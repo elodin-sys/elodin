@@ -88,6 +88,27 @@ def _project_python_sources(project_root: Path) -> list[Path]:
     return sorted(sources)
 
 
+def _simulation_source_entrypoint(caller_filename: str) -> str:
+    candidates = [
+        getattr(sys.modules.get("__main__"), "__file__", None),
+        sys.argv[0] if sys.argv else None,
+        caller_filename,
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.suffix != ".py":
+            continue
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if path.exists():
+            return str(path)
+    return caller_filename
+
+
 def _capture_simulation_source(db_path: str, entrypoint: str) -> None:
     try:
         entrypoint_path = Path(entrypoint).resolve()
@@ -670,7 +691,9 @@ class World(WorldBuilder):
         if frame is None:
             raise Exception("No previous frame")
         db_path = db_path if db_path is not None else os.environ.get("ELODIN_DB_PATH")
-        simulation_source_entrypoint = frame.f_code.co_filename if db_path is not None else None
+        simulation_source_entrypoint = (
+            _simulation_source_entrypoint(frame.f_code.co_filename) if db_path is not None else None
+        )
         addr = super().run(
             system,
             simulation_rate,

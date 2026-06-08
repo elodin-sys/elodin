@@ -1,5 +1,6 @@
 import importlib
 import json
+import types
 import sys
 
 import elodin as el
@@ -38,3 +39,18 @@ def test_capture_simulation_source_records_imported_project_modules(tmp_path):
     assert (source_root / "files" / "sim.py").read_text(encoding="utf-8") == (
         "from config import VALUE\n"
     )
+
+
+def test_simulation_source_entrypoint_prefers_main_file(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    helpers = project / "helpers"
+    helpers.mkdir(parents=True)
+    main = project / "main.py"
+    helper = helpers / "runner.py"
+    main.write_text("from helpers.runner import run\n", encoding="utf-8")
+    helper.write_text("def run(): pass\n", encoding="utf-8")
+
+    monkeypatch.setitem(sys.modules, "__main__", types.SimpleNamespace(__file__=str(main)))
+    monkeypatch.setattr(sys, "argv", [str(main)])
+
+    assert el._simulation_source_entrypoint(str(helper)) == str(main.resolve())
