@@ -775,8 +775,17 @@ impl WorldBuilder {
                     result?;
                     Ok(None)
                 });
-                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
-                run_result
+                match run_result {
+                    Ok(value) => {
+                        capture_simulation_source(
+                            py,
+                            &db_path,
+                            simulation_source_entrypoint.as_deref(),
+                        )?;
+                        Ok(value)
+                    }
+                    Err(err) => Err(err),
+                }
             }
             Args::Plan { addr, out_dir } => {
                 // Canonicalize the path to ensure s10 can find the file regardless of working directory
