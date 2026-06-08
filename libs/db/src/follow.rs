@@ -21,6 +21,8 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use impeller2::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
 use impeller2_stellar::{PacketSink, PacketStream};
 use impeller2_wkt::*;
+#[cfg(feature = "axum")]
+use stellarator::struc_con::Joinable;
 use stellarator::{io::SplitExt, net::TcpStream};
 use tracing::{debug, info, warn};
 
@@ -181,8 +183,20 @@ enum SchematicAssetSync {
 }
 
 #[cfg(feature = "axum")]
+async fn sync_schematic_assets_on_tokio(source_addr: SocketAddr, db: Arc<DB>) {
+    if let Err(err) = stellarator::struc_con::tokio(move |_| async move {
+        crate::assets_http::sync_schematic_assets_for_db_from_source(source_addr, &db).await;
+    })
+    .join()
+    .await
+    {
+        warn!(?err, "failed to join schematic asset sync task");
+    }
+}
+
+#[cfg(feature = "axum")]
 fn spawn_schematic_asset_sync(source_addr: SocketAddr, db: Arc<DB>) {
-    stellarator::spawn(async move {
+    stellarator::struc_con::tokio(move |_| async move {
         crate::assets_http::sync_schematic_assets_for_db_from_source(source_addr, &db).await;
     });
 }
@@ -243,8 +257,7 @@ async fn apply_source_snapshot(
     match asset_sync {
         SchematicAssetSync::Await => {
             #[cfg(feature = "axum")]
-            crate::assets_http::sync_schematic_assets_for_db_from_source(config.source_addr, db)
-                .await;
+            sync_schematic_assets_on_tokio(config.source_addr, db.clone()).await;
         }
         SchematicAssetSync::Background => {
             #[cfg(feature = "axum")]

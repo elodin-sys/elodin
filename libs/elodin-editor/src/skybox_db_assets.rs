@@ -207,10 +207,11 @@ pub fn sync_db_skybox_assets_from_config(
 
     in_flight.key = Some(key);
     let connection_addr = connection_addr.0;
-    in_flight.task = Some(
-        IoTaskPool::get()
-            .spawn(async move { download_db_skybox_assets(&desired, connection_addr).await }),
-    );
+    in_flight.task = Some(IoTaskPool::get().spawn(async move {
+        tokio::runtime::Runtime::new()
+            .map_err(|err| err.to_string())?
+            .block_on(download_db_skybox_assets(&desired, connection_addr))
+    }));
 }
 
 async fn fetch_asset(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
