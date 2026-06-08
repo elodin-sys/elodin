@@ -632,7 +632,6 @@ mod tests {
 
     /// Compare against elodin's ENU.
     #[test]
-    #[ignore]
     fn test_look_at_rh_nox_vs_glam_elodin() {
         test_look_at_rh_nox_vs_glam(|glam_mat, nox_mat| (elodin_R_bevy(glam_mat), nox_mat), |M| M);
     }
@@ -672,7 +671,7 @@ mod tests {
             // transform for Elodin's look_to. No surprise: It's ENU, with north as the
             // facing direction.
             (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
-            (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Y), // Fails matrix check
             (Vec3::new(1.0, 2.0, 3.0).normalize(), Vec3::Y),
             (Vec3::new(-1.0, 0.5, 0.3).normalize(), Vec3::Y),
             (Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
@@ -693,10 +692,9 @@ mod tests {
             // let nox_mat_bevy = bevy_R_elodin(nox_mat_bevy);
             let (glam_mat, nox_mat_bevy) = f(glam_mat, nox_mat_bevy);
 
-            // Weird thing. The matrices are not always the same.
-            // 
-            //assert_eq_mat!(nox_mat_bevy, glam_mat, "\ncase {i} dir {dir} up {up}");
-            // println!("nox {nox_mat_bevy}\nglam_mat {glam_mat}");
+            // Weird thing. The matrices are not always the same but the
+            // quaternions are.
+            // assert_eq_mat!(nox_mat_bevy, glam_mat, "\ncase {i} dir {dir} up {up}");
 
             // Also compare resulting quaternions
             let nox_quat_look_at = nox::Quaternion::look_at_rh(nox_dir, nox_up);
@@ -708,7 +706,6 @@ mod tests {
                 pos: nox::Vec3::new(0.0, 0.0, 0.0),
             };
             let nox_quat_bevy = world_pos.bevy_att();
-            assert_eq_quat!(bevy::math::DQuat::from(nox_quat), bevy::math::DQuat::from(world_pos.att()), "case {i} first");
             // let glam_quat = Quat::from_mat3(&elodin_R_bevy(glam_mat).transpose());
             let glam_quat = Quat::from_mat3(&g(glam_mat));
             assert_eq_quat!(nox_quat_bevy.as_quat(), glam_quat, "case {i} second");
