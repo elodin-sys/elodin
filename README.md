@@ -131,6 +131,24 @@ cargo elodin editor examples/three-body/main.py
 > [!NOTE]
 > Local setup instructions were validated on M1 architecture, macOS 15.6.1 on 2025-11-03.
 
+## Alternative Local Setup (Ubuntu/Linux)
+
+> [!WARNING]
+> This setup is more complex and may lead to inconsistent environments across developers. We strongly recommend using Nix instead.
+
+If you cannot use Nix, you can manually install dependencies on Ubuntu/Linux:
+
+### Prerequisites
+```sh
+# Install required tools via apt
+sudo apt install just git-lfs pkg-config libasound2-dev libudev-dev cmake gfortran patchelf python3-dev
+
+# Initialize git-lfs
+git lfs install
+```
+
+After installing these packages, follow the same `just install` and `uvx maturin` local build steps above.
+
 ## Additional Resources
 
 - [Elodin App Documentation](apps/elodin/README.md)
