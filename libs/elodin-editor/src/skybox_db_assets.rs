@@ -157,6 +157,7 @@ pub fn sync_db_skybox_assets_from_config(
                         mirror.last_failed = Some((key, Instant::now()));
                     }
                 }
+                return;
             }
         } else if skybox_in_flight_still_desired(&config, connection_addr.as_deref(), &in_flight) {
             return;
