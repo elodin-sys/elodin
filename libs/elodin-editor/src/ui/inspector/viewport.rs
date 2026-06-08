@@ -643,6 +643,34 @@ mod tests {
                                     |M| elodin_R_bevy(M));
     }
 
+    /// `WorldPosExt::bevy_att` must match `GeoRotation::to_bevy` in plane mode.
+    #[test]
+    fn test_bevy_att_vs_geo_frames_plane() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+
+        for (i, (dir, up)) in look_at_test_cases().into_iter().enumerate() {
+            let nox_dir = nox::Vec3::from(dir.as_dvec3());
+            let nox_up = nox::Vec3::from(up.as_dvec3());
+            let (nox_mat, _) = nox::Matrix3::look_at_rh_up(nox_dir, nox_up);
+            let nox_quat = nox::Quaternion::from_rot_mat(nox_mat);
+            let world_pos = super::WorldPos {
+                att: nox_quat,
+                pos: nox::Vec3::new(0.0, 0.0, 0.0),
+            };
+
+            let elodin_bevy = world_pos.bevy_att();
+            let geo_frames_bevy =
+                GeoRotation(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            assert_eq_quat!(
+                elodin_bevy.as_quat(),
+                geo_frames_bevy.as_quat(),
+                "case {i} dir {dir} up {up}"
+            );
+        }
+    }
+
     #[test]
     fn test_from_mat3() {
         let q = Quat::from_mat3(&Mat3::IDENTITY);
@@ -661,26 +689,26 @@ mod tests {
         // assert_eq_mat!(Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z), glam_look_at_rh(Vec3::Z, Vec3::Y).0, "current");
     }
 
-    fn test_look_at_rh_nox_vs_glam(f: fn(Mat3, Mat3) -> (Mat3, Mat3),
-                                   g: fn(Mat3) -> Mat3,
-
-    ) {
-        let test_cases = [
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: This is the identity for Elodin ENU.
-            (Vec3::NEG_Z, Vec3::Y), // 1: This is identity for Bevy.
-            // transform for Elodin's look_to. No surprise: It's ENU, with north as the
-            // facing direction.
+    fn look_at_test_cases() -> [(Vec3, Vec3); 10] {
+        [
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: identity for Elodin ENU
+            (Vec3::NEG_Z, Vec3::Y),              // 1: identity for Bevy
             (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
-            (Vec3::new(0.0, 0.0, 1.0), Vec3::Y), // Fails matrix check
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
             (Vec3::new(1.0, 2.0, 3.0).normalize(), Vec3::Y),
             (Vec3::new(-1.0, 0.5, 0.3).normalize(), Vec3::Y),
             (Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
             (Vec3::new(1.0, 0.0, 0.0), Vec3::Y),
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Y), // This one should be tricky.
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
             (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
-        ];
+        ]
+    }
 
-        for (i, (dir, up)) in test_cases.into_iter().enumerate() {
+    fn test_look_at_rh_nox_vs_glam(f: fn(Mat3, Mat3) -> (Mat3, Mat3),
+                                   g: fn(Mat3) -> Mat3,
+
+    ) {
+        for (i, (dir, up)) in look_at_test_cases().into_iter().enumerate() {
             let nox_dir = nox::Vec3::from(dir.as_dvec3());
             let nox_up = nox::Vec3::from(up.as_dvec3());
 

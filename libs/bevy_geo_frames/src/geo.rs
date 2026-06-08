@@ -334,16 +334,15 @@ impl GeoRotation {
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
         let frame = self.0;
         let local_rot = self.1;
-        DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)) * local_rot
+        let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context));
+        q * local_rot * q.conjugate()
     }
 
     /// Convert orientation from Bevy.
     pub fn from_bevy(frame: GeoFrame, v_bevy: impl Into<DQuat>, context: &GeoContext) -> Self {
         let v = v_bevy.into();
-        GeoRotation(
-            frame,
-            DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)).inverse() * v,
-        )
+        let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context));
+        GeoRotation(frame, q.conjugate() * v * q)
     }
 
     pub fn as_frame(&self, to_frame: GeoFrame, context: &GeoContext) -> GeoRotation {
@@ -673,7 +672,7 @@ mod tests {
     fn test_as_frame() {
         let ctx = dummy_ctx();
         let geo_rotation = GeoRotation::from_bevy(GeoFrame::ENU, DQuat::IDENTITY, &ctx);
-        assert_ne!(geo_rotation.1.as_quat(), Quat::IDENTITY);
+        assert_eq!(geo_rotation.1.as_quat(), Quat::IDENTITY);
         assert_eq!(geo_rotation.to_bevy(&ctx).as_quat(), Quat::IDENTITY);
     }
 
