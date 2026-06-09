@@ -13,6 +13,7 @@ import numpy as np
 
 from sim import (
     DEFAULT_MAX_TICKS,
+    DPS_FTP_THROTTLE,
     DPS_MAX_THRUST_N,
     GUIDANCE_RATE_HZ,
     LUNAR_GRAVITY,
@@ -24,7 +25,6 @@ from sim import (
     SOFT_VERTICAL_SPEED_MPS,
     START_TIMESTAMP_US,
     TELEMETRY_RATE_HZ,
-    THROTTLE_MIN,
     UPRIGHT_DOT_MIN,
     build,
     truth_altitude,
@@ -39,21 +39,22 @@ MAX_TICKS_ENV = "ELODIN_APOLLO_MAX_TICKS"
 
 
 class SitlBridge:
-    def __init__(self) -> None:
+    def __init__(self, throttle: float, attitude: list[float]) -> None:
         self.state_port = int(os.environ.get(STATE_PORT_ENV, str(DEFAULT_STATE_PORT)))
         self.command_port = int(os.environ.get(COMMAND_PORT_ENV, str(DEFAULT_COMMAND_PORT)))
         self.state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.command_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.command_sock.bind(("127.0.0.1", self.command_port))
         self.command_sock.settimeout(0.25)
-        self.last_throttle = THROTTLE_MIN
-        self.last_attitude = [0.0, 0.0, 0.0, 1.0]
+        self.last_throttle = throttle
+        self.last_attitude = list(attitude)
         self.last_rate_setpoint = 0.0
 
     def step(self, state: dict[str, float | list[float]]) -> tuple[float, list[float], float]:
         world_vel = [float(x) for x in state["world_vel"]]
+        world_pos = [float(x) for x in state["world_pos"]]
         payload = struct.pack(
-            "<15d",
+            "<20d",
             float(state["time_s"]),
             float(state["altitude"]),
             float(state["vertical_speed"]),
@@ -69,6 +70,11 @@ class SitlBridge:
             float(state["track_gain"]),
             float(state["vertical_gain"]),
             float(state["horizontal_gain"]),
+            world_pos[0],
+            world_pos[1],
+            float(state["ref_downrange"]),
+            float(state["ref_hspeed"]),
+            float(state["ref_hdecel"]),
         )
         self.state_sock.sendto(payload, ("127.0.0.1", self.state_port))
         try:
@@ -97,11 +103,16 @@ gravity = LUNAR_GRAVITY * float(params.get("gravity_scale", 1.0))
 track_gain = float(params.get("track_gain", 0.06))
 vertical_gain = float(params.get("vertical_gain", 0.45))
 horizontal_gain = float(params.get("horizontal_gain", 0.05))
+init_pitch_deg = float(params.get("init_pitch_deg", -77.0))
 max_ticks = int(os.environ.get(MAX_TICKS_ENV, str(DEFAULT_MAX_TICKS)))
 guidance_period_ticks = max(1, round(SIMULATION_RATE_HZ / GUIDANCE_RATE_HZ))
 
-last_throttle = THROTTLE_MIN
-last_attitude = [0.0, 0.0, 0.0, 1.0]
+# The window opens mid-braking-burn: DPS at the fixed throttle point, vehicle
+# pitched back retrograde. Seed the command state to match so the first
+# guidance exchanges do not command an attitude transient.
+last_throttle = DPS_FTP_THROTTLE
+_half_pitch = math.radians(init_pitch_deg) * 0.5
+last_attitude = [0.0, math.sin(_half_pitch), 0.0, math.cos(_half_pitch)]
 last_rate_setpoint = 0.0
 
 controller_dir = Path(__file__).parent / "controller"
@@ -126,7 +137,7 @@ def _normalize_quat(q: list[float]) -> list[float]:
     return [x / norm for x in q]
 
 
-def _slew_quat(current: list[float], target: list[float], max_deg: float = 8.0) -> list[float]:
+def _slew_quat(current: list[float], target: list[float], max_deg: float = 3.0) -> list[float]:
     current = _normalize_quat(current)
     target = _normalize_quat(target)
     dot = sum(a * b for a, b in zip(current, target))
@@ -197,13 +208,17 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             "max_thrust": DPS_MAX_THRUST_N,
             "ref_alt": REFERENCE.altitude(t_s),
             "ref_rate": REFERENCE.descent_rate(t_s),
+            "ref_downrange": REFERENCE.downrange(t_s),
+            "ref_hspeed": REFERENCE.horizontal_speed(t_s),
+            # Feed-forward braking deceleration from the reconstructed profile.
+            "ref_hdecel": REFERENCE.horizontal_speed(t_s) - REFERENCE.horizontal_speed(t_s + 1.0),
             "initial_altitude": initial_altitude,
             "track_gain": track_gain,
             "vertical_gain": vertical_gain,
             "horizontal_gain": horizontal_gain,
         }
         if bridge is None:
-            bridge = SitlBridge()
+            bridge = SitlBridge(last_throttle, last_attitude)
         last_throttle, target_attitude, last_rate_setpoint = bridge.step(state)
         last_attitude = _slew_quat(last_attitude, target_attitude)
 
@@ -221,6 +236,8 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         traj_rmse = (altitude_error_sum / max(error_samples, 1)) ** 0.5
         pitch_rmse = (pitch_error_sum / max(error_samples, 1)) ** 0.5
         upright_dot = math.cos(math.radians(abs(pitch)))
+        # Distance from the targeted landing site (world origin) at touchdown.
+        downrange_miss = abs(float(world_pos[4]))
         soft_landing = (
             landed
             and touchdown_speed <= SOFT_VERTICAL_SPEED_MPS
@@ -236,6 +253,7 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
                 rcs_fuel_remaining=rcs_propellant,
                 traj_rmse=traj_rmse,
                 pitch_rmse=pitch_rmse,
+                downrange_miss=downrange_miss,
                 landed=landed,
                 soft_landing=soft_landing,
             )

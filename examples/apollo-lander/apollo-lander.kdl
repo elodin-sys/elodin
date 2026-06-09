@@ -5,9 +5,10 @@ hsplit {
     viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=True show_grid=False share=0.463842
     vsplit share=0.536157 {
         hsplit {
-            graph "lander.altitude[0], lander_truth.altitude[0]" name="Altitude vs real range (m)" {
+            graph "lander.altitude[0], lander_truth.altitude[0], lander_truth.slant_range[0]" name="Altitude vs real + radar slant (m)" {
                 color 106 155 165
                 color 114 87 179
+                color 196 160 70
             }
             graph "lander_truth.vertical_speed[0], lander.vertical_speed[0]" name="Descent rate (m/s)" {
                 color 106 155 165
@@ -15,10 +16,11 @@ hsplit {
             }
         }
         hsplit {
-            graph "lander.horizontal_speed[0]" name="Horizontal speed (m/s)" {
+            graph "lander.horizontal_speed[0], lander_truth.horizontal_speed[0]" name="Horizontal speed vs reconstructed (m/s)" {
                 color 106 155 165
+                color 114 87 179
             }
-            graph "lander.pitch[0], lander_truth.pitch[0]" name="Pitch vs reconstructed truth (deg)" {
+            graph "lander.pitch[0], lander_truth.pitch[0]" name="Pitch vs gimbal-derived truth (deg)" {
                 color 106 155 165
                 color 114 87 179
             }
