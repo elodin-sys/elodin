@@ -317,6 +317,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/python-api/"
                     >Python API</a
                 >
@@ -526,6 +534,7 @@
 <ul>
 <li>Optional top-level node that activates a cached skybox by manifest name.</li>
 <li><code>name</code>: required manifest entry name. Entries are read from <code>assets/skyboxes/manifest.ron</code>, or from <code>$ELODIN_ASSETS_DIR/skyboxes/manifest.ron</code> when that environment variable is set.</li>
+<li>When a simulation records into an Elodin DB, the manifest and active cubemap are copied under <code>{db}/assets/skyboxes/</code>; see <a href="/reference/db-asset-server">DB Asset Server</a>.</li>
 <li>Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.</li>
 <li>Example: <code>skybox name="alien_swamp"</code>.</li>
 </ul>
@@ -566,7 +575,7 @@
 <li>
 <p>Mesh child (required, exactly one):</p>
 <ul>
-<li><code>glb</code>: <code>path</code> (required), <code>scale</code> (default 1.0), <code>translate</code> <code>(x,y,z)</code> (default 0s), <code>rotate</code> <code>(deg_x,deg_y,deg_z)</code> in degrees (default 0s).
+<li><code>glb</code>: <code>path</code> (required), <code>scale</code> (default 1.0), <code>translate</code> <code>(x,y,z)</code> (default 0s), <code>rotate</code> <code>(deg_x,deg_y,deg_z)</code> in degrees (default 0s). On DB record, local paths are stored as <code>db:…</code> and served over HTTP on replay; see <a href="/reference/db-asset-server">DB Asset Server</a>.
 <ul>
 <li><code>animate</code> child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
 <ul>
@@ -635,7 +644,7 @@ larger the error confidence interval, the larger the ellipsoid.</li>
 <li>Source (exactly one required):
 <ul>
 <li><code>builtin</code>: name of a <a href="https://fonts.google.com/icons?icon.set=Material+Icons">Material Icons</a> glyph (snake_case). Supported names include: <code>satellite_alt</code>, <code>satellite</code>, <code>rocket_launch</code>, <code>rocket</code>, <code>flight</code>, <code>flight_takeoff</code>, <code>public</code>, <code>language</code>, <code>circle</code>, <code>fiber_manual_record</code>, <code>star</code>, <code>star_outline</code>, <code>location_on</code>, <code>place</code>, <code>adjust</code>, <code>gps_fixed</code>, <code>my_location</code>, <code>explore</code>, <code>navigation</code>, <code>near_me</code>, <code>diamond</code>, <code>hexagon</code>, <code>change_history</code>, <code>lens</code>, <code>panorama_fish_eye</code>, <code>radio_button_unchecked</code>, <code>brightness_1</code>, <code>flare</code>, <code>wb_sunny</code>, <code>bolt</code>.</li>
-<li><code>path</code>: path to a custom PNG image file (loaded from the assets folder).</li>
+<li><code>path</code>: path to a custom PNG image file (loaded from the assets folder). Persisted into the DB like GLB paths when recording; <code>builtin</code> icons are not copied.</li>
 </ul>
 </li>
 <li><code>color</code> child node: tint color for the icon using the standard <code>color r g b [a]</code> format or named colors (default white). See Colors in the glossary above.</li>

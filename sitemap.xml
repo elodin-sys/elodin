@@ -73,6 +73,9 @@
         <loc>/reference/coords/</loc>
     </url>
     <url>
+        <loc>/reference/db-asset-server/</loc>
+    </url>
+    <url>
         <loc>/reference/elodin-cli/</loc>
     </url>
     <url>
