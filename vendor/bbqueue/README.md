@@ -38,7 +38,8 @@ queue.framed_consumer_with_header::<usize>();
    `maitake-sync-0_3`, initially via `elodin-sys/bbqueue` git fork (+28 lines).
 3. **Vendor in monorepo (`fix/bbq-migration`)** — copy bbqueue 0.7.0 here, apply the usize
    header patch locally, replace all `bbq2` / git `bbqueue` deps with `path` dependencies.
-   Nix builds include `vendor/` via `/vendor` in `nix/pkgs/common.nix`.
+   Nix builds include `vendor/` via `/vendor` in `nix/pkgs/common.nix` and
+   `aleph/pkgs/common.nix`.
 
 An upstream PR to expose generic frame headers on `ArcBBQueue` would let us drop the patch and
 return to crates.io. Until then, sync from upstream by re-copying `v0.7.x` and re-applying the
