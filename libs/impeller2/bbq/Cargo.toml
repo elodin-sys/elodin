@@ -8,6 +8,6 @@ edition = "2024"
 stellarator-buf.path = "../../stellarator/buf"
 impeller2.path = ".."
 impeller2.features = ["std"]
-bbqueue.path = "../../../vendor/bbqueue/bbqueue"
+bbqueue.path = "../../bbqueue"
 bbqueue.default-features = false
 bbqueue.features = ["std", "maitake-sync-0_3"]

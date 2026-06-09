@@ -22,7 +22,7 @@ bevy.workspace = true
 # channels
 thingbuf = "0.1.6"
 impeller2-bbq.path = "../bbq"
-bbqueue.path = "../../../vendor/bbqueue/bbqueue"
+bbqueue.path = "../../bbqueue"
 bbqueue.features = ["std", "maitake-sync-0_3"]
 bbqueue.default-features = false
 stellarator-buf.path = "../../stellarator/buf"

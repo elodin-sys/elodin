@@ -5,7 +5,8 @@ description = "A SPSC, lockless, no_std, thread safe, queue, based on BipBuffers
 repository = "https://github.com/jamesmunns/bbqueue"
 authors = ["James Munns <james@onevariable.com>"]
 edition = "2024"
-readme = "../README.md"
+readme = "README.md"
+publish = false
 
 categories = [
     "embedded",

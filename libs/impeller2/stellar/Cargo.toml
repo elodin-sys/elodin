@@ -44,7 +44,7 @@ miette.version = "7.2"
 # thingbuf
 thingbuf.version = "0.1.6"
 thingbuf.optional = true
-bbqueue.path = "../../../vendor/bbqueue/bbqueue"
+bbqueue.path = "../../bbqueue"
 bbqueue.features = ["std", "maitake-sync-0_3"]
 bbqueue.default-features = false
 bbqueue.optional = true
