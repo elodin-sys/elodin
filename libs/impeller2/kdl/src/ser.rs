@@ -645,12 +645,16 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             translate,
             rotate,
             animations,
+            emissivity,
         } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
                 .push(KdlEntry::new_prop("path", path.clone()));
             if *scale != 1.0 {
                 push_rounded_float_prop(&mut node, "scale", *scale as f64);
+            }
+            if *emissivity != 0.0 {
+                push_rounded_float_prop(&mut node, "emissivity", *emissivity as f64);
             }
             if *translate != (0.0, 0.0, 0.0) {
                 let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);

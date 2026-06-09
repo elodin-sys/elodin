@@ -5,6 +5,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -28,6 +29,7 @@ pub struct CampaignConfig {
     pub timeout: Option<String>,
     pub retries: usize,
     pub cache_dir: Option<PathBuf>,
+    pub build: Option<BuildConfig>,
     pub resources: ResourceConfig,
     pub hooks: HookConfig,
     pub params_compat: Option<String>,
@@ -41,12 +43,22 @@ impl Default for CampaignConfig {
             timeout: None,
             retries: 0,
             cache_dir: None,
+            build: None,
             resources: ResourceConfig::default(),
             hooks: HookConfig::default(),
             params_compat: None,
             continue_on_error: true,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BuildConfig {
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -436,6 +448,35 @@ impl CampaignReporter {
     }
 }
 
+fn run_build_step(build: Option<&BuildConfig>, reporter: &CampaignReporter) -> Result<()> {
+    let Some(build) = build else {
+        return Ok(());
+    };
+    let Some(program) = build.command.as_ref().filter(|command| !command.is_empty()) else {
+        return Ok(());
+    };
+    let display_args = build.args.join(" ");
+    reporter.line(format!(
+        "building campaign artifacts: {program} {display_args}"
+    ));
+    let mut command = Command::new(program);
+    command.args(&build.args);
+    if let Some(cwd) = &build.cwd {
+        command.current_dir(cwd);
+    }
+    command.envs(&build.env);
+    let status = command
+        .status()
+        .into_diagnostic()
+        .with_context(|| format!("run campaign build step `{program} {display_args}`"))?;
+    if !status.success() {
+        return Err(miette!(
+            "campaign build step failed with status {status}: {program} {display_args}"
+        ));
+    }
+    Ok(())
+}
+
 fn reap_existing_elodin(reporter: &CampaignReporter) {
     let current_pid = Pid::from_u32(std::process::id());
     let mut system = System::new();
@@ -606,6 +647,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     }
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
     let reporter = CampaignReporter::new(&options.out_dir, plan.len(), workers, options.progress)?;
+    run_build_step(config.build.as_ref(), &reporter)?;
     if !options.keep_existing {
         reap_existing_elodin(&reporter);
     }
@@ -1131,6 +1173,7 @@ async fn plan_recipe(sim_path: &Path, out_dir: &Path) -> Result<s10::Recipe> {
     fs::create_dir_all(&plan_dir).into_diagnostic()?;
     let output = s10::python_command()
         .into_diagnostic()?
+        .env("ELODIN_MONTE_CARLO_PLANNING", "1")
         .arg(sim_path)
         .arg("plan")
         .arg(&plan_dir)
@@ -2587,5 +2630,69 @@ mod tests {
         assert_eq!(worker_label(Some(0)), "0");
         assert_eq!(worker_label(Some(7)), "7");
         assert_eq!(worker_label(None), "-");
+    }
+
+    #[test]
+    fn build_config_parses_from_toml() {
+        let config: CampaignConfig = toml::from_str(
+            r#"
+            [build]
+            command = "cargo"
+            args = ["build", "--release"]
+            cwd = "."
+            [build.env]
+            FOO = "bar"
+            "#,
+        )
+        .expect("parse campaign config");
+        let build = config.build.expect("build config");
+        assert_eq!(build.command.as_deref(), Some("cargo"));
+        assert_eq!(build.args, ["build", "--release"]);
+        assert_eq!(build.cwd.as_deref(), Some(Path::new(".")));
+        assert_eq!(build.env.get("FOO").map(String::as_str), Some("bar"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_step_runs_command_once() {
+        let out_dir = std::env::temp_dir().join(format!(
+            "mc-build-step-{}-{}",
+            std::process::id(),
+            unix_now_ns()
+        ));
+        fs::create_dir_all(&out_dir).expect("create temp dir");
+        let marker = out_dir.join("marker");
+        let reporter =
+            CampaignReporter::new(&out_dir, 1, 1, ProgressMode::Never).expect("reporter");
+        let config = BuildConfig {
+            command: Some("touch".to_string()),
+            args: vec![marker.to_string_lossy().to_string()],
+            cwd: None,
+            env: HashMap::new(),
+        };
+        run_build_step(Some(&config), &reporter).expect("build step");
+        assert!(marker.exists());
+        let _ = fs::remove_dir_all(out_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_step_failure_is_error() {
+        let out_dir = std::env::temp_dir().join(format!(
+            "mc-build-step-fail-{}-{}",
+            std::process::id(),
+            unix_now_ns()
+        ));
+        fs::create_dir_all(&out_dir).expect("create temp dir");
+        let reporter =
+            CampaignReporter::new(&out_dir, 1, 1, ProgressMode::Never).expect("reporter");
+        let config = BuildConfig {
+            command: Some("false".to_string()),
+            args: Vec::new(),
+            cwd: None,
+            env: HashMap::new(),
+        };
+        assert!(run_build_step(Some(&config), &reporter).is_err());
+        let _ = fs::remove_dir_all(out_dir);
     }
 }

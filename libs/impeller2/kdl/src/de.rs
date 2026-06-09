@@ -903,6 +903,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 scale,
                 translate,
                 rotate,
+                emissivity,
                 ..
             } = parsed_mesh
         {
@@ -912,6 +913,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 translate,
                 rotate,
                 animations,
+                emissivity,
             };
         }
 
@@ -1018,6 +1020,11 @@ fn parse_object_3d_mesh(
         span: (0, 0).into(),
     })?;
 
+    fn numeric_prop(node: &KdlNode, prop: &str) -> Option<f64> {
+        node.get(prop)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+    }
+
     match node.name().value() {
         "glb" => {
             let path = node
@@ -1035,6 +1042,9 @@ fn parse_object_3d_mesh(
 
             let translate = parse_tuple_f32(node, "translate").unwrap_or((0.0, 0.0, 0.0));
             let rotate = parse_tuple_f32(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
+            let emissivity = numeric_prop(node, "emissivity")
+                .map(|v| v as f32)
+                .unwrap_or(0.0);
 
             Ok(Object3DMesh::Glb {
                 path,
@@ -1042,13 +1052,12 @@ fn parse_object_3d_mesh(
                 translate,
                 rotate,
                 animations: Vec::new(), // Animations are parsed at object_3d level, not glb level
+                emissivity,
             })
         }
         "sphere" => {
-            let radius = node
-                .get("radius")
-                .and_then(|v| v.as_float())
-                .ok_or_else(|| KdlSchematicError::MissingProperty {
+            let radius =
+                numeric_prop(node, "radius").ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "radius".to_string(),
                     node: "sphere".to_string(),
                     src: src.to_string(),
@@ -1061,31 +1070,25 @@ fn parse_object_3d_mesh(
             Ok(Object3DMesh::Mesh { mesh, material })
         }
         "box" => {
-            let x = node.get("x").and_then(|v| v.as_float()).ok_or_else(|| {
-                KdlSchematicError::MissingProperty {
-                    property: "x".to_string(),
-                    node: "box".to_string(),
-                    src: src.to_string(),
-                    span: node.span(),
-                }
+            let x = numeric_prop(node, "x").ok_or_else(|| KdlSchematicError::MissingProperty {
+                property: "x".to_string(),
+                node: "box".to_string(),
+                src: src.to_string(),
+                span: node.span(),
             })? as f32;
 
-            let y = node.get("y").and_then(|v| v.as_float()).ok_or_else(|| {
-                KdlSchematicError::MissingProperty {
-                    property: "y".to_string(),
-                    node: "box".to_string(),
-                    src: src.to_string(),
-                    span: node.span(),
-                }
+            let y = numeric_prop(node, "y").ok_or_else(|| KdlSchematicError::MissingProperty {
+                property: "y".to_string(),
+                node: "box".to_string(),
+                src: src.to_string(),
+                span: node.span(),
             })? as f32;
 
-            let z = node.get("z").and_then(|v| v.as_float()).ok_or_else(|| {
-                KdlSchematicError::MissingProperty {
-                    property: "z".to_string(),
-                    node: "box".to_string(),
-                    src: src.to_string(),
-                    span: node.span(),
-                }
+            let z = numeric_prop(node, "z").ok_or_else(|| KdlSchematicError::MissingProperty {
+                property: "z".to_string(),
+                node: "box".to_string(),
+                src: src.to_string(),
+                span: node.span(),
             })? as f32;
 
             let mesh = Mesh::Box { x, y, z };
@@ -1094,20 +1097,16 @@ fn parse_object_3d_mesh(
             Ok(Object3DMesh::Mesh { mesh, material })
         }
         "cylinder" => {
-            let radius = node
-                .get("radius")
-                .and_then(|v| v.as_float())
-                .ok_or_else(|| KdlSchematicError::MissingProperty {
+            let radius =
+                numeric_prop(node, "radius").ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "radius".to_string(),
                     node: "cylinder".to_string(),
                     src: src.to_string(),
                     span: node.span(),
                 })? as f32;
 
-            let height = node
-                .get("height")
-                .and_then(|v| v.as_float())
-                .ok_or_else(|| KdlSchematicError::MissingProperty {
+            let height =
+                numeric_prop(node, "height").ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "height".to_string(),
                     node: "cylinder".to_string(),
                     src: src.to_string(),
@@ -1120,21 +1119,13 @@ fn parse_object_3d_mesh(
             Ok(Object3DMesh::Mesh { mesh, material })
         }
         "plane" => {
-            let size = node
-                .get("size")
-                .and_then(|v| v.as_float())
-                .map(|v| v as f32)
-                .unwrap_or(10.0);
+            let size = numeric_prop(node, "size").map(|v| v as f32).unwrap_or(10.0);
 
-            let width = node
-                .get("width")
-                .and_then(|v| v.as_float())
+            let width = numeric_prop(node, "width")
                 .map(|v| v as f32)
                 .unwrap_or(size);
 
-            let depth = node
-                .get("depth")
-                .and_then(|v| v.as_float())
+            let depth = numeric_prop(node, "depth")
                 .map(|v| v as f32)
                 .unwrap_or(size);
 
@@ -2152,6 +2143,92 @@ object_3d "a.world_pos" {
     }
 
     #[test]
+    fn test_parse_object_3d_plane_integer_dimensions() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    plane width=100 depth=200 {
+        color 0 255 0
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        let Object3DMesh::Mesh { mesh, .. } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 100.0).abs() < f32::EPSILON);
+        assert!((*depth - 200.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_object_3d_integer_primitive_dimensions() {
+        let cases: [(&str, fn(&Mesh) -> bool); 3] = [
+            (
+                r#"object_3d "a.world_pos" { sphere radius=50 }"#,
+                |mesh: &Mesh| match mesh {
+                    Mesh::Sphere { radius } => (*radius - 50.0).abs() < f32::EPSILON,
+                    _ => false,
+                },
+            ),
+            (
+                r#"object_3d "a.world_pos" { box x=1 y=2 z=3 }"#,
+                |mesh: &Mesh| match mesh {
+                    Mesh::Box { x, y, z } => {
+                        (*x - 1.0).abs() < f32::EPSILON
+                            && (*y - 2.0).abs() < f32::EPSILON
+                            && (*z - 3.0).abs() < f32::EPSILON
+                    }
+                    _ => false,
+                },
+            ),
+            (
+                r#"object_3d "a.world_pos" { cylinder radius=4 height=5 }"#,
+                |mesh: &Mesh| match mesh {
+                    Mesh::Cylinder { radius, height } => {
+                        (*radius - 4.0).abs() < f32::EPSILON && (*height - 5.0).abs() < f32::EPSILON
+                    }
+                    _ => false,
+                },
+            ),
+        ];
+
+        for (kdl, validate) in cases {
+            let schematic = parse_schematic(kdl).unwrap();
+            let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+                panic!("Expected object_3d");
+            };
+            let Object3DMesh::Mesh { mesh, .. } = &obj.mesh else {
+                panic!("Expected mesh object");
+            };
+            assert!(validate(mesh));
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_glb_emissivity() {
+        let kdl = r#"object_3d "a.world_pos" { glb path="moon.glb" emissivity=0.5 }"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Glb { emissivity, .. } = &obj.mesh else {
+            panic!("Expected glb");
+        };
+        assert!((*emissivity - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_parse_object_3d_material_emissivity() {
         let kdl = r#"
 object_3d "a.world_pos" {
@@ -2505,6 +2582,7 @@ object_3d "a.world_pos" {
                     translate,
                     rotate,
                     animations,
+                    ..
                 } => {
                     assert_eq!(path.as_str(), "hi");
                     assert_eq!(*scale, 1.0);
@@ -2542,6 +2620,7 @@ object_3d "rocket.world_pos" {
                     translate,
                     rotate,
                     animations,
+                    ..
                 } => {
                     assert_eq!(path.as_str(), "flappy-rocket.glb");
                     assert_eq!(*scale, 1.0);
