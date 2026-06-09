@@ -31,7 +31,7 @@ use bevy::{
         render_resource::*,
         renderer::RenderDevice,
         sync_world::{MainEntity, MainEntityHashMap},
-        view::{ExtractedView, Msaa},
+        view::{ExtractedView, Msaa, ViewTarget},
         Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
     },
     shader::{ShaderDefVal, ShaderRef},
@@ -73,6 +73,7 @@ bitflags::bitflags! {
         const TEST1              = 1 << 14;
         const TEST2              = 1 << 15;
         const TEST3              = 1 << 16;
+        const HDR                = 1 << 17;
         const MSAA_RESERVED_BITS = TerrainPipelineFlags::MSAA_MASK_BITS << TerrainPipelineFlags::MSAA_SHIFT_BITS;
     }
 }
@@ -273,6 +274,15 @@ impl<M: Material> Specializer<RenderPipeline> for TerrainSpecializer<M> {
 
         descriptor.primitive.polygon_mode = key.flags.polygon_mode();
         descriptor.multisample.count = key.flags.msaa_samples();
+        if let Some(fragment) = &mut descriptor.fragment {
+            if let Some(Some(target)) = fragment.targets.first_mut() {
+                target.format = if key.flags.contains(TerrainPipelineFlags::HDR) {
+                    ViewTarget::TEXTURE_FORMAT_HDR
+                } else {
+                    TextureFormat::bevy_default()
+                };
+            }
+        }
 
         descriptor.vertex.shader_defs = shader_defs.clone();
         let mut fragment_shader_defs = shader_defs;
@@ -511,6 +521,9 @@ pub(crate) fn queue_terrain<M: Material>(
             };
 
             let mut flags = TerrainPipelineFlags::from_msaa_samples(msaa.samples());
+            if view.hdr {
+                flags |= TerrainPipelineFlags::HDR;
+            }
             if gpu_tile_atlas.is_spherical {
                 flags |= TerrainPipelineFlags::SPHERICAL;
             }
