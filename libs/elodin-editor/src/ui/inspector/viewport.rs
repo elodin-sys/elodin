@@ -464,7 +464,7 @@ pub fn set_viewport_pos(
                     }
                 }
                 Err(e) => {
-                    bevy::log::error!("viewport pos formula execution error: {}", e);
+                    bevy::log::error_once!("viewport pos formula execution error: {}", e);
                 }
             }
             if let Some(compiled_expr) = &viewport.look_at.compiled_expr
