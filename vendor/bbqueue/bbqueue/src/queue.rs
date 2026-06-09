@@ -100,9 +100,7 @@ impl<S: Storage, C: Coord, N: Notifier> BBQueue<S, C, N> {
     #[inline(always)]
     pub fn capacity(&self) -> usize {
         // SAFETY: capacity never changes, therefore reading the len is safe
-        unsafe {
-            self.sto.ptr_len().1
-        }
+        unsafe { self.sto.ptr_len().1 }
     }
 
     /// Get access to the internal storage implementation details
@@ -197,9 +195,7 @@ impl<S: Storage, C: Coord, N: Notifier> crate::queue::ArcBBQueue<S, C, N> {
     #[inline(always)]
     pub fn capacity(&self) -> usize {
         // SAFETY: capacity never changes, therefore reading the len is safe
-        unsafe {
-            self.0.sto.ptr_len().1
-        }
+        unsafe { self.0.sto.ptr_len().1 }
     }
 
     /// Get access to the internal storage implementation details
