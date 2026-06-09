@@ -83,7 +83,7 @@ where
     ///
     /// This method will never cause an "early wraparound" of the ring buffer unless
     /// there is no capacity without wrapping around. There may still be available
-    /// writing capacity in the buffer after commiting this write grant, so it may be
+    /// writing capacity in the buffer after committing this write grant, so it may be
     /// useful to call `grant_max_remaining` in a loop until `Err(WriteGrantError::InsufficientSize)`
     /// is returned.
     pub fn grant_max_remaining(&self, max: usize) -> Result<StreamGrantW<Q>, WriteGrantError> {

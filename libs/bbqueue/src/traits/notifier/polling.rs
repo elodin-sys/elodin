@@ -7,7 +7,7 @@ use const_init::ConstInit;
 
 /// A Blocking/Polling coordination
 ///
-/// This performs no notifiication
+/// This performs no notification
 pub struct Polling;
 
 // Blocking performs no notification
