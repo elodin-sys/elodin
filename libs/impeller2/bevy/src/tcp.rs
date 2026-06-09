@@ -1,6 +1,6 @@
 use crate::*;
-use bbq2::queue::ArcBBQueue;
-use bbq2::traits::storage::BoxedSlice;
+use bbqueue::ArcBBQueue;
+use bbqueue::traits::storage::BoxedSlice;
 use bevy::app::{Plugin, PreUpdate};
 use impeller2::types::LenPacket;
 use impeller2_bbq::*;
@@ -57,7 +57,8 @@ pub fn channels() -> (
     AsyncArcQueueTx,
 ) {
     let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
-    let (incoming_packet_rx, incoming_packet_tx) = queue.framed_split();
+    let incoming_packet_rx = queue.framed_consumer_with_header::<usize>();
+    let incoming_packet_tx = queue.framed_producer_with_header::<usize>();
     let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
     (
         PacketTx(outgoing_packet_tx),
@@ -74,7 +75,8 @@ pub fn msg_channels() -> (
     AsyncArcQueueTx,
 ) {
     let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
-    let (incoming_packet_rx, incoming_packet_tx) = queue.framed_split();
+    let incoming_packet_rx = queue.framed_consumer_with_header::<usize>();
+    let incoming_packet_tx = queue.framed_producer_with_header::<usize>();
     let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
     (
         MsgPacketTx(outgoing_packet_tx),

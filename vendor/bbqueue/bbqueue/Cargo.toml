@@ -1,0 +1,63 @@
+[package]
+name = "bbqueue"
+version = "0.7.0"
+description = "A SPSC, lockless, no_std, thread safe, queue, based on BipBuffers"
+repository = "https://github.com/jamesmunns/bbqueue"
+authors = ["James Munns <james@onevariable.com>"]
+edition = "2024"
+readme = "../README.md"
+
+categories = [
+    "embedded",
+    "no-std",
+    "memory-management",
+]
+license = "MIT OR Apache-2.0"
+keywords = ["bipbuffer", "lock-free"]
+documentation = "https://docs.rs/bbqueue/"
+
+[package.metadata.docs.rs]
+rustdoc-args    = ["--cfg", "docsrs"]
+features        = ["std"]
+
+[dependencies]
+const-init = "1.0.0"
+portable-atomic = { version = "1.13.1", default-features = false, optional = true }
+
+[dependencies.maitake-sync]
+version = "0.3"
+default-features = false
+optional = true
+
+[dependencies.critical-section]
+version = "1.0"
+default-features = false
+optional = true
+
+[dev-dependencies.tokio]
+version = "1.0"
+features = ["macros", "rt", "time"]
+
+[features]
+# NOTE: CAS atomics are switched using `#[cfg(target_has_atomic = "ptr")]`
+default = [
+    "maitake-sync-0_3",
+    "critical-section",
+]
+critical-section = [
+    "dep:critical-section",
+    "maitake-sync?/critical-section",
+]
+disable-cache-padding = [
+    "maitake-sync?/no-cache-pad",
+]
+alloc = []
+std = [
+    "alloc"
+]
+maitake-sync-0_3 = [
+    "dep:maitake-sync",
+]
+portable-atomic = ["dep:portable-atomic"]
+portable-atomic-critical-section = ["portable-atomic", "portable-atomic/critical-section"]
+portable-atomic-unsafe-assume-single-core = ["portable-atomic", "portable-atomic/unsafe-assume-single-core"]
