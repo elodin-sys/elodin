@@ -1651,6 +1651,7 @@ pub fn spawn_mesh(
             translate,
             rotate,
             animations: _,
+            emissivity: _,
         } => {
             let resolved = resolve_glb_asset_url(path, connection_addr);
             let url = format!("{resolved}#Scene0");
@@ -2029,6 +2030,58 @@ fn propagate_render_layers(
     }
 }
 
+/// Override a GLB's embedded materials with an emissive glow when the object_3d
+/// sets `emissivity` (GLBs carry their own materials, so the schematic value has
+/// no effect until we apply it here once the scene's materials are loaded).
+///
+/// Mirrors the built-in shape behavior (`Material::into_bevy`): the emissive is
+/// the base color boosted by `4 * emissivity`, modulated by the base-color
+/// texture so the surface pattern still shows. Each object_3d gets its own
+/// cloned material so other instances of the same GLB are unaffected.
+pub fn apply_glb_emissive(
+    objects: Query<(Entity, &Object3DState)>,
+    children: Query<&Children>,
+    mesh_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+    mut applied: Local<HashSet<Entity>>,
+) {
+    for (entity, state) in objects.iter() {
+        let impeller2_wkt::Object3DMesh::Glb { emissivity, .. } = state.data.mesh else {
+            continue;
+        };
+        if emissivity <= 0.0 || applied.contains(&entity) {
+            continue;
+        }
+        let boost = 4.0 * emissivity.clamp(0.0, 1.0);
+        let mut updates = Vec::new();
+        for child in children.iter_descendants(entity) {
+            let Ok(handle) = mesh_materials.get(child) else {
+                continue;
+            };
+            let Some(material) = materials.get(&handle.0) else {
+                continue;
+            };
+            let mut material = material.clone();
+            let c = material.base_color.to_srgba();
+            material.emissive = Color::srgb(c.red * boost, c.green * boost, c.blue * boost).into();
+            if material.emissive_texture.is_none() {
+                material.emissive_texture = material.base_color_texture.clone();
+            }
+            updates.push((child, material));
+        }
+        if updates.is_empty() {
+            // Scene or its materials are not loaded yet; retry on a later frame.
+            continue;
+        }
+        for (child, material) in updates {
+            let handle = materials.add(material);
+            commands.entity(child).insert(MeshMaterial3d(handle));
+        }
+        applied.insert(entity);
+    }
+}
+
 pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
@@ -2040,6 +2093,7 @@ impl Plugin for Object3DPlugin {
                 update_joint_animations,
                 warn_imported_cameras,
                 update_object_3d_billboard_system,
+                apply_glb_emissive,
             ),
         );
     }

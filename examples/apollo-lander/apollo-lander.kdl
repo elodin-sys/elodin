@@ -1,0 +1,68 @@
+coordinate frame=ENU
+theme mode=dark scheme=default
+timeline
+hsplit {
+    viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=True show_grid=False share=0.463842
+    vsplit share=0.536157 {
+        hsplit {
+            graph "lander.altitude[0], lander_truth.altitude[0]" name="Altitude vs real range (m)" {
+                color 106 155 165
+                color 114 87 179
+            }
+            graph "lander_truth.vertical_speed[0], lander.vertical_speed[0]" name="Descent rate (m/s)" {
+                color 106 155 165
+                color 114 87 179
+            }
+        }
+        hsplit {
+            graph "lander.horizontal_speed[0]" name="Horizontal speed (m/s)" {
+                color 106 155 165
+            }
+            graph "lander.pitch[0], lander_truth.pitch[0]" name="Pitch vs reconstructed truth (deg)" {
+                color 106 155 165
+                color 114 87 179
+            }
+        }
+        hsplit {
+            graph "lander.throttle_cmd[0], lander.throttle[0]" name="DPS throttle" {
+                color 106 155 165
+                color 114 87 179
+            }
+            graph "lander.propellant[0], lander.rcs_propellant[0]" name="Propellant remaining (kg)" {
+                color 106 155 165
+                color 114 87 179
+            }
+        }
+    }
+}
+object_3d surface.world_pos frame=ENU {
+    glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)"
+}
+object_3d lander.world_pos frame=ENU {
+    glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
+}
+object_3d lander_truth.world_pos frame=ENU {
+    glb path=apollo-lunar-module.glb
+}
+// Moon sphere as the curved horizon backdrop. With this rotation/scale the
+// LRO mesh surface directly under the site sits ~1,725,022 m above the sphere
+// center; seat it ~1.2 km below z=0 so it stays under the landing-site tile's
+// 60x-exaggerated valleys (deepest ~-1,116 m) and never pokes through.
+object_3d "(0,0,0,1, 0,0,-1726250)" frame=ENU {
+    glb path=moon.glb rotate="(25.32, 21.2, 79.59)" scale=1798000.0 emissivity=1.0
+}
+line_3d lander.world_pos frame=ENU {
+    color 20 97 209 220
+}
+line_3d lander_truth.world_pos frame=ENU {
+    color 0 255 0 220
+}
+vector_arrow lander.main_thrust_viz origin=lander.world_pos scale=2.0 name="DPS thrust" body_frame=#true frame=ENU {
+    color 255 128 0 220
+}
+vector_arrow lander.rcs_torque_viz origin=lander.world_pos scale=1.5 name="RCS torque" body_frame=#true frame=ENU {
+    color white
+}
+window screen=0 {
+    rect 3 3 97 97
+}

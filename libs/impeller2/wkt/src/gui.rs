@@ -648,6 +648,10 @@ pub enum Object3DMesh {
         rotate: (f32, f32, f32),
         #[serde(default = "default_glb_animations")]
         animations: Vec<JointAnimation>,
+        /// Overrides the GLB's own material emissive so it self-illuminates
+        /// (0.0 = use the file's material unchanged). Mirrors `Material::emissivity`.
+        #[serde(default)]
+        emissivity: f32,
     },
     Mesh {
         mesh: Mesh,
@@ -678,6 +682,7 @@ impl Object3DMesh {
             translate: default_glb_translate(),
             rotate: default_glb_rotate(),
             animations: default_glb_animations(),
+            emissivity: 0.0,
         }
     }
 

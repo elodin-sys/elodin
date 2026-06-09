@@ -260,6 +260,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     translate,
                     rotate,
                     animations: _,
+                    emissivity,
                 } => {
                     ui.label(egui::RichText::new("GLB Path").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
@@ -320,6 +321,18 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             .add(egui::DragValue::new(&mut rotate.2).speed(1.0))
                             .changed();
                     });
+
+                    ui.separator();
+
+                    ui.label(egui::RichText::new("Emissivity").color(get_scheme().text_secondary));
+                    ui.add_space(8.0);
+                    changed |= ui
+                        .add(
+                            egui::DragValue::new(emissivity)
+                                .speed(0.01)
+                                .range(0.0..=1.0),
+                        )
+                        .changed();
                 }
                 Object3DMesh::Mesh { mesh, material } => {
                     ui.horizontal(|ui| {
