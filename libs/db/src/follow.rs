@@ -21,6 +21,8 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use impeller2::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
 use impeller2_stellar::{PacketSink, PacketStream};
 use impeller2_wkt::*;
+#[cfg(feature = "axum")]
+use stellarator::struc_con::Joinable;
 use stellarator::{io::SplitExt, net::TcpStream};
 use tracing::{debug, info, warn};
 
@@ -48,6 +50,20 @@ impl Default for FollowConfig {
             reconnect_delay: DEFAULT_RECONNECT_DELAY,
         }
     }
+}
+
+/// Fetch metadata/schemas from the source, sync `db:` assets, and apply local state
+/// before the follower accepts clients.
+pub async fn prime_follower_state(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
+    let (_, metadata_resp, schema_resp) = request_source_snapshot(config, false).await?;
+    apply_source_snapshot(
+        config,
+        db,
+        &metadata_resp,
+        &schema_resp,
+        SchematicAssetSync::Await,
+    )
+    .await
 }
 
 /// Run the follower, connecting to the source and replicating all data.
@@ -78,38 +94,47 @@ pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error
     }
 }
 
-async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
+struct FollowStreamSession {
+    rx: PacketStream<stellarator::io::OwnedReader<stellarator::net::TcpStream>>,
+    buf: Vec<u8>,
+}
+
+async fn request_source_snapshot(
+    config: &FollowConfig,
+    start_stream: bool,
+) -> Result<
+    (
+        Option<FollowStreamSession>,
+        DumpMetadataResp,
+        DumpSchemaResp,
+    ),
+    Error,
+> {
     let stream = TcpStream::connect(config.source_addr).await?;
     let (rx, tx) = stream.split();
     let mut rx = PacketStream::new(rx);
     let tx = PacketSink::new(tx);
-
     let mut buf = vec![0u8; 8 * 1024 * 1024];
-
-    // ── Send ALL requests in one burst ──────────────────────────────────
-    // This avoids the source's I/O reactor needing to wake up between
-    // requests.  DumpMetadata + DumpSchema are processed inline by the
-    // source and their responses sent back.  FollowStream transitions the
-    // connection into streaming mode.
 
     let meta_req_id: u8 = 1;
     let schema_req_id: u8 = 2;
-    let follow_req_id: u8 = 0; // streaming uses req_id 0
 
     tx.send(DumpMetadata.with_request_id(meta_req_id)).await.0?;
     tx.send(DumpSchema.with_request_id(schema_req_id)).await.0?;
-    tx.send(
-        FollowStream {
-            target_packet_size: config.target_packet_size as u32,
-        }
-        .with_request_id(follow_req_id),
-    )
-    .await
-    .0?;
+    if start_stream {
+        tx.send(
+            FollowStream {
+                target_packet_size: config.target_packet_size as u32,
+            }
+            .with_request_id(0),
+        )
+        .await
+        .0?;
+        info!("sent DumpMetadata + DumpSchema + FollowStream in one burst");
+    } else {
+        info!("sent DumpMetadata + DumpSchema for follower priming");
+    }
 
-    info!("sent DumpMetadata + DumpSchema + FollowStream in one burst");
-
-    // ── Receive DumpMetadataResp and DumpSchemaResp ─────────────────────
     let mut metadata_resp: Option<DumpMetadataResp> = None;
     let mut schema_resp: Option<DumpSchemaResp> = None;
 
@@ -123,7 +148,10 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 schema_resp = Some(m.parse::<DumpSchemaResp>()?);
             }
             other => {
-                debug!(?other, "unexpected packet during phase 1, ignoring");
+                debug!(
+                    ?other,
+                    "unexpected packet during snapshot handshake, ignoring"
+                );
             }
         }
         buf = pkt.into_buf().into_inner();
@@ -136,40 +164,68 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         components = metadata_resp.component_metadata.len(),
         messages = metadata_resp.msg_metadata.len(),
         schemas = schema_resp.schemas.len(),
-        "phase 1: received metadata and schemas"
+        "received metadata and schemas from source"
     );
 
-    // ── Apply metadata ──────────────────────────────────────────────────
+    let session = if start_stream {
+        Some(FollowStreamSession { rx, buf })
+    } else {
+        None
+    };
+    Ok((session, metadata_resp, schema_resp))
+}
 
-    // Apply db_config (includes schematic content/path, recording flag, etc.).
-    // ── Apply metadata ──────────────────────────────────────────────────
+enum SchematicAssetSync {
+    /// Block until HTTP asset sync completes (no FollowStream active).
+    Await,
+    /// Keep draining the follow stream while assets sync over HTTP.
+    Background,
+}
 
-    // Apply db_config (includes schematic content/path, recording flag, etc.).
+#[cfg(feature = "axum")]
+async fn sync_schematic_assets_on_tokio(source_addr: SocketAddr, db: Arc<DB>) {
+    if let Err(err) = stellarator::struc_con::tokio(move |_| async move {
+        crate::assets_http::sync_schematic_assets_for_db_from_source(source_addr, &db).await;
+    })
+    .join()
+    .await
+    {
+        warn!(?err, "failed to join schematic asset sync task");
+    }
+}
+
+#[cfg(feature = "axum")]
+fn spawn_schematic_asset_sync(source_addr: SocketAddr, db: Arc<DB>) {
+    stellarator::struc_con::tokio(move |_| async move {
+        crate::assets_http::sync_schematic_assets_for_db_from_source(source_addr, &db).await;
+    });
+}
+
+async fn apply_source_snapshot(
+    config: &FollowConfig,
+    db: &Arc<DB>,
+    metadata_resp: &DumpMetadataResp,
+    schema_resp: &DumpSchemaResp,
+    asset_sync: SchematicAssetSync,
+) -> Result<(), Error> {
     db.with_state_mut(|s| {
-        s.db_config
-            .metadata
-            .extend(metadata_resp.db_config.metadata.clone());
+        s.db_config.metadata = metadata_resp.db_config.metadata.clone();
         s.db_config.default_stream_time_step = metadata_resp.db_config.default_stream_time_step;
     });
-    // Set earliest_timestamp to the source's DB creation time so the
-    // editor's timeline starts at the correct point.
     if let Some(ts_micros) = metadata_resp.db_config.time_start_timestamp_micros() {
         let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
     }
     db.save_db_state()?;
 
-    // Apply component metadata.
     for metadata in &metadata_resp.component_metadata {
         db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
     }
 
-    // Apply message metadata.
     for msg_meta in &metadata_resp.msg_metadata {
         let msg_id = impeller2::types::msg_id(&msg_meta.name);
         db.with_state_mut(|s| s.set_msg_metadata(msg_id, msg_meta.clone(), &db.path))?;
     }
 
-    // Create components from schemas using per-component start_timestamps.
     let source_start_ts = metadata_resp
         .db_config
         .time_start_timestamp_micros()
@@ -187,7 +243,6 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         })?;
     }
 
-    // Track all known component IDs as followed.
     {
         let mut followed = db.followed_components.write().unwrap();
         for &cid in schema_resp.schemas.keys() {
@@ -196,6 +251,52 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         db.has_followed_components
             .store(!followed.is_empty(), std::sync::atomic::Ordering::Release);
     }
+
+    match asset_sync {
+        SchematicAssetSync::Await => {
+            #[cfg(feature = "axum")]
+            sync_schematic_assets_on_tokio(config.source_addr, db.clone()).await;
+        }
+        SchematicAssetSync::Background => {
+            #[cfg(feature = "axum")]
+            spawn_schematic_asset_sync(config.source_addr, db.clone());
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_db_config_update(
+    config: &FollowConfig,
+    db: &Arc<DB>,
+    update: SetDbConfig,
+) -> Result<(), Error> {
+    let needs_asset_sync = db.apply_set_db_config(update)?;
+    #[cfg(feature = "axum")]
+    if needs_asset_sync {
+        spawn_schematic_asset_sync(config.source_addr, db.clone());
+    }
+    Ok(())
+}
+
+async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
+    let (session, metadata_resp, schema_resp) = request_source_snapshot(config, true).await?;
+    apply_source_snapshot(
+        config,
+        db,
+        &metadata_resp,
+        &schema_resp,
+        SchematicAssetSync::Background,
+    )
+    .await?;
+
+    let FollowStreamSession { mut rx, mut buf } = session.expect("follow stream session");
+
+    let source_start_ts = metadata_resp
+        .db_config
+        .time_start_timestamp_micros()
+        .map(Timestamp)
+        .unwrap_or_else(Timestamp::now);
 
     // Track message timestamps for dedup.
     let msg_ids: Vec<PacketId> = metadata_resp
@@ -287,6 +388,12 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
                 let meta: SetMsgMetadata = m.parse()?;
                 db.with_state_mut(|s| s.set_msg_metadata(meta.id, meta.metadata, &db.path))?;
+            }
+
+            // SetDbConfig – live db_config metadata (e.g. schematic.content).
+            Packet::Msg(m) if m.id == SetDbConfig::ID => {
+                let update: SetDbConfig = m.parse()?;
+                apply_db_config_update(config, db, update)?;
             }
 
             // VTableMsg – extract ComponentId and store in connection-local map.
@@ -419,5 +526,65 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             }
         }
         buf = pkt.into_buf().into_inner();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[stellarator::test]
+    async fn source_snapshot_replaces_stale_db_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([
+                ("schematic.content".to_string(), "old schematic".to_string()),
+                ("skybox.active".to_string(), "old_skybox".to_string()),
+                ("local.only".to_string(), "stale".to_string()),
+            ]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut source_config = DbConfig::default();
+        source_config
+            .metadata
+            .insert("source.only".to_string(), "fresh".to_string());
+        let metadata_resp = DumpMetadataResp {
+            component_metadata: Vec::new(),
+            msg_metadata: Vec::new(),
+            db_config: source_config,
+        };
+        let schema_resp = DumpSchemaResp {
+            schemas: HashMap::new(),
+            start_timestamps: HashMap::new(),
+        };
+        let config = FollowConfig::default();
+
+        apply_source_snapshot(
+            &config,
+            &db,
+            &metadata_resp,
+            &schema_resp,
+            SchematicAssetSync::Await,
+        )
+        .await
+        .unwrap();
+
+        db.with_state(|state| {
+            assert_eq!(
+                state
+                    .db_config
+                    .metadata
+                    .get("source.only")
+                    .map(String::as_str),
+                Some("fresh")
+            );
+            assert!(!state.db_config.metadata.contains_key("schematic.content"));
+            assert!(!state.db_config.metadata.contains_key("skybox.active"));
+            assert!(!state.db_config.metadata.contains_key("local.only"));
+        });
     }
 }

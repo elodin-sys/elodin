@@ -2,13 +2,20 @@
 # ruff: noqa: F405
 import os
 import code
+import datetime
+import hashlib
 import inspect
+import json
+import shutil
 import re
 import readline
 import rlcompleter
+import sys
+import sysconfig
 import types
 import typing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -36,6 +43,114 @@ __doc__ = elodin.__doc__
 jax.config.update("jax_enable_x64", True)
 
 Self = TypeVar("Self")
+
+SIMULATION_SOURCE_DIR = "simulation_source"
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_excluded_python_source(path: Path) -> bool:
+    parts = set(path.parts)
+    if "__pycache__" in parts:
+        return True
+    if any(part in parts for part in (".venv", "venv", "site-packages", "dist-packages")):
+        return True
+    stdlib = sysconfig.get_paths().get("stdlib")
+    if stdlib and _is_relative_to(path, Path(stdlib).resolve()):
+        return True
+    return False
+
+
+def _project_python_sources(project_root: Path) -> list[Path]:
+    sources: set[Path] = set()
+    for module in list(sys.modules.values()):
+        file = getattr(module, "__file__", None)
+        if not file:
+            continue
+        path = Path(file)
+        if path.suffix != ".py":
+            continue
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if not path.exists() or not _is_relative_to(path, project_root):
+            continue
+        if _is_excluded_python_source(path):
+            continue
+        sources.add(path)
+    return sorted(sources)
+
+
+def _simulation_source_entrypoint(caller_filename: str) -> str:
+    candidates = [
+        getattr(sys.modules.get("__main__"), "__file__", None),
+        sys.argv[0] if sys.argv else None,
+        caller_filename,
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.suffix != ".py":
+            continue
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if path.exists():
+            return str(path)
+    return caller_filename
+
+
+def _capture_simulation_source(db_path: str, entrypoint: str) -> None:
+    try:
+        entrypoint_path = Path(entrypoint).resolve()
+    except OSError:
+        return
+    if not entrypoint_path.exists():
+        return
+
+    project_root = entrypoint_path.parent
+    sources = _project_python_sources(project_root)
+    if entrypoint_path.suffix == ".py" and not _is_excluded_python_source(entrypoint_path):
+        sources = sorted(set(sources) | {entrypoint_path})
+
+    source_root = Path(db_path) / SIMULATION_SOURCE_DIR
+    files_root = source_root / "files"
+    files = []
+    for source in sources:
+        rel = source.relative_to(project_root)
+        dest = files_root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        data = source.read_bytes()
+        files.append(
+            {
+                "path": rel.as_posix(),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size": len(data),
+            }
+        )
+
+    source_root.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "version": 1,
+        "entrypoint": entrypoint_path.name,
+        "project_root": str(project_root),
+        "captured_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "files": files,
+    }
+    (source_root / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def system(func) -> System:
@@ -576,6 +691,9 @@ class World(WorldBuilder):
         if frame is None:
             raise Exception("No previous frame")
         db_path = db_path if db_path is not None else os.environ.get("ELODIN_DB_PATH")
+        simulation_source_entrypoint = (
+            _simulation_source_entrypoint(frame.f_code.co_filename) if db_path is not None else None
+        )
         addr = super().run(
             system,
             simulation_rate,
@@ -592,6 +710,7 @@ class World(WorldBuilder):
             start_timestamp,
             log_level,
             backend,
+            simulation_source_entrypoint,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

@@ -252,6 +252,12 @@ Simulations automatically create a temporary database:
 w.run(system)  # Creates temp DB in system temp directory
 ```
 
+When a simulation records to a persistent database with `db_path` or `ELODIN_DB_PATH`,
+Elodin also captures project-local Python source files under
+`{db}/simulation_source/`. The snapshot is intended for later analysis and
+provenance; it includes resolved `.py` modules from the local project, not the
+compiled simulation, virtualenv, third-party packages, or non-Python assets.
+
 ### Connect to Existing Database
 ```python
 # Start external database

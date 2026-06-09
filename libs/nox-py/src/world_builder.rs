@@ -61,6 +61,20 @@ fn install_signal_handlers(cancel_token: CancelToken) {
     });
 }
 
+fn capture_simulation_source(
+    py: Python<'_>,
+    db_path: &Path,
+    entrypoint: Option<&str>,
+) -> Result<(), Error> {
+    let Some(entrypoint) = entrypoint else {
+        return Ok(());
+    };
+    py.import("elodin")?
+        .getattr("_capture_simulation_source")?
+        .call1((db_path.to_string_lossy().as_ref(), entrypoint))?;
+    Ok(())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     version = concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
@@ -500,6 +514,7 @@ impl WorldBuilder {
         start_timestamp = None,
         log_level = None,
         backend = "cranelift",
+        simulation_source_entrypoint = None,
     ))]
     pub fn run(
         &mut self,
@@ -519,6 +534,7 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
         backend: &str,
+        simulation_source_entrypoint: Option<String>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -553,7 +569,7 @@ impl WorldBuilder {
             } => {
                 let cancel_token = CancelToken::new();
                 install_signal_handlers(cancel_token.clone());
-                let exec = self.build_with_backend(
+                let mut exec = self.build_with_backend(
                     py,
                     sys,
                     simulation_rate,
@@ -616,7 +632,11 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
-                py.allow_threads(|| {
+                crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
+                    .map_err(crate::Error::DB)?;
+                elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
+                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
+                let run_result = py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
                     // dedicated thread with a 256 MB stack. Large customer simulations
                     // compile many Cranelift ExplicitSlot buffers per function; the
@@ -755,7 +775,18 @@ impl WorldBuilder {
 
                     result?;
                     Ok(None)
-                })
+                });
+                match run_result {
+                    Ok(value) => {
+                        capture_simulation_source(
+                            py,
+                            &db_path,
+                            simulation_source_entrypoint.as_deref(),
+                        )?;
+                        Ok(value)
+                    }
+                    Err(err) => Err(err),
+                }
             }
             Args::Plan { addr, out_dir } => {
                 // Canonicalize the path to ensure s10 can find the file regardless of working directory
@@ -1297,6 +1328,8 @@ impl WorldBuilder {
                         None => tempfile::tempdir()?.keep().join("db"),
                     };
                     let db = elodin_db::DB::create(db_path)?;
+                    crate::impeller2_server::prime_schematic_assets(&db, compiled_exec.world_mut())
+                        .map_err(Error::DB)?;
                     crate::impeller2_server::init_db(
                         &db,
                         compiled_exec.world_mut(),
@@ -1386,6 +1419,8 @@ impl WorldBuilder {
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
+        crate::impeller2_server::prime_schematic_assets(&db, exec.world_mut())
+            .map_err(Error::DB)?;
         crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
         Ok(PyExec {
             exec,
@@ -1462,34 +1497,31 @@ impl WorldBuilder {
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
     pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
-        self.world.metadata.schematic_path =
-            // Don't use the ELODIN_KDL_DIR path here. We use that when we read
-            // or write to the filesystem.
-            //
-            // path.map(|p| impeller2_kdl::env::schematic_file(&Path::new(&p)));
-            path.map(PathBuf::from);
-        let file_contents = self
-            .world
-            .metadata
-            .schematic_path
+        let requested_path = path.map(PathBuf::from);
+        let resolved_path = requested_path
             .as_ref()
-            .map(|p| impeller2_kdl::env::schematic_file(Path::new(p)))
-            .and_then(|path| {
-                if path.exists() {
-                    std::fs::read_to_string(&path)
-                        .inspect(|_| info!("read schematic at {:?}", path.display()))
-                        .inspect_err(|err| {
-                            error!(
-                                ?err,
-                                "could not read schematic file at {:?}",
-                                path.display()
-                            )
-                        })
-                        .ok()
-                } else {
-                    None
-                }
-            });
+            .map(|p| impeller2_kdl::env::schematic_file(Path::new(p)));
+        let file_contents = resolved_path.as_ref().and_then(|path| {
+            if path.exists() {
+                std::fs::read_to_string(path)
+                    .inspect(|_| info!("read schematic at {:?}", path.display()))
+                    .inspect_err(|err| {
+                        error!(
+                            ?err,
+                            "could not read schematic file at {:?}",
+                            path.display()
+                        )
+                    })
+                    .ok()
+            } else {
+                None
+            }
+        });
+        self.world.metadata.schematic_path = if file_contents.is_some() {
+            resolved_path
+        } else {
+            requested_path
+        };
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 

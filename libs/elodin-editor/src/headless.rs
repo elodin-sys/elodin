@@ -9,6 +9,7 @@ use bevy::{
     asset::{AssetPlugin, Assets, UnapprovedPathMode},
     audio::AudioPlugin,
     diagnostic::{DiagnosticsPlugin, DiagnosticsStore},
+    ecs::system::SystemParam,
     gilrs::GilrsPlugin,
     gizmos::GizmoPlugin,
     input::InputPlugin,
@@ -33,7 +34,7 @@ use bevy_ai_skybox::prelude::{
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
-use impeller2_bevy::{MsgPacketTx, PacketTx};
+use impeller2_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{
     CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schematic, SchematicElem,
@@ -129,8 +130,15 @@ impl Plugin for HeadlessEditorPlugin {
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
             .init_resource::<HeadlessSkyboxRenderGate>()
+            .init_resource::<crate::skybox_db_assets::DbSkyboxAssetMirror>()
+            .init_resource::<crate::skybox_db_assets::DbSkyboxSyncInFlight>()
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, poll_headless_db_config)
+            .add_systems(
+                Update,
+                crate::skybox_db_assets::sync_db_skybox_assets_from_config
+                    .before(sync_headless_skybox),
+            )
             .add_systems(Update, sync_headless_skybox)
             .add_systems(Update, load_headless_scene)
             .set_runner(render_server_runner);
@@ -173,6 +181,7 @@ fn load_headless_scene(
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
     geo_context: Res<GeoContext>,
+    connection_addr: Option<Res<ConnectionAddr>>,
 ) {
     if *loaded {
         return;
@@ -191,6 +200,7 @@ fn load_headless_scene(
     }) else {
         return;
     };
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
 
     for elem in &schematic.elems {
         if let SchematicElem::Object3d(obj) = elem {
@@ -208,6 +218,7 @@ fn load_headless_scene(
                 &mut mat3_materials,
                 &asset_server,
                 &geo_context,
+                connection_addr,
             );
         }
     }
@@ -289,15 +300,35 @@ fn clear_applied_in_cache(desired: &Option<String>, cache: &SkyboxCache) -> bool
     desired.is_none() && cache.active.is_none()
 }
 
-fn sync_headless_skybox(
-    config: Res<DbConfig>,
-    cache: Res<SkyboxCache>,
-    settings: Res<SkyboxAssetSettings>,
-    cameras: Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
-    mut render_gate: ResMut<HeadlessSkyboxRenderGate>,
-    mut skybox_writer: MessageWriter<SetActiveSkybox>,
-    mut failed: MessageReader<SkyboxFailed>,
-) {
+#[derive(SystemParam)]
+struct SyncHeadlessSkyboxParams<'w, 's> {
+    config: Res<'w, DbConfig>,
+    cache: Res<'w, SkyboxCache>,
+    settings: Res<'w, SkyboxAssetSettings>,
+    cameras:
+        Query<'w, 's, (Option<&'static PrimarySkybox>, Option<&'static Skybox>), With<Camera3d>>,
+    render_gate: ResMut<'w, HeadlessSkyboxRenderGate>,
+    skybox_writer: MessageWriter<'w, SetActiveSkybox>,
+    failed: MessageReader<'w, 's, SkyboxFailed>,
+    connection_addr: Option<Res<'w, ConnectionAddr>>,
+    mirror: Res<'w, crate::skybox_db_assets::DbSkyboxAssetMirror>,
+    in_flight: Res<'w, crate::skybox_db_assets::DbSkyboxSyncInFlight>,
+}
+
+fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
+    let SyncHeadlessSkyboxParams {
+        config,
+        cache,
+        settings,
+        cameras,
+        mut render_gate,
+        mut skybox_writer,
+        mut failed,
+        connection_addr,
+        mirror,
+        in_flight,
+    } = params;
+
     for event in failed.read() {
         if !skybox_failure_matches_gate(&render_gate.desired, &event.name) {
             continue;
@@ -347,6 +378,32 @@ fn sync_headless_skybox(
         render_gate.applied = true;
         render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
         return;
+    }
+
+    if let (Some(connection_addr), Some(name)) = (connection_addr.as_deref(), &desired) {
+        if crate::skybox_db_assets::db_skybox_mirror_pending(
+            connection_addr.0,
+            name,
+            &mirror,
+            &in_flight,
+        ) {
+            render_gate.applied = false;
+            return;
+        }
+        if crate::skybox_db_assets::db_skybox_mirror_synced(connection_addr.0, name, &mirror) {
+            render_gate.applied = false;
+            if cache.active.as_deref() == Some(name.as_str()) {
+                skybox_writer.write(SetActiveSkybox::ByName(name.clone()));
+                render_gate.activation_dispatched = true;
+                return;
+            }
+            if render_gate.activation_dispatched {
+                return;
+            }
+            // Assets are mirrored; sync_db re-activates when cache.active is stale.
+            render_gate.activation_dispatched = true;
+            return;
+        }
     }
 
     render_gate.applied = false;

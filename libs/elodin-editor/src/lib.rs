@@ -67,6 +67,7 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+mod skybox_db_assets;
 mod skybox_generation;
 #[cfg(feature = "big_space")]
 pub(crate) mod spatial;
@@ -247,6 +248,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(plugins::kdl_document::plugin)
             .add_plugins(skybox_asset_plugin())
             .add_plugins(skybox_generation_plugin())
+            .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
+            .init_resource::<skybox_db_assets::DbSkyboxSyncInFlight>()
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
@@ -342,6 +345,10 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
+            .add_systems(
+                PostUpdate,
+                skybox_db_assets::sync_db_skybox_assets_from_config,
+            )
             .add_systems(PostUpdate, set_clear_color)
             .insert_resource(WireframeConfig {
                 global: false,
@@ -1174,7 +1181,9 @@ pub fn sync_object_3d(
     mut commands: Commands,
     assets: Res<AssetServer>,
     geo_context: Res<GeoContext>,
+    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
 ) {
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
             continue;
@@ -1228,6 +1237,7 @@ pub fn sync_object_3d(
             &mut mat3_material_assets,
             &assets,
             &geo_context,
+            connection_addr,
         ) {
             synced_object_3d.0.insert(entity, object_entity);
         }
