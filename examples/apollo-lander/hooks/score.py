@@ -28,6 +28,7 @@ def post_run(ctx):
     rcs_fuel_remaining = _number(result.get("rcs_fuel_remaining"), default=0.0)
     traj_rmse = _number(result.get("traj_rmse"))
     pitch_rmse = _number(result.get("pitch_rmse"))
+    downrange_miss = _number(result.get("downrange_miss"))
     landed = bool(result.get("landed", False))
     computed_soft_landing = (
         landed
@@ -47,4 +48,5 @@ def post_run(ctx):
         "rcs_fuel_remaining_kg": rcs_fuel_remaining,
         "traj_rmse_m": traj_rmse,
         "pitch_rmse_deg": pitch_rmse,
+        "downrange_miss_m": downrange_miss,
     }

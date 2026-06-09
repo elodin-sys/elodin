@@ -96,6 +96,11 @@ def post_campaign(ctx):
     pitch_rmse = [
         value for run in ok_runs if (value := _float(run["post"].get("pitch_rmse_deg"))) is not None
     ]
+    downrange_miss = [
+        value
+        for run in ok_runs
+        if (value := _float(run["post"].get("downrange_miss_m"))) is not None
+    ]
     best = min(rmse_values, key=lambda item: item[1], default=(None, None))
 
     lines = [
@@ -124,6 +129,11 @@ def post_campaign(ctx):
         "RCS fuel remaining",
         f"  mean: {_fmt((sum(rcs_fuel_remaining) / len(rcs_fuel_remaining)) if rcs_fuel_remaining else None, ' kg')}",
         f"  min:  {_fmt(min(rcs_fuel_remaining) if rcs_fuel_remaining else None, ' kg')}",
+        "",
+        "Landing dispersion (downrange miss from site)",
+        f"  mean: {_fmt((sum(downrange_miss) / len(downrange_miss)) if downrange_miss else None, ' m')}",
+        f"  p95:  {_fmt(_percentile(downrange_miss, 0.95), ' m')}",
+        f"  max:  {_fmt(max(downrange_miss) if downrange_miss else None, ' m')}",
         "",
         "Apollo telemetry fit",
         f"  best run: {best[0]['run_id'] if best[0] else 'n/a'}",

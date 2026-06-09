@@ -19,8 +19,10 @@ START_TIMESTAMP_US = int(PDI_START.timestamp() * 1_000_000)
 
 G0 = 9.80665
 LUNAR_GRAVITY = 1.622
+R_MOON_M = 1_737_400.0
 DPS_MAX_THRUST_N = 45_040.0
 DPS_MIN_THRUST_N = 4_670.0
+DPS_FTP_THROTTLE = 0.925  # fixed throttle point flown through the braking phase
 THROTTLE_MIN = DPS_MIN_THRUST_N / DPS_MAX_THRUST_N
 THROTTLE_MAX = 1.0
 RCS_THRUST_N = 445.0
@@ -31,14 +33,21 @@ SOFT_VERTICAL_SPEED_MPS = 3.0
 SOFT_HORIZONTAL_SPEED_MPS = 1.0
 UPRIGHT_DOT_MIN = 0.94
 
-# Smoothed, monotone Apollo 11 descent reference (altitude / descent-rate /
-# approximate pitch) shared with the external guidance controller.
+# Smoothed Apollo 11 descent reference (true altitude / descent rate /
+# approximate pitch / reconstructed horizontal profile) shared with the
+# external guidance controller.
 REFERENCE = build_reference()
 REF_TIME_S = np.asarray(REFERENCE.time_s, dtype=np.float64)
 REF_ALTITUDE_M = np.asarray(REFERENCE.altitude_m, dtype=np.float64)
 REF_RATE_MPS = np.asarray(REFERENCE.descent_rate_mps, dtype=np.float64)
 REF_PITCH_DEG = np.asarray(REFERENCE.pitch_deg, dtype=np.float64)
+REF_SLANT_RANGE_M = np.asarray(REFERENCE.slant_range_m, dtype=np.float64)
+REF_HSPEED_MPS = np.asarray(REFERENCE.horizontal_speed_mps, dtype=np.float64)
+REF_DOWNRANGE_M = np.asarray(REFERENCE.downrange_m, dtype=np.float64)
 REF_INIT_ALTITUDE = float(REF_ALTITUDE_M[0])
+REF_INIT_RATE = float(REF_RATE_MPS[0])
+REF_INIT_HSPEED = float(REF_HSPEED_MPS[0])
+REF_INIT_DOWNRANGE = float(REF_DOWNRANGE_M[0])
 # Run slightly past the data window so the gentle terminal descent reaches contact.
 DEFAULT_MAX_TICKS = int(math.ceil((REFERENCE.t_end + 20.0) * SIMULATION_RATE_HZ)) + 1
 
@@ -59,29 +68,39 @@ TERRAIN_CENTER_NATIVE_Z = 10.63
 TERRAIN_SEAT_Z = -TERRAIN_GLB_SCALE * TERRAIN_CENTER_NATIVE_Z
 
 PARAMS = el.monte_carlo.params_spec(
+    # Radar-corrected altitude at landing-radar lock-on (~38,700 ft). The
+    # navigation dispersions are tight: a saturated FTP braking burn cannot
+    # recover large state errors, exactly as on the real mission.
     init_altitude_m=el.monte_carlo.Param(
-        float, default=REF_INIT_ALTITUDE, min=12_000.0, max=14_500.0
+        float, default=REF_INIT_ALTITUDE, min=11_650.0, max=11_950.0
     ),
-    # The reference range-rate starts at about -97 m/s; straddle it so the
-    # controller can actually acquire the profile.
-    init_vertical_speed_mps=el.monte_carlo.Param(float, default=-97.0, min=-105.0, max=-85.0),
-    init_downrange_speed_mps=el.monte_carlo.Param(float, default=20.0, min=5.0, max=35.0),
+    init_vertical_speed_mps=el.monte_carlo.Param(
+        float, default=REF_INIT_RATE, min=-32.0, max=-18.0
+    ),
+    # Residual orbital velocity mid-way through the P63 braking phase
+    # (reconstructed ~800 m/s at radar lock).
+    init_downrange_speed_mps=el.monte_carlo.Param(
+        float, default=REF_INIT_HSPEED, min=784.0, max=814.0
+    ),
     init_crossrange_speed_mps=el.monte_carlo.Param(float, default=0.0, min=-3.0, max=3.0),
-    init_pitch_deg=el.monte_carlo.Param(float, default=-15.0, min=-35.0, max=-5.0),
-    dry_mass_kg=el.monte_carlo.Param(float, default=6_853.0, min=6_650.0, max=7_050.0),
-    # DPS propellant remaining at the start of the telemetry window (~13 km).
-    # The full load was ~8,212 kg; roughly half was burned during the braking
-    # phase before the landing radar locked on.
-    propellant_kg=el.monte_carlo.Param(float, default=4_100.0, min=3_800.0, max=4_600.0),
-    rcs_propellant_kg=el.monte_carlo.Param(float, default=240.0, min=150.0, max=350.0),
-    thrust_scale=el.monte_carlo.Param(float, default=1.0, min=0.96, max=1.04),
-    isp_s=el.monte_carlo.Param(float, default=311.0, min=300.0, max=318.0),
-    gravity_scale=el.monte_carlo.Param(float, default=1.0, min=0.995, max=1.005),
-    track_gain=el.monte_carlo.Param(float, default=0.06, min=0.03, max=0.12),
+    # Sampled offset from the reconstructed window-start downrange position.
+    init_downrange_offset_m=el.monte_carlo.Param(float, default=0.0, min=-1_500.0, max=1_500.0),
+    # Retrograde braking attitude (~77 deg from vertical at radar lock).
+    init_pitch_deg=el.monte_carlo.Param(float, default=-77.0, min=-80.0, max=-70.0),
+    dry_mass_kg=el.monte_carlo.Param(float, default=6_853.0, min=6_750.0, max=6_950.0),
+    # DPS propellant remaining at the start of the telemetry window. The full
+    # load was ~8,212 kg; the mission-report fuel chart shows ~4,260 kg burned
+    # by radar lock-on.
+    propellant_kg=el.monte_carlo.Param(float, default=3_950.0, min=3_800.0, max=4_200.0),
+    rcs_propellant_kg=el.monte_carlo.Param(float, default=240.0, min=180.0, max=320.0),
+    thrust_scale=el.monte_carlo.Param(float, default=1.0, min=0.98, max=1.02),
+    isp_s=el.monte_carlo.Param(float, default=311.0, min=308.0, max=314.0),
+    gravity_scale=el.monte_carlo.Param(float, default=1.0, min=0.998, max=1.002),
+    track_gain=el.monte_carlo.Param(float, default=0.04, min=0.02, max=0.06),
     horizontal_gain=el.monte_carlo.Param(float, default=0.05, min=0.02, max=0.10),
-    vertical_gain=el.monte_carlo.Param(float, default=0.45, min=0.25, max=0.70),
-    attitude_gain=el.monte_carlo.Param(float, default=0.040, min=0.020, max=0.080),
-    throttle_response_hz=el.monte_carlo.Param(float, default=3.0, min=1.5, max=6.0),
+    vertical_gain=el.monte_carlo.Param(float, default=0.45, min=0.30, max=0.60),
+    attitude_gain=el.monte_carlo.Param(float, default=0.040, min=0.030, max=0.060),
+    throttle_response_hz=el.monte_carlo.Param(float, default=3.0, min=2.0, max=5.0),
 )
 
 Altitude = ty.Annotated[
@@ -152,6 +171,12 @@ TouchdownHorizontalSpeed = ty.Annotated[
     jax.Array,
     el.Component("touchdown_horizontal_speed", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
+# Landing-radar slant range replay (truth ghost only); during the pitched-back
+# braking phase it visibly exceeds the true altitude.
+SlantRange = ty.Annotated[
+    jax.Array,
+    el.Component("slant_range", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
 # Marker scoping the truth-replay playback system to the lander_truth entity.
 TruthMarker = ty.Annotated[
     jax.Array,
@@ -198,12 +223,13 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     world = el.World()
 
     init_altitude = float(params.get("init_altitude_m", REF_INIT_ALTITUDE))
-    init_vertical_speed = float(params.get("init_vertical_speed_mps", -97.0))
-    init_downrange_speed = float(params.get("init_downrange_speed_mps", 20.0))
+    init_vertical_speed = float(params.get("init_vertical_speed_mps", REF_INIT_RATE))
+    init_downrange_speed = float(params.get("init_downrange_speed_mps", REF_INIT_HSPEED))
     init_crossrange_speed = float(params.get("init_crossrange_speed_mps", 0.0))
-    init_pitch = float(params.get("init_pitch_deg", -15.0))
+    init_downrange = REF_INIT_DOWNRANGE + float(params.get("init_downrange_offset_m", 0.0))
+    init_pitch = float(params.get("init_pitch_deg", -77.0))
     dry_mass = float(params.get("dry_mass_kg", 6_853.0))
-    propellant = float(params.get("propellant_kg", 4_100.0))
+    propellant = float(params.get("propellant_kg", 3_950.0))
     rcs_propellant = float(params.get("rcs_propellant_kg", 240.0))
     thrust_scale = float(params.get("thrust_scale", 1.0))
     isp = float(params.get("isp_s", 311.0))
@@ -211,13 +237,14 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     attitude_gain = float(params.get("attitude_gain", 0.040))
     throttle_response_hz = float(params.get("throttle_response_hz", 3.0))
     total_mass = dry_mass + propellant + rcs_propellant
-    hover_throttle = total_mass * LUNAR_GRAVITY * gravity_scale / (DPS_MAX_THRUST_N * thrust_scale)
     # Representative LM inertia tensor: roughly a 7m tall, 4m wide vehicle. The
     # DPS is treated as gimbaled through the moving CG; RCS provides control torque.
     base_inertia_diag = jnp.array([78_000.0, 72_000.0, 45_000.0], dtype=jnp.float64)
     landed_inertia = jnp.array([1.0e9, 1.0e9, 1.0e9], dtype=jnp.float64)
     rcs_k = jnp.array([4_500.0, 5_500.0, 4_500.0], dtype=jnp.float64) * (attitude_gain / 0.040)
-    rcs_d = jnp.array([8_000.0, 9_000.0, 8_000.0], dtype=jnp.float64)
+    # Damping sized for ~0.85 damping ratio against the proportional gains so
+    # the large braking-phase attitude commands do not overshoot.
+    rcs_d = jnp.array([19_000.0, 21_000.0, 19_000.0], dtype=jnp.float64)
     rcs_limit = jnp.array([RCS_AXIS_TORQUE_LIMIT_NM] * 3, dtype=jnp.float64)
     response_alpha = min(max(throttle_response_hz * SIM_TIME_STEP, 0.0), 1.0)
     lunar_g = LUNAR_GRAVITY * gravity_scale
@@ -228,7 +255,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             el.Body(
                 world_pos=el.SpatialTransform(
                     angular=initial_attitude,
-                    linear=jnp.array([0.0, 0.0, init_altitude], dtype=jnp.float64),
+                    linear=jnp.array([init_downrange, 0.0, init_altitude], dtype=jnp.float64),
                 ),
                 world_vel=el.SpatialMotion(
                     angular=jnp.zeros(3, dtype=jnp.float64),
@@ -246,8 +273,10 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             ),
             # Pitch telemetry is unsigned tilt-from-vertical (see derive_telemetry).
             el.C(Pitch, jnp.array([abs(init_pitch)], dtype=jnp.float64)),
-            el.C(Throttle, jnp.array([hover_throttle], dtype=jnp.float64)),
-            el.C(ThrottleCmd, jnp.array([hover_throttle], dtype=jnp.float64)),
+            # The window opens mid-braking-burn with the DPS at the fixed
+            # throttle point.
+            el.C(Throttle, jnp.array([DPS_FTP_THROTTLE], dtype=jnp.float64)),
+            el.C(ThrottleCmd, jnp.array([DPS_FTP_THROTTLE], dtype=jnp.float64)),
             el.C(AttitudeSetpoint, initial_attitude),
             el.C(Propellant, jnp.array([propellant], dtype=jnp.float64)),
             el.C(RcsPropellant, jnp.array([rcs_propellant], dtype=jnp.float64)),
@@ -269,12 +298,16 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             StaticSceneObject(
                 el.WorldPos(
                     angular=el.Quaternion(truth_quat(0.0)),
-                    linear=jnp.array([0.0, 30.0, REF_INIT_ALTITUDE], dtype=jnp.float64),
+                    linear=jnp.array(
+                        [REF_INIT_DOWNRANGE, 30.0, REF_INIT_ALTITUDE], dtype=jnp.float64
+                    ),
                 )
             ),
             el.C(TruthMarker, jnp.array([1.0], dtype=jnp.float64)),
             el.C(Altitude, jnp.array([REF_INIT_ALTITUDE], dtype=jnp.float64)),
             el.C(VerticalSpeed, jnp.array([truth_velocity(0.0)], dtype=jnp.float64)),
+            el.C(HorizontalSpeed, jnp.array([REF_INIT_HSPEED], dtype=jnp.float64)),
+            el.C(SlantRange, jnp.array([float(REF_SLANT_RANGE_M[0])], dtype=jnp.float64)),
             el.C(Pitch, jnp.array([truth_pitch(0.0)], dtype=jnp.float64)),
         ],
         name="lander_truth",
@@ -332,9 +365,15 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
         return jnp.where(landed[0] > 0.5, jnp.zeros(3, dtype=jnp.float64), torque)
 
     @el.map
-    def lunar_gravity(force: el.Force, inertia: el.Inertia) -> el.Force:
+    def lunar_gravity(force: el.Force, inertia: el.Inertia, vel: el.WorldVel) -> el.Force:
+        # Flat-world stand-in for the orbital centrifugal relief: a vehicle
+        # moving horizontally at v needs v^2/R less thrust to hold altitude.
+        # At the braking-phase ~830 m/s this is ~0.40 m/s^2 (a quarter of
+        # lunar gravity) and it is what made the real P63 fuel budget close.
+        v_h_sq = jnp.sum(vel.linear()[:2] ** 2)
+        g_eff = jnp.maximum(lunar_g - v_h_sq / R_MOON_M, 0.0)
         return force + el.SpatialForce(
-            linear=jnp.array([0.0, 0.0, -lunar_g], dtype=jnp.float64) * inertia.mass()
+            linear=jnp.array([0.0, 0.0, -1.0], dtype=jnp.float64) * g_eff * inertia.mass()
         )
 
     @el.map
@@ -404,31 +443,39 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     ref_altitude = jnp.asarray(REF_ALTITUDE_M)
     ref_rate = jnp.asarray(REF_RATE_MPS)
     ref_pitch = jnp.asarray(REF_PITCH_DEG)
+    ref_slant = jnp.asarray(REF_SLANT_RANGE_M)
+    ref_hspeed = jnp.asarray(REF_HSPEED_MPS)
+    ref_downrange = jnp.asarray(REF_DOWNRANGE_M)
 
     @el.system
     def truth_playback(
         tick: el.Query[el.SimulationTick],
         truth: el.Query[TruthMarker],
-    ) -> el.Query[el.WorldPos, Altitude, VerticalSpeed, Pitch]:
+    ) -> el.Query[el.WorldPos, Altitude, VerticalSpeed, HorizontalSpeed, SlantRange, Pitch]:
         """Replay the recorded Apollo 11 descent on the kinematic truth ghost."""
 
         t_s = tick[0] * SIM_TIME_STEP
         altitude = jnp.interp(t_s, ref_time, ref_altitude)
         rate = jnp.interp(t_s, ref_time, ref_rate)
+        hspeed = jnp.interp(t_s, ref_time, ref_hspeed)
+        slant = jnp.interp(t_s, ref_time, ref_slant)
+        downrange = jnp.interp(t_s, ref_time, ref_downrange)
         pitch_deg = jnp.abs(jnp.interp(t_s, ref_time, ref_pitch))
         attitude = el.Quaternion.from_axis_angle(
             jnp.array([0.0, 1.0, 0.0]), -jnp.deg2rad(pitch_deg)
         )
         pose = el.SpatialTransform(
             angular=attitude,
-            linear=jnp.array([0.0, 30.0, altitude]),
+            linear=jnp.array([downrange, 30.0, altitude]),
         )
         return truth.map(
-            (el.WorldPos, Altitude, VerticalSpeed, Pitch),
+            (el.WorldPos, Altitude, VerticalSpeed, HorizontalSpeed, SlantRange, Pitch),
             lambda _marker: (
                 pose,
                 jnp.array([altitude]),
                 jnp.array([rate]),
+                jnp.array([hspeed]),
+                jnp.array([slant]),
                 jnp.array([pitch_deg]),
             ),
         )
