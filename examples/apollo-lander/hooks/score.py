@@ -6,6 +6,7 @@ from pathlib import Path
 
 SOFT_HORIZONTAL_SPEED_MPS = 1.0
 SOFT_VERTICAL_SPEED_MPS = 3.0
+UPRIGHT_DOT_MIN = 0.94
 
 
 def _number(value, default=float("inf")) -> float:
@@ -29,11 +30,13 @@ def post_run(ctx):
     traj_rmse = _number(result.get("traj_rmse"))
     pitch_rmse = _number(result.get("pitch_rmse"))
     downrange_miss = _number(result.get("downrange_miss"))
+    upright_dot = _number(result.get("upright_dot"), default=-1.0)
     landed = bool(result.get("landed", False))
     computed_soft_landing = (
         landed
         and touchdown_speed <= SOFT_VERTICAL_SPEED_MPS
         and horizontal_speed <= SOFT_HORIZONTAL_SPEED_MPS
+        and upright_dot >= UPRIGHT_DOT_MIN
         and fuel_remaining > 0.0
     )
     soft_landing = bool(result.get("soft_landing", computed_soft_landing))

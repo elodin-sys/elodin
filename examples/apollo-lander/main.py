@@ -254,6 +254,7 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
                 traj_rmse=traj_rmse,
                 pitch_rmse=pitch_rmse,
                 downrange_miss=downrange_miss,
+                upright_dot=upright_dot,
                 landed=landed,
                 soft_landing=soft_landing,
             )
