@@ -99,6 +99,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(crate::skybox_asset_plugin_headless())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
                 ..default()

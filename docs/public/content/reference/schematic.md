@@ -74,7 +74,7 @@ order = 6
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position and orientation. Inherits from global `coordinate` if omitted.
 - Mesh child (required, exactly one):
-  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server).
+  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s), `emissivity` (default 0.0; open-ended strength that boosts the GLB's own material emissive by `4 x emissivity` and modulates it by the base-color texture), `glow` (default 0.0; open-ended view-dependent rim glow strength), and `glow_color` (optional named color or tuple string, default white). Use `emissivity` to brighten the surface texture; use `glow` for a bloomable silhouette/rim without washing out the whole model. On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server).
     - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
       - `joint`: required string; the exact name of the joint/bone in the GLB file.
       - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
@@ -109,10 +109,16 @@ order = 6
         value would be within the bounds. In practice this means that the
         larger the error confidence interval, the larger the ellipsoid.
 
-  Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
+  Non-GLB mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
   Mesh nodes and `icon` nodes both support an optional `visibility_range` child node that controls at what camera distances the element is rendered:
   - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
+
+Viewport nodes support an optional `bloom` child node:
+- `preset`: `natural` (default) or `old_school`. `old_school` uses additive compositing and is useful for stronger artistic glow.
+- `intensity`: optional override for bloom strength.
+- `threshold`: optional brightness cutoff; pixels below this do not contribute to bloom.
+- `threshold_softness`: optional threshold blend factor.
   - `fade_distance` (icon only, default 0): world-unit distance over which the icon fades in at the `min` boundary and fades out at the `max` boundary. For example, `min=50 fade_distance=50` means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their `min`/`max` boundaries.
   - Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.
 - `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.

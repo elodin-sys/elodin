@@ -1,5 +1,7 @@
 # Apollo 11 Lunar Module Monte Carlo SITL
 
+![Apollo 11 Lunar Module](./lander.png)
+
 This example turns `elodin monte-carlo` into a small but plausible Apollo 11
 powered-descent problem. The simulation picks up the real mission at
 landing-radar lock-on (GET 102:37:53, ~12 km up, still carrying ~800 m/s of

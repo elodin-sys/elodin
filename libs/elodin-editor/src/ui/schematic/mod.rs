@@ -234,6 +234,7 @@ impl SchematicParam<'_, '_> {
                             frustums_thickness,
                             show_view_cube,
                             hdr: self.hdr_enabled.0,
+                            bloom: None,
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
                             look_at: Some(viewport_data.look_at.eql.clone()),
