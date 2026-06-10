@@ -17,6 +17,7 @@ order = 6
 - Top-level nodes: `coordinate`, `theme`, `timeline`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+- Booleans: KDL booleans are `#true`/`#false`. A bare `True` is a *string*, not a boolean — most flags silently fall back to their default if given one. Viewport flags (`hdr`, `show_grid`, `active`, ...) leniently accept `True`/`"true"` (case-insensitive), but prefer the `#` forms everywhere.
 - Coordinate frames: `ENU` (East-North-Up), `NED` (North-East-Down), `ECEF` (Earth-Centered Earth-Fixed). Bevy uses a Y-up right-handed system; the `frame` attribute handles the conversion.
 
 ### coordinate
@@ -58,7 +59,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `projection_color` (default `white`; colors this viewport's source frustum 2D projection in target viewports), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors).
+- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `projection_color` (default `white`; colors this viewport's source frustum 2D projection in target viewports), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false; enables the HDR render path and is required for bloom), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors). An optional `bloom` child node tunes the glow post-process — see [viewport bloom](#viewport-bloom).
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
@@ -70,11 +71,30 @@ order = 6
 - `video_stream`: positional `msg_name` (required; the message name matching the `elodinsink` `msg-name` property), `name` (optional display label; defaults to `"Video Stream <msg_name>"`). Displays an H.264 video stream received by Elodin DB. The video source can be a GStreamer pipeline using `elodinsink`, an OBS Studio SRT stream via a receiver pipeline, or any source that sends H.264 NAL units to Elodin DB. See the [OBS Studio Integration](#obs-studio-integration) section below.
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
+### viewport bloom
+- Optional `bloom` child of `viewport`. Spreads pixels brighter than 1.0 ("white") into a soft halo — the glow effect for emissive/`glow` materials. Requires `hdr=#true` on the viewport; without HDR the bloom pass does not run.
+- `preset`: starting point for all values.
+  - `natural` (default): energy-conserving mix, no threshold. The whole frame gets a subtle filmic softness; very bright pixels halo. Redistributes light, never adds it.
+  - `old_school`: additive with a threshold — only hot pixels glow, everything else stays crisp. Adds light. Defaults: intensity `0.05`, threshold `0.6`, softness `0.2`.
+- `intensity`: halo strength (0–1). `natural` default `0.15`. Above ~0.5 reads as fog.
+- `threshold`: brightness cutoff in multiples of white; only the excess above it blooms. Set just above your lit scene whites (~1.0–1.2) so geometry stays crisp and only `glow`/emissive surfaces halo.
+- `threshold_softness`: 0–1 knee blend. ~0.25+ avoids popping as moving pixels cross the threshold.
+- Unset properties inherit the preset; omitting the node entirely uses `natural` defaults.
+- Tuning model: halo energy ≈ `(pixel luminance − threshold) × intensity`. Widen the gap (raise the material's `glow`, or lower `threshold`), then scale `intensity` to taste.
+
+```kdl
+viewport hdr=#true {
+    bloom preset="old_school" intensity=0.35 threshold=0.65 threshold_softness=0.6
+}
+```
+
 ### object_3d
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position and orientation. Inherits from global `coordinate` if omitted.
 - Mesh child (required, exactly one):
-  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s), `emissivity` (default 0.0; open-ended strength that boosts the GLB's own material emissive by `4 x emissivity` and modulates it by the base-color texture), `glow` (default 0.0; open-ended view-dependent rim glow strength), and `glow_color` (optional named color or tuple string, default white). Use `emissivity` to brighten the surface texture; use `glow` for a bloomable silhouette/rim without washing out the whole model. On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server).
+  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server). Material overrides (both open-ended strengths, default 0.0 = use the GLB's own materials):
+    - `emissivity`: brightens the surface — boosts the model's emissive by `4 × emissivity`, modulated by its base-color texture so the pattern still shows.
+    - `glow` + `glow_color` (named color or tuple string, default white): view-dependent fresnel rim, in multiples of white — lights the silhouette so bloom can halo it. Only reads as a glow on an `hdr=#true` viewport; pair with [viewport bloom](#viewport-bloom) and keep `glow` above the bloom `threshold`.
     - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
       - `joint`: required string; the exact name of the joint/bone in the GLB file.
       - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
@@ -113,12 +133,6 @@ order = 6
 
   Mesh nodes and `icon` nodes both support an optional `visibility_range` child node that controls at what camera distances the element is rendered:
   - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
-
-Viewport nodes support an optional `bloom` child node:
-- `preset`: `natural` (default) or `old_school`. `old_school` uses additive compositing and is useful for stronger artistic glow.
-- `intensity`: optional override for bloom strength.
-- `threshold`: optional brightness cutoff; pixels below this do not contribute to bloom.
-- `threshold_softness`: optional threshold blend factor.
   - `fade_distance` (icon only, default 0): world-unit distance over which the icon fades in at the `min` boundary and fades out at the `max` boundary. For example, `min=50 fade_distance=50` means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their `min`/`max` boundaries.
   - Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.
 - `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.
