@@ -83,7 +83,7 @@ class SitlBridge:
             self.last_throttle = values[0]
             self.last_attitude = [values[1], values[2], values[3], values[4]]
             self.last_rate_setpoint = values[5]
-        except TimeoutError:
+        except (TimeoutError, socket.timeout):
             pass
         return self.last_throttle, self.last_attitude, self.last_rate_setpoint
 
