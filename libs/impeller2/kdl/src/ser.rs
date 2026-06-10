@@ -162,6 +162,19 @@ fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     }
 }
 
+fn color_to_kdl_string(color: &Color) -> String {
+    if let Some(name) = name_from_color(color) {
+        name.to_string()
+    } else {
+        let (r, g, b, a) = color_to_ints(color);
+        if a == 255 {
+            format!("({r},{g},{b})")
+        } else {
+            format!("({r},{g},{b},{a})")
+        }
+    }
+}
+
 fn serialize_video_stream(video_stream: &VideoStream) -> KdlNode {
     let mut node = KdlNode::new("video_stream");
     node.entries_mut()
@@ -254,6 +267,35 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
 
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if let Some(bloom) = &viewport.bloom {
+        let mut bloom_node = KdlNode::new("bloom");
+        if bloom.preset != BloomPreset::Natural {
+            let preset = match bloom.preset {
+                BloomPreset::Natural => "natural",
+                BloomPreset::OldSchool => "old_school",
+            };
+            bloom_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("preset", preset));
+        }
+        if let Some(intensity) = bloom.intensity {
+            push_rounded_float_prop(&mut bloom_node, "intensity", intensity as f64);
+        }
+        if let Some(threshold) = bloom.threshold {
+            push_rounded_float_prop(&mut bloom_node, "threshold", threshold as f64);
+        }
+        if let Some(threshold_softness) = bloom.threshold_softness {
+            push_rounded_float_prop(
+                &mut bloom_node,
+                "threshold_softness",
+                threshold_softness as f64,
+            );
+        }
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        children.nodes_mut().push(bloom_node);
+        node.set_children(children);
     }
 
     if viewport.show_grid {
@@ -677,6 +719,8 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             rotate,
             animations,
             emissivity,
+            glow,
+            glow_color,
         } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
@@ -686,6 +730,15 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             }
             if *emissivity != 0.0 {
                 push_rounded_float_prop(&mut node, "emissivity", *emissivity as f64);
+            }
+            if *glow != 0.0 {
+                push_rounded_float_prop(&mut node, "glow", *glow as f64);
+            }
+            if let Some(glow_color) = glow_color {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "glow_color",
+                    color_to_kdl_string(glow_color),
+                ));
             }
             if *translate != (0.0, 0.0, 0.0) {
                 let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);
@@ -1018,6 +1071,7 @@ mod tests {
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
+                bloom: None,
                 pos: None,
                 look_at: None,
                 frame: None,
@@ -1062,6 +1116,7 @@ mod tests {
                 frustums_thickness: 0.012,
                 show_view_cube: false,
                 hdr: true,
+                bloom: None,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 frame: None,
@@ -1496,6 +1551,7 @@ graph "value" {
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
+                bloom: None,
                 pos: None,
                 look_at: None,
                 frame: None,

@@ -66,6 +66,7 @@ pub(crate) use embedded_lfs::embedded_lfs_asset;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
+pub mod rim_glow_material;
 pub mod sensor_camera;
 mod skybox_db_assets;
 mod skybox_generation;
@@ -363,6 +364,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(rim_glow_material::RimGlowMaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
             .add_plugins(plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(GeoFramePlugin {

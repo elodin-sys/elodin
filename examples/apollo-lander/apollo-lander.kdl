@@ -2,7 +2,10 @@ coordinate frame=ENU
 theme mode=dark scheme=default
 timeline
 hsplit {
-    viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=True show_grid=False share=0.463842
+    viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true show_grid=#false share=0.463842 {
+        bloom preset="old_school" intensity=0.45 threshold=0.65 threshold_softness=0.15 
+        // bloom preset="natural" intensity=0.25
+    }
     vsplit share=0.536157 {
         hsplit {
             graph "lander.altitude[0], lander_truth.altitude[0], lander_truth.slant_range[0]" name="Altitude vs real + radar slant (m)" {
@@ -38,7 +41,7 @@ hsplit {
     }
 }
 object_3d surface.world_pos frame=ENU {
-    glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)"
+    glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)" emissivity=0.1 glow=0.5
 }
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
@@ -51,7 +54,7 @@ object_3d lander_truth.world_pos frame=ENU {
 // center; seat it ~1.2 km below z=0 so it stays under the landing-site tile's
 // 60x-exaggerated valleys (deepest ~-1,116 m) and never pokes through.
 object_3d "(0,0,0,1, 0,0,-1726250)" frame=ENU {
-    glb path=moon.glb rotate="(25.32, 21.2, 79.59)" scale=1798000.0 emissivity=1.0
+    glb path=moon.glb rotate="(25.32, 21.2, 79.59)" scale=1798000.0 emissivity=0.2 glow=1.0
 }
 line_3d lander.world_pos frame=ENU {
     color 20 97 209 220

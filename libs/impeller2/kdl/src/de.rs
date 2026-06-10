@@ -442,6 +442,24 @@ fn parse_split(
     }
 }
 
+/// Bool value parser that also accepts case-insensitive `"true"`/`"false"`
+/// strings. In KDL 2.0 only `#true`/`#false` are booleans; a bare `True`
+/// parses as a string, which previously made `hdr=True` silently false.
+fn parse_bool_value(value: &kdl::KdlValue) -> Option<bool> {
+    if let Some(b) = value.as_bool() {
+        return Some(b);
+    }
+    match value.as_string()?.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn bool_prop(node: &KdlNode, prop: &str) -> Option<bool> {
+    node.get(prop).and_then(parse_bool_value)
+}
+
 fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
     let near = node
@@ -503,31 +521,19 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         });
     }
 
-    let active = node
-        .get("active")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let active = bool_prop(node, "active").unwrap_or(false);
 
     let name = parse_name(node);
-    let show_grid = node
-        .get("show_grid")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let show_grid = bool_prop(node, "show_grid").unwrap_or(false);
 
-    let show_arrows = node
-        .get("show_arrows")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let show_arrows = bool_prop(node, "show_arrows").unwrap_or(true);
 
-    let create_frustum = node
-        .get("create_frustum")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let create_frustum = bool_prop(node, "create_frustum").unwrap_or(false);
 
     let show_frustums = node
         .get("show_frustums")
         .or_else(|| node.get("show_frustum"))
-        .and_then(|v| v.as_bool())
+        .and_then(parse_bool_value)
         .unwrap_or(false);
 
     let frustums_color = if let Some(value) = node.get("frustums_color") {
@@ -567,12 +573,10 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         });
     }
 
-    let show_view_cube = node
-        .get("show_view_cube")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let show_view_cube = bool_prop(node, "show_view_cube").unwrap_or(true);
 
-    let hdr = node.get("hdr").and_then(|v| v.as_bool()).unwrap_or(false);
+    let hdr = bool_prop(node, "hdr").unwrap_or(false);
+    let bloom = parse_viewport_bloom(node, kdl_src)?;
 
     let pos = node
         .get("pos")
@@ -641,6 +645,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         frustums_thickness,
         show_view_cube,
         hdr,
+        bloom,
         name,
         pos,
         look_at,
@@ -649,6 +654,69 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         local_arrows,
         node_id: NodeId::default(),
     }))
+}
+
+fn parse_viewport_bloom(
+    node: &KdlNode,
+    src: &str,
+) -> Result<Option<BloomConfig>, KdlSchematicError> {
+    let Some(children) = node.children() else {
+        return Ok(None);
+    };
+    let Some(bloom_node) = children
+        .nodes()
+        .iter()
+        .find(|n| n.name().value() == "bloom")
+    else {
+        return Ok(None);
+    };
+
+    let preset = match bloom_node.get("preset").and_then(|v| v.as_string()) {
+        None | Some("natural") => BloomPreset::Natural,
+        Some("old_school") => BloomPreset::OldSchool,
+        Some(_) => {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "preset".to_string(),
+                node: "bloom".to_string(),
+                expected: "\"natural\" or \"old_school\"".to_string(),
+                src: src.to_string(),
+                span: bloom_node.span(),
+            });
+        }
+    };
+
+    let float_prop = |prop: &str| {
+        bloom_node
+            .get(prop)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+    };
+    let config = BloomConfig {
+        preset,
+        intensity: float_prop("intensity"),
+        threshold: float_prop("threshold"),
+        threshold_softness: float_prop("threshold_softness"),
+    };
+
+    for (prop, value) in [
+        ("intensity", config.intensity),
+        ("threshold", config.threshold),
+        ("threshold_softness", config.threshold_softness),
+    ] {
+        if let Some(value) = value
+            && value < 0.0
+        {
+            return Err(KdlSchematicError::InvalidValue {
+                property: prop.to_string(),
+                node: "bloom".to_string(),
+                expected: "a non-negative number".to_string(),
+                src: src.to_string(),
+                span: bloom_node.span(),
+            });
+        }
+    }
+
+    Ok(Some(config))
 }
 
 fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -956,6 +1024,8 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 translate,
                 rotate,
                 emissivity,
+                glow,
+                glow_color,
                 ..
             } = parsed_mesh
         {
@@ -966,6 +1036,8 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 rotate,
                 animations,
                 emissivity,
+                glow,
+                glow_color,
             };
         }
 
@@ -1097,6 +1169,8 @@ fn parse_object_3d_mesh(
             let emissivity = numeric_prop(node, "emissivity")
                 .map(|v| v as f32)
                 .unwrap_or(0.0);
+            let glow = numeric_prop(node, "glow").map(|v| v as f32).unwrap_or(0.0);
+            let glow_color = node.get("glow_color").and_then(parse_viewport_color);
 
             Ok(Object3DMesh::Glb {
                 path,
@@ -1105,6 +1179,8 @@ fn parse_object_3d_mesh(
                 rotate,
                 animations: Vec::new(), // Animations are parsed at object_3d level, not glb level
                 emissivity,
+                glow,
+                glow_color,
             })
         }
         "sphere" => {
@@ -1679,6 +1755,8 @@ fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ser::serialize_schematic;
+
     use super::*;
 
     #[test]
@@ -1762,6 +1840,25 @@ timeline follow_latest=#true {
             assert!(viewport.show_view_cube);
         } else {
             panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_bool_string_values() {
+        // Bare identifiers like `True` are strings in KDL 2.0, not booleans;
+        // they previously parsed as false silently.
+        for (kdl, expected_hdr) in [
+            (r#"viewport hdr=True"#, true),
+            (r#"viewport hdr="true""#, true),
+            (r#"viewport hdr=#true"#, true),
+            (r#"viewport hdr=False"#, false),
+            (r#"viewport hdr=#false"#, false),
+        ] {
+            let schematic = parse_schematic(kdl).unwrap();
+            let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+                panic!("Expected viewport panel");
+            };
+            assert_eq!(viewport.hdr, expected_hdr, "kdl: {kdl}");
         }
     }
 
@@ -2278,6 +2375,58 @@ object_3d "a.world_pos" {
             panic!("Expected glb");
         };
         assert!((*emissivity - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_object_3d_glb_glow() {
+        let kdl = r#"object_3d "a.world_pos" { glb path="moon.glb" glow=2.5 glow_color="cyan" }"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Glb {
+            glow, glow_color, ..
+        } = &obj.mesh
+        else {
+            panic!("Expected glb");
+        };
+
+        assert!((*glow - 2.5).abs() < f32::EPSILON);
+        assert_eq!(*glow_color, Some(Color::CYAN));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(serialized.contains("glow=2.5"));
+        assert!(
+            serialized.contains("glow_color=cyan") || serialized.contains("glow_color=\"cyan\"")
+        );
+    }
+
+    #[test]
+    fn test_parse_viewport_bloom() {
+        let kdl = r#"
+viewport hdr=#true {
+    bloom preset="old_school" intensity=0.4 threshold=1.0 threshold_softness=0.2
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport");
+        };
+        let bloom = viewport.bloom.as_ref().expect("expected bloom config");
+        assert_eq!(bloom.preset, BloomPreset::OldSchool);
+        assert_eq!(bloom.intensity, Some(0.4));
+        assert_eq!(bloom.threshold, Some(1.0));
+        assert_eq!(bloom.threshold_softness, Some(0.2));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(serialized.contains("bloom"));
+        assert!(
+            serialized.contains("preset=old_school")
+                || serialized.contains("preset=\"old_school\"")
+        );
+        assert!(serialized.contains("intensity=0.4"));
+        assert!(serialized.contains("threshold=1.0"));
+        assert!(serialized.contains("threshold_softness=0.2"));
     }
 
     #[test]
