@@ -282,8 +282,10 @@ impl Plugin for EditorPlugin {
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
-            .add_plugins(GizmoPlugin)
-            .add_plugins(ui::UiPlugin)
+            .add_plugins(GizmoPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
+        app.add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)

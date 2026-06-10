@@ -2315,6 +2315,7 @@ fn read_per_core_cpu_samples() -> Vec<CpuSample> {
     Vec::new()
 }
 
+#[cfg(target_os = "linux")]
 fn parse_cpu_line(line: &str) -> Option<CpuSample> {
     let values = line
         .split_whitespace()
@@ -2527,6 +2528,7 @@ fn memory_score(samples: &[CacheMappingSample]) -> (usize, u64, u64) {
     )
 }
 
+#[cfg(target_os = "linux")]
 fn parse_kib(line: &str) -> u64 {
     line.split_whitespace()
         .nth(1)
