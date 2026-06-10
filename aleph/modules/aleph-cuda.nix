@@ -62,6 +62,10 @@ in {
     nixpkgs.config = {
       cudaSupport = true;
       cudaCapabilities = ["8.7"];
+      # see: https://nvidia.custhelp.com/app/answers/detail/a_id/5836
+      permittedInsecurePackages = [
+        "cuda12.6-tensorrt-10.7.0.23"
+      ];
     };
 
     hardware.graphics.enable = true;

@@ -7,7 +7,6 @@
   cfg = config.aleph.dev;
   pythonPackages = ps:
     (with ps; [
-      pipx
       pip
       virtualenv
       numpy
