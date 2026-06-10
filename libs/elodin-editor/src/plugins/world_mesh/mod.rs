@@ -5,7 +5,9 @@ use bevy_world_mesh::terrain::{
     math::TerrainModel,
     terrain::{TerrainBundle, TerrainConfig},
     terrain_data::{
-        AttachmentConfig, AttachmentFormat, tile_atlas::TileAtlas, tile_tree::TileTree,
+        AttachmentConfig, AttachmentFormat,
+        tile_atlas::TileAtlas,
+        tile_tree::{TerrainViewPosition, TileTree},
     },
     terrain_view::{TerrainViewComponents, TerrainViewConfig},
 };
@@ -37,8 +39,10 @@ pub struct EditorWorldMeshPlugin;
 
 impl Plugin for EditorWorldMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BevyWorldMeshRendererPlugin)
-            .add_systems(Update, sync_terrain_view_components);
+        app.add_plugins(BevyWorldMeshRendererPlugin).add_systems(
+            Update,
+            (sync_terrain_view_components, sync_terrain_view_positions).chain(),
+        );
     }
 }
 
@@ -208,5 +212,49 @@ fn sync_terrain_view_components(
                 .entry((terrain, view))
                 .or_insert_with(|| TileTree::new(tile_atlas, &view_config));
         }
+    }
+}
+
+#[cfg(feature = "big_space")]
+fn sync_terrain_view_positions(
+    mut commands: Commands,
+    cameras: Query<
+        (
+            Entity,
+            &Transform,
+            Option<&crate::spatial::GridCell>,
+            Option<&ChildOf>,
+        ),
+        WorldMeshViewFilter,
+    >,
+    parents: Query<(&Transform, &crate::spatial::GridCell)>,
+    floating_origin: Res<crate::spatial::FloatingOriginSettings>,
+) {
+    for (entity, transform, cell, parent) in &cameras {
+        let absolute = cell
+            .map(|cell| floating_origin.grid_position_double(cell, transform))
+            .or_else(|| {
+                let parent = parent?;
+                let (parent_transform, parent_cell) = parents.get(parent.parent()).ok()?;
+                let combined = parent_transform.mul_transform(*transform);
+                Some(floating_origin.grid_position_double(parent_cell, &combined))
+            })
+            .unwrap_or_else(|| transform.translation.as_dvec3());
+
+        commands
+            .entity(entity)
+            .insert(TerrainViewPosition(absolute));
+    }
+}
+
+#[cfg(not(feature = "big_space"))]
+fn sync_terrain_view_positions(
+    mut commands: Commands,
+    cameras: Query<(Entity, &Transform), WorldMeshViewFilter>,
+) {
+    for (entity, transform) in &cameras {
+        commands
+            .entity(entity)
+            .insert(TerrainViewPosition(transform.translation.as_dvec3()));
     }
 }

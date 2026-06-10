@@ -625,7 +625,10 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 #[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
-    query: Query<(&Transform, Option<&ChildOf>), (With<MainCamera>, Without<FloatingOrigin>)>,
+    query: Query<
+        (&Transform, Option<&ChildOf>),
+        (With<MainCamera>, With<EditorCam>, Without<FloatingOrigin>),
+    >,
     parent_query: Query<(&Transform, &GridCell), (Without<MainCamera>, Without<FloatingOrigin>)>,
     mut floating_origin: Query<(&mut Transform, &mut GridCell), With<FloatingOrigin>>,
     floating_origin_settings: Res<FloatingOriginSettings>,

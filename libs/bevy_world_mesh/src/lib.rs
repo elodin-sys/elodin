@@ -88,7 +88,9 @@ pub mod prelude {
         render::{terrain_material::TerrainMaterialPlugin, world_mesh_material::WorldMeshMaterial},
         terrain::{TerrainBundle, TerrainConfig},
         terrain_data::{
-            tile_atlas::TileAtlas, tile_tree::TileTree, AttachmentConfig, AttachmentFormat,
+            tile_atlas::TileAtlas,
+            tile_tree::{TerrainViewPosition, TileTree},
+            AttachmentConfig, AttachmentFormat,
         },
         terrain_view::{TerrainViewComponents, TerrainViewConfig},
     };

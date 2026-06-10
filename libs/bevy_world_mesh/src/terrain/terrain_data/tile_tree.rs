@@ -13,6 +13,13 @@ use itertools::iproduct;
 use ndarray::{Array2, Array4};
 use std::iter;
 
+/// Absolute terrain-space view position used for tile selection.
+///
+/// Host apps with their own floating-origin integration can attach this to a
+/// camera to override the local [`Transform`] position used by [`TileTree`].
+#[derive(Component, Clone, Copy, Debug)]
+pub struct TerrainViewPosition(pub DVec3);
+
 /// The current state of a tile of a [`TileTree`].
 ///
 /// This indicates, whether or not the tile should be loaded into the [`TileAtlas`).
@@ -337,34 +344,59 @@ impl TileTree {
     pub(crate) fn compute_requests(
         mut tile_trees: ResMut<TerrainViewComponents<TileTree>>,
         tile_atlases: Query<&TileAtlas>,
-        // big_space 0.11 removed the `crate::big_space` shim in favour of
-        // calling the crate directly (see `remove big_space shim` commit).
-        // big_space 0.12 renamed `ReferenceFrames` -> `Grids`,
-        // `GridTransformReadOnly` -> `CellTransformReadOnly`, and
-        // `parent_frame` -> `parent_grid`. The view `position_double(&grid)`
-        // method is still there on `CellTransformReadOnlyItem`.
         #[cfg(feature = "high_precision")] frames: big_space::prelude::Grids,
-        #[cfg(feature = "high_precision")] view_transforms: Query<
-            big_space::world_query::CellTransformReadOnly,
-        >,
-        #[cfg(not(feature = "high_precision"))] view_transforms: Query<&Transform>,
+        #[cfg(feature = "high_precision")] view_transforms: Query<(
+            &Transform,
+            Option<&TerrainViewPosition>,
+            Option<&big_space::prelude::CellCoord>,
+            Option<&ChildOf>,
+        )>,
+        #[cfg(feature = "high_precision")] parent_transforms: Query<(
+            &Transform,
+            &big_space::prelude::CellCoord,
+        )>,
+        #[cfg(not(feature = "high_precision"))] view_transforms: Query<(
+            &Transform,
+            Option<&TerrainViewPosition>,
+        )>,
     ) {
         for (&(terrain, view), tile_tree) in tile_trees.iter_mut() {
             let Ok(tile_atlas) = tile_atlases.get(terrain) else {
                 continue;
             };
-            let Ok(view_transform) = view_transforms.get(view) else {
-                continue;
-            };
-
             #[cfg(feature = "high_precision")]
             let Some(frame) = frames.parent_grid(terrain) else {
                 continue;
             };
             #[cfg(feature = "high_precision")]
-            let view_position = view_transform.position_double(frame);
+            let Ok((view_transform, view_position_override, view_cell, view_parent)) =
+                view_transforms.get(view)
+            else {
+                continue;
+            };
+            #[cfg(feature = "high_precision")]
+            let view_position = view_position_override
+                .map(|position| position.0)
+                .or_else(|| {
+                    view_cell.map(|view_cell| frame.grid_position_double(view_cell, view_transform))
+                })
+                .or_else(|| {
+                    let parent = view_parent?;
+                    let (parent_transform, parent_cell) =
+                        parent_transforms.get(parent.parent()).ok()?;
+                    let transform = parent_transform.mul_transform(*view_transform);
+                    Some(frame.grid_position_double(parent_cell, &transform))
+                })
+                .unwrap_or_else(|| view_transform.translation.as_dvec3());
+
             #[cfg(not(feature = "high_precision"))]
-            let view_position = view_transform.translation.as_dvec3();
+            let Ok((view_transform, view_position_override)) = view_transforms.get(view) else {
+                continue;
+            };
+            #[cfg(not(feature = "high_precision"))]
+            let view_position = view_position_override
+                .map(|position| position.0)
+                .unwrap_or_else(|| view_transform.translation.as_dvec3());
 
             tile_tree.update(view_position, tile_atlas);
         }
