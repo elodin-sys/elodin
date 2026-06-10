@@ -236,8 +236,8 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         traj_rmse = (altitude_error_sum / max(error_samples, 1)) ** 0.5
         pitch_rmse = (pitch_error_sum / max(error_samples, 1)) ** 0.5
         upright_dot = math.cos(math.radians(abs(pitch)))
-        # Distance from the targeted landing site (world origin) at touchdown.
-        downrange_miss = abs(float(world_pos[4]))
+        # Horizontal distance from the targeted landing site (world origin) at touchdown.
+        downrange_miss = math.hypot(float(world_pos[4]), float(world_pos[5]))
         soft_landing = (
             landed
             and touchdown_speed <= SOFT_VERTICAL_SPEED_MPS
