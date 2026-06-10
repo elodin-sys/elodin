@@ -11,8 +11,12 @@ use bevy_hanabi::{
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
-        output::{ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier},
-        position::SetPositionCircleModifier,
+        force::LinearDragModifier,
+        output::{
+            ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier, OrientMode,
+            OrientModifier, SizeOverLifetimeModifier,
+        },
+        position::{SetPositionCircleModifier, SetPositionCone3dModifier},
     },
 };
 use impeller2::types::ComponentId;
@@ -26,8 +30,8 @@ use crate::vector_arrow::component_value_tail_to_vec3;
 const LANDER_EQL: &str = "lander.world_pos";
 const THRUST_VIZ: &str = "lander.main_thrust_viz";
 const RCS_VIZ: &str = "lander.rcs_torque_viz";
-/// Matches `apollo-lunar-module.glb translate=(0,-2.5,0)` in Bevy body space.
-const DPS_NOZZLE_BODY: Vec3 = Vec3::new(0.0, -2.5, 0.0);
+/// DPS deck under the gray ascent stage (Bevy body Y-up).
+const DPS_NOZZLE_BODY: Vec3 = Vec3::new(0.0, -0.55, 0.0);
 /// Body +Z thrust in ENU maps to Bevy +Y; exhaust is opposite.
 const DPS_EXHAUST_BODY: Vec3 = Vec3::NEG_Y;
 
@@ -166,23 +170,36 @@ fn setup_thruster_effects(mut commands: Commands, mut effects: ResMut<Assets<Eff
 
 fn build_dps_exhaust() -> EffectAsset {
     let mut module = Module::default();
-    let init_pos = SetPositionCircleModifier {
-        center: module.lit(Vec3::ZERO),
-        axis: module.lit(Vec3::Y),
-        radius: module.lit(0.45),
-        dimension: ShapeDimension::Surface,
+    let init_pos = SetPositionCone3dModifier {
+        height: module.lit(0.22),
+        base_radius: module.lit(0.12),
+        top_radius: module.lit(0.32),
+        dimension: ShapeDimension::Volume,
     };
     let init_vel =
-        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 10.0));
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.9));
-    let size = SetAttributeModifier::new(Attribute::SIZE, module.lit(0.35));
+        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 15.0));
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(1.65));
+    let size = SetAttributeModifier::new(
+        Attribute::SIZE3,
+        module.lit(Vec3::new(0.9, 0.38, 0.38)),
+    );
+    let drag = LinearDragModifier::new(module.lit(1.25));
 
-    let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(1.0, 0.55, 0.15, 1.0));
-    gradient.add_key(0.35, Vec4::new(1.0, 0.35, 0.05, 0.85));
-    gradient.add_key(1.0, Vec4::ZERO);
+    let mut color = Gradient::<Vec4>::new();
+    color.add_key(0.0, Vec4::new(1.0, 0.94, 0.82, 0.75));
+    color.add_key(0.1, Vec4::new(1.0, 0.68, 0.16, 0.7));
+    color.add_key(0.35, Vec4::new(1.0, 0.4, 0.05, 0.55));
+    color.add_key(0.7, Vec4::new(0.82, 0.24, 0.03, 0.22));
+    color.add_key(1.0, Vec4::ZERO);
 
-    EffectAsset::new(8192, SpawnerSettings::rate(120.0.into()), module)
+    let mut size_over_life = Gradient::<Vec3>::new();
+    size_over_life.add_key(0.0, Vec3::new(0.9, 0.42, 0.42));
+    size_over_life.add_key(0.15, Vec3::new(1.8, 0.82, 0.82));
+    size_over_life.add_key(0.45, Vec3::new(2.5, 1.15, 1.15));
+    size_over_life.add_key(0.75, Vec3::new(2.1, 1.0, 1.0));
+    size_over_life.add_key(1.0, Vec3::new(0.7, 0.35, 0.35));
+
+    EffectAsset::new(32768, SpawnerSettings::rate(340.0.into()), module)
         .with_name("dps_exhaust")
         .with_simulation_space(SimulationSpace::Local)
         .with_alpha_mode(AlphaMode::Add)
@@ -190,8 +207,14 @@ fn build_dps_exhaust() -> EffectAsset {
         .init(init_vel)
         .init(lifetime)
         .init(size)
+        .update(drag)
+        .render(OrientModifier::new(OrientMode::AlongVelocity))
+        .render(SizeOverLifetimeModifier {
+            gradient: size_over_life,
+            screen_space_size: false,
+        })
         .render(ColorOverLifetimeModifier {
-            gradient,
+            gradient: color,
             blend: ColorBlendMode::Overwrite,
             mask: ColorBlendMask::RGBA,
         })
@@ -351,7 +374,7 @@ fn apply_spawner(
     *visibility = Visibility::Visible;
     spawner.active = true;
     let base = match kind {
-        JetKind::Dps => 180.0,
+        JetKind::Dps => 400.0,
         JetKind::Rcs { .. } => 55.0,
     };
     spawner.settings = SpawnerSettings::rate((intensity * base).into());
