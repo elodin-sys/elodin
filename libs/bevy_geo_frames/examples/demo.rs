@@ -60,7 +60,7 @@ fn main() {
         )
         .add_systems(Update, draw_origin_gizmos)
         .add_systems(Update, draw_frame_zero_gizmo)
-        // .add_systems(Update, draw_frame_axes)
+        .add_systems(Update, draw_frame_axes)
         .add_systems(Update, draw_radius_sphere)
         .init_resource::<CurrentFrame>();
 
@@ -92,11 +92,11 @@ fn setup(
     let transform = Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y);
     let _camera_id = commands
         .spawn((
-            GeoPosition::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
-            GeoRotation::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
+            transform,
+            // GeoPosition::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
+            // GeoRotation::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
             Camera3d::default(),
             EditorCam::default(),
-            Transform::default(),
         ))
         .id();
     #[cfg(feature = "big_space")]
@@ -133,7 +133,7 @@ fn setup(
     let cuboid_mat = materials.add(Color::srgb(0.3, 0.8, 0.9));
 
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
-    let enu_pos = DVec3::new(0.0, 0.0, 0.0);
+    let enu_pos = DVec3::new(20.0, 0.0, 1.0);
 
     let _cube_id = commands
         .spawn((
@@ -142,8 +142,8 @@ fn setup(
             Transform::default(),
             GeoPosition(GeoFrame::ENU, enu_pos),
             // GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
-            // GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
-            GeoRotation(GeoFrame::ENU, DQuat::from_rotation_x(0.25 * PI)),
+            GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
+            // GeoRotation(GeoFrame::ENU, DQuat::from_rotation_x(0.25 * PI)),
             // GeoAngularVelocity(
             //     GeoFrame::ENU,
             //     // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
@@ -182,20 +182,31 @@ fn setup_ui(mut commands: Commands) {
 }
 
 fn update_position_display(
-    q: Query<(&GeoPosition, &Transform), With<FrameDemo>>,
+    q: Query<(&GeoPosition, Option<&GeoRotation>, &Transform), With<FrameDemo>>,
     mut text_query: Query<&mut Text, With<PositionDisplay>>,
     ctx: Res<GeoContext>,
 ) {
-    if let Ok((geo_trans, transform)) = q.single() {
+    if let Ok((geo_trans, geo_rot, transform)) = q.single() {
         let frame = geo_trans.0;
         let pos_in_frame = geo_trans.1;
         let pos_in_bevy = transform.translation;
+        let rot_in_bevy = transform.rotation;
         let lat_deg = ctx.origin.latitude.to_degrees();
         let lon_deg = ctx.origin.longitude.to_degrees();
 
         let frame_name = format!("{:?}", frame);
+        let rot_in_frame = match geo_rot {
+            Some(geo_rot) => {
+                let q = geo_rot.1;
+                format!(
+                    "({:.3}, {:.3}, {:.3}, {:.3}) [{:?}]",
+                    q.x, q.y, q.z, q.w, geo_rot.0
+                )
+            }
+            None => "n/a".to_string(),
+        };
         let text = format!(
-            "Frame: {}\nPosition in frame: ({:.2}, {:.2}, {:.2})\nPosition in Bevy: ({:.2}, {:.2}, {:.2})\nOrigin lat/lon: ({:.2}, {:.2})",
+            "Frame: {}\nPosition in frame: ({:.2}, {:.2}, {:.2})\nPosition in Bevy: ({:.2}, {:.2}, {:.2})\nQuat in frame: {}\nQuat in Bevy: ({:.3}, {:.3}, {:.3}, {:.3})\nOrigin lat/lon: ({:.2}, {:.2})",
             frame_name,
             pos_in_frame.x,
             pos_in_frame.y,
@@ -203,6 +214,11 @@ fn update_position_display(
             pos_in_bevy.x,
             pos_in_bevy.y,
             pos_in_bevy.z,
+            rot_in_frame,
+            rot_in_bevy.x,
+            rot_in_bevy.y,
+            rot_in_bevy.z,
+            rot_in_bevy.w,
             lat_deg,
             lon_deg
         );
@@ -275,6 +291,7 @@ fn toggle_present_mode(
 fn frame_switch_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<&mut GeoPosition, With<FrameDemo>>,
+    mut r: Query<&mut GeoRotation, With<FrameDemo>>,
     mut current_frame: ResMut<CurrentFrame>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
@@ -292,6 +309,11 @@ fn frame_switch_input(
             geo.0 = frame;
             info!(?frame, "Switched demo cuboid to frame");
         }
+
+        for mut geo in &mut r {
+            geo.0 = frame;
+            info!(?frame, "Switched demo cuboid rotation to frame");
+        }
         current_frame.frame = frame;
     }
 }
@@ -304,7 +326,7 @@ fn frame_switch_input(
 fn transform_frame_at_position(
     keys: Res<ButtonInput<KeyCode>>,
     ctx: Res<GeoContext>,
-    mut q: Query<(&Transform, &mut GeoPosition), With<FrameDemo>>,
+    mut q: Query<(&Transform, &mut GeoPosition, &mut GeoRotation), With<FrameDemo>>,
     mut current_frame: ResMut<CurrentFrame>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
@@ -318,16 +340,20 @@ fn transform_frame_at_position(
     }
 
     if let Some(frame) = target_frame {
-        for (transform, mut geo_trans) in &mut q {
+        for (transform, mut geo_trans, mut geo_rot) in &mut q {
             // Get current Bevy position
             let bevy_pos = transform.translation;
+            let bevy_rot = transform.rotation;
 
             // Convert from Bevy to the target frame
             let pos_in_frame = GeoPosition::from_bevy(frame, bevy_pos, &ctx).1;
+            let rot_in_frame = GeoRotation::from_bevy(frame, bevy_rot.as_dquat(), &ctx).1;
 
             // Update the frame and position
             geo_trans.0 = frame;
             geo_trans.1 = pos_in_frame;
+            geo_rot.0 = frame;
+            geo_rot.1 = rot_in_frame;
             current_frame.frame = frame;
 
             info!(
