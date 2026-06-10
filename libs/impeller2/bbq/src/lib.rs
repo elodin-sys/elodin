@@ -1,6 +1,6 @@
-use bbq2::{
+use bbqueue::{
+    ArcBBQueue,
     prod_cons::framed::{FramedConsumer, FramedProducer},
-    queue::ArcBBQueue,
     traits::{coordination::cas::AtomicCoord, notifier::maitake::MaiNotSpsc, storage::BoxedSlice},
 };
 use impeller2::types::{LenPacket, OwnedPacket, PrimType};
@@ -13,19 +13,11 @@ use std::{
 use stellarator_buf::{IoBuf, IoBufMut};
 
 pub type AsyncArcQueue = ArcBBQueue<BoxedSlice, AtomicCoord, MaiNotSpsc>;
-pub type AsyncArcQueueInner = Arc<bbq2::queue::BBQueue<BoxedSlice, AtomicCoord, MaiNotSpsc>>;
-pub type AsyncArcQueueTx =
-    FramedProducer<AsyncArcQueueInner, BoxedSlice, AtomicCoord, MaiNotSpsc, usize>;
-pub type AsyncArcQueueRx =
-    FramedConsumer<AsyncArcQueueInner, BoxedSlice, AtomicCoord, MaiNotSpsc, usize>;
+pub type AsyncArcQueueInner = Arc<bbqueue::BBQueue<BoxedSlice, AtomicCoord, MaiNotSpsc>>;
+pub type AsyncArcQueueTx = FramedProducer<AsyncArcQueueInner, usize>;
+pub type AsyncArcQueueRx = FramedConsumer<AsyncArcQueueInner, usize>;
 
-type PacketGrantWInner = bbq2::prod_cons::framed::FramedGrantW<
-    AsyncArcQueueInner,
-    BoxedSlice,
-    AtomicCoord,
-    MaiNotSpsc,
-    usize,
->;
+type PacketGrantWInner = bbqueue::prod_cons::framed::FramedGrantW<AsyncArcQueueInner, usize>;
 
 pub struct PacketGrantW(PacketGrantWInner);
 
@@ -97,15 +89,7 @@ unsafe impl IoBufMut for PacketGrantW {
 }
 
 pub struct PacketGrantR(
-    Option<
-        bbq2::prod_cons::framed::FramedGrantR<
-            AsyncArcQueueInner,
-            BoxedSlice,
-            AtomicCoord,
-            MaiNotSpsc,
-            usize,
-        >,
-    >,
+    Option<bbqueue::prod_cons::framed::FramedGrantR<AsyncArcQueueInner, usize>>,
 );
 
 unsafe impl Sync for PacketGrantR {}
@@ -121,15 +105,7 @@ impl PacketGrantR {
         PrimType::U64.padding(self.inner().deref().as_ptr() as usize)
     }
 
-    fn inner(
-        &self,
-    ) -> &bbq2::prod_cons::framed::FramedGrantR<
-        AsyncArcQueueInner,
-        BoxedSlice,
-        AtomicCoord,
-        MaiNotSpsc,
-        usize,
-    > {
+    fn inner(&self) -> &bbqueue::prod_cons::framed::FramedGrantR<AsyncArcQueueInner, usize> {
         self.0.as_ref().expect("missing inner")
     }
 }

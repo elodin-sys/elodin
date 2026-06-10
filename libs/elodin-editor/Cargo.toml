@@ -66,6 +66,7 @@ postcard.version = "1.0.8"
 reqwest = { version = "0.12", features = [
   "rustls-tls",
   "gzip",
+  "blocking",
 ], default-features = false }
 impeller2.path = "../../libs/impeller2"
 impeller2.features = ["hifitime"]

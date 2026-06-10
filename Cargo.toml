@@ -20,6 +20,7 @@ members = [
     "libs/db/macros",
     "fsw/roci/adcs",
     "libs/wmm",
+    "libs/bbqueue",
     "libs/s10",
     "libs/impeller2",
     "libs/impeller2/stellar",

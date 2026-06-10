@@ -43,6 +43,7 @@ order = 6
 ### skybox
 - Optional top-level node that activates a cached skybox by manifest name.
 - `name`: required manifest entry name. Entries are read from `assets/skyboxes/manifest.ron`, or from `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron` when that environment variable is set.
+- When a simulation records into an Elodin DB, the manifest and active cubemap are copied under `{db}/assets/skyboxes/`; see [DB Asset Server](/reference/db-asset-server).
 - Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.
 - Example: `skybox name="alien_swamp"`.
 
@@ -73,7 +74,7 @@ order = 6
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position and orientation. Inherits from global `coordinate` if omitted.
 - Mesh child (required, exactly one):
-  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s).
+  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server).
     - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
       - `joint`: required string; the exact name of the joint/bone in the GLB file.
       - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
@@ -117,7 +118,7 @@ order = 6
 - `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.
   - Source (exactly one required):
     - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
-    - `path`: path to a custom PNG image file (loaded from the assets folder).
+    - `path`: path to a custom PNG image file (loaded from the assets folder). Persisted into the DB like GLB paths when recording; `builtin` icons are not copied.
   - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
   - `visibility_range` child node: `min`, `max`, and `fade_distance` in world units (see above).
   - `size`: desired screen pixel size of the icon (default 32).

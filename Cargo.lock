@@ -1231,11 +1231,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "bbq2"
-version = "0.1.0"
-source = "git+https://github.com/elodin-sys/bbq2.git?rev=b6e36706a5549d770ebf2dc122b39cef1368b06d#b6e36706a5549d770ebf2dc122b39cef1368b06d"
+name = "bbqueue"
+version = "0.7.0"
 dependencies = [
- "maitake-sync 0.2.2",
+ "const-init",
+ "critical-section",
+ "maitake-sync 0.3.0",
+ "portable-atomic",
+ "tokio",
 ]
 
 [[package]]
@@ -3638,6 +3641,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32b13ea120a812beba79e34316b3942a857c86ec1593cb34f27bb28272ce2cca"
 
 [[package]]
+name = "const-init"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bd422bfb4f24a97243f60b6a4443e63d810c925d8da4bb2d8fde26a7c1d57ec"
+
+[[package]]
 name = "const-random"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5319,6 +5328,7 @@ dependencies = [
  "hostname",
  "impeller2",
  "impeller2-cli",
+ "impeller2-kdl",
  "impeller2-stellar",
  "impeller2-wkt",
  "libc",
@@ -5335,6 +5345,7 @@ dependencies = [
  "postcard-schema",
  "rayon",
  "reflink-copy",
+ "reqwest",
  "rustfft",
  "ryu",
  "scuffle-h264",
@@ -7597,7 +7608,7 @@ dependencies = [
 name = "impeller2-bbq"
 version = "0.17.4-alpha.0"
 dependencies = [
- "bbq2",
+ "bbqueue",
  "impeller2",
  "stellarator-buf",
 ]
@@ -7606,7 +7617,7 @@ dependencies = [
 name = "impeller2-bevy"
 version = "0.17.4-alpha.0"
 dependencies = [
- "bbq2",
+ "bbqueue",
  "bevy",
  "compact_str",
  "fastrand 2.4.1",
@@ -7672,6 +7683,8 @@ dependencies = [
  "impeller2-wkt",
  "kdl",
  "miette 7.6.0",
+ "ron 0.10.1",
+ "serde",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -7680,7 +7693,7 @@ dependencies = [
 name = "impeller2-stellar"
 version = "0.17.4-alpha.0"
 dependencies = [
- "bbq2",
+ "bbqueue",
  "fastrand 2.4.1",
  "futures-concurrency",
  "futures-lite",
@@ -8654,11 +8667,12 @@ dependencies = [
 
 [[package]]
 name = "maitake-sync"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "748f86d9befd480b602c3bebc9ef30dbf2f3dfc8acc4a73d07b90f0117e6de3f"
+checksum = "3d77c365d697828821727b9bc09e6bc3c518b8c63804e79e1be5a5ae091a7c5f"
 dependencies = [
  "cordyceps",
+ "critical-section",
  "loom",
  "mutex-traits",
  "mycelium-bitfield",
@@ -11883,7 +11897,7 @@ name = "roci"
 version = "0.17.4-alpha.0"
 dependencies = [
  "anyhow",
- "bbq2",
+ "bbqueue",
  "csv",
  "db-macros",
  "fastrand 2.4.1",

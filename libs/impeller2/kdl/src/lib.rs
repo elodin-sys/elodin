@@ -11,6 +11,9 @@ pub use ser::*;
 mod de;
 pub use de::*;
 
+mod rewrite;
+pub use rewrite::*;
+
 pub mod env;
 
 #[derive(Error, Debug, Diagnostic, Clone)]

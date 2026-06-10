@@ -185,6 +185,10 @@ impl Default for SkyboxManifest {
 }
 
 impl SkyboxManifest {
+    pub fn from_ron_str(contents: &str) -> Result<Self> {
+        Ok(ron::from_str(contents)?)
+    }
+
     pub fn read_or_create(path: &Path) -> Result<Self> {
         if !path.exists() {
             if let Some(parent) = path.parent() {
@@ -196,7 +200,7 @@ impl SkyboxManifest {
         }
 
         let contents = fs::read_to_string(path)?;
-        Ok(ron::from_str(&contents)?)
+        Self::from_ron_str(&contents)
     }
 
     pub fn write_atomic(&self, path: &Path) -> Result<()> {
@@ -1159,7 +1163,14 @@ fn manifest_entry_for_activation(cache: &mut SkyboxCache, name: &str) -> Result<
 }
 
 fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
+    let mut activated_names = HashSet::new();
     for message in params.reader.read() {
+        if let SetActiveSkybox::ByName(name) = message
+            && activated_names.contains(name)
+        {
+            continue;
+        }
+
         let (name, handle, disk_bytes) = match message {
             SetActiveSkybox::Clear => {
                 if params.cache.active.is_none()
@@ -1263,10 +1274,11 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
         if updated_any && let Some(name) = name {
             debug!("active skybox: {name}");
             params.ready.write(SkyboxReady {
-                name,
+                name: name.clone(),
                 handle,
                 disk_bytes,
             });
+            activated_names.insert(name);
         }
     }
 }
@@ -1886,6 +1898,32 @@ mod tests {
             .write_message(SetActiveSkybox::ByName("grand_canyon".to_string()));
         app.update();
 
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&handle));
+        assert_eq!(
+            app.world().resource::<SkyboxCache>().active.as_deref(),
+            Some("grand_canyon")
+        );
+    }
+
+    #[test]
+    fn duplicate_named_skybox_messages_apply_once_per_update() {
+        let mut app = skybox_apply_test_app();
+        let handle = register_test_skybox(&mut app, "grand_canyon");
+
+        app.world_mut()
+            .write_message(SetActiveSkybox::ByName("grand_canyon".to_string()));
+        app.world_mut()
+            .write_message(SetActiveSkybox::ByName("grand_canyon".to_string()));
+        app.update();
+
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<SkyboxReady>>();
+        let mut cursor = messages.get_cursor();
+        let ready: Vec<_> = cursor.read(messages).collect();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].name, "grand_canyon");
+        assert_eq!(ready[0].handle, handle);
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&handle));
         assert_eq!(
             app.world().resource::<SkyboxCache>().active.as_deref(),

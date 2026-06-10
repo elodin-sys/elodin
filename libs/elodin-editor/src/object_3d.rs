@@ -25,12 +25,46 @@ use bevy_geo_frames::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
+
+fn client_asset_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        other => other,
+    }
+}
+
+pub fn assets_http_base(connection_addr: SocketAddr) -> String {
+    let port = connection_addr
+        .port()
+        .saturating_add(impeller2::ASSETS_HTTP_PORT_OFFSET);
+    match client_asset_ip(connection_addr.ip()) {
+        IpAddr::V4(v4) => format!("http://{v4}:{port}"),
+        IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
+    }
+}
+
+/// Resolves schematic asset paths (`db:…`) to the embedded HTTP assets URL.
+pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+    if let Some(name) = path.strip_prefix("db:") {
+        let name = name.trim_start_matches('/');
+        let conn = connection_addr.unwrap_or_else(|| "127.0.0.1:2240".parse().expect("valid addr"));
+        format!("{}/{}", assets_http_base(conn), name)
+    } else {
+        path.to_string()
+    }
+}
+
+pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+    resolve_db_asset_url(path, connection_addr)
+}
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -1447,6 +1481,7 @@ pub fn create_object_3d_entity(
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     geo_context: &GeoContext,
+    connection_addr: Option<SocketAddr>,
 ) -> Result<Entity, CompileError> {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid {
@@ -1529,6 +1564,7 @@ pub fn create_object_3d_entity(
         mesh_assets,
         mat3_material_assets,
         assets,
+        connection_addr,
     );
     Ok(entity_id)
 }
@@ -1544,9 +1580,13 @@ pub fn spawn_billboard_icon(
     image_assets: &mut ResMut<Assets<Image>>,
     asset_server: &Res<AssetServer>,
     icon_cache: &mut ResMut<IconTextureCache>,
+    connection_addr: Option<SocketAddr>,
 ) {
     let texture_handle: Handle<Image> = match &icon.source {
-        Object3DIconSource::Path(path) => asset_server.load(path.clone()),
+        Object3DIconSource::Path(path) => {
+            let url = resolve_db_asset_url(path, connection_addr);
+            asset_server.load(url)
+        }
         Object3DIconSource::Builtin(name) => {
             let raster_size = (icon.size * 2.0).max(64.0) as u32;
             icon_cache.get_or_insert(name, raster_size, image_assets)
@@ -1602,6 +1642,7 @@ pub fn spawn_mesh(
     mesh_assets: &mut Assets<Mesh>,
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
+    connection_addr: Option<SocketAddr>,
 ) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
@@ -1611,7 +1652,8 @@ pub fn spawn_mesh(
             rotate,
             animations: _,
         } => {
-            let url = format!("{path}#Scene0");
+            let resolved = resolve_glb_asset_url(path, connection_addr);
+            let url = format!("{resolved}#Scene0");
             let scene = assets.load(&url);
 
             let translation = Vec3::new(translate.0, translate.1, translate.2);
@@ -2193,5 +2235,70 @@ mod ellipsoid_scale_eql_tests {
 
             assert_vec3_close(scale, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod db_asset_url_tests {
+    use super::resolve_db_asset_url;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn resolve_db_asset_url_uses_connection_host_and_offset_port() {
+        let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        assert_eq!(
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
+            "http://127.0.0.1:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_http_asset_url_is_unchanged() {
+        let url = "http://127.0.0.1:2241/rocket.glb";
+        assert_eq!(resolve_db_asset_url(url, None), url);
+    }
+
+    #[test]
+    fn resolve_db_asset_url_ipv6() {
+        let conn: SocketAddr = "[::1]:2240".parse().unwrap();
+        assert_eq!(
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
+            "http://[::1]:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_normalizes_unspecified_ipv6_to_loopback() {
+        let conn: SocketAddr = "[::]:2240".parse().unwrap();
+        assert_eq!(
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
+            "http://[::1]:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_normalizes_unspecified_ipv4_to_loopback() {
+        let conn: SocketAddr = "0.0.0.0:2240".parse().unwrap();
+        assert_eq!(
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
+            "http://127.0.0.1:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_defaults_to_localhost_when_disconnected() {
+        assert_eq!(
+            resolve_db_asset_url("db:rocket.glb", None),
+            "http://127.0.0.1:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_supports_png_icon_paths() {
+        let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        assert_eq!(
+            resolve_db_asset_url("db:icons/marker.png", Some(conn)),
+            "http://127.0.0.1:2241/icons/marker.png"
+        );
     }
 }

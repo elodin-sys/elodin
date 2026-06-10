@@ -59,6 +59,8 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 pub mod append_log;
 mod arrow;
 #[cfg(feature = "axum")]
+pub mod assets_http;
+#[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
 pub(crate) mod coalescing_sink;
@@ -353,6 +355,30 @@ impl DB {
         db_state.write(self.path.join("db_state"))
     }
 
+    /// Apply a `SetDbConfig` patch and persist.
+    ///
+    /// Returns whether schematic assets should be re-synced (`schematic.content` or
+    /// `skybox.active` in the patch).
+    pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
+        let needs_asset_sync = update.metadata.contains_key("schematic.content")
+            || update.metadata.contains_key("skybox.active");
+        if let Some(recording) = update.recording {
+            self.with_state_mut(|s| s.db_config.recording = recording);
+            self.recording_cell.set_playing(recording);
+        }
+        self.with_state_mut(|s| {
+            for (key, value) in update.metadata {
+                if value.is_empty() {
+                    s.db_config.metadata.remove(&key);
+                } else {
+                    s.db_config.metadata.insert(key, value);
+                }
+            }
+        });
+        self.save_db_state()?;
+        Ok(needs_asset_sync)
+    }
+
     pub fn flush_all(&self) -> Result<(), Error> {
         self.with_state(|state| -> Result<(), Error> {
             // Ensure time-series data is fully flushed
@@ -440,7 +466,10 @@ impl DB {
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
-            if !path.is_dir() || path.file_name() == Some(OsStr::new("msgs")) {
+            if !path.is_dir()
+                || path.file_name() == Some(OsStr::new("msgs"))
+                || path.file_name() == Some(OsStr::new("assets"))
+            {
                 trace!("Skipping non-component directory: {}", path.display());
                 continue;
             }
@@ -1961,20 +1990,8 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             });
         }
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
-            let SetDbConfig {
-                recording,
-                metadata,
-            } = m.parse::<SetDbConfig>()?;
-            if let Some(recording) = recording {
-                db.with_state_mut(|s| {
-                    s.db_config.recording = recording;
-                });
-                db.recording_cell.set_playing(recording);
-            }
-            db.with_state_mut(|s| {
-                s.db_config.metadata.extend(metadata);
-            });
-            db.save_db_state()?;
+            let update = m.parse::<SetDbConfig>()?;
+            db.apply_set_db_config(update)?;
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
@@ -3258,5 +3275,31 @@ mod tests {
 
         send.await
             .expect("send should complete after mutex release");
+    }
+
+    #[test]
+    fn apply_set_db_config_empty_metadata_removes_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("schematic.content".to_string(), "graph {}".to_string())]),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            Some("graph {}".to_string())
+        );
+
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("schematic.content".to_string(), String::new())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            None
+        );
     }
 }

@@ -80,6 +80,8 @@ We use Datafusion to power the SQL interface. [Their docs](https://datafusion.ap
 elodin-db run [::]:2241 ./ground-station --follows 192.168.1.10:2240
 ```
 
+**DB Asset Server** -- When a simulation records with `ELODIN_DB_PATH` or `db_path`, GLB meshes, custom `.png` icons, and skybox files referenced by the schematic are copied into `{db}/assets/` and served over HTTP on port `N+1` while the server runs. See [DB Asset Server](/reference/db-asset-server).
+
 **Video** -- H.264 video streams (e.g. from GStreamer via `elodinsink`) are stored as timestamped message logs and displayed in the Elodin Editor. Recorded video can be exported to MP4 with `elodin-db export-videos`.
 
 **Export** -- Export component data to Parquet, Arrow IPC, or CSV without a running server: `elodin-db export ./db -o ./out`. Glob filtering and vector flattening are supported.

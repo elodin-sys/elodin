@@ -51,3 +51,7 @@ pub mod vtable;
 #[doc(hidden)]
 #[cfg(feature = "nox")]
 pub mod nox_impls;
+
+/// Port offset K for the embedded static-assets HTTP server: assets listen on
+/// `{impeller_tcp_port} + ASSETS_HTTP_PORT_OFFSET` (default Impeller 2240 → assets 2241).
+pub const ASSETS_HTTP_PORT_OFFSET: u16 = 1;
