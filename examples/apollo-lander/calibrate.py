@@ -136,10 +136,10 @@ def main() -> None:
         next_spec.write_text(narrowed_spec(spec, params, args.shrink, args.samples))
         next_out = args.work_dir / f"round_{round_idx + 1:02d}"
         print(f"round {round_idx + 1}: best={run_id} rmse={rmse:.3f}m -> {next_spec}")
+        spec = next_spec
         if not args.dry_run:
             run_campaign(next_spec, next_out)
             previous_out = next_out
-            spec = next_spec
 
 
 if __name__ == "__main__":
