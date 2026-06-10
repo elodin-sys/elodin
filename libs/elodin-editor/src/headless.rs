@@ -117,6 +117,8 @@ impl Plugin for HeadlessEditorPlugin {
                     // with the sensor camera's pose (which reads the TelemetryCache
                     // directly), preventing one-frame jitter in `sensor_view`.
                     sync_pos,
+                    #[cfg(not(feature = "big_space"))]
+                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
                     #[cfg(feature = "big_space")]
                     crate::spatial::apply_big_translation,

@@ -313,6 +313,8 @@ impl Plugin for EditorPlugin {
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
+                    #[cfg(not(feature = "big_space"))]
+                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
                     #[cfg(feature = "big_space")]
                     spatial::apply_big_translation,
