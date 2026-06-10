@@ -15,6 +15,18 @@ use bevy_world_mesh::terrain::{
 use crate::{MainCamera, sensor_camera::SensorCamera};
 
 type WorldMeshViewFilter = Or<(With<MainCamera>, With<SensorCamera>)>;
+#[cfg(feature = "big_space")]
+type WorldMeshViewPositionQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Transform,
+        Option<&'static crate::spatial::GridCell>,
+        Option<&'static ChildOf>,
+    ),
+    WorldMeshViewFilter,
+>;
 
 const PLANAR_TEXTURE_SIZE: u32 = 512;
 const SPHERICAL_TEXTURE_SIZE: u32 = 512;
@@ -218,15 +230,7 @@ fn sync_terrain_view_components(
 #[cfg(feature = "big_space")]
 fn sync_terrain_view_positions(
     mut commands: Commands,
-    cameras: Query<
-        (
-            Entity,
-            &Transform,
-            Option<&crate::spatial::GridCell>,
-            Option<&ChildOf>,
-        ),
-        WorldMeshViewFilter,
-    >,
+    cameras: WorldMeshViewPositionQuery,
     parents: Query<(&Transform, &crate::spatial::GridCell)>,
     floating_origin: Res<crate::spatial::FloatingOriginSettings>,
 ) {
