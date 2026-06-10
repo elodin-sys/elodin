@@ -1016,8 +1016,12 @@ pub fn sync_pos(
             }
             if let Some(ref mut geo_rot) = geo_rot {
                 // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
-                //geo_rot.1 = world_pos.att();
+                **geo_rot = GeoRotation::from_bevy_kind(
+                    geo_rot.0,
+                    world_pos.bevy_att(),
+                    &geo_context,
+                    geo_rot.2,
+                );
             }
 
             if geo_pos.is_none() {
@@ -1059,8 +1063,12 @@ pub fn sync_pos(
             }
             if let Some(ref mut geo_rot) = geo_rot {
                 // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
-                //geo_rot.1 = world_pos.att();
+                **geo_rot = GeoRotation::from_bevy_kind(
+                    geo_rot.0,
+                    world_pos.bevy_att(),
+                    &geo_context,
+                    geo_rot.2,
+                );
             }
 
             if geo_pos.is_none() {

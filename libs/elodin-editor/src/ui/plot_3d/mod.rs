@@ -101,7 +101,9 @@ pub fn sync_line_plot_3d(
                 crate::spatial::GridCell::default(),
             ));
             if let Some(frame) = line_plot.frame {
-                entity.try_insert(GeoRotation(frame, DQuat::IDENTITY));
+                // Absolute: the line's vertex data is raw frame coordinates, so
+                // its transform must carry the frame -> Bevy basis change.
+                entity.try_insert(GeoRotation::absolute(frame, DQuat::IDENTITY));
             }
         }
     }

@@ -636,10 +636,12 @@ impl LoadSchematicParams<'_, '_> {
         spawn.insert(Name::new("line_3d"));
 
         // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
+        // The rotation is Absolute: the line's vertex data is raw frame
+        // coordinates, so its transform must carry the frame -> Bevy basis change.
         if let Some(frame) = frame.or_default() {
             spawn.insert((
                 bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
-                bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
+                bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
             ));
         }
         spawn.insert(SchematicSpawned);

@@ -578,7 +578,7 @@ mod tests {
             .expect("it can't be colinear with everyone");
         // Constructs a look_at rotation matrix using the same algorithm as
         // nox::Matrix3::look_at_rh.
-        // 
+        //
         // let f = dir.normalize();
         // let s = f.cross(up).normalize();
         // let u = s.cross(f);
@@ -598,7 +598,7 @@ mod tests {
     ///                    [ 0  0 -1 ]
     ///                    [ 0  1  0 ]
     /// ```
-    /// 
+    ///
     /// Note: It's orthonormal, so its tranpose is its inverse.
     #[inline]
     fn elodin_R_bevy(M: Mat3) -> Mat3 {
@@ -619,28 +619,35 @@ mod tests {
 
     #[test]
     fn test_inverses() {
-        let A = Mat3::from_cols(Vec3::new(1.0,2.0,3.0),
-                                Vec3::new(4.0,5.0,6.0),
-                                Vec3::new(7.0,8.0,9.0));
+        let A = Mat3::from_cols(
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(4.0, 5.0, 6.0),
+            Vec3::new(7.0, 8.0, 9.0),
+        );
         let B = elodin_R_bevy(A);
         let C = bevy_R_elodin(B);
-        assert_eq_mat!(A,C, "b to e to b");
+        assert_eq_mat!(A, C, "b to e to b");
         let B = bevy_R_elodin(A);
         let C = elodin_R_bevy(B);
-        assert_eq_mat!(A,C, "e to b to e");
+        assert_eq_mat!(A, C, "e to b to e");
     }
 
     /// Compare against elodin's ENU.
     #[test]
     fn test_look_at_rh_nox_vs_glam_elodin() {
-        test_look_at_rh_nox_vs_glam(|glam_mat, nox_mat| (elodin_R_bevy(glam_mat), nox_mat), |M| M);
+        test_look_at_rh_nox_vs_glam(
+            |glam_mat, nox_mat| (elodin_R_bevy(glam_mat), nox_mat),
+            |M| M,
+        );
     }
 
     /// Compare against Bevy's EUS.
     #[test]
     fn test_look_at_rh_nox_vs_glam_bevy() {
-        test_look_at_rh_nox_vs_glam(|glam_mat, nox_mat| (glam_mat, bevy_R_elodin(nox_mat)),
-                                    |M| elodin_R_bevy(M));
+        test_look_at_rh_nox_vs_glam(
+            |glam_mat, nox_mat| (glam_mat, bevy_R_elodin(nox_mat)),
+            |M| elodin_R_bevy(M),
+        );
     }
 
     /// `WorldPosExt::bevy_att` must match `GeoRotation::to_bevy` in plane mode.
@@ -661,8 +668,7 @@ mod tests {
             };
 
             let elodin_bevy = world_pos.bevy_att();
-            let geo_frames_bevy =
-                GeoRotation(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let geo_frames_bevy = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
             assert_eq_quat!(
                 elodin_bevy.as_quat(),
                 geo_frames_bevy.as_quat(),
@@ -676,7 +682,7 @@ mod tests {
         let q = Quat::from_mat3(&Mat3::IDENTITY);
         assert_eq_quat!(q, Quat::IDENTITY);
 
-        let dir = Vec3::Y; 
+        let dir = Vec3::Y;
         let up = Vec3::Z;
         let (M, _) = glam_look_at_rh(dir, up);
         assert_eq_mat!(M, Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y));
@@ -685,7 +691,11 @@ mod tests {
         let S = elodin_R_bevy(M).transpose();
         assert_eq_mat!(S, Mat3::IDENTITY);
 
-        assert_eq_mat!(Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z), glam_look_at_rh(Vec3::NEG_Z, Vec3::NEG_Y).0, "trial 0");
+        assert_eq_mat!(
+            Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z),
+            glam_look_at_rh(Vec3::NEG_Z, Vec3::NEG_Y).0,
+            "trial 0"
+        );
         // assert_eq_mat!(Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z), glam_look_at_rh(Vec3::Z, Vec3::Y).0, "current");
     }
 
@@ -704,17 +714,18 @@ mod tests {
         ]
     }
 
-    fn test_look_at_rh_nox_vs_glam(f: fn(Mat3, Mat3) -> (Mat3, Mat3),
-                                   g: fn(Mat3) -> Mat3,
-
-    ) {
+    fn test_look_at_rh_nox_vs_glam(f: fn(Mat3, Mat3) -> (Mat3, Mat3), g: fn(Mat3) -> Mat3) {
         for (i, (dir, up)) in look_at_test_cases().into_iter().enumerate() {
             let nox_dir = nox::Vec3::from(dir.as_dvec3());
             let nox_up = nox::Vec3::from(up.as_dvec3());
 
             let (nox_mat, nox_up_actual) = nox::Matrix3::look_at_rh_up(nox_dir, nox_up);
             let (glam_mat, up_actual) = glam_look_at_rh(dir, up);
-            assert_eq_vec!(up_actual, bevy::math::DVec3::from(nox_up_actual).as_vec3(), "case {i} nox and bevy up vector don't match");
+            assert_eq_vec!(
+                up_actual,
+                bevy::math::DVec3::from(nox_up_actual).as_vec3(),
+                "case {i} nox and bevy up vector don't match"
+            );
             // let glam_mat = elodin_R_bevy(glam_mat);
             let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
             // let nox_mat_bevy = bevy_R_elodin(nox_mat_bevy);
@@ -727,8 +738,11 @@ mod tests {
             // Also compare resulting quaternions
             let nox_quat_look_at = nox::Quaternion::look_at_rh(nox_dir, nox_up);
             let nox_quat = nox::Quaternion::from_rot_mat(nox_mat);
-            assert_eq_quat!(bevy::math::DQuat::from(nox_quat),
-                            bevy::math::DQuat::from(nox_quat_look_at), "case {i} look_at_rh vs mat");
+            assert_eq_quat!(
+                bevy::math::DQuat::from(nox_quat),
+                bevy::math::DQuat::from(nox_quat_look_at),
+                "case {i} look_at_rh vs mat"
+            );
             let world_pos = super::WorldPos {
                 att: nox_quat,
                 pos: nox::Vec3::new(0.0, 0.0, 0.0),

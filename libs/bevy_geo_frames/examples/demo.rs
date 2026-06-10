@@ -142,8 +142,8 @@ fn setup(
             Transform::default(),
             GeoPosition(GeoFrame::ENU, enu_pos),
             // GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
-            GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
-            // GeoRotation(GeoFrame::ENU, DQuat::from_rotation_x(0.25 * PI)),
+            GeoRotation::new(GeoFrame::ENU, DQuat::IDENTITY),
+            // GeoRotation::new(GeoFrame::ENU, DQuat::from_rotation_x(0.25 * PI)),
             // GeoAngularVelocity(
             //     GeoFrame::ENU,
             //     // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),

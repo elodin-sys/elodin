@@ -956,8 +956,8 @@ mod tests {
     }
 
     /// Body-frame arrows: rotating the direction by the body attitude in sim
-    /// coordinates must match the old Bevy-space rotation by
-    /// `GeoRotation(frame, att).to_bevy`.
+    /// coordinates must match the Bevy-space rotation by
+    /// `GeoRotation::absolute(frame, att).to_bevy`.
     #[test]
     fn endpoints_match_direct_body_frame_conversion() {
         let ctx = GeoContext::default();
@@ -968,7 +968,7 @@ mod tests {
         for frame in [GeoFrame::ENU, GeoFrame::NED] {
             let end = arrow_end_pos(&start, direction, true);
             let delta = bevy_delta(&start, &end, frame, &ctx);
-            let expected = GeoRotation(frame, att).to_bevy(&ctx) * direction;
+            let expected = GeoRotation::absolute(frame, att).to_bevy(&ctx) * direction;
             assert!(
                 (delta - expected).length() < 1e-9,
                 "{frame:?}: got {delta:?}, expected {expected:?}"

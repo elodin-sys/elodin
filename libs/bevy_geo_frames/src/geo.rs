@@ -218,10 +218,11 @@ impl GeoFrame {
         use crate::GeoFrame::*;
         match (*from, *self) {
             (x, y) if x == y => DMat3::IDENTITY,
-            (ENU, NED) => DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Y),
-            (NED, ENU) => DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Y),
-            (ECEF, x) => Self::ecef_R_(&x, &context.origin),
-            (x, ECEF) => Self::ecef_R_(&x, &context.origin).inverse(),
+            (ENU, NED) => Self::ned_R_enu(),
+            (NED, ENU) => Self::enu_R_ned(),
+            // ecef_R_(x) maps x -> ECEF, so self_R_ecef is its inverse.
+            (ECEF, x) => Self::ecef_R_(&x, &context.origin).inverse(),
+            (x, ECEF) => Self::ecef_R_(&x, &context.origin),
             (x, y) => unreachable!("{x:?} -> {y:?}"),
         }
     }
@@ -330,24 +331,58 @@ impl GeoPosition {
 }
 
 impl GeoRotation {
+    /// A [RotationKind::Relative] rotation expressed in `frame`.
+    pub fn new(frame: GeoFrame, q: impl Into<DQuat>) -> Self {
+        GeoRotation(frame, q.into(), RotationKind::default())
+    }
+
+    /// A [RotationKind::Absolute] rotation expressed in `frame`.
+    pub fn absolute(frame: GeoFrame, q: impl Into<DQuat>) -> Self {
+        GeoRotation(frame, q.into(), RotationKind::Absolute)
+    }
+
     /// Convert orientation to Bevy.
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
-        let frame = self.0;
         let local_rot = self.1;
-        let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context));
-        q * local_rot * q.conjugate()
+        let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&self.0, context));
+        match self.2 {
+            // Re-express the rotation operator in Bevy coordinates.
+            RotationKind::Relative => q * local_rot * q.conjugate(),
+            // Compose with the frame's basis change into Bevy.
+            RotationKind::Absolute => q * local_rot,
+        }
     }
 
-    /// Convert orientation from Bevy.
+    /// Convert a [RotationKind::Relative] orientation from Bevy.
     pub fn from_bevy(frame: GeoFrame, v_bevy: impl Into<DQuat>, context: &GeoContext) -> Self {
+        Self::from_bevy_kind(frame, v_bevy, context, RotationKind::default())
+    }
+
+    /// Convert orientation from Bevy, inverting [Self::to_bevy] for `kind`.
+    pub fn from_bevy_kind(
+        frame: GeoFrame,
+        v_bevy: impl Into<DQuat>,
+        context: &GeoContext,
+        kind: RotationKind,
+    ) -> Self {
         let v = v_bevy.into();
         let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context));
-        GeoRotation(frame, q.conjugate() * v * q)
+        let local_rot = match kind {
+            RotationKind::Relative => q.conjugate() * v * q,
+            RotationKind::Absolute => q.conjugate() * v,
+        };
+        GeoRotation(frame, local_rot, kind)
     }
 
+    /// Re-express the rotation in another frame, preserving the rotation it
+    /// produces in Bevy and its [RotationKind].
     pub fn as_frame(&self, to_frame: GeoFrame, context: &GeoContext) -> GeoRotation {
-        let R = to_frame._R_(&self.0, context);
-        GeoRotation(to_frame, DQuat::from_mat3(&R) * self.1)
+        let R = DQuat::from_mat3(&to_frame._R_(&self.0, context));
+        let local_rot = match self.2 {
+            RotationKind::Relative => R * self.1 * R.conjugate(),
+            RotationKind::Absolute => R * self.1,
+        };
+        GeoRotation(to_frame, local_rot, self.2)
     }
 
     /// Create from a Bevy Transform's rotation.
@@ -377,12 +412,23 @@ impl GeoVelocity {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Reflect)]
+pub enum RotationKind {
+    #[default]
+    /// The rotation is relative. An identity rotation in any frame is an
+    /// identity rotation in Bevy's frame.
+    Relative,
+    /// The rotation is absolute. An identity rotation in ENU will produce a
+    /// rotation that rotates [x,y,z] to [x,z,-y] for instance.
+    Absolute,
+}
+
 /// Per-entity geo orientation:
 ///   0: frame the quaternion is expressed in
 ///   1: rotation from local -> that frame
 #[derive(Debug, Component, Reflect, Clone)]
 #[reflect(Component)]
-pub struct GeoRotation(pub GeoFrame, pub DQuat);
+pub struct GeoRotation(pub GeoFrame, pub DQuat, pub RotationKind);
 
 /// Per-entity angular velocity in some frame, in rad/s.
 #[derive(Debug, Component, Reflect, Clone)]
@@ -676,6 +722,85 @@ mod tests {
         assert_eq!(geo_rotation.to_bevy(&ctx).as_quat(), Quat::IDENTITY);
     }
 
+    /// Quaternion equality up to sign (double cover), robust to fp noise.
+    macro_rules! assert_quat_eq {
+        ($a:expr, $b:expr) => {
+            assert_quat_eq!($a, $b, "quat mismatch")
+        };
+        ($a:expr, $b:expr, $($l:tt)+) => {
+            let a: DQuat = $a;
+            let b: DQuat = $b;
+            assert!(
+                a.dot(b).abs() > 1.0 - 1e-9,
+                "{}: got {:?} expected {:?}",
+                format!($($l)+),
+                a,
+                b
+            );
+        };
+    }
+
+    #[test]
+    fn relative_identity_is_identity_in_bevy() {
+        let ctx = dummy_ctx();
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            let r = GeoRotation::new(frame, DQuat::IDENTITY);
+            assert_eq!(r.2, RotationKind::Relative);
+            assert_eq!(r.to_bevy(&ctx).as_quat(), Quat::IDENTITY, "{frame:?}");
+        }
+    }
+
+    #[test]
+    fn absolute_identity_is_basis_change() {
+        let ctx = dummy_ctx();
+        // Per the RotationKind doc: identity in ENU rotates [x,y,z] to [x,z,-y].
+        let r = GeoRotation::absolute(GeoFrame::ENU, DQuat::IDENTITY);
+        let q = r.to_bevy(&ctx);
+        assert_approx_eq!(
+            q * DVec3::new(1.0, 2.0, 3.0),
+            DVec3::new(1.0, 3.0, -2.0),
+            1e-9
+        );
+        // It must match the frame's basis-change rotation exactly.
+        let basis = DQuat::from_mat3(&GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx));
+        assert_quat_eq!(q, basis);
+    }
+
+    #[test]
+    fn from_bevy_kind_round_trips() {
+        let ctx = dummy_ctx();
+        let v = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.4, -0.9, 1.3);
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            for kind in [RotationKind::Relative, RotationKind::Absolute] {
+                let r = GeoRotation::from_bevy_kind(frame, v, &ctx, kind);
+                assert_eq!(r.2, kind);
+                assert_quat_eq!(r.to_bevy(&ctx), v, "{frame:?} {kind:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn as_frame_preserves_bevy_rotation_and_kind() {
+        // Sphere mode: all frames map to Bevy consistently. (In Plane mode the
+        // ECEF -> Bevy mapping is a fixed swizzle that intentionally disagrees
+        // with the origin-dependent ENU mapping.)
+        let ctx = dummy_ctx().with_present(Present::Sphere);
+        let q = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.4, -0.9, 1.3);
+        for kind in [RotationKind::Relative, RotationKind::Absolute] {
+            for to_frame in [GeoFrame::NED, GeoFrame::ECEF] {
+                let r = GeoRotation(GeoFrame::ENU, q, kind);
+                let converted = r.as_frame(to_frame, &ctx);
+                assert_eq!(converted.0, to_frame);
+                assert_eq!(converted.2, kind);
+                assert_quat_eq!(
+                    converted.to_bevy(&ctx),
+                    r.to_bevy(&ctx),
+                    "{to_frame:?} {kind:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn enu_r_ned_mul_vector_123() {
         let v_ned = DVec3::new(1.0, 2.0, 3.0);
@@ -717,15 +842,15 @@ mod tests {
 
         assert_approx_eq!(ecef_R_enu_s * DVec3::Y, DVec3::Z, 1e-9, "ecef_R_enu y-axis");
 
-        // The next two assertions show that we do not entirely comport with
-        // what map_3d does.
+        // 1 m north of the origin (1,0,0): north at lat/lon 0 is +Z_ecef.
         assert_approx_eq!(
             convert_pos(GeoFrame::ECEF, GeoFrame::ENU, DVec3::Y, &ctx_sphere),
-            2.0 * DVec3::X,
+            DVec3::new(1.0, 0.0, 1.0),
             1e-9,
             "convert_pos ecef _M_ y-axis"
         );
 
+        // 1 m above the origin (1,0,0): matches map_3d's enu2ecef.
         assert_approx_eq!(
             convert_pos_map_3d(GeoFrame::ECEF, GeoFrame::ENU, DVec3::Z, &ctx_sphere),
             DVec3::new(2.0, 0.0, 0.0),
@@ -734,7 +859,7 @@ mod tests {
         );
         assert_approx_eq!(
             convert_pos(GeoFrame::ECEF, GeoFrame::ENU, DVec3::Z, &ctx_sphere),
-            DVec3::new(1.0, 1.0, 0.0),
+            DVec3::new(2.0, 0.0, 0.0),
             1e-9,
             "convert_pos ecef _M_ z-axis"
         );
