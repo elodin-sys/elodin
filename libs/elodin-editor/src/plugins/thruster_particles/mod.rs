@@ -14,8 +14,8 @@ use bevy_hanabi::{
         attr::SetAttributeModifier,
         force::LinearDragModifier,
         output::{
-            ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier, OrientMode,
-            OrientModifier, SizeOverLifetimeModifier,
+            ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier, OrientMode, OrientModifier,
+            SizeOverLifetimeModifier,
         },
         position::SetPositionCone3dModifier,
     },
@@ -172,10 +172,7 @@ fn build_dps_exhaust() -> EffectAsset {
     let init_vel =
         SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 15.0));
     let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(1.65));
-    let size = SetAttributeModifier::new(
-        Attribute::SIZE3,
-        module.lit(Vec3::new(0.9, 0.38, 0.38)),
-    );
+    let size = SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.9, 0.38, 0.38)));
     let drag = LinearDragModifier::new(module.lit(1.25));
 
     let mut color = Gradient::<Vec4>::new();
@@ -287,9 +284,7 @@ fn ensure_lander_thrusters(
             let jet = commands
                 .spawn((
                     ThrusterJet {
-                        kind: JetKind::Rcs {
-                            index: idx as u8,
-                        },
+                        kind: JetKind::Rcs { index: idx as u8 },
                         body_offset: mount.body_pos,
                         body_exhaust: mount.body_exhaust,
                     },
@@ -350,10 +345,7 @@ fn sync_thruster_particles(
             };
             let intensity = match jet.kind {
                 JetKind::Dps => thrust,
-                JetKind::Rcs { index } => rcs
-                    .get(index as usize)
-                    .copied()
-                    .unwrap_or(0.0),
+                JetKind::Rcs { index } => rcs.get(index as usize).copied().unwrap_or(0.0),
             };
             apply_spawner(&mut spawner, &mut visibility, intensity, jet.kind);
         }
@@ -422,14 +414,9 @@ fn read_rcs_thruster_levels(
 fn component_value_f64_array(value: &WktComponentValue) -> Option<Vec<f64>> {
     use nox::ArrayBuf;
     match value {
-        WktComponentValue::F32(array) => Some(
-            array
-                .buf
-                .as_buf()
-                .iter()
-                .map(|v| f64::from(*v))
-                .collect(),
-        ),
+        WktComponentValue::F32(array) => {
+            Some(array.buf.as_buf().iter().map(|v| f64::from(*v)).collect())
+        }
         WktComponentValue::F64(array) => Some(array.buf.as_buf().to_vec()),
         _ => None,
     }
