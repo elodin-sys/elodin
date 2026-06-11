@@ -159,6 +159,19 @@ RcsTorqueViz = ty.Annotated[
     jax.Array,
     el.Component("rcs_torque_viz", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
+# Per-nozzle cold-gas firing level (0..1) for editor particles. Index order matches
+# `RCS_JETS` in libs/elodin-editor/src/plugins/thruster_particles/mod.rs.
+RcsThrusterViz = ty.Annotated[
+    jax.Array,
+    el.Component("rcs_thruster_viz", el.ComponentType(el.PrimitiveType.F64, (16,))),
+]
+RCS_THRUSTER_AXIS = jnp.array(
+    [0, 0, 2, 2, 0, 0, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2], dtype=jnp.int32
+)
+RCS_THRUSTER_SIGN = jnp.array(
+    [1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0],
+    dtype=jnp.float64,
+)
 Landed = ty.Annotated[
     jax.Array,
     el.Component("landed", el.ComponentType(el.PrimitiveType.F64, (1,))),
@@ -284,6 +297,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             el.C(RcsTorque, jnp.zeros(3, dtype=jnp.float64)),
             el.C(MainThrustViz, jnp.zeros(3, dtype=jnp.float64)),
             el.C(RcsTorqueViz, jnp.zeros(3, dtype=jnp.float64)),
+            el.C(RcsThrusterViz, jnp.zeros(16, dtype=jnp.float64)),
             el.C(Landed, jnp.array([0.0], dtype=jnp.float64)),
             el.C(TouchdownSpeed, jnp.array([0.0], dtype=jnp.float64)),
             el.C(TouchdownHorizontalSpeed, jnp.array([0.0], dtype=jnp.float64)),
@@ -433,10 +447,15 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     @el.map
     def thrust_visualization(
         thrust: Thrust, torque: RcsTorque
-    ) -> tuple[MainThrustViz, RcsTorqueViz]:
+    ) -> tuple[MainThrustViz, RcsTorqueViz, RcsThrusterViz]:
+        torque_norm = torque / RCS_AXIS_TORQUE_LIMIT_NM
+        per_thruster = jnp.maximum(
+            0.0, torque_norm[RCS_THRUSTER_AXIS] * RCS_THRUSTER_SIGN
+        )
         return (
             jnp.array([0.0, 0.0, thrust[0] / DPS_MAX_THRUST_N], dtype=jnp.float64),
-            torque / RCS_AXIS_TORQUE_LIMIT_NM,
+            torque_norm,
+            per_thruster,
         )
 
     ref_time = jnp.asarray(REF_TIME_S)
