@@ -36,8 +36,6 @@ const SPHERICAL_ATLAS_SIZE: u32 = 2048;
 const SPHERICAL_PATH: &str = "terrains/spherical";
 const WGS84_MAJOR_AXIS_M: f64 = 6_378_137.0;
 const WGS84_MINOR_AXIS_M: f64 = 6_356_752.314_245;
-const SPHERICAL_MIN_HEIGHT_M: f32 = -12_000.0;
-const SPHERICAL_MAX_HEIGHT_M: f32 = 9_000.0;
 
 /// Marker for terrain entities spawned from a schematic `world_mesh` element.
 #[derive(Component)]
@@ -65,7 +63,7 @@ pub(crate) fn spawn_world_mesh_terrain(
 ) -> Option<Entity> {
     let region = world_mesh.region.clone();
     let config = if region == "globe" {
-        spherical_terrain_config(world_mesh.lod_count)
+        spherical_terrain_config(world_mesh.lod_count)?
     } else {
         planar_terrain_config(&region, world_mesh.lod_count)?
     };
@@ -158,52 +156,61 @@ struct GlobeManifest {
     lod_count: u32,
 }
 
-impl Default for GlobeManifest {
-    fn default() -> Self {
-        Self {
-            min_height_m: SPHERICAL_MIN_HEIGHT_M,
-            max_height_m: SPHERICAL_MAX_HEIGHT_M,
-            lod_count: DEFAULT_SPHERICAL_LOD_COUNT,
-        }
-    }
-}
-
-fn spherical_terrain_config(lod_count: Option<u32>) -> TerrainConfig {
-    let manifest_path = bevy_world_mesh::terrain::util::asset_path("terrains/spherical/globe.toml");
-    let manifest = std::fs::read_to_string(&manifest_path)
+fn spherical_terrain_config(lod_count: Option<u32>) -> Option<TerrainConfig> {
+    let manifest_path =
+        bevy_world_mesh::terrain::util::asset_path(format!("{SPHERICAL_PATH}/globe.toml"));
+    let Some(manifest) = std::fs::read_to_string(&manifest_path)
         .ok()
         .and_then(|text| toml::from_str::<GlobeManifest>(&text).ok())
-        .unwrap_or_default();
+    else {
+        bevy::log::warn!(
+            "schematic world_mesh region=\"globe\" could not load a valid manifest from {}; run fetch_global_spherical first",
+            manifest_path.display()
+        );
+        return None;
+    };
 
-    TerrainConfig {
-        lod_count: lod_count
-            .unwrap_or(manifest.lod_count)
-            .min(DEFAULT_SPHERICAL_LOD_COUNT),
-        model: TerrainModel::ellipsoid(
-            bevy::math::DVec3::ZERO,
-            WGS84_MAJOR_AXIS_M,
-            WGS84_MINOR_AXIS_M,
-            manifest.min_height_m,
-            manifest.max_height_m,
-        ),
-        path: SPHERICAL_PATH.to_string(),
-        atlas_size: SPHERICAL_ATLAS_SIZE,
-        ..default()
+    let atlas_config_path =
+        bevy_world_mesh::terrain::util::asset_path(format!("{SPHERICAL_PATH}/config.tc"));
+    if !atlas_config_path.is_file() {
+        bevy::log::warn!(
+            "schematic world_mesh region=\"globe\" has no prepared spherical atlas at {}; run preprocess_global first",
+            atlas_config_path.display()
+        );
+        return None;
     }
-    .add_attachment(AttachmentConfig {
-        name: "height".to_string(),
-        texture_size: SPHERICAL_TEXTURE_SIZE,
-        border_size: 2,
-        mip_level_count: 4,
-        format: AttachmentFormat::R16,
-    })
-    .add_attachment(AttachmentConfig {
-        name: "albedo".to_string(),
-        texture_size: SPHERICAL_TEXTURE_SIZE,
-        border_size: 2,
-        mip_level_count: 4,
-        format: AttachmentFormat::Rgba8,
-    })
+
+    Some(
+        TerrainConfig {
+            lod_count: lod_count
+                .unwrap_or(manifest.lod_count)
+                .min(DEFAULT_SPHERICAL_LOD_COUNT),
+            model: TerrainModel::ellipsoid(
+                bevy::math::DVec3::ZERO,
+                WGS84_MAJOR_AXIS_M,
+                WGS84_MINOR_AXIS_M,
+                manifest.min_height_m,
+                manifest.max_height_m,
+            ),
+            path: SPHERICAL_PATH.to_string(),
+            atlas_size: SPHERICAL_ATLAS_SIZE,
+            ..default()
+        }
+        .add_attachment(AttachmentConfig {
+            name: "height".to_string(),
+            texture_size: SPHERICAL_TEXTURE_SIZE,
+            border_size: 2,
+            mip_level_count: 4,
+            format: AttachmentFormat::R16,
+        })
+        .add_attachment(AttachmentConfig {
+            name: "albedo".to_string(),
+            texture_size: SPHERICAL_TEXTURE_SIZE,
+            border_size: 2,
+            mip_level_count: 4,
+            format: AttachmentFormat::Rgba8,
+        }),
+    )
 }
 
 /// The terrain renderer needs one [`TileTree`] per `(terrain, camera)` pair.
