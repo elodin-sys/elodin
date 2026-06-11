@@ -34,6 +34,9 @@ pub use spatial::*;
 pub use tensor::*;
 pub use vector::*;
 
+#[cfg(feature = "bevy_math")]
+pub mod bevy;
+
 #[cfg(feature = "jax")]
 pub mod jax;
 

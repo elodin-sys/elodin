@@ -61,6 +61,8 @@ pub struct HeadlessEditorPlugin;
 
 impl Plugin for HeadlessEditorPlugin {
     fn build(&self, app: &mut App) {
+        // Must run before anything can spawn a `WorldPos` entity.
+        crate::register_world_pos_components(app);
         app.add_plugins(crate::plugins::WebAssetPlugin)
             .add_plugins(crate::plugins::env_asset_source::plugin)
             .add_plugins(
@@ -118,6 +120,8 @@ impl Plugin for HeadlessEditorPlugin {
                     // with the sensor camera's pose (which reads the TelemetryCache
                     // directly), preventing one-frame jitter in `sensor_view`.
                     sync_pos,
+                    #[cfg(not(feature = "big_space"))]
+                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
                     #[cfg(feature = "big_space")]
                     crate::spatial::apply_big_translation,
@@ -143,9 +147,9 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Update, load_headless_scene)
             .set_runner(render_server_runner);
 
+        app.add_systems(PreUpdate, crate::warn_missing_geo.before(PositionSync));
         #[cfg(feature = "big_space")]
-        app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
-            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink));
+        app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<HeadlessMode>()
