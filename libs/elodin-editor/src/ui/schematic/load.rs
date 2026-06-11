@@ -1403,7 +1403,6 @@ mod tests {
     #[test_case("vector_arrow \"(0,0,1)\"" ; "vector_arrow")]
     #[test_case("object_3d \"(0,0,0,1, 0,0,0)\" { sphere radius=1.0 { color 0 0 0 } }" ; "object_3d")]
     #[test_case("world_mesh \"death_valley\"" ; "world_mesh")]
-    #[test_case("world_mesh \"globe\"" ; "world_mesh_globe")]
     fn scene_roots_clear_cleanly(content: &str) {
         let mut app = test_app();
         let baseline = entity_count(&mut app);
@@ -1444,6 +1443,26 @@ mod tests {
         assert!(
             !cleared_state.ui_state.right_sidebar_visible,
             "clearing the schematic should hide the inspector sidebar"
+        );
+    }
+
+    #[test]
+    fn optional_globe_world_mesh_clears_cleanly() {
+        let mut app = test_app();
+        let baseline = entity_count(&mut app);
+        let schematic = Schematic::from_kdl("world_mesh \"globe\"").expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        assert!(
+            entity_count(&mut app) >= baseline,
+            "loading an optional globe world mesh should not remove entities"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(
+            entity_count(&mut app),
+            baseline,
+            "clearing the schematic should restore the entity count to baseline"
         );
     }
 
