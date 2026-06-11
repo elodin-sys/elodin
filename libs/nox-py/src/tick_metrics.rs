@@ -25,7 +25,13 @@
 //!   summary. Existing profile / tracing output already lives on
 //!   stderr.
 
-use std::time::{Duration, Instant};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use serde::Serialize;
 
 /// Number of log2 buckets in [`PhaseStats::buckets`]. Bucket `i`
 /// covers `[2^i, 2^(i+1))` ns, so 32 buckets reach ~2.1 s — well
@@ -45,6 +51,49 @@ pub struct PhaseStats {
     /// Log2(ns) histogram. `buckets[i]` counts observations where
     /// `floor(log2(max(ns, 1))) == i`.
     buckets: [u32; BUCKETS],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PhaseStatsSnapshot {
+    sum_ns: u64,
+    count: u64,
+    min_ns: u64,
+    max_ns: u64,
+    buckets: [u32; BUCKETS],
+}
+
+impl From<&PhaseStats> for PhaseStatsSnapshot {
+    fn from(stats: &PhaseStats) -> Self {
+        Self {
+            sum_ns: stats.sum_ns,
+            count: stats.count,
+            min_ns: stats.min_ns,
+            max_ns: stats.max_ns,
+            buckets: stats.buckets,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TickSummaryJson {
+    pre_step: PhaseStatsSnapshot,
+    copy_db_to_world: PhaseStatsSnapshot,
+    world_run: PhaseStatsSnapshot,
+    commit: PhaseStatsSnapshot,
+    wait_for_write: PhaseStatsSnapshot,
+    post_step: PhaseStatsSnapshot,
+    real_time_pacing: PhaseStatsSnapshot,
+    total_cycle: PhaseStatsSnapshot,
+    cycles: u64,
+    steps: u64,
+    simulation_rate_hz: f64,
+    telemetry_rate_hz: f64,
+    wall_ns: u64,
+    entry_unix_ns: Option<u64>,
+    compile_done_unix_ns: Option<u64>,
+    loop_start_unix_ns: u64,
+    loop_end_unix_ns: u64,
+    summary_written_unix_ns: u64,
 }
 
 impl PhaseStats {
@@ -168,6 +217,8 @@ pub struct TickMetrics {
     /// when the user didn't opt in to a slower telemetry rate.
     telemetry_rate_hz: f64,
     started_at: Instant,
+    started_unix_ns: u64,
+    loop_end_unix_ns: Option<u64>,
     /// Suppresses the `Drop` summary (e.g. when no cycles ever ran).
     /// Currently unused — the summary itself gracefully handles
     /// zero-cycle cases — but kept as an escape hatch for callers
@@ -191,8 +242,14 @@ impl TickMetrics {
             simulation_rate_hz: 0.0,
             telemetry_rate_hz: 0.0,
             started_at: Instant::now(),
+            started_unix_ns: unix_now_ns(),
+            loop_end_unix_ns: None,
             silent: false,
         }
+    }
+
+    pub fn mark_loop_end(&mut self) {
+        self.loop_end_unix_ns.get_or_insert_with(unix_now_ns);
     }
 
     /// Feed the configured rates so `print_summary` can show the
@@ -339,6 +396,58 @@ impl TickMetrics {
         );
         println!("───────────────────────────────────");
     }
+
+    pub fn summary_json(&self) -> TickSummaryJson {
+        let summary_written_unix_ns = unix_now_ns();
+        TickSummaryJson {
+            pre_step: (&self.pre_step).into(),
+            copy_db_to_world: (&self.copy_db_to_world).into(),
+            world_run: (&self.world_run).into(),
+            commit: (&self.commit).into(),
+            wait_for_write: (&self.wait_for_write).into(),
+            post_step: (&self.post_step).into(),
+            real_time_pacing: (&self.real_time_pacing).into(),
+            total_cycle: (&self.total_cycle).into(),
+            cycles: self.cycles,
+            steps: self.steps,
+            simulation_rate_hz: self.simulation_rate_hz,
+            telemetry_rate_hz: self.telemetry_rate_hz,
+            wall_ns: u64::try_from(self.started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            entry_unix_ns: read_env_u64("ELODIN_SIM_ENTRY_UNIX_NS"),
+            compile_done_unix_ns: read_env_u64("ELODIN_SIM_COMPILE_DONE_UNIX_NS"),
+            loop_start_unix_ns: self.started_unix_ns,
+            loop_end_unix_ns: self.loop_end_unix_ns.unwrap_or(summary_written_unix_ns),
+            summary_written_unix_ns,
+        }
+    }
+
+    fn write_summary_json_from_env(&self) {
+        if self.silent {
+            return;
+        }
+        let Ok(path) = std::env::var("ELODIN_SIM_SUMMARY_JSON") else {
+            return;
+        };
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&self.summary_json()) {
+            let _ = fs::write(path, json);
+        }
+    }
+}
+
+fn unix_now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or_default()
+}
+
+fn read_env_u64(key: &str) -> Option<u64> {
+    std::env::var(key).ok()?.parse().ok()
 }
 
 /// Format a rate in Hz, stripping the decimal when the value is
@@ -362,7 +471,9 @@ impl Default for TickMetrics {
 
 impl Drop for TickMetrics {
     fn drop(&mut self) {
+        self.mark_loop_end();
         self.print_summary();
+        self.write_summary_json_from_env();
     }
 }
 

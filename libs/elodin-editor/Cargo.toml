@@ -126,12 +126,12 @@ bevy-inspector-egui.optional = true
 bevy_defer = "0.17"
 bitvec = "1.0.1"
 
-
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.default-features = false
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy_hanabi = { version = "0.18", default-features = false, features = ["3d"] }
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 # os
 directories = "5.0"

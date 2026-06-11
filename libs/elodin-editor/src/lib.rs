@@ -66,6 +66,7 @@ pub(crate) use embedded_lfs::embedded_lfs_asset;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
+pub mod rim_glow_material;
 pub mod sensor_camera;
 mod skybox_db_assets;
 mod skybox_generation;
@@ -281,8 +282,10 @@ impl Plugin for EditorPlugin {
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
-            .add_plugins(GizmoPlugin)
-            .add_plugins(ui::UiPlugin)
+            .add_plugins(GizmoPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
+        app.add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
@@ -363,6 +366,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(rim_glow_material::RimGlowMaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,

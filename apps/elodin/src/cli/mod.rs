@@ -3,6 +3,7 @@ use miette::Context;
 use miette::IntoDiagnostic;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
+mod monte_carlo;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -27,6 +28,9 @@ enum Commands {
     /// Run an Elodin simulation in headless mode
     #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
+    /// Run and manage Monte Carlo campaigns
+    #[cfg(not(target_os = "windows"))]
+    MonteCarlo(monte_carlo::Args),
     /// Start the headless sensor camera render server (managed by s10)
     #[cfg(not(target_os = "windows"))]
     RenderServer(editor::RenderServerArgs),
@@ -102,6 +106,8 @@ impl Cli {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
+            #[cfg(not(target_os = "windows"))]
+            Some(Commands::MonteCarlo(args)) => self.clone().monte_carlo(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),

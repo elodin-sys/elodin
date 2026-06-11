@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod cli;
 pub mod error;
 pub mod liveness;

@@ -1,5 +1,6 @@
 # ruff: noqa: F403
 # ruff: noqa: F405
+import logging
 import os
 import code
 import datetime
@@ -37,10 +38,13 @@ from typing_extensions import TypeVarTuple, Unpack
 import elodin.jaxsim
 
 from .elodin import *
+from . import monte_carlo as monte_carlo
 
 __doc__ = elodin.__doc__
 
 jax.config.update("jax_enable_x64", True)
+# Only lower to StableHLO; silence JAX's CUDA-fallback warning.
+logging.getLogger("jax._src.xla_bridge").setLevel(logging.ERROR)
 
 Self = TypeVar("Self")
 

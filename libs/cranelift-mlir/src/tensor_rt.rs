@@ -784,6 +784,7 @@ macro_rules! convert_op {
 convert_op!(tensor_widen_i32_to_i64, i32, i64, |x: i32| x as i64);
 convert_op!(tensor_convert_i64_to_f64, i64, f64, |x: i64| x as f64);
 convert_op!(tensor_convert_f64_to_i64, f64, i64, |x: f64| x as i64);
+convert_op!(tensor_convert_f64_to_ui64, f64, u64, |x: f64| x as u64);
 convert_op!(tensor_convert_i1_to_f64, u8, f64, |x: u8| if x != 0 {
     1.0
 } else {
@@ -791,6 +792,7 @@ convert_op!(tensor_convert_i1_to_f64, u8, f64, |x: u8| if x != 0 {
 });
 convert_op!(tensor_convert_f64_to_i32, f64, i32, |x: f64| x as i32);
 convert_op!(tensor_convert_i1_to_i32, u8, i32, |x: u8| x as i32);
+convert_op!(tensor_convert_i1_to_i64, u8, i64, |x: u8| x as i64);
 convert_op!(tensor_convert_i64_to_i32, i64, i32, |x: i64| x as i32);
 convert_op!(tensor_convert_i32_to_f64, i32, f64, |x: i32| x as f64);
 convert_op!(tensor_convert_f64_to_f32, f64, f32, |x: f64| x as f32);

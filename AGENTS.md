@@ -34,6 +34,7 @@ alejandra                                                # Nix
 For in-depth instructions, read the relevant skill file below when working in that area:
 
 - **Creating simulations** (Python SDK, components, systems, 6DOF, visualization, SITL/HITL): `.cursor/skills/elodin-simulation/SKILL.md`
+- **Monte Carlo + truth data** (calibrating sims against experimental data, campaign specs/hooks, truth-replay ghosts, run scoring, reconstruction): `.cursor/skills/elodin-monte-carlo/SKILL.md`
 - **Contributing to the codebase** (building from source, architecture, workspace structure, testing): `.cursor/skills/elodin-dev/SKILL.md`
 - **Aleph flight computer** (AlephOS deployment, NixOS modules, flight software services, firmware): `.cursor/skills/elodin-aleph/SKILL.md`
 - **Elodin DB** (running the database, client integrations, replication/follow mode, Lua REPL): `.cursor/skills/elodin-db/SKILL.md`

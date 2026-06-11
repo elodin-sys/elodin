@@ -242,6 +242,8 @@ pub struct Viewport {
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     pub hdr: bool,
+    #[serde(default)]
+    pub bloom: Option<BloomConfig>,
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
@@ -272,6 +274,7 @@ impl Default for Viewport {
             frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
             hdr: false,
+            bloom: None,
             name: None,
             pos: None,
             look_at: None,
@@ -281,6 +284,26 @@ impl Default for Viewport {
             node_id: NodeId::default(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct BloomConfig {
+    #[serde(default)]
+    pub preset: BloomPreset,
+    #[serde(default)]
+    pub intensity: Option<f32>,
+    #[serde(default)]
+    pub threshold: Option<f32>,
+    #[serde(default)]
+    pub threshold_softness: Option<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BloomPreset {
+    #[default]
+    Natural,
+    OldSchool,
 }
 
 impl Asset for Panel {
@@ -647,6 +670,16 @@ pub enum Object3DMesh {
         rotate: (f32, f32, f32),
         #[serde(default = "default_glb_animations")]
         animations: Vec<JointAnimation>,
+        /// Overrides the GLB's own material emissive so it self-illuminates
+        /// (0.0 = use the file's material unchanged). Mirrors `Material::emissivity`.
+        #[serde(default)]
+        emissivity: f32,
+        /// View-dependent rim glow strength, independent from surface emissivity.
+        #[serde(default)]
+        glow: f32,
+        /// Optional rim glow color. Defaults to white when `glow` is non-zero.
+        #[serde(default)]
+        glow_color: Option<Color>,
     },
     Mesh {
         mesh: Mesh,
@@ -677,6 +710,9 @@ impl Object3DMesh {
             translate: default_glb_translate(),
             rotate: default_glb_rotate(),
             animations: default_glb_animations(),
+            emissivity: 0.0,
+            glow: 0.0,
+            glow_color: None,
         }
     }
 

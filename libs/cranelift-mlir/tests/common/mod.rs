@@ -10,6 +10,7 @@ pub type TickFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
 pub fn run_mlir(mlir: &str, inputs: &[&[u8]], output_sizes: &[usize]) -> Vec<Vec<u8>> {
     let module = parse_module(mlir).expect("parse failed");
     let compiled = compile_module(&module).expect("compile failed");
+    drop(module);
     let fn_ptr = compiled.get_main_fn();
     let tick_fn: TickFn = unsafe { std::mem::transmute(fn_ptr) };
 
@@ -29,6 +30,7 @@ pub fn run_mlir_mem(mlir: &str, inputs: &[&[u8]], output_sizes: &[usize]) -> Vec
         ..CompileConfig::from_env()
     };
     let compiled = compile_module_with_config(&module, config).expect("compile failed (mem path)");
+    drop(module);
     let fn_ptr = compiled.get_main_fn();
     let tick_fn: TickFn = unsafe { std::mem::transmute(fn_ptr) };
 

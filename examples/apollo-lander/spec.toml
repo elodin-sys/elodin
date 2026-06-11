@@ -1,0 +1,23 @@
+[monte_carlo]
+n_samples = 30
+seed = 19690720
+method = "lhs"
+
+[monte_carlo.variables]
+attitude_gain = { dist = "uniform", min = 0.030, max = 0.060 }
+dry_mass_kg = { dist = "uniform", min = 6750.0, max = 6950.0 }
+gravity_scale = { dist = "uniform", min = 0.998, max = 1.002 }
+horizontal_gain = { dist = "uniform", min = 0.02, max = 0.10 }
+init_altitude_m = { dist = "uniform", min = 11650.0, max = 11950.0 }
+init_crossrange_speed_mps = { dist = "uniform", min = -3.0, max = 3.0 }
+init_downrange_offset_m = { dist = "uniform", min = -1500.0, max = 1500.0 }
+init_downrange_speed_mps = { dist = "uniform", min = 784.0, max = 814.0 }
+init_pitch_deg = { dist = "uniform", min = -80.0, max = -70.0 }
+init_vertical_speed_mps = { dist = "uniform", min = -32.0, max = -18.0 }
+isp_s = { dist = "uniform", min = 308.0, max = 314.0 }
+propellant_kg = { dist = "uniform", min = 3800.0, max = 4200.0 }
+rcs_propellant_kg = { dist = "uniform", min = 180.0, max = 320.0 }
+throttle_response_hz = { dist = "uniform", min = 2.0, max = 5.0 }
+thrust_scale = { dist = "uniform", min = 0.98, max = 1.02 }
+track_gain = { dist = "uniform", min = 0.02, max = 0.06 }
+vertical_gain = { dist = "uniform", min = 0.30, max = 0.60 }

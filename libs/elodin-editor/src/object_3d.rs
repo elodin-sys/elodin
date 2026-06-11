@@ -18,6 +18,7 @@ use smallvec::smallvec;
 use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
+use crate::rim_glow_material::{RimGlowExt, RimGlowMaterial, RimGlowParams};
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use bevy::platform::hash::FixedHasher;
@@ -30,6 +31,8 @@ use std::sync::Arc;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
+type GlbSceneQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static ChildOf), (With<Object3DMeshChild>, With<SceneRoot>)>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
 
@@ -1651,6 +1654,9 @@ pub fn spawn_mesh(
             translate,
             rotate,
             animations: _,
+            emissivity: _,
+            glow: _,
+            glow_color: _,
         } => {
             let resolved = resolve_glb_asset_url(path, connection_addr);
             let url = format!("{resolved}#Scene0");
@@ -2029,6 +2035,103 @@ fn propagate_render_layers(
     }
 }
 
+/// Override a GLB's embedded materials with an emissive glow when the object_3d
+/// sets `emissivity` (GLBs carry their own materials, so the schematic value has
+/// no effect until we apply it here once the scene's materials are loaded).
+///
+/// The emissive is the base color boosted by `4 * emissivity` (in sRGB space),
+/// modulated by the base-color texture so the surface pattern still shows.
+/// `emissivity` is an open-ended strength, not a 0..1 factor: ~1.0 subtly
+/// self-illuminates, while a few units push luminance far past white so the
+/// viewport's bloom pass produces a visible glow. Each object_3d gets its own
+/// cloned material so other instances of the same GLB are unaffected.
+///
+/// Keyed on the spawned scene child (not the object_3d root): inspector edits
+/// respawn the scene child, so a fresh entity id re-applies the override with
+/// the latest value (and dropping emissivity to 0 restores the GLB's own
+/// materials via the respawn).
+#[allow(clippy::too_many_arguments)]
+pub fn apply_glb_material_overrides(
+    objects: Query<&Object3DState>,
+    scenes: GlbSceneQuery,
+    children: Query<&Children>,
+    mesh_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut rim_glow_materials: ResMut<Assets<RimGlowMaterial>>,
+    mut commands: Commands,
+    mut applied: Local<HashSet<Entity>>,
+) {
+    applied.retain(|entity| scenes.contains(*entity));
+    for (scene_entity, child_of) in scenes.iter() {
+        if applied.contains(&scene_entity) {
+            continue;
+        }
+        let Ok(state) = objects.get(child_of.0) else {
+            continue;
+        };
+        let impeller2_wkt::Object3DMesh::Glb {
+            emissivity,
+            glow,
+            glow_color,
+            ..
+        } = state.data.mesh
+        else {
+            continue;
+        };
+        if emissivity <= 0.0 && glow <= 0.0 {
+            continue;
+        }
+        let boost = 4.0 * emissivity;
+        let mut updates = Vec::new();
+        for child in children.iter_descendants(scene_entity) {
+            let Ok(handle) = mesh_materials.get(child) else {
+                continue;
+            };
+            let Some(material) = materials.get(&handle.0) else {
+                continue;
+            };
+            let mut material = material.clone();
+            if emissivity > 0.0 {
+                let c = material.base_color.to_srgba();
+                material.emissive =
+                    Color::srgb(c.red * boost, c.green * boost, c.blue * boost).into();
+                if material.emissive_texture.is_none() {
+                    material.emissive_texture = material.base_color_texture.clone();
+                }
+            }
+            updates.push((child, material, glow, glow_color));
+        }
+        if updates.is_empty() {
+            // Scene or its materials are not loaded yet; retry on a later frame.
+            continue;
+        }
+        for (child, material, glow, glow_color) in updates {
+            if glow > 0.0 {
+                let color = glow_color.unwrap_or(impeller2_wkt::Color::WHITE);
+                let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
+                let handle = rim_glow_materials.add(RimGlowMaterial {
+                    base: material,
+                    extension: RimGlowExt {
+                        params: RimGlowParams {
+                            color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
+                            strength: glow,
+                            power: 3.0,
+                        },
+                    },
+                });
+                commands
+                    .entity(child)
+                    .remove::<MeshMaterial3d<StandardMaterial>>()
+                    .insert(MeshMaterial3d(handle));
+            } else {
+                let handle = materials.add(material);
+                commands.entity(child).insert(MeshMaterial3d(handle));
+            }
+        }
+        applied.insert(scene_entity);
+    }
+}
+
 pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
@@ -2040,6 +2143,7 @@ impl Plugin for Object3DPlugin {
                 update_joint_animations,
                 warn_imported_cameras,
                 update_object_3d_billboard_system,
+                apply_glb_material_overrides,
             ),
         );
     }

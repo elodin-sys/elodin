@@ -1,0 +1,10 @@
+[monte_carlo]
+n_samples = 100
+seed = 42
+method = "lhs"
+
+[monte_carlo.variables]
+mass = { dist = "uniform", min = 1.0, max = 2.0 }
+target_x = { dist = "uniform", min = 20.0, max = 40.0 }
+thrust_gain = { dist = "uniform", min = 0.8, max = 1.2 }
+wind = { dist = "normal", mean = 0.0, std = 0.5 }

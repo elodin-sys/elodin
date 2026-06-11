@@ -1975,6 +1975,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_hanabi"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d551e95cf661cfc74bd71faf16e7cc8eed7d21b7f0ac8ca8301426338e38be36"
+dependencies = [
+ "anyhow",
+ "bevy",
+ "bitflags 2.11.1",
+ "bytemuck",
+ "fixedbitset",
+ "getrandom 0.3.4",
+ "naga",
+ "naga_oil",
+ "rand 0.9.4",
+ "rand_pcg",
+ "ron 0.8.1",
+ "serde",
+ "thiserror 2.0.18",
+ "wgpu",
+]
+
+[[package]]
 name = "bevy_image"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3994,12 +4016,14 @@ dependencies = [
 name = "cranelift-mlir"
 version = "0.17.4-alpha.0"
 dependencies = [
+ "blake3",
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
  "faer",
+ "memmap2",
  "rayon",
  "serde",
  "serde_json",
@@ -5232,6 +5256,7 @@ dependencies = [
  "impeller2-bevy",
  "machine-uid",
  "miette 7.6.0",
+ "monte-carlo",
  "opener 0.7.2",
  "postcard",
  "reqwest",
@@ -5371,6 +5396,7 @@ dependencies = [
  "bevy_fontmesh",
  "bevy_framepace",
  "bevy_geo_frames",
+ "bevy_hanabi",
  "bevy_infinite_grid",
  "bevy_mat3_material",
  "bevy_picking",
@@ -8891,6 +8917,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "monte-carlo"
+version = "0.17.4-alpha.0"
+dependencies = [
+ "chrono",
+ "csv",
+ "indicatif",
+ "miette 7.6.0",
+ "s10",
+ "serde",
+ "serde_json",
+ "stellarator",
+ "sysinfo 0.34.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11336,6 +11380,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_pcg"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b48ac3f7ffaab7fac4d2376632268aa5f89abdb55f7ebf8f4d11fffccb2320f7"
+dependencies = [
+ "rand_core 0.9.5",
+]
+
+[[package]]
 name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11813,6 +11866,18 @@ checksum = "e7ceb6607dd738c99bc8cb28eff249b7cd5c8ec88b9db96c0608c1480d140fb1"
 dependencies = [
  "cpal",
  "lewton",
+]
+
+[[package]]
+name = "ron"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+dependencies = [
+ "base64 0.21.7",
+ "bitflags 2.11.1",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]

@@ -46,6 +46,7 @@ This document contains the help content for the Elodin command-line programs.
 
 * `editor` — Launch the Elodin editor (default)
 * `run` — Run an Elodin simulation in headless mode
+* `monte-carlo` — Run Monte Carlo campaigns
 
 ###### **Options**
 
@@ -83,7 +84,7 @@ Launch the Elodin editor (default)
 
 Run an Elodin simulation in headless mode (not available on Windows)
 
-**Usage:** `elodin run [addr/path]`
+**Usage:** `elodin run [--monte-carlo PLAN.csv] [addr/path]`
 
 ###### **Arguments**
 
@@ -92,12 +93,70 @@ Run an Elodin simulation in headless mode (not available on Windows)
   - A TOML file (e.g., `s10.toml`)
   - A directory containing `main.py` or `s10.toml`
 
+* `--monte-carlo <PLAN.csv>` — Sugar for `elodin monte-carlo run <addr/path> --plan PLAN.csv`.
+
+## `elodin monte-carlo`
+
+Run a simulation campaign with a bounded worker pool. Each worker owns a
+deterministic resource slot (DB port and user-defined SITL ports), and the
+runner recycles those slots across arbitrarily many runs. The campaign pins a
+shared `ELODIN_CACHE_DIR` so large Cranelift constants are mapped once across
+workers. When worker or runtime-thread counts are unset, the runner auto-sizes
+them from available CPUs: workers consume the CPU budget, while the orchestrator
+uses a small I/O thread pool for process/log handling. Campaign startup reaps
+pre-existing `elodin` and `elodin-db` processes by default so stale editor or
+database sessions cannot collide with worker ports.
+
+**Usage:** `elodin monte-carlo <COMMAND>`
+
+###### **Subcommands**
+
+* `template` — Generate a starter plan or sampling spec from declared simulation params
+* `sample` — Materialize a sampling spec into a plan CSV
+* `run` — Execute a campaign
+* `resume` — Re-run missing or failed runs from a previous campaign
+* `report` — Rebuild campaign reports
+
+### `elodin monte-carlo run`
+
+```bash
+elodin monte-carlo run examples/monte-carlo/main.py \
+  --campaign examples/monte-carlo/campaign.toml \
+  --spec examples/monte-carlo/spec.toml \
+  --out dbs/monte-carlo-demo
+```
+
+Key options:
+
+- `--plan <PLAN.csv>`: materialized one-row-per-run plan.
+- `--spec <SPEC.toml>`: sampling spec; sampled into a plan before execution.
+- `--campaign <CAMPAIGN.toml>`: worker count, resource slots, hooks, retries, timeouts.
+- `--workers <N>`: override the auto-sized campaign worker count.
+- `--runtime-threads <N>`: override the auto-sized orchestrator I/O thread
+  pool. Use `0` or omit the option for the default auto-sized pool.
+- `--memory-probe`: enable expensive shared-constant PSS sampling and
+  `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
+- `--keep-existing`: do not reap existing `elodin` / `elodin-db` processes at
+  campaign startup.
+- `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
+- `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
+- `--progress <auto|always|never>`: control the live progress bar. `auto` shows
+  a bar only when stderr is a terminal.
+
+Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
+`resources.csv`, `campaign_summary.txt`, and `summary.json`. With
+`--memory-probe`, the runner also writes `memory.json` and `processes.csv`.
+Each run's child process output is captured in `runs/<run_id>/logs/`, and the
+per-run simulation timing snapshot is written to `runs/<run_id>/sim_summary.json`
+for the final campaign rollup.
+
 ## Python Simulation Subcommands
 
 When you run a simulation Python file directly (for example `python examples/drone/main.py ...`), the embedded simulation CLI supports additional subcommands:
 
 - `run` (default): run the simulation normally.
 - `bench`: run a fixed-tick benchmark and print runtime metrics.
+- `params`: print the simulation's declared Monte Carlo parameter schema as JSON.
 
 ### `bench` options
 

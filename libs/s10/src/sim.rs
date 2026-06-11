@@ -2,6 +2,7 @@ use std::iter;
 use std::process::Stdio;
 #[allow(unused_imports)]
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
@@ -26,6 +27,10 @@ pub struct SimRecipe {
     pub addr: SocketAddr,
     #[serde(default)]
     pub optimize: bool,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub log_path: Option<PathBuf>,
 }
 
 fn default_addr() -> SocketAddr {
@@ -117,31 +122,46 @@ impl SimRecipe {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.env("TRACY_PORT", "8089");
+        cmd.envs(self.env.iter());
         let port = crate::liveness::serve_tokio().await?;
-        let mut child = cmd
+        let child = cmd
             .arg(&self.path)
             .arg("run")
+            .arg(self.addr.to_string())
             .arg("--no-s10")
             .arg("--liveness-port")
-            .arg(port.to_string())
-            .spawn()?;
+            .arg(port.to_string());
+        if self.optimize {
+            child.arg("--optimize");
+        }
+        let mut child = child.spawn()?;
         let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
 
         if let Some(stdout) = child.stdout.take() {
+            let log_path = self.log_path.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("sim {line}");
+                    if let Some(log_path) = &log_path {
+                        let _ = crate::recipe::append_log_line(log_path, "sim", &line).await;
+                    } else {
+                        eprintln!("sim {line}");
+                    }
                 }
             });
         }
         if let Some(stderr) = child.stderr.take() {
+            let log_path = self.log_path.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("sim {line}");
+                    if let Some(log_path) = &log_path {
+                        let _ = crate::recipe::append_log_line(log_path, "sim", &line).await;
+                    } else {
+                        eprintln!("sim {line}");
+                    }
                 }
             });
         }
@@ -171,6 +191,14 @@ impl SimRecipe {
             }
             res = child.wait() => {
                 let status = res?;
+                if let Some(log_path) = &self.log_path {
+                    let line = if let Some(code) = status.code() {
+                        format!("killed with code {code}")
+                    } else {
+                        "killed by signal".to_string()
+                    };
+                    crate::recipe::append_log_line(log_path, "sim", &line).await?;
+                }
                 if !status.success() {
                     Err(Error::SimBuildFailed(status.code()))
                 } else {
