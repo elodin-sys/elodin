@@ -103,7 +103,15 @@ impl Plugin for FloatingOriginPlugin {
         app.insert_resource(self.settings.clone())
             .add_plugins(big_space::prelude::BigSpaceDefaultPlugins)
             .add_systems(Startup, setup_floating_origin)
-            .add_systems(PreUpdate, attach_parentless_grid_cells);
+            .add_systems(PreUpdate, attach_parentless_grid_cells)
+            // Also adopt right before transform propagation (and big_space's
+            // PostUpdate hierarchy validation) so entities that gained a
+            // `GridCell` during this frame never cross a validation pass
+            // unparented.
+            .add_systems(
+                PostUpdate,
+                attach_parentless_grid_cells.before(bevy::transform::TransformSystems::Propagate),
+            );
     }
 }
 

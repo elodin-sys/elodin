@@ -231,7 +231,10 @@ fn spawn_arrow_endpoint(
         Name::new(name),
     ));
     if let Some(frame) = frame {
-        endpoint.insert(GeoPosition(frame, DVec3::ZERO));
+        endpoint.insert((
+            GeoPosition(frame, DVec3::ZERO),
+            GeoRotation::new(frame, bevy::math::DQuat::IDENTITY),
+        ));
     }
     endpoint.id()
 }
