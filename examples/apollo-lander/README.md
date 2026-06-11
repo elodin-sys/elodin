@@ -252,3 +252,8 @@ Use `--dry-run` to only write the narrowed specs.
   whitepaper's visualization section for the measured numbers).
 - Orange (DPS thrust) and white (RCS torque) vector arrows show effector
   activity in the body frame.
+- **Editor preview (experimental, native only):** GPU exhaust particles for the
+  DPS plume and 16 cold-gas RCS jets, driven by `main_thrust_viz` and
+  `rcs_thruster_viz`. Nozzle geometry lives in the editor plugin, not the KDL.
+  Proposal for a future KDL `thruster` node:
+  [`docs/kdl-particle-effects-proposal.md`](docs/kdl-particle-effects-proposal.md).

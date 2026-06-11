@@ -1,7 +1,8 @@
-//! GPU thruster exhaust for simulations that expose `main_thrust_viz` / `rcs_torque_viz`.
+//! GPU thruster exhaust for simulations that expose thrust / RCS viz components.
 //!
-//! Spike: auto-attaches to the schematic `lander.world_pos` object and drives particle
-//! spawn rates from live telemetry (no KDL node yet).
+//! Spike: auto-attaches to the schematic `lander.world_pos` object.
+//! - DPS: `main_thrust_viz` (future: KDL `thruster` node — see apollo-lander docs)
+//! - Cold gas RCS: `rcs_thruster_viz[16]`; nozzle geometry stays in this plugin, not KDL.
 
 use bevy::math::{Quat, Vec4};
 use bevy::prelude::*;
@@ -16,7 +17,7 @@ use bevy_hanabi::{
             ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier, OrientMode,
             OrientModifier, SizeOverLifetimeModifier,
         },
-        position::{SetPositionCircleModifier, SetPositionCone3dModifier},
+        position::SetPositionCone3dModifier,
     },
 };
 use impeller2::types::ComponentId;
@@ -29,7 +30,7 @@ use crate::vector_arrow::component_value_tail_to_vec3;
 
 const LANDER_EQL: &str = "lander.world_pos";
 const THRUST_VIZ: &str = "lander.main_thrust_viz";
-const RCS_VIZ: &str = "lander.rcs_torque_viz";
+const RCS_THRUSTERS_VIZ: &str = "lander.rcs_thruster_viz";
 /// DPS deck under the gray ascent stage (Bevy body Y-up).
 const DPS_NOZZLE_BODY: Vec3 = Vec3::new(0.0, -0.55, 0.0);
 /// Body +Z thrust in ENU maps to Bevy +Y; exhaust is opposite.
@@ -57,90 +58,82 @@ struct ThrusterJet {
 #[derive(Clone, Copy)]
 enum JetKind {
     Dps,
-    Rcs { axis: u8, sign: f32 },
+    Rcs { index: u8 },
 }
 
-const RCS_JET_COUNT: usize = 12;
+const RCS_JET_COUNT: usize = 16;
 
 struct RcsJetMount {
     body_pos: Vec3,
     body_exhaust: Vec3,
-    axis: u8,
-    sign: f32,
 }
 
+/// Sixteen cold-gas jets on the ascent-stage corners (4 clusters × 4 nozzles).
+/// Index order must match `RCS_THRUSTER_AXIS` / `RCS_THRUSTER_SIGN` in apollo-lander/sim.py.
 const RCS_JETS: [RcsJetMount; RCS_JET_COUNT] = [
     RcsJetMount {
-        body_pos: Vec3::new(2.2, 0.9, 1.2),
+        body_pos: Vec3::new(2.15, 0.85, 1.45),
         body_exhaust: Vec3::NEG_X,
-        axis: 0,
-        sign: 1.0,
     },
     RcsJetMount {
-        body_pos: Vec3::new(-2.2, 0.9, 1.2),
-        body_exhaust: Vec3::X,
-        axis: 0,
-        sign: -1.0,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(2.2, -0.9, 1.2),
+        body_pos: Vec3::new(2.15, 0.85, -1.45),
         body_exhaust: Vec3::NEG_X,
-        axis: 0,
-        sign: 1.0,
     },
     RcsJetMount {
-        body_pos: Vec3::new(-2.2, -0.9, 1.2),
+        body_pos: Vec3::new(2.15, 1.35, 0.0),
+        body_exhaust: Vec3::NEG_Y,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(2.15, 0.35, 0.0),
+        body_exhaust: Vec3::Y,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(-2.15, 0.85, 1.45),
         body_exhaust: Vec3::X,
-        axis: 0,
-        sign: -1.0,
     },
     RcsJetMount {
-        body_pos: Vec3::new(0.9, 2.2, 1.2),
-        body_exhaust: Vec3::NEG_Z,
-        axis: 1,
-        sign: 1.0,
+        body_pos: Vec3::new(-2.15, 0.85, -1.45),
+        body_exhaust: Vec3::X,
     },
     RcsJetMount {
-        body_pos: Vec3::new(-0.9, 2.2, 1.2),
-        body_exhaust: Vec3::Z,
-        axis: 1,
-        sign: -1.0,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(0.9, -2.2, 1.2),
-        body_exhaust: Vec3::NEG_Z,
-        axis: 1,
-        sign: 1.0,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-0.9, -2.2, 1.2),
-        body_exhaust: Vec3::Z,
-        axis: 1,
-        sign: -1.0,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(1.4, 0.0, 2.0),
+        body_pos: Vec3::new(-2.15, 1.35, 0.0),
         body_exhaust: Vec3::NEG_Y,
-        axis: 2,
-        sign: 1.0,
     },
     RcsJetMount {
-        body_pos: Vec3::new(-1.4, 0.0, 2.0),
+        body_pos: Vec3::new(-2.15, 0.35, 0.0),
         body_exhaust: Vec3::Y,
-        axis: 2,
-        sign: -1.0,
     },
     RcsJetMount {
-        body_pos: Vec3::new(0.0, 1.4, 2.0),
+        body_pos: Vec3::new(1.45, 0.85, 2.15),
+        body_exhaust: Vec3::NEG_Z,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(-1.45, 0.85, 2.15),
+        body_exhaust: Vec3::NEG_Z,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(0.0, 1.35, 2.15),
         body_exhaust: Vec3::NEG_Y,
-        axis: 2,
-        sign: 1.0,
     },
     RcsJetMount {
-        body_pos: Vec3::new(0.0, -1.4, 2.0),
+        body_pos: Vec3::new(0.0, 0.35, 2.15),
         body_exhaust: Vec3::Y,
-        axis: 2,
-        sign: -1.0,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(1.45, 0.85, -2.15),
+        body_exhaust: Vec3::Z,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(-1.45, 0.85, -2.15),
+        body_exhaust: Vec3::Z,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(0.0, 1.35, -2.15),
+        body_exhaust: Vec3::NEG_Y,
+    },
+    RcsJetMount {
+        body_pos: Vec3::new(0.0, 0.35, -2.15),
+        body_exhaust: Vec3::Y,
     },
 ];
 
@@ -222,22 +215,29 @@ fn build_dps_exhaust() -> EffectAsset {
 
 fn build_rcs_jet() -> EffectAsset {
     let mut module = Module::default();
-    let init_pos = SetPositionCircleModifier {
-        center: module.lit(Vec3::ZERO),
-        axis: module.lit(Vec3::Y),
-        radius: module.lit(0.08),
-        dimension: ShapeDimension::Surface,
+    let init_pos = SetPositionCone3dModifier {
+        height: module.lit(0.06),
+        base_radius: module.lit(0.04),
+        top_radius: module.lit(0.07),
+        dimension: ShapeDimension::Volume,
     };
     let init_vel =
-        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 4.0));
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.18));
-    let size = SetAttributeModifier::new(Attribute::SIZE, module.lit(0.08));
+        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 10.0));
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.32));
+    let size = SetAttributeModifier::new(Attribute::SIZE, module.lit(0.14));
+    let drag = LinearDragModifier::new(module.lit(2.5));
 
     let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(0.95, 0.97, 1.0, 1.0));
+    gradient.add_key(0.0, Vec4::new(0.92, 0.96, 1.0, 0.85));
+    gradient.add_key(0.35, Vec4::new(0.78, 0.86, 0.98, 0.45));
     gradient.add_key(1.0, Vec4::ZERO);
 
-    EffectAsset::new(4096, SpawnerSettings::rate(40.0.into()), module)
+    let mut size_over_life = Gradient::<Vec3>::new();
+    size_over_life.add_key(0.0, Vec3::splat(0.35));
+    size_over_life.add_key(0.2, Vec3::splat(0.9));
+    size_over_life.add_key(1.0, Vec3::splat(0.25));
+
+    EffectAsset::new(8192, SpawnerSettings::rate(90.0.into()), module)
         .with_name("rcs_jet")
         .with_simulation_space(SimulationSpace::Local)
         .with_alpha_mode(AlphaMode::Add)
@@ -245,6 +245,11 @@ fn build_rcs_jet() -> EffectAsset {
         .init(init_vel)
         .init(lifetime)
         .init(size)
+        .update(drag)
+        .render(SizeOverLifetimeModifier {
+            gradient: size_over_life,
+            screen_space_size: false,
+        })
         .render(ColorOverLifetimeModifier {
             gradient,
             blend: ColorBlendMode::Overwrite,
@@ -283,8 +288,7 @@ fn ensure_lander_thrusters(
                 .spawn((
                     ThrusterJet {
                         kind: JetKind::Rcs {
-                            axis: mount.axis,
-                            sign: mount.sign,
+                            index: idx as u8,
                         },
                         body_offset: mount.body_pos,
                         body_exhaust: mount.body_exhaust,
@@ -337,7 +341,7 @@ fn sync_thruster_particles(
     component_values: Query<&WktComponentValue>,
 ) {
     let thrust = read_thrust_level(&entity_map, &component_values);
-    let torque = read_torque(&entity_map, &component_values);
+    let rcs = read_rcs_thruster_levels(&entity_map, &component_values);
 
     for rig in &rigs {
         for entity in core::iter::once(rig.dps).chain(rig.rcs) {
@@ -346,14 +350,10 @@ fn sync_thruster_particles(
             };
             let intensity = match jet.kind {
                 JetKind::Dps => thrust,
-                JetKind::Rcs { axis, sign } => {
-                    let component = match axis {
-                        0 => torque.x,
-                        1 => torque.y,
-                        _ => torque.z,
-                    };
-                    (component * sign).max(0.0)
-                }
+                JetKind::Rcs { index } => rcs
+                    .get(index as usize)
+                    .copied()
+                    .unwrap_or(0.0),
             };
             apply_spawner(&mut spawner, &mut visibility, intensity, jet.kind);
         }
@@ -366,18 +366,22 @@ fn apply_spawner(
     intensity: f32,
     kind: JetKind,
 ) {
-    if intensity <= 0.02 {
+    let (cutoff, base) = match kind {
+        JetKind::Dps => (0.02, 400.0),
+        JetKind::Rcs { .. } => (0.006, 140.0),
+    };
+    if intensity <= cutoff {
         spawner.active = false;
         *visibility = Visibility::Hidden;
         return;
     }
     *visibility = Visibility::Visible;
     spawner.active = true;
-    let base = match kind {
-        JetKind::Dps => 400.0,
-        JetKind::Rcs { .. } => 55.0,
+    let rate = match kind {
+        JetKind::Rcs { .. } => intensity.sqrt() * base,
+        JetKind::Dps => intensity * base,
     };
-    spawner.settings = SpawnerSettings::rate((intensity * base).into());
+    spawner.settings = SpawnerSettings::rate(rate.into());
 }
 
 fn read_thrust_level(entity_map: &EntityMap, component_values: &Query<&WktComponentValue>) -> f32 {
@@ -393,15 +397,40 @@ fn read_thrust_level(entity_map: &EntityMap, component_values: &Query<&WktCompon
         .unwrap_or(0.0)
 }
 
-fn read_torque(entity_map: &EntityMap, component_values: &Query<&WktComponentValue>) -> Vec3 {
-    let id = ComponentId::new(RCS_VIZ);
+fn read_rcs_thruster_levels(
+    entity_map: &EntityMap,
+    component_values: &Query<&WktComponentValue>,
+) -> [f32; RCS_JET_COUNT] {
+    let id = ComponentId::new(RCS_THRUSTERS_VIZ);
     let Some(entity) = entity_map.get(&id) else {
-        return Vec3::ZERO;
+        return [0.0; RCS_JET_COUNT];
     };
     let Ok(value) = component_values.get(*entity) else {
-        return Vec3::ZERO;
+        return [0.0; RCS_JET_COUNT];
     };
-    component_value_tail_to_vec3(value)
-        .map(|v| Vec3::new(v.x as f32, v.y as f32, v.z as f32))
-        .unwrap_or(Vec3::ZERO)
+    component_value_f64_array(value)
+        .map(|values| {
+            let mut levels = [0.0f32; RCS_JET_COUNT];
+            for (idx, level) in levels.iter_mut().enumerate() {
+                *level = values.get(idx).copied().unwrap_or(0.0) as f32;
+            }
+            levels
+        })
+        .unwrap_or([0.0; RCS_JET_COUNT])
+}
+
+fn component_value_f64_array(value: &WktComponentValue) -> Option<Vec<f64>> {
+    use nox::ArrayBuf;
+    match value {
+        WktComponentValue::F32(array) => Some(
+            array
+                .buf
+                .as_buf()
+                .iter()
+                .map(|v| f64::from(*v))
+                .collect(),
+        ),
+        WktComponentValue::F64(array) => Some(array.buf.as_buf().to_vec()),
+        _ => None,
+    }
 }

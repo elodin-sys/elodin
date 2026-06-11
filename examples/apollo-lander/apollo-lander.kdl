@@ -46,6 +46,9 @@ object_3d surface.world_pos frame=ENU {
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
 }
+// Editor preview (native only, experimental): GPU DPS plume + 16 cold-gas jets driven by
+// lander.main_thrust_viz and lander.rcs_thruster_viz — geometry in editor plugin, not KDL.
+// See examples/apollo-lander/docs/kdl-particle-effects-proposal.md
 object_3d lander_truth.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb
 }
