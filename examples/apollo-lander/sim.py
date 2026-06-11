@@ -165,9 +165,7 @@ RcsThrusterViz = ty.Annotated[
     jax.Array,
     el.Component("rcs_thruster_viz", el.ComponentType(el.PrimitiveType.F64, (16,))),
 ]
-RCS_THRUSTER_AXIS = jnp.array(
-    [0, 0, 2, 2, 0, 0, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2], dtype=jnp.int32
-)
+RCS_THRUSTER_AXIS = jnp.array([0, 0, 2, 2, 0, 0, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2], dtype=jnp.int32)
 RCS_THRUSTER_SIGN = jnp.array(
     [1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0],
     dtype=jnp.float64,
@@ -449,9 +447,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
         thrust: Thrust, torque: RcsTorque
     ) -> tuple[MainThrustViz, RcsTorqueViz, RcsThrusterViz]:
         torque_norm = torque / RCS_AXIS_TORQUE_LIMIT_NM
-        per_thruster = jnp.maximum(
-            0.0, torque_norm[RCS_THRUSTER_AXIS] * RCS_THRUSTER_SIGN
-        )
+        per_thruster = jnp.maximum(0.0, torque_norm[RCS_THRUSTER_AXIS] * RCS_THRUSTER_SIGN)
         return (
             jnp.array([0.0, 0.0, thrust[0] / DPS_MAX_THRUST_N], dtype=jnp.float64),
             torque_norm,
