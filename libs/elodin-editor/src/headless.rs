@@ -203,17 +203,22 @@ fn load_headless_scene(
         return;
     };
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let fallback_frame = schematic.frame;
 
     for elem in &schematic.elems {
         match elem {
             SchematicElem::Object3d(obj) => {
+                let mut obj = obj.clone();
+                if obj.frame.is_none() {
+                    obj.frame = fallback_frame;
+                }
                 let Ok(expr) = eql.0.parse_str(&obj.eql) else {
                     tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
                     continue;
                 };
                 let _ = create_object_3d_entity(
                     &mut commands,
-                    obj.clone(),
+                    obj,
                     expr,
                     &eql.0,
                     &mut materials,
@@ -225,10 +230,14 @@ fn load_headless_scene(
                 );
             }
             SchematicElem::WorldMesh(world_mesh) => {
+                let mut world_mesh = world_mesh.clone();
+                if world_mesh.frame.is_none() {
+                    world_mesh.frame = fallback_frame;
+                }
                 crate::plugins::world_mesh::spawn_world_mesh_terrain(
                     &mut commands,
                     &mut world_mesh_materials,
-                    world_mesh,
+                    &world_mesh,
                 );
             }
             _ => {}
