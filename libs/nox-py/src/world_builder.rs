@@ -1477,7 +1477,17 @@ impl WorldBuilder {
             .and_then(|path| {
                 if path.exists() {
                     std::fs::read_to_string(&path)
-                        .inspect(|_| info!("read schematic at {:?}", path.display()))
+                        .inspect(|_| {
+                            if default_content.is_some() {
+                                tracing::warn!(
+                                    "using schematic file {:?} instead of the default KDL; \
+                                     delete the file to use the default",
+                                    path.display()
+                                );
+                            } else {
+                                info!("read schematic at {:?}", path.display());
+                            }
+                        })
                         .inspect_err(|err| {
                             error!(
                                 ?err,

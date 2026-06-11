@@ -473,10 +473,6 @@ pub fn set_viewport_pos(
                 && let Some(look_at) = val.as_world_pos()
             {
                 let dir = (look_at.pos - pos.pos).normalize();
-                let dir = match viewport.frame {
-                    Some(GeoFrame::NED) => nox::Vec3::new(dir.y(), dir.x(), -dir.z()),
-                    _ => dir,
-                };
                 let up_vec = viewport
                     .up
                     .compiled_expr
