@@ -530,10 +530,14 @@ pub(crate) fn queue_terrain<M: Material>(
             if let Some(debug) = &debug {
                 flags |= TerrainPipelineFlags::from_debug(debug);
             } else {
+                // Match `DebugTerrain::default()`: HIGH_PRECISION is required
+                // for jitter-free Earth-radius terrain and self-gates by view
+                // distance, so it is safe for planar terrain too.
                 flags |= TerrainPipelineFlags::LIGHTING
                     | TerrainPipelineFlags::MORPH
                     | TerrainPipelineFlags::BLEND
-                    | TerrainPipelineFlags::SAMPLE_GRAD;
+                    | TerrainPipelineFlags::SAMPLE_GRAD
+                    | TerrainPipelineFlags::HIGH_PRECISION;
             }
 
             let key = TerrainPipelineKey { flags };
