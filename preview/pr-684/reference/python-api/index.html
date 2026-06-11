@@ -319,6 +319,14 @@
             
             <li>
                 <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-684/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
                     class="docs-link active"
                     href="https://docs.elodin.systems/preview/pr-684/reference/python-api/"
                     >Python API</a
@@ -829,7 +837,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>is_canceled</code> : <code>Callable[[], bool]</code>, optional, a polling function checked during the simulation loop. If it returns <code>True</code>, the simulation exits gracefully. Useful for integrating with external control systems (e.g., a GUI stop button, or a watchdog timeout).</li>
 <li><code>pre_step</code> : <code>Callable[[int, StepContext], None]</code>, optional, a callback function called <strong>before</strong> each simulation tick. Receives the tick number and a <a href="https://docs.elodin.systems/preview/pr-684/reference/python-api/#class-elodin-stepcontext">elodin.StepContext</a> for direct database access. Useful for injecting external data (e.g., from hardware-in-the-loop systems) before the physics step runs.</li>
 <li><code>post_step</code> : <code>Callable[[int, StepContext], None]</code>, optional, a callback function called <strong>after</strong> each simulation tick. Receives the tick number and a <a href="https://docs.elodin.systems/preview/pr-684/reference/python-api/#class-elodin-stepcontext">elodin.StepContext</a> for direct database access. Useful for reading simulation results and sending data to external systems (e.g., SITL flight controllers).</li>
-<li><code>db_path</code> : <code>string</code>, optional, the path to the database directory. If not provided, a temporary database is created.</li>
+<li><code>db_path</code> : <code>string</code>, optional, the path to the database directory. If not provided, a temporary database is created. When provided, Elodin records project-local Python source files to <code>{db_path}/simulation_source/</code> for analysis and provenance.</li>
 <li><code>interactive</code> : <code>bool</code>, optional, controls simulation behavior after reaching <code>max_ticks</code>, defaults to <code>True</code>. When <code>True</code>, the simulation pauses but remains running for continued interaction in the Elodin editor. When <code>False</code>, the simulation terminates completely after reaching <code>max_ticks</code>.</li>
 <li><code>start_timestamp</code> : <code>int</code>, optional, the starting timestamp for the simulation in microseconds. If <code>None</code> (default), uses the current system time (epoch-based). Set to <code>0</code> for zero-based timing where the simulation starts at <code>t=0</code>.</li>
 <li><code>log_level</code> : <code>str</code>, optional, log level for the embedded Elodin-DB instance (<code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>). Defaults to <code>info</code> unless <code>RUST_LOG</code> is set.</li>
