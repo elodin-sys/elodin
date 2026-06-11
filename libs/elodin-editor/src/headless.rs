@@ -98,6 +98,8 @@ impl Plugin for HeadlessEditorPlugin {
             )
             .add_plugins(crate::skybox_asset_plugin_headless())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
+            .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
+            .add_plugins(bevy::pbr::wireframe::WireframePlugin::default())
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(GeoFramePlugin {
@@ -236,6 +238,8 @@ fn load_headless_scene(
                 }
                 crate::plugins::world_mesh::spawn_world_mesh_terrain(
                     &mut commands,
+                    &mut meshes,
+                    &mut materials,
                     &mut world_mesh_materials,
                     &world_mesh,
                 );
