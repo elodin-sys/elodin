@@ -56,7 +56,8 @@ use ui::{
 /// Global coordinate frame resource set by the schematic's top-level `coordinate` node.
 /// Individual elements (viewport, object_3d, line_3d, vector_arrow) use this as a fallback
 /// when they don't specify their own frame.
-#[derive(Resource, Default, Clone, Copy, Debug)]
+#[derive(Resource, Default, Clone, Copy, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct Coordinate(pub Option<GeoFrame>);
 
 mod embedded_lfs;
@@ -953,11 +954,24 @@ pub fn warn_missing_geo(
     }
 }
 
+/// Accessors for `WorldPos` simulation coordinates.
+///
+/// Positioning goes exclusively through the geo pipeline: read `pos()`/`att()`
+/// and convert with `GeoPosition`/`GeoRotation` + `GeoContext`. The `bevy_*`
+/// methods hard-code the ENU-Plane mapping and exist only as legacy oracles
+/// for tests; they silently disagree with `Present::Sphere` and non-ENU
+/// frames.
 pub trait WorldPosExt {
+    /// Legacy ENU-Plane position swizzle `(x, z, -y)`. Test oracle only;
+    /// use `GeoPosition::to_bevy` instead.
     fn bevy_pos(&self) -> DVec3;
+    /// Legacy ENU-Plane attitude swizzle. Test oracle only; use
+    /// `GeoRotation::to_bevy` instead.
     fn bevy_att(&self) -> DQuat;
 
+    /// Position in simulation coordinates.
     fn pos(&self) -> DVec3;
+    /// Attitude in simulation coordinates.
     fn att(&self) -> DQuat;
 }
 
@@ -1030,19 +1044,18 @@ pub fn follow_latest(
 /// direct `WorldPos` -> `Transform` path.
 pub fn sync_pos(
     mut query: Query<(&mut GeoPosition, &mut GeoRotation, &WorldPos), Changed<WorldPos>>,
-    geo_context: Res<GeoContext>,
 ) {
     query
         .iter_mut()
         .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
             geo_pos.1 = world_pos.pos();
             // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-            *geo_rot = GeoRotation::from_bevy_kind(
-                geo_rot.0,
-                world_pos.bevy_att(),
-                &geo_context,
-                geo_rot.2,
-            );
+            // (`GeoRotation::new(ENU, att).to_bevy` matches the legacy
+            // `bevy_att()` swizzle in Plane mode; see
+            // `test_bevy_att_vs_geo_frames_plane`.)
+            geo_rot.1 = world_pos.att();
+            // let bevy_att = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&geo_context);
+            // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
         });
 }
 
@@ -1370,6 +1383,7 @@ pub enum TimeRangeError {
 }
 
 #[derive(Resource, PartialEq, Eq, Clone, Copy, Debug)]
+
 enum Offset {
     Earliest(Duration),
     Latest(Duration),
