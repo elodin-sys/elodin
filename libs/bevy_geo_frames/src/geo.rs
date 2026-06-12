@@ -341,6 +341,48 @@ impl GeoRotation {
         GeoRotation(frame, q.into(), RotationKind::Absolute)
     }
 
+    /// A [RotationKind::Relative] rotation expressed in `frame` that orients a
+    /// camera (Bevy convention: forward `-Z`, up `+Y`) to look along `dir`,
+    /// with the camera's up toward `up`. Both vectors are expressed in `frame`
+    /// coordinates, so the computation is frame agnostic.
+    ///
+    /// If `up` is `None` (or collinear with `dir`), the frame's natural camera
+    /// up — the frame direction that maps to Bevy `+Y` — is used.
+    pub fn look_at(
+        frame: GeoFrame,
+        dir: impl Into<DVec3>,
+        up: Option<DVec3>,
+        context: &GeoContext,
+    ) -> Self {
+        let frame_R_bevy = GeoFrame::bevy_R_(&frame, context).transpose();
+        // The camera's identity axes expressed in `frame` coordinates.
+        let f0 = frame_R_bevy * DVec3::NEG_Z;
+        let u0 = frame_R_bevy * DVec3::Y;
+
+        let f = dir.into().normalize();
+        let mut up = up.unwrap_or(u0);
+        if f.cross(up).length_squared() < 1e-12 {
+            // `up` collinear with `dir`: prefer the frame's camera up, then
+            // its camera forward (orthogonal to `u0`, so always valid).
+            up = if f.cross(u0).length_squared() > 1e-12 {
+                u0
+            } else {
+                f0
+            };
+        }
+        let s = f.cross(up).normalize();
+        let u = s.cross(f);
+
+        // Rotation taking the identity camera axes to the desired ones.
+        let m0 = DMat3::from_cols(f0.cross(u0), f0, u0);
+        let m = DMat3::from_cols(s, f, u);
+        GeoRotation(
+            frame,
+            DQuat::from_mat3(&(m * m0.transpose())),
+            RotationKind::Relative,
+        )
+    }
+
     /// Convert orientation to Bevy.
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
         let local_rot = self.1;
@@ -764,6 +806,76 @@ mod tests {
         // It must match the frame's basis-change rotation exactly.
         let basis = DQuat::from_mat3(&GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx));
         assert_quat_eq!(q, basis);
+    }
+
+    /// `look_at` is computed entirely in frame coordinates; converting to Bevy
+    /// must point the camera (forward `-Z`, up `+Y`) along the frame-space
+    /// direction in every frame and presentation mode.
+    #[test]
+    fn look_at_orients_camera_in_any_frame() {
+        let contexts = [
+            dummy_ctx(),
+            dummy_ctx().with_present(Present::Sphere),
+            GeoContext::from(GeoOrigin::new_from_degrees(35.0, -110.0, 0.0))
+                .with_present(Present::Sphere),
+        ];
+        let dir = DVec3::new(1.0, -2.0, 0.5);
+        let up = DVec3::new(-0.2, 0.3, 1.0);
+
+        for (c, ctx) in contexts.iter().enumerate() {
+            for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+                let bevy_R = GeoFrame::bevy_R_(&frame, ctx);
+
+                let r = GeoRotation::look_at(frame, dir, Some(up), ctx);
+                assert_eq!(r.0, frame);
+                assert_eq!(r.2, RotationKind::Relative);
+                let q = r.to_bevy(ctx);
+
+                let fwd = q * DVec3::NEG_Z;
+                let expected = (bevy_R * dir).normalize();
+                assert_approx_eq!(fwd, expected, 1e-9, format!("ctx {c} {frame:?} forward"));
+
+                // Camera up must tilt toward the requested up.
+                let cam_up = q * DVec3::Y;
+                assert!(
+                    cam_up.dot((bevy_R * up).normalize()) > 0.0,
+                    "ctx {c} {frame:?}: camera up {cam_up:?} points away from requested up"
+                );
+
+                // Default up: same forward, and up matches the frame's
+                // natural camera up projected off the view direction.
+                let q_default = GeoRotation::look_at(frame, dir, None, ctx).to_bevy(ctx);
+                let fwd_default = q_default * DVec3::NEG_Z;
+                assert_approx_eq!(
+                    fwd_default,
+                    expected,
+                    1e-9,
+                    format!("ctx {c} {frame:?} default-up forward")
+                );
+                // Default up maps to Bevy +Y, so the camera stays right side
+                // up for any mostly-horizontal view direction.
+                assert!(
+                    (q_default * DVec3::Y).dot(DVec3::Y) > 0.0,
+                    "ctx {c} {frame:?}: default camera up flipped"
+                );
+            }
+        }
+    }
+
+    /// Looking "north" with frame-up must be the identity attitude in both
+    /// ENU and NED (their camera identity axes differ, the result must not).
+    #[test]
+    fn look_at_identity_per_frame() {
+        let ctx = dummy_ctx();
+        let cases = [
+            (GeoFrame::ENU, DVec3::Y, DVec3::Z),
+            (GeoFrame::NED, DVec3::X, DVec3::NEG_Z),
+        ];
+        for (frame, north, up) in cases {
+            let r = GeoRotation::look_at(frame, north, Some(up), &ctx);
+            assert_quat_eq!(r.1, DQuat::IDENTITY, "{frame:?} local");
+            assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?} bevy");
+        }
     }
 
     #[test]

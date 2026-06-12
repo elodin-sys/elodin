@@ -1,5 +1,5 @@
 //! Conversions between nox tensors and Bevy math types.
-use crate::{ArrayRepr, Matrix3, Quaternion, Vec3, Tensor};
+use crate::{ArrayRepr, Matrix3, Quaternion, Tensor, Vec3};
 
 /// Row-major `[[T; 3]; 3]` (nox layout) to Bevy column-major `Mat3`.
 #[inline]
@@ -71,6 +71,18 @@ impl From<Quaternion<f64, ArrayRepr>> for bevy_math::DQuat {
     }
 }
 
+impl From<bevy_math::Quat> for Quaternion<f32, ArrayRepr> {
+    fn from(q: bevy_math::Quat) -> Self {
+        Quaternion::new(q.w, q.x, q.y, q.z)
+    }
+}
+
+impl From<bevy_math::DQuat> for Quaternion<f64, ArrayRepr> {
+    fn from(q: bevy_math::DQuat) -> Self {
+        Quaternion::new(q.w, q.x, q.y, q.z)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,7 +151,26 @@ mod tests {
     fn dquat_from_nox() {
         let q = Quaternion::from_axis_angle(Vector3::x_axis(), core::f64::consts::FRAC_PI_2);
         let bevy: bevy_math::DQuat = q.into();
-        let expected = bevy_math::DQuat::from_axis_angle(bevy_math::DVec3::X, core::f64::consts::FRAC_PI_2);
+        let expected =
+            bevy_math::DQuat::from_axis_angle(bevy_math::DVec3::X, core::f64::consts::FRAC_PI_2);
         assert!(bevy.abs_diff_eq(expected, 1e-6));
+    }
+
+    #[test]
+    fn quat_round_trips_through_bevy() {
+        let bevy = bevy_math::Quat::from_xyzw(0.1, 0.2, 0.3, 0.4);
+        let nox: Quaternion<f32, ArrayRepr> = bevy.into();
+        assert_eq!(nox.0.into_buf(), [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(bevy_math::Quat::from(nox), bevy);
+    }
+
+    #[test]
+    fn dquat_round_trips_through_bevy() {
+        let bevy = bevy_math::DQuat::from_axis_angle(
+            bevy_math::DVec3::new(1.0, 2.0, -0.5).normalize(),
+            0.7,
+        );
+        let nox: Quaternion<f64, ArrayRepr> = bevy.into();
+        assert!(bevy_math::DQuat::from(nox).abs_diff_eq(bevy, 1e-12));
     }
 }

@@ -387,6 +387,7 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
@@ -969,9 +970,14 @@ fn update_anchor_depth_for_view_cube(
     coordinate: &Coordinate,
     origin_world: DVec3,
 ) {
-    let Some(orbit_target_world) =
-        view_cube_orbit_target(camera, viewports, entity_map, values, geo_context, coordinate)
-    else {
+    let Some(orbit_target_world) = view_cube_orbit_target(
+        camera,
+        viewports,
+        entity_map,
+        values,
+        geo_context,
+        coordinate,
+    ) else {
         return;
     };
     let orbit_target = (orbit_target_world - origin_world).as_vec3();
@@ -1025,8 +1031,14 @@ fn refresh_anchor_depth_for_arrow(
     coordinate: &Coordinate,
     origin_world: DVec3,
 ) -> Option<(f32, f32)> {
-    let orbit_target_world =
-        view_cube_orbit_target(camera, viewports, entity_map, values, geo_context, coordinate)?;
+    let orbit_target_world = view_cube_orbit_target(
+        camera,
+        viewports,
+        entity_map,
+        values,
+        geo_context,
+        coordinate,
+    )?;
     let orbit_target = (orbit_target_world - origin_world).as_vec3();
     let measured_distance = (orbit_target - camera_translation).length();
     if !measured_distance.is_finite() || measured_distance <= 1.0e-3 {

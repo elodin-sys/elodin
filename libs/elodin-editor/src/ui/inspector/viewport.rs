@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 use bevy::ecs::system::{SystemParam, SystemState};
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::{
     camera::Projection,
@@ -8,13 +9,14 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
-use bevy_geo_frames::GeoFrame;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault};
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
-use nox::{ArrayBuf, ArrayRepr, Vector3};
+use nox::ArrayBuf;
 
 use crate::EqlContext;
+use crate::WorldPosExt;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
@@ -30,7 +32,7 @@ use crate::{
 use super::{color_popup, empty_inspector, eql_autocomplete, query};
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
-fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
+fn extract_vec3(val: &ComponentValue) -> Option<DVec3> {
     let ComponentValue::F64(array) = val else {
         return None;
     };
@@ -38,7 +40,7 @@ fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
     if data.len() < 3 {
         return None;
     }
-    Some(Vector3::new(data[0], data[1], data[2]))
+    Some(DVec3::new(data[0], data[1], data[2]))
 }
 
 #[derive(Component)]
@@ -450,6 +452,7 @@ pub fn set_viewport_pos(
     mut pos: Query<&mut WorldPos>,
     entity_map: Res<EntityMap>,
     values: Query<&'static ComponentValue>,
+    geo_context: Res<GeoContext>,
 ) {
     for viewport in viewports.iter() {
         let Ok(mut pos) = pos.get_mut(viewport.parent_entity) else {
@@ -472,23 +475,23 @@ pub fn set_viewport_pos(
                 && let Ok(val) = compiled_expr.execute(&entity_map, &values)
                 && let Some(look_at) = val.as_world_pos()
             {
-                let dir = (look_at.pos - pos.pos).normalize();
-                let up_vec = viewport
+                let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
+                // Everything stays in the viewport's frame: direction and up
+                // are frame coordinates, and `GeoRotation::look_at` yields the
+                // attitude expressed in that frame. `sync_pos` carries it into
+                // the entity's `GeoRotation` unchanged.
+                let dir = look_at.pos() - pos.pos();
+                if dir.length_squared() < 1e-20 {
+                    continue;
+                }
+                let up = viewport
                     .up
                     .compiled_expr
                     .as_ref()
                     .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
                     .and_then(|v| extract_vec3(&v))
-                    .and_then(|v| {
-                        let n_sq = v.norm_squared();
-                        if n_sq.into_buf() > 1e-20 {
-                            Some(v.normalize())
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(nox::Vec3::z_axis());
-                pos.att = nox::Quaternion::look_at_rh(dir, up_vec);
+                    .filter(|v| v.length_squared() > 1e-20);
+                pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
             }
         }
     }
@@ -498,6 +501,80 @@ pub fn set_viewport_pos(
 mod tests {
     use crate::WorldPosExt;
     use bevy::math::{Mat3, Quat, Vec3};
+
+    /// Full pipeline test with real EQL: `set_viewport_pos` -> `sync_pos` ->
+    /// `apply_geo_rotation`. A NED viewport with an explicit `up="(0,0,-1)"`
+    /// (up, away from the ground in NED) must produce a right-side-up rig
+    /// looking at the target; `up="(0,0,1)"` (down) must produce an inverted
+    /// one.
+    #[test]
+    fn ned_viewport_explicit_up_through_pipeline() {
+        use crate::object_3d::{EditableEQL, compile_eql_expr};
+        use bevy::math::{DQuat, DVec3};
+        use bevy::prelude::{IntoScheduleConfigs, Transform};
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+
+        let eql_ctx = eql::Context::default();
+        let editable = |s: &str| EditableEQL {
+            eql: s.to_string(),
+            compiled_expr: Some(
+                compile_eql_expr(
+                    eql_ctx
+                        .parse_str(s)
+                        .unwrap_or_else(|e| panic!("parse {s:?}: {e}")),
+                )
+                .unwrap_or_else(|e| panic!("compile {s:?}: {e}")),
+            ),
+        };
+
+        for (up_eql, expect_up_y) in [("(0,0,-1)", 1.0f32), ("(0,0,1)", -1.0f32)] {
+            let mut app = bevy::app::App::new();
+            app.insert_resource(GeoContext::default());
+            app.init_resource::<super::EntityMap>();
+            crate::register_world_pos_components(&mut app);
+            app.add_systems(
+                bevy::app::Update,
+                (
+                    super::set_viewport_pos,
+                    crate::sync_pos,
+                    bevy_geo_frames::apply_geo_rotation,
+                )
+                    .chain(),
+            );
+
+            let frame = GeoFrame::NED;
+            let parent = app
+                .world_mut()
+                .spawn((
+                    super::WorldPos::default(),
+                    GeoPosition(frame, DVec3::ZERO),
+                    GeoRotation::new(frame, DQuat::IDENTITY),
+                ))
+                .id();
+            // Values from the failing ball.kdl viewport.
+            app.world_mut().spawn(super::Viewport::new(
+                parent,
+                editable("(0,0,0,0, 0,0,0)"),
+                editable("(0,0,0,0, 0,-3,0)"),
+                editable(up_eql),
+                Some(frame),
+            ));
+            app.update();
+
+            let transform = *app.world().get::<Transform>(parent).unwrap();
+            let up = transform.rotation * Vec3::Y;
+            assert!(
+                up.y * expect_up_y > 0.5,
+                "up={up_eql}: rig up {up:?}, expected y sign {expect_up_y}"
+            );
+            // NED (0,-3,0) is 3 m west of the origin => bevy -X.
+            let fwd = transform.rotation * Vec3::NEG_Z;
+            assert!(
+                (fwd.x - -1.0).abs() < 1e-5 && fwd.y.abs() < 1e-5,
+                "up={up_eql}: camera fwd = {fwd:?}, expected -X"
+            );
+        }
+    }
 
     macro_rules! assert_eq_mat {
         ($a:expr, $b:expr $(,)?) => {{
@@ -642,7 +719,7 @@ mod tests {
     fn test_look_at_rh_nox_vs_glam_bevy() {
         test_look_at_rh_nox_vs_glam(
             |glam_mat, nox_mat| (glam_mat, bevy_R_elodin(nox_mat)),
-            |M| elodin_R_bevy(M),
+            elodin_R_bevy,
         );
     }
 
@@ -725,7 +802,7 @@ mod tests {
             // let glam_mat = elodin_R_bevy(glam_mat);
             let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
             // let nox_mat_bevy = bevy_R_elodin(nox_mat_bevy);
-            let (glam_mat, nox_mat_bevy) = f(glam_mat, nox_mat_bevy);
+            let (glam_mat, _nox_mat_bevy) = f(glam_mat, nox_mat_bevy);
 
             // Weird thing. The matrices are not always the same but the
             // quaternions are.

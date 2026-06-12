@@ -92,8 +92,6 @@ where
 }
 
 impl<T: RealField> Matrix3<T, ArrayRepr> {
-
-
     pub fn look_at_rh(
         dir: impl Into<Vector<T, 3, ArrayRepr>>,
         up: impl Into<Vector<T, 3, ArrayRepr>>,
