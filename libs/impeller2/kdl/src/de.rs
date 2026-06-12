@@ -278,7 +278,16 @@ fn parse_world_mesh(node: &KdlNode, src: &str) -> Result<WorldMesh, KdlSchematic
     let lod_count = node
         .get("lod_count")
         .and_then(|v| v.as_integer())
-        .map(|v| v as u32);
+        .map(|v| {
+            u32::try_from(v).map_err(|_| KdlSchematicError::InvalidValue {
+                property: "lod_count".to_string(),
+                node: "world_mesh".to_string(),
+                expected: format!("an integer between 0 and {}", u32::MAX),
+                src: src.to_string(),
+                span: node.span(),
+            })
+        })
+        .transpose()?;
 
     let translate = parse_tuple3::<f64>(node, "translate");
 
@@ -2836,6 +2845,38 @@ graph "value" {
         assert_eq!(color.g, Color::YALK.g);
         assert_eq!(color.b, Color::YALK.b);
         assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_world_mesh_lod_count() {
+        let kdl = r#"world_mesh "death_valley" lod_count=7"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::WorldMesh(world_mesh) = &schematic.elems[0] else {
+            panic!("Expected world_mesh elem");
+        };
+        assert_eq!(world_mesh.region, "death_valley");
+        assert_eq!(world_mesh.lod_count, Some(7));
+    }
+
+    #[test]
+    fn test_parse_world_mesh_rejects_negative_lod_count() {
+        let kdl = r#"world_mesh "globe" lod_count=-1"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert!(matches!(
+            err,
+            KdlSchematicError::InvalidValue { ref property, .. } if property == "lod_count"
+        ));
+    }
+
+    #[test]
+    fn test_parse_world_mesh_rejects_overflowing_lod_count() {
+        let kdl = r#"world_mesh "globe" lod_count=4294967296"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert!(matches!(
+            err,
+            KdlSchematicError::InvalidValue { ref property, .. } if property == "lod_count"
+        ));
     }
 
     #[test]
