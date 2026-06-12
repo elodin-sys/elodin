@@ -98,9 +98,9 @@ pub(crate) fn spawn_world_mesh_terrain(
             insert_big_space_cell(commands, entity);
             entity
         }
-        WorldMeshConfig::Fallback(fallback) => spawn_world_mesh_fallback(
-            commands, meshes, materials, world_mesh, &region, fallback,
-        ),
+        WorldMeshConfig::Fallback(fallback) => {
+            spawn_world_mesh_fallback(commands, meshes, materials, world_mesh, &region, fallback)
+        }
     }
 }
 
