@@ -708,17 +708,16 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_world_mesh(&mut self, world_mesh: impeller2_wkt::WorldMesh) {
-        if let Some(entity) = crate::plugins::world_mesh::spawn_world_mesh_terrain(
+        let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
             &mut self.commands,
             &mut self.meshes,
             &mut self.materials,
             &mut self.world_mesh_materials,
             &world_mesh,
-        ) {
-            self.commands
-                .entity(entity)
-                .insert((SchematicSpawned, world_mesh));
-        }
+        );
+        self.commands
+            .entity(entity)
+            .insert((SchematicSpawned, world_mesh));
     }
 
     fn spawn_panel(
@@ -1406,6 +1405,7 @@ mod tests {
     #[test_case("object_3d \"(0,0,0,1, 0,0,0)\" { sphere radius=1.0 { color 0 0 0 } }" ; "object_3d")]
     #[test_case("world_mesh \"death_valley\"" ; "world_mesh")]
     #[test_case("world_mesh \"globe\"" ; "world_mesh_globe")]
+    #[test_case("world_mesh \"no_such_region\"" ; "world_mesh_unknown_region")]
     fn scene_roots_clear_cleanly(content: &str) {
         let mut app = test_app();
         let baseline = entity_count(&mut app);

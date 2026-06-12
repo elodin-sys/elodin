@@ -69,12 +69,12 @@ pub(crate) fn spawn_world_mesh_terrain(
     materials: &mut Assets<StandardMaterial>,
     world_mesh_materials: &mut Assets<bevy_world_mesh::prelude::WorldMeshMaterial>,
     world_mesh: &impeller2_wkt::WorldMesh,
-) -> Option<Entity> {
+) -> Entity {
     let region = world_mesh.region.clone();
     let config = if region == "globe" {
         spherical_terrain_config(world_mesh.lod_count)
     } else {
-        planar_terrain_config(&region, world_mesh.lod_count)?
+        planar_terrain_config(&region, world_mesh.lod_count)
     };
 
     match config {
@@ -96,11 +96,11 @@ pub(crate) fn spawn_world_mesh_terrain(
                 .id();
 
             insert_big_space_cell(commands, entity);
-            Some(entity)
+            entity
         }
-        WorldMeshConfig::Fallback(fallback) => Some(spawn_world_mesh_fallback(
+        WorldMeshConfig::Fallback(fallback) => spawn_world_mesh_fallback(
             commands, meshes, materials, world_mesh, &region, fallback,
-        )),
+        ),
     }
 }
 
@@ -150,7 +150,7 @@ fn insert_big_space_cell(commands: &mut Commands, entity: Entity) {
     let _ = (commands, entity);
 }
 
-fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> Option<WorldMeshConfig> {
+fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfig {
     let manifest_path =
         bevy_world_mesh::terrain::util::asset_path(format!("terrains/planar/{region}/region.toml"));
     let Some(manifest) = std::fs::read_to_string(&manifest_path)
@@ -162,10 +162,10 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> Option<WorldMe
         })
     else {
         bevy::log::warn!(
-            "schematic world_mesh region={region:?} is not a built-in preset and could not load a valid manifest from {}",
+            "schematic world_mesh region={region:?} is not a built-in preset and could not load a valid manifest from {}; showing fallback grid",
             manifest_path.display()
         );
-        return None;
+        return WorldMeshConfig::Fallback(WorldMeshFallback::PlanarGrid);
     };
 
     let terrain_size = manifest.terrain_size_m();
@@ -205,9 +205,9 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> Option<WorldMe
     });
 
     if atlas_ready {
-        Some(WorldMeshConfig::Terrain(Box::new(config)))
+        WorldMeshConfig::Terrain(Box::new(config))
     } else {
-        Some(WorldMeshConfig::Fallback(WorldMeshFallback::PlanarGrid))
+        WorldMeshConfig::Fallback(WorldMeshFallback::PlanarGrid)
     }
 }
 
