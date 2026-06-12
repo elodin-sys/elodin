@@ -7,7 +7,6 @@ use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
 use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings};
 use map_3d::Ellipsoid;
-use std::f64::consts::PI;
 
 /// Marker for the demo cuboid we switch frames on.
 #[derive(Component)]
@@ -78,7 +77,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    geo_ctx: Res<GeoContext>,
 ) {
     #[cfg(feature = "big_space")]
     let big_space_root = commands

@@ -11,7 +11,7 @@ Serializer/deserializer for `impeller2_wkt::Schematic` to and from KDL.
 
 The parser accepts these root nodes:
 
-- `coordinate`: sets the global coordinate frame (`frame=ENU|NED|ECEF`)
+- `coordinate`: sets the global coordinate frame (`frame=ENU|NED|ECEF`) and optional geographic origin (`lat`/`lon`/`alt`)
 - `theme`
 - `timeline`
 - `window`
@@ -32,6 +32,15 @@ Supported frames:
 - `ECEF`: Earth-Centered Earth-Fixed
 
 Individual elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`) can override the global frame with their own `frame` attribute.
+
+The `coordinate` node also accepts an optional geographic origin that sets the viewer's `GeoContext` origin:
+
+```kdl
+coordinate frame="NED" lat=34.72 lon=-86.64 alt=180.0
+```
+
+- `lat`/`lon` are geodetic latitude/longitude in degrees; `alt` is altitude in meters.
+- `lat` and `lon` must be given together; `alt` is optional and defaults to `0.0`.
 
 ## Panel Nodes
 

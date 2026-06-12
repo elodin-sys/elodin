@@ -127,7 +127,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
-    pub geo_context: Res<'w, GeoContext>,
+    pub geo_context: ResMut<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
     cameras: Query<'w, 's, &'static mut Camera>,
@@ -231,6 +231,23 @@ impl LoadSchematicParams<'_, '_> {
     ) {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
+
+        // Set the GeoContext origin from the schematic (degrees -> radians),
+        // resetting to the default when absent so reloads are deterministic.
+        // Only write on change: mutating GeoContext re-touches every
+        // GeoPosition/GeoRotation in the world.
+        let origin = schematic
+            .origin
+            .map(|o| {
+                bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude)
+            })
+            .unwrap_or_default();
+        let current = &self.geo_context.origin;
+        if (current.latitude, current.longitude, current.altitude)
+            != (origin.latitude, origin.longitude, origin.altitude)
+        {
+            self.geo_context.origin = origin;
+        }
 
         for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
@@ -1482,6 +1499,26 @@ mod tests {
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    #[test]
+    fn geo_origin_is_applied_and_reset_on_clear() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl("coordinate frame=NED lat=34.72 lon=-86.64 alt=180.0")
+            .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        let origin = app.world().resource::<bevy_geo_frames::GeoContext>().origin;
+        assert_eq!(origin.latitude, 34.72f64.to_radians());
+        assert_eq!(origin.longitude, (-86.64f64).to_radians());
+        assert_eq!(origin.altitude, 180.0);
+
+        load_schematic(&mut app, &Schematic::default());
+        let origin = app.world().resource::<bevy_geo_frames::GeoContext>().origin;
+        let default_origin = bevy_geo_frames::GeoOrigin::default();
+        assert_eq!(origin.latitude, default_origin.latitude);
+        assert_eq!(origin.longitude, default_origin.longitude);
+        assert_eq!(origin.altitude, default_origin.altitude);
     }
 
     #[test]

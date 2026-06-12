@@ -176,7 +176,7 @@ fn load_headless_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
-    geo_context: Res<GeoContext>,
+    mut geo_context: ResMut<GeoContext>,
 ) {
     if *loaded {
         return;
@@ -195,6 +195,11 @@ fn load_headless_scene(
     }) else {
         return;
     };
+
+    if let Some(o) = schematic.origin {
+        geo_context.origin =
+            bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude);
+    }
 
     for elem in &schematic.elems {
         if let SchematicElem::Object3d(obj) = elem {
