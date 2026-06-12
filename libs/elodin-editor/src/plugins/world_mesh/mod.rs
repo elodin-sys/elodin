@@ -33,7 +33,8 @@ type WorldMeshViewPositionQuery<'w, 's> = Query<
 
 const PLANAR_TEXTURE_SIZE: u32 = 512;
 const SPHERICAL_TEXTURE_SIZE: u32 = 512;
-const DEFAULT_PLANAR_LOD_COUNT: u32 = 5;
+const PREPROCESSED_PLANAR_LOD_COUNT: u32 = 5;
+const DEFAULT_PLANAR_LOD_COUNT: u32 = PREPROCESSED_PLANAR_LOD_COUNT;
 const DEFAULT_SPHERICAL_LOD_COUNT: u32 = 5;
 const SPHERICAL_ATLAS_SIZE: u32 = 2048;
 const SPHERICAL_PATH: &str = "terrains/spherical";
@@ -179,7 +180,7 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfi
     );
 
     let config = TerrainConfig {
-        lod_count: lod_count.unwrap_or(DEFAULT_PLANAR_LOD_COUNT),
+        lod_count: planar_lod_count(lod_count),
         model: TerrainModel::planar(
             bevy::math::DVec3::new(0.0, -(height as f64) * 0.4, 0.0),
             terrain_size,
@@ -209,6 +210,12 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfi
     } else {
         WorldMeshConfig::Fallback(WorldMeshFallback::PlanarGrid)
     }
+}
+
+fn planar_lod_count(lod_count: Option<u32>) -> u32 {
+    lod_count
+        .unwrap_or(DEFAULT_PLANAR_LOD_COUNT)
+        .min(PREPROCESSED_PLANAR_LOD_COUNT)
 }
 
 fn terrain_atlas_ready(terrain_path: &str, region: &str, kind: &str, hint: &str) -> bool {
@@ -474,5 +481,25 @@ fn sync_terrain_view_positions(
         commands
             .entity(entity)
             .insert(TerrainViewPosition(transform.translation.as_dvec3()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planar_lod_count_defaults_to_preprocessed_depth() {
+        assert_eq!(planar_lod_count(None), PREPROCESSED_PLANAR_LOD_COUNT);
+    }
+
+    #[test]
+    fn planar_lod_count_caps_values_above_preprocessed_depth() {
+        assert_eq!(planar_lod_count(Some(7)), PREPROCESSED_PLANAR_LOD_COUNT);
+    }
+
+    #[test]
+    fn planar_lod_count_keeps_lower_values() {
+        assert_eq!(planar_lod_count(Some(3)), 3);
     }
 }
