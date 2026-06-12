@@ -14,13 +14,16 @@
 #   assets/terrains/spherical/config.tc
 #
 # Usage:
-#   ./scripts/prepare_editor_spherical_terrain.sh
+#   ./scripts/prepare_editor_spherical_terrain.sh                  # --zoom 7 --face-size 2048
 #   ./scripts/prepare_editor_spherical_terrain.sh --zoom 6
-#   ./scripts/prepare_editor_spherical_terrain.sh --face-size 1024
+#   ./scripts/prepare_editor_spherical_terrain.sh --zoom 8 --face-size 8192  # hero quality
 #
 # Environment overrides:
-#   FORCE_REFETCH                set to 1 to wipe source faces before fetching
-#   WORLD_MESH_FETCH_WORKERS     rayon worker count for each provider fetch pool
+#   FORCE_REFETCH                       set to 1 to wipe source faces before fetching
+#   WORLD_MESH_FETCH_WORKERS            network workers per provider fetch pool (default: 8)
+#   WORLD_MESH_FACE_WORKERS             CPU workers for cube-face generation (default: CPU count)
+#   WORLD_MESH_EDITOR_GLOBE_ZOOM        default zoom when --zoom is omitted (default: 7)
+#   WORLD_MESH_EDITOR_GLOBE_FACE_SIZE   default face size when --face-size is omitted (default: 2048)
 
 set -euo pipefail
 
@@ -30,6 +33,7 @@ cd "$repo_root"
 usage() {
     cat >&2 <<'EOF'
 usage: ./scripts/prepare_editor_spherical_terrain.sh [fetch_global_spherical args]
+  editor defaults: --zoom 7 --face-size 2048
   common args: --zoom N, --face-size N
 EOF
 }
@@ -47,14 +51,32 @@ export BEVY_ASSET_ROOT="$repo_root"
 
 terrain_dir="assets/terrains/spherical"
 
+default_zoom="${WORLD_MESH_EDITOR_GLOBE_ZOOM:-7}"
+default_face_size="${WORLD_MESH_EDITOR_GLOBE_FACE_SIZE:-2048}"
+has_zoom=0
+has_face_size=0
+for arg in "$@"; do
+    case "$arg" in
+        --zoom | -z | --zoom=*) has_zoom=1 ;;
+        --face-size | --face-size=*) has_face_size=1 ;;
+    esac
+done
+fetch_args=("$@")
+if [ "$has_face_size" = "0" ]; then
+    fetch_args=(--face-size "$default_face_size" "${fetch_args[@]}")
+fi
+if [ "$has_zoom" = "0" ]; then
+    fetch_args=(--zoom "$default_zoom" "${fetch_args[@]}")
+fi
+
 if [ "${FORCE_REFETCH:-0}" = "1" ]; then
     echo "==> FORCE_REFETCH=1 - wiping spherical source faces"
     rm -rf -- "$terrain_dir/source"
 fi
 
-echo "==> Fetching global spherical terrain for editor assets"
+echo "==> Fetching global spherical terrain for editor assets (${fetch_args[*]})"
 cargo run -p bevy_world_mesh --release --bin fetch_global_spherical \
-    --features "fetch,scenes" -- "$@"
+    --features "fetch,scenes" -- "${fetch_args[@]}"
 
 echo "==> Rebuilding spherical atlas in top-level assets"
 rm -rf -- "$terrain_dir/data" "$terrain_dir/config.tc"

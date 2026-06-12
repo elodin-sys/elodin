@@ -9,19 +9,41 @@
 // attachment for the albedo and the same exit-when-atlas-saved guard the
 // planar `preprocess` binary uses, so this is scriptable.
 
-use bevy::prelude::*;
+use bevy::{
+    app::ScheduleRunnerPlugin,
+    asset::AssetPlugin,
+    prelude::*,
+    window::{ExitCondition, WindowPlugin},
+    winit::WinitPlugin,
+};
 use bevy_world_mesh::prelude::*;
-use bevy_world_mesh::scenes::globe::{globe_terrain_config, PATH};
-use std::path::Path;
+use bevy_world_mesh::scenes::globe::{PATH, globe_terrain_config};
+use bevy_world_mesh::terrain::util::{asset_path, assets_root};
+use std::time::Duration;
 
 fn main() {
     App::new()
         .add_plugins((
+            // Run headless: preprocessing only needs Bevy's asset/render/wgpu
+            // stack for compute shaders, not a visible window.
+            //
             // big_space requires TransformPlugin disabled, matching the
             // upstream spherical example. Preprocess itself never touches
             // big_space, but `scenes` enables `high_precision` workspace-
             // wide so we keep the same DefaultPlugins shape everywhere.
-            DefaultPlugins.build().disable::<TransformPlugin>(),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: ExitCondition::DontExit,
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    file_path: assets_root().to_string_lossy().into_owned(),
+                    ..default()
+                })
+                .disable::<WinitPlugin>()
+                .disable::<TransformPlugin>(),
+            ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(1.0 / 60.0)),
             TerrainPlugin,
             TerrainPreprocessPlugin,
         ))
@@ -68,11 +90,14 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn exit_when_atlas_saved(mut exit: MessageWriter<AppExit>, mut frames_after: Local<u32>) {
-    let atlas_config = format!("assets/{PATH}/config.tc");
-    if Path::new(&atlas_config).exists() {
+    let atlas_config = asset_path(format!("{PATH}/config.tc"));
+    if atlas_config.exists() {
         *frames_after += 1;
         if *frames_after > 120 {
-            eprintln!("preprocess_global: atlas at {atlas_config}, exiting.");
+            eprintln!(
+                "preprocess_global: atlas at {}, exiting.",
+                atlas_config.display()
+            );
             exit.write(AppExit::Success);
         }
     }

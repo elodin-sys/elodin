@@ -304,6 +304,33 @@ impl TileFetcher {
         Ok(bytes)
     }
 
+    /// Ensure a URL's bytes exist in the on-disk cache without decoding or
+    /// reading an already-cached body back into memory. This is the fast path
+    /// used by prefetchers: a warm cache should cost one metadata check per
+    /// tile, not a full tile read that will be repeated by the stitcher or
+    /// sphere sampler later.
+    fn prefetch_cached(&self, url: &str, stats: &AtomicTileStats) -> Result<()> {
+        let cache_path = url_to_cache_path(&self.cache_dir, url)?;
+        if cache_path
+            .metadata()
+            .map(|metadata| metadata.is_file() && metadata.len() > 0)
+            .unwrap_or(false)
+        {
+            stats.cache_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(());
+        }
+
+        let bytes = self.fetch_url_with_retries(url, stats)?;
+
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&cache_path, &bytes)
+            .with_context(|| format!("write tile cache {}", cache_path.display()))?;
+        stats.network_hits.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Fetch `url` over HTTP, retrying transient errors with exponential
     /// backoff (1s, 2s, 4s, ...; capped at 60s with ±500 ms jitter). Up to
     /// 8 attempts total; gives up after ~2 minutes of cumulative sleep.
@@ -424,8 +451,7 @@ impl TileFetcher {
     /// Bumps `aws_terrain_stats` so the prefetch progress UI can read its
     /// own counters via [`Self::aws_terrain_stats`].
     pub fn prefetch_aws_terrain(&self, x: u32, y: u32, z: u8) -> Result<()> {
-        self.fetch_cached(&aws_terrain_url(x, y, z), &self.aws_terrain_stats)?;
-        Ok(())
+        self.prefetch_cached(&aws_terrain_url(x, y, z), &self.aws_terrain_stats)
     }
 
     /// Download an EOX imagery tile to the on-disk cache without decoding.
@@ -436,8 +462,7 @@ impl TileFetcher {
     /// Bumps `eox_imagery_stats` so the prefetch progress UI can read its
     /// own counters via [`Self::eox_imagery_stats`].
     pub fn prefetch_eox_imagery(&self, x: u32, y: u32, z: u8) -> Result<()> {
-        self.fetch_cached(&eox_imagery_url(x, y, z), &self.eox_imagery_stats)?;
-        Ok(())
+        self.prefetch_cached(&eox_imagery_url(x, y, z), &self.eox_imagery_stats)
     }
 
     /// Bilinear-sample the AWS Terrain elevation at `(lon, lat)` from the tile

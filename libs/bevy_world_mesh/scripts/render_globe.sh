@@ -20,6 +20,8 @@
 #   SCREENSHOT_TIMEOUT  (default: 180)
 #   FORCE_REFETCH       (default: 0; set to 1 to wipe source TIFFs before
 #                        running so the fetcher re-downloads from scratch)
+#   WORLD_MESH_FETCH_WORKERS  network workers per provider fetch pool (default: 8)
+#   WORLD_MESH_FACE_WORKERS   CPU workers for cube-face generation (default: CPU count)
 
 set -uo pipefail
 
@@ -37,7 +39,7 @@ if [ "${FORCE_REFETCH:-0}" = "1" ]; then
     rm -rf assets/terrains/spherical/source
 fi
 
-echo "==> Fetching global spherical Earth (z=7 default; pass --zoom N to override)"
+echo "==> Fetching global spherical Earth (z=8 hero default; pass --zoom 7 --face-size 2048 for fast)"
 cargo run --release --bin fetch_global_spherical --features "fetch,scenes" -- "$@"
 
 echo "==> Rebuilding spherical atlas"
