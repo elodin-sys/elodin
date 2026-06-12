@@ -107,7 +107,7 @@ impl Plugin for FloatingOriginPlugin {
             // Also adopt right before transform propagation (and big_space's
             // PostUpdate hierarchy validation) so entities that gained a
             // `GridCell` during this frame never cross a validation pass
-            // unparented.
+            // parentless.
             .add_systems(
                 PostUpdate,
                 attach_parentless_grid_cells.before(bevy::transform::TransformSystems::Propagate),

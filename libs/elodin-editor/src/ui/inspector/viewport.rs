@@ -636,8 +636,9 @@ mod tests {
             );
         }};
     }
+
     #[inline]
-    fn are_colinear(a: Vec3, b: Vec3) -> bool {
+    fn are_collinear(a: Vec3, b: Vec3) -> bool {
         a.cross(b).length_squared() < 1e-6
     }
 
@@ -647,7 +648,7 @@ mod tests {
         let up_candidates = [up, Vec3::Y, Vec3::X, Vec3::Z];
         let up = up_candidates
             .into_iter()
-            .find(|up| !are_colinear(*up, dir))
+            .find(|up| !are_collinear(*up, dir))
             .expect("it can't be colinear with everyone");
         // Constructs a look_at rotation matrix using the same algorithm as
         // nox::Matrix3::look_at_rh.
