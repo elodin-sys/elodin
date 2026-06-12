@@ -119,6 +119,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub world_mesh_materials: ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
@@ -302,6 +303,13 @@ impl LoadSchematicParams<'_, '_> {
                         arrow.frame = fallback_frame;
                     }
                     self.spawn_vector_arrow(arrow, None);
+                }
+                impeller2_wkt::SchematicElem::WorldMesh(world_mesh) => {
+                    let mut wm = world_mesh.clone();
+                    if wm.frame.is_none() {
+                        wm.frame = fallback_frame;
+                    }
+                    self.spawn_world_mesh(wm);
                 }
                 impeller2_wkt::SchematicElem::Window(_) => {}
                 impeller2_wkt::SchematicElem::Theme(_) => {}
@@ -697,6 +705,19 @@ impl LoadSchematicParams<'_, '_> {
         if let Some(camera) = viewport_camera {
             spawn.insert(ViewportArrow { camera });
         }
+    }
+
+    pub fn spawn_world_mesh(&mut self, world_mesh: impeller2_wkt::WorldMesh) {
+        let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.materials,
+            &mut self.world_mesh_materials,
+            &world_mesh,
+        );
+        self.commands
+            .entity(entity)
+            .insert((SchematicSpawned, world_mesh));
     }
 
     fn spawn_panel(
@@ -1323,6 +1344,7 @@ mod tests {
             .init_asset::<StandardMaterial>()
             .init_asset::<Image>()
             .init_asset::<Mat3Material>()
+            .init_asset::<bevy_world_mesh::prelude::WorldMeshMaterial>()
             .init_asset::<SchematicDocumentAsset>();
         app.add_plugins(GeoFramePlugin {
             apply_transforms: false,
@@ -1381,6 +1403,9 @@ mod tests {
     #[test_case("line_3d \"(0,0,0)\""; "line_3d")]
     #[test_case("vector_arrow \"(0,0,1)\"" ; "vector_arrow")]
     #[test_case("object_3d \"(0,0,0,1, 0,0,0)\" { sphere radius=1.0 { color 0 0 0 } }" ; "object_3d")]
+    #[test_case("world_mesh \"death_valley\"" ; "world_mesh")]
+    #[test_case("world_mesh \"globe\"" ; "world_mesh_globe")]
+    #[test_case("world_mesh \"no_such_region\"" ; "world_mesh_unknown_region")]
     fn scene_roots_clear_cleanly(content: &str) {
         let mut app = test_app();
         let baseline = entity_count(&mut app);

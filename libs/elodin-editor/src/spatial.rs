@@ -23,7 +23,7 @@
 //! [`BigSpaceRoot`] automatically. Call sites can therefore spawn
 //! grid-aware entities without explicitly setting their parent.
 
-use bevy::{math::DVec3, prelude::*};
+use bevy::{math::DVec3, prelude::*, transform::TransformSystems};
 
 pub use big_space::prelude::{BigSpace, CellCoord as GridCell, FloatingOrigin, Grid};
 
@@ -103,7 +103,11 @@ impl Plugin for FloatingOriginPlugin {
         app.insert_resource(self.settings.clone())
             .add_plugins(big_space::prelude::BigSpaceDefaultPlugins)
             .add_systems(Startup, setup_floating_origin)
-            .add_systems(PreUpdate, attach_parentless_grid_cells);
+            .add_systems(PreUpdate, attach_parentless_grid_cells)
+            .add_systems(
+                PostUpdate,
+                attach_parentless_grid_cells.before(TransformSystems::Propagate),
+            );
     }
 }
 
@@ -129,8 +133,8 @@ pub fn setup_floating_origin(mut commands: Commands, settings: Res<FloatingOrigi
 /// PreUpdate system that adopts every entity carrying a [`GridCell`] but
 /// no [`ChildOf`] under the unique [`BigSpaceRoot`]. This keeps callers
 /// free from having to know about the root entity when they spawn
-/// grid-aware entities. Runs every frame so newly spawned entities are
-/// re-parented as soon as they are visible to the query.
+/// grid-aware entities. Runs before transform propagation as well so entities
+/// spawned by schematic reloads do not spend a frame as invalid root nodes.
 fn attach_parentless_grid_cells(
     mut commands: Commands,
     roots: Query<Entity, With<BigSpaceRoot>>,

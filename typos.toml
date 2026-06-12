@@ -18,6 +18,14 @@
 "fram" = "fram"
 "FRAM" = "FRAM"
 "THS" = "THS"
+"LOD" = "LOD"
+"lod" = "lod"
+"ALOS" = "ALOS"
+"bse" = "bse"
+"numer" = "numer"
+"iy" = "iy"
+"PNGs" = "PNGs"
+"PN" = "PN"
 
 [files]
 extend-exclude = [
@@ -34,5 +42,6 @@ extend-exclude = [
     "*.age",
     "examples/linalg/*",
     "libs/cranelift-mlir/*",
+    "assets/terrains"
 ]
 ignore-vcs = true

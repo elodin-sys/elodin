@@ -182,7 +182,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
 
 struct FieldTableInner {
     ready_wait_cell: WaitCell,
-    writeable_wait_cell: WaitQueue,
+    writable_wait_cell: WaitQueue,
     filled_fields: AtomicBitVec,
     table: Mutex<Option<LenPacket>>,
 }
@@ -201,7 +201,7 @@ impl FieldTable {
             inner: Arc::new(FieldTableInner {
                 table: Mutex::new(Some(table)),
                 ready_wait_cell: WaitCell::new(),
-                writeable_wait_cell: WaitQueue::new(),
+                writable_wait_cell: WaitQueue::new(),
                 filled_fields: AtomicBitVec::new(total_field_count),
             }),
         }
@@ -237,7 +237,7 @@ impl FieldTable {
 
     pub fn notify_writers(&self) {
         self.inner.filled_fields.set_all(false);
-        self.inner.writeable_wait_cell.wake_all();
+        self.inner.writable_wait_cell.wake_all();
     }
 }
 
@@ -248,10 +248,10 @@ struct Field {
 }
 
 impl Field {
-    pub async fn wait_writeable(&self) {
+    pub async fn wait_writable(&self) {
         let _ = self
             .table
-            .writeable_wait_cell
+            .writable_wait_cell
             .wait_for(|| !self.table.filled_fields.get(self.index).unwrap_or(true))
             .await;
     }
@@ -447,7 +447,7 @@ async fn handle_plan(
 ) {
     trace!("spawning shard plan");
     loop {
-        shard.wait_writeable().await;
+        shard.wait_writable().await;
         let mut finished = true;
         for stage in plan.iter_mut() {
             match stage
