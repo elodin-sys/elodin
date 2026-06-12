@@ -115,9 +115,10 @@ pub fn bbox_to_tile_range(bbox: Bbox, z: u8) -> TileRange {
 
 /// HTTP fetcher with on-disk cache plus a small in-memory decoded-tile cache
 /// for the per-pixel sphere sampler. The decoded cache holds the most recently
-/// fetched terrain and imagery tiles keyed by `(z, x, y)`; capacity is small
-/// (32 of each) since the sphere fetcher accesses pixels in row-major order
-/// per face and so almost always re-uses the previously decoded tile.
+/// fetched terrain and imagery tiles keyed by `(z, x, y)`. For heavily
+/// parallel per-pixel workloads, prefer [`TerrainLonLatSampler`] /
+/// [`ImageryLonLatSampler`] so each worker owns its decoded-tile cache instead
+/// of contending on this shared mutex-protected cache.
 ///
 /// `aws_terrain_stats` / `eox_imagery_stats` are bumped inside
 /// [`Self::fetch_cached`] (the right one per call) so consumers can read
@@ -526,6 +527,97 @@ impl TileFetcher {
     }
 }
 
+/// Per-worker terrain sampler for row-parallel lon/lat workloads.
+///
+/// [`TileFetcher::sample_terrain_at_lonlat`] uses a shared mutex-protected
+/// decoded-tile cache, which is convenient for sequential callers but becomes
+/// lock-heavy when millions of pixels are sampled in parallel. This sampler is
+/// intentionally `!Sync` and owns a small decoded cache for one rayon worker.
+pub struct TerrainLonLatSampler<'a> {
+    fetcher: &'a TileFetcher,
+    zoom: u8,
+    capacity: usize,
+    cache: HashMap<TileKey, Vec<f32>>,
+}
+
+impl<'a> TerrainLonLatSampler<'a> {
+    pub fn new(fetcher: &'a TileFetcher, zoom: u8) -> Self {
+        Self::with_capacity(fetcher, zoom, DECODED_CACHE_CAP)
+    }
+
+    pub fn with_capacity(fetcher: &'a TileFetcher, zoom: u8, capacity: usize) -> Self {
+        Self {
+            fetcher,
+            zoom,
+            capacity,
+            cache: HashMap::new(),
+        }
+    }
+
+    pub fn sample(&mut self, lon: f64, lat: f64) -> Result<f32> {
+        let (tx, ty) = lonlat_to_tile(lon, lat, self.zoom);
+        let (u, v) = tile_subpixel(lon, lat, tx, ty, self.zoom);
+        let tile = self.tile(tx, ty)?;
+        Ok(sample_f32_bilinear(tile, TILE_PX, u, v))
+    }
+
+    fn tile(&mut self, tx: u32, ty: u32) -> Result<&[f32]> {
+        let key = (self.zoom, tx, ty);
+        if !self.cache.contains_key(&key) {
+            let tile = self
+                .fetcher
+                .fetch_aws_terrain(tx, ty, self.zoom)
+                .with_context(|| format!("AWS terrain tile {}/{}/{}", self.zoom, tx, ty))?;
+            evict_one_if_full_with_cap(&mut self.cache, self.capacity);
+            self.cache.insert(key, tile);
+        }
+        Ok(self.cache.get(&key).expect("tile inserted").as_slice())
+    }
+}
+
+/// Per-worker imagery sampler for row-parallel lon/lat workloads.
+pub struct ImageryLonLatSampler<'a> {
+    fetcher: &'a TileFetcher,
+    zoom: u8,
+    capacity: usize,
+    cache: HashMap<TileKey, RgbImage>,
+}
+
+impl<'a> ImageryLonLatSampler<'a> {
+    pub fn new(fetcher: &'a TileFetcher, zoom: u8) -> Self {
+        Self::with_capacity(fetcher, zoom, DECODED_CACHE_CAP)
+    }
+
+    pub fn with_capacity(fetcher: &'a TileFetcher, zoom: u8, capacity: usize) -> Self {
+        Self {
+            fetcher,
+            zoom,
+            capacity,
+            cache: HashMap::new(),
+        }
+    }
+
+    pub fn sample(&mut self, lon: f64, lat: f64) -> Result<[u8; 3]> {
+        let (tx, ty) = lonlat_to_tile(lon, lat, self.zoom);
+        let (u, v) = tile_subpixel(lon, lat, tx, ty, self.zoom);
+        let tile = self.tile(tx, ty)?;
+        Ok(sample_rgb_bilinear(tile, u, v))
+    }
+
+    fn tile(&mut self, tx: u32, ty: u32) -> Result<&RgbImage> {
+        let key = (self.zoom, tx, ty);
+        if !self.cache.contains_key(&key) {
+            let tile = self
+                .fetcher
+                .fetch_eox_imagery(tx, ty, self.zoom)
+                .with_context(|| format!("EOX imagery tile {}/{}/{}", self.zoom, tx, ty))?;
+            evict_one_if_full_with_cap(&mut self.cache, self.capacity);
+            self.cache.insert(key, tile);
+        }
+        Ok(self.cache.get(&key).expect("tile inserted"))
+    }
+}
+
 /// Outcome of a single HTTP attempt inside [`TileFetcher::fetch_url_with_retries`].
 /// Kept private so the public surface stays a plain `Result<Vec<u8>>`.
 enum FetchAttempt {
@@ -570,7 +662,11 @@ fn jitter_ms() -> u64 {
 }
 
 fn evict_one_if_full<V>(cache: &mut HashMap<TileKey, V>) {
-    if cache.len() >= DECODED_CACHE_CAP {
+    evict_one_if_full_with_cap(cache, DECODED_CACHE_CAP);
+}
+
+fn evict_one_if_full_with_cap<V>(cache: &mut HashMap<TileKey, V>, capacity: usize) {
+    if cache.len() >= capacity {
         if let Some(k) = cache.keys().next().copied() {
             cache.remove(&k);
         }

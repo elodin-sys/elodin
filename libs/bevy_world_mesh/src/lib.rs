@@ -58,6 +58,9 @@ pub mod terrain;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 
+#[cfg(feature = "fetch")]
+pub mod fetch_pipeline;
+
 #[cfg(feature = "regions")]
 pub mod regions;
 

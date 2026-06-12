@@ -22,21 +22,21 @@
 
 use anyhow::{anyhow, Context, Result};
 use bevy_world_mesh::fetch::{
-    cube_face_to_dir, dir_to_lonlat, lonlat_to_tile, tile_to_lonlat, FetchStats, TileFetcher,
-    TILE_PX,
+    cube_face_to_dir, dir_to_lonlat, ImageryLonLatSampler, TerrainLonLatSampler, TileFetcher,
+};
+use bevy_world_mesh::fetch_pipeline::{
+    format_stats_message, workers_from_env_or, workers_from_env_or_available, TilePhase,
 };
 use bevy_world_mesh::scenes::globe::{
     GlobeManifest, DEFAULT_CAMERA_DISTANCE_RADII, DEFAULT_LOD_COUNT, MAX_HEIGHT_M, MIN_HEIGHT_M,
 };
 use image::{ImageBuffer, Luma, RgbImage};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
 use std::{
-    collections::HashMap,
     fs,
     path::Path,
     sync::atomic::{AtomicU32, Ordering},
-    time::Duration,
 };
 
 const CACHE_DIR: &str = "target/tile_cache";
@@ -45,8 +45,6 @@ const CACHE_DIR: &str = "target/tile_cache";
 const DEFAULT_FETCH_WORKERS: usize = 8;
 /// Fallback face-generation worker count if CPU parallelism can't be detected.
 const FALLBACK_FACE_WORKERS: usize = 8;
-/// Per-worker decoded-tile cache cap used while generating cube-face pixels.
-const LOCAL_DECODED_CACHE_CAP: usize = 256;
 /// Default zoom level for both elevation and imagery. z=8 gives ≈ 39 m/px at
 /// the equator before resampling — 4x richer than z=7, at the cost of ≈ 4 GB
 /// total one-time download (65 536 unique tiles globally per source).
@@ -94,7 +92,6 @@ fn main() -> Result<()> {
             &fetcher,
             args.zoom,
             tiles_per_axis,
-            tiles_per_source,
             missing_height,
             missing_albedo,
             fetch_workers,
@@ -225,7 +222,6 @@ fn prefetch_global_tiles(
     fetcher: &TileFetcher,
     zoom: u8,
     tiles_per_axis: u32,
-    tiles_per_source: u64,
     missing_height: bool,
     missing_albedo: bool,
     workers: usize,
@@ -236,12 +232,15 @@ fn prefetch_global_tiles(
     );
 
     let mp = MultiProgress::new();
+    let terrain_phase = TilePhase::square("terrain-pref", zoom, tiles_per_axis);
+    let imagery_phase = TilePhase::square("imagery-pref", zoom, tiles_per_axis);
+
     match (missing_height, missing_albedo) {
         (true, true) => {
-            print_phase_banner("terrain-pref", zoom, tiles_per_axis, tiles_per_source);
-            print_phase_banner("imagery-pref", zoom, tiles_per_axis, tiles_per_source);
-            let terrain_pb = mp.add(make_progress_bar(tiles_per_source, "terrain-pref"));
-            let imagery_pb = mp.add(make_progress_bar(tiles_per_source, "imagery-pref"));
+            terrain_phase.print_banner();
+            imagery_phase.print_banner();
+            let terrain_pb = terrain_phase.progress_bar(&mp);
+            let imagery_pb = imagery_phase.progress_bar(&mp);
             let terrain_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(workers)
                 .build()
@@ -254,24 +253,12 @@ fn prefetch_global_tiles(
             std::thread::scope(|scope| -> Result<()> {
                 let imagery_handle = scope.spawn(|| -> Result<()> {
                     imagery_pool.install(|| {
-                        prefetch_imagery_tiles(
-                            fetcher,
-                            zoom,
-                            tiles_per_axis,
-                            tiles_per_source,
-                            &imagery_pb,
-                        )
+                        prefetch_imagery_tiles(fetcher, imagery_phase, tiles_per_axis, &imagery_pb)
                     })
                 });
 
                 terrain_pool.install(|| {
-                    prefetch_terrain_tiles(
-                        fetcher,
-                        zoom,
-                        tiles_per_axis,
-                        tiles_per_source,
-                        &terrain_pb,
-                    )
+                    prefetch_terrain_tiles(fetcher, terrain_phase, tiles_per_axis, &terrain_pb)
                 })?;
 
                 imagery_handle
@@ -282,25 +269,25 @@ fn prefetch_global_tiles(
             })?;
         }
         (true, false) => {
-            print_phase_banner("terrain-pref", zoom, tiles_per_axis, tiles_per_source);
-            let terrain_pb = mp.add(make_progress_bar(tiles_per_source, "terrain-pref"));
+            terrain_phase.print_banner();
+            let terrain_pb = terrain_phase.progress_bar(&mp);
             let terrain_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(workers)
                 .build()
                 .context("build terrain prefetch rayon pool")?;
             terrain_pool.install(|| {
-                prefetch_terrain_tiles(fetcher, zoom, tiles_per_axis, tiles_per_source, &terrain_pb)
+                prefetch_terrain_tiles(fetcher, terrain_phase, tiles_per_axis, &terrain_pb)
             })?;
         }
         (false, true) => {
-            print_phase_banner("imagery-pref", zoom, tiles_per_axis, tiles_per_source);
-            let imagery_pb = mp.add(make_progress_bar(tiles_per_source, "imagery-pref"));
+            imagery_phase.print_banner();
+            let imagery_pb = imagery_phase.progress_bar(&mp);
             let imagery_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(workers)
                 .build()
                 .context("build imagery prefetch rayon pool")?;
             imagery_pool.install(|| {
-                prefetch_imagery_tiles(fetcher, zoom, tiles_per_axis, tiles_per_source, &imagery_pb)
+                prefetch_imagery_tiles(fetcher, imagery_phase, tiles_per_axis, &imagery_pb)
             })?;
         }
         (false, false) => {}
@@ -310,280 +297,61 @@ fn prefetch_global_tiles(
 }
 
 fn parse_fetch_workers() -> usize {
-    std::env::var("WORLD_MESH_FETCH_WORKERS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(DEFAULT_FETCH_WORKERS)
+    workers_from_env_or("WORLD_MESH_FETCH_WORKERS", DEFAULT_FETCH_WORKERS)
 }
 
 fn parse_face_workers() -> usize {
-    std::env::var("WORLD_MESH_FACE_WORKERS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(FALLBACK_FACE_WORKERS)
-        })
-}
-
-fn print_phase_banner(label: &'static str, zoom: u8, tiles_per_axis: u32, tiles_per_source: u64) {
-    eprintln!(
-        "    {label:12} z={zoom} {tiles_per_axis}x{tiles_per_axis} = {tiles_per_source} tile(s)"
-    );
-}
-
-fn make_progress_bar(total: u64, label: &'static str) -> ProgressBar {
-    let style = ProgressStyle::with_template(
-        "    {prefix:12} [{elapsed_precise}] [{bar:40.cyan/blue}] \
-         {pos}/{len} {msg} {per_sec} ETA {eta}",
-    )
-    .expect("static progress template parses")
-    .progress_chars("#>-");
-    let pb = ProgressBar::new(total);
-    pb.set_style(style);
-    pb.set_prefix(label);
-    pb
-}
-
-fn format_duration(d: Duration) -> String {
-    let total = d.as_secs();
-    let h = total / 3600;
-    let m = (total % 3600) / 60;
-    let s = total % 60;
-    format!("{h:02}:{m:02}:{s:02}")
-}
-
-fn format_stats_message(s: FetchStats) -> String {
-    if s.retries == 0 {
-        format!("net={} cached={}", s.network_hits, s.cache_hits)
-    } else {
-        format!(
-            "net={} cached={} retries={}",
-            s.network_hits, s.cache_hits, s.retries
-        )
-    }
-}
-
-fn print_phase_summary(
-    pb: &ProgressBar,
-    label: &'static str,
-    zoom: u8,
-    total: u64,
-    stats: FetchStats,
-) {
-    let elapsed = pb.elapsed();
-    pb.finish_and_clear();
-    let rate = total as f64 / elapsed.as_secs_f64().max(1e-6);
-    let retries_suffix = if stats.retries == 0 {
-        String::new()
-    } else {
-        format!(", {} retries", stats.retries)
-    };
-    eprintln!(
-        "    {label:12} z={zoom} done in {} — {} net + {} cached{} ({rate:.1} tile/s avg)",
-        format_duration(elapsed),
-        stats.network_hits,
-        stats.cache_hits,
-        retries_suffix,
-    );
+    workers_from_env_or_available("WORLD_MESH_FACE_WORKERS", FALLBACK_FACE_WORKERS)
 }
 
 fn prefetch_terrain_tiles(
     fetcher: &TileFetcher,
-    zoom: u8,
+    phase: TilePhase,
     tiles_per_axis: u32,
-    tiles_per_source: u64,
     pb: &ProgressBar,
 ) -> Result<()> {
     fetcher.reset_aws_terrain_stats();
     let axis = u64::from(tiles_per_axis);
-    let result = (0..tiles_per_source)
+    let result = (0..phase.total)
         .into_par_iter()
         .try_for_each(|idx| -> Result<()> {
             let tx = (idx % axis) as u32;
             let ty = (idx / axis) as u32;
             fetcher
-                .prefetch_aws_terrain(tx, ty, zoom)
-                .with_context(|| format!("prefetch AWS terrain {zoom}/{tx}/{ty}"))?;
+                .prefetch_aws_terrain(tx, ty, phase.z)
+                .with_context(|| format!("prefetch AWS terrain {}/{tx}/{ty}", phase.z))?;
             pb.set_message(format_stats_message(fetcher.aws_terrain_stats()));
             pb.inc(1);
             Ok(())
         });
 
-    print_phase_summary(
-        pb,
-        "terrain-pref",
-        zoom,
-        tiles_per_source,
-        fetcher.aws_terrain_stats(),
-    );
+    phase.print_summary(pb, fetcher.aws_terrain_stats());
     result
 }
 
 fn prefetch_imagery_tiles(
     fetcher: &TileFetcher,
-    zoom: u8,
+    phase: TilePhase,
     tiles_per_axis: u32,
-    tiles_per_source: u64,
     pb: &ProgressBar,
 ) -> Result<()> {
     fetcher.reset_eox_imagery_stats();
     let axis = u64::from(tiles_per_axis);
-    let result = (0..tiles_per_source)
+    let result = (0..phase.total)
         .into_par_iter()
         .try_for_each(|idx| -> Result<()> {
             let tx = (idx % axis) as u32;
             let ty = (idx / axis) as u32;
             fetcher
-                .prefetch_eox_imagery(tx, ty, zoom)
-                .with_context(|| format!("prefetch EOX imagery {zoom}/{tx}/{ty}"))?;
+                .prefetch_eox_imagery(tx, ty, phase.z)
+                .with_context(|| format!("prefetch EOX imagery {}/{tx}/{ty}", phase.z))?;
             pb.set_message(format_stats_message(fetcher.eox_imagery_stats()));
             pb.inc(1);
             Ok(())
         });
 
-    print_phase_summary(
-        pb,
-        "imagery-pref",
-        zoom,
-        tiles_per_source,
-        fetcher.eox_imagery_stats(),
-    );
+    phase.print_summary(pb, fetcher.eox_imagery_stats());
     result
-}
-
-type TileKey = (u8, u32, u32);
-
-struct TerrainFaceSampler<'a> {
-    fetcher: &'a TileFetcher,
-    zoom: u8,
-    cache: HashMap<TileKey, Vec<f32>>,
-}
-
-impl<'a> TerrainFaceSampler<'a> {
-    fn new(fetcher: &'a TileFetcher, zoom: u8) -> Self {
-        Self {
-            fetcher,
-            zoom,
-            cache: HashMap::new(),
-        }
-    }
-
-    fn sample(&mut self, lon: f64, lat: f64) -> Result<f32> {
-        let (tx, ty) = lonlat_to_tile(lon, lat, self.zoom);
-        let (u, v) = tile_subpixel_local(lon, lat, tx, ty, self.zoom);
-        let tile = self.tile(tx, ty)?;
-        Ok(sample_f32_bilinear_local(tile, TILE_PX, u, v))
-    }
-
-    fn tile(&mut self, tx: u32, ty: u32) -> Result<&[f32]> {
-        let key = (self.zoom, tx, ty);
-        if !self.cache.contains_key(&key) {
-            let tile = self
-                .fetcher
-                .fetch_aws_terrain(tx, ty, self.zoom)
-                .with_context(|| format!("AWS terrain tile {}/{}/{}", self.zoom, tx, ty))?;
-            evict_local_if_full(&mut self.cache);
-            self.cache.insert(key, tile);
-        }
-        Ok(self.cache.get(&key).expect("tile inserted").as_slice())
-    }
-}
-
-struct ImageryFaceSampler<'a> {
-    fetcher: &'a TileFetcher,
-    zoom: u8,
-    cache: HashMap<TileKey, RgbImage>,
-}
-
-impl<'a> ImageryFaceSampler<'a> {
-    fn new(fetcher: &'a TileFetcher, zoom: u8) -> Self {
-        Self {
-            fetcher,
-            zoom,
-            cache: HashMap::new(),
-        }
-    }
-
-    fn sample(&mut self, lon: f64, lat: f64) -> Result<[u8; 3]> {
-        let (tx, ty) = lonlat_to_tile(lon, lat, self.zoom);
-        let (u, v) = tile_subpixel_local(lon, lat, tx, ty, self.zoom);
-        let tile = self.tile(tx, ty)?;
-        Ok(sample_rgb_bilinear_local(tile, u, v))
-    }
-
-    fn tile(&mut self, tx: u32, ty: u32) -> Result<&RgbImage> {
-        let key = (self.zoom, tx, ty);
-        if !self.cache.contains_key(&key) {
-            let tile = self
-                .fetcher
-                .fetch_eox_imagery(tx, ty, self.zoom)
-                .with_context(|| format!("EOX imagery tile {}/{}/{}", self.zoom, tx, ty))?;
-            evict_local_if_full(&mut self.cache);
-            self.cache.insert(key, tile);
-        }
-        Ok(self.cache.get(&key).expect("tile inserted"))
-    }
-}
-
-fn evict_local_if_full<V>(cache: &mut HashMap<TileKey, V>) {
-    if cache.len() >= LOCAL_DECODED_CACHE_CAP {
-        if let Some(k) = cache.keys().next().copied() {
-            cache.remove(&k);
-        }
-    }
-}
-
-fn tile_subpixel_local(lon: f64, lat: f64, tx: u32, ty: u32, z: u8) -> (f64, f64) {
-    let (nw_lon, nw_lat) = tile_to_lonlat(tx, ty, z);
-    let (se_lon, se_lat) = tile_to_lonlat(tx + 1, ty + 1, z);
-    let u = ((lon - nw_lon) / (se_lon - nw_lon)).clamp(0.0, 1.0);
-    let v = ((nw_lat - lat) / (nw_lat - se_lat)).clamp(0.0, 1.0);
-    (u, v)
-}
-
-fn sample_f32_bilinear_local(buf: &[f32], size: u32, u: f64, v: f64) -> f32 {
-    let px_f = u * size as f64 - 0.5;
-    let py_f = v * size as f64 - 0.5;
-    let px0 = (px_f.floor() as i32).clamp(0, size as i32 - 1) as u32;
-    let py0 = (py_f.floor() as i32).clamp(0, size as i32 - 1) as u32;
-    let px1 = (px0 + 1).min(size - 1);
-    let py1 = (py0 + 1).min(size - 1);
-    let fx = (px_f - px_f.floor()).clamp(0.0, 1.0) as f32;
-    let fy = (py_f - py_f.floor()).clamp(0.0, 1.0) as f32;
-    let v00 = buf[(py0 * size + px0) as usize];
-    let v10 = buf[(py0 * size + px1) as usize];
-    let v01 = buf[(py1 * size + px0) as usize];
-    let v11 = buf[(py1 * size + px1) as usize];
-    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
-}
-
-fn sample_rgb_bilinear_local(img: &RgbImage, u: f64, v: f64) -> [u8; 3] {
-    let size = TILE_PX;
-    let px_f = u * size as f64 - 0.5;
-    let py_f = v * size as f64 - 0.5;
-    let px0 = (px_f.floor() as i32).clamp(0, size as i32 - 1) as u32;
-    let py0 = (py_f.floor() as i32).clamp(0, size as i32 - 1) as u32;
-    let px1 = (px0 + 1).min(size - 1);
-    let py1 = (py0 + 1).min(size - 1);
-    let fx = (px_f - px_f.floor()).clamp(0.0, 1.0) as f32;
-    let fy = (py_f - py_f.floor()).clamp(0.0, 1.0) as f32;
-    let p00 = img.get_pixel(px0, py0).0;
-    let p10 = img.get_pixel(px1, py0).0;
-    let p01 = img.get_pixel(px0, py1).0;
-    let p11 = img.get_pixel(px1, py1).0;
-    let mut out = [0u8; 3];
-    for c in 0..3 {
-        let v = p00[c] as f32 * (1.0 - fx) * (1.0 - fy)
-            + p10[c] as f32 * fx * (1.0 - fy)
-            + p01[c] as f32 * (1.0 - fx) * fy
-            + p11[c] as f32 * fx * fy;
-        out[c] = v.round().clamp(0.0, 255.0) as u8;
-    }
-    out
 }
 
 fn fetch_face_height(
@@ -609,7 +377,7 @@ fn fetch_face_height(
     let mut buf = vec![0u16; pixel_count];
 
     buf.par_chunks_mut(side).enumerate().try_for_each_init(
-        || TerrainFaceSampler::new(fetcher, zoom),
+        || TerrainLonLatSampler::new(fetcher, zoom),
         |sampler, (y, row)| -> Result<()> {
             let y_u32 = u32::try_from(y).context("row index doesn't fit u32")?;
             for (x, out) in row.iter_mut().enumerate() {
@@ -670,7 +438,7 @@ fn fetch_face_albedo(
     buf.par_chunks_mut(row_bytes)
         .enumerate()
         .try_for_each_init(
-            || ImageryFaceSampler::new(fetcher, zoom),
+            || ImageryLonLatSampler::new(fetcher, zoom),
             |sampler, (y, row)| -> Result<()> {
                 let y_u32 = u32::try_from(y).context("row index doesn't fit u32")?;
                 for x in 0..side {
