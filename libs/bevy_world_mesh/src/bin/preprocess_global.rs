@@ -17,7 +17,7 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_world_mesh::prelude::*;
-use bevy_world_mesh::scenes::globe::{PATH, globe_terrain_config};
+use bevy_world_mesh::scenes::globe::{globe_terrain_config, PATH};
 use bevy_world_mesh::terrain::util::{asset_path, assets_root};
 use std::time::Duration;
 
