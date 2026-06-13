@@ -1065,7 +1065,7 @@ pub fn sync_pos(
         (&mut GeoPosition, &mut GeoRotation, &WorldPos),
         (Changed<WorldPos>, Without<ParentFrame>),
     >,
-    mut parented: Query<(&ParentFrame, &WorldPos, &mut Transform), Changed<WorldPos>>,
+    mut parented: Query<(&WorldPos, &mut Transform), Changed<WorldPos>>,
 ) {
     geo.iter_mut()
         .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
@@ -1079,17 +1079,11 @@ pub fn sync_pos(
             // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
         });
 
-    let plane_ctx = GeoContext::default();
     parented
         .iter_mut()
-        .for_each(|(parent_frame, world_pos, mut transform)| {
-            let frame = parent_frame.0;
-            transform.translation = GeoPosition(frame, world_pos.pos())
-                .to_bevy(&plane_ctx)
-                .as_vec3();
-            transform.rotation = GeoRotation::new(frame, world_pos.att())
-                .to_bevy(&plane_ctx)
-                .as_quat();
+        .for_each(|(world_pos, mut transform)| {
+            transform.translation = DVec3::from(world_pos.pos()).as_vec3();
+            transform.rotation = DQuat::from(world_pos.att()).as_quat();
         });
 }
 
