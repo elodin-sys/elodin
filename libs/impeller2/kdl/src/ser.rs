@@ -566,8 +566,15 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
 
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
 
-    // Add frame attribute if not default (Bevy)
-    if let Some(frame) = obj.frame {
+    if let Some(name) = &obj.name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("name", name.clone()));
+    }
+
+    if let Some(parent) = &obj.parent {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", format!("parent:{parent}")));
+    } else if let Some(frame) = obj.frame {
         node.entries_mut()
             .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
     }
@@ -1183,6 +1190,8 @@ graph "value" {
             icon: None,
             mesh_visibility_range: None,
             frame: None,
+            name: None,
+            parent: None,
             node_id: NodeId::default(),
         }));
 
@@ -1224,6 +1233,8 @@ graph "value" {
             icon: None,
             mesh_visibility_range: None,
             frame: None,
+            name: None,
+            parent: None,
             node_id: NodeId::default(),
         }));
 
@@ -1262,6 +1273,8 @@ graph "value" {
             icon: None,
             mesh_visibility_range: None,
             frame: None,
+            name: None,
+            parent: None,
             node_id: NodeId::default(),
         }));
 
@@ -1297,6 +1310,8 @@ graph "value" {
             icon: None,
             mesh_visibility_range: None,
             frame: None,
+            name: None,
+            parent: None,
             node_id: NodeId::default(),
         }));
 
@@ -1339,6 +1354,8 @@ graph "value" {
                 material: Material::with_color(Color::ORANGE),
             },
             frame: Some(GeoFrame::NED),
+            name: None,
+            parent: None,
             mesh_visibility_range: None,
             icon: None,
             node_id: NodeId::next(),
@@ -1361,6 +1378,39 @@ graph "value" {
     }
 
     #[test]
+    fn test_roundtrip_object_3d_name_and_parent() {
+        let original = r#"object_3d "drone.world_pos" name="drone" {
+    sphere radius=0.2
+}
+object_3d "gimbal.pos" frame="parent:drone" {
+    sphere radius=0.05
+}
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        assert!(
+            serialized.contains("name=drone") || serialized.contains(r#"name="drone""#),
+            "serialized output should contain the name, got:\n{serialized}"
+        );
+        assert!(
+            serialized.contains("frame=parent:drone")
+                || serialized.contains(r#"frame="parent:drone""#),
+            "serialized output should contain the parent frame, got:\n{serialized}"
+        );
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(parent) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(parent.name.as_deref(), Some("drone"));
+        let SchematicElem::Object3d(child) = &reparsed.elems[1] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(child.parent.as_deref(), Some("drone"));
+        assert_eq!(child.frame, None);
+    }
+
+    #[test]
     fn test_serialize_object_3d_default_frame_not_serialized() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Object3d(Object3D {
@@ -1370,6 +1420,8 @@ graph "value" {
                 material: Material::with_color(Color::WHITE),
             },
             frame: None, // Default (no frame)
+            name: None,
+            parent: None,
             icon: None,
             mesh_visibility_range: None,
             node_id: NodeId::next(),

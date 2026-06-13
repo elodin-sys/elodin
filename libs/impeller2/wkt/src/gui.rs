@@ -828,6 +828,13 @@ pub struct Object3D {
     pub mesh: Object3DMesh,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
+    /// Name other objects can reference via `frame="parent:$NAME"`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Name of the object_3d this one is parented to (from
+    /// `frame="parent:$NAME"`); mutually exclusive with `frame`.
+    #[serde(default)]
+    pub parent: Option<String>,
     pub icon: Option<Object3DIcon>,
     #[serde(default)]
     pub mesh_visibility_range: Option<VisRange>,

@@ -888,10 +888,29 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         })?
         .to_string();
 
-    let frame = node
-        .get("frame")
+    let name = node
+        .get("name")
         .and_then(|v| v.as_string())
-        .and_then(|s| GeoFrame::from_str(s).ok());
+        .map(str::to_string);
+
+    let mut frame = None;
+    let mut parent = None;
+    if let Some(frame_str) = node.get("frame").and_then(|v| v.as_string()) {
+        if let Some(parent_name) = frame_str.strip_prefix("parent:") {
+            if parent_name.is_empty() {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "frame".to_string(),
+                    node: "object_3d".to_string(),
+                    expected: "parent:$NAME with a non-empty name".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                });
+            }
+            parent = Some(parent_name.to_string());
+        } else {
+            frame = GeoFrame::from_str(frame_str).ok();
+        }
+    }
     let mut icon = None;
     let mut mesh_visibility_range = None;
 
@@ -971,6 +990,8 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         eql,
         mesh,
         frame,
+        name,
+        parent,
         icon,
         mesh_visibility_range,
         node_id: NodeId::default(),
@@ -2070,6 +2091,40 @@ object_3d "a.world_pos" {
         assert!(parse_schematic(r#"coordinate frame="NED" lat=34.72"#).is_err());
         assert!(parse_schematic(r#"coordinate frame="NED" lon=-86.64"#).is_err());
         assert!(parse_schematic(r#"coordinate frame="NED" alt=100.0"#).is_err());
+    }
+
+    #[test]
+    fn test_parse_object_3d_name_and_parent() {
+        let kdl = r#"
+object_3d "drone.world_pos" name="drone" {
+    sphere radius=0.2
+}
+object_3d "gimbal.pos" frame="parent:drone" {
+    sphere radius=0.05
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 2);
+        let SchematicElem::Object3d(parent) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(parent.name.as_deref(), Some("drone"));
+        assert_eq!(parent.parent, None);
+        let SchematicElem::Object3d(child) = &schematic.elems[1] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(child.parent.as_deref(), Some("drone"));
+        assert_eq!(child.frame, None);
+    }
+
+    #[test]
+    fn test_parse_object_3d_empty_parent_name_is_an_error() {
+        let kdl = r#"
+object_3d "gimbal.pos" frame="parent:" {
+    sphere radius=0.05
+}
+"#;
+        assert!(parse_schematic(kdl).is_err());
     }
 
     #[test]

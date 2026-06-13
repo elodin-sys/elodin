@@ -1490,6 +1490,11 @@ pub fn create_object_3d_entity(
     };
 
     let geo_frame = data.frame;
+    let has_parent = data.parent.is_some();
+    let name = match &data.name {
+        Some(name) => Name::new(format!("object_3d {name}")),
+        None => Name::new(format!("object_3d {}", &data.mesh)),
+    };
 
     let entity_id = commands
         .spawn((
@@ -1506,19 +1511,36 @@ pub fn create_object_3d_entity(
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-            #[cfg(feature = "big_space")]
-            crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
-            Name::new(format!("object_3d {}", &data.mesh)),
+            name,
         ))
         .id();
 
-    // Add GeoPosition and GeoRotation components.
-    if let Some(frame) = geo_frame.or_default() {
-        commands.entity(entity_id).insert((
-            GeoPosition(frame, DVec3::ZERO),
-            GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),
-        ));
+    if has_parent {
+        // Parented children are positioned locally to their parent
+        // (`sync_pos` writes their Transform from WorldPos directly), so they
+        // must not carry the geo pipeline components that WorldPos
+        // auto-inserts, nor a GridCell.
+        commands
+            .entity(entity_id)
+            .remove::<(GeoPosition, GeoRotation)>();
+        #[cfg(feature = "big_space")]
+        commands
+            .entity(entity_id)
+            .remove::<crate::spatial::GridCell>();
+    } else {
+        #[cfg(feature = "big_space")]
+        commands
+            .entity(entity_id)
+            .insert(crate::spatial::GridCell::default());
+
+        // Add GeoPosition and GeoRotation components.
+        if let Some(frame) = geo_frame.or_default() {
+            commands.entity(entity_id).insert((
+                GeoPosition(frame, DVec3::ZERO),
+                GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),
+            ));
+        }
     }
 
     spawn_mesh(
@@ -1531,6 +1553,64 @@ pub fn create_object_3d_entity(
         assets,
     );
     Ok(entity_id)
+}
+
+/// Wire up `frame="parent:$NAME"` references among the object_3ds spawned in
+/// one schematic load. Each child becomes a Bevy child of the named object and
+/// gets a [`crate::ParentFrame`] carrying the parent's effective geo frame, so
+/// `sync_pos` writes its `WorldPos` as a local transform.
+pub fn resolve_object_3d_parents(commands: &mut Commands, objects: &[(Entity, Object3D)]) {
+    let mut named: HashMap<&str, (Entity, Option<GeoFrame>)> = HashMap::default();
+    for (entity, data) in objects {
+        if let Some(name) = data.name.as_deref()
+            && named.insert(name, (*entity, data.frame)).is_some()
+        {
+            warn!("duplicate object_3d name {name:?}; parent references use the last one");
+        }
+    }
+    // name -> parent name, for cycle detection
+    let parent_of: HashMap<&str, &str> = objects
+        .iter()
+        .filter_map(|(_, data)| Some((data.name.as_deref()?, data.parent.as_deref()?)))
+        .collect();
+
+    for (entity, data) in objects {
+        let Some(parent_name) = data.parent.as_deref() else {
+            continue;
+        };
+        let Some(&(parent_entity, parent_frame)) = named.get(parent_name) else {
+            warn!("object_3d parent {parent_name:?} not found; leaving the object unparented");
+            continue;
+        };
+        if let Some(name) = data.name.as_deref() {
+            let mut cursor = parent_name;
+            let mut steps = 0;
+            let cyclic = loop {
+                if cursor == name {
+                    break true;
+                }
+                match parent_of.get(cursor) {
+                    Some(next) if steps < objects.len() => {
+                        cursor = next;
+                        steps += 1;
+                    }
+                    Some(_) => break true,
+                    None => break false,
+                }
+            };
+            if cyclic {
+                warn!(
+                    "object_3d {name:?} -> {parent_name:?} would create a parent cycle; \
+                     leaving the object unparented"
+                );
+                continue;
+            }
+        }
+        let frame = parent_frame.or_default().unwrap_or(GeoFrame::ENU);
+        commands
+            .entity(*entity)
+            .insert((ChildOf(parent_entity), crate::ParentFrame(frame)));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

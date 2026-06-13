@@ -917,11 +917,13 @@ fn set_icon_mac() {
     }
 }
 
-/// `WorldPos` entities are positioned exclusively by the geo pipeline
+/// `WorldPos` entities are positioned by the geo pipeline
 /// (`sync_pos` -> `GeoPosition`/`GeoRotation` -> `Transform`/`GridCell`), so
 /// inserting `WorldPos` must always bring the pipeline components along.
 /// Spawners that need a non-default frame insert their own `Geo*` components,
-/// which take precedence over these defaults.
+/// which take precedence over these defaults. The one exception is entities
+/// parented to another object ([`ParentFrame`]): their spawner removes the
+/// `Geo*` components and `sync_pos` writes their local `Transform` directly.
 pub fn register_world_pos_components(app: &mut App) {
     app.register_required_components_with::<WorldPos, GeoPosition>(|| {
         GeoPosition(GeoFrame::default(), DVec3::ZERO)
@@ -936,13 +938,15 @@ pub fn register_world_pos_components(app: &mut App) {
 
 /// `WorldPos` requires the `Geo*` components ([`register_world_pos_components`]),
 /// so this should never fire; an entity that escapes the geo pipeline is never
-/// positioned.
+/// positioned. Entities parented to another object ([`ParentFrame`])
+/// legitimately lack `Geo*` and are exempt.
 #[allow(clippy::type_complexity)]
 pub fn warn_missing_geo(
     query: Query<
         (Entity, Option<&Name>),
         (
             With<WorldPos>,
+            Without<ParentFrame>,
             Or<(Without<GeoPosition>, Without<GeoRotation>)>,
         ),
     >,
@@ -1035,18 +1039,35 @@ pub fn follow_latest(
     current_ts.0 = latest.0;
 }
 
+/// Marks an entity that is a Bevy child of another object (via the
+/// `frame="parent:$NAME"` schematic attribute). Its `WorldPos` is a
+/// body-frame offset from the parent, expressed with the parent's geo frame
+/// axis convention. Such entities carry no `GeoPosition`/`GeoRotation`;
+/// `sync_pos` writes their local `Transform` directly.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ParentFrame(pub GeoFrame);
+
 /// Sync `WorldPos` (sim coordinates) into the entity's `GeoPosition` and
 /// `GeoRotation`. The geo pipeline (`apply_transforms`/`apply_big_translation`
 /// plus `apply_geo_rotation`) then produces the Bevy `Transform`/`GridCell`.
 ///
 /// Every `WorldPos` entity gets its `Geo*` components at insertion
-/// ([`register_world_pos_components`]) or from its spawner, so there is no
-/// direct `WorldPos` -> `Transform` path.
+/// ([`register_world_pos_components`]) or from its spawner, with one
+/// exception: entities parented to another object ([`ParentFrame`]) have a
+/// direct `WorldPos` -> local `Transform` path here, using the parent
+/// frame's constant Plane-mode basis. Bevy's transform propagation then
+/// composes the result with the parent's pose. This is exact in
+/// `Present::Plane`; in `Present::Sphere` the parent's basis is
+/// position-dependent and the composition is approximate.
+#[allow(clippy::type_complexity)]
 pub fn sync_pos(
-    mut query: Query<(&mut GeoPosition, &mut GeoRotation, &WorldPos), Changed<WorldPos>>,
+    mut geo: Query<
+        (&mut GeoPosition, &mut GeoRotation, &WorldPos),
+        (Changed<WorldPos>, Without<ParentFrame>),
+    >,
+    mut parented: Query<(&ParentFrame, &WorldPos, &mut Transform), Changed<WorldPos>>,
 ) {
-    query
-        .iter_mut()
+    geo.iter_mut()
         .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
             geo_pos.1 = world_pos.pos();
             // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
@@ -1056,6 +1077,19 @@ pub fn sync_pos(
             geo_rot.1 = world_pos.att();
             // let bevy_att = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&geo_context);
             // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
+        });
+
+    let plane_ctx = GeoContext::default();
+    parented
+        .iter_mut()
+        .for_each(|(parent_frame, world_pos, mut transform)| {
+            let frame = parent_frame.0;
+            transform.translation = GeoPosition(frame, world_pos.pos())
+                .to_bevy(&plane_ctx)
+                .as_vec3();
+            transform.rotation = GeoRotation::new(frame, world_pos.att())
+                .to_bevy(&plane_ctx)
+                .as_quat();
         });
 }
 
@@ -1203,6 +1237,8 @@ pub fn sync_object_3d(
                 icon: None,
                 mesh_visibility_range: None,
                 frame: None,
+                name: None,
+                parent: None,
                 node_id: Default::default(),
             },
             expr,
@@ -1656,6 +1692,64 @@ mod tests {
             q.dot(wp.bevy_att()).abs() > 1.0 - 1e-9,
             "got {q:?}, expected {:?}",
             wp.bevy_att()
+        );
+    }
+
+    /// Entities with [`ParentFrame`] bypass the geo pipeline: `sync_pos`
+    /// writes their local `Transform` directly from `WorldPos` using the
+    /// parent frame's constant Plane-mode basis.
+    #[test]
+    fn parented_world_pos_writes_local_transform() {
+        let mut app = App::new();
+        app.insert_resource(GeoContext::default());
+        register_world_pos_components(&mut app);
+        app.add_systems(bevy::app::Update, sync_pos);
+
+        let att = DQuat::from_euler(EulerRot::XYZ, 0.3, -0.8, 1.1);
+        let world_pos = WorldPos {
+            att: nox::Quaternion::new(att.w, att.x, att.y, att.z),
+            pos: nox::Vector3::new(1.0, 2.0, 3.0),
+        };
+
+        let enu_child = app
+            .world_mut()
+            .spawn((world_pos, ParentFrame(GeoFrame::ENU)))
+            .id();
+        let ned_child = app
+            .world_mut()
+            .spawn((world_pos, ParentFrame(GeoFrame::NED)))
+            .id();
+        // ParentFrame entities have their Geo* removed by the spawner.
+        for entity in [enu_child, ned_child] {
+            app.world_mut()
+                .entity_mut(entity)
+                .remove::<(GeoPosition, GeoRotation)>();
+        }
+        app.update();
+
+        // ENU matches the legacy ENU-Plane swizzle oracle.
+        let world = app.world();
+        let transform = world.get::<Transform>(enu_child).unwrap();
+        let expected = world_pos.bevy_pos().as_vec3();
+        assert!(
+            (transform.translation - expected).length() < 1e-6,
+            "got {:?}, expected {expected:?}",
+            transform.translation
+        );
+        let expected_att = world_pos.bevy_att().as_quat();
+        assert!(
+            transform.rotation.dot(expected_att).abs() > 1.0 - 1e-6,
+            "got {:?}, expected {expected_att:?}",
+            transform.rotation
+        );
+
+        // NED: (n, e, d) -> Bevy (e, -d, -n).
+        let transform = world.get::<Transform>(ned_child).unwrap();
+        let expected = bevy::math::Vec3::new(2.0, -3.0, -1.0);
+        assert!(
+            (transform.translation - expected).length() < 1e-6,
+            "got {:?}, expected {expected:?}",
+            transform.translation
         );
     }
 }

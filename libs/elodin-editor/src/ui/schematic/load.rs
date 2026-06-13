@@ -254,7 +254,7 @@ impl LoadSchematicParams<'_, '_> {
                 continue;
             }
             window_state.tile_state.clear(&mut self.commands);
-            self.commands.entity(id).despawn();
+            self.commands.entity(id).try_despawn();
         }
 
         let primary_window = *self.primary_window;
@@ -268,8 +268,11 @@ impl LoadSchematicParams<'_, '_> {
         };
         main_state.clear(&mut self.commands);
         self.hdr_enabled.0 = false;
+        // Parented object_3ds despawn recursively with their parent, so
+        // entities in this query may already be gone by the time we reach
+        // them.
         for entity in self.schematic_spawned.iter() {
-            self.commands.entity(entity).despawn();
+            self.commands.entity(entity).try_despawn();
         }
         let theme_selection = apply_theme(schematic.theme.as_ref());
         let theme_mode = Some(theme_selection.mode.clone());
@@ -286,6 +289,7 @@ impl LoadSchematicParams<'_, '_> {
         let mut main_ui_state = crate::ui::WindowUiState::default();
 
         let fallback_frame = self.coordinate.0;
+        let mut spawned_objects: Vec<(Entity, Object3D)> = Vec::new();
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
@@ -300,10 +304,14 @@ impl LoadSchematicParams<'_, '_> {
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     let mut obj = object_3d.clone();
-                    if obj.frame.is_none() {
+                    // Parented objects ignore their own frame attr; everyone
+                    // else inherits the global coordinate frame.
+                    if obj.frame.is_none() && obj.parent.is_none() {
                         obj.frame = fallback_frame;
                     }
-                    self.spawn_object_3d(obj);
+                    if let Some(entity) = self.spawn_object_3d(obj.clone()) {
+                        spawned_objects.push((entity, obj));
+                    }
                 }
                 impeller2_wkt::SchematicElem::Line3d(line_3d) => {
                     let mut line = line_3d.clone();
@@ -325,6 +333,7 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::Coordinate(_) => {}
             }
         }
+        crate::object_3d::resolve_object_3d_parents(&mut self.commands, &spawned_objects);
 
         {
             let mut window_state = self
@@ -607,9 +616,9 @@ impl LoadSchematicParams<'_, '_> {
         true
     }
 
-    pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
+    pub fn spawn_object_3d(&mut self, object_3d: Object3D) -> Option<Entity> {
         let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
-            return;
+            return None;
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
@@ -640,9 +649,11 @@ impl LoadSchematicParams<'_, '_> {
                         &mut self.icon_cache,
                     );
                 }
+                Some(entity)
             }
             Err(err) => {
                 warn!("Unable to spawn object 3d due to eql compile error: {err}");
+                None
             }
         }
     }
@@ -1499,6 +1510,109 @@ mod tests {
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    fn find_object_3d(
+        app: &mut App,
+        predicate: impl Fn(&impeller2_wkt::Object3D) -> bool,
+    ) -> Option<Entity> {
+        let world = app.world_mut();
+        let mut query = world.query::<(Entity, &crate::object_3d::Object3DState)>();
+        query
+            .iter(world)
+            .find(|(_, state)| predicate(&state.data))
+            .map(|(entity, _)| entity)
+    }
+
+    #[test]
+    fn object_3d_parenting_wires_hierarchy() {
+        let mut app = test_app();
+        let baseline = entity_count(&mut app);
+
+        // Child declared first to exercise forward references.
+        let kdl = r#"
+object_3d "(0,0,0,1, 1,2,3)" frame="parent:ball" { sphere radius=0.1 { color 0 0 0 } }
+object_3d "(0,0,0,1, 0,0,0)" name="ball" frame="NED" { sphere radius=0.2 { color 0 0 0 } }
+"#;
+        let schematic = Schematic::from_kdl(kdl).expect("parse test schematic");
+        load_schematic(&mut app, &schematic);
+
+        let parent = find_object_3d(&mut app, |data| data.name.as_deref() == Some("ball"))
+            .expect("parent object");
+        let child = find_object_3d(&mut app, |data| data.parent.as_deref() == Some("ball"))
+            .expect("child object");
+
+        let world = app.world();
+        let child_of = world.get::<ChildOf>(child).expect("child is parented");
+        assert_eq!(child_of.parent(), parent);
+        assert!(
+            world.get::<bevy_geo_frames::GeoPosition>(child).is_none(),
+            "parented child must not carry GeoPosition"
+        );
+        assert!(
+            world.get::<bevy_geo_frames::GeoRotation>(child).is_none(),
+            "parented child must not carry GeoRotation"
+        );
+        #[cfg(feature = "big_space")]
+        assert!(
+            world.get::<crate::spatial::GridCell>(child).is_none(),
+            "parented child must not carry GridCell"
+        );
+        assert_eq!(
+            world
+                .get::<crate::ParentFrame>(child)
+                .expect("ParentFrame")
+                .0,
+            GeoFrame::NED,
+            "child inherits the parent's effective frame"
+        );
+        assert!(
+            world.get::<bevy_geo_frames::GeoPosition>(parent).is_some(),
+            "parent stays on the geo pipeline"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(
+            entity_count(&mut app),
+            baseline,
+            "clearing the schematic should despawn parent and child"
+        );
+    }
+
+    #[test]
+    fn object_3d_missing_parent_stays_unparented() {
+        let mut app = test_app();
+        let kdl = r#"
+object_3d "(0,0,0,1, 0,0,0)" frame="parent:ghost" { sphere radius=0.1 { color 0 0 0 } }
+"#;
+        let schematic = Schematic::from_kdl(kdl).expect("parse test schematic");
+        load_schematic(&mut app, &schematic);
+
+        let child = find_object_3d(&mut app, |data| data.parent.as_deref() == Some("ghost"))
+            .expect("child object");
+        let world = app.world();
+        assert!(world.get::<ChildOf>(child).is_none());
+        assert!(world.get::<crate::ParentFrame>(child).is_none());
+    }
+
+    #[test]
+    fn object_3d_parent_cycle_is_skipped() {
+        let mut app = test_app();
+        let kdl = r#"
+object_3d "(0,0,0,1, 0,0,0)" name="a" frame="parent:b" { sphere radius=0.1 { color 0 0 0 } }
+object_3d "(0,0,0,1, 0,0,0)" name="b" frame="parent:a" { sphere radius=0.1 { color 0 0 0 } }
+"#;
+        let schematic = Schematic::from_kdl(kdl).expect("parse test schematic");
+        load_schematic(&mut app, &schematic);
+
+        for name in ["a", "b"] {
+            let entity = find_object_3d(&mut app, |data| data.name.as_deref() == Some(name))
+                .expect("object");
+            assert!(
+                app.world().get::<ChildOf>(entity).is_none(),
+                "cyclic parent reference {name:?} must stay unparented"
+            );
+        }
     }
 
     #[test]

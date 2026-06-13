@@ -201,13 +201,18 @@ fn load_headless_scene(
             bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude);
     }
 
+    let mut spawned_objects: Vec<(Entity, impeller2_wkt::Object3D)> = Vec::new();
     for elem in &schematic.elems {
         if let SchematicElem::Object3d(obj) = elem {
             let Ok(expr) = eql.0.parse_str(&obj.eql) else {
                 tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
                 continue;
             };
-            let _ = create_object_3d_entity(
+            let mut obj = obj.clone();
+            if obj.frame.is_none() && obj.parent.is_none() {
+                obj.frame = schematic.frame;
+            }
+            let result = create_object_3d_entity(
                 &mut commands,
                 obj.clone(),
                 expr,
@@ -218,8 +223,12 @@ fn load_headless_scene(
                 &asset_server,
                 &geo_context,
             );
+            if let Ok(entity) = result {
+                spawned_objects.push((entity, obj));
+            }
         }
     }
+    crate::object_3d::resolve_object_3d_parents(&mut commands, &spawned_objects);
     tracing::debug!(
         "Headless scene loaded: {} elements from schematic",
         schematic.elems.len()

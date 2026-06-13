@@ -80,7 +80,9 @@ viewport name="Fin Orientation"
 
 All scene nodes support an optional `frame` attribute (`ENU`, `NED`, or `ECEF`) that specifies the coordinate frame for interpreting position and orientation. If omitted, the global `coordinate` frame is used.
 
-- `object_3d <eql> [frame=ENU|NED|ECEF] { ... }`: one mesh child is required.
+- `object_3d <eql> [name=...] [frame=ENU|NED|ECEF|"parent:$NAME"] { ... }`: one mesh child is required.
+  - `name` lets other objects reference this one.
+  - `frame="parent:$NAME"` parents this object to the object named `$NAME`: it becomes a child in the scene hierarchy and its EQL pose is interpreted in the parent's body frame, so it translates and rotates with the parent.
   - `glb path=... [scale=1.0] [translate="(x,y,z)"] [rotate="(deg_x,deg_y,deg_z)"]`
   - `sphere radius=...`
   - `box x=... y=... z=...`
