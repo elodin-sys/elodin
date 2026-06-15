@@ -42,7 +42,12 @@ def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
             continue
         result_path = out_dir / row.get("result_json", "")
         post = _read_json(result_path.with_name("post_run_result.json"))
+        # Prefer the hook's scored RMSE, but fall back to the raw `traj_rmse`
+        # in result.json so successful runs still rank when post-run scoring
+        # is absent or incomplete.
         rmse = _float(post.get("traj_rmse_m"))
+        if rmse is None:
+            rmse = _float(_read_json(result_path).get("traj_rmse"))
         if rmse is None or rmse >= best_rmse:
             continue
         context = _read_json(result_path.with_name("post_run_context.json"))
@@ -55,7 +60,7 @@ def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
         best_params = params
         best_rmse = rmse
     if not best_run:
-        raise RuntimeError(f"no successful runs with traj_rmse_m in {out_dir}")
+        raise RuntimeError(f"no successful runs with a trajectory RMSE in {out_dir}")
     return best_run, best_params, best_rmse
 
 
