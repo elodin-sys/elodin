@@ -957,6 +957,11 @@ pool. Use <code>0</code> or omit the option for the default auto-sized pool.</li
 <code>memory.json</code>/<code>processes.csv</code> output. Leave this off for scaling benchmarks.</li>
 <li><code>--keep-existing</code>: do not reap existing <code>elodin</code> / <code>elodin-db</code> processes at
 campaign startup.</li>
+<li><code>--fail-on-errors</code>: exit non-zero when any run failed or missed scoring.
+Off by default so exploratory campaigns can finish with partial failures.
+Also configurable as <code>fail_on_run_errors = true</code> in <code>campaign.toml</code>. For CI
+gates, prefer a <code>post_campaign</code> hook that raises on <code>summary.failed</code> (see
+<code>examples/apollo-lander/hooks/ci_gate.py</code>) instead of relying on this flag.</li>
 <li><code>--post-run &lt;HOOK.py&gt;</code> / <code>--post-campaign &lt;HOOK.py&gt;</code>: plain-Python lifecycle hooks.</li>
 <li><code>--params-compat revere-overrides-file</code>: emit <code>REVERE_SIM_OVERRIDES_FILE</code> and <code>SIM_SEED</code> for legacy simulations.</li>
 <li><code>--progress &lt;auto|always|never&gt;</code>: control the live progress bar. <code>auto</code> shows
