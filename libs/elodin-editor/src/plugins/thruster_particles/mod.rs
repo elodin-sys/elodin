@@ -18,6 +18,7 @@ use bevy_hanabi::{
             SizeOverLifetimeModifier,
         },
         position::SetPositionCone3dModifier,
+        velocity::SetVelocitySphereModifier,
     },
 };
 use impeller2_bevy::EntityMap;
@@ -146,27 +147,44 @@ fn build_dps_exhaust() -> EffectAsset {
 
 fn build_rcs_jet() -> EffectAsset {
     let mut module = Module::default();
+
+    // Tight nozzle mouth: particles spawn in a small cone volume at the jet exit.
     let init_pos = SetPositionCone3dModifier {
-        height: module.lit(0.06),
-        base_radius: module.lit(0.04),
-        top_radius: module.lit(0.07),
+        height: module.lit(0.05),
+        base_radius: module.lit(0.022),
+        top_radius: module.lit(0.06),
         dimension: ShapeDimension::Volume,
     };
-    let init_vel =
-        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 10.0));
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.32));
-    let size = SetAttributeModifier::new(Attribute::SIZE, module.lit(0.14));
-    let drag = LinearDragModifier::new(module.lit(2.5));
 
+    // Diverging exhaust: aim the velocity radially away from a virtual throat
+    // placed just behind the mouth (exhaust travels along -Y), so the jet fans
+    // out into a narrow cone instead of a parallel column like a real cold-gas
+    // puff. The rig rotates the whole emitter, so -Y maps to the jet direction.
+    let throat = module.lit(-DPS_EXHAUST_BODY * 0.18);
+    let speed = module.lit(11.0);
+    let init_vel = SetVelocitySphereModifier {
+        center: throat,
+        speed,
+    };
+
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.34));
+    let size = SetAttributeModifier::new(Attribute::SIZE, module.lit(0.12));
+    // Heavier drag so the puff loses momentum quickly and reads as a crisp burst.
+    let drag = LinearDragModifier::new(module.lit(2.8));
+
+    // HDR core (channels > 1.0) so the viewport bloom catches a bright ignition
+    // flash at the nozzle, cooling to a faint bluish haze before fading out.
     let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(0.92, 0.96, 1.0, 0.85));
-    gradient.add_key(0.35, Vec4::new(0.78, 0.86, 0.98, 0.45));
+    gradient.add_key(0.0, Vec4::new(1.8, 2.1, 2.6, 0.9));
+    gradient.add_key(0.18, Vec4::new(1.0, 1.15, 1.4, 0.6));
+    gradient.add_key(0.5, Vec4::new(0.6, 0.72, 0.92, 0.28));
     gradient.add_key(1.0, Vec4::ZERO);
 
+    // Pop open fast at the mouth, then thin out as the gas disperses.
     let mut size_over_life = Gradient::<Vec3>::new();
-    size_over_life.add_key(0.0, Vec3::splat(0.35));
-    size_over_life.add_key(0.2, Vec3::splat(0.9));
-    size_over_life.add_key(1.0, Vec3::splat(0.25));
+    size_over_life.add_key(0.0, Vec3::splat(0.28));
+    size_over_life.add_key(0.16, Vec3::splat(0.85));
+    size_over_life.add_key(1.0, Vec3::splat(0.2));
 
     EffectAsset::new(8192, SpawnerSettings::rate(90.0.into()), module)
         .with_name("rcs_jet")
