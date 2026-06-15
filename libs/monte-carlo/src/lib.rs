@@ -509,7 +509,6 @@ fn reap_existing_elodin(reporter: &CampaignReporter) {
         .iter()
         .filter_map(|(pid, process)| {
             if protected_pids.contains(pid)
-                || process_cmd_contains(process, "monte-carlo")
                 || (process.start_time() >= current_start_time
                     && has_protected_ancestor(&system, *pid, &protected_pids))
             {
@@ -600,13 +599,6 @@ fn has_protected_ancestor(system: &System, mut pid: Pid, protected: &HashSet<Pid
         }
         pid = parent;
     }
-}
-
-fn process_cmd_contains(process: &sysinfo::Process, needle: &str) -> bool {
-    process
-        .cmd()
-        .iter()
-        .any(|arg| arg.to_string_lossy() == needle)
 }
 
 fn elodin_process_name(process: &sysinfo::Process) -> Option<String> {
