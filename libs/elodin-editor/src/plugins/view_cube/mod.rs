@@ -5,6 +5,7 @@ mod components;
 mod config;
 mod events;
 mod interactions;
+mod picking;
 pub mod spawn;
 mod theme;
 
@@ -50,6 +51,7 @@ impl Plugin for ViewCubePlugin {
             .init_resource::<CurrentColorMode>()
             .add_message::<ViewCubeEvent>()
             .add_plugins(spawn::plugin)
+            .add_plugins(picking::plugin)
             .add_plugins(FontMeshPlugin::<StandardMaterial>::default())
             .add_systems(Update, interactions::setup_cube_elements)
             .add_systems(Update, interactions::repeat_held_arrow)

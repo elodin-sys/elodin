@@ -122,7 +122,7 @@ pub fn setup_cube_elements(
 
             commands
                 .entity(entity)
-                .insert((elem.clone(), ViewCubeSetup));
+                .insert((elem.clone(), ViewCubeSetup, Pickable::default()));
 
             if let Ok(mat_handle) = material_query.get(entity)
                 && materials.get(&mat_handle.0).is_some()

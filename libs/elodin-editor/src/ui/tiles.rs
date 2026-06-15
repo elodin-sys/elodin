@@ -1581,7 +1581,7 @@ impl ViewportPane {
                     zoom: 0.2,
                     ..default()
                 },
-                last_anchor_depth: 2.0,
+                last_anchor_depth: -2.0,
                 ..Default::default()
             },
             GridHandle { grid: grid_id },

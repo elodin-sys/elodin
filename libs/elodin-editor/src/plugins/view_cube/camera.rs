@@ -698,6 +698,29 @@ pub fn handle_view_cube_editor(
             match action {
                 ViewportActionButton::Reset => {
                     apply_viewport_reset(transform.as_mut(), &mut editor_cam);
+                    // Recompute the orbit depth from the viewport's look_at so a
+                    // stale km-scale terrain pick depth can't survive the reset,
+                    // then issue a LookTo to cancel any in-flight snap animation.
+                    let reset_pose =
+                        lookup.current_camera_pose(transform.as_ref(), parent, origin_world);
+                    update_anchor_depth_for_view_cube(
+                        entity,
+                        reset_pose.translation,
+                        reset_pose.rotation,
+                        &mut editor_cam,
+                        &lookup.viewports,
+                        lookup.entity_map.as_ref(),
+                        &lookup.values,
+                        origin_world,
+                    );
+                    if let Ok(facing) = Dir3::new(Vec3::NEG_Z) {
+                        look_to.write(LookToTrigger::auto_snap_up_direction(
+                            facing,
+                            entity,
+                            transform.as_ref(),
+                            &editor_cam,
+                        ));
+                    }
                 }
                 ViewportActionButton::ZoomOut => {
                     apply_viewport_zoom(true, transform.as_mut(), &mut editor_cam);
@@ -948,6 +971,51 @@ fn choose_min_rotation_up(
     )
 }
 
+/// Orbit radius for view-cube snaps. Prefer the camera-to-`look_at` distance so
+/// stale mesh-pick depths (e.g. km-scale terrain under the Apollo landing tile)
+/// cannot hijack `LookTo` rotation.
+fn resolve_view_cube_orbit_distance(
+    to_target: Vec3,
+    camera_rotation: Quat,
+    previous_distance: f32,
+) -> f32 {
+    const MIN_ALIGNMENT_FOR_PROJECTED: f32 = 0.65;
+    const MIN_ORBIT_DISTANCE: f32 = 0.25;
+    const STALE_DEPTH_RATIO: f32 = 4.0;
+
+    let forward = camera_rotation * Vec3::NEG_Z;
+    let projected_distance = to_target.dot(forward);
+    let measured_distance = to_target.length();
+    let alignment_ratio = if measured_distance.is_finite() && measured_distance > 1.0e-3 {
+        (projected_distance / measured_distance).clamp(-1.0, 1.0)
+    } else {
+        f32::NAN
+    };
+
+    let distance = if measured_distance.is_finite() && measured_distance > MIN_ORBIT_DISTANCE {
+        measured_distance
+    } else if projected_distance.is_finite()
+        && measured_distance.is_finite()
+        && projected_distance > 1.0e-3
+        && measured_distance > 1.0e-3
+        && alignment_ratio >= MIN_ALIGNMENT_FOR_PROJECTED
+    {
+        projected_distance
+    } else if previous_distance > MIN_ORBIT_DISTANCE
+        && (!measured_distance.is_finite()
+            || measured_distance <= MIN_ORBIT_DISTANCE
+            || previous_distance <= measured_distance * STALE_DEPTH_RATIO)
+    {
+        previous_distance
+    } else if measured_distance.is_finite() && measured_distance > 1.0e-3 {
+        measured_distance
+    } else {
+        1.0
+    };
+
+    distance.max(MIN_ORBIT_DISTANCE)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_anchor_depth_for_view_cube(
     camera: Entity,
@@ -964,42 +1032,10 @@ fn update_anchor_depth_for_view_cube(
         return;
     };
     let orbit_target = (orbit_target_world - origin_world).as_vec3();
-
     let to_target = orbit_target - camera_translation;
-    let forward = camera_rotation * Vec3::NEG_Z;
-    let projected_distance = to_target.dot(forward);
-    let measured_distance = to_target.length();
     let previous_distance = editor_cam.last_anchor_depth.abs() as f32;
-    let alignment_ratio = if measured_distance.is_finite() && measured_distance > 1.0e-3 {
-        (projected_distance / measured_distance).clamp(-1.0, 1.0)
-    } else {
-        f32::NAN
-    };
-
-    const MIN_ALIGNMENT_FOR_PROJECTED: f32 = 0.65;
-    const MIN_ORBIT_DISTANCE: f32 = 0.25;
-
-    let mut distance = if projected_distance.is_finite()
-        && measured_distance.is_finite()
-        && projected_distance > 1.0e-3
-        && measured_distance > 1.0e-3
-        && alignment_ratio >= MIN_ALIGNMENT_FOR_PROJECTED
-    {
-        projected_distance
-    } else if previous_distance > 1.0e-3 {
-        previous_distance
-    } else if measured_distance.is_finite() && measured_distance > 1.0e-3 {
-        measured_distance
-    } else {
-        1.0
-    };
-
-    if distance < MIN_ORBIT_DISTANCE {
-        distance = MIN_ORBIT_DISTANCE;
-    }
-
-    let new_depth = -(distance as f64);
-    editor_cam.last_anchor_depth = new_depth;
+    let distance = resolve_view_cube_orbit_distance(to_target, camera_rotation, previous_distance);
+    editor_cam.last_anchor_depth = -(distance as f64);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1342,6 +1378,27 @@ mod tests {
             Some(&Visibility::Inherited),
             "root should become visible once the scene instance is ready",
         );
+    }
+
+    #[test]
+    fn resolve_view_cube_orbit_distance_prefers_look_at_over_stale_terrain_pick() {
+        let to_target = Vec3::new(-10.0, -4.0, 10.0);
+        let camera_rotation = Quat::from_rotation_y(1.2);
+        let distance = resolve_view_cube_orbit_distance(to_target, camera_rotation, 12_000.0);
+        let expected = to_target.length();
+        assert!(
+            (distance - expected).abs() < 1.0e-4,
+            "expected orbit radius {expected}, got {distance}"
+        );
+        assert!(distance < 100.0, "stale km-scale pick depth leaked through");
+    }
+
+    #[test]
+    fn resolve_view_cube_orbit_distance_uses_previous_when_target_not_measurable() {
+        let to_target = Vec3::ZERO;
+        let camera_rotation = Quat::IDENTITY;
+        let distance = resolve_view_cube_orbit_distance(to_target, camera_rotation, 5.0);
+        assert!((distance - 5.0).abs() < 1.0e-6);
     }
 
     #[test]
