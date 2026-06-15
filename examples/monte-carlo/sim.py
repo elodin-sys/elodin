@@ -40,6 +40,10 @@ Target = ty.Annotated[
     jax.Array,
     el.Component("target", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
+SpecificForce = ty.Annotated[
+    jax.Array,
+    el.Component("specific_force", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
 
 
 def lookup_table(size: int) -> np.ndarray:
@@ -69,6 +73,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             el.C(Velocity, jnp.array([wind], dtype=jnp.float64)),
             el.C(Command, jnp.array([0.0], dtype=jnp.float64)),
             el.C(Target, jnp.array([target_x], dtype=jnp.float64)),
+            el.C(SpecificForce, jnp.array([0.0], dtype=jnp.float64)),
         ],
         name="vehicle",
     )
@@ -76,7 +81,9 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     dt = 1.0 / SIMULATION_RATE_HZ
 
     @el.map
-    def point_mass(pos: Position, vel: Velocity, command: Command) -> tuple[Position, Velocity]:
+    def point_mass(
+        pos: Position, vel: Velocity, command: Command
+    ) -> tuple[Position, Velocity, SpecificForce]:
         idx = jnp.clip(
             jnp.abs(vel[0] * 1000.0).astype(jnp.int32),
             0,
@@ -93,6 +100,6 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
         acc = acc + probe_sum * 1e-300
         new_vel = vel + jnp.array([acc * dt])
         new_pos = pos + new_vel * dt
-        return new_pos, new_vel
+        return new_pos, new_vel, jnp.array([acc])
 
     return world, point_mass

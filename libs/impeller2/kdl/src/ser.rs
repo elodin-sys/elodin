@@ -646,10 +646,52 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     if let Some(icon) = &obj.icon {
         children.nodes_mut().push(serialize_object_3d_icon(icon));
     }
+    for thruster in &obj.thrusters {
+        children.nodes_mut().push(serialize_thruster(thruster));
+    }
 
     node.set_children(children);
 
     node
+}
+
+fn serialize_thruster(thruster: &Thruster) -> KdlNode {
+    let mut node = KdlNode::new("thruster");
+    push_optional_name_prop(&mut node, thruster.name.as_deref());
+    if thruster.body_frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("body_frame", true));
+    }
+    node.entries_mut().push(KdlEntry::new_prop(
+        "position",
+        tuple3_to_kdl_string(thruster.position),
+    ));
+    node.entries_mut().push(KdlEntry::new_prop(
+        "direction",
+        tuple3_to_kdl_string(thruster.direction),
+    ));
+    node.entries_mut()
+        .push(KdlEntry::new_prop("intensity", thruster.intensity.clone()));
+    if (thruster.emission_rate - Thruster::default_emission_rate()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "emission_rate",
+            f64::from(thruster.emission_rate),
+        );
+    }
+    if (thruster.cutoff - Thruster::default_cutoff()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "cutoff", f64::from(thruster.cutoff));
+    }
+    node
+}
+
+fn tuple3_to_kdl_string(value: (f32, f32, f32)) -> String {
+    format!(
+        "({}, {}, {})",
+        round_float_default(f64::from(value.0)),
+        round_float_default(f64::from(value.1)),
+        round_float_default(f64::from(value.2))
+    )
 }
 
 fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
@@ -1257,6 +1299,7 @@ graph "value" {
                 material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1298,6 +1341,7 @@ graph "value" {
                 material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1327,6 +1371,34 @@ graph "value" {
     }
 
     #[test]
+    fn test_serialize_object_3d_thruster() {
+        let original = r#"
+object_3d "vehicle.world_pos" {
+    sphere radius=0.25 {
+        color 80 170 255
+    }
+    thruster name="main" body_frame=#true position="(-0.35, 0, 0)" direction="(-1, 0, 0)" intensity="vehicle.specific_force[0] / 20.0" emission_rate=420.0
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(obj.thrusters.len(), 1);
+        let thruster = &obj.thrusters[0];
+        assert_eq!(thruster.name.as_deref(), Some("main"));
+        assert!(thruster.body_frame);
+        assert_eq!(thruster.position, (-0.35, 0.0, 0.0));
+        assert_eq!(thruster.direction, (-1.0, 0.0, 0.0));
+        assert_eq!(thruster.intensity, "vehicle.specific_force[0] / 20.0");
+        assert_eq!(thruster.emission_rate, 420.0);
+    }
+
+    #[test]
     fn test_serialize_object_3d_material_emissivity() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Object3d(Object3D {
@@ -1336,6 +1408,7 @@ graph "value" {
                 material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1371,6 +1444,7 @@ graph "value" {
                 grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1417,6 +1491,7 @@ graph "value" {
             frame: Some(GeoFrame::NED),
             mesh_visibility_range: None,
             icon: None,
+            thrusters: Vec::new(),
             node_id: NodeId::next(),
         }));
 
@@ -1447,6 +1522,7 @@ graph "value" {
             },
             frame: None, // Default (no frame)
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: NodeId::next(),
         }));

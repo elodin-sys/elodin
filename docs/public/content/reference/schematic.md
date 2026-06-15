@@ -142,6 +142,22 @@ viewport hdr=#true {
   - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
   - `visibility_range` child node: `min`, `max`, and `fade_distance` in world units (see above).
   - `size`: desired screen pixel size of the icon (default 32).
+- `thruster` children (optional, multiple): GPU exhaust particles attached to the object. Declare one item per nozzle; there is no bank shorthand yet.
+  - `position`: required `(x, y, z)` nozzle position in the object body frame.
+  - `direction`: required `(x, y, z)` exhaust direction. With `body_frame=#true`, the direction rotates with the object; otherwise it is interpreted in world frame.
+  - `intensity`: required scalar EQL expression. The renderer clamps the evaluated value to `0..1`, so separate forward/reverse nozzles can be modeled with opposite signed expressions. For a diegetic thrust gauge, drive this from specific force: acceleration modulo gravity, scaled to the vehicle's useful thrust range.
+  - `name`: optional debug/display name.
+  - `body_frame`: bool, default `#false`.
+  - `emission_rate`: particles per second at intensity `1.0`, default `400.0`.
+  - `cutoff`: intensity threshold below which the emitter is hidden, default `0.02`.
+
+```kdl
+object_3d "(0,0,0,1, vehicle.position[0], 0, 0)" {
+    sphere radius=0.25 { color 80 170 255 }
+    thruster name="forward" body_frame=#true position="(-0.35, 0, 0)" direction="(-1, 0, 0)" intensity="vehicle.specific_force[0] / 20.0"
+    thruster name="reverse" body_frame=#true position="(0.35, 0, 0)" direction="(1, 0, 0)" intensity="vehicle.specific_force[0] / -20.0"
+}
+```
 
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
@@ -307,6 +323,7 @@ object_3d = "object_3d"
           [emissivity=float]
           { [visibility_range] }
           [icon]
+          { thruster }*
 
 animate = "animate"
         joint=string
@@ -316,6 +333,15 @@ icon = "icon"
      (builtin=string | path=string)
      [size=float]
      { [visibility_range] [color] }
+
+thruster = "thruster"
+          position=tuple3
+          direction=tuple3
+          intensity=eql
+          [name=string]
+          [body_frame=bool]
+          [emission_rate=float]
+          [cutoff=float]
 
 visibility_range = "visibility_range"
                  [min=float]

@@ -972,10 +972,13 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .and_then(|s| GeoFrame::from_str(s).ok());
     let mut icon = None;
     let mut mesh_visibility_range = None;
+    let mut thrusters = Vec::new();
 
     let mesh = if let Some(children) = node.children() {
         let children_nodes = children.nodes();
-        let mesh_node = children_nodes.first();
+        let mesh_node = children_nodes
+            .iter()
+            .find(|child| is_object_3d_mesh_node(child.name().value()));
         let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
 
         if let Some(mn) = mesh_node {
@@ -1014,6 +1017,8 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 });
             } else if child_name == "icon" {
                 icon = Some(parse_object_3d_icon(child, src)?);
+            } else if child_name == "thruster" {
+                thrusters.push(parse_thruster(child, src)?);
             }
         }
 
@@ -1056,8 +1061,71 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         mesh,
         frame,
         icon,
+        thrusters,
         mesh_visibility_range,
         node_id: NodeId::default(),
+    })
+}
+
+fn is_object_3d_mesh_node(name: &str) -> bool {
+    matches!(
+        name,
+        "glb" | "sphere" | "box" | "cylinder" | "plane" | "ellipsoid"
+    )
+}
+
+fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicError> {
+    let position =
+        parse_tuple_f32(node, "position").ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "position".to_string(),
+            node: "thruster".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?;
+    let direction =
+        parse_tuple_f32(node, "direction").ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "direction".to_string(),
+            node: "thruster".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?;
+    let intensity = node
+        .get("intensity")
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "intensity".to_string(),
+            node: "thruster".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .trim()
+        .to_string();
+    if intensity.is_empty() {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "intensity".to_string(),
+            node: "thruster".to_string(),
+            expected: "a non-empty EQL scalar expression".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+
+    Ok(Thruster {
+        name: parse_name(node),
+        body_frame: bool_prop(node, "body_frame").unwrap_or(false),
+        position,
+        direction,
+        intensity,
+        emission_rate: node
+            .get("emission_rate")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+            .unwrap_or_else(Thruster::default_emission_rate),
+        cutoff: node
+            .get("cutoff")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+            .unwrap_or_else(Thruster::default_cutoff),
     })
 }
 

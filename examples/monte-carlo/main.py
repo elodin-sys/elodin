@@ -50,6 +50,21 @@ class SitlBridge:
 
 params = el.monte_carlo.params(PARAMS)
 world, system = build(params)
+world.schematic(
+    """
+    viewport name="Monte Carlo" active=#true hdr=#true show_grid=#true pos="(0,0,0,1, vehicle.position[0] - 8, -10, 5)" look_at="(0,0,0,1, vehicle.position[0], 0, 0)" {
+        bloom preset="old_school" intensity=0.35 threshold=0.55 threshold_softness=0.2
+    }
+    object_3d "(0,0,0,1, vehicle.position[0], 0, 0)" {
+        sphere radius=0.25 { color 80 170 255 }
+        thruster name="Forward specific force" body_frame=#true position="(-0.35, 0, 0)" direction="(-1, 0, 0)" intensity="vehicle.specific_force[0] / 20.0" emission_rate=420.0
+        thruster name="Reverse specific force" body_frame=#true position="(0.35, 0, 0)" direction="(1, 0, 0)" intensity="vehicle.specific_force[0] / -20.0" emission_rate=420.0
+    }
+    graph "vehicle.specific_force" name="Specific force"
+    graph "vehicle.position" name="Position"
+    """,
+    "monte-carlo.kdl",
+)
 bridge: SitlBridge | None = None
 use_controller = os.environ.get(CONTROLLER_ENV, "1") != "0"
 

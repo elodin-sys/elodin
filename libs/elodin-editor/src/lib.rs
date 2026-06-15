@@ -1234,6 +1234,7 @@ pub fn sync_object_3d(
                 eql,
                 mesh: mesh_source,
                 icon: None,
+                thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 frame: None,
                 node_id: Default::default(),

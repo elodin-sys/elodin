@@ -388,6 +388,7 @@ mod asset_tests {
             mesh: Object3DMesh::glb(path),
             frame: None,
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: Default::default(),
         })
@@ -758,6 +759,7 @@ object_3d "rocket.world_pos" {
                     size: default_icon_size(),
                     visibility_range: None,
                 }),
+                thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
             })],

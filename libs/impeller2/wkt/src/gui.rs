@@ -796,6 +796,32 @@ pub struct Object3DIcon {
     pub visibility_range: Option<VisRange>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Thruster {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub body_frame: bool,
+    pub position: (f32, f32, f32),
+    pub direction: (f32, f32, f32),
+    pub intensity: String,
+    #[serde(default = "Thruster::default_emission_rate")]
+    pub emission_rate: f32,
+    #[serde(default = "Thruster::default_cutoff")]
+    pub cutoff: f32,
+}
+
+impl Thruster {
+    pub fn default_emission_rate() -> f32 {
+        400.0
+    }
+
+    pub fn default_cutoff() -> f32 {
+        0.02
+    }
+}
+
 /// Maps a built-in icon name (snake_case) to its Material Icons Unicode codepoint.
 pub fn builtin_icon_char(name: &str) -> Option<char> {
     let cp: u32 = match name {
@@ -842,6 +868,8 @@ pub struct Object3D {
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub icon: Option<Object3DIcon>,
+    #[serde(default)]
+    pub thrusters: Vec<Thruster>,
     #[serde(default)]
     pub mesh_visibility_range: Option<VisRange>,
     #[serde(default)]
