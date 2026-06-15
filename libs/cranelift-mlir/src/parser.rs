@@ -671,12 +671,19 @@ fn parse_dense_value(input: &mut Stream<'_>) -> PResult<ParsedDenseValue> {
         let hex_str: &str = take_till(0.., '"').parse_next(input)?;
         let _ = '"'.parse_next(input)?;
         let hex_data = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-        let mut bytes = Vec::new();
+        // Hex blobs must be whole bytes; an odd length means the data is
+        // malformed and silently truncating it would corrupt the constant.
+        if !hex_data.len().is_multiple_of(2) {
+            return Err(winnow::error::ContextError::new());
+        }
+        let mut bytes = Vec::with_capacity(hex_data.len() / 2);
         let mut i = 0;
         while i + 1 < hex_data.len() {
-            if let Ok(b) = u8::from_str_radix(&hex_data[i..i + 2], 16) {
-                bytes.push(b);
-            }
+            // Fail loudly on invalid hex pairs rather than dropping them, which
+            // would otherwise truncate large interned constants.
+            let b = u8::from_str_radix(&hex_data[i..i + 2], 16)
+                .map_err(|_| winnow::error::ContextError::new())?;
+            bytes.push(b);
             i += 2;
         }
         if bytes.len() > 1_000_000 {
