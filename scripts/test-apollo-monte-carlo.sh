@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Fast smoke-test elodin monte-carlo on the Apollo lander example for CI.
+# Fast smoke-test elodin monte-carlo on the Apollo lander example for CI
+# (Buildkite step :rocket: apollo monte-carlo smoke).
 # Runs one truncated deterministic campaign (infrastructure + SITL plumbing),
 # not a full soft-landing validation. CI failure is enforced by the
 # post_campaign ci_gate.py hook, not fail_on_run_errors.

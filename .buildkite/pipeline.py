@@ -111,6 +111,11 @@ test_steps = [
                 command="./scripts/ci/sensor_camera_perf.sh",
                 env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
             ),
+            nix_step(
+                emoji=":rocket:",
+                label="apollo monte-carlo smoke",
+                command="just install && ./scripts/test-apollo-monte-carlo.sh",
+            ),
         ],
     ),
     group(
