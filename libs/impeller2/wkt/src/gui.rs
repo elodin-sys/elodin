@@ -804,12 +804,20 @@ pub struct Thruster {
     #[serde(default)]
     pub body_frame: bool,
     pub position: (f32, f32, f32),
-    pub direction: (f32, f32, f32),
+    /// Exhaust direction for scalar `intensity`. Omit for vector `intensity` (direction from EQL).
+    #[serde(default)]
+    pub direction: Option<(f32, f32, f32)>,
     pub intensity: String,
+    /// Built-in particle preset: `plume` (default) or `cold_gas`.
+    #[serde(default = "Thruster::default_effect")]
+    pub effect: String,
     #[serde(default = "Thruster::default_emission_rate")]
     pub emission_rate: f32,
     #[serde(default = "Thruster::default_cutoff")]
     pub cutoff: f32,
+    /// Vector-mode only: maps the EQL vector's magnitude onto the `0..1` intensity range.
+    #[serde(default = "Thruster::default_scale")]
+    pub scale: f32,
 }
 
 impl Thruster {
@@ -819,6 +827,18 @@ impl Thruster {
 
     pub fn default_cutoff() -> f32 {
         0.02
+    }
+
+    pub fn default_scale() -> f32 {
+        1.0
+    }
+
+    pub fn default_effect() -> String {
+        "plume".to_string()
+    }
+
+    pub fn vector_intensity(&self) -> bool {
+        self.direction.is_none()
     }
 }
 

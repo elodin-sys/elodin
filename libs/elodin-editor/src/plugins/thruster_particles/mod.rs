@@ -1,11 +1,11 @@
 //! GPU thruster exhaust for simulations that expose thrust / RCS viz components.
 //!
-//! Spike: auto-attaches to the schematic `lander.world_pos` object.
-//! - DPS: `main_thrust_viz` (future: KDL `thruster` node — see apollo-lander docs)
-//! - Cold gas RCS: `rcs_thruster_viz[16]`; nozzle geometry stays in this plugin, not KDL.
+//! - KDL `thruster` nodes on `object_3d`: scalar or 3-vector `intensity` EQL
+//! - Apollo RCS: 16 cold-gas jets from `lander.rcs_thruster_viz`; geometry in this plugin
 
-use bevy::math::{Quat, Vec4};
+use bevy::math::{DVec3, Quat, Vec4};
 use bevy::prelude::*;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use bevy_hanabi::{
     AlphaMode, Attribute, EffectAsset, EffectSpawner, Gradient, HanabiPlugin, Module,
     ParticleEffect, SimulationSpace, SpawnerSettings,
@@ -20,7 +20,6 @@ use bevy_hanabi::{
         position::SetPositionCone3dModifier,
     },
 };
-use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue as WktComponentValue, Thruster, WorldPos};
 
@@ -29,24 +28,24 @@ use crate::WorldPosExt;
 use crate::object_3d::{CompiledExpr, Object3DState, compile_eql_expr};
 use crate::vector_arrow::component_value_tail_to_vec3;
 
-const LANDER_EQL: &str = "lander.world_pos";
-const THRUST_VIZ: &str = "lander.main_thrust_viz";
-const RCS_THRUSTERS_VIZ: &str = "lander.rcs_thruster_viz";
-/// DPS deck under the gray ascent stage (Bevy body Y-up).
-const DPS_NOZZLE_BODY: Vec3 = Vec3::new(0.0, -0.55, 0.0);
-/// Body +Z thrust in ENU maps to Bevy +Y; exhaust is opposite.
+/// Reference exhaust axis used to build each emitter's local orientation (Bevy Y-up).
 const DPS_EXHAUST_BODY: Vec3 = Vec3::NEG_Y;
+const MIN_THRUST_VECTOR_LENGTH_SQUARED: f32 = 1e-12;
 
 #[derive(Resource)]
 struct ThrusterEffectAssets {
-    dps: Handle<EffectAsset>,
-    rcs: Handle<EffectAsset>,
+    plume: Handle<EffectAsset>,
+    cold_gas: Handle<EffectAsset>,
 }
 
-#[derive(Component)]
-struct LanderThrusterRig {
-    dps: Entity,
-    rcs: [Entity; RCS_JET_COUNT],
+impl ThrusterEffectAssets {
+    /// Selects a built-in preset by name, falling back to the plume.
+    fn by_name(&self, effect: &str) -> Handle<EffectAsset> {
+        match effect {
+            "cold_gas" => self.cold_gas.clone(),
+            _ => self.plume.clone(),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -57,101 +56,20 @@ struct KdlThrusterRig {
 #[derive(Component)]
 struct KdlThrusterJet {
     body_offset: Vec3,
-    exhaust: Vec3,
+    fixed_exhaust: Vec3,
+    vector_intensity: bool,
     body_frame: bool,
+    frame: Option<GeoFrame>,
     intensity: Option<CompiledExpr>,
+    scale: f32,
     base_rate: f32,
     cutoff: f32,
 }
 
-#[derive(Component)]
-struct ThrusterJet {
-    kind: JetKind,
-    body_offset: Vec3,
-    body_exhaust: Vec3,
+struct KdlThrusterEval {
+    exhaust: Vec3,
+    intensity: f32,
 }
-
-#[derive(Clone, Copy)]
-enum JetKind {
-    Dps,
-    Rcs { index: u8 },
-}
-
-const RCS_JET_COUNT: usize = 16;
-
-struct RcsJetMount {
-    body_pos: Vec3,
-    body_exhaust: Vec3,
-}
-
-/// Sixteen cold-gas jets on the ascent-stage corners (4 clusters × 4 nozzles).
-/// Index order must match `RCS_THRUSTER_AXIS` / `RCS_THRUSTER_SIGN` in apollo-lander/sim.py.
-const RCS_JETS: [RcsJetMount; RCS_JET_COUNT] = [
-    RcsJetMount {
-        body_pos: Vec3::new(2.15, 0.85, 1.45),
-        body_exhaust: Vec3::NEG_X,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(2.15, 0.85, -1.45),
-        body_exhaust: Vec3::NEG_X,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(2.15, 1.35, 0.0),
-        body_exhaust: Vec3::NEG_Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(2.15, 0.35, 0.0),
-        body_exhaust: Vec3::Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-2.15, 0.85, 1.45),
-        body_exhaust: Vec3::X,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-2.15, 0.85, -1.45),
-        body_exhaust: Vec3::X,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-2.15, 1.35, 0.0),
-        body_exhaust: Vec3::NEG_Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-2.15, 0.35, 0.0),
-        body_exhaust: Vec3::Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(1.45, 0.85, 2.15),
-        body_exhaust: Vec3::NEG_Z,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-1.45, 0.85, 2.15),
-        body_exhaust: Vec3::NEG_Z,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(0.0, 1.35, 2.15),
-        body_exhaust: Vec3::NEG_Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(0.0, 0.35, 2.15),
-        body_exhaust: Vec3::Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(1.45, 0.85, -2.15),
-        body_exhaust: Vec3::Z,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(-1.45, 0.85, -2.15),
-        body_exhaust: Vec3::Z,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(0.0, 1.35, -2.15),
-        body_exhaust: Vec3::NEG_Y,
-    },
-    RcsJetMount {
-        body_pos: Vec3::new(0.0, 0.35, -2.15),
-        body_exhaust: Vec3::Y,
-    },
-];
 
 pub struct ThrusterParticlesPlugin;
 
@@ -162,11 +80,8 @@ impl Plugin for ThrusterParticlesPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    ensure_lander_thrusters,
                     ensure_kdl_thrusters,
-                    sync_thruster_transforms,
                     sync_kdl_thruster_transforms,
-                    sync_thruster_particles,
                     sync_kdl_thruster_particles,
                 )
                     .chain(),
@@ -175,9 +90,9 @@ impl Plugin for ThrusterParticlesPlugin {
 }
 
 fn setup_thruster_effects(mut commands: Commands, mut effects: ResMut<Assets<EffectAsset>>) {
-    let dps = effects.add(build_dps_exhaust());
-    let rcs = effects.add(build_rcs_jet());
-    commands.insert_resource(ThrusterEffectAssets { dps, rcs });
+    let plume = effects.add(build_dps_exhaust());
+    let cold_gas = effects.add(build_rcs_jet());
+    commands.insert_resource(ThrusterEffectAssets { plume, cold_gas });
 }
 
 fn build_dps_exhaust() -> EffectAsset {
@@ -273,57 +188,6 @@ fn build_rcs_jet() -> EffectAsset {
         })
 }
 
-fn ensure_lander_thrusters(
-    mut commands: Commands,
-    landers: Query<(Entity, &Object3DState), Without<LanderThrusterRig>>,
-    assets: Res<ThrusterEffectAssets>,
-) {
-    for (lander, state) in &landers {
-        if state.data.eql != LANDER_EQL {
-            continue;
-        }
-
-        let dps = commands
-            .spawn((
-                ThrusterJet {
-                    kind: JetKind::Dps,
-                    body_offset: DPS_NOZZLE_BODY,
-                    body_exhaust: DPS_EXHAUST_BODY,
-                },
-                ParticleEffect::new(assets.dps.clone()),
-                Transform::default(),
-                GlobalTransform::default(),
-                Visibility::Hidden,
-                Name::new("dps_exhaust"),
-            ))
-            .id();
-
-        let mut rcs = [Entity::PLACEHOLDER; RCS_JET_COUNT];
-        for (idx, mount) in RCS_JETS.iter().enumerate() {
-            let jet = commands
-                .spawn((
-                    ThrusterJet {
-                        kind: JetKind::Rcs { index: idx as u8 },
-                        body_offset: mount.body_pos,
-                        body_exhaust: mount.body_exhaust,
-                    },
-                    ParticleEffect::new(assets.rcs.clone()),
-                    Transform::default(),
-                    GlobalTransform::default(),
-                    Visibility::Hidden,
-                    Name::new(format!("rcs_jet_{idx}")),
-                ))
-                .id();
-            rcs[idx] = jet;
-        }
-
-        commands
-            .entity(lander)
-            .insert(LanderThrusterRig { dps, rcs });
-        info!("attached thruster particle rig to Apollo lander");
-    }
-}
-
 fn ensure_kdl_thrusters(
     mut commands: Commands,
     objects: Query<(Entity, &Object3DState), Without<KdlThrusterRig>>,
@@ -351,8 +215,8 @@ fn ensure_kdl_thrusters(
                 .ok();
             let jet = commands
                 .spawn((
-                    KdlThrusterJet::from_config(config, intensity),
-                    ParticleEffect::new(assets.dps.clone()),
+                    KdlThrusterJet::from_config(config, state.data.frame, intensity),
+                    ParticleEffect::new(assets.by_name(&config.effect)),
                     Transform::default(),
                     GlobalTransform::default(),
                     Visibility::Hidden,
@@ -372,65 +236,147 @@ fn ensure_kdl_thrusters(
 }
 
 impl KdlThrusterJet {
-    fn from_config(config: &Thruster, intensity: Option<CompiledExpr>) -> Self {
+    fn from_config(
+        config: &Thruster,
+        frame: Option<GeoFrame>,
+        intensity: Option<CompiledExpr>,
+    ) -> Self {
         let position = Vec3::new(config.position.0, config.position.1, config.position.2);
-        let exhaust = Vec3::new(config.direction.0, config.direction.1, config.direction.2)
-            .normalize_or_zero();
+        let vector_intensity = config.vector_intensity();
+        let fixed_exhaust = config
+            .direction
+            .map(|direction| {
+                let exhaust = Vec3::new(direction.0, direction.1, direction.2).normalize_or_zero();
+                if exhaust == Vec3::ZERO {
+                    DPS_EXHAUST_BODY
+                } else {
+                    exhaust
+                }
+            })
+            .unwrap_or(DPS_EXHAUST_BODY);
         Self {
             body_offset: position,
-            exhaust: if exhaust == Vec3::ZERO {
-                DPS_EXHAUST_BODY
-            } else {
-                exhaust
-            },
+            fixed_exhaust,
+            vector_intensity,
             body_frame: config.body_frame,
+            frame,
             intensity,
+            scale: config.scale.max(0.0),
             base_rate: config.emission_rate.max(0.0),
             cutoff: config.cutoff.max(0.0),
         }
     }
 }
 
-fn sync_thruster_transforms(
-    landers: Query<(&LanderThrusterRig, &WorldPos)>,
-    mut jets: Query<(&ThrusterJet, &mut Transform, &mut GlobalTransform)>,
-) {
-    for (rig, world_pos) in &landers {
-        let body_att = world_pos.bevy_att().as_quat();
-        let body_origin = world_pos.bevy_pos().as_vec3();
+fn body_rotation(world_pos: &WorldPos, frame: Option<GeoFrame>, geo_context: &GeoContext) -> Quat {
+    if let Some(frame) = frame {
+        GeoRotation(frame, world_pos.att())
+            .to_bevy(geo_context)
+            .as_quat()
+    } else {
+        world_pos.bevy_att().as_quat()
+    }
+}
 
-        for entity in core::iter::once(rig.dps).chain(rig.rcs) {
-            let Ok((jet, mut transform, mut global_transform)) = jets.get_mut(entity) else {
-                continue;
-            };
-            let local_rotation =
-                Quat::from_rotation_arc(DPS_EXHAUST_BODY, jet.body_exhaust.normalize_or_zero());
-            *transform = Transform {
-                translation: body_origin + body_att * jet.body_offset,
-                rotation: body_att * local_rotation,
-                scale: Vec3::ONE,
-            };
-            *global_transform = GlobalTransform::from(*transform);
+fn vector_to_bevy(
+    vector: Vec3,
+    body_frame: bool,
+    frame: Option<GeoFrame>,
+    body_att: Quat,
+    geo_context: &GeoContext,
+) -> Vec3 {
+    if body_frame {
+        body_att * vector
+    } else if let Some(frame) = frame {
+        (GeoFrame::bevy_R_(&frame, geo_context) * DVec3::from(vector)).as_vec3()
+    } else {
+        vector
+    }
+}
+
+fn evaluate_kdl_thruster(
+    jet: &KdlThrusterJet,
+    world_pos: &WorldPos,
+    geo_context: &GeoContext,
+    entity_map: &EntityMap,
+    component_values: &Query<'_, '_, &'static WktComponentValue>,
+) -> Option<KdlThrusterEval> {
+    let value = jet
+        .intensity
+        .as_ref()?
+        .execute(entity_map, component_values)
+        .ok()?;
+    let body_att = body_rotation(world_pos, jet.frame, geo_context);
+
+    if jet.vector_intensity {
+        let thrust = component_value_tail_to_vec3(&value)?;
+        let thrust = jet.scale
+            * vector_to_bevy(
+                thrust.as_vec3(),
+                jet.body_frame,
+                jet.frame,
+                body_att,
+                geo_context,
+            );
+        let magnitude = thrust.length();
+        let intensity = magnitude.clamp(0.0, 1.0);
+        if intensity <= jet.cutoff || magnitude * magnitude <= MIN_THRUST_VECTOR_LENGTH_SQUARED {
+            return Some(KdlThrusterEval {
+                exhaust: Vec3::ZERO,
+                intensity: 0.0,
+            });
         }
+        Some(KdlThrusterEval {
+            exhaust: (-thrust).normalize(),
+            intensity,
+        })
+    } else {
+        let intensity = component_value_scalar(&value)?.clamp(0.0, 1.0);
+        let exhaust = vector_to_bevy(
+            jet.fixed_exhaust,
+            jet.body_frame,
+            jet.frame,
+            body_att,
+            geo_context,
+        );
+        Some(KdlThrusterEval { exhaust, intensity })
     }
 }
 
 fn sync_kdl_thruster_transforms(
     objects: Query<(&KdlThrusterRig, &WorldPos)>,
     mut jets: Query<(&KdlThrusterJet, &mut Transform, &mut GlobalTransform)>,
+    entity_map: Res<EntityMap>,
+    component_values: Query<&'static WktComponentValue>,
+    geo_context: Res<GeoContext>,
 ) {
     for (rig, world_pos) in &objects {
-        let body_att = world_pos.bevy_att().as_quat();
         let body_origin = world_pos.bevy_pos().as_vec3();
 
         for &entity in &rig.jets {
             let Ok((jet, mut transform, mut global_transform)) = jets.get_mut(entity) else {
                 continue;
             };
-            let exhaust = if jet.body_frame {
-                body_att * jet.exhaust
+            let body_att = body_rotation(world_pos, jet.frame, &geo_context);
+            let Some(eval) =
+                evaluate_kdl_thruster(jet, world_pos, &geo_context, &entity_map, &component_values)
+            else {
+                continue;
+            };
+            let exhaust = if eval.exhaust == Vec3::ZERO {
+                if jet.vector_intensity {
+                    DPS_EXHAUST_BODY
+                } else {
+                    vector_to_bevy(
+                        jet.fixed_exhaust,
+                        jet.body_frame,
+                        jet.frame,
+                        body_att,
+                        &geo_context,
+                    )
+                }
             } else {
-                jet.exhaust
+                eval.exhaust
             };
             *transform = Transform {
                 translation: body_origin + body_att * jet.body_offset,
@@ -442,47 +388,22 @@ fn sync_kdl_thruster_transforms(
     }
 }
 
-fn sync_thruster_particles(
-    rigs: Query<&LanderThrusterRig>,
-    mut jets: Query<(&ThrusterJet, &mut EffectSpawner, &mut Visibility)>,
-    entity_map: Res<EntityMap>,
-    component_values: Query<&'static WktComponentValue>,
-) {
-    let thrust = read_thrust_level(&entity_map, &component_values);
-    let rcs = read_rcs_thruster_levels(&entity_map, &component_values);
-
-    for rig in &rigs {
-        for entity in core::iter::once(rig.dps).chain(rig.rcs) {
-            let Ok((jet, mut spawner, mut visibility)) = jets.get_mut(entity) else {
-                continue;
-            };
-            let intensity = match jet.kind {
-                JetKind::Dps => thrust,
-                JetKind::Rcs { index } => rcs.get(index as usize).copied().unwrap_or(0.0),
-            };
-            apply_spawner(&mut spawner, &mut visibility, intensity, jet.kind);
-        }
-    }
-}
-
 fn sync_kdl_thruster_particles(
-    rigs: Query<&KdlThrusterRig>,
+    rig_objects: Query<(&KdlThrusterRig, &WorldPos)>,
     mut jets: Query<(&KdlThrusterJet, &mut EffectSpawner, &mut Visibility)>,
     entity_map: Res<EntityMap>,
     component_values: Query<&'static WktComponentValue>,
+    geo_context: Res<GeoContext>,
 ) {
-    for rig in &rigs {
+    for (rig, world_pos) in &rig_objects {
         for &entity in &rig.jets {
             let Ok((jet, mut spawner, mut visibility)) = jets.get_mut(entity) else {
                 continue;
             };
-            let intensity = jet
-                .intensity
-                .as_ref()
-                .and_then(|expr| expr.execute(&entity_map, &component_values).ok())
-                .and_then(|value| component_value_scalar(&value))
-                .unwrap_or(0.0)
-                .clamp(0.0, 1.0);
+            let intensity =
+                evaluate_kdl_thruster(jet, world_pos, &geo_context, &entity_map, &component_values)
+                    .map(|eval| eval.intensity)
+                    .unwrap_or(0.0);
             apply_kdl_spawner(
                 &mut spawner,
                 &mut visibility,
@@ -492,30 +413,6 @@ fn sync_kdl_thruster_particles(
             );
         }
     }
-}
-
-fn apply_spawner(
-    spawner: &mut EffectSpawner,
-    visibility: &mut Visibility,
-    intensity: f32,
-    kind: JetKind,
-) {
-    let (cutoff, base) = match kind {
-        JetKind::Dps => (0.02, 400.0),
-        JetKind::Rcs { .. } => (0.006, 140.0),
-    };
-    if intensity <= cutoff {
-        spawner.active = false;
-        *visibility = Visibility::Hidden;
-        return;
-    }
-    *visibility = Visibility::Visible;
-    spawner.active = true;
-    let rate = match kind {
-        JetKind::Rcs { .. } => intensity.sqrt() * base,
-        JetKind::Dps => intensity * base,
-    };
-    spawner.settings = SpawnerSettings::rate(rate.into());
 }
 
 fn apply_kdl_spawner(
@@ -533,44 +430,6 @@ fn apply_kdl_spawner(
     *visibility = Visibility::Visible;
     spawner.active = true;
     spawner.settings = SpawnerSettings::rate((intensity * base_rate).into());
-}
-
-fn read_thrust_level(
-    entity_map: &EntityMap,
-    component_values: &Query<&'static WktComponentValue>,
-) -> f32 {
-    let id = ComponentId::new(THRUST_VIZ);
-    let Some(entity) = entity_map.get(&id) else {
-        return 0.0;
-    };
-    let Ok(value) = component_values.get(*entity) else {
-        return 0.0;
-    };
-    component_value_tail_to_vec3(value)
-        .map(|v| v.z.max(0.0) as f32)
-        .unwrap_or(0.0)
-}
-
-fn read_rcs_thruster_levels(
-    entity_map: &EntityMap,
-    component_values: &Query<&'static WktComponentValue>,
-) -> [f32; RCS_JET_COUNT] {
-    let id = ComponentId::new(RCS_THRUSTERS_VIZ);
-    let Some(entity) = entity_map.get(&id) else {
-        return [0.0; RCS_JET_COUNT];
-    };
-    let Ok(value) = component_values.get(*entity) else {
-        return [0.0; RCS_JET_COUNT];
-    };
-    component_value_f64_array(value)
-        .map(|values| {
-            let mut levels = [0.0f32; RCS_JET_COUNT];
-            for (idx, level) in levels.iter_mut().enumerate() {
-                *level = values.get(idx).copied().unwrap_or(0.0) as f32;
-            }
-            levels
-        })
-        .unwrap_or([0.0; RCS_JET_COUNT])
 }
 
 fn component_value_f64_array(value: &WktComponentValue) -> Option<Vec<f64>> {

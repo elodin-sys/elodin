@@ -43,12 +43,30 @@ hsplit {
 object_3d surface.world_pos frame=ENU {
     glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)" emissivity=0.1 glow=0.5
 }
+// All thruster exhaust is declared here in KDL and driven by EQL viz channels.
+// DPS: vector intensity (direction + magnitude from lander.main_thrust_viz).
+// RCS: 16 cold-gas jets, scalar intensity from lander.rcs_thruster_viz[i].
+// RCS index order must match RCS_THRUSTER_AXIS / RCS_THRUSTER_SIGN in sim.py.
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
+    thruster name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz
+    thruster name="rcs_0" effect="cold_gas" body_frame=#true position="(2.15, 0.85, 1.45)" direction="(-1, 0, 0)" intensity=lander.rcs_thruster_viz[0] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_1" effect="cold_gas" body_frame=#true position="(2.15, 0.85, -1.45)" direction="(-1, 0, 0)" intensity=lander.rcs_thruster_viz[1] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_2" effect="cold_gas" body_frame=#true position="(2.15, 1.35, 0)" direction="(0, -1, 0)" intensity=lander.rcs_thruster_viz[2] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_3" effect="cold_gas" body_frame=#true position="(2.15, 0.35, 0)" direction="(0, 1, 0)" intensity=lander.rcs_thruster_viz[3] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_4" effect="cold_gas" body_frame=#true position="(-2.15, 0.85, 1.45)" direction="(1, 0, 0)" intensity=lander.rcs_thruster_viz[4] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_5" effect="cold_gas" body_frame=#true position="(-2.15, 0.85, -1.45)" direction="(1, 0, 0)" intensity=lander.rcs_thruster_viz[5] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_6" effect="cold_gas" body_frame=#true position="(-2.15, 1.35, 0)" direction="(0, -1, 0)" intensity=lander.rcs_thruster_viz[6] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_7" effect="cold_gas" body_frame=#true position="(-2.15, 0.35, 0)" direction="(0, 1, 0)" intensity=lander.rcs_thruster_viz[7] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_8" effect="cold_gas" body_frame=#true position="(1.45, 0.85, 2.15)" direction="(0, 0, -1)" intensity=lander.rcs_thruster_viz[8] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_9" effect="cold_gas" body_frame=#true position="(-1.45, 0.85, 2.15)" direction="(0, 0, -1)" intensity=lander.rcs_thruster_viz[9] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_10" effect="cold_gas" body_frame=#true position="(0, 1.35, 2.15)" direction="(0, -1, 0)" intensity=lander.rcs_thruster_viz[10] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_11" effect="cold_gas" body_frame=#true position="(0, 0.35, 2.15)" direction="(0, 1, 0)" intensity=lander.rcs_thruster_viz[11] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_12" effect="cold_gas" body_frame=#true position="(1.45, 0.85, -2.15)" direction="(0, 0, 1)" intensity=lander.rcs_thruster_viz[12] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_13" effect="cold_gas" body_frame=#true position="(-1.45, 0.85, -2.15)" direction="(0, 0, 1)" intensity=lander.rcs_thruster_viz[13] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_14" effect="cold_gas" body_frame=#true position="(0, 1.35, -2.15)" direction="(0, -1, 0)" intensity=lander.rcs_thruster_viz[14] emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_15" effect="cold_gas" body_frame=#true position="(0, 0.35, -2.15)" direction="(0, 1, 0)" intensity=lander.rcs_thruster_viz[15] emission_rate=140.0 cutoff=0.006
 }
-// Editor preview (native only, experimental): GPU DPS plume + 16 cold-gas jets driven by
-// lander.main_thrust_viz and lander.rcs_thruster_viz — geometry in editor plugin, not KDL.
-// See examples/apollo-lander/docs/kdl-particle-effects-proposal.md
 object_3d lander_truth.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb
 }

@@ -1082,13 +1082,7 @@ fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicErr
             src: src.to_string(),
             span: node.span(),
         })?;
-    let direction =
-        parse_tuple_f32(node, "direction").ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "direction".to_string(),
-            node: "thruster".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?;
+    let direction = parse_tuple_f32(node, "direction");
     let intensity = node
         .get("intensity")
         .and_then(|v| v.as_string())
@@ -1104,11 +1098,31 @@ fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicErr
         return Err(KdlSchematicError::InvalidValue {
             property: "intensity".to_string(),
             node: "thruster".to_string(),
-            expected: "a non-empty EQL scalar expression".to_string(),
+            expected: "a non-empty EQL expression".to_string(),
             src: src.to_string(),
             span: node.span(),
         });
     }
+
+    let scale = match node.entry("scale") {
+        None => Thruster::default_scale(),
+        Some(entry) => {
+            let value = entry.value();
+            if let Some(value) = value.as_float() {
+                value as f32
+            } else if let Some(value) = value.as_integer() {
+                value as f32
+            } else {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "scale".to_string(),
+                    node: "thruster".to_string(),
+                    expected: "a numeric value".to_string(),
+                    src: src.to_string(),
+                    span: entry.span(),
+                });
+            }
+        }
+    };
 
     Ok(Thruster {
         name: parse_name(node),
@@ -1116,6 +1130,11 @@ fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicErr
         position,
         direction,
         intensity,
+        effect: node
+            .get("effect")
+            .and_then(|v| v.as_string())
+            .map(|s| s.to_string())
+            .unwrap_or_else(Thruster::default_effect),
         emission_rate: node
             .get("emission_rate")
             .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
@@ -1126,6 +1145,7 @@ fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicErr
             .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
             .map(|v| v as f32)
             .unwrap_or_else(Thruster::default_cutoff),
+        scale,
     })
 }
 
@@ -2248,6 +2268,26 @@ object_3d "a.world_pos" {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_parse_object_3d_vector_thruster() {
+        let kdl = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(obj.thrusters.len(), 1);
+        let thruster = &obj.thrusters[0];
+        assert!(thruster.vector_intensity());
+        assert_eq!(thruster.direction, None);
+        assert_eq!(thruster.intensity, "lander.main_thrust_viz");
+        assert_eq!(thruster.position, (0.0, -0.55, 0.0));
     }
 
     #[test]

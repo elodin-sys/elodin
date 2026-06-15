@@ -666,12 +666,21 @@ fn serialize_thruster(thruster: &Thruster) -> KdlNode {
         "position",
         tuple3_to_kdl_string(thruster.position),
     ));
-    node.entries_mut().push(KdlEntry::new_prop(
-        "direction",
-        tuple3_to_kdl_string(thruster.direction),
-    ));
+    if let Some(direction) = thruster.direction {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "direction",
+            tuple3_to_kdl_string(direction),
+        ));
+    }
     node.entries_mut()
         .push(KdlEntry::new_prop("intensity", thruster.intensity.clone()));
+    if thruster.effect != Thruster::default_effect() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("effect", thruster.effect.clone()));
+    }
+    if (thruster.scale - Thruster::default_scale()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "scale", f64::from(thruster.scale));
+    }
     if (thruster.emission_rate - Thruster::default_emission_rate()).abs() > f32::EPSILON {
         push_rounded_float_prop(
             &mut node,
@@ -1393,9 +1402,32 @@ object_3d "vehicle.world_pos" {
         assert_eq!(thruster.name.as_deref(), Some("main"));
         assert!(thruster.body_frame);
         assert_eq!(thruster.position, (-0.35, 0.0, 0.0));
-        assert_eq!(thruster.direction, (-1.0, 0.0, 0.0));
+        assert_eq!(thruster.direction, Some((-1.0, 0.0, 0.0)));
         assert_eq!(thruster.intensity, "vehicle.specific_force[0] / 20.0");
         assert_eq!(thruster.emission_rate, 420.0);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_vector_thruster() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz scale=2.0
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert!(thruster.vector_intensity());
+        assert_eq!(thruster.direction, None);
+        assert_eq!(thruster.intensity, "lander.main_thrust_viz");
+        assert!((thruster.scale - 2.0).abs() < f32::EPSILON);
     }
 
     #[test]

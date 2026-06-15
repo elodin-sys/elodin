@@ -144,10 +144,14 @@ viewport hdr=#true {
   - `size`: desired screen pixel size of the icon (default 32).
 - `thruster` children (optional, multiple): GPU exhaust particles attached to the object. Declare one item per nozzle; there is no bank shorthand yet.
   - `position`: required `(x, y, z)` nozzle position in the object body frame.
-  - `direction`: required `(x, y, z)` exhaust direction. With `body_frame=#true`, the direction rotates with the object; otherwise it is interpreted in world frame.
-  - `intensity`: required scalar EQL expression. The renderer clamps the evaluated value to `0..1`, so separate forward/reverse nozzles can be modeled with opposite signed expressions. For a diegetic thrust gauge, drive this from specific force: acceleration modulo gravity, scaled to the vehicle's useful thrust range.
+  - `direction`: optional `(x, y, z)` exhaust direction for **scalar** `intensity`. Omit when `intensity` is a 3-vector (vector mode).
+  - `intensity`: required EQL expression.
+    - **Vector mode** (no `direction`): a single 3-component EQL vector drives **both** the exhaust direction (opposite the vector) **and** the intensity (its length × `scale`, clamped to `0..1`). Accepts any vector expression, e.g. `lander.main_thrust_viz`, `(0, 0, lander.main_thrust_viz[2])`, or `k * (0, 0, -1)`.
+    - **Scalar mode** (with `direction`): a single number, clamped to `0..1`; `direction` fixes where the plume points. Use opposite-signed expressions on paired nozzles for forward/reverse, or for thrust-vector-control attach the thruster to an animated mesh and drive a scalar.
   - `name`: optional debug/display name.
-  - `body_frame`: bool, default `#false`.
+  - `effect`: built-in particle preset: `plume` (default; large hot exhaust) or `cold_gas` (small attitude-jet puff).
+  - `body_frame`: bool, default `#false`. Rotates `direction` or the vector with the object.
+  - `scale`: vector-mode multiplier mapping the EQL vector's magnitude onto `0..1` (default `1.0`).
   - `emission_rate`: particles per second at intensity `1.0`, default `400.0`.
   - `cutoff`: intensity threshold below which the emitter is hidden, default `0.02`.
 
@@ -156,6 +160,9 @@ object_3d "(0,0,0,1, vehicle.position[0], 0, 0)" {
     sphere radius=0.25 { color 80 170 255 }
     thruster name="forward" body_frame=#true position="(-0.35, 0, 0)" direction="(-1, 0, 0)" intensity="vehicle.specific_force[0] / 20.0"
     thruster name="reverse" body_frame=#true position="(0.35, 0, 0)" direction="(1, 0, 0)" intensity="vehicle.specific_force[0] / -20.0"
+}
+object_3d lander.world_pos {
+    thruster name="DPS" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz
 }
 ```
 
@@ -336,10 +343,12 @@ icon = "icon"
 
 thruster = "thruster"
           position=tuple3
-          direction=tuple3
+          [direction=tuple3]
           intensity=eql
           [name=string]
+          [effect=("plume"|"cold_gas")]
           [body_frame=bool]
+          [scale=float]
           [emission_rate=float]
           [cutoff=float]
 
