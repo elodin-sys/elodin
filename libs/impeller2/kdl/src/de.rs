@@ -2291,6 +2291,26 @@ object_3d lander.world_pos {
     }
 
     #[test]
+    fn test_parse_object_3d_scalar_thruster_indexed_intensity() {
+        // Indexed EQL must be quoted: KDL 2.0 bare strings cannot contain `[`/`]`.
+        let kdl = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="rcs_0" effect="cold_gas" body_frame=#true position="(2.15, 0.85, 1.45)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[0]" emission_rate=140.0 cutoff=0.006
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert!(!thruster.vector_intensity());
+        assert_eq!(thruster.intensity, "lander.rcs_thruster_viz[0]");
+        assert_eq!(thruster.direction, Some((-1.0, 0.0, 0.0)));
+        assert_eq!(thruster.effect, "cold_gas");
+    }
+
+    #[test]
     fn test_parse_viewport_with_frame() {
         let kdl =
             r#"viewport name="main" frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)""#;
