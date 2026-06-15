@@ -138,6 +138,11 @@ Key options:
   `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
 - `--keep-existing`: do not reap existing `elodin` / `elodin-db` processes at
   campaign startup.
+- `--fail-on-errors`: exit non-zero when any run failed or missed scoring.
+  Off by default so exploratory campaigns can finish with partial failures.
+  Also configurable as `fail_on_run_errors = true` in `campaign.toml`. For CI
+  gates, prefer a `post_campaign` hook that raises on `summary.failed` (see
+  `examples/apollo-lander/hooks/ci_gate.py`) instead of relying on this flag.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
 - `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
 - `--progress <auto|always|never>`: control the live progress bar. `auto` shows

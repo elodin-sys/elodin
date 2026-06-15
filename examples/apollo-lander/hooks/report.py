@@ -39,6 +39,13 @@ def _fmt(value: float | None, suffix: str = "") -> str:
     return f"{value:.3f}{suffix}"
 
 
+def _run_passed(row: dict) -> bool:
+    passed = row.get("passed")
+    if passed is not None and passed != "":
+        return passed.strip().lower() in {"true", "1", "yes"}
+    return row.get("status", "") == "ok"
+
+
 def post_campaign(ctx):
     out_dir = Path(ctx.out_dir)
     results_path = Path(ctx.results)
@@ -59,6 +66,7 @@ def post_campaign(ctx):
             {
                 "run_id": run_id,
                 "status": row.get("status", ""),
+                "passed": row.get("passed", ""),
                 "wall_ms": _float(row.get("wall_ms")),
                 "result": result,
                 "post": post_result,
@@ -66,7 +74,7 @@ def post_campaign(ctx):
             }
         )
 
-    ok_runs = [run for run in runs if run["status"] == "ok"]
+    ok_runs = [run for run in runs if _run_passed(run)]
     soft = [run for run in ok_runs if bool(run["post"].get("soft_landing", False))]
     touchdown_speeds = [
         value

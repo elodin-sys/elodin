@@ -62,6 +62,23 @@ elodin monte-carlo run examples/apollo-lander/main.py \
   --out dbs/apollo-lander-demo
 ```
 
+## CI smoke test
+
+CI runs a **fast infrastructure smoke** (target under 5 minutes) via
+`scripts/test-apollo-monte-carlo.sh`. It uses `campaign.ci.toml` and
+`spec.ci.toml` (one fixed nominal sample), truncates the sim with
+`ELODIN_APOLLO_MAX_TICKS=600` (~5 s at 120 Hz), and scores runs with
+`hooks/ci_score.py` (artifact present, not soft landing). The campaign keeps the
+default exit code (0 even with partial failures); CI failure is enforced only by
+`hooks/ci_gate.py`, which raises when `summary.json` reports any failed runs.
+
+```sh
+scripts/test-apollo-monte-carlo.sh
+```
+
+For a full soft-landing campaign locally, use `campaign.toml` and `spec.toml`
+instead of the `*.ci.toml` files.
+
 For a single editor run:
 
 ```sh

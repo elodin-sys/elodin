@@ -1,0 +1,40 @@
+name: Apollo Monte Carlo
+
+on:
+  pull_request:
+    paths:
+      - "libs/monte-carlo/**"
+      - "apps/elodin/**"
+      - "examples/apollo-lander/**"
+      - "libs/s10/**"
+      - "libs/nox-py/**"
+      - "scripts/test-apollo-monte-carlo.sh"
+      - ".github/workflows/apollo-monte-carlo.yml"
+      - "flake.nix"
+  workflow_dispatch:
+
+concurrency:
+  group: apollo-monte-carlo-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build and smoke-test apollo-lander monte-carlo
+        run: |
+          nix develop --command bash -lc '
+            set -euo pipefail
+            just install
+            chmod +x scripts/test-apollo-monte-carlo.sh
+            scripts/test-apollo-monte-carlo.sh
+          '

@@ -61,6 +61,8 @@ pub struct RunArgs {
     #[arg(long)]
     pub fail_fast: bool,
     #[arg(long)]
+    pub fail_on_errors: bool,
+    #[arg(long)]
     pub dry_run: bool,
     #[arg(long)]
     pub memory_probe: bool,
@@ -149,6 +151,7 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         post_campaign: args.post_campaign,
         params_compat: args.params_compat,
         fail_fast: args.fail_fast,
+        fail_on_run_errors: args.fail_on_errors,
         dry_run: args.dry_run,
         memory_probe: args.memory_probe,
         keep_existing: args.keep_existing,

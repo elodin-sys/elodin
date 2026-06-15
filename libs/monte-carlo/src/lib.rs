@@ -34,6 +34,10 @@ pub struct CampaignConfig {
     pub hooks: HookConfig,
     pub params_compat: Option<String>,
     pub continue_on_error: bool,
+    /// When true, the campaign process exits non-zero if any run failed scoring
+    /// or crashed. Defaults to false so exploratory campaigns can finish with
+    /// partial failures and still produce reports.
+    pub fail_on_run_errors: bool,
 }
 
 impl Default for CampaignConfig {
@@ -48,6 +52,7 @@ impl Default for CampaignConfig {
             hooks: HookConfig::default(),
             params_compat: None,
             continue_on_error: true,
+            fail_on_run_errors: false,
         }
     }
 }
@@ -104,6 +109,7 @@ pub struct RunOptions {
     pub post_campaign: Option<PathBuf>,
     pub params_compat: Option<String>,
     pub fail_fast: bool,
+    pub fail_on_run_errors: bool,
     pub dry_run: bool,
     pub progress: ProgressMode,
     pub memory_probe: bool,
@@ -339,8 +345,6 @@ pub struct SimSummaryAggregate {
 enum Error {
     #[error("campaign generated no runs")]
     EmptyPlan,
-    #[error("run {0} failed")]
-    RunFailed(String),
     #[error("unsupported params compatibility mode: {0}")]
     UnsupportedCompat(String),
 }
@@ -901,11 +905,11 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         run_hook("post_campaign", hook, &context).await?;
     }
 
-    // continue_on_error only controls whether workers keep going after a
-    // failure; the campaign still exits non-zero if any run failed so CI and
-    // shell jobs that check the exit code don't treat failures as success.
-    if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone() {
-        return Err(Error::RunFailed(run_id)).into_diagnostic();
+    if config.fail_on_run_errors && summary.failed > 0 {
+        return Err(miette!(
+            "monte-carlo campaign finished with {} failed run(s) (fail_on_run_errors=true)",
+            summary.failed
+        ));
     }
 
     Ok(())
@@ -1423,6 +1427,9 @@ fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     if options.fail_fast {
         config.continue_on_error = false;
     }
+    if options.fail_on_run_errors {
+        config.fail_on_run_errors = true;
+    }
     config.workers = config.workers.map(|workers| workers.max(1));
 }
 
@@ -1769,6 +1776,8 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
         .write_record([
             "run_id",
             "status",
+            "passed",
+            "scored_pass",
             "worker_id",
             "wall_ms",
             "db_path",
@@ -1777,10 +1786,16 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
         .into_diagnostic()?;
     for metric in metrics {
         let result_json = metric.run_dir.join("result.json");
+        let scored_pass = metric
+            .scored_pass
+            .map(|pass| pass.to_string())
+            .unwrap_or_default();
         writer
             .write_record([
                 metric.run_id.as_str(),
                 metric.status.as_str(),
+                &metric.passed().to_string(),
+                &scored_pass,
                 &metric
                     .worker_id
                     .map(|id| id.to_string())
@@ -3011,6 +3026,25 @@ mod tests {
     }
 
     #[test]
+    fn results_csv_includes_passed_and_scored_pass() {
+        let dir = std::env::temp_dir().join(format!("mc-results-{}", unix_now_ns()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("results.csv");
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &dir, "ok");
+        metric.exit_ok = true;
+        metric.scored_pass = Some(false);
+        write_results_csv(&path, &dir, std::slice::from_ref(&metric)).unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("passed"));
+        assert!(text.contains("scored_pass"));
+        assert!(text.contains("run_0000000,ok,false,false"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn load_existing_metric_only_returns_recorded_runs() {
         let out_dir = std::env::temp_dir().join(format!("mc-load-{}", unix_now_ns()));
         let run_dir = out_dir.join("runs").join("run_0000000");
@@ -3057,6 +3091,22 @@ mod tests {
         assert_eq!(build.args, ["build", "--release"]);
         assert_eq!(build.cwd.as_deref(), Some(Path::new(".")));
         assert_eq!(build.env.get("FOO").map(String::as_str), Some("bar"));
+    }
+
+    #[test]
+    fn campaign_config_defaults_and_ci_gate_flag() {
+        let config: CampaignConfig = toml::from_str("").expect("parse empty campaign config");
+        assert!(config.continue_on_error);
+        assert!(!config.fail_on_run_errors);
+
+        let ci: CampaignConfig = toml::from_str(
+            r#"
+            continue_on_error = true
+            fail_on_run_errors = true
+            "#,
+        )
+        .expect("parse ci campaign config");
+        assert!(ci.fail_on_run_errors);
     }
 
     #[cfg(unix)]

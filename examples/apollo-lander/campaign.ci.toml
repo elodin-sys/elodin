@@ -1,0 +1,17 @@
+timeout = "180s"
+retries = 0
+continue_on_error = true
+
+[build]
+command = "cargo"
+args = ["build", "--release", "--manifest-path", "examples/apollo-lander/controller/Cargo.toml"]
+
+[resources]
+port_stride = 40
+db_port = 2240
+state_port = 9013
+command_port = 9012
+
+[hooks]
+post_run = "examples/apollo-lander/hooks/ci_score.py"
+post_campaign = "examples/apollo-lander/hooks/ci_gate.py"

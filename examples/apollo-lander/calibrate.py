@@ -30,6 +30,13 @@ def _float(value) -> float | None:
     return result if math.isfinite(result) else None
 
 
+def _run_passed(row: dict) -> bool:
+    passed = row.get("passed")
+    if passed is not None and passed != "":
+        return passed.strip().lower() in {"true", "1", "yes"}
+    return row.get("status", "") == "ok"
+
+
 def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
     rows_path = out_dir / "results.csv"
     with rows_path.open(newline="") as f:
@@ -38,7 +45,7 @@ def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
     best_params: dict[str, float] = {}
     best_rmse = float("inf")
     for row in rows:
-        if row.get("status") != "ok":
+        if not _run_passed(row):
             continue
         result_path = out_dir / row.get("result_json", "")
         post = _read_json(result_path.with_name("post_run_result.json"))
