@@ -872,9 +872,10 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         run_hook("post_campaign", hook, &context).await?;
     }
 
-    if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone()
-        && !config.continue_on_error
-    {
+    // continue_on_error only controls whether workers keep going after a
+    // failure; the campaign still exits non-zero if any run failed so CI and
+    // shell jobs that check the exit code don't treat failures as success.
+    if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone() {
         return Err(Error::RunFailed(run_id)).into_diagnostic();
     }
 
