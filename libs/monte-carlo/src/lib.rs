@@ -150,6 +150,11 @@ pub struct RunMetric {
     pub attempt: usize,
     pub status: String,
     pub exit_ok: bool,
+    /// Pass/fail outcome reported by the `post_run` hook via the `pass` field of
+    /// `post_run_result.json`. `None` when no hook ran or it reported no `pass`
+    /// outcome, in which case the run is judged purely on `exit_ok`.
+    #[serde(default)]
+    pub scored_pass: Option<bool>,
     pub wall_ms: u128,
     pub started_at: DateTime<Utc>,
     pub finished_at: DateTime<Utc>,
@@ -167,6 +172,15 @@ pub struct RunMetric {
     pub process_shutdown_ms: Option<f64>,
     pub db_path: PathBuf,
     pub run_dir: PathBuf,
+}
+
+impl RunMetric {
+    /// Whether the run counts as a pass: it must exit cleanly *and*, if a
+    /// `post_run` hook scored it, the hook's `pass` outcome must be true. A
+    /// run can exit successfully yet fail its scoring criteria.
+    pub fn passed(&self) -> bool {
+        self.exit_ok && self.scored_pass.unwrap_or(true)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
