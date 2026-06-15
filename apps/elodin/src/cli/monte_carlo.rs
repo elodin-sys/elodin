@@ -89,14 +89,11 @@ impl Cli {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
             }
             Command::Run(args) => run_with_runtime(*args, rt),
-            Command::Resume { campaign_dir } => Err(miette!(
-                "resume is not implemented yet for {}",
-                campaign_dir.display()
+            Command::Resume { campaign_dir } => rt.block_on(monte_carlo::resume_campaign(
+                campaign_dir,
+                monte_carlo::ProgressMode::Auto,
             )),
-            Command::Report { campaign_dir } => Err(miette!(
-                "report is not implemented yet for {}",
-                campaign_dir.display()
-            )),
+            Command::Report { campaign_dir } => monte_carlo::rebuild_report(&campaign_dir),
         }
     }
 }

@@ -615,7 +615,6 @@ fn elodin_process_name(process: &sysinfo::Process) -> Option<String> {
 
 pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     let started_at = Utc::now();
-    let wall_start = Instant::now();
     let mut config = load_config(options.campaign_path.as_deref())?;
     apply_overrides(&mut config, &mut options);
 
@@ -660,21 +659,95 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         fs::copy(&options.plan_path, &plan_dest).into_diagnostic()?;
     }
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
-    let reporter = CampaignReporter::new(&options.out_dir, plan.len(), workers, options.progress)?;
+    write_json(
+        &options.out_dir.join("campaign.manifest.json"),
+        &ResumeManifest {
+            sim_path: options.sim_path.clone(),
+            memory_probe: options.memory_probe,
+        },
+    )?;
+
+    execute_campaign(ExecuteParams {
+        config,
+        sim_path: options.sim_path,
+        out_dir: options.out_dir,
+        cache_dir,
+        plan,
+        preserved: Vec::new(),
+        started_at,
+        memory_probe: options.memory_probe,
+        progress: options.progress,
+        keep_existing: options.keep_existing,
+    })
+    .await
+}
+
+/// Persisted next to the campaign so `resume` can reconstruct the run inputs
+/// that aren't already captured in `campaign.resolved.json`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ResumeManifest {
+    sim_path: PathBuf,
+    #[serde(default)]
+    memory_probe: bool,
+}
+
+struct ExecuteParams {
+    config: CampaignConfig,
+    sim_path: PathBuf,
+    out_dir: PathBuf,
+    cache_dir: PathBuf,
+    /// Rows still to run.
+    plan: Vec<PlanRow>,
+    /// Metrics for runs that already passed (resume); merged into the report.
+    preserved: Vec<RunMetric>,
+    started_at: DateTime<Utc>,
+    memory_probe: bool,
+    progress: ProgressMode,
+    keep_existing: bool,
+}
+
+/// Schedules `params.plan` across workers, merges in any `params.preserved`
+/// metrics, and writes the full campaign report. Shared by `run_campaign` and
+/// `resume_campaign`.
+async fn execute_campaign(params: ExecuteParams) -> Result<()> {
+    let ExecuteParams {
+        config,
+        sim_path,
+        out_dir,
+        cache_dir,
+        plan,
+        preserved,
+        started_at,
+        memory_probe,
+        progress,
+        keep_existing,
+    } = params;
+    fs::create_dir_all(&out_dir)
+        .into_diagnostic()
+        .with_context(|| format!("create campaign output {}", out_dir.display()))?;
+    let wall_start = Instant::now();
+    let workers = config.workers.unwrap_or(1).max(1);
+    let total_runs = preserved.len() + plan.len();
+
+    let reporter = CampaignReporter::new(&out_dir, total_runs, workers, progress)?;
     run_build_step(config.build.as_ref(), &reporter)?;
-    if !options.keep_existing {
+    if !keep_existing {
         reap_existing_elodin(&reporter);
     }
+    // Count already-passed runs toward the report without re-running them.
+    for metric in &preserved {
+        reporter.record(metric);
+    }
 
-    let base_recipe = plan_recipe(&options.sim_path, &options.out_dir).await?;
+    let base_recipe = plan_recipe(&sim_path, &out_dir).await?;
     let rows = Arc::new(Mutex::new(VecDeque::from(plan)));
-    let metrics = Arc::new(Mutex::new(Vec::<RunMetric>::new()));
+    let metrics = Arc::new(Mutex::new(preserved));
     let failure = Arc::new(Mutex::new(None::<String>));
     let stop_sampling = Arc::new(AtomicBool::new(false));
     let peak_memory = Arc::new(Mutex::new(Vec::<CacheMappingSample>::new()));
     let resource_samples = Arc::new(Mutex::new(Vec::<ResourceSample>::new()));
     let process_samples = Arc::new(Mutex::new(Vec::<ProcessSample>::new()));
-    let memory_sampler = options.memory_probe.then(|| {
+    let memory_sampler = memory_probe.then(|| {
         spawn_memory_sampler(
             cache_dir.clone(),
             stop_sampling.clone(),
@@ -682,11 +755,11 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         )
     });
     let resource_sampler = spawn_resource_sampler(
-        options.out_dir.clone(),
+        out_dir.clone(),
         wall_start,
         stop_sampling.clone(),
         resource_samples.clone(),
-        options.memory_probe.then_some(process_samples.clone()),
+        memory_probe.then_some(process_samples.clone()),
     );
     let mut worker_tasks = JoinSet::new();
 
@@ -696,7 +769,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         let failure = failure.clone();
         let base_recipe = base_recipe.clone();
         let config = config.clone();
-        let out_dir = options.out_dir.clone();
+        let out_dir = out_dir.clone();
         let cache_dir = cache_dir.clone();
         let reporter = reporter.clone();
         worker_tasks.spawn(async move {
@@ -757,7 +830,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .drain(..)
         .collect::<Vec<_>>();
     for row in skipped_rows {
-        let metric = placeholder_metric(&row.run_id, None, &options.out_dir, "skipped");
+        let metric = placeholder_metric(&row.run_id, None, &out_dir, "skipped");
         reporter.record(&metric);
         metrics.lock().expect("metrics mutex poisoned").push(metric);
     }
@@ -768,15 +841,11 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     resource_sampler.await.into_diagnostic()?;
 
     let metrics = metrics.lock().expect("metrics mutex poisoned").clone();
-    write_perf_csv(&options.out_dir.join("perf.csv"), &metrics)?;
+    write_perf_csv(&out_dir.join("perf.csv"), &metrics)?;
     let (timeline, concurrency_summary) = build_timeline(&metrics);
-    write_timeline_csv(&options.out_dir.join("timeline.csv"), &timeline)?;
-    write_results_csv(
-        &options.out_dir.join("results.csv"),
-        &options.out_dir,
-        &metrics,
-    )?;
-    let memory = if options.memory_probe {
+    write_timeline_csv(&out_dir.join("timeline.csv"), &timeline)?;
+    write_results_csv(&out_dir.join("results.csv"), &out_dir, &metrics)?;
+    let memory = if memory_probe {
         peak_memory.lock().expect("memory mutex poisoned").clone()
     } else {
         Vec::new()
@@ -785,11 +854,11 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .lock()
         .expect("resource samples mutex poisoned")
         .clone();
-    write_resource_csv(&options.out_dir.join("resources.csv"), &resource_samples)?;
-    if options.memory_probe {
-        write_json(&options.out_dir.join("memory.json"), &memory)?;
+    write_resource_csv(&out_dir.join("resources.csv"), &resource_samples)?;
+    if memory_probe {
+        write_json(&out_dir.join("memory.json"), &memory)?;
         write_process_csv(
-            &options.out_dir.join("processes.csv"),
+            &out_dir.join("processes.csv"),
             &process_samples
                 .lock()
                 .expect("process samples mutex poisoned")
@@ -797,6 +866,210 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         )?;
     }
 
+    let summary = summarize_campaign(
+        &out_dir,
+        &metrics,
+        &resource_samples,
+        started_at,
+        Utc::now(),
+        wall_start.elapsed().as_millis(),
+        workers,
+        &concurrency_summary,
+    );
+    write_json(&out_dir.join("summary.json"), &summary)?;
+    write_campaign_summary(
+        &out_dir,
+        &summary,
+        summary.sim_phase_summary.as_ref(),
+        &memory,
+    )?;
+    reporter.finish();
+
+    if let Some(hook) = &config.hooks.post_campaign {
+        let context = out_dir.join("campaign_hook_context.json");
+        write_json(
+            &context,
+            &json!({
+                "out_dir": out_dir,
+                "results": out_dir.join("results.csv"),
+                "perf": out_dir.join("perf.csv"),
+                "memory": memory_probe.then(|| out_dir.join("memory.json")),
+                "resources": out_dir.join("resources.csv"),
+                "summary": out_dir.join("summary.json"),
+            }),
+        )?;
+        run_hook("post_campaign", hook, &context).await?;
+    }
+
+    // continue_on_error only controls whether workers keep going after a
+    // failure; the campaign still exits non-zero if any run failed so CI and
+    // shell jobs that check the exit code don't treat failures as success.
+    if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone() {
+        return Err(Error::RunFailed(run_id)).into_diagnostic();
+    }
+
+    Ok(())
+}
+
+/// Resume a previously started campaign: keep the runs that already passed,
+/// re-run everything else, then rewrite the merged report.
+pub async fn resume_campaign(campaign_dir: PathBuf, progress: ProgressMode) -> Result<()> {
+    let out_dir = campaign_dir;
+    if !out_dir.exists() {
+        return Err(miette!(
+            "campaign directory {} does not exist",
+            out_dir.display()
+        ));
+    }
+    let manifest: ResumeManifest = read_json(&out_dir.join("campaign.manifest.json"))
+        .with_context(|| {
+            format!(
+                "{} has no campaign.manifest.json; only campaigns created by `monte-carlo run` can be resumed",
+                out_dir.display()
+            )
+        })?;
+    let mut config: CampaignConfig = read_json(&out_dir.join("campaign.resolved.json"))
+        .with_context(|| format!("read resolved config in {}", out_dir.display()))?;
+    let plan = read_plan(&out_dir.join("plan.csv"))?;
+    if plan.is_empty() {
+        return Err(Error::EmptyPlan).into_diagnostic();
+    }
+
+    let mut preserved = Vec::new();
+    let mut pending = Vec::new();
+    for row in plan {
+        match load_existing_metric(&out_dir, &row.run_id) {
+            Some(metric) if metric.passed() => preserved.push(metric),
+            _ => pending.push(row),
+        }
+    }
+
+    if pending.is_empty() {
+        eprintln!(
+            "monte-carlo resume: all {} run(s) already passed; rebuilding report",
+            preserved.len()
+        );
+        return rebuild_report(&out_dir);
+    }
+    eprintln!(
+        "monte-carlo resume: {} done / {} pending in {}",
+        preserved.len(),
+        pending.len(),
+        out_dir.display()
+    );
+
+    let workers = resolve_workers(config.workers, pending.len());
+    config.workers = Some(workers);
+    let cache_dir = config
+        .cache_dir
+        .clone()
+        .unwrap_or_else(|| out_dir.join("const-cache"));
+    fs::create_dir_all(&cache_dir)
+        .into_diagnostic()
+        .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+
+    execute_campaign(ExecuteParams {
+        config,
+        sim_path: manifest.sim_path,
+        out_dir,
+        cache_dir,
+        plan: pending,
+        preserved,
+        started_at: Utc::now(),
+        memory_probe: manifest.memory_probe,
+        progress,
+        keep_existing: false,
+    })
+    .await
+}
+
+/// Rebuild the human-readable report and `summary.json` from the per-run
+/// metrics already written to a campaign directory.
+pub fn rebuild_report(campaign_dir: &Path) -> Result<()> {
+    let out_dir = campaign_dir;
+    if !out_dir.exists() {
+        return Err(miette!(
+            "campaign directory {} does not exist",
+            out_dir.display()
+        ));
+    }
+    let mut metrics = read_perf_metrics(&out_dir.join("perf.csv"))?;
+    if metrics.is_empty() {
+        return Err(miette!(
+            "no runs recorded in {}",
+            out_dir.join("perf.csv").display()
+        ));
+    }
+    // Reconstruct per-run paths relative to this directory so sim summaries and
+    // result paths resolve even if the campaign was moved since it ran.
+    for metric in &mut metrics {
+        let run_dir = out_dir.join("runs").join(&metric.run_id);
+        metric.db_path = run_dir.join("db");
+        metric.run_dir = run_dir;
+    }
+
+    let started_at = metrics
+        .iter()
+        .map(|metric| metric.started_at)
+        .min()
+        .unwrap_or_else(Utc::now);
+    let finished_at = metrics
+        .iter()
+        .map(|metric| metric.finished_at)
+        .max()
+        .unwrap_or_else(Utc::now);
+    let wall_ms = (finished_at - started_at).num_milliseconds().max(0) as u128;
+    let workers = read_json::<CampaignSummary>(&out_dir.join("summary.json"))
+        .ok()
+        .map(|summary| summary.workers)
+        .filter(|workers| *workers > 0)
+        .unwrap_or_else(|| {
+            metrics
+                .iter()
+                .filter_map(|metric| metric.worker_id)
+                .max()
+                .map(|id| id + 1)
+                .unwrap_or(1)
+        });
+
+    let resource_samples = read_resource_samples(&out_dir.join("resources.csv"));
+    let memory =
+        read_json::<Vec<CacheMappingSample>>(&out_dir.join("memory.json")).unwrap_or_default();
+    let (timeline, concurrency_summary) = build_timeline(&metrics);
+    write_timeline_csv(&out_dir.join("timeline.csv"), &timeline)?;
+    write_results_csv(&out_dir.join("results.csv"), out_dir, &metrics)?;
+
+    let summary = summarize_campaign(
+        out_dir,
+        &metrics,
+        &resource_samples,
+        started_at,
+        finished_at,
+        wall_ms,
+        workers,
+        &concurrency_summary,
+    );
+    write_json(&out_dir.join("summary.json"), &summary)?;
+    write_campaign_summary(
+        out_dir,
+        &summary,
+        summary.sim_phase_summary.as_ref(),
+        &memory,
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn summarize_campaign(
+    out_dir: &Path,
+    metrics: &[RunMetric],
+    resource_samples: &[ResourceSample],
+    started_at: DateTime<Utc>,
+    finished_at: DateTime<Utc>,
+    wall_ms: u128,
+    workers: usize,
+    concurrency_summary: &ConcurrencySummary,
+) -> CampaignSummary {
     let passed = metrics.iter().filter(|metric| metric.passed()).count();
     let skipped = metrics
         .iter()
@@ -808,21 +1081,20 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .iter()
         .filter(|metric| metric.status != "skipped" && !metric.passed())
         .count();
-    let sim_phase_summary = aggregate_sim_summaries(&metrics);
-    let phase_attribution = summarize_phase_attribution(&metrics);
+    let sim_phase_summary = aggregate_sim_summaries(metrics);
+    let phase_attribution = summarize_phase_attribution(metrics);
     let total_run_wall_ms = metrics.iter().map(|metric| metric.wall_ms).sum::<u128>();
     let max_run_wall_ms = metrics
         .iter()
         .map(|metric| metric.wall_ms)
         .max()
         .unwrap_or_default();
-    let wall_ms = wall_start.elapsed().as_millis();
-    let disk_bytes = dir_size(&options.out_dir);
-    let mut resource_summary = summarize_resources(&resource_samples);
+    let disk_bytes = dir_size(out_dir);
+    let mut resource_summary = summarize_resources(resource_samples);
     resource_summary.peak_campaign_disk_bytes = disk_bytes;
-    let summary = CampaignSummary {
+    CampaignSummary {
         started_at,
-        finished_at: Utc::now(),
+        finished_at,
         total_runs: metrics.len(),
         passed,
         failed,
@@ -843,43 +1115,53 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         },
         disk_bytes,
         resource_summary,
-        sim_phase_summary: sim_phase_summary.clone(),
+        sim_phase_summary,
         phase_attribution,
-        concurrency_summary,
+        concurrency_summary: concurrency_summary.clone(),
+    }
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    let text = fs::read_to_string(path)
+        .into_diagnostic()
+        .with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&text)
+        .into_diagnostic()
+        .with_context(|| format!("parse {}", path.display()))
+}
+
+fn read_perf_metrics(path: &Path) -> Result<Vec<RunMetric>> {
+    let mut reader = csv::Reader::from_path(path)
+        .into_diagnostic()
+        .with_context(|| format!("read {}", path.display()))?;
+    let mut metrics = Vec::new();
+    for record in reader.deserialize::<RunMetric>() {
+        metrics.push(
+            record
+                .into_diagnostic()
+                .with_context(|| format!("parse row in {}", path.display()))?,
+        );
+    }
+    Ok(metrics)
+}
+
+fn read_resource_samples(path: &Path) -> Vec<ResourceSample> {
+    let Ok(mut reader) = csv::Reader::from_path(path) else {
+        return Vec::new();
     };
-    write_json(&options.out_dir.join("summary.json"), &summary)?;
-    write_campaign_summary(
-        &options.out_dir,
-        &summary,
-        sim_phase_summary.as_ref(),
-        &memory,
-    )?;
-    reporter.finish();
+    reader
+        .deserialize::<ResourceSample>()
+        .filter_map(Result::ok)
+        .collect()
+}
 
-    if let Some(hook) = &config.hooks.post_campaign {
-        let context = options.out_dir.join("campaign_hook_context.json");
-        write_json(
-            &context,
-            &json!({
-                "out_dir": options.out_dir,
-                "results": options.out_dir.join("results.csv"),
-                "perf": options.out_dir.join("perf.csv"),
-                "memory": options.memory_probe.then(|| options.out_dir.join("memory.json")),
-                "resources": options.out_dir.join("resources.csv"),
-                "summary": options.out_dir.join("summary.json"),
-            }),
-        )?;
-        run_hook("post_campaign", hook, &context).await?;
-    }
-
-    // continue_on_error only controls whether workers keep going after a
-    // failure; the campaign still exits non-zero if any run failed so CI and
-    // shell jobs that check the exit code don't treat failures as success.
-    if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone() {
-        return Err(Error::RunFailed(run_id)).into_diagnostic();
-    }
-
-    Ok(())
+fn load_existing_metric(out_dir: &Path, run_id: &str) -> Option<RunMetric> {
+    let run_dir = out_dir.join("runs").join(run_id);
+    let text = fs::read_to_string(run_dir.join("metrics.json")).ok()?;
+    let mut metric: RunMetric = serde_json::from_str(&text).ok()?;
+    metric.db_path = run_dir.join("db");
+    metric.run_dir = run_dir;
+    Some(metric)
 }
 
 async fn run_with_retries(
@@ -2704,6 +2986,50 @@ mod tests {
         assert_eq!(read_post_run_pass(&dir.join("missing.json")), None);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn perf_metrics_round_trip_through_csv() {
+        let dir = std::env::temp_dir().join(format!("mc-perf-{}", unix_now_ns()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("perf.csv");
+
+        let mut metric = placeholder_metric("run_0000001", Some(2), &dir, "ok");
+        metric.exit_ok = true;
+        metric.scored_pass = Some(true);
+        metric.wall_ms = 1234;
+        write_perf_csv(&path, std::slice::from_ref(&metric)).unwrap();
+
+        let loaded = read_perf_metrics(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].run_id, "run_0000001");
+        assert_eq!(loaded[0].worker_id, Some(2));
+        assert_eq!(loaded[0].wall_ms, 1234);
+        assert!(loaded[0].passed());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_existing_metric_only_returns_recorded_runs() {
+        let out_dir = std::env::temp_dir().join(format!("mc-load-{}", unix_now_ns()));
+        let run_dir = out_dir.join("runs").join("run_0000000");
+        fs::create_dir_all(&run_dir).unwrap();
+
+        // No metrics.json yet -> nothing to preserve.
+        assert!(load_existing_metric(&out_dir, "run_0000000").is_none());
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &out_dir, "ok");
+        metric.exit_ok = true;
+        write_json(&run_dir.join("metrics.json"), &metric).unwrap();
+
+        let loaded = load_existing_metric(&out_dir, "run_0000000").expect("metric");
+        assert!(loaded.passed());
+        // Paths are reconstructed relative to the campaign dir.
+        assert_eq!(loaded.run_dir, run_dir);
+        assert_eq!(loaded.db_path, run_dir.join("db"));
+
+        let _ = fs::remove_dir_all(&out_dir);
     }
 
     #[test]
