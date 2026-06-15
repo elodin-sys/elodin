@@ -735,7 +735,9 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
                         continue;
                     }
                 };
-                let failed = !metric.exit_ok;
+                // A clean process exit that fails post_run scoring is still a
+                // campaign failure, so --fail-fast halts on scored misses too.
+                let failed = !metric.passed();
                 if failed {
                     *failure.lock().expect("failure mutex poisoned") = Some(metric.run_id.clone());
                 }
