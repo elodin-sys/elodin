@@ -413,7 +413,7 @@ impl CampaignReporter {
     fn record(&self, metric: &RunMetric) {
         if metric.status == "skipped" {
             self.skipped.fetch_add(1, Ordering::SeqCst);
-        } else if metric.exit_ok {
+        } else if metric.passed() {
             self.ok.fetch_add(1, Ordering::SeqCst);
         } else {
             self.failed.fetch_add(1, Ordering::SeqCst);
@@ -434,7 +434,7 @@ impl CampaignReporter {
                 metric.run_dir.join("logs").display()
             );
             self.log_only(&line);
-            if !metric.exit_ok {
+            if !metric.passed() {
                 progress.suspend(|| eprintln!("{line}"));
             }
         } else {
@@ -795,14 +795,16 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         )?;
     }
 
-    let passed = metrics.iter().filter(|metric| metric.exit_ok).count();
-    let failed = metrics
-        .iter()
-        .filter(|metric| metric.status == "failed")
-        .count();
+    let passed = metrics.iter().filter(|metric| metric.passed()).count();
     let skipped = metrics
         .iter()
         .filter(|metric| metric.status == "skipped")
+        .count();
+    // Anything that ran but didn't pass (clean exit yet failed scoring, or a
+    // hard failure) counts as failed, keeping passed + failed + skipped == total.
+    let failed = metrics
+        .iter()
+        .filter(|metric| metric.status != "skipped" && !metric.passed())
         .count();
     let sim_phase_summary = aggregate_sim_summaries(&metrics);
     let phase_attribution = summarize_phase_attribution(&metrics);
@@ -993,12 +995,13 @@ async fn run_one(
     let summary_written_unix_ns = sim_summary
         .as_ref()
         .and_then(|summary| summary.summary_written_unix_ns);
-    let metric = RunMetric {
+    let mut metric = RunMetric {
         run_id: row.run_id.clone(),
         worker_id: Some(worker_id),
         attempt,
         status: if exit_ok { "ok" } else { "failed" }.to_string(),
         exit_ok,
+        scored_pass: None,
         wall_ms: start.elapsed().as_millis(),
         started_at,
         finished_at: Utc::now(),
@@ -1017,7 +1020,6 @@ async fn run_one(
         db_path,
         run_dir: run_dir.clone(),
     };
-    write_json(&run_dir.join("metrics.json"), &metric)?;
     if let Some(hook) = &ctx.config.hooks.post_run {
         let hook_ctx = run_dir.join("post_run_context.json");
         write_json(
@@ -1032,8 +1034,21 @@ async fn run_one(
             }),
         )?;
         run_hook("post_run", hook, &hook_ctx).await?;
+        // The hook scores the run via `post_run_result.json`; fold its verdict
+        // into the metric so summaries don't count a criteria-failing run as
+        // passed just because the process exited cleanly.
+        metric.scored_pass = read_post_run_pass(&run_dir.join("post_run_result.json"));
     }
+    write_json(&run_dir.join("metrics.json"), &metric)?;
     Ok(metric)
+}
+
+/// Reads the `pass` outcome from a `post_run_result.json` produced by a scoring
+/// hook. Returns `None` if the file is absent or has no boolean `pass` field.
+fn read_post_run_pass(path: &Path) -> Option<bool> {
+    let contents = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    value.get("pass").and_then(serde_json::Value::as_bool)
 }
 
 fn load_config(path: Option<&Path>) -> Result<CampaignConfig> {
@@ -1544,6 +1559,7 @@ fn placeholder_metric(
         attempt: 0,
         status: status.to_string(),
         exit_ok: false,
+        scored_pass: None,
         wall_ms: 0,
         started_at: now,
         finished_at: now,
@@ -2639,6 +2655,52 @@ mod tests {
         let metric = placeholder_metric("run_0000000", Some(3), out_dir, "failed");
         assert_eq!(metric.status, "failed");
         assert_eq!(metric.worker_id, Some(3));
+    }
+
+    #[test]
+    fn passed_respects_post_run_hook_verdict() {
+        let out_dir = Path::new("/tmp/mc-test");
+        let mut metric = placeholder_metric("run_0000000", Some(0), out_dir, "ok");
+        metric.exit_ok = true;
+
+        // Clean exit, no hook outcome -> judged on exit_ok alone.
+        metric.scored_pass = None;
+        assert!(metric.passed());
+
+        // Clean exit but the scoring hook failed the criteria -> not a pass.
+        metric.scored_pass = Some(false);
+        assert!(!metric.passed());
+
+        // Clean exit and the hook passed -> pass.
+        metric.scored_pass = Some(true);
+        assert!(metric.passed());
+
+        // A hard failure never passes, even if a stale hook verdict says true.
+        metric.exit_ok = false;
+        metric.scored_pass = Some(true);
+        assert!(!metric.passed());
+    }
+
+    #[test]
+    fn read_post_run_pass_extracts_bool_pass_field() {
+        let dir = std::env::temp_dir().join(format!("mc-post-run-{}", unix_now_ns()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("post_run_result.json");
+
+        fs::write(&path, r#"{"pass": false, "traj_rmse_m": 12.5}"#).unwrap();
+        assert_eq!(read_post_run_pass(&path), Some(false));
+
+        fs::write(&path, r#"{"pass": true}"#).unwrap();
+        assert_eq!(read_post_run_pass(&path), Some(true));
+
+        // No `pass` field -> fall back to exit-based judgement.
+        fs::write(&path, r#"{"traj_rmse_m": 1.0}"#).unwrap();
+        assert_eq!(read_post_run_pass(&path), None);
+
+        // Missing file -> None.
+        assert_eq!(read_post_run_pass(&dir.join("missing.json")), None);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
