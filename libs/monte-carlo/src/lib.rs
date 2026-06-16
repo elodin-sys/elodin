@@ -660,6 +660,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         &ResumeManifest {
             sim_path: options.sim_path.clone(),
             memory_probe: options.memory_probe,
+            keep_existing: options.keep_existing,
         },
     )?;
 
@@ -685,6 +686,11 @@ struct ResumeManifest {
     sim_path: PathBuf,
     #[serde(default)]
     memory_probe: bool,
+    /// Whether the original run kept pre-existing elodin / elodin-db processes
+    /// alive (`--keep-existing`). Persisted so resume honors the same intent;
+    /// defaults to `false` for campaigns created before this field existed.
+    #[serde(default)]
+    keep_existing: bool,
 }
 
 struct ExecuteParams {
@@ -974,7 +980,7 @@ pub async fn resume_campaign(campaign_dir: PathBuf, progress: ProgressMode) -> R
         started_at: Utc::now(),
         memory_probe: manifest.memory_probe,
         progress,
-        keep_existing: false,
+        keep_existing: manifest.keep_existing,
     })
     .await
 }
