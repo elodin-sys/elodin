@@ -111,14 +111,20 @@ test_steps = [
                 command="./scripts/ci/sensor_camera_perf.sh",
                 env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
             ),
+            # Monte Carlo steps must not run concurrently: each `monte-carlo run`
+            # reaps stray elodin/elodin-db processes at startup, so two campaigns
+            # sharing an agent would reap each other's orchestrator (SIGTERM /
+            # exit 143). Serialize them with depends_on.
             nix_step(
                 emoji=":rocket:",
-                label="apollo monte-carlo",
+                label="monte-carlo apollo",
+                key="monte-carlo-apollo",
                 command="just install && ./scripts/test-apollo-monte-carlo.sh",
             ),
             nix_step(
                 emoji=":sparkles:",
                 label="monte-carlo quickstart",
+                depends_on=["monte-carlo-apollo"],
                 command="just install && ./scripts/test-quickstart.sh",
             ),
         ],
