@@ -43,7 +43,12 @@ def main() -> None:
     module = _load_hook(hook_path)
     hook = getattr(module, hook_name, None)
     if hook is None:
-        return
+        # The hook was explicitly configured, so a missing function is a
+        # misconfiguration: fail loudly instead of silently skipping scoring
+        # (a skipped post_run leaves scored_pass unset, which counts as passed).
+        raise SystemExit(f"hook {hook_path} does not define a `{hook_name}` function")
+    if not callable(hook):
+        raise SystemExit(f"hook {hook_path} attribute `{hook_name}` is not callable")
     result = hook(_namespace(payload))
     if result is not None:
         output = context_path.with_name(f"{hook_name}_result.json")
