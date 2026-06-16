@@ -19,7 +19,7 @@ use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
-    VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
+    VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
 };
 
 pub mod bindings;
@@ -63,6 +63,7 @@ pub struct SchematicParam<'w, 's> {
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
+    pub world_meshes: Query<'w, 's, (Entity, &'static WorldMesh)>,
     pub vector_arrows: Query<
         'w,
         's,
@@ -455,6 +456,16 @@ pub fn tiles_to_schematic(
                 SchematicElem::VectorArrow(a)
             }),
     );
+
+    schematic
+        .elems
+        .extend(param.world_meshes.iter().map(|(entity, world_mesh)| {
+            let mut wm = world_mesh.clone();
+            let node_id = impeller2_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            wm.node_id = node_id;
+            SchematicElem::WorldMesh(wm)
+        }));
 
     window_schematics.0.clear();
     let mut window_elems = Vec::new();

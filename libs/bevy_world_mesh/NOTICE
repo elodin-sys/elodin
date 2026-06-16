@@ -1,0 +1,24 @@
+World Mesh
+Copyright 2026 World Mesh contributors
+
+This product includes software derived from the `bevy_terrain` project
+(https://github.com/kurtkuehnert/bevy_terrain), which is dual-licensed under the
+MIT License and the Apache License, Version 2.0:
+
+    Copyright (c) 2023 Kurt Kühnert
+    Copyright (c) 2023 Argeo
+
+The Apache License, Version 2.0 ("License") governs the combined work; see the
+LICENSE file for the full text. Portions incorporated from `bevy_terrain` may
+alternatively be used under the MIT License at the recipient's option,
+consistent with the upstream dual-licence terms. The original MIT text is
+preserved at `crates/bevy_terrain/LICENSE-MIT` during the transitional layout
+and will move alongside those sources when they are inlined into this crate.
+
+This product also builds on:
+
+- Bevy Engine (https://bevy.org)                        — dual MIT / Apache-2.0
+- big_space (https://crates.io/crates/big_space)        — dual MIT / Apache-2.0
+- AWS Terrain Tiles (https://registry.opendata.aws/terrain-tiles/)
+  — source elevation data; see https://github.com/tilezen/joerd for licensing
+- EOX Sentinel-2 Cloudless (https://s2maps.eu)          — CC BY 4.0

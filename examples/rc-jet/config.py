@@ -110,7 +110,7 @@ class BDXConfig:
 
     # Initial conditions - start in fast cruise (easier to stabilize)
     initial_speed: float = 70.0  # m/s (fast cruise - more stable)
-    initial_altitude: float = 50.0  # m (higher altitude)
+    initial_altitude: float = 4500.0  # m, above Death Valley's Telescope Peak (~3368 m)
     initial_pitch_deg: float = 0.0  # degrees (level on runway)
     initial_roll_deg: float = 0.0  # degrees
     initial_yaw_deg: float = 35.0  # degrees (35° offset - northeast heading)

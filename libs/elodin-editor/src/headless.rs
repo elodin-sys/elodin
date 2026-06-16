@@ -98,7 +98,10 @@ impl Plugin for HeadlessEditorPlugin {
             )
             .add_plugins(crate::skybox_asset_plugin_headless())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
+            .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
+            .add_plugins(bevy::pbr::wireframe::WireframePlugin::default())
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
                 ..default()
@@ -179,6 +182,7 @@ fn load_headless_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
+    mut world_mesh_materials: ResMut<Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
     asset_server: Res<AssetServer>,
     geo_context: Res<GeoContext>,
     connection_addr: Option<Res<ConnectionAddr>>,
@@ -201,25 +205,46 @@ fn load_headless_scene(
         return;
     };
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let fallback_frame = schematic.frame;
 
     for elem in &schematic.elems {
-        if let SchematicElem::Object3d(obj) = elem {
-            let Ok(expr) = eql.0.parse_str(&obj.eql) else {
-                tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
-                continue;
-            };
-            let _ = create_object_3d_entity(
-                &mut commands,
-                obj.clone(),
-                expr,
-                &eql.0,
-                &mut materials,
-                &mut meshes,
-                &mut mat3_materials,
-                &asset_server,
-                &geo_context,
-                connection_addr,
-            );
+        match elem {
+            SchematicElem::Object3d(obj) => {
+                let mut obj = obj.clone();
+                if obj.frame.is_none() {
+                    obj.frame = fallback_frame;
+                }
+                let Ok(expr) = eql.0.parse_str(&obj.eql) else {
+                    tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
+                    continue;
+                };
+                let _ = create_object_3d_entity(
+                    &mut commands,
+                    obj,
+                    expr,
+                    &eql.0,
+                    &mut materials,
+                    &mut meshes,
+                    &mut mat3_materials,
+                    &asset_server,
+                    &geo_context,
+                    connection_addr,
+                );
+            }
+            SchematicElem::WorldMesh(world_mesh) => {
+                let mut world_mesh = world_mesh.clone();
+                if world_mesh.frame.is_none() {
+                    world_mesh.frame = fallback_frame;
+                }
+                crate::plugins::world_mesh::spawn_world_mesh_terrain(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut world_mesh_materials,
+                    &world_mesh,
+                );
+            }
+            _ => {}
         }
     }
     tracing::debug!(

@@ -637,15 +637,13 @@ w.schematic(
     vsplit {
         hsplit share=0.6 {
             tabs {
-                viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="ore_sat.world_pos" hdr=#true
+                viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="ore_sat.world_pos" far=15000000.0 hdr=#true
             }
             graph "css_0.css_value, css_1.css_value, css_2.css_value, css_3.css_value, css_4.css_value, css_5.css_value" Name=Sensor
         }
         graph "ore_sat.att_est" Name=Att
     }
-    object_3d earth.world_pos {
-        glb path="earth.glb"
-    }
+    world_mesh "globe"
 
     object_3d ore_sat.world_pos {
         glb path="oresat-low.glb"
