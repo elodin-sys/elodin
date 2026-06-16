@@ -63,7 +63,14 @@ pub fn write_cubemap_ktx2(
     let mut command = Command::new(toktx.as_ref());
     command
         .arg("--t2")
+        .arg("--encode")
+        .arg("uastc")
+        .arg("--uastc_quality")
+        .arg("3")
+        .arg("--uastc_rdo_l")
+        .arg("0.75")
         .arg("--zcmp")
+        .arg("19")
         .arg("--genmipmap")
         .arg("--cubemap")
         .arg("--assign_oetf")
