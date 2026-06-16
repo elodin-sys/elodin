@@ -1,0 +1,8 @@
+target/
+.DS_Store
+.direnv/
+result
+result-*
+assets/terrains/
+context/
+screenshots/

@@ -171,12 +171,26 @@ fn write_window_schematics(
 /// after the connection overwrote DbConfig with metadata) so the schematic loads.
 pub fn apply_initial_kdl_path(
     mut reader: MessageReader<DbMessage>,
-    initial: Res<InitialKdlPath>,
+    mut initial: ResMut<InitialKdlPath>,
+    current_document: Res<CurrentDocument>,
 ) -> Option<PathBuf> {
-    if !reader.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
-        None
+    // If the user passed `--kdl`, we want to open that file exactly once.
+    //
+    // Historically this was only triggered by a DB config update message, but
+    // that prevents using `elodin editor --kdl <file>` in offline / no-DB
+    // scenarios.
+    let path = initial.0.take()?;
+
+    // Only apply when either:
+    // - a DB config update arrived (normal flow), OR
+    // - there is no current document loaded yet (offline flow).
+    let db_updated = reader.read().any(|m| matches!(m, DbMessage::UpdateConfig));
+    if db_updated || current_document.handle.is_none() {
+        Some(path)
     } else {
-        initial.0.clone()
+        // Put it back; we'll try again on the next config update.
+        initial.0 = Some(path);
+        None
     }
 }
 

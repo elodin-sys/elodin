@@ -4,7 +4,7 @@ BDX RC Jet Turbine Simulation
 
 Main entry point for the Elite Aerosports BDX simulation.
 Implements a 6-DOF fixed-wing jet aircraft with aerodynamics,
-turbine propulsion, and control surface dynamics.
+turbine propulsion, control surface dynamics, and a Death Valley terrain backdrop.
 
 Usage:
     elodin editor main.py       # Run with 3D visualization
@@ -71,11 +71,11 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         name="bdx",
     )
 
-    # Spawn target drone (static visual marker) - positioned along initial flight path
-    # Jet starts at [0,0,50] with heading 35° and speed 70 m/s
-    # World velocity ≈ [57.3, 40.2, 0] m/s, so target at ~6 seconds ahead
-    # Using StaticMarker (no Inertia/Force) makes it immune to physics systems
-    target_position = jnp.array([350.0, 245.0, 55.0])
+    # Spawn target drone (static visual marker) - positioned along initial flight path.
+    # Jet starts at [0,0,initial_altitude] with heading 35° and speed 70 m/s.
+    # World velocity ≈ [57.3, 40.2, 0] m/s, so target at ~6 seconds ahead.
+    # Using StaticMarker (no Inertia/Force) makes it immune to physics systems.
+    target_position = jnp.array([350.0, 245.0, config.initial_altitude + 5.0])
     target = world.spawn(
         StaticMarker(
             world_pos=el.SpatialTransform(
@@ -93,28 +93,31 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         height=480,
         fov=90.0,
         fps=30.0,
-        near=0.02,
-        far=0.65,
+        near=0.1,
+        # Keep the FPV render range large enough for the Death Valley terrain.
+        # Frustum visualization uses this same far plane, so don't publish this
+        # sensor as a debug frustum or it will dominate the chase viewport.
+        far=100_000.0,
         pos_offset=[-1.0, 0.0, 0.0],
         rot_offset=[0.0, 0.0, 0.0],
-        create_frustum=True,
-        frustums_color=[0.4, 1.0, 0.4, 0.5],
-        projection_color=[0.4, 1.0, 0.4, 0.1],
+        create_frustum=False,
     )
 
     # Create schematic for visualization
     world.schematic(
         """
+        world_mesh "death_valley" translate="(0.0, 0.0, 0.0)"
+
         tabs {
             hsplit name="Main View" {
-                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true show_frustums=#true active=#true
+                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#false show_frustums=#true active=#true far=100000
                 vsplit share=0.4 {
                     vsplit {
                         graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
-                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
+                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#false
                         hsplit {
-                            viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
+                            viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#false
                             sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
                         }
                     }
@@ -150,7 +153,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 }
             }
             hsplit name="Navigation" {
-                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#true
+                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#false far=100000
                 query_plot name="Ground Track (XY)" query="SELECT bdx_world_pos.bdx_world_pos[5], bdx_world_pos.bdx_world_pos[6] FROM bdx_world_pos" type="sql" mode="xy" x_label="X Position (m)" y_label="Y Position (m)" auto_refresh=#true refresh_interval=500 {
                     color cyan
                 }
@@ -206,7 +209,8 @@ print(f"Initial speed: {config.initial_speed:.1f} m/s")
 print(f"Initial heading: {config.initial_yaw_deg:.1f}° (0°=East, 90°=North)")
 print(f"Mass: {config.mass:.1f} kg")
 print(f"Max thrust: {config.propulsion.max_thrust:.1f} N")
-print("Target position: (350.0, 245.0, 55.0) m - along flight path at ~6s")
+target_altitude = config.initial_altitude + 5.0
+print(f"Target position: (350.0, 245.0, {target_altitude:.1f}) m - along flight path at ~6s")
 print(f"Simulation time: {config.simulation_time:.1f} s")
 print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")

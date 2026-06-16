@@ -58,6 +58,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
+        "world_mesh" => Ok(SchematicElem::WorldMesh(parse_world_mesh(node, src)?)),
         "coordinate" => Ok(SchematicElem::Coordinate(parse_coordinate(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
@@ -256,6 +257,57 @@ fn parse_coordinate(node: &KdlNode, src: &str) -> Result<GeoFrame, KdlSchematicE
         expected: "ENU, NED, or ECEF".to_string(),
         src: src.to_string(),
         span: node.span(),
+    })
+}
+
+fn parse_world_mesh(node: &KdlNode, src: &str) -> Result<WorldMesh, KdlSchematicError> {
+    let region = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .or_else(|| node.get("region").and_then(|v| v.as_string()))
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "region".to_string(),
+            node: "world_mesh".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+
+    let lod_count = node
+        .get("lod_count")
+        .and_then(|v| v.as_integer())
+        .map(|v| {
+            u32::try_from(v).map_err(|_| KdlSchematicError::InvalidValue {
+                property: "lod_count".to_string(),
+                node: "world_mesh".to_string(),
+                expected: format!("an integer between 0 and {}", u32::MAX),
+                src: src.to_string(),
+                span: node.span(),
+            })
+        })
+        .transpose()?;
+
+    let translate = parse_tuple3::<f64>(node, "translate");
+
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
+    let visible = node
+        .get("visible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    Ok(WorldMesh {
+        region,
+        lod_count,
+        translate,
+        frame,
+        visible,
+        node_id: NodeId::default(),
     })
 }
 
@@ -1033,8 +1085,8 @@ fn parse_object_3d_mesh(
 
             let scale = node.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
 
-            let translate = parse_tuple_f32(node, "translate").unwrap_or((0.0, 0.0, 0.0));
-            let rotate = parse_tuple_f32(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
+            let translate = parse_tuple3::<f32>(node, "translate").unwrap_or((0.0, 0.0, 0.0));
+            let rotate = parse_tuple3::<f32>(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
 
             Ok(Object3DMesh::Glb {
                 path,
@@ -1444,7 +1496,7 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
     None
 }
 
-fn parse_tuple_f32(node: &KdlNode, property: &str) -> Option<(f32, f32, f32)> {
+fn parse_tuple3<T: FromStr>(node: &KdlNode, property: &str) -> Option<(T, T, T)> {
     let value_str = node.get(property).and_then(|v| v.as_string())?;
 
     // Parse string like "(1.0, 2.0, 3.0)" or "(1, 2, 3)"
@@ -1460,9 +1512,9 @@ fn parse_tuple_f32(node: &KdlNode, property: &str) -> Option<(f32, f32, f32)> {
         return None;
     }
 
-    let x = parts[0].trim().parse::<f32>().ok()?;
-    let y = parts[1].trim().parse::<f32>().ok()?;
-    let z = parts[2].trim().parse::<f32>().ok()?;
+    let x = parts[0].trim().parse::<T>().ok()?;
+    let y = parts[1].trim().parse::<T>().ok()?;
+    let z = parts[2].trim().parse::<T>().ok()?;
 
     Some((x, y, z))
 }
@@ -2793,6 +2845,38 @@ graph "value" {
         assert_eq!(color.g, Color::YALK.g);
         assert_eq!(color.b, Color::YALK.b);
         assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_world_mesh_lod_count() {
+        let kdl = r#"world_mesh "death_valley" lod_count=7"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::WorldMesh(world_mesh) = &schematic.elems[0] else {
+            panic!("Expected world_mesh elem");
+        };
+        assert_eq!(world_mesh.region, "death_valley");
+        assert_eq!(world_mesh.lod_count, Some(7));
+    }
+
+    #[test]
+    fn test_parse_world_mesh_rejects_negative_lod_count() {
+        let kdl = r#"world_mesh "globe" lod_count=-1"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert!(matches!(
+            err,
+            KdlSchematicError::InvalidValue { ref property, .. } if property == "lod_count"
+        ));
+    }
+
+    #[test]
+    fn test_parse_world_mesh_rejects_overflowing_lod_count() {
+        let kdl = r#"world_mesh "globe" lod_count=4294967296"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert!(matches!(
+            err,
+            KdlSchematicError::InvalidValue { ref property, .. } if property == "lod_count"
+        ));
     }
 
     #[test]
