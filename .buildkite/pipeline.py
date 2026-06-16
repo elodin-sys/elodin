@@ -113,7 +113,7 @@ test_steps = [
             ),
             nix_step(
                 emoji=":rocket:",
-                label="apollo monte-carlo smoke",
+                label="apollo monte-carlo",
                 command="just install && ./scripts/test-apollo-monte-carlo.sh",
             ),
         ],

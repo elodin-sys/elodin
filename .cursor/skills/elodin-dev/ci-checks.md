@@ -59,6 +59,6 @@ cargo fmt && cargo test && cargo clippy -- -Dwarnings && ruff format --check && 
 - `cargo clippy` uses the workspace's `rust-toolchain.toml` (edition 2024)
 - Python checks apply to all `.py` files in the repository
 - Nix formatting applies to `flake.nix`, `aleph/**/*.nix`, and `nix/**/*.nix`
-- Apollo lander Monte Carlo smoke runs on Buildkite (`:rocket: apollo monte-carlo
-  smoke` in `.buildkite/pipeline.py`). Locally (inside `nix develop`, after
+- Apollo lander Monte Carlo runs on Buildkite (`:rocket: apollo monte-carlo` in
+  `.buildkite/pipeline.py`). Locally (inside `nix develop`, after
   `just install`): `scripts/test-apollo-monte-carlo.sh`
