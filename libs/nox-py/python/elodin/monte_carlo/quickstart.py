@@ -38,7 +38,9 @@ def post_run(ctx):
     # when it produced a result.json (i.e. the sim ran to completion).
     passed = bool(result)
 
-    return {"pass": passed, **result}
+    # Spread result first so the hook's computed `pass` always wins, even when
+    # the sim already emitted its own `pass` field via el.monte_carlo.result(...).
+    return {**result, "pass": passed}
 '''
 
 GATE_HOOK = '''"""post_campaign hook: fail the campaign process when any run failed.
