@@ -464,6 +464,10 @@
                                 </li>
                                 
                                 <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-684/reference/elodin-cli/#elodin-monte-carlo-quickstart">elodin monte-carlo quickstart</a>
+                                </li>
+                                
+                                <li>
                                     <a href="https://docs.elodin.systems/preview/pr-684/reference/elodin-cli/#elodin-monte-carlo-run">elodin monte-carlo run</a>
                                 </li>
                                 
@@ -933,12 +937,33 @@ database sessions cannot collide with worker ports.</p>
 <p><strong>Usage:</strong> <code>elodin monte-carlo &lt;COMMAND&gt;</code></p>
 <h6 id="subcommands-1"><strong>Subcommands</strong></h6>
 <ul>
+<li><code>quickstart</code> — Scaffold a runnable campaign (spec + campaign + hooks) from a simulation</li>
 <li><code>template</code> — Generate a starter plan or sampling spec from declared simulation params</li>
 <li><code>sample</code> — Materialize a sampling spec into a plan CSV</li>
 <li><code>run</code> — Execute a campaign</li>
 <li><code>resume</code> — Re-run missing or failed runs from a previous campaign</li>
 <li><code>report</code> — Rebuild campaign reports</li>
 </ul>
+<h3 id="elodin-monte-carlo-quickstart"><code>elodin monte-carlo quickstart</code></h3>
+<p>The fastest way to get a new simulation into a Monte Carlo campaign. Reads the
+sim's declared params (<code>python SIM.py params</code>) and writes a ready-to-run
+skeleton you then edit:</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> monte-carlo quickstart examples/drone/main.py campaigns/drone</span>
+</span></code></pre>
+<p>This generates:</p>
+<pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">campaigns/drone/
+</span><span class="z-text z-plain">  spec.toml        # one variable per param: uniform[min,max] when bounds are
+</span><span class="z-text z-plain">                   # declared, else fixed at the default
+</span><span class="z-text z-plain">  campaign.toml    # worker pool + post_run/post_campaign hooks
+</span><span class="z-text z-plain">  hooks/score.py   # post_run: records result.json metrics, marks pass
+</span><span class="z-text z-plain">  hooks/gate.py    # post_campaign: raises when any run failed (CI gate)
+</span></code></pre>
+<p>Each <code>el.monte_carlo.Param(..., min=..., max=...)</code> becomes a <code>uniform</code>
+variable; params without bounds are emitted as <code>fixed</code>. Edit the ranges and the
+<code>hooks/score.py</code> pass criterion, then run the printed <code>elodin monte-carlo run</code>
+command. The campaign keeps the default exit code (0 even with partial
+failures); <code>hooks/gate.py</code> is what turns a failure count into a non-zero exit
+for a gated pipeline.</p>
 <h3 id="elodin-monte-carlo-run"><code>elodin monte-carlo run</code></h3>
 <pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> monte-carlo run examples/monte-carlo/main.py <span class="z-punctuation z-separator z-continuation z-line z-shell">\
 </span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>campaign</span> examples/monte-carlo/campaign.toml <span class="z-punctuation z-separator z-continuation z-line z-shell">\
