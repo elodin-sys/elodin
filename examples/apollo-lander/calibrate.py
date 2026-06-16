@@ -30,11 +30,32 @@ def _float(value) -> float | None:
     return result if math.isfinite(result) else None
 
 
-def _run_passed(row: dict) -> bool:
-    passed = row.get("passed")
-    if passed is not None and passed != "":
-        return passed.strip().lower() in {"true", "1", "yes"}
-    return row.get("status", "") == "ok"
+SOFT_HORIZONTAL_SPEED_MPS = 1.0
+SOFT_VERTICAL_SPEED_MPS = 3.0
+UPRIGHT_DOT_MIN = 0.94
+
+
+def _soft_landing(post: dict, result: dict) -> bool:
+    if "soft_landing" in post:
+        return bool(post["soft_landing"])
+    if post.get("pass") is not None:
+        return bool(post["pass"])
+    touchdown_speed = _float(result.get("touchdown_speed"))
+    horizontal_speed = _float(result.get("horizontal_speed"))
+    fuel_remaining = _float(result.get("fuel_remaining"))
+    upright_dot = _float(result.get("upright_dot"))
+    if touchdown_speed is None or horizontal_speed is None:
+        return False
+    landed = bool(result.get("landed", False))
+    return (
+        landed
+        and touchdown_speed <= SOFT_VERTICAL_SPEED_MPS
+        and horizontal_speed <= SOFT_HORIZONTAL_SPEED_MPS
+        and upright_dot is not None
+        and upright_dot >= UPRIGHT_DOT_MIN
+        and fuel_remaining is not None
+        and fuel_remaining > 0.0
+    )
 
 
 def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
@@ -45,10 +66,11 @@ def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
     best_params: dict[str, float] = {}
     best_rmse = float("inf")
     for row in rows:
-        if not _run_passed(row):
-            continue
         result_path = out_dir / row.get("result_json", "")
+        result = _read_json(result_path)
         post = _read_json(result_path.with_name("post_run_result.json"))
+        if not _soft_landing(post, result):
+            continue
         # Prefer the hook's scored RMSE, but fall back to the raw `traj_rmse`
         # in result.json so successful runs still rank when post-run scoring
         # is absent or incomplete.
@@ -67,7 +89,7 @@ def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
         best_params = params
         best_rmse = rmse
     if not best_run:
-        raise RuntimeError(f"no successful runs with a trajectory RMSE in {out_dir}")
+        raise RuntimeError(f"no soft-landing runs with a trajectory RMSE in {out_dir}")
     return best_run, best_params, best_rmse
 
 
@@ -92,8 +114,8 @@ def narrowed_spec(
             lo = float(spec["min"])
             hi = float(spec["max"])
             half_width = (hi - lo) * shrink * 0.5
-            spec["min"] = center - half_width
-            spec["max"] = center + half_width
+            spec["min"] = max(lo, center - half_width)
+            spec["max"] = min(hi, center + half_width)
         rendered = ", ".join(
             f"{item_key} = {item_value!r}"
             if isinstance(item_value, str)
