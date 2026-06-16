@@ -62,6 +62,27 @@ elodin monte-carlo run examples/apollo-lander/main.py \
   --out dbs/apollo-lander-demo
 ```
 
+## Quickstart (your own sim)
+
+This example hand-tunes its campaign, but to bootstrap a Monte Carlo campaign
+for a new simulation in a couple of minutes, scaffold one from the sim's
+declared params:
+
+```sh
+elodin monte-carlo quickstart path/to/main.py campaigns/my-sim
+```
+
+It writes `spec.toml` (a `uniform` variable for each `el.monte_carlo.Param`
+with `min`/`max`, `fixed` otherwise), a `campaign.toml` wired to lifecycle
+hooks, and minimal `hooks/score.py` (post_run pass/fail) + `hooks/gate.py`
+(post_campaign CI gate). Edit the ranges and the score criterion, then run the
+printed `elodin monte-carlo run` command. See the
+[CLI reference](../../docs/public/content/reference/elodin-cli.md) for details.
+
+The Apollo hooks and `calibrate.py` share their metric logic in
+[`hooks/mc_metrics.py`](hooks/mc_metrics.py) (`soft_landing`, `traj_rmse`,
+`run_passed`) so the soft-landing criteria live in exactly one place.
+
 ## CI test
 
 Buildkite runs a **fast infrastructure check** (target under 5 minutes) via the

@@ -19,6 +19,8 @@ enum Command {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Scaffold a runnable campaign (spec + campaign + hooks) from a simulation
+    Quickstart { sim: PathBuf, output: PathBuf },
     /// Materialize a sampling spec into a plan CSV
     Sample {
         spec: PathBuf,
@@ -86,6 +88,9 @@ impl Cli {
         match args.command {
             Command::Template { sim, output } => {
                 python_module(["-m", "elodin.monte_carlo.template"], [sim, output])
+            }
+            Command::Quickstart { sim, output } => {
+                python_module(["-m", "elodin.monte_carlo.quickstart"], [sim, output])
             }
             Command::Sample { spec, output } => {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])

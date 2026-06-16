@@ -6,22 +6,15 @@ import csv
 import json
 from pathlib import Path
 
+from mc_metrics import run_passed
+
 
 def _failed_run_ids(results_path: Path) -> list[str]:
     if not results_path.exists():
         return []
     with results_path.open(newline="") as f:
         rows = list(csv.DictReader(f))
-    failed = []
-    for row in rows:
-        passed = row.get("passed")
-        if passed is not None and passed != "":
-            if passed.strip().lower() not in {"true", "1", "yes"}:
-                failed.append(row.get("run_id", ""))
-            continue
-        if row.get("status", "") != "ok":
-            failed.append(row.get("run_id", ""))
-    return [run_id for run_id in failed if run_id]
+    return [row.get("run_id", "") for row in rows if not run_passed(row) and row.get("run_id")]
 
 
 def post_campaign(ctx):

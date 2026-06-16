@@ -1,24 +1,10 @@
 from __future__ import annotations
 
 import csv
-import json
 import math
 from pathlib import Path
 
-
-def _read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text())
-    except OSError:
-        return {}
-
-
-def _float(value) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    return result if math.isfinite(result) else None
+from mc_metrics import read_json, run_passed, to_float
 
 
 def _percentile(values: list[float], q: float) -> float | None:
@@ -39,13 +25,6 @@ def _fmt(value: float | None, suffix: str = "") -> str:
     return f"{value:.3f}{suffix}"
 
 
-def _run_passed(row: dict) -> bool:
-    passed = row.get("passed")
-    if passed is not None and passed != "":
-        return passed.strip().lower() in {"true", "1", "yes"}
-    return row.get("status", "") == "ok"
-
-
 def post_campaign(ctx):
     out_dir = Path(ctx.out_dir)
     results_path = Path(ctx.results)
@@ -58,56 +37,57 @@ def post_campaign(ctx):
     for row in rows:
         run_id = row.get("run_id", "")
         result_path = out_dir / row.get("result_json", "")
-        result = _read_json(result_path)
-        post_result = _read_json(result_path.with_name("post_run_result.json"))
-        params_path = result_path.with_name("post_run_context.json")
-        context = _read_json(params_path)
+        result = read_json(result_path)
+        post_result = read_json(result_path.with_name("post_run_result.json"))
+        context = read_json(result_path.with_name("post_run_context.json"))
         runs.append(
             {
                 "run_id": run_id,
                 "status": row.get("status", ""),
                 "passed": row.get("passed", ""),
-                "wall_ms": _float(row.get("wall_ms")),
+                "wall_ms": to_float(row.get("wall_ms")),
                 "result": result,
                 "post": post_result,
                 "params": context.get("params", {}),
             }
         )
 
-    ok_runs = [run for run in runs if _run_passed(run)]
+    ok_runs = [run for run in runs if run_passed(run)]
     soft = [run for run in ok_runs if bool(run["post"].get("soft_landing", False))]
     touchdown_speeds = [
         value
         for run in ok_runs
-        if (value := _float(run["post"].get("touchdown_speed_mps"))) is not None
+        if (value := to_float(run["post"].get("touchdown_speed_mps"))) is not None
     ]
     horizontal_speeds = [
         value
         for run in ok_runs
-        if (value := _float(run["post"].get("horizontal_speed_mps"))) is not None
+        if (value := to_float(run["post"].get("horizontal_speed_mps"))) is not None
     ]
     fuel_remaining = [
         value
         for run in ok_runs
-        if (value := _float(run["post"].get("fuel_remaining_kg"))) is not None
+        if (value := to_float(run["post"].get("fuel_remaining_kg"))) is not None
     ]
     rcs_fuel_remaining = [
         value
         for run in ok_runs
-        if (value := _float(run["post"].get("rcs_fuel_remaining_kg"))) is not None
+        if (value := to_float(run["post"].get("rcs_fuel_remaining_kg"))) is not None
     ]
     rmse_values = [
         (run, value)
         for run in ok_runs
-        if (value := _float(run["post"].get("traj_rmse_m"))) is not None
+        if (value := to_float(run["post"].get("traj_rmse_m"))) is not None
     ]
     pitch_rmse = [
-        value for run in ok_runs if (value := _float(run["post"].get("pitch_rmse_deg"))) is not None
+        value
+        for run in ok_runs
+        if (value := to_float(run["post"].get("pitch_rmse_deg"))) is not None
     ]
     downrange_miss = [
         value
         for run in ok_runs
-        if (value := _float(run["post"].get("downrange_miss_m"))) is not None
+        if (value := to_float(run["post"].get("downrange_miss_m"))) is not None
     ]
     best = min(rmse_values, key=lambda item: item[1], default=(None, None))
 

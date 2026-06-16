@@ -111,11 +111,40 @@ database sessions cannot collide with worker ports.
 
 ###### **Subcommands**
 
+* `quickstart` — Scaffold a runnable campaign (spec + campaign + hooks) from a simulation
 * `template` — Generate a starter plan or sampling spec from declared simulation params
 * `sample` — Materialize a sampling spec into a plan CSV
 * `run` — Execute a campaign
 * `resume` — Re-run missing or failed runs from a previous campaign
 * `report` — Rebuild campaign reports
+
+### `elodin monte-carlo quickstart`
+
+The fastest way to get a new simulation into a Monte Carlo campaign. Reads the
+sim's declared params (`python SIM.py params`) and writes a ready-to-run
+skeleton you then edit:
+
+```bash
+elodin monte-carlo quickstart examples/drone/main.py campaigns/drone
+```
+
+This generates:
+
+```text
+campaigns/drone/
+  spec.toml        # one variable per param: uniform[min,max] when bounds are
+                   # declared, else fixed at the default
+  campaign.toml    # worker pool + post_run/post_campaign hooks
+  hooks/score.py   # post_run: records result.json metrics, marks pass
+  hooks/gate.py    # post_campaign: raises when any run failed (CI gate)
+```
+
+Each `el.monte_carlo.Param(..., min=..., max=...)` becomes a `uniform`
+variable; params without bounds are emitted as `fixed`. Edit the ranges and the
+`hooks/score.py` pass criterion, then run the printed `elodin monte-carlo run`
+command. The campaign keeps the default exit code (0 even with partial
+failures); `hooks/gate.py` is what turns a failure count into a non-zero exit
+for a gated pipeline.
 
 ### `elodin monte-carlo run`
 

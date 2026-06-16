@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
-import math
 import subprocess
+import sys
 from pathlib import Path
 
 try:
@@ -14,79 +13,57 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
-
-def _read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text())
-    except OSError:
-        return {}
+# Share the soft-landing / RMSE / float helpers with the hooks.
+sys.path.insert(0, str(Path(__file__).parent / "hooks"))
+from mc_metrics import read_json, soft_landing, to_float, traj_rmse  # noqa: E402
 
 
-def _float(value) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    return result if math.isfinite(result) else None
+def _plan_params(out_dir: Path) -> dict[str, dict[str, float]]:
+    """Map run_id -> sampled params, read from the campaign's `plan.csv`.
 
-
-SOFT_HORIZONTAL_SPEED_MPS = 1.0
-SOFT_VERTICAL_SPEED_MPS = 3.0
-UPRIGHT_DOT_MIN = 0.94
-
-
-def _soft_landing(post: dict, result: dict) -> bool:
-    if "soft_landing" in post:
-        return bool(post["soft_landing"])
-    if post.get("pass") is not None:
-        return bool(post["pass"])
-    touchdown_speed = _float(result.get("touchdown_speed"))
-    horizontal_speed = _float(result.get("horizontal_speed"))
-    fuel_remaining = _float(result.get("fuel_remaining"))
-    upright_dot = _float(result.get("upright_dot"))
-    if touchdown_speed is None or horizontal_speed is None:
-        return False
-    landed = bool(result.get("landed", False))
-    return (
-        landed
-        and touchdown_speed <= SOFT_VERTICAL_SPEED_MPS
-        and horizontal_speed <= SOFT_HORIZONTAL_SPEED_MPS
-        and upright_dot is not None
-        and upright_dot >= UPRIGHT_DOT_MIN
-        and fuel_remaining is not None
-        and fuel_remaining > 0.0
-    )
+    The plan is the materialized source of truth for each run's inputs (one
+    `param.<name>` column per variable), so we read it directly instead of the
+    per-run `post_run_context.json`.
+    """
+    plan_path = out_dir / "plan.csv"
+    params_by_run: dict[str, dict[str, float]] = {}
+    if not plan_path.exists():
+        return params_by_run
+    with plan_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            run_id = row.get("run_id", "")
+            if not run_id:
+                continue
+            params = {}
+            for key, value in row.items():
+                if key.startswith("param."):
+                    parsed = to_float(value)
+                    if parsed is not None:
+                        params[key[len("param.") :]] = parsed
+            params_by_run[run_id] = params
+    return params_by_run
 
 
 def best_fit(out_dir: Path) -> tuple[str, dict[str, float], float]:
     rows_path = out_dir / "results.csv"
     with rows_path.open(newline="") as f:
         rows = list(csv.DictReader(f))
+    plan_params = _plan_params(out_dir)
     best_run = ""
     best_params: dict[str, float] = {}
     best_rmse = float("inf")
     for row in rows:
         result_path = out_dir / row.get("result_json", "")
-        result = _read_json(result_path)
-        post = _read_json(result_path.with_name("post_run_result.json"))
-        if not _soft_landing(post, result):
+        result = read_json(result_path)
+        post = read_json(result_path.with_name("post_run_result.json"))
+        if not soft_landing(post, result):
             continue
-        # Prefer the hook's scored RMSE, but fall back to the raw `traj_rmse`
-        # in result.json so successful runs still rank when post-run scoring
-        # is absent or incomplete.
-        rmse = _float(post.get("traj_rmse_m"))
-        if rmse is None:
-            rmse = _float(_read_json(result_path).get("traj_rmse"))
+        rmse = traj_rmse(post, result)
         if rmse is None or rmse >= best_rmse:
             continue
-        context = _read_json(result_path.with_name("post_run_context.json"))
-        params = {}
-        for key, value in context.get("params", {}).items():
-            parsed = _float(value)
-            if parsed is not None:
-                params[key] = parsed
-        best_run = row.get("run_id", "")
-        best_params = params
+        run_id = row.get("run_id", "")
+        best_run = run_id
+        best_params = plan_params.get(run_id, {})
         best_rmse = rmse
     if not best_run:
         raise RuntimeError(f"no soft-landing runs with a trajectory RMSE in {out_dir}")

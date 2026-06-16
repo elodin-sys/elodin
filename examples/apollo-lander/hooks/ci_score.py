@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from mc_metrics import read_json, traj_rmse
 
 
 def post_run(ctx):
     result_path = Path(ctx.run_dir) / "result.json"
     if not result_path.exists():
         raise RuntimeError(f"CI smoke: missing {result_path}")
-    result = json.loads(result_path.read_text())
-    traj_rmse = result.get("traj_rmse")
-    if traj_rmse is None:
+    result = read_json(result_path)
+    rmse = traj_rmse({}, result)
+    if rmse is None:
         raise RuntimeError(f"CI smoke: {result_path} has no traj_rmse")
     return {
         "pass": True,
         "smoke": True,
         "landed": bool(result.get("landed", False)),
-        "traj_rmse_m": traj_rmse,
+        "traj_rmse_m": rmse,
     }

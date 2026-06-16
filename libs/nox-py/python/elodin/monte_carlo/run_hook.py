@@ -14,6 +14,11 @@ def _load_hook(path: Path):
     if spec is None or spec.loader is None:
         raise RuntimeError(f"could not load hook: {path}")
     module = importlib.util.module_from_spec(spec)
+    # Make the hook's own directory importable so a hook can `import` sibling
+    # helper modules (e.g. a shared `mc_metrics.py`) regardless of the cwd.
+    hook_dir = str(path.resolve().parent)
+    if hook_dir not in sys.path:
+        sys.path.insert(0, hook_dir)
     spec.loader.exec_module(module)
     return module
 
