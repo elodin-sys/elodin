@@ -1076,13 +1076,13 @@ fn is_object_3d_mesh_node(name: &str) -> bool {
 
 fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicError> {
     let position =
-        parse_tuple_f32(node, "position").ok_or_else(|| KdlSchematicError::MissingProperty {
+        parse_tuple3::<f32>(node, "position").ok_or_else(|| KdlSchematicError::MissingProperty {
             property: "position".to_string(),
             node: "thruster".to_string(),
             src: src.to_string(),
             span: node.span(),
         })?;
-    let direction = parse_tuple_f32(node, "direction");
+    let direction = parse_tuple3::<f32>(node, "direction");
     let intensity = node
         .get("intensity")
         .and_then(|v| v.as_string())
