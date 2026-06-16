@@ -99,6 +99,12 @@ def write_quickstart(sim_path: Path, out_dir: Path) -> list[Path]:
     spec_path = out_dir / "spec.toml"
     spec_path.write_text("\n".join(spec_lines) + "\n")
 
+    # Hook paths in campaign.toml are resolved relative to the directory you run
+    # `elodin monte-carlo run` from (not relative to campaign.toml), so prefix
+    # them with the campaign dir as given. This keeps the generated campaign
+    # runnable from the same cwd you run quickstart from (and absolute when
+    # OUTDIR is absolute).
+    hook_prefix = out_dir.as_posix().rstrip("/")
     campaign_path = out_dir / "campaign.toml"
     campaign_path.write_text(
         "\n".join(
@@ -108,8 +114,8 @@ def write_quickstart(sim_path: Path, out_dir: Path) -> list[Path]:
                 "continue_on_error = true",
                 "",
                 "[hooks]",
-                'post_run = "hooks/score.py"',
-                'post_campaign = "hooks/gate.py"',
+                f'post_run = "{hook_prefix}/hooks/score.py"',
+                f'post_campaign = "{hook_prefix}/hooks/gate.py"',
             ]
         )
         + "\n"

@@ -116,6 +116,11 @@ test_steps = [
                 label="apollo monte-carlo",
                 command="just install && ./scripts/test-apollo-monte-carlo.sh",
             ),
+            nix_step(
+                emoji=":sparkles:",
+                label="monte-carlo quickstart",
+                command="just install && ./scripts/test-quickstart.sh",
+            ),
         ],
     ),
     group(
