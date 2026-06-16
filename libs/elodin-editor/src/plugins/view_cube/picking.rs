@@ -12,36 +12,37 @@ use crate::ui::input_owner::UiInputOwners;
 
 use super::components::ViewCubeCamera;
 
-/// Restrict mesh picking to the ViewCube overlay camera while the pointer is
-/// over the overlay.
+/// Stop a hovered ViewCube's main viewport camera from stealing the cube's hit.
 ///
-/// Picking generates one ray per active camera. Over the cube's screen corner
-/// the main viewport (and any graph/UI cameras) also raycast the scene, so a
-/// km-scale terrain GLB on the default render layer (e.g. the Apollo landing
-/// tile) wins the hit and steals hover/click from the cube. Whitelisting only
-/// the overlay camera's rays keeps cube interactions isolated.
+/// Picking generates one ray per active camera, and `RayMap` is global across
+/// every viewport/tile. Over the cube's screen corner the cube's main viewport
+/// also raycasts the scene, so a km-scale terrain GLB on the default render
+/// layer (e.g. the Apollo landing tile) wins the hit and steals hover/click
+/// from the cube. We drop only the ray of each main camera whose cube is
+/// currently hovered, leaving every other camera (other viewports, graphs, UI,
+/// and the cube's own overlay camera) untouched so picking stays per-viewport.
 pub fn filter_picking_rays_for_view_cube_overlay(
     mut ray_map: ResMut<RayMap>,
     input_owners: Res<UiInputOwners>,
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
-    overlay_cameras: Query<(Entity, &Camera, &NavGizmoParent), With<ViewCubeCamera>>,
+    overlay_cameras: Query<(&Camera, &NavGizmoParent), With<ViewCubeCamera>>,
 ) {
     let Ok((window_entity, window)) = primary_window.single() else {
         return;
     };
-    let allowed =
-        overlay_cameras_for_cursor(window, &overlay_cameras, &input_owners, window_entity);
-    if allowed.is_empty() {
+    let blocked =
+        blocked_main_cameras_for_cursor(window, &overlay_cameras, &input_owners, window_entity);
+    if blocked.is_empty() {
         return;
     }
 
-    let allowed: HashSet<Entity> = allowed.into_iter().collect();
     ray_map
         .map
-        .retain(|ray_id, _| allowed.contains(&ray_id.camera));
+        .retain(|ray_id, _| !blocked.contains(&ray_id.camera));
 }
 
-/// Overlay cameras the cube picking should be restricted to.
+/// Main viewport cameras whose ViewCube overlay is hovered, and whose scene
+/// rays should therefore be suppressed.
 ///
 /// Combines two independent signals, both evaluated against the *current*
 /// cursor position so the restriction is dropped the same frame the pointer
@@ -56,17 +57,17 @@ pub fn filter_picking_rays_for_view_cube_overlay(
 /// cube rect disagree momentarily — exactly when a km-scale terrain GLB would
 /// otherwise steal the cube's hit — without keeping it active after the pointer
 /// has left.
-fn overlay_cameras_for_cursor(
+fn blocked_main_cameras_for_cursor(
     window: &Window,
-    overlay_cameras: &Query<(Entity, &Camera, &NavGizmoParent), With<ViewCubeCamera>>,
+    overlay_cameras: &Query<(&Camera, &NavGizmoParent), With<ViewCubeCamera>>,
     input_owners: &UiInputOwners,
     window_entity: Entity,
-) -> Vec<Entity> {
+) -> HashSet<Entity> {
     let physical_cursor = window.physical_cursor_position();
     let cube_owner_pos = window.cursor_position().map(|pos| egui::pos2(pos.x, pos.y));
-    let mut allowed = Vec::new();
+    let mut blocked = HashSet::new();
 
-    for (entity, camera, parent) in overlay_cameras.iter() {
+    for (camera, parent) in overlay_cameras.iter() {
         if !camera.is_active {
             continue;
         }
@@ -81,11 +82,11 @@ fn overlay_cameras_for_cursor(
             input_owners.permits_view_cube_at(window_entity, parent.main_camera, pos)
         });
         if cursor_in_viewport || owned_by_view_cube {
-            allowed.push(entity);
+            blocked.insert(parent.main_camera);
         }
     }
 
-    allowed
+    blocked
 }
 
 fn cursor_in_physical_viewport(cursor: Option<Vec2>, position: UVec2, size: UVec2) -> bool {
