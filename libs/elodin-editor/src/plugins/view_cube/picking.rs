@@ -40,8 +40,18 @@ pub fn filter_picking_rays_for_view_cube_overlay(
         .retain(|ray_id, _| allowed.contains(&ray_id.camera));
 }
 
-/// Overlay cameras whose viewport currently contains the cursor (falling back to
-/// the input-owner region, which is updated a frame later in `Update`).
+/// Overlay cameras the cube picking should be restricted to.
+///
+/// Combines two independent signals so a one-frame lag in either does not drop
+/// the restriction while the pointer sits over the cube:
+/// - the cursor is physically inside an overlay camera's viewport, and
+/// - egui's resolved input owner for the window is `ViewCube` (updated in
+///   `Update`, i.e. one frame behind this `PreUpdate` system).
+///
+/// Taking the union (rather than treating the input owner purely as a fallback)
+/// keeps the filter active during the entry transition where the viewport
+/// hit-test or the physical cursor is momentarily unavailable, which is exactly
+/// when a km-scale terrain GLB would otherwise steal the cube's hit.
 fn overlay_cameras_for_cursor(
     window: &Window,
     overlay_cameras: &Query<(Entity, &Camera, &NavGizmoParent), With<ViewCubeCamera>>,
@@ -49,29 +59,22 @@ fn overlay_cameras_for_cursor(
     window_entity: Entity,
 ) -> Vec<Entity> {
     let cursor = window.physical_cursor_position();
+    let owner_main_camera = match input_owners.owner_for_window(window_entity) {
+        PointerOwner::ViewCube { camera } => Some(camera),
+        _ => None,
+    };
     let mut allowed = Vec::new();
 
-    for (entity, camera, _) in overlay_cameras.iter() {
+    for (entity, camera, parent) in overlay_cameras.iter() {
         if !camera.is_active {
             continue;
         }
-        let Some(viewport) = camera.viewport.as_ref() else {
-            continue;
-        };
-        if cursor_in_physical_viewport(cursor, viewport.physical_position, viewport.physical_size) {
+        let cursor_in_viewport = camera.viewport.as_ref().is_some_and(|viewport| {
+            cursor_in_physical_viewport(cursor, viewport.physical_position, viewport.physical_size)
+        });
+        let owned_by_view_cube = owner_main_camera == Some(parent.main_camera);
+        if cursor_in_viewport || owned_by_view_cube {
             allowed.push(entity);
-        }
-    }
-
-    if allowed.is_empty()
-        && let PointerOwner::ViewCube {
-            camera: main_camera,
-        } = input_owners.owner_for_window(window_entity)
-    {
-        for (entity, _, parent) in overlay_cameras.iter() {
-            if parent.main_camera == main_camera {
-                allowed.push(entity);
-            }
         }
     }
 
