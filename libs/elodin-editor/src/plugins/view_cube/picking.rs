@@ -5,9 +5,10 @@ use std::collections::HashSet;
 use bevy::picking::{PickingSystems, backend::ray::RayMap, mesh_picking::update_hits};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_egui::egui;
 
 use crate::plugins::navigation_gizmo::NavGizmoParent;
-use crate::ui::input_owner::{PointerOwner, UiInputOwners};
+use crate::ui::input_owner::UiInputOwners;
 
 use super::components::ViewCubeCamera;
 
@@ -42,27 +43,27 @@ pub fn filter_picking_rays_for_view_cube_overlay(
 
 /// Overlay cameras the cube picking should be restricted to.
 ///
-/// Combines two independent signals so a one-frame lag in either does not drop
-/// the restriction while the pointer sits over the cube:
-/// - the cursor is physically inside an overlay camera's viewport, and
-/// - egui's resolved input owner for the window is `ViewCube` (updated in
-///   `Update`, i.e. one frame behind this `PreUpdate` system).
+/// Combines two independent signals, both evaluated against the *current*
+/// cursor position so the restriction is dropped the same frame the pointer
+/// leaves the cube (never lingering and suppressing main-viewport picking):
+/// - the cursor is physically inside an overlay camera's viewport, or
+/// - egui resolves the cube as the input owner at the cursor position.
 ///
-/// Taking the union (rather than treating the input owner purely as a fallback)
-/// keeps the filter active during the entry transition where the viewport
-/// hit-test or the physical cursor is momentarily unavailable, which is exactly
-/// when a km-scale terrain GLB would otherwise steal the cube's hit.
+/// The owner is resolved at the live cursor (`permits_view_cube_at`) rather
+/// than read from the cached last-frame resolution (`owner_for_window`), which
+/// would lag one frame behind this `PreUpdate` system. Taking the union keeps
+/// the filter active on entry even when the overlay viewport rect and the egui
+/// cube rect disagree momentarily — exactly when a km-scale terrain GLB would
+/// otherwise steal the cube's hit — without keeping it active after the pointer
+/// has left.
 fn overlay_cameras_for_cursor(
     window: &Window,
     overlay_cameras: &Query<(Entity, &Camera, &NavGizmoParent), With<ViewCubeCamera>>,
     input_owners: &UiInputOwners,
     window_entity: Entity,
 ) -> Vec<Entity> {
-    let cursor = window.physical_cursor_position();
-    let owner_main_camera = match input_owners.owner_for_window(window_entity) {
-        PointerOwner::ViewCube { camera } => Some(camera),
-        _ => None,
-    };
+    let physical_cursor = window.physical_cursor_position();
+    let cube_owner_pos = window.cursor_position().map(|pos| egui::pos2(pos.x, pos.y));
     let mut allowed = Vec::new();
 
     for (entity, camera, parent) in overlay_cameras.iter() {
@@ -70,9 +71,15 @@ fn overlay_cameras_for_cursor(
             continue;
         }
         let cursor_in_viewport = camera.viewport.as_ref().is_some_and(|viewport| {
-            cursor_in_physical_viewport(cursor, viewport.physical_position, viewport.physical_size)
+            cursor_in_physical_viewport(
+                physical_cursor,
+                viewport.physical_position,
+                viewport.physical_size,
+            )
         });
-        let owned_by_view_cube = owner_main_camera == Some(parent.main_camera);
+        let owned_by_view_cube = cube_owner_pos.is_some_and(|pos| {
+            input_owners.permits_view_cube_at(window_entity, parent.main_camera, pos)
+        });
         if cursor_in_viewport || owned_by_view_cube {
             allowed.push(entity);
         }
