@@ -655,7 +655,7 @@
 <table><thead><tr><th>Stage</th><th>Behavior</th></tr></thead><tbody>
 <tr><td><strong>Local files</strong></td><td><code>assets/skyboxes/manifest.ron</code> plus the active entry's <code>*.cubemap.ktx2</code></td></tr>
 <tr><td><strong>On disk in DB</strong></td><td><code>assets/skyboxes/manifest.ron</code> + <code>assets/skyboxes/{name}.cubemap.ktx2</code></td></tr>
-<tr><td><strong>Stored KDL</strong></td><td><code>skybox name="mojave_desert"</code> unchanged (name is logical)</td></tr>
+<tr><td><strong>Stored KDL</strong></td><td><code>skybox name="desert_night"</code> unchanged (name is logical)</td></tr>
 <tr><td><strong>Editor</strong></td><td>Async download from DB HTTP into the local skybox cache, then <code>SetActiveSkybox</code></td></tr>
 <tr><td><strong>Clear</strong></td><td>Empty <code>skybox.active</code> metadata or schematic without a <code>skybox</code> node → skybox cleared in the editor</td></tr>
 </tbody></table>
