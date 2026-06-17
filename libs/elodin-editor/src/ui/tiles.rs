@@ -4,6 +4,7 @@ use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
+    picking::prelude::MeshPickingCamera,
     post_process::bloom::Bloom,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
@@ -1603,6 +1604,7 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
+        camera.insert(MeshPickingCamera);
         camera.insert(bloom_from_config(viewport.bloom.as_ref()));
         camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {

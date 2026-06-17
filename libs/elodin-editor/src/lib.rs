@@ -25,7 +25,7 @@ use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
-use bevy_picking::PickingSettings;
+use bevy_picking::{PickingSettings, PickingSystems, mesh_picking::update_hits};
 use bevy_render::alpha::AlphaMode;
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
@@ -47,7 +47,7 @@ use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     create_egui_context, default_present_mode,
-    inspector::viewport::set_viewport_pos,
+    inspector::viewport::{set_viewport_pos, sync_viewport_focus_pick_targets},
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
     utils::FriendlyEpoch,
@@ -301,6 +301,12 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PreUpdate,
                 sanitize_editor_cam_anchor_depth.before(SyncCameraPosition),
+            )
+            .add_systems(
+                PreUpdate,
+                sync_viewport_focus_pick_targets
+                    .before(update_hits)
+                    .in_set(PickingSystems::Backend),
             )
             .add_systems(
                 PreUpdate,

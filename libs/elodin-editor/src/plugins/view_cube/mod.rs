@@ -44,6 +44,11 @@ impl Plugin for ViewCubePlugin {
             app.add_plugins(MeshPickingPlugin);
         }
 
+        app.insert_resource(MeshPickingSettings {
+            require_markers: true,
+            ..Default::default()
+        });
+
         app.insert_resource(self.config.clone())
             .init_resource::<HoveredElement>()
             .init_resource::<OriginalMaterials>()

@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use bevy::ecs::system::{SystemParam, SystemState};
+use bevy::picking::prelude::Pickable;
 use bevy::prelude::*;
 use bevy::{
     camera::Projection,
@@ -30,6 +33,9 @@ use super::{color_popup, empty_inspector, eql_autocomplete, query};
 
 const DEFAULT_EDITOR_CAM_ANCHOR_DEPTH: f64 = -2.0;
 const ANCHOR_DEPTH_EPSILON: f64 = 1.0e-9;
+
+#[derive(Component)]
+pub struct ViewportFocusPickTarget;
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
 fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
@@ -521,6 +527,70 @@ fn is_valid_viewport_target_distance(target_distance: f64) -> bool {
     target_distance.is_finite() && target_distance > f32::EPSILON as f64
 }
 
+pub fn sync_viewport_focus_pick_targets(
+    mut commands: Commands,
+    viewports: Query<&Viewport>,
+    objects: Query<(Entity, &Object3DState)>,
+    children: Query<&Children>,
+    mesh_entities: Query<(), With<Mesh3d>>,
+    current_targets: Query<Entity, With<ViewportFocusPickTarget>>,
+) {
+    let focus_eqls = viewport_focus_eqls(&viewports);
+    let mut desired_targets = HashSet::new();
+    let current_targets = current_targets.iter().collect::<HashSet<_>>();
+
+    for (entity, object) in &objects {
+        if is_focus_object_eql(&focus_eqls, &object.data.eql) {
+            collect_mesh_descendants(entity, &children, &mesh_entities, &mut desired_targets);
+        }
+    }
+
+    for entity in current_targets.difference(&desired_targets) {
+        commands
+            .entity(*entity)
+            .remove::<(Pickable, ViewportFocusPickTarget)>();
+    }
+
+    for entity in desired_targets.difference(&current_targets) {
+        commands
+            .entity(*entity)
+            .insert((Pickable::default(), ViewportFocusPickTarget));
+    }
+}
+
+fn viewport_focus_eqls(viewports: &Query<&Viewport>) -> HashSet<String> {
+    viewports
+        .iter()
+        .filter_map(|viewport| normalized_focus_eql(&viewport.look_at.eql))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn normalized_focus_eql(eql: &str) -> Option<&str> {
+    let eql = eql.trim();
+    (!eql.is_empty()).then_some(eql)
+}
+
+fn is_focus_object_eql(focus_eqls: &HashSet<String>, object_eql: &str) -> bool {
+    normalized_focus_eql(object_eql).is_some_and(|eql| focus_eqls.contains(eql))
+}
+
+fn collect_mesh_descendants(
+    entity: Entity,
+    children: &Query<&Children>,
+    mesh_entities: &Query<(), With<Mesh3d>>,
+    output: &mut HashSet<Entity>,
+) {
+    if mesh_entities.contains(entity) {
+        output.insert(entity);
+    }
+    if let Ok(child_list) = children.get(entity) {
+        for child in child_list.iter() {
+            collect_mesh_descendants(child, children, mesh_entities, output);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +628,14 @@ mod tests {
                 DEFAULT_EDITOR_CAM_ANCHOR_DEPTH
             );
         }
+    }
+
+    #[test]
+    fn focus_object_eql_matches_trimmed_viewport_look_at() {
+        let focus_eqls = HashSet::from(["lander.world_pos".to_string()]);
+
+        assert!(is_focus_object_eql(&focus_eqls, " lander.world_pos "));
+        assert!(!is_focus_object_eql(&focus_eqls, "lander_truth.world_pos"));
+        assert!(!is_focus_object_eql(&focus_eqls, ""));
     }
 }
