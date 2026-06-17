@@ -1,7 +1,9 @@
-//! GPU thruster exhaust for simulations that expose thrust / RCS viz components.
+//! GPU thruster exhaust driven by KDL `thruster` nodes on `object_3d`.
 //!
-//! - KDL `thruster` nodes on `object_3d`: scalar or 3-vector `intensity` EQL
-//! - Apollo RCS: 16 cold-gas jets from `lander.rcs_thruster_viz`; geometry in this plugin
+//! Each node carries a scalar or 3-vector `intensity` EQL expression plus the
+//! emitter geometry (position, direction, scale, rate, cutoff). Apollo's RCS and
+//! DPS plumes are authored this way in the lander schematic; this plugin only
+//! evaluates the nodes and drives the particle effects.
 
 use bevy::math::{DVec3, Quat, Vec4};
 use bevy::prelude::*;

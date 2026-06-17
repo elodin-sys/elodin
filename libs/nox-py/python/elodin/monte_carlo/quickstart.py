@@ -9,6 +9,11 @@
       hooks/score.py   # post_run: copies result.json metrics, marks pass
       hooks/gate.py    # post_campaign: fails the run when any run failed
 
+Prerequisite: the simulation must declare its tunable parameters with
+`el.monte_carlo.params_spec(...)` first — that declaration is what populates
+`spec.toml`'s `[monte_carlo.variables]`. A sim with no declared params yields a
+spec with nothing to vary (a warning is printed). See `examples/monte-carlo`.
+
 The generated files are intentionally minimal and meant to be edited. The goal
 is to get a new simulation into `elodin monte-carlo run` in a couple of minutes.
 """
@@ -86,6 +91,13 @@ def _variable_line(name: str, param: dict) -> str:
 
 def write_quickstart(sim_path: Path, out_dir: Path) -> list[Path]:
     params = _spec(sim_path).get("params", {})
+    if not params:
+        print(
+            f"warning: {sim_path.as_posix()} declares no params; "
+            "spec.toml will have an empty [monte_carlo.variables]. Declare them "
+            "with el.monte_carlo.params_spec(...) and re-run quickstart.",
+            file=sys.stderr,
+        )
     hooks_dir = out_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
 

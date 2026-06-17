@@ -128,6 +128,22 @@ skeleton you then edit:
 elodin monte-carlo quickstart examples/drone/main.py campaigns/drone
 ```
 
+**Prerequisite:** the simulation must declare its tunable parameters with
+`el.monte_carlo.params_spec(...)` before running quickstart — that declaration
+is what populates `spec.toml`. A sim with no declared params produces an empty
+`[monte_carlo.variables]` (quickstart prints a warning). Declare them in the
+sim, for example:
+
+```python
+import elodin as el
+
+def params_spec():
+    return el.monte_carlo.params_spec(
+        thrust=el.monte_carlo.Param(default=1.0, min=0.8, max=1.2),
+        mass=el.monte_carlo.Param(default=12.0, min=11.0, max=13.0),
+    )
+```
+
 This generates:
 
 ```text
