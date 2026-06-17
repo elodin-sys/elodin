@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn sync_cache_active_from_skybox_aligns_save_source_with_schematic() {
         let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
-        cache.active = Some("alien_swamp".to_string());
+        cache.active = Some("desert_night".to_string());
 
         sync_cache_active_from_skybox(
             &mut cache,

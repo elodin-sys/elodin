@@ -28,7 +28,7 @@ ERROR="${GLB_SIMPLIFY_ERROR:-0.01}"   # max simplification error (fraction of si
 
 gt() { npx --yes @gltf-transform/cli@latest "$@"; }
 
-WORK="$(mktemp -d -t glb-opt)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/glb-opt.XXXXXXXXXX")"
 LOSSLESS="$WORK/lossless.glb"
 RESULT="$WORK/result.glb"
 trap 'rm -rf "$WORK"' EXIT

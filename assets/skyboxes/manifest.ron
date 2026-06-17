@@ -15,5 +15,5 @@
             created_at: "2026-06-16T22:52:24.646277Z",
         ),
     ],
-    default: Some("mojave_desert"),
+    default: Some("desert_night"),
 )

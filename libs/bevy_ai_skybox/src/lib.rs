@@ -1816,7 +1816,7 @@ mod tests {
     "#;
 
     const SCHEMATIC_WITH_SKYBOX_FRAGMENT: &str = r#"
-        skybox name="mojave_desert"
+        skybox name="desert_night"
 
         tabs {
             viewport name=Viewport active=#true
@@ -1934,11 +1934,11 @@ mod tests {
     #[test]
     fn set_active_named_skybox_replaces_existing_camera_skybox() {
         let mut app = skybox_apply_test_app();
-        let first = register_test_skybox(&mut app, "alien_swamp");
+        let first = register_test_skybox(&mut app, "desert_night");
         let second = register_test_skybox(&mut app, "grand_canyon");
 
         app.world_mut()
-            .write_message(SetActiveSkybox::ByName("alien_swamp".to_string()));
+            .write_message(SetActiveSkybox::ByName("desert_night".to_string()));
         app.update();
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&first));
 
@@ -2321,7 +2321,7 @@ mod tests {
     fn parse_skybox_name_from_kdl_fragment() {
         assert_eq!(
             parse_skybox_name_from_kdl(SCHEMATIC_WITH_SKYBOX_FRAGMENT).as_deref(),
-            Some("mojave_desert")
+            Some("desert_night")
         );
         assert_eq!(parse_skybox_name_from_kdl(RC_JET_SCHEMATIC_FRAGMENT), None);
     }

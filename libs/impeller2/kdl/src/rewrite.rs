@@ -669,7 +669,7 @@ mod tests {
     fn collect_local_asset_paths_includes_skybox_manifest() {
         let schematic = Schematic {
             skybox: Some(SkyboxConfig {
-                name: "mojave_desert".into(),
+                name: "desert_night".into(),
             }),
             ..Default::default()
         };
@@ -684,7 +684,7 @@ mod tests {
     fn collect_db_asset_names_includes_skybox_manifest() {
         let schematic = Schematic {
             skybox: Some(SkyboxConfig {
-                name: "mojave_desert".into(),
+                name: "desert_night".into(),
             }),
             ..Default::default()
         };
@@ -702,22 +702,22 @@ mod tests {
     version: 2,
     entries: [
         (
-            name: "mojave_desert",
+            name: "desert_night",
             prompt: "mojave",
             style: M3Photoreal,
             blockade: None,
-            cubemap_file: "mojave_desert.cubemap.ktx2",
+            cubemap_file: "desert_night.cubemap.ktx2",
             face_size: 2048,
             created_at: "2026-05-11T05:34:26Z",
         ),
     ],
-    default: Some("mojave_desert"),
+    default: Some("desert_night"),
 )
 "#;
 
         assert_eq!(
-            skybox_manifest_cubemap_asset_name(manifest, "mojave_desert").unwrap(),
-            Some("skyboxes/mojave_desert.cubemap.ktx2".to_string())
+            skybox_manifest_cubemap_asset_name(manifest, "desert_night").unwrap(),
+            Some("skyboxes/desert_night.cubemap.ktx2".to_string())
         );
     }
 

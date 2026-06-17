@@ -45,7 +45,7 @@ order = 6
 - `name`: required manifest entry name. Entries are read from `assets/skyboxes/manifest.ron`, or from `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron` when that environment variable is set.
 - When a simulation records into an Elodin DB, the manifest and active cubemap are copied under `{db}/assets/skyboxes/`; see [DB Asset Server](/reference/db-asset-server).
 - Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.
-- Example: `skybox name="alien_swamp"`.
+- Example: `skybox name="desert_night"`.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
