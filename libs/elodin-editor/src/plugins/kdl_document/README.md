@@ -90,7 +90,7 @@ A schematic document is a `.kdl` file. The following top-level nodes are recogni
 
 ```kdl
 theme mode="dark" scheme="elodin"
-skybox name="alien_swamp"
+skybox name="desert_night"
 
 window path="motor-panel.kdl" title="Motors" screen=1
 window path="rate-control-panel.kdl" title="Rate Control"
