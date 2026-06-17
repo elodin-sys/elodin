@@ -1,3 +1,4 @@
+use crate::admission::{self, AdmissionPermit};
 use crate::recipe::Recipe;
 use clap::Parser;
 use miette::miette;
@@ -51,6 +52,26 @@ pub async fn run_recipe_with_token(
     watch: bool,
     release: bool,
     cancel_token: CancelToken,
+) -> miette::Result<()> {
+    let admission_permit = admission::acquire_run_slot(admission::recipe_weight(&recipe)).await;
+    run_recipe_with_token_admitted(
+        recipe_name,
+        recipe,
+        watch,
+        release,
+        cancel_token,
+        admission_permit,
+    )
+    .await
+}
+
+pub async fn run_recipe_with_token_admitted(
+    recipe_name: String,
+    recipe: Recipe,
+    watch: bool,
+    release: bool,
+    cancel_token: CancelToken,
+    _admission_permit: Option<AdmissionPermit>,
 ) -> miette::Result<()> {
     // Set up Ctrl+C handling so the recipe can be cancelled interactively
     let ctrl_c_cancel_token = cancel_token.clone();

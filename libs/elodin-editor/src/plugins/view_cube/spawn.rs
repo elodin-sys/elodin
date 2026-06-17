@@ -130,6 +130,7 @@ fn spawn_overlay_camera(
             ..default()
         },
         Camera3d::default(),
+        MeshPickingCamera,
         ViewCubeCamera,
         ViewCubeLink { main_camera },
         Name::new("view_cube_camera"),
@@ -483,6 +484,7 @@ fn spawn_rotation_arrows(
             MeshMaterial3d(hitbox_material.clone()),
             Transform::from_translation(Vec3::ZERO),
             ChildOf(arrow_entity),
+            Pickable::default(),
             Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
         ));
         if let Some(lease) = render_layer_lease {
@@ -540,6 +542,7 @@ fn spawn_rotation_arrows(
             MeshMaterial3d(hitbox_material.clone()),
             Transform::from_translation(Vec3::ZERO),
             ChildOf(arrow_entity),
+            Pickable::default(),
             Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
         ));
         if let Some(lease) = render_layer_lease {
@@ -614,6 +617,7 @@ fn spawn_viewport_action_buttons(
         MeshMaterial3d(hitbox_material.clone()),
         Transform::from_translation(Vec3::ZERO),
         ChildOf(reset_button),
+        Pickable::default(),
         Name::new("viewport_action_button_Reset_hitbox"),
     ));
     if let Some(lease) = render_layer_lease {
@@ -674,6 +678,7 @@ fn spawn_viewport_action_buttons(
         MeshMaterial3d(hitbox_material),
         Transform::from_translation(Vec3::ZERO),
         ChildOf(zoom_button),
+        Pickable::default(),
         Name::new("viewport_action_button_ZoomOut_hitbox"),
     ));
     if let Some(lease) = render_layer_lease {

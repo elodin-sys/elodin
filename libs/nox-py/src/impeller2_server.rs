@@ -388,6 +388,7 @@ mod asset_tests {
             mesh: Object3DMesh::glb(path),
             frame: None,
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: Default::default(),
         })
@@ -758,6 +759,7 @@ object_3d "rocket.world_pos" {
                     size: default_icon_size(),
                     visibility_range: None,
                 }),
+                thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
             })],
@@ -1079,6 +1081,7 @@ async fn tick(
     }
     loop {
         if should_cancel() {
+            metrics.mark_loop_end();
             return;
         }
         if !db.recording_cell.is_playing() {
@@ -1089,6 +1092,7 @@ async fn tick(
             })
             .await;
             if should_cancel() {
+                metrics.mark_loop_end();
                 return;
             }
             continue;
@@ -1117,6 +1121,7 @@ async fn tick(
             db.recording_cell.set_playing(false);
             world.world_mut().metadata.max_tick = u64::MAX;
             if !interactive {
+                metrics.mark_loop_end();
                 return;
             } else {
                 info!(
@@ -1188,11 +1193,13 @@ async fn tick(
             stellarator::sleep(Duration::from_millis(1)).await;
             if should_cancel() {
                 metrics.observe_wait_for_write(wait_for_write_start.elapsed());
+                metrics.mark_loop_end();
                 return;
             }
         }
         metrics.observe_wait_for_write(wait_for_write_start.elapsed());
         if should_cancel() {
+            metrics.mark_loop_end();
             return;
         }
         // Called with end_tick (not batch start) because the world state now

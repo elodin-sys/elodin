@@ -177,6 +177,8 @@ mod tests {
             cwd: None,
             env: HashMap::new(),
             restart_policy: RestartPolicy::Never,
+            fail_on_error: false,
+            log_path: None,
         }
     }
 }

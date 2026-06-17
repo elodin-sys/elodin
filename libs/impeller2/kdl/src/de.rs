@@ -442,6 +442,24 @@ fn parse_split(
     }
 }
 
+/// Bool value parser that also accepts case-insensitive `"true"`/`"false"`
+/// strings. In KDL 2.0 only `#true`/`#false` are booleans; a bare `True`
+/// parses as a string, which previously made `hdr=True` silently false.
+fn parse_bool_value(value: &kdl::KdlValue) -> Option<bool> {
+    if let Some(b) = value.as_bool() {
+        return Some(b);
+    }
+    match value.as_string()?.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn bool_prop(node: &KdlNode, prop: &str) -> Option<bool> {
+    node.get(prop).and_then(parse_bool_value)
+}
+
 fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
     let near = node
@@ -503,31 +521,19 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         });
     }
 
-    let active = node
-        .get("active")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let active = bool_prop(node, "active").unwrap_or(false);
 
     let name = parse_name(node);
-    let show_grid = node
-        .get("show_grid")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let show_grid = bool_prop(node, "show_grid").unwrap_or(false);
 
-    let show_arrows = node
-        .get("show_arrows")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let show_arrows = bool_prop(node, "show_arrows").unwrap_or(true);
 
-    let create_frustum = node
-        .get("create_frustum")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let create_frustum = bool_prop(node, "create_frustum").unwrap_or(false);
 
     let show_frustums = node
         .get("show_frustums")
         .or_else(|| node.get("show_frustum"))
-        .and_then(|v| v.as_bool())
+        .and_then(parse_bool_value)
         .unwrap_or(false);
 
     let frustums_color = if let Some(value) = node.get("frustums_color") {
@@ -567,12 +573,10 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         });
     }
 
-    let show_view_cube = node
-        .get("show_view_cube")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let show_view_cube = bool_prop(node, "show_view_cube").unwrap_or(true);
 
-    let hdr = node.get("hdr").and_then(|v| v.as_bool()).unwrap_or(false);
+    let hdr = bool_prop(node, "hdr").unwrap_or(false);
+    let bloom = parse_viewport_bloom(node, kdl_src)?;
 
     let pos = node
         .get("pos")
@@ -641,6 +645,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         frustums_thickness,
         show_view_cube,
         hdr,
+        bloom,
         name,
         pos,
         look_at,
@@ -649,6 +654,69 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         local_arrows,
         node_id: NodeId::default(),
     }))
+}
+
+fn parse_viewport_bloom(
+    node: &KdlNode,
+    src: &str,
+) -> Result<Option<BloomConfig>, KdlSchematicError> {
+    let Some(children) = node.children() else {
+        return Ok(None);
+    };
+    let Some(bloom_node) = children
+        .nodes()
+        .iter()
+        .find(|n| n.name().value() == "bloom")
+    else {
+        return Ok(None);
+    };
+
+    let preset = match bloom_node.get("preset").and_then(|v| v.as_string()) {
+        None | Some("natural") => BloomPreset::Natural,
+        Some("old_school") => BloomPreset::OldSchool,
+        Some(_) => {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "preset".to_string(),
+                node: "bloom".to_string(),
+                expected: "\"natural\" or \"old_school\"".to_string(),
+                src: src.to_string(),
+                span: bloom_node.span(),
+            });
+        }
+    };
+
+    let float_prop = |prop: &str| {
+        bloom_node
+            .get(prop)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+    };
+    let config = BloomConfig {
+        preset,
+        intensity: float_prop("intensity"),
+        threshold: float_prop("threshold"),
+        threshold_softness: float_prop("threshold_softness"),
+    };
+
+    for (prop, value) in [
+        ("intensity", config.intensity),
+        ("threshold", config.threshold),
+        ("threshold_softness", config.threshold_softness),
+    ] {
+        if let Some(value) = value
+            && value < 0.0
+        {
+            return Err(KdlSchematicError::InvalidValue {
+                property: prop.to_string(),
+                node: "bloom".to_string(),
+                expected: "a non-negative number".to_string(),
+                src: src.to_string(),
+                span: bloom_node.span(),
+            });
+        }
+    }
+
+    Ok(Some(config))
 }
 
 fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -904,10 +972,13 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .and_then(|s| GeoFrame::from_str(s).ok());
     let mut icon = None;
     let mut mesh_visibility_range = None;
+    let mut thrusters = Vec::new();
 
     let mesh = if let Some(children) = node.children() {
         let children_nodes = children.nodes();
-        let mesh_node = children_nodes.first();
+        let mesh_node = children_nodes
+            .iter()
+            .find(|child| is_object_3d_mesh_node(child.name().value()));
         let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
 
         if let Some(mn) = mesh_node {
@@ -946,6 +1017,8 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 });
             } else if child_name == "icon" {
                 icon = Some(parse_object_3d_icon(child, src)?);
+            } else if child_name == "thruster" {
+                thrusters.push(parse_thruster(child, src)?);
             }
         }
 
@@ -955,6 +1028,9 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 scale,
                 translate,
                 rotate,
+                emissivity,
+                glow,
+                glow_color,
                 ..
             } = parsed_mesh
         {
@@ -964,6 +1040,9 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 translate,
                 rotate,
                 animations,
+                emissivity,
+                glow,
+                glow_color,
             };
         }
 
@@ -982,8 +1061,92 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         mesh,
         frame,
         icon,
+        thrusters,
         mesh_visibility_range,
         node_id: NodeId::default(),
+    })
+}
+
+fn is_object_3d_mesh_node(name: &str) -> bool {
+    matches!(
+        name,
+        "glb" | "sphere" | "box" | "cylinder" | "plane" | "ellipsoid"
+    )
+}
+
+fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicError> {
+    let position = parse_tuple3::<f32>(node, "position").ok_or_else(|| {
+        KdlSchematicError::MissingProperty {
+            property: "position".to_string(),
+            node: "thruster".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        }
+    })?;
+    let direction = parse_tuple3::<f32>(node, "direction");
+    let intensity = node
+        .get("intensity")
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "intensity".to_string(),
+            node: "thruster".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .trim()
+        .to_string();
+    if intensity.is_empty() {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "intensity".to_string(),
+            node: "thruster".to_string(),
+            expected: "a non-empty EQL expression".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+
+    let scale = match node.entry("scale") {
+        None => Thruster::default_scale(),
+        Some(entry) => {
+            let value = entry.value();
+            if let Some(value) = value.as_float() {
+                value as f32
+            } else if let Some(value) = value.as_integer() {
+                value as f32
+            } else {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "scale".to_string(),
+                    node: "thruster".to_string(),
+                    expected: "a numeric value".to_string(),
+                    src: src.to_string(),
+                    span: entry.span(),
+                });
+            }
+        }
+    };
+
+    Ok(Thruster {
+        name: parse_name(node),
+        body_frame: bool_prop(node, "body_frame").unwrap_or(false),
+        position,
+        direction,
+        intensity,
+        effect: node
+            .get("effect")
+            .and_then(|v| v.as_string())
+            .map(|s| s.to_string())
+            .unwrap_or_else(Thruster::default_effect),
+        emission_rate: node
+            .get("emission_rate")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+            .unwrap_or_else(Thruster::default_emission_rate),
+        cutoff: node
+            .get("cutoff")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+            .unwrap_or_else(Thruster::default_cutoff),
+        scale,
     })
 }
 
@@ -1070,6 +1233,11 @@ fn parse_object_3d_mesh(
         span: (0, 0).into(),
     })?;
 
+    fn numeric_prop(node: &KdlNode, prop: &str) -> Option<f64> {
+        node.get(prop)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+    }
+
     match node.name().value() {
         "glb" => {
             let path = node
@@ -1087,6 +1255,11 @@ fn parse_object_3d_mesh(
 
             let translate = parse_tuple3::<f32>(node, "translate").unwrap_or((0.0, 0.0, 0.0));
             let rotate = parse_tuple3::<f32>(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
+            let emissivity = numeric_prop(node, "emissivity")
+                .map(|v| v as f32)
+                .unwrap_or(0.0);
+            let glow = numeric_prop(node, "glow").map(|v| v as f32).unwrap_or(0.0);
+            let glow_color = node.get("glow_color").and_then(parse_viewport_color);
 
             Ok(Object3DMesh::Glb {
                 path,
@@ -1094,13 +1267,14 @@ fn parse_object_3d_mesh(
                 translate,
                 rotate,
                 animations: Vec::new(), // Animations are parsed at object_3d level, not glb level
+                emissivity,
+                glow,
+                glow_color,
             })
         }
         "sphere" => {
-            let radius = node
-                .get("radius")
-                .and_then(|v| v.as_float())
-                .ok_or_else(|| KdlSchematicError::MissingProperty {
+            let radius =
+                numeric_prop(node, "radius").ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "radius".to_string(),
                     node: "sphere".to_string(),
                     src: src.to_string(),
@@ -1113,31 +1287,25 @@ fn parse_object_3d_mesh(
             Ok(Object3DMesh::Mesh { mesh, material })
         }
         "box" => {
-            let x = node.get("x").and_then(|v| v.as_float()).ok_or_else(|| {
-                KdlSchematicError::MissingProperty {
-                    property: "x".to_string(),
-                    node: "box".to_string(),
-                    src: src.to_string(),
-                    span: node.span(),
-                }
+            let x = numeric_prop(node, "x").ok_or_else(|| KdlSchematicError::MissingProperty {
+                property: "x".to_string(),
+                node: "box".to_string(),
+                src: src.to_string(),
+                span: node.span(),
             })? as f32;
 
-            let y = node.get("y").and_then(|v| v.as_float()).ok_or_else(|| {
-                KdlSchematicError::MissingProperty {
-                    property: "y".to_string(),
-                    node: "box".to_string(),
-                    src: src.to_string(),
-                    span: node.span(),
-                }
+            let y = numeric_prop(node, "y").ok_or_else(|| KdlSchematicError::MissingProperty {
+                property: "y".to_string(),
+                node: "box".to_string(),
+                src: src.to_string(),
+                span: node.span(),
             })? as f32;
 
-            let z = node.get("z").and_then(|v| v.as_float()).ok_or_else(|| {
-                KdlSchematicError::MissingProperty {
-                    property: "z".to_string(),
-                    node: "box".to_string(),
-                    src: src.to_string(),
-                    span: node.span(),
-                }
+            let z = numeric_prop(node, "z").ok_or_else(|| KdlSchematicError::MissingProperty {
+                property: "z".to_string(),
+                node: "box".to_string(),
+                src: src.to_string(),
+                span: node.span(),
             })? as f32;
 
             let mesh = Mesh::Box { x, y, z };
@@ -1146,20 +1314,16 @@ fn parse_object_3d_mesh(
             Ok(Object3DMesh::Mesh { mesh, material })
         }
         "cylinder" => {
-            let radius = node
-                .get("radius")
-                .and_then(|v| v.as_float())
-                .ok_or_else(|| KdlSchematicError::MissingProperty {
+            let radius =
+                numeric_prop(node, "radius").ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "radius".to_string(),
                     node: "cylinder".to_string(),
                     src: src.to_string(),
                     span: node.span(),
                 })? as f32;
 
-            let height = node
-                .get("height")
-                .and_then(|v| v.as_float())
-                .ok_or_else(|| KdlSchematicError::MissingProperty {
+            let height =
+                numeric_prop(node, "height").ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "height".to_string(),
                     node: "cylinder".to_string(),
                     src: src.to_string(),
@@ -1172,21 +1336,13 @@ fn parse_object_3d_mesh(
             Ok(Object3DMesh::Mesh { mesh, material })
         }
         "plane" => {
-            let size = node
-                .get("size")
-                .and_then(|v| v.as_float())
-                .map(|v| v as f32)
-                .unwrap_or(10.0);
+            let size = numeric_prop(node, "size").map(|v| v as f32).unwrap_or(10.0);
 
-            let width = node
-                .get("width")
-                .and_then(|v| v.as_float())
+            let width = numeric_prop(node, "width")
                 .map(|v| v as f32)
                 .unwrap_or(size);
 
-            let depth = node
-                .get("depth")
-                .and_then(|v| v.as_float())
+            let depth = numeric_prop(node, "depth")
                 .map(|v| v as f32)
                 .unwrap_or(size);
 
@@ -1688,6 +1844,8 @@ fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ser::serialize_schematic;
+
     use super::*;
 
     #[test]
@@ -1734,6 +1892,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_apollo_lander_schematic_keeps_truth_as_trail_only() {
+        let kdl = include_str!("../../../../examples/apollo-lander/apollo-lander.kdl");
+        let schematic = parse_schematic(kdl).expect("apollo lander schematic should parse");
+
+        let object_eqls: Vec<_> = schematic
+            .elems
+            .iter()
+            .filter_map(|elem| match elem {
+                SchematicElem::Object3d(obj) => Some(obj.eql.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(object_eqls.contains(&"lander.world_pos"));
+        assert!(
+            !object_eqls.contains(&"lander_truth.world_pos"),
+            "lander_truth should remain replay data/trail, not a second rendered LM"
+        );
+        assert!(schematic.elems.iter().any(|elem| matches!(
+            elem,
+            SchematicElem::Line3d(line) if line.eql == "lander_truth.world_pos"
+        )));
+    }
+
+    #[test]
     fn test_parse_timeline_unknown_properties_are_rejected() {
         let kdl = r#"timeline unexpected=#true"#;
         assert!(parse_schematic(kdl).is_err());
@@ -1771,6 +1954,25 @@ timeline follow_latest=#true {
             assert!(viewport.show_view_cube);
         } else {
             panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_bool_string_values() {
+        // Bare identifiers like `True` are strings in KDL 2.0, not booleans;
+        // they previously parsed as false silently.
+        for (kdl, expected_hdr) in [
+            (r#"viewport hdr=True"#, true),
+            (r#"viewport hdr="true""#, true),
+            (r#"viewport hdr=#true"#, true),
+            (r#"viewport hdr=False"#, false),
+            (r#"viewport hdr=#false"#, false),
+        ] {
+            let schematic = parse_schematic(kdl).unwrap();
+            let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+                panic!("Expected viewport panel");
+            };
+            assert_eq!(viewport.hdr, expected_hdr, "kdl: {kdl}");
         }
     }
 
@@ -2095,6 +2297,46 @@ object_3d "a.world_pos" {
     }
 
     #[test]
+    fn test_parse_object_3d_vector_thruster() {
+        let kdl = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(obj.thrusters.len(), 1);
+        let thruster = &obj.thrusters[0];
+        assert!(thruster.vector_intensity());
+        assert_eq!(thruster.direction, None);
+        assert_eq!(thruster.intensity, "lander.main_thrust_viz");
+        assert_eq!(thruster.position, (0.0, -0.55, 0.0));
+    }
+
+    #[test]
+    fn test_parse_object_3d_scalar_thruster_indexed_intensity() {
+        // Indexed EQL must be quoted: KDL 2.0 bare strings cannot contain `[`/`]`.
+        let kdl = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="rcs_0" effect="cold_gas" body_frame=#true position="(2.15, 0.85, 1.45)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[0]" emission_rate=140.0 cutoff=0.006
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert!(!thruster.vector_intensity());
+        assert_eq!(thruster.intensity, "lander.rcs_thruster_viz[0]");
+        assert_eq!(thruster.direction, Some((-1.0, 0.0, 0.0)));
+        assert_eq!(thruster.effect, "cold_gas");
+    }
+
+    #[test]
     fn test_parse_viewport_with_frame() {
         let kdl =
             r#"viewport name="main" frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)""#;
@@ -2201,6 +2443,144 @@ object_3d "a.world_pos" {
         assert_eq!(material.base_color.r, 0.0);
         assert_eq!(material.base_color.g, 0.0);
         assert_eq!(material.base_color.b, 1.0);
+    }
+
+    #[test]
+    fn test_parse_object_3d_plane_integer_dimensions() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    plane width=100 depth=200 {
+        color 0 255 0
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        let Object3DMesh::Mesh { mesh, .. } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 100.0).abs() < f32::EPSILON);
+        assert!((*depth - 200.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_object_3d_integer_primitive_dimensions() {
+        let cases: [(&str, fn(&Mesh) -> bool); 3] = [
+            (
+                r#"object_3d "a.world_pos" { sphere radius=50 }"#,
+                |mesh: &Mesh| match mesh {
+                    Mesh::Sphere { radius } => (*radius - 50.0).abs() < f32::EPSILON,
+                    _ => false,
+                },
+            ),
+            (
+                r#"object_3d "a.world_pos" { box x=1 y=2 z=3 }"#,
+                |mesh: &Mesh| match mesh {
+                    Mesh::Box { x, y, z } => {
+                        (*x - 1.0).abs() < f32::EPSILON
+                            && (*y - 2.0).abs() < f32::EPSILON
+                            && (*z - 3.0).abs() < f32::EPSILON
+                    }
+                    _ => false,
+                },
+            ),
+            (
+                r#"object_3d "a.world_pos" { cylinder radius=4 height=5 }"#,
+                |mesh: &Mesh| match mesh {
+                    Mesh::Cylinder { radius, height } => {
+                        (*radius - 4.0).abs() < f32::EPSILON && (*height - 5.0).abs() < f32::EPSILON
+                    }
+                    _ => false,
+                },
+            ),
+        ];
+
+        for (kdl, validate) in cases {
+            let schematic = parse_schematic(kdl).unwrap();
+            let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+                panic!("Expected object_3d");
+            };
+            let Object3DMesh::Mesh { mesh, .. } = &obj.mesh else {
+                panic!("Expected mesh object");
+            };
+            assert!(validate(mesh));
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_glb_emissivity() {
+        let kdl = r#"object_3d "a.world_pos" { glb path="moon.glb" emissivity=0.5 }"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Glb { emissivity, .. } = &obj.mesh else {
+            panic!("Expected glb");
+        };
+        assert!((*emissivity - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_object_3d_glb_glow() {
+        let kdl = r#"object_3d "a.world_pos" { glb path="moon.glb" glow=2.5 glow_color="cyan" }"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Glb {
+            glow, glow_color, ..
+        } = &obj.mesh
+        else {
+            panic!("Expected glb");
+        };
+
+        assert!((*glow - 2.5).abs() < f32::EPSILON);
+        assert_eq!(*glow_color, Some(Color::CYAN));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(serialized.contains("glow=2.5"));
+        assert!(
+            serialized.contains("glow_color=cyan") || serialized.contains("glow_color=\"cyan\"")
+        );
+    }
+
+    #[test]
+    fn test_parse_viewport_bloom() {
+        let kdl = r#"
+viewport hdr=#true {
+    bloom preset="old_school" intensity=0.4 threshold=1.0 threshold_softness=0.2
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport");
+        };
+        let bloom = viewport.bloom.as_ref().expect("expected bloom config");
+        assert_eq!(bloom.preset, BloomPreset::OldSchool);
+        assert_eq!(bloom.intensity, Some(0.4));
+        assert_eq!(bloom.threshold, Some(1.0));
+        assert_eq!(bloom.threshold_softness, Some(0.2));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(serialized.contains("bloom"));
+        assert!(
+            serialized.contains("preset=old_school")
+                || serialized.contains("preset=\"old_school\"")
+        );
+        assert!(serialized.contains("intensity=0.4"));
+        assert!(serialized.contains("threshold=1.0"));
+        assert!(serialized.contains("threshold_softness=0.2"));
     }
 
     #[test]
@@ -2557,6 +2937,7 @@ object_3d "a.world_pos" {
                     translate,
                     rotate,
                     animations,
+                    ..
                 } => {
                     assert_eq!(path.as_str(), "hi");
                     assert_eq!(*scale, 1.0);
@@ -2594,6 +2975,7 @@ object_3d "rocket.world_pos" {
                     translate,
                     rotate,
                     animations,
+                    ..
                 } => {
                     assert_eq!(path.as_str(), "flappy-rocket.glb");
                     assert_eq!(*scale, 1.0);

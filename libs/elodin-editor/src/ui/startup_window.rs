@@ -33,10 +33,23 @@ use super::{
 #[derive(Component)]
 pub struct StartupWindow;
 
+#[derive(Resource)]
+struct MainWindowRevealDelay {
+    frames_remaining: u8,
+}
+
+const MAIN_WINDOW_REVEAL_FRAMES: u8 = 2;
+
+fn queue_main_window_reveal(commands: &mut Commands) {
+    commands.insert_resource(MainWindowRevealDelay {
+        frames_remaining: MAIN_WINDOW_REVEAL_FRAMES,
+    });
+}
+
 fn create_startup_window(
     mut commands: Commands,
     status: Res<ThreadConnectionStatus>,
-    mut primary: Query<&mut Window, With<PrimaryWindow>>,
+    primary: Query<&Window, With<PrimaryWindow>>,
 ) {
     commands.insert_resource(recent_files());
     if status.status() == ConnectionStatus::NoConnection {
@@ -67,9 +80,28 @@ fn create_startup_window(
         let camera = Camera::default();
 
         window.insert((camera, RenderTarget::Window(WindowRef::Entity(window.id()))));
-    } else if let Ok(mut primary) = primary.single_mut() {
-        primary.visible = true
+    } else if primary.single().is_ok() {
+        queue_main_window_reveal(&mut commands);
     }
+}
+
+fn reveal_main_window(
+    mut commands: Commands,
+    reveal_delay: Option<ResMut<MainWindowRevealDelay>>,
+    mut main_window: Query<&mut Window, (With<PrimaryWindow>, Without<StartupWindow>)>,
+) {
+    let Some(mut reveal_delay) = reveal_delay else {
+        return;
+    };
+    if reveal_delay.frames_remaining > 0 {
+        reveal_delay.frames_remaining -= 1;
+        return;
+    }
+
+    if let Ok(mut window) = main_window.single_mut() {
+        window.visible = true;
+    }
+    commands.remove_resource::<MainWindowRevealDelay>();
 }
 
 pub fn add_layouts(world: &mut World) {
@@ -81,7 +113,7 @@ pub struct StartupPlugin;
 impl Plugin for StartupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, create_startup_window);
-        app.add_systems(Update, add_layouts);
+        app.add_systems(Update, (add_layouts, reveal_main_window));
     }
 }
 
@@ -89,7 +121,6 @@ impl Plugin for StartupPlugin {
 pub struct StartupLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     window: Query<'w, 's, Entity, With<StartupWindow>>,
-    main_window: Query<'w, 's, &'static mut Window, (With<PrimaryWindow>, Without<StartupWindow>)>,
     images: Local<'s, images::Images>,
     modal_state: Local<'s, ModalState>,
     packet_tx: ResMut<'w, PacketTx>,
@@ -180,9 +211,7 @@ impl StartupLayout<'_, '_> {
         self.commands
             .entity(e.expect("Window entity should exist"))
             .despawn();
-        if let Ok(mut window) = self.main_window.single_mut() {
-            window.visible = true;
-        }
+        queue_main_window_reveal(&mut self.commands);
     }
 
     fn open_file(&mut self, file: PathBuf) {

@@ -243,6 +243,8 @@ pub struct Viewport {
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     pub hdr: bool,
+    #[serde(default)]
+    pub bloom: Option<BloomConfig>,
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
@@ -273,6 +275,7 @@ impl Default for Viewport {
             frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
             hdr: false,
+            bloom: None,
             name: None,
             pos: None,
             look_at: None,
@@ -282,6 +285,26 @@ impl Default for Viewport {
             node_id: NodeId::default(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct BloomConfig {
+    #[serde(default)]
+    pub preset: BloomPreset,
+    #[serde(default)]
+    pub intensity: Option<f32>,
+    #[serde(default)]
+    pub threshold: Option<f32>,
+    #[serde(default)]
+    pub threshold_softness: Option<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BloomPreset {
+    #[default]
+    Natural,
+    OldSchool,
 }
 
 impl Asset for Panel {
@@ -648,6 +671,16 @@ pub enum Object3DMesh {
         rotate: (f32, f32, f32),
         #[serde(default = "default_glb_animations")]
         animations: Vec<JointAnimation>,
+        /// Overrides the GLB's own material emissive so it self-illuminates
+        /// (0.0 = use the file's material unchanged). Mirrors `Material::emissivity`.
+        #[serde(default)]
+        emissivity: f32,
+        /// View-dependent rim glow strength, independent from surface emissivity.
+        #[serde(default)]
+        glow: f32,
+        /// Optional rim glow color. Defaults to white when `glow` is non-zero.
+        #[serde(default)]
+        glow_color: Option<Color>,
     },
     Mesh {
         mesh: Mesh,
@@ -678,6 +711,9 @@ impl Object3DMesh {
             translate: default_glb_translate(),
             rotate: default_glb_rotate(),
             animations: default_glb_animations(),
+            emissivity: 0.0,
+            glow: 0.0,
+            glow_color: None,
         }
     }
 
@@ -760,6 +796,52 @@ pub struct Object3DIcon {
     pub visibility_range: Option<VisRange>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Thruster {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub body_frame: bool,
+    pub position: (f32, f32, f32),
+    /// Exhaust direction for scalar `intensity`. Omit for vector `intensity` (direction from EQL).
+    #[serde(default)]
+    pub direction: Option<(f32, f32, f32)>,
+    pub intensity: String,
+    /// Built-in particle preset: `plume` (default) or `cold_gas`.
+    #[serde(default = "Thruster::default_effect")]
+    pub effect: String,
+    #[serde(default = "Thruster::default_emission_rate")]
+    pub emission_rate: f32,
+    #[serde(default = "Thruster::default_cutoff")]
+    pub cutoff: f32,
+    /// Vector-mode only: maps the EQL vector's magnitude onto the `0..1` intensity range.
+    #[serde(default = "Thruster::default_scale")]
+    pub scale: f32,
+}
+
+impl Thruster {
+    pub fn default_emission_rate() -> f32 {
+        400.0
+    }
+
+    pub fn default_cutoff() -> f32 {
+        0.02
+    }
+
+    pub fn default_scale() -> f32 {
+        1.0
+    }
+
+    pub fn default_effect() -> String {
+        "plume".to_string()
+    }
+
+    pub fn vector_intensity(&self) -> bool {
+        self.direction.is_none()
+    }
+}
+
 /// Maps a built-in icon name (snake_case) to its Material Icons Unicode codepoint.
 pub fn builtin_icon_char(name: &str) -> Option<char> {
     let cp: u32 = match name {
@@ -806,6 +888,8 @@ pub struct Object3D {
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub icon: Option<Object3DIcon>,
+    #[serde(default)]
+    pub thrusters: Vec<Thruster>,
     #[serde(default)]
     pub mesh_visibility_range: Option<VisRange>,
     #[serde(default)]

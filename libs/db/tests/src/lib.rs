@@ -2991,4 +2991,84 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    /// Verify that DB::open() preserves a negative (pre-1970) configured start
+    /// timestamp — e.g. historical replays like the Apollo 11 lander example,
+    /// whose epoch is 1969-07-20. The old `> 0` validity filters discarded the
+    /// configured start and fell back to a degenerate range that had to be
+    /// recovered by scanning the data.
+    #[test]
+    async fn test_open_negative_epoch_start() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_negative_epoch_{}", fastrand::u64(..)));
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        let comp = ComponentId::new("lander_pos");
+        let schema = elodin_db::ComponentSchema::new(PrimType::F64, &[1]);
+
+        // 1969-07-20T20:09:53.164Z in microseconds since the Unix epoch.
+        let start_ts: i64 = -14_183_406_836_000;
+        let time_step_us: i64 = 25_000;
+        let num_ticks: i64 = 100;
+
+        {
+            let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+            // The simulation sets the historical start timestamp explicitly.
+            db.set_earliest_timestamp(Timestamp(start_ts)).unwrap();
+
+            db.with_state_mut(|state| {
+                state
+                    .insert_component(comp, schema.clone(), &temp_dir)
+                    .unwrap();
+            });
+
+            db.with_state(|state| {
+                let data = 1.0f64.to_le_bytes();
+                let c = state.get_component(comp).unwrap();
+                for tick in 0..num_ticks {
+                    let ts = Timestamp(start_ts + tick * time_step_us);
+                    c.time_series.push_buf(ts, &data).unwrap();
+                }
+            });
+
+            // Simulate runtime min/max tracking for nonzero timestamps.
+            for tick in 0..num_ticks {
+                let ts = Timestamp(start_ts + tick * time_step_us);
+                db.last_updated.update_max(ts);
+                if ts.0 != 0 {
+                    db.earliest_timestamp.update_min(ts);
+                }
+            }
+
+            db.flush_all().unwrap();
+        }
+
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        let earliest = db.earliest_timestamp.latest();
+        let last = db.last_updated.latest();
+
+        assert_eq!(
+            earliest.0, start_ts,
+            "earliest_timestamp should preserve the negative configured start (got {})",
+            earliest.0,
+        );
+        assert_eq!(
+            last.0,
+            start_ts + (num_ticks - 1) * time_step_us,
+            "last_updated should be the final tick timestamp"
+        );
+        assert!(
+            earliest < last,
+            "earliest_timestamp ({}) must be < last_updated ({})",
+            earliest.0,
+            last.0,
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

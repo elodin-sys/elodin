@@ -1,4 +1,6 @@
 mod common;
+use std::fmt::Write as _;
+
 use common::*;
 
 // ---- LAPACK ops ----
@@ -1108,6 +1110,131 @@ module @module {
     // Slice starting at [1,0,0] with sizes [1,3,4] = elements 12..24
     let expected: Vec<f64> = (12..24).map(|i| i as f64).collect();
     assert_eq!(result, expected);
+}
+
+fn large_external_8d_dynamic_slice_fixture(nested: bool) -> (String, Vec<f64>) {
+    const SHAPE: [usize; 8] = [4, 8, 8, 8, 4, 4, 2, 8];
+    const STARTS: [usize; 8] = [1, 3, 4, 5, 1, 2, 0, 3];
+    const SIZES: [usize; 8] = [2, 2, 2, 2, 2, 2, 2, 3];
+
+    let n = SHAPE.iter().product::<usize>();
+    let mut hex = String::with_capacity(n * 16);
+    for i in 0..n {
+        let value = i as f64 + 0.25;
+        for byte in value.to_le_bytes() {
+            write!(&mut hex, "{byte:02x}").unwrap();
+        }
+    }
+
+    let mut strides = [1usize; 8];
+    for i in (0..SHAPE.len() - 1).rev() {
+        strides[i] = strides[i + 1] * SHAPE[i + 1];
+    }
+
+    let mut expected = Vec::with_capacity(SIZES.iter().product());
+    for i0 in 0..SIZES[0] {
+        for i1 in 0..SIZES[1] {
+            for i2 in 0..SIZES[2] {
+                for i3 in 0..SIZES[3] {
+                    for i4 in 0..SIZES[4] {
+                        for i5 in 0..SIZES[5] {
+                            for i6 in 0..SIZES[6] {
+                                for i7 in 0..SIZES[7] {
+                                    let idx = [i0, i1, i2, i3, i4, i5, i6, i7]
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(axis, offset)| {
+                                            (STARTS[axis] + offset) * strides[axis]
+                                        })
+                                        .sum::<usize>();
+                                    expected.push(idx as f64 + 0.25);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let shape = SHAPE
+        .iter()
+        .map(|dim| dim.to_string())
+        .collect::<Vec<_>>()
+        .join("x");
+    let starts = STARTS
+        .iter()
+        .enumerate()
+        .map(|(axis, _)| format!("%c{axis}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sizes = SIZES
+        .iter()
+        .map(|size| size.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let out_shape = SIZES
+        .iter()
+        .map(|dim| dim.to_string())
+        .collect::<Vec<_>>()
+        .join("x");
+    let constants = STARTS
+        .iter()
+        .enumerate()
+        .map(|(axis, start)| {
+            format!("    %c{axis} = stablehlo.constant dense<{start}> : tensor<i64>")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mlir = if nested {
+        format!(
+            r#"
+module @module {{
+  func.func private @inner(%arg0: tensor<{shape}xf64>) -> tensor<{out_shape}xf64> {{
+{constants}
+    %0 = stablehlo.dynamic_slice %arg0, {starts}, sizes = [{sizes}] : (tensor<{shape}xf64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>) -> tensor<{out_shape}xf64>
+    return %0 : tensor<{out_shape}xf64>
+  }}
+
+  func.func public @main() -> tensor<{out_shape}xf64> {{
+    %0 = stablehlo.constant dense<"0x{hex}"> : tensor<{shape}xf64>
+    %1 = call @inner(%0) : (tensor<{shape}xf64>) -> tensor<{out_shape}xf64>
+    return %1 : tensor<{out_shape}xf64>
+  }}
+}}
+"#
+        )
+    } else {
+        format!(
+            r#"
+module @module {{
+  func.func public @main() -> tensor<{out_shape}xf64> {{
+{constants}
+    %0 = stablehlo.constant dense<"0x{hex}"> : tensor<{shape}xf64>
+    %1 = stablehlo.dynamic_slice %0, {starts}, sizes = [{sizes}] : (tensor<{shape}xf64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>, tensor<i64>) -> tensor<{out_shape}xf64>
+    return %1 : tensor<{out_shape}xf64>
+  }}
+}}
+"#
+        )
+    };
+
+    (mlir, expected)
+}
+
+#[test]
+fn test_large_external_constant_8d_dynamic_slice_mem() {
+    let (mlir, expected) = large_external_8d_dynamic_slice_fixture(false);
+    let out = run_mlir_mem(&mlir, &[], &[expected.len() * 8]);
+    assert_f64s_close(&read_f64s(&out[0]), &expected);
+}
+
+#[test]
+fn test_large_external_constant_8d_dynamic_slice_nested_call_mem() {
+    let (mlir, expected) = large_external_8d_dynamic_slice_fixture(true);
+    let out = run_mlir_mem(&mlir, &[], &[expected.len() * 8]);
+    assert_f64s_close(&read_f64s(&out[0]), &expected);
 }
 
 // ---- Dynamic update slice ----
@@ -3366,9 +3493,27 @@ fn test_convert_i64_to_i1_mem() {
 }
 
 #[test]
+fn test_convert_i1_to_i64_mem() {
+    let out = convert_mem_test("i1", "i64", &[0, 1, 1], 1, 8, 3);
+    assert_eq!(read_i64s(&out), vec![0, 1, 1]);
+}
+
+#[test]
+fn test_convert_i1_to_ui64_mem() {
+    let out = convert_mem_test("i1", "ui64", &[0, 1, 1], 1, 8, 3);
+    assert_eq!(read_u64s(&out), vec![0, 1, 1]);
+}
+
+#[test]
 fn test_convert_ui32_to_f64_mem() {
     let out = convert_mem_test("ui32", "f64", &u32_buf(&[0, 42, 1000]), 4, 8, 3);
     assert_f64s_close(&read_f64s(&out), &[0.0, 42.0, 1000.0]);
+}
+
+#[test]
+fn test_convert_f64_to_ui64_mem() {
+    let out = convert_mem_test("f64", "ui64", &f64_buf(&[0.0, 1.0, 42.0]), 8, 8, 3);
+    assert_eq!(read_u64s(&out), vec![0, 1, 42]);
 }
 
 // ---- Integer layout ops ----

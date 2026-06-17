@@ -624,7 +624,10 @@ fn parse_constant_op(
 
     skip_to_newline(input)?;
 
-    let value = match value {
+    let value = match value
+        .into_constant(&ty)
+        .map_err(|_| winnow::error::ContextError::new())?
+    {
         ConstantValue::DenseScalar(sv) if !ty.is_scalar() => {
             ConstantValue::DenseSplat(sv, ty.clone())
         }
@@ -638,20 +641,53 @@ fn parse_constant_op(
     }))
 }
 
-fn parse_dense_value(input: &mut Stream<'_>) -> PResult<ConstantValue> {
+enum ParsedDenseValue {
+    Scalar(ScalarValue),
+    Array(Vec<ScalarValue>),
+    RawHex(Vec<u8>),
+}
+
+impl ParsedDenseValue {
+    fn into_constant(self, ty: &TensorType) -> Result<ConstantValue, String> {
+        match self {
+            ParsedDenseValue::Scalar(sv) => Ok(ConstantValue::DenseScalar(sv)),
+            ParsedDenseValue::Array(values) => Ok(ConstantValue::DenseArray(values)),
+            ParsedDenseValue::RawHex(bytes) => {
+                let data = crate::const_cache::intern_bytes(ty.element_type, &bytes)?;
+                Ok(ConstantValue::DenseExternal {
+                    elem_type: ty.element_type,
+                    byte_len: bytes.len(),
+                    data,
+                })
+            }
+        }
+    }
+}
+
+fn parse_dense_value(input: &mut Stream<'_>) -> PResult<ParsedDenseValue> {
     if input.starts_with('"') {
         // Hex blob: dense<"0xDEADBEEF...">
         let _ = '"'.parse_next(input)?;
         let hex_str: &str = take_till(0.., '"').parse_next(input)?;
         let _ = '"'.parse_next(input)?;
         let hex_data = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-        let mut bytes = Vec::new();
+        // Hex blobs must be whole bytes; an odd length means the data is
+        // malformed and silently truncating it would corrupt the constant.
+        if !hex_data.len().is_multiple_of(2) {
+            return Err(winnow::error::ContextError::new());
+        }
+        let mut bytes = Vec::with_capacity(hex_data.len() / 2);
         let mut i = 0;
         while i + 1 < hex_data.len() {
-            if let Ok(b) = u8::from_str_radix(&hex_data[i..i + 2], 16) {
-                bytes.push(b);
-            }
+            // Fail loudly on invalid hex pairs rather than dropping them, which
+            // would otherwise truncate large interned constants.
+            let b = u8::from_str_radix(&hex_data[i..i + 2], 16)
+                .map_err(|_| winnow::error::ContextError::new())?;
+            bytes.push(b);
             i += 2;
+        }
+        if bytes.len() > 1_000_000 {
+            return Ok(ParsedDenseValue::RawHex(bytes));
         }
         let mut values = Vec::new();
         let mut j = 0;
@@ -660,7 +696,7 @@ fn parse_dense_value(input: &mut Stream<'_>) -> PResult<ConstantValue> {
             values.push(ScalarValue::F64(f64::from_le_bytes(arr)));
             j += 8;
         }
-        return Ok(ConstantValue::DenseArray(values));
+        return Ok(ParsedDenseValue::Array(values));
     }
     if input.starts_with('[') {
         let _ = '['.parse_next(input)?;
@@ -673,9 +709,9 @@ fn parse_dense_value(input: &mut Stream<'_>) -> PResult<ConstantValue> {
             if input.starts_with('[') {
                 let inner = parse_dense_value(input)?;
                 match inner {
-                    ConstantValue::DenseArray(arr) => vals.extend(arr),
-                    ConstantValue::DenseScalar(s) => vals.push(s),
-                    _ => {}
+                    ParsedDenseValue::Array(arr) => vals.extend(arr),
+                    ParsedDenseValue::Scalar(s) => vals.push(s),
+                    ParsedDenseValue::RawHex(_) => {}
                 }
             } else {
                 let sv = parse_scalar_value(input)?;
@@ -685,10 +721,10 @@ fn parse_dense_value(input: &mut Stream<'_>) -> PResult<ConstantValue> {
             let _ = opt(',').parse_next(input)?;
         }
         let _ = ']'.parse_next(input)?;
-        Ok(ConstantValue::DenseArray(vals))
+        Ok(ParsedDenseValue::Array(vals))
     } else {
         let sv = parse_scalar_value(input)?;
-        Ok(ConstantValue::DenseScalar(sv))
+        Ok(ParsedDenseValue::Scalar(sv))
     }
 }
 

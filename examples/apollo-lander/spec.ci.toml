@@ -1,0 +1,23 @@
+[monte_carlo]
+n_samples = 1
+seed = 19690720
+method = "lhs"
+
+[monte_carlo.variables]
+attitude_gain = { dist = "fixed", value = 0.040 }
+dry_mass_kg = { dist = "fixed", value = 6853.0 }
+gravity_scale = { dist = "fixed", value = 1.0 }
+horizontal_gain = { dist = "fixed", value = 0.05 }
+init_altitude_m = { dist = "fixed", value = 11790.401754545455 }
+init_crossrange_speed_mps = { dist = "fixed", value = 0.0 }
+init_downrange_offset_m = { dist = "fixed", value = 0.0 }
+init_downrange_speed_mps = { dist = "fixed", value = 799.3088767753687 }
+init_pitch_deg = { dist = "fixed", value = -77.0 }
+init_vertical_speed_mps = { dist = "fixed", value = -24.993134883116873 }
+isp_s = { dist = "fixed", value = 311.0 }
+propellant_kg = { dist = "fixed", value = 3950.0 }
+rcs_propellant_kg = { dist = "fixed", value = 240.0 }
+throttle_response_hz = { dist = "fixed", value = 3.0 }
+thrust_scale = { dist = "fixed", value = 1.0 }
+track_gain = { dist = "fixed", value = 0.04 }
+vertical_gain = { dist = "fixed", value = 0.45 }

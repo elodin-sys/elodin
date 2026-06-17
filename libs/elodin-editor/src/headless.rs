@@ -102,6 +102,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy::pbr::wireframe::WireframePlugin::default())
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
+            .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
                 ..default()

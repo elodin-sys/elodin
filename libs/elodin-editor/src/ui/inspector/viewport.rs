@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use bevy::ecs::system::{SystemParam, SystemState};
+use bevy::picking::prelude::Pickable;
 use bevy::prelude::*;
 use bevy::{
     camera::Projection,
@@ -27,6 +30,12 @@ use crate::{
 };
 
 use super::{color_popup, empty_inspector, eql_autocomplete, query};
+
+const DEFAULT_EDITOR_CAM_ANCHOR_DEPTH: f64 = -2.0;
+const ANCHOR_DEPTH_EPSILON: f64 = 1.0e-9;
+
+#[derive(Component)]
+pub struct ViewportFocusPickTarget;
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
 fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
@@ -445,12 +454,12 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
 }
 
 pub fn set_viewport_pos(
-    viewports: Query<&Viewport>,
+    mut viewports: Query<(&Viewport, &mut EditorCam)>,
     mut pos: Query<&mut WorldPos>,
     entity_map: Res<EntityMap>,
     values: Query<&'static ComponentValue>,
 ) {
-    for viewport in viewports.iter() {
+    for (viewport, mut editor_cam) in viewports.iter_mut() {
         let Ok(mut pos) = pos.get_mut(viewport.parent_entity) else {
             continue;
         };
@@ -471,7 +480,13 @@ pub fn set_viewport_pos(
                 && let Ok(val) = compiled_expr.execute(&entity_map, &values)
                 && let Some(look_at) = val.as_world_pos()
             {
-                let dir = (look_at.pos - pos.pos).normalize();
+                let to_target = look_at.pos - pos.pos;
+                let target_distance = to_target.norm().into_buf();
+                if !is_valid_viewport_target_distance(target_distance) {
+                    continue;
+                }
+                refresh_default_anchor_depth(&mut editor_cam, target_distance);
+                let dir = to_target.normalize();
                 let dir = match viewport.frame {
                     Some(GeoFrame::NED) => nox::Vec3::new(dir.y(), dir.x(), -dir.z()),
                     _ => dir,
@@ -494,5 +509,133 @@ pub fn set_viewport_pos(
                 pos.att = nox::Quaternion::look_at_rh(dir, up_vec);
             }
         }
+    }
+}
+
+fn refresh_default_anchor_depth(editor_cam: &mut EditorCam, target_distance: f64) {
+    if !is_valid_viewport_target_distance(target_distance) {
+        return;
+    }
+    if (editor_cam.last_anchor_depth - DEFAULT_EDITOR_CAM_ANCHOR_DEPTH).abs() > ANCHOR_DEPTH_EPSILON
+    {
+        return;
+    }
+    editor_cam.last_anchor_depth = -target_distance;
+}
+
+fn is_valid_viewport_target_distance(target_distance: f64) -> bool {
+    target_distance.is_finite() && target_distance > f32::EPSILON as f64
+}
+
+pub fn sync_viewport_focus_pick_targets(
+    mut commands: Commands,
+    viewports: Query<&Viewport>,
+    objects: Query<(Entity, &Object3DState)>,
+    children: Query<&Children>,
+    mesh_entities: Query<(), With<Mesh3d>>,
+    current_targets: Query<Entity, With<ViewportFocusPickTarget>>,
+) {
+    let focus_eqls = viewport_focus_eqls(&viewports);
+    let mut desired_targets = HashSet::new();
+    let current_targets = current_targets.iter().collect::<HashSet<_>>();
+
+    for (entity, object) in &objects {
+        if is_focus_object_eql(&focus_eqls, &object.data.eql) {
+            collect_mesh_descendants(entity, &children, &mesh_entities, &mut desired_targets);
+        }
+    }
+
+    for entity in current_targets.difference(&desired_targets) {
+        commands
+            .entity(*entity)
+            .remove::<(Pickable, ViewportFocusPickTarget)>();
+    }
+
+    for entity in desired_targets.difference(&current_targets) {
+        commands
+            .entity(*entity)
+            .insert((Pickable::default(), ViewportFocusPickTarget));
+    }
+}
+
+fn viewport_focus_eqls(viewports: &Query<&Viewport>) -> HashSet<String> {
+    viewports
+        .iter()
+        .filter_map(|viewport| normalized_focus_eql(&viewport.look_at.eql))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn normalized_focus_eql(eql: &str) -> Option<&str> {
+    let eql = eql.trim();
+    (!eql.is_empty()).then_some(eql)
+}
+
+fn is_focus_object_eql(focus_eqls: &HashSet<String>, object_eql: &str) -> bool {
+    normalized_focus_eql(object_eql).is_some_and(|eql| focus_eqls.contains(eql))
+}
+
+fn collect_mesh_descendants(
+    entity: Entity,
+    children: &Query<&Children>,
+    mesh_entities: &Query<(), With<Mesh3d>>,
+    output: &mut HashSet<Entity>,
+) {
+    if mesh_entities.contains(entity) {
+        output.insert(entity);
+    }
+    if let Ok(child_list) = children.get(entity) {
+        for child in child_list.iter() {
+            collect_mesh_descendants(child, children, mesh_entities, output);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_default_anchor_depth_uses_viewport_look_at_distance() {
+        let mut editor_cam = EditorCam::default();
+
+        refresh_default_anchor_depth(&mut editor_cam, 14.696_938);
+
+        assert!((editor_cam.last_anchor_depth + 14.696_938).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn refresh_default_anchor_depth_keeps_user_adjusted_depth() {
+        let mut editor_cam = EditorCam {
+            last_anchor_depth: -8.0,
+            ..Default::default()
+        };
+
+        refresh_default_anchor_depth(&mut editor_cam, 14.696_938);
+
+        assert_eq!(editor_cam.last_anchor_depth, -8.0);
+    }
+
+    #[test]
+    fn refresh_default_anchor_depth_rejects_invalid_distance() {
+        for target_distance in [0.0, f64::NAN, f64::INFINITY] {
+            let mut editor_cam = EditorCam::default();
+
+            refresh_default_anchor_depth(&mut editor_cam, target_distance);
+
+            assert_eq!(
+                editor_cam.last_anchor_depth,
+                DEFAULT_EDITOR_CAM_ANCHOR_DEPTH
+            );
+        }
+    }
+
+    #[test]
+    fn focus_object_eql_matches_trimmed_viewport_look_at() {
+        let focus_eqls = HashSet::from(["lander.world_pos".to_string()]);
+
+        assert!(is_focus_object_eql(&focus_eqls, " lander.world_pos "));
+        assert!(!is_focus_object_eql(&focus_eqls, "lander_truth.world_pos"));
+        assert!(!is_focus_object_eql(&focus_eqls, ""));
     }
 }

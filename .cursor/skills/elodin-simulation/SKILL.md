@@ -195,6 +195,48 @@ ThrustCmd = ty.Annotated[jax.Array,
     el.Component("thrust_cmd", el.ComponentType.F64, metadata={"external_control": "true"})]
 ```
 
+## Shared Constants And Monte Carlo
+
+The Cranelift backend transparently interns baked StableHLO constants over 1 MB. For large immutable lookup tables, aero maps, ephemerides, terrain grids, or other constants, capture the JAX array in the system closure:
+
+```python
+aero_table = jnp.asarray(aero_grid)
+
+@el.map
+def aero_force(v: el.WorldVel, f: el.Force) -> el.Force:
+    coeff = aero_table[0, 0]
+    return f + el.SpatialForce(linear=-coeff * v.linear())
+```
+
+During StableHLO parsing, large `dense<"0x...">` blobs are moved into the content-addressed mmap cache. Multiple processes compiling the same constant map the same cache file, so Monte Carlo campaigns avoid paying N copies of the table in resident memory.
+
+For campaign structure and memory reporting, use the native campaign runner:
+
+```bash
+elodin monte-carlo run examples/monte-carlo/main.py \
+  --campaign examples/monte-carlo/campaign.toml \
+  --spec examples/monte-carlo/spec.toml \
+  --out dbs/monte-carlo-demo
+```
+
+Declare tunable parameters with `el.monte_carlo.params_spec(...)`, read the
+current row with `el.monte_carlo.params(...)`, and optionally emit scalar outputs
+with `el.monte_carlo.result(...)`. Each run writes a separate DB path. The
+runner pins `ELODIN_CACHE_DIR` for all workers and auto-sizes workers/runtime
+threads from available CPUs when unset. For SITL campaigns, register external
+controllers with `world.recipe(...)`; the campaign runner injects worker-slot
+ports into every process via `ELODIN_MONTE_CARLO_*` environment variables.
+Campaign startup reaps pre-existing `elodin` and `elodin-db` processes by
+default to avoid stale editor/database sessions colliding with worker ports;
+use `--keep-existing` only when intentionally managing those processes yourself.
+Per-run stdout/stderr lands in `runs/<run_id>/logs/`, and the runner injects
+`ELODIN_SIM_SUMMARY_JSON` so each run writes a structured timing snapshot. At
+campaign end, the native runner prints and writes `campaign_summary.txt` with
+an aggregated version of the standard `elodin simulation summary` block plus
+CPU/RAM/disk rollups. Use `--memory-probe` only for shared-constant PSS proof
+runs; it enables expensive `/proc/<pid>/smaps` sampling and writes
+`memory.json`/`processes.csv`.
+
 ## Execution Modes
 
 | Mode | Command | Backend | Use |

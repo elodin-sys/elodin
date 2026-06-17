@@ -7,6 +7,7 @@ use crate::{
 use bevy::animation::{AnimatedBy, AnimationTargetId, animated_field};
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::math::Dir3;
+use bevy::picking::prelude::{MeshPickingCamera, Pickable};
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowRef};
 use bevy_editor_cam::controller::component::EditorCam;
@@ -233,6 +234,7 @@ pub fn spawn_gizmo(
                     ..Default::default()
                 },
                 NavGizmoParent { main_camera },
+                Pickable::default(),
                 render_layers.clone(),
             ))
             .insert(ChildOf(nav_gizmo));
@@ -242,6 +244,7 @@ pub fn spawn_gizmo(
                 MeshMaterial3d(materials.add(material)),
                 transform,
                 NavGizmoParent { main_camera },
+                Pickable::default(),
                 render_layers.clone(),
             ))
             .observe(cube_color_highlight)
@@ -261,6 +264,7 @@ pub fn spawn_gizmo(
                 ..Default::default()
             },
             Camera3d::default(),
+            MeshPickingCamera,
             render_layers.clone(),
             NavGizmoParent { main_camera },
             NavGizmoCamera,

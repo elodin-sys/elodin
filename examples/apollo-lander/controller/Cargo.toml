@@ -1,0 +1,16 @@
+[package]
+name = "apollo-lander-controller"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+version = "0.1.0"
+description = "Apollo lander guidance controller for the Elodin example"
+publish = false
+
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "apollo-lander-controller"
+path = "src/main.rs"
+
+[workspace]

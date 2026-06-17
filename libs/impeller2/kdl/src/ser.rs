@@ -162,6 +162,19 @@ fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     }
 }
 
+fn color_to_kdl_string(color: &Color) -> String {
+    if let Some(name) = name_from_color(color) {
+        name.to_string()
+    } else {
+        let (r, g, b, a) = color_to_ints(color);
+        if a == 255 {
+            format!("({r},{g},{b})")
+        } else {
+            format!("({r},{g},{b},{a})")
+        }
+    }
+}
+
 fn serialize_video_stream(video_stream: &VideoStream) -> KdlNode {
     let mut node = KdlNode::new("video_stream");
     node.entries_mut()
@@ -254,6 +267,35 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
 
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if let Some(bloom) = &viewport.bloom {
+        let mut bloom_node = KdlNode::new("bloom");
+        if bloom.preset != BloomPreset::Natural {
+            let preset = match bloom.preset {
+                BloomPreset::Natural => "natural",
+                BloomPreset::OldSchool => "old_school",
+            };
+            bloom_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("preset", preset));
+        }
+        if let Some(intensity) = bloom.intensity {
+            push_rounded_float_prop(&mut bloom_node, "intensity", intensity as f64);
+        }
+        if let Some(threshold) = bloom.threshold {
+            push_rounded_float_prop(&mut bloom_node, "threshold", threshold as f64);
+        }
+        if let Some(threshold_softness) = bloom.threshold_softness {
+            push_rounded_float_prop(
+                &mut bloom_node,
+                "threshold_softness",
+                threshold_softness as f64,
+            );
+        }
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        children.nodes_mut().push(bloom_node);
+        node.set_children(children);
     }
 
     if viewport.show_grid {
@@ -604,10 +646,61 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     if let Some(icon) = &obj.icon {
         children.nodes_mut().push(serialize_object_3d_icon(icon));
     }
+    for thruster in &obj.thrusters {
+        children.nodes_mut().push(serialize_thruster(thruster));
+    }
 
     node.set_children(children);
 
     node
+}
+
+fn serialize_thruster(thruster: &Thruster) -> KdlNode {
+    let mut node = KdlNode::new("thruster");
+    push_optional_name_prop(&mut node, thruster.name.as_deref());
+    if thruster.body_frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("body_frame", true));
+    }
+    node.entries_mut().push(KdlEntry::new_prop(
+        "position",
+        tuple3_to_kdl_string(thruster.position),
+    ));
+    if let Some(direction) = thruster.direction {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "direction",
+            tuple3_to_kdl_string(direction),
+        ));
+    }
+    node.entries_mut()
+        .push(KdlEntry::new_prop("intensity", thruster.intensity.clone()));
+    if thruster.effect != Thruster::default_effect() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("effect", thruster.effect.clone()));
+    }
+    if (thruster.scale - Thruster::default_scale()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "scale", f64::from(thruster.scale));
+    }
+    if (thruster.emission_rate - Thruster::default_emission_rate()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "emission_rate",
+            f64::from(thruster.emission_rate),
+        );
+    }
+    if (thruster.cutoff - Thruster::default_cutoff()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "cutoff", f64::from(thruster.cutoff));
+    }
+    node
+}
+
+fn tuple3_to_kdl_string(value: (f32, f32, f32)) -> String {
+    format!(
+        "({}, {}, {})",
+        round_float_default(f64::from(value.0)),
+        round_float_default(f64::from(value.1)),
+        round_float_default(f64::from(value.2))
+    )
 }
 
 fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
@@ -676,12 +769,27 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             translate,
             rotate,
             animations,
+            emissivity,
+            glow,
+            glow_color,
         } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
                 .push(KdlEntry::new_prop("path", path.clone()));
             if *scale != 1.0 {
                 push_rounded_float_prop(&mut node, "scale", *scale as f64);
+            }
+            if *emissivity != 0.0 {
+                push_rounded_float_prop(&mut node, "emissivity", *emissivity as f64);
+            }
+            if *glow != 0.0 {
+                push_rounded_float_prop(&mut node, "glow", *glow as f64);
+            }
+            if let Some(glow_color) = glow_color {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "glow_color",
+                    color_to_kdl_string(glow_color),
+                ));
             }
             if *translate != (0.0, 0.0, 0.0) {
                 let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);
@@ -1014,6 +1122,7 @@ mod tests {
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
+                bloom: None,
                 pos: None,
                 look_at: None,
                 frame: None,
@@ -1058,6 +1167,7 @@ mod tests {
                 frustums_thickness: 0.012,
                 show_view_cube: false,
                 hdr: true,
+                bloom: None,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 frame: None,
@@ -1198,6 +1308,7 @@ graph "value" {
                 material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1239,6 +1350,7 @@ graph "value" {
                 material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1268,6 +1380,57 @@ graph "value" {
     }
 
     #[test]
+    fn test_serialize_object_3d_thruster() {
+        let original = r#"
+object_3d "vehicle.world_pos" {
+    sphere radius=0.25 {
+        color 80 170 255
+    }
+    thruster name="main" body_frame=#true position="(-0.35, 0, 0)" direction="(-1, 0, 0)" intensity="vehicle.specific_force[0] / 20.0" emission_rate=420.0
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(obj.thrusters.len(), 1);
+        let thruster = &obj.thrusters[0];
+        assert_eq!(thruster.name.as_deref(), Some("main"));
+        assert!(thruster.body_frame);
+        assert_eq!(thruster.position, (-0.35, 0.0, 0.0));
+        assert_eq!(thruster.direction, Some((-1.0, 0.0, 0.0)));
+        assert_eq!(thruster.intensity, "vehicle.specific_force[0] / 20.0");
+        assert_eq!(thruster.emission_rate, 420.0);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_vector_thruster() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz scale=2.0
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert!(thruster.vector_intensity());
+        assert_eq!(thruster.direction, None);
+        assert_eq!(thruster.intensity, "lander.main_thrust_viz");
+        assert!((thruster.scale - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_serialize_object_3d_material_emissivity() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Object3d(Object3D {
@@ -1277,6 +1440,7 @@ graph "value" {
                 material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1312,6 +1476,7 @@ graph "value" {
                 grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
             },
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
             node_id: NodeId::default(),
@@ -1358,6 +1523,7 @@ graph "value" {
             frame: Some(GeoFrame::NED),
             mesh_visibility_range: None,
             icon: None,
+            thrusters: Vec::new(),
             node_id: NodeId::next(),
         }));
 
@@ -1388,6 +1554,7 @@ graph "value" {
             },
             frame: None, // Default (no frame)
             icon: None,
+            thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: NodeId::next(),
         }));
@@ -1492,6 +1659,7 @@ graph "value" {
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
+                bloom: None,
                 pos: None,
                 look_at: None,
                 frame: None,

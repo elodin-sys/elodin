@@ -126,6 +126,28 @@ If `ELODIN_BACKEND` is set, it takes precedence over the `backend=` argument pas
 ELODIN_BACKEND=jax-gpu python main.py
 ```
 
+### Monte Carlo Campaign API
+
+The `el.monte_carlo` submodule lets a simulation declare tunable parameters and
+read the current campaign row. Outside `elodin monte-carlo`, declared defaults
+are returned so the same simulation still runs normally.
+
+```python
+PARAMS = el.monte_carlo.params_spec(
+    mass=el.monte_carlo.Param(float, default=1.5, min=0.5, max=5.0),
+    target_x=el.monte_carlo.Param(float, default=30.0),
+)
+
+p = el.monte_carlo.params(PARAMS)
+mass = p["mass"]
+db_path = p.db_path
+```
+
+- `Param(type_, default=None, min=None, max=None)` declares a JSON-serializable tunable value.
+- `params_spec(**params)` records a parameter schema for `elodin monte-carlo template` and `python sim.py params`.
+- `params(spec=None)` reads `ELODIN_MONTE_CARLO_CONTEXT` and returns defaults plus row overrides. It exposes `run_id`, `seed`, `db_path`, `db_addr`, `cache_dir`, `run_dir`, `slots()`, and `as_overrides_dict()`.
+- `result(**values)` writes scalar run outputs to `result.json` in the current run directory; the campaign runner merges these into `results.csv`.
+
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.
 

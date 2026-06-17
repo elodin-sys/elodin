@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::instructions::BlockArg;
@@ -17,7 +18,7 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{ArenaMemoryProvider, JITBuilder, JITModule};
-use cranelift_module::{DataDescription, FuncId, Linkage, Module};
+use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 
 use crate::ir::*;
 use crate::tensor_rt;
@@ -25,6 +26,7 @@ use crate::tensor_rt;
 pub struct CompiledModule {
     module: JITModule,
     main_fn_id: FuncId,
+    _external_constants: Vec<Arc<crate::const_cache::CachedConst>>,
     /// Millisecond-level breakdown of the three compile phases, captured
     /// during `compile_module_with_config`. Read by callers like
     /// `nox-py`'s `cranelift_compile.rs` to surface timings in the
@@ -380,9 +382,6 @@ pub(crate) enum FuncAbi {
 }
 
 fn classify_function(func_def: &FuncDef) -> FuncAbi {
-    if func_def.name == "main" {
-        return FuncAbi::Scalar;
-    }
     let param_max = func_def
         .params
         .iter()
@@ -423,6 +422,20 @@ fn scan_body_max_elements(body: &[InstrResult]) -> usize {
                     max_elem = max_elem.max(scan_body_max_elements(branch));
                 }
             }
+            Instruction::Sort { comparator, .. } => {
+                max_elem = max_elem.max(scan_body_max_elements(comparator));
+            }
+            Instruction::Map { body, .. } | Instruction::ReduceWindow { body, .. } => {
+                max_elem = max_elem.max(scan_body_max_elements(body));
+            }
+            Instruction::SelectAndScatter {
+                select_body,
+                scatter_body,
+                ..
+            } => {
+                max_elem = max_elem.max(scan_body_max_elements(select_body));
+                max_elem = max_elem.max(scan_body_max_elements(scatter_body));
+            }
             _ => {}
         }
     }
@@ -445,6 +458,59 @@ fn classify_all_functions(ir_module: &crate::ir::Module) -> HashMap<String, Func
         eprintln!("[elodin-cranelift] abi classification: scalar={scalar} pointer={pointer}");
     }
     abis
+}
+
+fn collect_external_constants(
+    ir_module: &crate::ir::Module,
+) -> HashMap<String, std::sync::Arc<crate::const_cache::CachedConst>> {
+    let mut constants = HashMap::new();
+    for func in &ir_module.functions {
+        collect_external_constants_in_body(&func.body, &mut constants);
+    }
+    constants
+}
+
+fn collect_external_constants_in_body(
+    body: &[InstrResult],
+    constants: &mut HashMap<String, std::sync::Arc<crate::const_cache::CachedConst>>,
+) {
+    for ir in body {
+        match &ir.instr {
+            Instruction::Constant {
+                value: ConstantValue::DenseExternal { data, .. },
+            } => {
+                constants.insert(data.symbol.clone(), data.clone());
+            }
+            Instruction::While {
+                cond_body,
+                loop_body,
+                ..
+            } => {
+                collect_external_constants_in_body(cond_body, constants);
+                collect_external_constants_in_body(loop_body, constants);
+            }
+            Instruction::Case { branches, .. } => {
+                for branch in branches {
+                    collect_external_constants_in_body(branch, constants);
+                }
+            }
+            Instruction::Sort { comparator, .. } => {
+                collect_external_constants_in_body(comparator, constants);
+            }
+            Instruction::Map { body, .. } | Instruction::ReduceWindow { body, .. } => {
+                collect_external_constants_in_body(body, constants);
+            }
+            Instruction::SelectAndScatter {
+                select_body,
+                scatter_body,
+                ..
+            } => {
+                collect_external_constants_in_body(select_body, constants);
+                collect_external_constants_in_body(scatter_body, constants);
+            }
+            _ => {}
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1383,9 +1449,11 @@ define_trt! {
     // conversion: fn(dst, src, n)
     convert_i64_to_f64, "__trt_cvt_i64_f64", tensor_rt::tensor_convert_i64_to_f64, [ptr_type(), ptr_type(), types::I64];
     convert_f64_to_i64, "__trt_cvt_f64_i64", tensor_rt::tensor_convert_f64_to_i64, [ptr_type(), ptr_type(), types::I64];
+    convert_f64_to_ui64, "__trt_cvt_f64_ui64", tensor_rt::tensor_convert_f64_to_ui64, [ptr_type(), ptr_type(), types::I64];
     convert_i1_to_f64,  "__trt_cvt_i1_f64",  tensor_rt::tensor_convert_i1_to_f64,  [ptr_type(), ptr_type(), types::I64];
     convert_f64_to_i32, "__trt_cvt_f64_i32",  tensor_rt::tensor_convert_f64_to_i32, [ptr_type(), ptr_type(), types::I64];
     convert_i1_to_i32,  "__trt_cvt_i1_i32",   tensor_rt::tensor_convert_i1_to_i32,  [ptr_type(), ptr_type(), types::I64];
+    convert_i1_to_i64,  "__trt_cvt_i1_i64",   tensor_rt::tensor_convert_i1_to_i64,  [ptr_type(), ptr_type(), types::I64];
     convert_i64_to_i32, "__trt_cvt_i64_i32",  tensor_rt::tensor_convert_i64_to_i32, [ptr_type(), ptr_type(), types::I64];
     convert_i32_to_f64, "__trt_cvt_i32_f64",  tensor_rt::tensor_convert_i32_to_f64, [ptr_type(), ptr_type(), types::I64];
     convert_f64_to_f32, "__trt_cvt_f64_f32",  tensor_rt::tensor_convert_f64_to_f32, [ptr_type(), ptr_type(), types::I64];
@@ -1641,7 +1709,19 @@ pub fn compile_module_with_config(
     );
     register_tensor_rt_symbols(&mut jit_builder);
 
+    let external_constants = collect_external_constants(ir_module);
+    for constant in external_constants.values() {
+        jit_builder.symbol(&constant.symbol, constant.ptr());
+    }
+
     let mut jit_module = JITModule::new(jit_builder);
+    let mut external_data_ids = HashMap::new();
+    for symbol in external_constants.keys() {
+        let data_id = jit_module
+            .declare_data(symbol, Linkage::Import, false, false)
+            .map_err(|e| format!("declare external constant {symbol}: {e}"))?;
+        external_data_ids.insert(symbol.clone(), data_id);
+    }
     let func_abis = classify_all_functions(ir_module);
     let func_ids = declare_all_functions(ir_module, &mut jit_module, call_conv, &func_abis)?;
     let libm_ids = declare_libm_functions(&mut jit_module, call_conv)?;
@@ -1701,6 +1781,7 @@ pub fn compile_module_with_config(
                 &libm_ids,
                 &trt_ids,
                 &profile_ids,
+                &external_data_ids,
                 abi,
                 fid,
                 &config,
@@ -1828,6 +1909,7 @@ pub fn compile_module_with_config(
     Ok(CompiledModule {
         module: jit_module,
         main_fn_id,
+        _external_constants: external_constants.values().cloned().collect(),
         timings: CompileTimings {
             ir_build_ms,
             codegen_ms,
@@ -2066,6 +2148,7 @@ fn compile_case_branch_as_function_mem(
     func_abis: &HashMap<String, FuncAbi>,
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
+    external_data_ids: &HashMap<String, DataId>,
     branch_body: &[InstrResult],
     result_types: &[TensorType],
     captured: &[(ValueId, TensorType)],
@@ -2119,6 +2202,7 @@ fn compile_case_branch_as_function_mem(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             &mut value_map,
             &mut type_map,
@@ -2172,6 +2256,7 @@ fn compile_region_as_function(
     func_abis: &HashMap<String, FuncAbi>,
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
+    external_data_ids: &HashMap<String, DataId>,
     param_types: &[Type],
     return_type: Type,
     body: &[InstrResult],
@@ -2229,6 +2314,7 @@ fn compile_region_as_function(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             &mut value_map,
             &mut type_map,
@@ -2288,6 +2374,7 @@ fn build_function_ir(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     profile_ids: &ProfileIds,
+    external_data_ids: &HashMap<String, DataId>,
     abi: FuncAbi,
     fid: FuncId,
     config: &CompileConfig,
@@ -2317,7 +2404,7 @@ fn build_function_ir(
         let mut value_map: HashMap<ValueId, LaneRepr> = HashMap::new();
         let mut type_map: HashMap<ValueId, TensorType> = HashMap::new();
 
-        if func_def.name == "main" && config.force_pointer_abi_main {
+        if func_def.name == "main" && (config.force_pointer_abi_main || abi == FuncAbi::Pointer) {
             lower_main_body_mem(
                 &mut builder,
                 func_def,
@@ -2326,6 +2413,7 @@ fn build_function_ir(
                 libm_ids,
                 trt_ids,
                 func_abis,
+                external_data_ids,
                 jit_module,
                 &block_params,
                 &mut value_map,
@@ -2340,6 +2428,7 @@ fn build_function_ir(
                 libm_ids,
                 trt_ids,
                 func_abis,
+                external_data_ids,
                 jit_module,
                 &block_params,
                 &mut value_map,
@@ -2354,6 +2443,7 @@ fn build_function_ir(
                 libm_ids,
                 trt_ids,
                 func_abis,
+                external_data_ids,
                 jit_module,
                 &block_params,
                 &mut value_map,
@@ -2368,6 +2458,7 @@ fn build_function_ir(
                 libm_ids,
                 trt_ids,
                 func_abis,
+                external_data_ids,
                 jit_module,
                 &block_params,
                 &mut value_map,
@@ -2404,6 +2495,7 @@ fn lower_main_body(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
@@ -2437,6 +2529,7 @@ fn lower_main_body(
         libm_ids,
         trt_ids,
         func_abis,
+        external_data_ids,
         jit_module,
         value_map,
         type_map,
@@ -3152,6 +3245,7 @@ fn lower_pointer_body(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
@@ -3173,6 +3267,7 @@ fn lower_pointer_body(
         libm_ids,
         trt_ids,
         func_abis,
+        external_data_ids,
         jit_module,
         value_map,
         type_map,
@@ -3210,6 +3305,7 @@ fn lower_main_body_mem(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
@@ -3235,6 +3331,7 @@ fn lower_main_body_mem(
         libm_ids,
         trt_ids,
         func_abis,
+        external_data_ids,
         jit_module,
         value_map,
         type_map,
@@ -3274,6 +3371,7 @@ fn lower_body_mem(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -3301,6 +3399,7 @@ fn lower_body_mem(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             value_map,
             type_map,
@@ -3346,6 +3445,7 @@ fn lower_instruction_mem(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -3461,6 +3561,31 @@ fn lower_instruction_mem(
                     builder.ins().call(memcpy_ref, &[dst, data_ptr, nb]);
                     Ok(vec![LaneRepr::scalar(vec![dst])])
                 }
+            }
+            ConstantValue::DenseExternal {
+                elem_type,
+                byte_len,
+                data,
+            } => {
+                if *elem_type != rt.element_type {
+                    return Err(format!(
+                        "external constant element type mismatch: cached {:?}, result {:?}",
+                        elem_type, rt.element_type
+                    ));
+                }
+                let expected_bytes = n * elem_sz;
+                if *byte_len != expected_bytes {
+                    return Err(format!(
+                        "external constant byte length mismatch: cached {}, tensor {}",
+                        byte_len, expected_bytes
+                    ));
+                }
+                let data_id = external_data_ids
+                    .get(&data.symbol)
+                    .ok_or_else(|| format!("missing imported constant {}", data.symbol))?;
+                let gv = jit_module.declare_data_in_func(*data_id, builder.func);
+                let data_ptr = builder.ins().global_value(ptr_type(), gv);
+                Ok(vec![LaneRepr::scalar(vec![data_ptr])])
             }
         },
 
@@ -3983,6 +4108,7 @@ fn lower_instruction_mem(
                 (ElementType::I64, ElementType::F64) => trt_ids.convert_i64_to_f64,
                 (ElementType::UI64, ElementType::F64) => trt_ids.convert_ui64_to_f64,
                 (ElementType::F64, ElementType::I64) => trt_ids.convert_f64_to_i64,
+                (ElementType::F64, ElementType::UI64) => trt_ids.convert_f64_to_ui64,
                 (ElementType::I1, ElementType::F64) => trt_ids.convert_i1_to_f64,
                 (ElementType::F64, ElementType::I32 | ElementType::UI32) => {
                     trt_ids.convert_f64_to_i32
@@ -3992,6 +4118,9 @@ fn lower_instruction_mem(
                 }
                 (ElementType::I1, ElementType::I32 | ElementType::UI32) => {
                     trt_ids.convert_i1_to_i32
+                }
+                (ElementType::I1, ElementType::I64 | ElementType::UI64) => {
+                    trt_ids.convert_i1_to_i64
                 }
                 (ElementType::I32, ElementType::F64) => trt_ids.convert_i32_to_f64,
                 (ElementType::UI32, ElementType::F64) => trt_ids.convert_ui32_to_f64,
@@ -4656,6 +4785,7 @@ fn lower_instruction_mem(
                 libm_ids,
                 trt_ids,
                 func_abis,
+                external_data_ids,
                 jit_module,
                 &mut cond_vm,
                 &mut cond_tm,
@@ -4698,6 +4828,7 @@ fn lower_instruction_mem(
                 libm_ids,
                 trt_ids,
                 func_abis,
+                external_data_ids,
                 jit_module,
                 &mut body_vm,
                 &mut body_tm,
@@ -5124,6 +5255,7 @@ fn lower_instruction_mem(
                         func_abis,
                         libm_ids,
                         trt_ids,
+                        external_data_ids,
                         branch,
                         result_types,
                         &captured,
@@ -5149,8 +5281,17 @@ fn lower_instruction_mem(
                 let mut br_vm = value_map.clone();
                 let mut br_tm = type_map.clone();
                 lower_body_mem(
-                    builder, branch, ir_module, func_ids, libm_ids, trt_ids, func_abis, jit_module,
-                    &mut br_vm, &mut br_tm,
+                    builder,
+                    branch,
+                    ir_module,
+                    func_ids,
+                    libm_ids,
+                    trt_ids,
+                    func_abis,
+                    external_data_ids,
+                    jit_module,
+                    &mut br_vm,
+                    &mut br_tm,
                 )?;
 
                 if let Some(ret_ir) = branch
@@ -5630,6 +5771,7 @@ fn lower_instruction_mem(
                 func_abis,
                 libm_ids,
                 trt_ids,
+                external_data_ids,
                 &param_types_cr,
                 types::F64,
                 body,
@@ -5683,6 +5825,7 @@ fn lower_instruction_mem(
                 func_abis,
                 libm_ids,
                 trt_ids,
+                external_data_ids,
                 &[types::F64, types::F64],
                 types::F64,
                 body,
@@ -5764,6 +5907,7 @@ fn lower_instruction_mem(
                 func_abis,
                 libm_ids,
                 trt_ids,
+                external_data_ids,
                 &[types::F64, types::F64],
                 types::I8,
                 select_body,
@@ -5777,6 +5921,7 @@ fn lower_instruction_mem(
                 func_abis,
                 libm_ids,
                 trt_ids,
+                external_data_ids,
                 &[types::F64, types::F64],
                 types::F64,
                 scatter_body,
@@ -6149,6 +6294,7 @@ fn lower_callee_body(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
@@ -6179,6 +6325,7 @@ fn lower_callee_body(
         libm_ids,
         trt_ids,
         func_abis,
+        external_data_ids,
         jit_module,
         value_map,
         type_map,
@@ -6234,6 +6381,7 @@ fn lower_body(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -6254,6 +6402,7 @@ fn lower_body(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             value_map,
             type_map,
@@ -6290,6 +6439,7 @@ fn lower_instruction(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -6301,7 +6451,34 @@ fn lower_instruction(
 
     match instr {
         // ----- Constants -----
-        Instruction::Constant { value } => Ok(vec![lower_constant(builder, value, &rt)]),
+        Instruction::Constant { value } => match value {
+            ConstantValue::DenseExternal {
+                elem_type,
+                byte_len,
+                data,
+            } => {
+                if *elem_type != rt.element_type {
+                    return Err(format!(
+                        "external constant element type mismatch: cached {:?}, result {:?}",
+                        elem_type, rt.element_type
+                    ));
+                }
+                let expected_bytes = rt.num_elements() * rt.element_type.byte_size();
+                if *byte_len != expected_bytes {
+                    return Err(format!(
+                        "external constant byte length mismatch: cached {}, tensor {}",
+                        byte_len, expected_bytes
+                    ));
+                }
+                let data_id = external_data_ids
+                    .get(&data.symbol)
+                    .ok_or_else(|| format!("missing imported constant {}", data.symbol))?;
+                let gv = jit_module.declare_data_in_func(*data_id, builder.func);
+                let data_ptr = builder.ins().global_value(ptr_type(), gv);
+                Ok(vec![LaneRepr::scalar(vec![data_ptr])])
+            }
+            _ => Ok(vec![lower_constant(builder, value, &rt)]),
+        },
 
         // ----- Arithmetic -----
         Instruction::Add { lhs, rhs } => {
@@ -7247,6 +7424,7 @@ fn lower_instruction(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             value_map,
             type_map,
@@ -7263,6 +7441,7 @@ fn lower_instruction(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             value_map,
             type_map,
@@ -7845,6 +8024,7 @@ fn lower_while(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -7907,6 +8087,7 @@ fn lower_while(
         libm_ids,
         trt_ids,
         func_abis,
+        external_data_ids,
         jit_module,
         &mut cond_vmap,
         &mut cond_tmap,
@@ -7958,6 +8139,7 @@ fn lower_while(
         libm_ids,
         trt_ids,
         func_abis,
+        external_data_ids,
         jit_module,
         &mut body_vmap,
         &mut body_tmap,
@@ -8055,6 +8237,7 @@ fn lower_case(
     libm_ids: &LibmIds,
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -8128,6 +8311,7 @@ fn lower_case(
             libm_ids,
             trt_ids,
             func_abis,
+            external_data_ids,
             jit_module,
             &mut br_vmap,
             &mut br_tmap,
@@ -8354,6 +8538,9 @@ fn lower_constant(
             } else {
                 LaneRepr::scalar(vec![v; n])
             }
+        }
+        ConstantValue::DenseExternal { .. } => {
+            panic!("external constants require pointer-ABI lowering")
         }
     }
 }

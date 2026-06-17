@@ -516,8 +516,10 @@ impl DB {
                 if let Some((timestamp, _)) = component.time_series.latest() {
                     last_updated = timestamp.0.max(last_updated);
                 };
+                // Timestamp 0 is treated as an init-message sentinel; negative
+                // timestamps (pre-1970 epochs) are valid data.
                 let comp_start = component.time_series.start_timestamp().0;
-                if comp_start > 0 {
+                if comp_start != 0 && comp_start != i64::MAX {
                     start_timestamp = start_timestamp.min(comp_start);
                 }
             } else {
@@ -540,7 +542,7 @@ impl DB {
                     .ok_or(Error::InvalidMsgId)?;
                 let msg_log = MsgLog::open(path)?;
                 if let Some(first_timestamp) = msg_log.timestamps().first()
-                    && first_timestamp.0 > 0
+                    && first_timestamp.0 != 0
                 {
                     start_timestamp = start_timestamp.min(first_timestamp.0);
                 }
@@ -567,9 +569,11 @@ impl DB {
             db_config: db_state.clone(),
             ..Default::default()
         };
+        // A configured start of 0 is treated as unset (init-message sentinel);
+        // negative values are valid pre-1970 starts (e.g. historical replays).
         let earliest_timestamp = db_state
             .time_start_timestamp_micros()
-            .filter(|&ts| ts > 0)
+            .filter(|&ts| ts != 0)
             .map(Timestamp)
             .unwrap_or_else(|| {
                 if start_timestamp != i64::MAX {
@@ -841,7 +845,7 @@ impl DB {
             })?;
         }
         self.last_updated.update_max(timestamp);
-        if timestamp.0 > 0 {
+        if timestamp.0 != 0 {
             self.earliest_timestamp.update_min(timestamp);
         }
         Ok(())
@@ -1389,7 +1393,8 @@ pub(crate) struct DBSink<'a> {
     /// batch. Flushed once via `flush_timestamps()` after the batch completes,
     /// avoiding per-component `wake_all()` overhead.
     batch_max_ts: Timestamp,
-    /// Tracks the minimum positive timestamp seen in this batch.
+    /// Tracks the minimum nonzero timestamp seen in this batch (timestamp 0 is
+    /// the init-message sentinel).
     batch_min_ts: Timestamp,
     batch_has_ts: bool,
 }
@@ -1491,7 +1496,7 @@ impl Decomponentize for DBSink<'_> {
             if timestamp > self.batch_max_ts {
                 self.batch_max_ts = timestamp;
             }
-            if timestamp.0 > 0 && timestamp < self.batch_min_ts {
+            if timestamp.0 != 0 && timestamp < self.batch_min_ts {
                 self.batch_min_ts = timestamp;
             }
             self.batch_has_ts = true;

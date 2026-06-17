@@ -59,6 +59,7 @@ members = [
     "libs/bevy_world_mesh",
     "libs/bevy_ai_skybox",
     "libs/cranelift-mlir",
+    "libs/monte-carlo",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

@@ -25,7 +25,7 @@ use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
-use bevy_picking::PickingSettings;
+use bevy_picking::{PickingSettings, PickingSystems, mesh_picking::update_hits};
 use bevy_render::alpha::AlphaMode;
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
@@ -47,7 +47,7 @@ use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     create_egui_context, default_present_mode,
-    inspector::viewport::set_viewport_pos,
+    inspector::viewport::{set_viewport_pos, sync_viewport_focus_pick_targets},
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
     utils::FriendlyEpoch,
@@ -66,6 +66,7 @@ pub(crate) use embedded_lfs::embedded_lfs_asset;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
+pub mod rim_glow_material;
 pub mod sensor_camera;
 mod skybox_db_assets;
 mod skybox_generation;
@@ -281,8 +282,10 @@ impl Plugin for EditorPlugin {
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
-            .add_plugins(GizmoPlugin)
-            .add_plugins(ui::UiPlugin)
+            .add_plugins(GizmoPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
+        app.add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
@@ -298,6 +301,12 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PreUpdate,
                 sanitize_editor_cam_anchor_depth.before(SyncCameraPosition),
+            )
+            .add_systems(
+                PreUpdate,
+                sync_viewport_focus_pick_targets
+                    .before(update_hits)
+                    .in_set(PickingSystems::Backend),
             )
             .add_systems(
                 PreUpdate,
@@ -363,6 +372,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(rim_glow_material::RimGlowMaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
             .add_plugins(plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(GeoFramePlugin {
@@ -1230,6 +1240,7 @@ pub fn sync_object_3d(
                 eql,
                 mesh: mesh_source,
                 icon: None,
+                thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 frame: None,
                 node_id: Default::default(),

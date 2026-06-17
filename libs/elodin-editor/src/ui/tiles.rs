@@ -4,6 +4,7 @@ use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
+    picking::prelude::MeshPickingCamera,
     post_process::bloom::Bloom,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
@@ -22,7 +23,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{Graph, Viewport, WindowRect};
+use impeller2_wkt::{BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap};
 use std::{
@@ -91,6 +92,26 @@ fn default_viewport_perspective() -> PerspectiveProjection {
 fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
     perspective.near = near;
     perspective.near_clip_plane = crate::plugins::frustum_common::near_clip_plane(near);
+}
+
+fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
+    let Some(config) = config else {
+        return Bloom::default();
+    };
+    let mut bloom = match config.preset {
+        BloomPreset::Natural => Bloom::NATURAL,
+        BloomPreset::OldSchool => Bloom::OLD_SCHOOL,
+    };
+    if let Some(intensity) = config.intensity {
+        bloom.intensity = intensity;
+    }
+    if let Some(threshold) = config.threshold {
+        bloom.prefilter.threshold = threshold;
+    }
+    if let Some(threshold_softness) = config.threshold_softness {
+        bloom.prefilter.threshold_softness = threshold_softness;
+    }
+    bloom
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -1561,7 +1582,7 @@ impl ViewportPane {
                     zoom: 0.2,
                     ..default()
                 },
-                last_anchor_depth: 2.0,
+                last_anchor_depth: -2.0,
                 ..Default::default()
             },
             GridHandle { grid: grid_id },
@@ -1583,7 +1604,8 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
-        camera.insert(Bloom { ..default() });
+        camera.insert(MeshPickingCamera);
+        camera.insert(bloom_from_config(viewport.bloom.as_ref()));
         camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
