@@ -166,27 +166,27 @@ fn build_rcs_jet() -> EffectAsset {
         speed,
     };
 
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.22));
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.26));
     let size =
-        SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.16, 0.045, 0.045)));
-    let drag = LinearDragModifier::new(module.lit(4.5));
+        SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.20, 0.055, 0.055)));
+    let drag = LinearDragModifier::new(module.lit(4.2));
 
-    // Subtle cold-gas haze: avoid HDR white blocks while retaining a small
-    // blue-white nozzle flash.
+    // Compact cold-gas puff: visible enough to debug RCS firing without
+    // returning to the old opaque square sprites.
     let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(0.95, 1.05, 1.18, 0.42));
-    gradient.add_key(0.22, Vec4::new(0.62, 0.74, 0.92, 0.22));
-    gradient.add_key(0.58, Vec4::new(0.38, 0.48, 0.62, 0.09));
+    gradient.add_key(0.0, Vec4::new(0.98, 1.05, 1.16, 0.72));
+    gradient.add_key(0.22, Vec4::new(0.72, 0.84, 1.0, 0.46));
+    gradient.add_key(0.58, Vec4::new(0.42, 0.54, 0.70, 0.18));
     gradient.add_key(1.0, Vec4::ZERO);
 
     // Elongated, oriented particles read as short puffs instead of square
     // billboards. Keep the cross-section narrow throughout the lifetime.
     let mut size_over_life = Gradient::<Vec3>::new();
-    size_over_life.add_key(0.0, Vec3::new(0.10, 0.03, 0.03));
-    size_over_life.add_key(0.2, Vec3::new(0.28, 0.08, 0.08));
-    size_over_life.add_key(1.0, Vec3::new(0.08, 0.02, 0.02));
+    size_over_life.add_key(0.0, Vec3::new(0.12, 0.035, 0.035));
+    size_over_life.add_key(0.2, Vec3::new(0.34, 0.10, 0.10));
+    size_over_life.add_key(1.0, Vec3::new(0.10, 0.025, 0.025));
 
-    EffectAsset::new(8192, SpawnerSettings::rate(90.0.into()), module)
+    EffectAsset::new(8192, SpawnerSettings::rate(130.0.into()), module)
         .with_name("rcs_jet")
         .with_simulation_space(SimulationSpace::Local)
         .with_alpha_mode(AlphaMode::Blend)

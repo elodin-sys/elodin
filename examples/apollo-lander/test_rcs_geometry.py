@@ -4,7 +4,12 @@ import re
 import unittest
 from pathlib import Path
 
-from rcs_geometry import RCS_THRUSTER_AXIS, RCS_THRUSTER_SIGN, rcs_thruster_levels
+from rcs_geometry import (
+    RCS_THRUSTER_AXIS,
+    RCS_THRUSTER_SIGN,
+    RCS_THRUSTER_VIZ_MIN_RAW_LEVEL,
+    rcs_thruster_levels,
+)
 
 
 def _cross(
@@ -72,28 +77,59 @@ def _kdl_rcs_torques() -> list[tuple[float, float, float]]:
 class RcsGeometryTests(unittest.TestCase):
     def test_kdl_rcs_emitters_stay_on_visible_lander_nozzle_band(self) -> None:
         # The GLB is translated by (0, -2.5, 0). Its visible RCS nozzle band
-        # lands near +/-1.4 m in X/Z and around 0.6-1.1 m in Y in object space.
+        # lands near +/-1.52 m in X/Z and around 0.5-1.2 m in Y in object space.
         for index, (position, _, _) in enumerate(_kdl_rcs_nozzles()):
             x, y, z = position
             self.assertLessEqual(
                 abs(x),
-                1.5,
+                1.52,
                 f"rcs_{index} should not float outside the visual LM X radius",
             )
             self.assertLessEqual(
                 abs(z),
-                1.5,
+                1.52,
                 f"rcs_{index} should not float outside the visual LM Z radius",
             )
             self.assertGreaterEqual(
                 y,
-                0.55,
+                0.50,
                 f"rcs_{index} should stay in the visible LM RCS nozzle band",
             )
             self.assertLessEqual(
                 y,
-                1.15,
+                1.25,
                 f"rcs_{index} should stay in the visible LM RCS nozzle band",
+            )
+
+    def test_kdl_rcs_emitters_form_four_lm_quads(self) -> None:
+        clusters: dict[tuple[float, float], list[tuple[float, float, float]]] = {}
+        for position, exhaust, _ in _kdl_rcs_nozzles():
+            x, _, z = position
+            clusters.setdefault((_sign(x), _sign(z)), []).append(exhaust)
+
+        self.assertEqual(
+            set(clusters),
+            {(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)},
+        )
+        for cluster, exhausts in clusters.items():
+            self.assertEqual(len(exhausts), 4, f"quad {cluster} should have 4 nozzles")
+            axis_counts = [0, 0, 0]
+            y_signs = set()
+            for exhaust in exhausts:
+                axis = max(range(3), key=lambda item: abs(exhaust[item]))
+                axis_counts[axis] += 1
+                if axis == 1:
+                    y_signs.add(_sign(exhaust[1]))
+
+            self.assertEqual(
+                axis_counts,
+                [1, 2, 1],
+                f"quad {cluster} should be a 4-nozzle star",
+            )
+            self.assertEqual(
+                y_signs,
+                {-1.0, 1.0},
+                f"quad {cluster} should have opposed Y nozzles",
             )
 
     def test_thruster_mapping_matches_kdl_nozzle_geometry(self) -> None:
@@ -134,6 +170,17 @@ class RcsGeometryTests(unittest.TestCase):
                     )
                     self.assertEqual(dominant_axis, axis)
                     self.assertEqual(_sign(torque[dominant_axis]), sign)
+
+    def test_visual_levels_boost_small_real_torque_commands(self) -> None:
+        small_command = (0.0, 0.04, 0.0)
+        active = rcs_thruster_levels(small_command)
+
+        self.assertGreater(max(active), small_command[1])
+        self.assertAlmostEqual(max(active), small_command[1] ** 0.5)
+
+    def test_visual_levels_keep_tiny_torque_commands_off(self) -> None:
+        tiny_command = (0.0, RCS_THRUSTER_VIZ_MIN_RAW_LEVEL * 0.5, 0.0)
+        self.assertTrue(all(level == 0.0 for level in rcs_thruster_levels(tiny_command)))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import numpy as np
 from reference import build_reference
 from rcs_geometry import RCS_THRUSTER_AXIS as RCS_THRUSTER_AXIS_TABLE
 from rcs_geometry import RCS_THRUSTER_SIGN as RCS_THRUSTER_SIGN_TABLE
+from rcs_geometry import RCS_THRUSTER_VIZ_MIN_RAW_LEVEL
 
 SIMULATION_RATE_HZ = 120.0
 SIM_TIME_STEP = 1.0 / SIMULATION_RATE_HZ
@@ -446,7 +447,14 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
         thrust: Thrust, torque: RcsTorque
     ) -> tuple[MainThrustViz, RcsTorqueViz, RcsThrusterViz]:
         torque_norm = torque / RCS_AXIS_TORQUE_LIMIT_NM
-        per_thruster = jnp.maximum(0.0, torque_norm[RCS_THRUSTER_AXIS] * RCS_THRUSTER_SIGN)
+        raw_per_thruster = jnp.maximum(0.0, torque_norm[RCS_THRUSTER_AXIS] * RCS_THRUSTER_SIGN)
+        # Particle visibility is nonlinear: keep the physics torque unchanged,
+        # but make small attitude-control pulses visible in the editor.
+        per_thruster = jnp.where(
+            raw_per_thruster > RCS_THRUSTER_VIZ_MIN_RAW_LEVEL,
+            jnp.sqrt(raw_per_thruster),
+            0.0,
+        )
         return (
             jnp.array([0.0, 0.0, thrust[0] / DPS_MAX_THRUST_N], dtype=jnp.float64),
             torque_norm,
