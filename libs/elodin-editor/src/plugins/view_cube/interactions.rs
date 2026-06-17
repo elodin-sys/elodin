@@ -34,6 +34,7 @@ pub fn setup_cube_elements(
     mut transforms: Query<&mut Transform>,
     parents: Query<&ChildOf>,
     children_query: Query<&Children>,
+    mesh_query: Query<(), With<Mesh3d>>,
     mesh_roots: Query<Entity, With<ViewCubeMeshRoot>>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -123,6 +124,12 @@ pub fn setup_cube_elements(
             commands
                 .entity(entity)
                 .insert((elem.clone(), ViewCubeSetup, Pickable::default()));
+            insert_pickable_on_mesh_descendants(
+                entity,
+                &children_query,
+                &mesh_query,
+                &mut commands,
+            );
 
             if let Ok(mat_handle) = material_query.get(entity)
                 && materials.get(&mat_handle.0).is_some()
@@ -146,6 +153,24 @@ pub fn setup_cube_elements(
                 }
             }
         }
+    }
+}
+
+fn insert_pickable_on_mesh_descendants(
+    entity: Entity,
+    children_query: &Query<&Children>,
+    mesh_query: &Query<(), With<Mesh3d>>,
+    commands: &mut Commands,
+) {
+    let Ok(children) = children_query.get(entity) else {
+        return;
+    };
+
+    for child in children.iter() {
+        if mesh_query.get(child).is_ok() {
+            commands.entity(child).insert(Pickable::default());
+        }
+        insert_pickable_on_mesh_descendants(child, children_query, mesh_query, commands);
     }
 }
 
@@ -1692,5 +1717,46 @@ mod tests {
             })
             .collect();
         assert!(corners.len() >= 2);
+    }
+
+    #[test]
+    fn setup_cube_elements_marks_mesh_children_pickable() {
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<OriginalMaterials>()
+            .add_systems(Update, setup_cube_elements);
+
+        let material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+
+        let root = app
+            .world_mut()
+            .spawn((ViewCubeMeshRoot, Name::new("view_cube_root")))
+            .id();
+        let face = app
+            .world_mut()
+            .spawn((
+                Name::new("Face_Top"),
+                Transform::from_translation(Vec3::Y),
+                ChildOf(root),
+            ))
+            .id();
+        let mesh_child = app
+            .world_mut()
+            .spawn((
+                Mesh3d(Handle::<Mesh>::default()),
+                MeshMaterial3d(material),
+                Name::new("face_mesh"),
+                ChildOf(face),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().entity(face).contains::<CubeElement>());
+        assert!(app.world().entity(face).contains::<Pickable>());
+        assert!(app.world().entity(mesh_child).contains::<Pickable>());
     }
 }
