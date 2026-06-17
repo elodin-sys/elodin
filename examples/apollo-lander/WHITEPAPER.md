@@ -87,7 +87,7 @@ autopilot is its own computer talking to sensors and actuators over a bus.
 flowchart LR
     subgraph SIM["sim.py — plant (Elodin / JAX, 120 Hz)"]
         PHYS["el.six_dof integrator<br/>gravity · DPS thrust · RCS torque<br/>mass & inertia burn-down"]
-        TRUTH["truth_playback system<br/>replays the recorded descent<br/>on the kinematic green ghost"]
+        TRUTH["truth_playback system<br/>replays the recorded descent<br/>as a kinematic truth profile"]
     end
     subgraph BR["main.py — SITL bridge + harness"]
         POST["post_step():<br/>read state, exchange with FSW,<br/>write throttle + attitude"]
@@ -432,19 +432,18 @@ body_up = q · (0, 0, 1)
 pitch   = arccos(clip(body_up_z, −1, 1))    (angle between thrust axis and "up")
 ```
 
-### 4.8 The truth ghost (in-sim replay)
+### 4.8 The truth replay (in-sim reference)
 
-The green `lander_truth` vehicle is **kinematic**: it is spawned without an
+The `lander_truth` replay entity is **kinematic**: it is spawned without an
 `el.Body` ([`sim.py`](sim.py)), so gravity, the integrator, and the
 telemetry-derivation systems never touch it. A dedicated playback system,
 [`truth_playback`](sim.py), reads the built-in `el.SimulationTick`,
 interpolates the cleaned reference (true altitude, descent rate, pitch trend,
 radar slant range, and the reconstructed downrange/horizontal-speed profile)
-with `jnp.interp`, and writes the ghost's pose and telemetry every tick — so
-the ghost flies the whole braking descent alongside the simulated vehicle,
-from 107 km uprange to the site. A `TruthMarker` component scopes the system's
-query to the ghost, so the playback never collides with the simulated lander's
-physics.
+with `jnp.interp`, and writes the replay pose and telemetry every tick. The
+editor renders this as a truth trail and graph data rather than a second Lunar
+Module mesh. A `TruthMarker` component scopes the system's query to the replay
+entity, so the playback never collides with the simulated lander's physics.
 
 Because the replay runs inside the compiled simulation, the reference arrays
 become JIT-time constants, the replay costs a few interpolations per tick, and
@@ -620,7 +619,7 @@ stays in JAX and the only Python work per tick is moving bytes:
   kinematics, exchange them with the controller over UDP, and **write** the
   resulting `throttle_cmd` and `attitude_setpoint`.
 
-(The truth vehicle needs no callback at all — it is replayed *inside* the
+(The truth replay needs no callback at all — it is driven *inside* the
 compiled simulation by the `truth_playback` system, Section 4.8.)
 
 ### 7.1 The wire protocol
@@ -689,8 +688,8 @@ Elodin describes its 3D scene and dashboards declaratively in **KDL**
   vs real vs radar slant range), descent rate, horizontal speed (sim vs the
   reconstructed profile), pitch (sim vs the gimbal-derived trend), throttle,
   and propellant;
-- four **`object_3d`** GLB models: the landing site, the simulated LM, the green
-  truth LM, and a full Moon sphere used as the curved horizon backdrop;
+- three **`object_3d`** GLB models: the landing site, the simulated LM, and a
+  full Moon sphere used as the curved horizon backdrop;
 - **`line_3d`** trajectory trails (blue = simulated, green = truth);
 - **`vector_arrow`** overlays for DPS thrust (orange) and RCS torque (white).
 
@@ -932,7 +931,7 @@ elodin editor examples/apollo-lander/main.py
 ```
 
 Look for the simulated LM pitched ~77° back at the start, braking beside the
-green truth LM; watch the throttle-down land near the historical t = 98 s, the
+green truth trail; watch the throttle-down land near the historical t = 98 s, the
 pitchover as horizontal speed falls through ~150 m/s, and the six graphs
 converge to touchdown.
 
@@ -1008,5 +1007,3 @@ Want to go deeper? Each of these is a self-contained extension:
 ---
 
 *Built with Elodin — aerospace's open-source answer to ROS. Ad astra.*
-
-

@@ -67,9 +67,6 @@ object_3d lander.world_pos frame=ENU {
     thruster name="rcs_14" effect="cold_gas" body_frame=#true position="(0, 1.35, -2.15)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[14]" emission_rate=140.0 cutoff=0.006
     thruster name="rcs_15" effect="cold_gas" body_frame=#true position="(0, 0.35, -2.15)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[15]" emission_rate=140.0 cutoff=0.006
 }
-object_3d lander_truth.world_pos frame=ENU {
-    glb path=apollo-lunar-module.glb
-}
 // Moon sphere as the curved horizon backdrop. With this rotation/scale the
 // LRO mesh surface directly under the site sits ~1,725,022 m above the sphere
 // center; seat it ~1.2 km below z=0 so it stays under the landing-site tile's

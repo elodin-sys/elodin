@@ -1892,6 +1892,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_apollo_lander_schematic_keeps_truth_as_trail_only() {
+        let kdl = include_str!("../../../../examples/apollo-lander/apollo-lander.kdl");
+        let schematic = parse_schematic(kdl).expect("apollo lander schematic should parse");
+
+        let object_eqls: Vec<_> = schematic
+            .elems
+            .iter()
+            .filter_map(|elem| match elem {
+                SchematicElem::Object3d(obj) => Some(obj.eql.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(object_eqls.contains(&"lander.world_pos"));
+        assert!(
+            !object_eqls.contains(&"lander_truth.world_pos"),
+            "lander_truth should remain replay data/trail, not a second rendered LM"
+        );
+        assert!(schematic.elems.iter().any(|elem| matches!(
+            elem,
+            SchematicElem::Line3d(line) if line.eql == "lander_truth.world_pos"
+        )));
+    }
+
+    #[test]
     fn test_parse_timeline_unknown_properties_are_rejected() {
         let kdl = r#"timeline unexpected=#true"#;
         assert!(parse_schematic(kdl).is_err());

@@ -10,10 +10,9 @@ approach (P64), and the landing (P66) to touchdown. An external controller
 process plays a minimal Lunar Guidance Computer (LGC): it receives telemetry
 over UDP and sends back throttle and attitude commands.
 
-The example also replays real Apollo 11 LM telemetry as a truth vehicle. In the
-editor, the simulated LM and real LM fly the braking descent together over the
-landing-site asset so the campaign has both a flight-control goal and a visual
-story.
+The example also replays real Apollo 11 LM telemetry as a kinematic truth
+profile. In the editor, the simulated LM flies over the landing-site asset while
+graphs and the green truth trail compare it against the reconstructed descent.
 
 > For a full educational walkthrough — the data sources, the flight-dynamics and
 > guidance math, and how each piece maps to Elodin features — see
@@ -30,16 +29,16 @@ story.
   brakes off ~800 m/s of horizontal velocity at the fixed throttle point,
   throttles down and pitches over near the historical times, and lands on the
   targeted site.
-- An in-sim truth replay: the green `lander_truth` ghost is a kinematic entity
+- An in-sim truth replay: `lander_truth` is a kinematic entity
   (no `el.Body`) driven by a JAX playback system on `el.SimulationTick` that
   interpolates the recorded descent profile every tick.
 - A software-in-the-loop campaign with an external Rust FSW process
   (`controller/`) that flies the Apollo descent as a reference-trajectory
   follower, including the DPS throttle-erosion-band logic.
-- A real KDL schematic: LM GLB, a green "truth" LM GLB, landing-site GLB,
-  viewport-follow, blue/green trajectory trails, body-frame attitude arrows, and
-  graphs for altitude (vs real + radar slant), descent rate, horizontal speed,
-  pitch, throttle, and propellant.
+- A real KDL schematic: LM GLB, landing-site GLB, viewport-follow, blue/green
+  trajectory trails, body-frame attitude arrows, and graphs for altitude (vs
+  real + radar slant), descent rate, horizontal speed, pitch, throttle, and
+  propellant.
 - A real simulation epoch: `1969-07-20T20:09:53.164Z`, matching the first row of
   the Apollo descent telemetry. This uses `start_timestamp`; Elodin-DB timestamps
   native component writes from the simulation clock, so no manual time component
@@ -271,8 +270,8 @@ Use `--dry-run` to only write the narrowed specs.
   would drop ~3 km over that distance); the centrifugal-relief gravity term is
   the one orbital-mechanics effect retained. The landing site is the world
   origin.
-- The truth LM is offset laterally in the scene so the blue simulated trajectory
-  and green truth trajectory are easy to compare.
+- The truth trajectory is offset laterally in the scene so the blue simulated
+  trajectory and green truth trail are easy to compare.
 - GLB model scaling (derived from the NASA assets, see `sim.py` constants):
   - `apollo-lunar-module.glb` is modeled in **meters** (~6.4 m footprint, ~5.0 m
     tall, Y-up), so `LANDER_GLB_SCALE = 1.0` renders it ~life-size.
