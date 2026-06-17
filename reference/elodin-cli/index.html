@@ -455,6 +455,27 @@
                         </li>
                         
                         <li>
+                            <a href="/reference/elodin-cli/#elodin-monte-carlo">elodin monte-carlo</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#subcommands-1">Subcommands</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#elodin-monte-carlo-quickstart">elodin monte-carlo quickstart</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#elodin-monte-carlo-run">elodin monte-carlo run</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/reference/elodin-cli/#python-simulation-subcommands">Python Simulation Subcommands</a>
                             
                             <ul>
@@ -477,7 +498,7 @@
                             <ul>
                                 
                                 <li>
-                                    <a href="/reference/elodin-cli/#subcommands-1">Subcommands</a>
+                                    <a href="/reference/elodin-cli/#subcommands-2">Subcommands</a>
                                 </li>
                                 
                             </ul>
@@ -853,6 +874,7 @@
 <ul>
 <li><code>editor</code> — Launch the Elodin editor (default)</li>
 <li><code>run</code> — Run an Elodin simulation in headless mode</li>
+<li><code>monte-carlo</code> — Run Monte Carlo campaigns</li>
 </ul>
 <h6 id="options"><strong>Options</strong></h6>
 <ul>
@@ -887,22 +909,114 @@ generated into <code>$ELODIN_ASSETS_DIR/skyboxes</code>; otherwise <code>./asset
 </ul>
 <h2 id="elodin-run"><code>elodin run</code></h2>
 <p>Run an Elodin simulation in headless mode (not available on Windows)</p>
-<p><strong>Usage:</strong> <code>elodin run [addr/path]</code></p>
+<p><strong>Usage:</strong> <code>elodin run [--monte-carlo PLAN.csv] [addr/path]</code></p>
 <h6 id="arguments-1"><strong>Arguments</strong></h6>
 <ul>
-<li><code>&lt;addr/path&gt;</code> — Simulation to run. Can be:
+<li>
+<p><code>&lt;addr/path&gt;</code> — Simulation to run. Can be:</p>
 <ul>
 <li>A Python file (e.g., <code>main.py</code>)</li>
 <li>A TOML file (e.g., <code>s10.toml</code>)</li>
 <li>A directory containing <code>main.py</code> or <code>s10.toml</code></li>
 </ul>
 </li>
+<li>
+<p><code>--monte-carlo &lt;PLAN.csv&gt;</code> — Sugar for <code>elodin monte-carlo run &lt;addr/path&gt; --plan PLAN.csv</code>.</p>
+</li>
 </ul>
+<h2 id="elodin-monte-carlo"><code>elodin monte-carlo</code></h2>
+<p>Run a simulation campaign with a bounded worker pool. Each worker owns a
+deterministic resource slot (DB port and user-defined SITL ports), and the
+runner recycles those slots across arbitrarily many runs. The campaign pins a
+shared <code>ELODIN_CACHE_DIR</code> so large Cranelift constants are mapped once across
+workers. When worker or runtime-thread counts are unset, the runner auto-sizes
+them from available CPUs: workers consume the CPU budget, while the orchestrator
+uses a small I/O thread pool for process/log handling. Campaign startup reaps
+pre-existing <code>elodin</code> and <code>elodin-db</code> processes by default so stale editor or
+database sessions cannot collide with worker ports.</p>
+<p><strong>Usage:</strong> <code>elodin monte-carlo &lt;COMMAND&gt;</code></p>
+<h6 id="subcommands-1"><strong>Subcommands</strong></h6>
+<ul>
+<li><code>quickstart</code> — Scaffold a runnable campaign (spec + campaign + hooks) from a simulation</li>
+<li><code>template</code> — Generate a starter plan or sampling spec from declared simulation params</li>
+<li><code>sample</code> — Materialize a sampling spec into a plan CSV</li>
+<li><code>run</code> — Execute a campaign</li>
+<li><code>resume</code> — Re-run missing or failed runs from a previous campaign</li>
+<li><code>report</code> — Rebuild campaign reports</li>
+</ul>
+<h3 id="elodin-monte-carlo-quickstart"><code>elodin monte-carlo quickstart</code></h3>
+<p>The fastest way to get a new simulation into a Monte Carlo campaign. Reads the
+sim's declared params (<code>python SIM.py params</code>) and writes a ready-to-run
+skeleton you then edit:</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> monte-carlo quickstart examples/drone/main.py campaigns/drone</span>
+</span></code></pre>
+<p><strong>Prerequisite:</strong> the simulation must declare its tunable parameters with
+<code>el.monte_carlo.params_spec(...)</code> before running quickstart — that declaration
+is what populates <code>spec.toml</code>. A sim with no declared params produces an empty
+<code>[monte_carlo.variables]</code> (quickstart prints a warning). Declare them in the
+sim, for example:</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">elodin</span></span> <span class="z-keyword z-control z-import z-as z-python">as</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span></span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-function z-python"><span class="z-storage z-type z-function z-python"><span class="z-keyword z-declaration z-function z-python">def</span></span> <span class="z-entity z-name z-function z-python"><span class="z-meta z-generic-name z-python">params_spec</span></span></span><span class="z-meta z-function z-parameters z-python"><span class="z-punctuation z-section z-parameters z-begin z-python">(</span></span><span class="z-meta z-function z-parameters z-python"><span class="z-punctuation z-section z-parameters z-end z-python">)</span></span><span class="z-meta z-function z-python"><span class="z-punctuation z-section z-function z-begin z-python">:</span></span>
+</span><span class="z-source z-python">    <span class="z-keyword z-control z-flow z-return z-python">return</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">monte_carlo</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">params_spec</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">thrust</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">monte_carlo</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Param</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">default</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">1<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">min</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">0<span class="z-punctuation z-separator z-decimal z-python">.</span>8</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">max</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">1<span class="z-punctuation z-separator z-decimal z-python">.</span>2</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">mass</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">monte_carlo</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Param</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">default</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">12<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">min</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">11<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">max</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">13<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></code></pre>
+<p>This generates:</p>
+<pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">campaigns/drone/
+</span><span class="z-text z-plain">  spec.toml        # one variable per param: uniform[min,max] when bounds are
+</span><span class="z-text z-plain">                   # declared, else fixed at the default
+</span><span class="z-text z-plain">  campaign.toml    # worker pool + post_run/post_campaign hooks
+</span><span class="z-text z-plain">  hooks/score.py   # post_run: records result.json metrics, marks pass
+</span><span class="z-text z-plain">  hooks/gate.py    # post_campaign: raises when any run failed (CI gate)
+</span></code></pre>
+<p>Each <code>el.monte_carlo.Param(..., min=..., max=...)</code> becomes a <code>uniform</code>
+variable; params without bounds are emitted as <code>fixed</code>. Edit the ranges and the
+<code>hooks/score.py</code> pass criterion, then run the printed <code>elodin monte-carlo run</code>
+command. The campaign keeps the default exit code (0 even with partial
+failures); <code>hooks/gate.py</code> is what turns a failure count into a non-zero exit
+for a gated pipeline.</p>
+<h3 id="elodin-monte-carlo-run"><code>elodin monte-carlo run</code></h3>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> monte-carlo run examples/monte-carlo/main.py <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>campaign</span> examples/monte-carlo/campaign.toml <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>spec</span> examples/monte-carlo/spec.toml <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>out</span> dbs/monte-carlo-demo</span>
+</span></code></pre>
+<p>Key options:</p>
+<ul>
+<li><code>--plan &lt;PLAN.csv&gt;</code>: materialized one-row-per-run plan.</li>
+<li><code>--spec &lt;SPEC.toml&gt;</code>: sampling spec; sampled into a plan before execution.</li>
+<li><code>--campaign &lt;CAMPAIGN.toml&gt;</code>: worker count, resource slots, hooks, retries, timeouts.</li>
+<li><code>--workers &lt;N&gt;</code>: override the auto-sized campaign worker count.</li>
+<li><code>--runtime-threads &lt;N&gt;</code>: override the auto-sized orchestrator I/O thread
+pool. Use <code>0</code> or omit the option for the default auto-sized pool.</li>
+<li><code>--memory-probe</code>: enable expensive shared-constant PSS sampling and
+<code>memory.json</code>/<code>processes.csv</code> output. Leave this off for scaling benchmarks.</li>
+<li><code>--keep-existing</code>: do not reap existing <code>elodin</code> / <code>elodin-db</code> processes at
+campaign startup.</li>
+<li><code>--fail-on-errors</code>: exit non-zero when any run failed or missed scoring.
+Off by default so exploratory campaigns can finish with partial failures.
+Also configurable as <code>fail_on_run_errors = true</code> in <code>campaign.toml</code>. For CI
+gates, prefer a <code>post_campaign</code> hook that raises on <code>summary.failed</code> (see
+<code>examples/apollo-lander/hooks/ci_gate.py</code>) instead of relying on this flag.</li>
+<li><code>--post-run &lt;HOOK.py&gt;</code> / <code>--post-campaign &lt;HOOK.py&gt;</code>: plain-Python lifecycle hooks.</li>
+<li><code>--params-compat revere-overrides-file</code>: emit <code>REVERE_SIM_OVERRIDES_FILE</code> and <code>SIM_SEED</code> for legacy simulations.</li>
+<li><code>--progress &lt;auto|always|never&gt;</code>: control the live progress bar. <code>auto</code> shows
+a bar only when stderr is a terminal.</li>
+</ul>
+<p>Outputs include per-run databases under <code>runs/</code>, <code>results.csv</code>, <code>perf.csv</code>,
+<code>resources.csv</code>, <code>campaign_summary.txt</code>, and <code>summary.json</code>. With
+<code>--memory-probe</code>, the runner also writes <code>memory.json</code> and <code>processes.csv</code>.
+Each run's child process output is captured in <code>runs/&lt;run_id&gt;/logs/</code>, and the
+per-run simulation timing snapshot is written to <code>runs/&lt;run_id&gt;/sim_summary.json</code>
+for the final campaign rollup.</p>
 <h2 id="python-simulation-subcommands">Python Simulation Subcommands</h2>
 <p>When you run a simulation Python file directly (for example <code>python examples/drone/main.py ...</code>), the embedded simulation CLI supports additional subcommands:</p>
 <ul>
 <li><code>run</code> (default): run the simulation normally.</li>
 <li><code>bench</code>: run a fixed-tick benchmark and print runtime metrics.</li>
+<li><code>params</code>: print the simulation's declared Monte Carlo parameter schema as JSON.</li>
 </ul>
 <h3 id="bench-options"><code>bench</code> options</h3>
 <ul>
@@ -923,7 +1037,7 @@ generated into <code>$ELODIN_ASSETS_DIR/skyboxes</code>; otherwise <code>./asset
 <hr />
 <h2 id="elodin-db"><code>elodin-db</code></h2>
 <p><strong>Usage:</strong> <code>elodin-db &lt;COMMAND&gt;</code></p>
-<h6 id="subcommands-1"><strong>Subcommands</strong></h6>
+<h6 id="subcommands-2"><strong>Subcommands</strong></h6>
 <ul>
 <li><code>run</code> — Run the Elodin database server</li>
 <li><code>lua</code> — Run a Lua script or launch a REPL</li>
