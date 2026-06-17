@@ -295,4 +295,6 @@ Use `--dry-run` to only write the narrowed specs.
   `intensity` from `main_thrust_viz` (`effect="plume"`); the 16 cold-gas RCS
   jets each bind `rcs_thruster_viz[i]` with `effect="cold_gas"`. RCS jet
   activity follows the body-frame RCS torque command, not the DPS throttle.
-  Nozzle geometry and presets live in `apollo-lander.kdl`.
+  Nozzle geometry and presets live in `apollo-lander.kdl`; RCS emitter
+  positions are tuned to the visible Apollo LM nozzle band after the GLB mesh
+  translate.

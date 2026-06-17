@@ -33,27 +33,69 @@ def _sign(value: float) -> float:
     return 0.0
 
 
-def _kdl_rcs_torques() -> list[tuple[float, float, float]]:
+def _kdl_rcs_nozzles() -> list[
+    tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+    ]
+]:
     kdl = Path(__file__).with_name("apollo-lander.kdl").read_text()
     matches = re.finditer(
         r'name="rcs_(\d+)"[^\n]*position="\(([^)]*)\)" direction="\(([^)]*)\)"',
         kdl,
     )
 
-    torques: list[tuple[float, float, float]] = []
+    nozzles: list[
+        tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ]
+    ] = []
     for match in matches:
         index = int(match.group(1))
         position = _parse_vec3(match.group(2))
         exhaust = _parse_vec3(match.group(3))
         reaction_force = tuple(-component for component in exhaust)
         torque = _cross(position, reaction_force)
-        if index != len(torques):
-            raise AssertionError(f"expected rcs_{len(torques)}, got rcs_{index}")
-        torques.append(torque)
-    return torques
+        if index != len(nozzles):
+            raise AssertionError(f"expected rcs_{len(nozzles)}, got rcs_{index}")
+        nozzles.append((position, exhaust, torque))
+    return nozzles
+
+
+def _kdl_rcs_torques() -> list[tuple[float, float, float]]:
+    return [torque for _, _, torque in _kdl_rcs_nozzles()]
 
 
 class RcsGeometryTests(unittest.TestCase):
+    def test_kdl_rcs_emitters_stay_on_visible_lander_nozzle_band(self) -> None:
+        # The GLB is translated by (0, -2.5, 0). Its visible RCS nozzle band
+        # lands near +/-1.4 m in X/Z and around 0.6-1.1 m in Y in object space.
+        for index, (position, _, _) in enumerate(_kdl_rcs_nozzles()):
+            x, y, z = position
+            self.assertLessEqual(
+                abs(x),
+                1.5,
+                f"rcs_{index} should not float outside the visual LM X radius",
+            )
+            self.assertLessEqual(
+                abs(z),
+                1.5,
+                f"rcs_{index} should not float outside the visual LM Z radius",
+            )
+            self.assertGreaterEqual(
+                y,
+                0.55,
+                f"rcs_{index} should stay in the visible LM RCS nozzle band",
+            )
+            self.assertLessEqual(
+                y,
+                1.15,
+                f"rcs_{index} should stay in the visible LM RCS nozzle band",
+            )
+
     def test_thruster_mapping_matches_kdl_nozzle_geometry(self) -> None:
         torques = _kdl_rcs_torques()
 

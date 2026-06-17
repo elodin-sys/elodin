@@ -47,25 +47,27 @@ object_3d surface.world_pos frame=ENU {
 // DPS: vector intensity (direction + magnitude from lander.main_thrust_viz).
 // RCS: 16 cold-gas jets, scalar intensity from lander.rcs_thruster_viz[i].
 // RCS index order must match RCS_THRUSTER_AXIS / RCS_THRUSTER_SIGN in rcs_geometry.py.
+// Positions are in the visible object frame after the GLB translate below, tuned to
+// the Apollo LM nozzle band rather than the old oversized idealized radius.
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
     thruster name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz
-    thruster name="rcs_0" effect="cold_gas" body_frame=#true position="(2.15, 0.85, 1.45)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[0]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_1" effect="cold_gas" body_frame=#true position="(2.15, 0.85, -1.45)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[1]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_2" effect="cold_gas" body_frame=#true position="(2.15, 1.35, 0)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[2]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_3" effect="cold_gas" body_frame=#true position="(2.15, 0.35, 0)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[3]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_4" effect="cold_gas" body_frame=#true position="(-2.15, 0.85, 1.45)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[4]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_5" effect="cold_gas" body_frame=#true position="(-2.15, 0.85, -1.45)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[5]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_6" effect="cold_gas" body_frame=#true position="(-2.15, 1.35, 0)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[6]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_7" effect="cold_gas" body_frame=#true position="(-2.15, 0.35, 0)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[7]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_8" effect="cold_gas" body_frame=#true position="(1.45, 0.85, 2.15)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[8]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_9" effect="cold_gas" body_frame=#true position="(-1.45, 0.85, 2.15)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[9]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_10" effect="cold_gas" body_frame=#true position="(0, 1.35, 2.15)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[10]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_11" effect="cold_gas" body_frame=#true position="(0, 0.35, 2.15)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[11]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_12" effect="cold_gas" body_frame=#true position="(1.45, 0.85, -2.15)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[12]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_13" effect="cold_gas" body_frame=#true position="(-1.45, 0.85, -2.15)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[13]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_14" effect="cold_gas" body_frame=#true position="(0, 1.35, -2.15)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[14]" emission_rate=140.0 cutoff=0.006
-    thruster name="rcs_15" effect="cold_gas" body_frame=#true position="(0, 0.35, -2.15)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[15]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_0" effect="cold_gas" body_frame=#true position="(1.41, 0.90, 1.26)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[0]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_1" effect="cold_gas" body_frame=#true position="(1.32, 0.87, -1.36)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[1]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_2" effect="cold_gas" body_frame=#true position="(1.25, 1.09, 0)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[2]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_3" effect="cold_gas" body_frame=#true position="(1.25, 0.68, 0)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[3]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_4" effect="cold_gas" body_frame=#true position="(-1.36, 0.92, 1.28)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[4]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_5" effect="cold_gas" body_frame=#true position="(-1.29, 0.85, -1.36)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[5]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_6" effect="cold_gas" body_frame=#true position="(-1.21, 1.09, 0)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[6]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_7" effect="cold_gas" body_frame=#true position="(-1.21, 0.68, 0)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[7]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_8" effect="cold_gas" body_frame=#true position="(1.32, 0.91, 1.37)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[8]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_9" effect="cold_gas" body_frame=#true position="(-1.23, 0.91, 1.36)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[9]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_10" effect="cold_gas" body_frame=#true position="(0, 1.06, 1.24)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[10]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_11" effect="cold_gas" body_frame=#true position="(0, 0.77, 1.24)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[11]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_12" effect="cold_gas" body_frame=#true position="(1.09, 0.87, -1.44)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[12]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_13" effect="cold_gas" body_frame=#true position="(-1.06, 0.86, -1.44)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[13]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_14" effect="cold_gas" body_frame=#true position="(0, 1.13, -1.37)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[14]" emission_rate=140.0 cutoff=0.006
+    thruster name="rcs_15" effect="cold_gas" body_frame=#true position="(0, 0.60, -1.37)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[15]" emission_rate=140.0 cutoff=0.006
 }
 // Moon sphere as the curved horizon backdrop. With this rotation/scale the
 // LRO mesh surface directly under the site sits ~1,725,022 m above the sphere
