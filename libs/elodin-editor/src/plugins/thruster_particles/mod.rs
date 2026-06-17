@@ -148,53 +148,54 @@ fn build_dps_exhaust() -> EffectAsset {
 fn build_rcs_jet() -> EffectAsset {
     let mut module = Module::default();
 
-    // Tight nozzle mouth: particles spawn in a small cone volume at the jet exit.
+    // Tight nozzle mouth: keep RCS puffs compact so they read as attitude jets,
+    // not large square sprites detached from the vehicle.
     let init_pos = SetPositionCone3dModifier {
-        height: module.lit(0.05),
-        base_radius: module.lit(0.022),
-        top_radius: module.lit(0.06),
+        height: module.lit(0.025),
+        base_radius: module.lit(0.01),
+        top_radius: module.lit(0.028),
         dimension: ShapeDimension::Volume,
     };
 
-    // Diverging exhaust: aim the velocity radially away from a virtual throat
-    // placed just behind the mouth (exhaust travels along -Y), so the jet fans
-    // out into a narrow cone instead of a parallel column like a real cold-gas
-    // puff. The rig rotates the whole emitter, so -Y maps to the jet direction.
-    let throat = module.lit(-DPS_EXHAUST_BODY * 0.18);
-    let speed = module.lit(11.0);
+    // Diverging exhaust from a virtual throat just behind the mouth. Lower
+    // speed and drag keep the jet short instead of streaking across the frame.
+    let throat = module.lit(-DPS_EXHAUST_BODY * 0.10);
+    let speed = module.lit(6.5);
     let init_vel = SetVelocitySphereModifier {
         center: throat,
         speed,
     };
 
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.34));
-    let size = SetAttributeModifier::new(Attribute::SIZE, module.lit(0.12));
-    // Heavier drag so the puff loses momentum quickly and reads as a crisp burst.
-    let drag = LinearDragModifier::new(module.lit(2.8));
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.22));
+    let size =
+        SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.16, 0.045, 0.045)));
+    let drag = LinearDragModifier::new(module.lit(4.5));
 
-    // HDR core (channels > 1.0) so the viewport bloom catches a bright ignition
-    // flash at the nozzle, cooling to a faint bluish haze before fading out.
+    // Subtle cold-gas haze: avoid HDR white blocks while retaining a small
+    // blue-white nozzle flash.
     let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(1.8, 2.1, 2.6, 0.9));
-    gradient.add_key(0.18, Vec4::new(1.0, 1.15, 1.4, 0.6));
-    gradient.add_key(0.5, Vec4::new(0.6, 0.72, 0.92, 0.28));
+    gradient.add_key(0.0, Vec4::new(0.95, 1.05, 1.18, 0.42));
+    gradient.add_key(0.22, Vec4::new(0.62, 0.74, 0.92, 0.22));
+    gradient.add_key(0.58, Vec4::new(0.38, 0.48, 0.62, 0.09));
     gradient.add_key(1.0, Vec4::ZERO);
 
-    // Pop open fast at the mouth, then thin out as the gas disperses.
+    // Elongated, oriented particles read as short puffs instead of square
+    // billboards. Keep the cross-section narrow throughout the lifetime.
     let mut size_over_life = Gradient::<Vec3>::new();
-    size_over_life.add_key(0.0, Vec3::splat(0.28));
-    size_over_life.add_key(0.16, Vec3::splat(0.85));
-    size_over_life.add_key(1.0, Vec3::splat(0.2));
+    size_over_life.add_key(0.0, Vec3::new(0.10, 0.03, 0.03));
+    size_over_life.add_key(0.2, Vec3::new(0.28, 0.08, 0.08));
+    size_over_life.add_key(1.0, Vec3::new(0.08, 0.02, 0.02));
 
     EffectAsset::new(8192, SpawnerSettings::rate(90.0.into()), module)
         .with_name("rcs_jet")
         .with_simulation_space(SimulationSpace::Local)
-        .with_alpha_mode(AlphaMode::Add)
+        .with_alpha_mode(AlphaMode::Blend)
         .init(init_pos)
         .init(init_vel)
         .init(lifetime)
         .init(size)
         .update(drag)
+        .render(OrientModifier::new(OrientMode::AlongVelocity))
         .render(SizeOverLifetimeModifier {
             gradient: size_over_life,
             screen_space_size: false,
