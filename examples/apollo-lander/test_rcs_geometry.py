@@ -11,6 +11,25 @@ from rcs_geometry import (
     rcs_thruster_levels,
 )
 
+GLB_YELLOW_NOZZLES = (
+    ((1.089, 0.870, -1.506), (0.0, 0.0, -1.0)),
+    ((1.388, 0.874, -1.361), (1.0, 0.0, 0.0)),
+    ((-1.180, 0.527, -1.369), (0.0, -1.0, 0.0)),
+    ((-1.360, 0.855, -1.361), (-1.0, 0.0, 0.0)),
+    ((-1.062, 0.858, -1.507), (0.0, 0.0, -1.0)),
+    ((-1.249, 1.127, 1.230), (0.0, 1.0, 0.0)),
+    ((-1.429, 0.916, 1.280), (-1.0, 0.0, 0.0)),
+    ((-1.232, 0.912, 1.428), (0.0, 0.0, 1.0)),
+    ((1.297, 1.127, 1.243), (0.0, 1.0, 0.0)),
+    ((1.296, 0.694, 1.243), (0.0, -1.0, 0.0)),
+    ((1.484, 0.905, 1.260), (1.0, 0.0, 0.0)),
+    ((1.314, 0.908, 1.442), (0.0, 0.0, 1.0)),
+    ((1.207, 1.201, -1.369), (0.0, 1.0, 0.0)),
+    ((1.207, 0.527, -1.369), (0.0, -1.0, 0.0)),
+    ((-1.249, 0.694, 1.230), (0.0, -1.0, 0.0)),
+    ((-1.180, 1.200, -1.369), (0.0, 1.0, 0.0)),
+)
+
 
 def _cross(
     a: tuple[float, float, float],
@@ -75,6 +94,39 @@ def _kdl_rcs_torques() -> list[tuple[float, float, float]]:
 
 
 class RcsGeometryTests(unittest.TestCase):
+    def test_kdl_dps_uses_original_vector_intensity(self) -> None:
+        kdl = Path(__file__).with_name("apollo-lander.kdl").read_text()
+        match = re.search(
+            r'name="DPS"[^\n]*position="\(([^)]*)\)"[^\n]*intensity=([^\s]+)',
+            kdl,
+        )
+
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(_parse_vec3(match.group(1)), (0.0, -0.55, 0.0))
+        self.assertEqual(match.group(2), "lander.main_thrust_viz")
+        self.assertNotIn('name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" direction=', kdl)
+
+    def test_kdl_rcs_emitters_match_yellow_glb_nozzle_mouths(self) -> None:
+        nozzles = _kdl_rcs_nozzles()
+
+        self.assertEqual(len(nozzles), len(GLB_YELLOW_NOZZLES))
+        for index, ((position, exhaust, _), (expected_pos, expected_exhaust)) in enumerate(
+            zip(nozzles, GLB_YELLOW_NOZZLES)
+        ):
+            for actual, expected in zip(position, expected_pos):
+                self.assertAlmostEqual(
+                    actual,
+                    expected,
+                    places=3,
+                    msg=f"rcs_{index} should originate on the yellow GLB nozzle mouth",
+                )
+            self.assertEqual(
+                exhaust,
+                expected_exhaust,
+                f"rcs_{index} should point along the yellow GLB nozzle axis",
+            )
+
     def test_kdl_rcs_emitters_stay_on_visible_lander_nozzle_band(self) -> None:
         # The GLB is translated by (0, -2.5, 0). Its visible RCS nozzle band
         # lands near +/-1.52 m in X/Z and around 0.5-1.2 m in Y in object space.

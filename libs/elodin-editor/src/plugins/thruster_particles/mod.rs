@@ -5,6 +5,7 @@
 
 use bevy::math::{DVec3, Quat, Vec4};
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use bevy_hanabi::{
     AlphaMode, Attribute, EffectAsset, EffectSpawner, Gradient, HanabiPlugin, Module,
@@ -18,7 +19,6 @@ use bevy_hanabi::{
             SizeOverLifetimeModifier,
         },
         position::SetPositionCone3dModifier,
-        velocity::SetVelocitySphereModifier,
     },
 };
 use impeller2_bevy::EntityMap;
@@ -85,7 +85,8 @@ impl Plugin for ThrusterParticlesPlugin {
                     sync_kdl_thruster_transforms,
                     sync_kdl_thruster_particles,
                 )
-                    .chain(),
+                    .chain()
+                    .after(TransformSystems::Propagate),
             );
     }
 }
@@ -99,35 +100,35 @@ fn setup_thruster_effects(mut commands: Commands, mut effects: ResMut<Assets<Eff
 fn build_dps_exhaust() -> EffectAsset {
     let mut module = Module::default();
     let init_pos = SetPositionCone3dModifier {
-        height: module.lit(0.22),
-        base_radius: module.lit(0.12),
-        top_radius: module.lit(0.32),
+        height: module.lit(0.18),
+        base_radius: module.lit(0.08),
+        top_radius: module.lit(0.22),
         dimension: ShapeDimension::Volume,
     };
     let init_vel =
-        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 15.0));
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(1.65));
-    let size = SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.9, 0.38, 0.38)));
-    let drag = LinearDragModifier::new(module.lit(1.25));
+        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 11.0));
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(1.05));
+    let size = SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.55, 0.24, 0.24)));
+    let drag = LinearDragModifier::new(module.lit(1.6));
 
     let mut color = Gradient::<Vec4>::new();
-    color.add_key(0.0, Vec4::new(1.0, 0.94, 0.82, 0.75));
-    color.add_key(0.1, Vec4::new(1.0, 0.68, 0.16, 0.7));
-    color.add_key(0.35, Vec4::new(1.0, 0.4, 0.05, 0.55));
-    color.add_key(0.7, Vec4::new(0.82, 0.24, 0.03, 0.22));
+    color.add_key(0.0, Vec4::new(1.0, 0.94, 0.82, 0.42));
+    color.add_key(0.1, Vec4::new(1.0, 0.68, 0.16, 0.34));
+    color.add_key(0.35, Vec4::new(1.0, 0.4, 0.05, 0.22));
+    color.add_key(0.7, Vec4::new(0.82, 0.24, 0.03, 0.08));
     color.add_key(1.0, Vec4::ZERO);
 
     let mut size_over_life = Gradient::<Vec3>::new();
-    size_over_life.add_key(0.0, Vec3::new(0.9, 0.42, 0.42));
-    size_over_life.add_key(0.15, Vec3::new(1.8, 0.82, 0.82));
-    size_over_life.add_key(0.45, Vec3::new(2.5, 1.15, 1.15));
-    size_over_life.add_key(0.75, Vec3::new(2.1, 1.0, 1.0));
-    size_over_life.add_key(1.0, Vec3::new(0.7, 0.35, 0.35));
+    size_over_life.add_key(0.0, Vec3::new(0.55, 0.24, 0.24));
+    size_over_life.add_key(0.15, Vec3::new(1.05, 0.46, 0.46));
+    size_over_life.add_key(0.45, Vec3::new(1.45, 0.62, 0.62));
+    size_over_life.add_key(0.75, Vec3::new(1.18, 0.52, 0.52));
+    size_over_life.add_key(1.0, Vec3::new(0.42, 0.2, 0.2));
 
-    EffectAsset::new(32768, SpawnerSettings::rate(340.0.into()), module)
+    EffectAsset::new(16384, SpawnerSettings::rate(220.0.into()), module)
         .with_name("dps_exhaust")
         .with_simulation_space(SimulationSpace::Local)
-        .with_alpha_mode(AlphaMode::Add)
+        .with_alpha_mode(AlphaMode::Blend)
         .init(init_pos)
         .init(init_vel)
         .init(lifetime)
@@ -148,48 +149,42 @@ fn build_dps_exhaust() -> EffectAsset {
 fn build_rcs_jet() -> EffectAsset {
     let mut module = Module::default();
 
-    // Tight nozzle mouth: keep RCS puffs compact so they read as attitude jets,
-    // not large square sprites detached from the vehicle.
+    // Miniature DPS-style plume: anchored at the nozzle mouth, expanding back
+    // into the emitter volume while velocity carries particles outward.
     let init_pos = SetPositionCone3dModifier {
-        height: module.lit(0.025),
-        base_radius: module.lit(0.01),
-        top_radius: module.lit(0.028),
+        height: module.lit(0.12),
+        base_radius: module.lit(0.025),
+        top_radius: module.lit(0.09),
         dimension: ShapeDimension::Volume,
     };
 
-    // Diverging exhaust from a virtual throat just behind the mouth. Lower
-    // speed and drag keep the jet short instead of streaking across the frame.
-    let throat = module.lit(-DPS_EXHAUST_BODY * 0.10);
-    let speed = module.lit(6.5);
-    let init_vel = SetVelocitySphereModifier {
-        center: throat,
-        speed,
-    };
+    let init_vel =
+        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 8.0));
 
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.26));
-    let size =
-        SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.20, 0.055, 0.055)));
-    let drag = LinearDragModifier::new(module.lit(4.2));
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.42));
+    let size = SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.26, 0.08, 0.08)));
+    let drag = LinearDragModifier::new(module.lit(2.0));
 
-    // Compact cold-gas puff: visible enough to debug RCS firing without
-    // returning to the old opaque square sprites.
+    // Blue-white cold gas, brighter than the earlier transparent haze but
+    // still slimmer than the DPS exhaust.
     let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(0.98, 1.05, 1.16, 0.72));
-    gradient.add_key(0.22, Vec4::new(0.72, 0.84, 1.0, 0.46));
-    gradient.add_key(0.58, Vec4::new(0.42, 0.54, 0.70, 0.18));
+    gradient.add_key(0.0, Vec4::new(0.85, 0.95, 1.35, 0.9));
+    gradient.add_key(0.1, Vec4::new(0.58, 0.78, 1.25, 0.8));
+    gradient.add_key(0.35, Vec4::new(0.34, 0.56, 1.0, 0.58));
+    gradient.add_key(0.7, Vec4::new(0.18, 0.34, 0.78, 0.28));
     gradient.add_key(1.0, Vec4::ZERO);
 
-    // Elongated, oriented particles read as short puffs instead of square
-    // billboards. Keep the cross-section narrow throughout the lifetime.
     let mut size_over_life = Gradient::<Vec3>::new();
-    size_over_life.add_key(0.0, Vec3::new(0.12, 0.035, 0.035));
-    size_over_life.add_key(0.2, Vec3::new(0.34, 0.10, 0.10));
-    size_over_life.add_key(1.0, Vec3::new(0.10, 0.025, 0.025));
+    size_over_life.add_key(0.0, Vec3::new(0.22, 0.07, 0.07));
+    size_over_life.add_key(0.15, Vec3::new(0.46, 0.16, 0.16));
+    size_over_life.add_key(0.45, Vec3::new(0.64, 0.22, 0.22));
+    size_over_life.add_key(0.75, Vec3::new(0.48, 0.17, 0.17));
+    size_over_life.add_key(1.0, Vec3::new(0.18, 0.06, 0.06));
 
-    EffectAsset::new(8192, SpawnerSettings::rate(130.0.into()), module)
+    EffectAsset::new(8192, SpawnerSettings::rate(360.0.into()), module)
         .with_name("rcs_jet")
         .with_simulation_space(SimulationSpace::Local)
-        .with_alpha_mode(AlphaMode::Blend)
+        .with_alpha_mode(AlphaMode::Add)
         .init(init_pos)
         .init(init_vel)
         .init(lifetime)
@@ -302,10 +297,13 @@ fn vector_to_bevy(
     body_frame: bool,
     frame: Option<GeoFrame>,
     body_att: Quat,
+    body_transform: Option<&GlobalTransform>,
     geo_context: &GeoContext,
 ) -> Vec3 {
     if body_frame {
-        body_att * vector
+        body_transform
+            .map(|transform| transform.compute_transform().rotation * vector)
+            .unwrap_or(body_att * vector)
     } else if let Some(frame) = frame {
         (GeoFrame::bevy_R_(&frame, geo_context) * DVec3::from(vector)).as_vec3()
     } else {
@@ -319,6 +317,7 @@ fn evaluate_kdl_thruster(
     geo_context: &GeoContext,
     entity_map: &EntityMap,
     component_values: &Query<'_, '_, &'static WktComponentValue>,
+    body_transform: Option<&GlobalTransform>,
 ) -> Option<KdlThrusterEval> {
     let value = jet
         .intensity
@@ -329,12 +328,16 @@ fn evaluate_kdl_thruster(
 
     if jet.vector_intensity {
         let thrust = component_value_tail_to_vec3(&value)?;
+        // Vector thrusters carry their visual direction in telemetry, so keep
+        // the original world-pos attitude path. Fixed-direction scalar jets use
+        // the rendered object transform below to line up with GLB nozzle meshes.
         let thrust = jet.scale
             * vector_to_bevy(
                 thrust.as_vec3(),
                 jet.body_frame,
                 jet.frame,
                 body_att,
+                None,
                 geo_context,
             );
         let magnitude = thrust.length();
@@ -356,6 +359,7 @@ fn evaluate_kdl_thruster(
             jet.body_frame,
             jet.frame,
             body_att,
+            body_transform,
             geo_context,
         );
         Some(KdlThrusterEval { exhaust, intensity })
@@ -363,23 +367,26 @@ fn evaluate_kdl_thruster(
 }
 
 fn sync_kdl_thruster_transforms(
-    objects: Query<(&KdlThrusterRig, &WorldPos)>,
+    objects: Query<(&KdlThrusterRig, &WorldPos, &GlobalTransform), Without<KdlThrusterJet>>,
     mut jets: Query<(&KdlThrusterJet, &mut Transform, &mut GlobalTransform)>,
     entity_map: Res<EntityMap>,
     component_values: Query<&'static WktComponentValue>,
     geo_context: Res<GeoContext>,
 ) {
-    for (rig, world_pos) in &objects {
-        let body_origin = world_pos.bevy_pos().as_vec3();
-
+    for (rig, world_pos, object_global_transform) in &objects {
         for &entity in &rig.jets {
             let Ok((jet, mut transform, mut global_transform)) = jets.get_mut(entity) else {
                 continue;
             };
             let body_att = body_rotation(world_pos, jet.frame, &geo_context);
-            let Some(eval) =
-                evaluate_kdl_thruster(jet, world_pos, &geo_context, &entity_map, &component_values)
-            else {
+            let Some(eval) = evaluate_kdl_thruster(
+                jet,
+                world_pos,
+                &geo_context,
+                &entity_map,
+                &component_values,
+                Some(object_global_transform),
+            ) else {
                 continue;
             };
             let exhaust = if eval.exhaust == Vec3::ZERO {
@@ -391,6 +398,7 @@ fn sync_kdl_thruster_transforms(
                         jet.body_frame,
                         jet.frame,
                         body_att,
+                        Some(object_global_transform),
                         &geo_context,
                     )
                 }
@@ -398,7 +406,7 @@ fn sync_kdl_thruster_transforms(
                 eval.exhaust
             };
             *transform = Transform {
-                translation: body_origin + body_att * jet.body_offset,
+                translation: object_global_transform.transform_point(jet.body_offset),
                 rotation: Quat::from_rotation_arc(DPS_EXHAUST_BODY, exhaust.normalize_or_zero()),
                 scale: Vec3::ONE,
             };
@@ -419,10 +427,16 @@ fn sync_kdl_thruster_particles(
             let Ok((jet, mut spawner, mut visibility)) = jets.get_mut(entity) else {
                 continue;
             };
-            let intensity =
-                evaluate_kdl_thruster(jet, world_pos, &geo_context, &entity_map, &component_values)
-                    .map(|eval| eval.intensity)
-                    .unwrap_or(0.0);
+            let intensity = evaluate_kdl_thruster(
+                jet,
+                world_pos,
+                &geo_context,
+                &entity_map,
+                &component_values,
+                None,
+            )
+            .map(|eval| eval.intensity)
+            .unwrap_or(0.0);
             apply_kdl_spawner(
                 &mut spawner,
                 &mut visibility,
@@ -464,4 +478,19 @@ fn component_value_f64_array(value: &WktComponentValue) -> Option<Vec<f64>> {
 
 fn component_value_scalar(value: &WktComponentValue) -> Option<f32> {
     component_value_f64_array(value).and_then(|values| values.first().copied().map(|v| v as f32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_transform_queries_are_disjoint() {
+        let mut app = App::new();
+        app.init_resource::<EntityMap>()
+            .insert_resource(GeoContext::default())
+            .add_systems(Update, sync_kdl_thruster_transforms);
+
+        app.update();
+    }
 }
