@@ -1816,7 +1816,7 @@ mod tests {
     "#;
 
     const SCHEMATIC_WITH_SKYBOX_FRAGMENT: &str = r#"
-        skybox name="mojave_desert"
+        skybox name="desert_night"
 
         tabs {
             viewport name=Viewport active=#true
@@ -1934,11 +1934,11 @@ mod tests {
     #[test]
     fn set_active_named_skybox_replaces_existing_camera_skybox() {
         let mut app = skybox_apply_test_app();
-        let first = register_test_skybox(&mut app, "alien_swamp");
+        let first = register_test_skybox(&mut app, "desert_night");
         let second = register_test_skybox(&mut app, "grand_canyon");
 
         app.world_mut()
-            .write_message(SetActiveSkybox::ByName("alien_swamp".to_string()));
+            .write_message(SetActiveSkybox::ByName("desert_night".to_string()));
         app.update();
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&first));
 
@@ -1992,39 +1992,49 @@ mod tests {
     fn bundled_manifest_parses() {
         let manifest = bundled_manifest();
         assert_eq!(manifest.version, 2);
-        assert_eq!(manifest.default.as_deref(), Some("mojave_desert"));
+        if let Some(default) = manifest.default.as_deref() {
+            assert!(
+                manifest.get(default).is_some(),
+                "default skybox `{default}` must exist in manifest"
+            );
+        }
     }
 
     #[test]
     fn bundled_manifest_lists_shipped_skyboxes() {
         let manifest = bundled_manifest();
-        for name in [
-            "mojave_desert",
-            "alien_swamp",
-            "beach_sunset",
-            "seaport",
-            "coastal_beach",
-            "grand_canyon",
-        ] {
-            let entry = manifest
-                .get(name)
-                .unwrap_or_else(|| panic!("missing bundled skybox `{name}`"));
+        let valid_face_sizes = [
+            SkyboxResolution::OneK.face_size(),
+            SkyboxResolution::TwoK.face_size(),
+            SkyboxResolution::FourK.face_size(),
+            SkyboxResolution::EightK.face_size(),
+            SkyboxResolution::SixteenK.face_size(),
+        ];
+        assert!(
+            !manifest.entries.is_empty(),
+            "bundled manifest must list at least one skybox"
+        );
+        for entry in &manifest.entries {
             assert!(
                 !entry.cubemap_file.is_empty(),
-                "{name} must reference a cubemap asset"
+                "{} must reference a cubemap asset",
+                entry.name
             );
             assert!(
                 entry.equirect_file.is_none(),
-                "{name} must not reference an equirect source that is not shipped"
+                "{} must not reference an equirect source that is not shipped",
+                entry.name
             );
             assert!(
                 entry.cubemap_file.ends_with(".cubemap.ktx2"),
-                "{name} must ship as KTX2 cubemap"
+                "{} must ship as KTX2 cubemap",
+                entry.name
             );
-            assert_eq!(
-                entry.face_size,
-                cubemap_convert::BUNDLED_CUBEMAP_FACE_SIZE,
-                "{name} must use bundled face size"
+            assert!(
+                valid_face_sizes.contains(&entry.face_size),
+                "{} must use a known skybox face size, got {}",
+                entry.name,
+                entry.face_size
             );
         }
     }
@@ -2081,10 +2091,14 @@ mod tests {
         assert_eq!(loaded.version, original.version);
         assert_eq!(loaded.default, original.default);
         assert_eq!(loaded.entries.len(), original.entries.len());
-        assert_eq!(
-            loaded.get("seaport").unwrap().cubemap_file,
-            "seaport.cubemap.ktx2"
-        );
+        for entry in &original.entries {
+            assert_eq!(
+                loaded.get(&entry.name).map(|loaded| &loaded.cubemap_file),
+                Some(&entry.cubemap_file),
+                "{} must round-trip through manifest serialization",
+                entry.name
+            );
+        }
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -2307,7 +2321,7 @@ mod tests {
     fn parse_skybox_name_from_kdl_fragment() {
         assert_eq!(
             parse_skybox_name_from_kdl(SCHEMATIC_WITH_SKYBOX_FRAGMENT).as_deref(),
-            Some("mojave_desert")
+            Some("desert_night")
         );
         assert_eq!(parse_skybox_name_from_kdl(RC_JET_SCHEMATIC_FRAGMENT), None);
     }

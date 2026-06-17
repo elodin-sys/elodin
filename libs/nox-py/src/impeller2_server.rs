@@ -798,28 +798,28 @@ object_3d "rocket.world_pos" {
     version: 2,
     entries: [
         (
-            name: "mojave_desert",
+            name: "desert_night",
             prompt: "mojave",
             style: M3Photoreal,
             blockade: None,
-            cubemap_file: "mojave_desert.cubemap.ktx2",
+            cubemap_file: "desert_night.cubemap.ktx2",
             face_size: 2048,
             created_at: "2026-05-11T05:34:26Z",
         ),
     ],
-    default: Some("mojave_desert"),
+    default: Some("desert_night"),
 )
 "#;
         std::fs::write(dir.path().join("skyboxes/manifest.ron"), manifest).unwrap();
         std::fs::write(
-            dir.path().join("skyboxes/mojave_desert.cubemap.ktx2"),
+            dir.path().join("skyboxes/desert_night.cubemap.ktx2"),
             b"ktx2-bytes",
         )
         .unwrap();
 
         let mut schematic = Schematic {
             skybox: Some(SkyboxConfig {
-                name: "mojave_desert".into(),
+                name: "desert_night".into(),
             }),
             ..Default::default()
         };
@@ -837,7 +837,7 @@ object_3d "rocket.world_pos" {
             manifest.as_bytes().to_vec()
         );
         assert_eq!(
-            std::fs::read(assets_dir.join("skyboxes/mojave_desert.cubemap.ktx2")).unwrap(),
+            std::fs::read(assets_dir.join("skyboxes/desert_night.cubemap.ktx2")).unwrap(),
             b"ktx2-bytes".to_vec()
         );
     }
@@ -857,11 +857,11 @@ object_3d "rocket.world_pos" {
     version: 2,
     entries: [
         (
-            name: "mojave_desert",
+            name: "desert_night",
             prompt: "mojave",
             style: M3Photoreal,
             blockade: None,
-            cubemap_file: "mojave_desert.cubemap.ktx2",
+            cubemap_file: "desert_night.cubemap.ktx2",
             face_size: 2048,
             created_at: "2026-05-11T05:34:26Z",
         ),
@@ -875,12 +875,12 @@ object_3d "rocket.world_pos" {
             created_at: "2026-05-11T05:34:26Z",
         ),
     ],
-    default: Some("mojave_desert"),
+    default: Some("desert_night"),
 )
 "#;
         std::fs::write(dir.path().join("skyboxes/manifest.ron"), manifest).unwrap();
         std::fs::write(
-            dir.path().join("skyboxes/mojave_desert.cubemap.ktx2"),
+            dir.path().join("skyboxes/desert_night.cubemap.ktx2"),
             b"mojave",
         )
         .unwrap();
@@ -888,7 +888,7 @@ object_3d "rocket.world_pos" {
 
         let mut schematic = Schematic {
             skybox: Some(SkyboxConfig {
-                name: "mojave_desert".into(),
+                name: "desert_night".into(),
             }),
             ..Default::default()
         };
@@ -911,7 +911,7 @@ object_3d "rocket.world_pos" {
         );
         assert!(
             !assets_dir
-                .join("skyboxes/mojave_desert.cubemap.ktx2")
+                .join("skyboxes/desert_night.cubemap.ktx2")
                 .exists()
         );
     }

@@ -30,7 +30,7 @@ fn run() -> Result<(), String> {
     if names.is_empty() {
         return Err(
             "no skybox entries with equirect sources found in manifest; \
-             pass skybox names on the command line (e.g. pack_skybox_assets mojave_desert)"
+             pass skybox names on the command line (e.g. pack_skybox_assets desert_night)"
                 .into(),
         );
     }

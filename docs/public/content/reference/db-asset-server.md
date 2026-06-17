@@ -173,7 +173,7 @@ Skyboxes are **indirect**: the KDL node names a manifest entry, not a single fil
 |-------|----------|
 | **Local files** | `assets/skyboxes/manifest.ron` plus the active entry's `*.cubemap.ktx2` |
 | **On disk in DB** | `assets/skyboxes/manifest.ron` + `assets/skyboxes/{name}.cubemap.ktx2` |
-| **Stored KDL** | `skybox name="mojave_desert"` unchanged (name is logical) |
+| **Stored KDL** | `skybox name="desert_night"` unchanged (name is logical) |
 | **Editor** | Async download from DB HTTP into the local skybox cache, then `SetActiveSkybox` |
 | **Clear** | Empty `skybox.active` metadata or schematic without a `skybox` node → skybox cleared in the editor |
 

@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn loaded_document_with_skybox_requests_activation() {
         let mut app = skybox_message_test_app();
-        app.world_mut().resource_mut::<SkyboxCache>().active = Some("alien_swamp".to_string());
+        app.world_mut().resource_mut::<SkyboxCache>().active = Some("desert_night".to_string());
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,
             document: SchematicDocumentAsset {
@@ -417,10 +417,10 @@ mod tests {
     fn loaded_document_skybox_replaces_existing_camera_skybox() {
         let temp = TempTestDir::new("skybox-runtime-replace");
         let mut app = skybox_runtime_test_app(temp.path());
-        let first = register_runtime_test_skybox(&mut app, "alien_swamp");
+        let first = register_runtime_test_skybox(&mut app, "desert_night");
         let second = register_runtime_test_skybox(&mut app, "grand_canyon");
 
-        load_test_document(&mut app, Some("alien_swamp"));
+        load_test_document(&mut app, Some("desert_night"));
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&first));
 
         load_test_document(&mut app, Some("grand_canyon"));

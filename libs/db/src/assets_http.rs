@@ -523,21 +523,21 @@ mod tests {
     version: 2,
     entries: [
         (
-            name: "mojave_desert",
+            name: "desert_night",
             prompt: "mojave",
             style: M3Photoreal,
             blockade: None,
-            cubemap_file: "mojave_desert.cubemap.ktx2",
+            cubemap_file: "desert_night.cubemap.ktx2",
             face_size: 2048,
             created_at: "2026-05-11T05:34:26Z",
         ),
     ],
-    default: Some("mojave_desert"),
+    default: Some("desert_night"),
 )
 "#;
         std::fs::write(source_assets.join("skyboxes/manifest.ron"), skybox_manifest).unwrap();
         std::fs::write(
-            source_assets.join("skyboxes/mojave_desert.cubemap.ktx2"),
+            source_assets.join("skyboxes/desert_night.cubemap.ktx2"),
             b"ktx2-source",
         )
         .unwrap();
@@ -561,7 +561,7 @@ mod tests {
 
         let follower_db = dir.path().join("follower_db");
         let kdl = r#"
-skybox name="mojave_desert"
+skybox name="desert_night"
 
 object_3d "rocket.world_pos" {
     glb path="db:models/rocket.glb"
@@ -585,7 +585,7 @@ object_3d "rocket.world_pos" {
             skybox_manifest.as_bytes().to_vec()
         );
         assert_eq!(
-            std::fs::read(assets_dir(&follower_db).join("skyboxes/mojave_desert.cubemap.ktx2"))
+            std::fs::read(assets_dir(&follower_db).join("skyboxes/desert_night.cubemap.ktx2"))
                 .unwrap(),
             b"ktx2-source".to_vec()
         );
@@ -601,11 +601,11 @@ object_3d "rocket.world_pos" {
     version: 2,
     entries: [
         (
-            name: "mojave_desert",
+            name: "desert_night",
             prompt: "mojave",
             style: M3Photoreal,
             blockade: None,
-            cubemap_file: "mojave_desert.cubemap.ktx2",
+            cubemap_file: "desert_night.cubemap.ktx2",
             face_size: 2048,
             created_at: "2026-05-11T05:34:26Z",
         ),
@@ -619,12 +619,12 @@ object_3d "rocket.world_pos" {
             created_at: "2026-05-11T05:34:26Z",
         ),
     ],
-    default: Some("mojave_desert"),
+    default: Some("desert_night"),
 )
 "#;
         std::fs::write(source_assets.join("skyboxes/manifest.ron"), skybox_manifest).unwrap();
         std::fs::write(
-            source_assets.join("skyboxes/mojave_desert.cubemap.ktx2"),
+            source_assets.join("skyboxes/desert_night.cubemap.ktx2"),
             b"mojave",
         )
         .unwrap();
@@ -653,7 +653,7 @@ object_3d "rocket.world_pos" {
 
         let follower_db = dir.path().join("follower_db");
         let kdl = r#"
-skybox name="mojave_desert"
+skybox name="desert_night"
 "#;
         let mut db_config = DbConfig::default();
         db_config.set_skybox_active(Some("alpine"));
@@ -668,7 +668,7 @@ skybox name="mojave_desert"
         );
         assert!(
             !assets_dir(&follower_db)
-                .join("skyboxes/mojave_desert.cubemap.ktx2")
+                .join("skyboxes/desert_night.cubemap.ktx2")
                 .exists()
         );
     }
@@ -770,7 +770,7 @@ object_3d "rocket.world_pos" {
     fn skybox_name_for_schematic_sync_prefers_metadata() {
         let schematic = Schematic {
             skybox: Some(impeller2_wkt::SkyboxConfig {
-                name: "mojave_desert".to_string(),
+                name: "desert_night".to_string(),
             }),
             ..Default::default()
         };

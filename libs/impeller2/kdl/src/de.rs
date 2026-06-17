@@ -1864,7 +1864,7 @@ mod tests {
 
     #[test]
     fn test_parse_skybox_config() {
-        let schematic = parse_schematic(r#"skybox name="mojave_desert""#).unwrap();
+        let schematic = parse_schematic(r#"skybox name="desert_night""#).unwrap();
 
         assert!(schematic.elems.is_empty());
         assert_eq!(
@@ -1872,7 +1872,7 @@ mod tests {
                 .skybox
                 .expect("skybox config should be parsed")
                 .name,
-            "mojave_desert"
+            "desert_night"
         );
     }
 

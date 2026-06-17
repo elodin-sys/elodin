@@ -1786,7 +1786,7 @@ mod tests {
     fn save_kdl_active_skybox_replaces_stale_schematic_skybox() {
         let schematic = CurrentSchematic(Schematic {
             skybox: Some(SkyboxConfig {
-                name: "alien_swamp".to_string(),
+                name: "desert_night".to_string(),
             }),
             ..Default::default()
         });

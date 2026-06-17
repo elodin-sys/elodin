@@ -1085,7 +1085,7 @@ mod tests {
     fn test_serialize_skybox_config() {
         let schematic = Schematic {
             skybox: Some(SkyboxConfig {
-                name: "mojave_desert".to_string(),
+                name: "desert_night".to_string(),
             }),
             ..Default::default()
         };
@@ -1094,10 +1094,10 @@ mod tests {
         let parsed = parse_schematic(&serialized).unwrap();
 
         assert!(serialized.contains("skybox"));
-        assert!(serialized.contains("mojave_desert"));
+        assert!(serialized.contains("desert_night"));
         assert_eq!(
             parsed.skybox.expect("skybox config should roundtrip").name,
-            "mojave_desert"
+            "desert_night"
         );
     }
 

@@ -110,6 +110,7 @@ features = [
   "std",
   "async_executor",
   "android-game-activity",
+  "basis-universal",
   "bevy_animation",
   "bevy_asset",
   "bevy_color",

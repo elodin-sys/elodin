@@ -304,11 +304,11 @@ mod tests {
     #[test]
     fn desired_skybox_from_config_reads_schematic_content() {
         let mut config = DbConfig::default();
-        config.set_schematic_content(r#"skybox name="mojave_desert""#.to_string());
+        config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
 
         assert_eq!(
             desired_skybox_from_config(&config),
-            Some(Some("mojave_desert".to_string()))
+            Some(Some("desert_night".to_string()))
         );
     }
 
@@ -318,7 +318,7 @@ mod tests {
         config
             .metadata
             .insert("skybox.active".to_string(), String::new());
-        config.set_schematic_content(r#"skybox name="mojave_desert""#.to_string());
+        config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
 
         assert_eq!(desired_skybox_from_config(&config), Some(None));
     }
@@ -334,11 +334,11 @@ mod tests {
         let mirror = DbSkyboxAssetMirror {
             synced: Some(MirrorKey {
                 addr,
-                skybox: "mojave_desert".to_string(),
+                skybox: "desert_night".to_string(),
             }),
             last_failed: None,
         };
-        assert!(db_skybox_mirror_synced(addr, "mojave_desert", &mirror));
+        assert!(db_skybox_mirror_synced(addr, "desert_night", &mirror));
         assert!(!db_skybox_mirror_synced(addr, "grand_canyon", &mirror));
     }
 
@@ -347,13 +347,13 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:2240".parse().unwrap();
         let key = MirrorKey {
             addr,
-            skybox: "mojave_desert".to_string(),
+            skybox: "desert_night".to_string(),
         };
         let mirror = DbSkyboxAssetMirror::default();
         let in_flight = DbSkyboxSyncInFlight::default();
         assert!(db_skybox_mirror_pending(
             addr,
-            "mojave_desert",
+            "desert_night",
             &mirror,
             &in_flight
         ));
@@ -364,7 +364,7 @@ mod tests {
         };
         assert!(!db_skybox_mirror_pending(
             addr,
-            "mojave_desert",
+            "desert_night",
             &mirror,
             &in_flight
         ));
@@ -375,7 +375,7 @@ mod tests {
         };
         assert!(!db_skybox_mirror_pending(
             addr,
-            "mojave_desert",
+            "desert_night",
             &mirror,
             &in_flight
         ));
