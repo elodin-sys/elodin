@@ -51,8 +51,8 @@ order = 8
 
 - `Skybox...`: submenu for skybox actions against `assets/skyboxes/manifest.ron` or
   `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron`.
-  - `Generate Skybox...`: prompt for a description, generate a new skybox via Blockade, add it to
-    the manifest, and activate it.
+  - `Generate Skybox...`: prompt for a description, then choose a Blockade style and local cubemap
+    resolution before generating the skybox, adding it to the manifest, and activating it.
   - `Clear Skybox`: shown when a skybox is active; removes it from viewports and sensor cameras and
     removes the top-level `skybox` node from the current schematic.
   - `Revert to …`: shown after AI generation replaced an active skybox.
@@ -62,9 +62,9 @@ Selecting a cached skybox sets `skybox name="..."` on the current schematic and 
 immediately. Use **Save Schematic** or **Save Schematic To DB** to persist changes.
 
 Skybox generation requires `BLOCKADE_API_KEY` in the editor environment. Generated cubemaps are
-resampled locally to the configured face size (default 2048 px per face); Blockade always returns an
-~8K equirect source, so higher local presets upscale rather than fetching a higher remote tier.
-Generated assets are written next to the manifest used by the editor.
+resampled locally to the selected face size (`4K` is the default, 1024 px per face); Blockade always
+returns an ~8K equirect source, so higher local presets upscale rather than fetching a higher remote
+tier. Generated assets are written next to the manifest used by the editor.
 
 ## Simulation
 
