@@ -112,10 +112,10 @@ fn build_dps_exhaust() -> EffectAsset {
     let drag = LinearDragModifier::new(module.lit(1.6));
 
     let mut color = Gradient::<Vec4>::new();
-    color.add_key(0.0, Vec4::new(1.0, 0.94, 0.82, 0.42));
-    color.add_key(0.1, Vec4::new(1.0, 0.74, 0.28, 0.34));
-    color.add_key(0.35, Vec4::new(0.95, 0.48, 0.12, 0.22));
-    color.add_key(0.7, Vec4::new(0.68, 0.28, 0.08, 0.08));
+    color.add_key(0.0, Vec4::new(1.0, 0.96, 0.86, 0.38));
+    color.add_key(0.1, Vec4::new(1.0, 0.82, 0.46, 0.3));
+    color.add_key(0.35, Vec4::new(0.82, 0.58, 0.34, 0.17));
+    color.add_key(0.7, Vec4::new(0.46, 0.38, 0.3, 0.06));
     color.add_key(1.0, Vec4::ZERO);
 
     let mut size_over_life = Gradient::<Vec3>::new();
@@ -340,18 +340,7 @@ fn evaluate_kdl_thruster(
                 None,
                 geo_context,
             );
-        let magnitude = thrust.length();
-        let intensity = magnitude.clamp(0.0, 1.0);
-        if intensity <= jet.cutoff || magnitude * magnitude <= MIN_THRUST_VECTOR_LENGTH_SQUARED {
-            return Some(KdlThrusterEval {
-                exhaust: Vec3::ZERO,
-                intensity: 0.0,
-            });
-        }
-        Some(KdlThrusterEval {
-            exhaust: (-thrust).normalize(),
-            intensity,
-        })
+        Some(evaluate_vector_thruster(thrust, jet.cutoff))
     } else {
         let intensity = component_value_scalar(&value)?.clamp(0.0, 1.0);
         let exhaust = vector_to_bevy(
@@ -363,6 +352,21 @@ fn evaluate_kdl_thruster(
             geo_context,
         );
         Some(KdlThrusterEval { exhaust, intensity })
+    }
+}
+
+fn evaluate_vector_thruster(thrust: Vec3, cutoff: f32) -> KdlThrusterEval {
+    let magnitude = thrust.length();
+    let intensity = magnitude.clamp(0.0, 1.0);
+    if intensity <= cutoff || magnitude * magnitude <= MIN_THRUST_VECTOR_LENGTH_SQUARED {
+        return KdlThrusterEval {
+            exhaust: Vec3::ZERO,
+            intensity: 0.0,
+        };
+    }
+    KdlThrusterEval {
+        exhaust: (-thrust).normalize(),
+        intensity,
     }
 }
 
@@ -483,6 +487,56 @@ fn component_value_scalar(value: &WktComponentValue) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_vec3_near(actual: Vec3, expected: Vec3) {
+        assert!(
+            (actual - expected).length() < 1e-6,
+            "expected {expected:?}, got {actual:?}",
+        );
+    }
+
+    #[test]
+    fn vector_thruster_eval_reports_direction_sense_and_intensity() {
+        let eval = evaluate_vector_thruster(Vec3::new(0.0, 0.0, 0.25), 0.0);
+
+        assert_vec3_near(eval.exhaust, Vec3::NEG_Z);
+        assert!((eval.intensity - 0.25).abs() < 1e-6);
+
+        let saturated = evaluate_vector_thruster(Vec3::new(0.0, 0.0, -2.0), 0.0);
+
+        assert_vec3_near(saturated.exhaust, Vec3::Z);
+        assert!((saturated.intensity - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn vector_thruster_eval_hides_below_cutoff() {
+        let eval = evaluate_vector_thruster(Vec3::new(0.0, 0.0, 0.004), 0.006);
+
+        assert_vec3_near(eval.exhaust, Vec3::ZERO);
+        assert_eq!(eval.intensity, 0.0);
+    }
+
+    #[test]
+    fn vector_body_frame_conversion_can_use_attitude_without_render_transform() {
+        let attitude = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let render_transform = GlobalTransform::from(Transform::from_rotation(
+            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+        ));
+
+        let via_attitude =
+            vector_to_bevy(Vec3::X, true, None, attitude, None, &GeoContext::default());
+        let via_render_transform = vector_to_bevy(
+            Vec3::X,
+            true,
+            None,
+            attitude,
+            Some(&render_transform),
+            &GeoContext::default(),
+        );
+
+        assert_vec3_near(via_attitude, Vec3::Y);
+        assert!((via_render_transform - via_attitude).length() > 0.5);
+    }
 
     #[test]
     fn sync_transform_queries_are_disjoint() {
