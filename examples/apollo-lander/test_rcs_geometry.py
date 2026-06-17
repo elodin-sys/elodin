@@ -222,9 +222,7 @@ class RcsGeometryTests(unittest.TestCase):
                     if level <= 0.0:
                         continue
                     torque = torques[index]
-                    dominant_axis = max(
-                        range(3), key=lambda item: abs(torque[item])
-                    )
+                    dominant_axis = max(range(3), key=lambda item: abs(torque[item]))
                     self.assertEqual(dominant_axis, axis)
                     self.assertEqual(_sign(torque[dominant_axis]), sign)
 
