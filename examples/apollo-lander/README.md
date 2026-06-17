@@ -293,5 +293,6 @@ Use `--dry-run` to only write the narrowed specs.
 - **Editor preview (experimental, native only):** GPU exhaust particles fully
   declared in KDL and driven by EQL viz channels. The DPS plume uses a vector
   `intensity` from `main_thrust_viz` (`effect="plume"`); the 16 cold-gas RCS
-  jets each bind `rcs_thruster_viz[i]` with `effect="cold_gas"`. Nozzle geometry
-  and presets live in `apollo-lander.kdl`.
+  jets each bind `rcs_thruster_viz[i]` with `effect="cold_gas"`. RCS jet
+  activity follows the body-frame RCS torque command, not the DPS throttle.
+  Nozzle geometry and presets live in `apollo-lander.kdl`.

@@ -8,6 +8,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from reference import build_reference
+from rcs_geometry import RCS_THRUSTER_AXIS as RCS_THRUSTER_AXIS_TABLE
+from rcs_geometry import RCS_THRUSTER_SIGN as RCS_THRUSTER_SIGN_TABLE
 
 SIMULATION_RATE_HZ = 120.0
 SIM_TIME_STEP = 1.0 / SIMULATION_RATE_HZ
@@ -159,17 +161,14 @@ RcsTorqueViz = ty.Annotated[
     jax.Array,
     el.Component("rcs_torque_viz", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
-# Per-nozzle cold-gas firing level (0..1) for editor particles. Index order matches
-# `RCS_JETS` in libs/elodin-editor/src/plugins/thruster_particles/mod.rs.
+# Per-nozzle cold-gas firing level (0..1) for editor particles. Index order
+# matches the RCS thruster declarations in apollo-lander.kdl.
 RcsThrusterViz = ty.Annotated[
     jax.Array,
     el.Component("rcs_thruster_viz", el.ComponentType(el.PrimitiveType.F64, (16,))),
 ]
-RCS_THRUSTER_AXIS = jnp.array([0, 0, 2, 2, 0, 0, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2], dtype=jnp.int32)
-RCS_THRUSTER_SIGN = jnp.array(
-    [1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0],
-    dtype=jnp.float64,
-)
+RCS_THRUSTER_AXIS = jnp.array(RCS_THRUSTER_AXIS_TABLE, dtype=jnp.int32)
+RCS_THRUSTER_SIGN = jnp.array(RCS_THRUSTER_SIGN_TABLE, dtype=jnp.float64)
 Landed = ty.Annotated[
     jax.Array,
     el.Component("landed", el.ComponentType(el.PrimitiveType.F64, (1,))),

@@ -46,7 +46,7 @@ object_3d surface.world_pos frame=ENU {
 // All thruster exhaust is declared here in KDL and driven by EQL viz channels.
 // DPS: vector intensity (direction + magnitude from lander.main_thrust_viz).
 // RCS: 16 cold-gas jets, scalar intensity from lander.rcs_thruster_viz[i].
-// RCS index order must match RCS_THRUSTER_AXIS / RCS_THRUSTER_SIGN in sim.py.
+// RCS index order must match RCS_THRUSTER_AXIS / RCS_THRUSTER_SIGN in rcs_geometry.py.
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
     thruster name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz
