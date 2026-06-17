@@ -1409,6 +1409,7 @@ pub fn on_arrow_pressed(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn on_action_button_click(
     trigger: On<Pointer<Click>>,
     action_buttons: Query<&ViewportActionButton>,
