@@ -97,7 +97,8 @@ class RcsGeometryTests(unittest.TestCase):
     def test_kdl_dps_uses_original_vector_intensity(self) -> None:
         kdl = Path(__file__).with_name("apollo-lander.kdl").read_text()
         match = re.search(
-            r'name="DPS"[^\n]*position="\(([^)]*)\)"[^\n]*intensity=([^\s]+)',
+            r'name="DPS"[^\n]*position="\(([^)]*)\)"[^\n]*intensity=([^\s]+)[^\n]*'
+            r"emission_rate=([0-9.]+)",
             kdl,
         )
 
@@ -105,7 +106,11 @@ class RcsGeometryTests(unittest.TestCase):
         assert match is not None
         self.assertEqual(_parse_vec3(match.group(1)), (0.0, -0.55, 0.0))
         self.assertEqual(match.group(2), "lander.main_thrust_viz")
-        self.assertNotIn('name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" direction=', kdl)
+        self.assertEqual(float(match.group(3)), 180.0)
+        self.assertNotIn(
+            'name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" direction=',
+            kdl,
+        )
 
     def test_kdl_rcs_emitters_match_yellow_glb_nozzle_mouths(self) -> None:
         nozzles = _kdl_rcs_nozzles()

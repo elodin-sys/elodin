@@ -99,12 +99,13 @@ fn setup(
 | `sync_with_camera` | `bool` | `true` | Cube rotation mirrors main camera |
 | `camera_distance` | `f32` | `2.5` | Overlay camera distance from cube |
 | `scale` | `f32` | `0.6` | Cube scale factor |
-| `rotation_increment` | `f32` | `15°` | Arrow click angular step |
+| `rotation_increment` | `f32` | `15°` default, `5°` editor mode | Arrow click angular step |
 | `axis_correction` | `Quat` | `IDENTITY` | Extra rotation applied after the system correction |
 | `render_layer` | `u8` | `31` | Render layer used by ViewCube camera and entities |
 | `system` | `CoordinateSystem` | `ENU` | Coordinate system (ENU only) |
 
-`ViewCubeConfig::editor_mode()` is the canonical preset and currently matches `Default`.
+`ViewCubeConfig::editor_mode()` is the canonical preset for the editor overlay and uses a finer
+rotation step than `Default`.
 
 ## Required Assets
 

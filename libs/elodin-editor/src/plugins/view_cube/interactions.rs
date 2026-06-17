@@ -1,7 +1,9 @@
 //! Interaction handlers for the ViewCube widget.
 
+use bevy::camera::NormalizedRenderTarget;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
+use bevy::picking::pointer::Location;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
@@ -1051,6 +1053,7 @@ fn frame_hover_swap_target(
     Some((context.front_face.opposite(), root))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn on_cube_click(
     trigger: On<Pointer<Click>>,
     cube_elements: Query<(Entity, &CubeElement)>,
@@ -1058,6 +1061,8 @@ pub fn on_cube_click(
     lookup: OnCubeClickLookup,
     hovered: Res<HoveredElement>,
     input_owners: Res<UiInputOwners>,
+    windows: Query<&Window>,
+    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     if trigger.event().button != PointerButton::Primary {
@@ -1101,7 +1106,13 @@ pub fn on_cube_click(
     let Ok(link) = lookup.root_links.get(source) else {
         return;
     };
-    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
+    if !permits_view_cube_interaction(
+        &input_owners,
+        link.main_camera,
+        &trigger.pointer_location,
+        &windows,
+        &overlay_cameras,
+    ) {
         return;
     }
 
@@ -1176,6 +1187,8 @@ pub fn on_cube_drag(
     mut cameras: Query<(&Transform, &mut EditorCam, &Camera), With<ViewCubeTargetCamera>>,
     dragging_roots: Query<(), With<ViewCubeDragging>>,
     input_owners: Res<UiInputOwners>,
+    windows: Query<&Window>,
+    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
     if drag.button != PointerButton::Secondary {
@@ -1196,7 +1209,13 @@ pub fn on_cube_drag(
     let Ok((transform, mut editor_cam, camera)) = cameras.get_mut(link.main_camera) else {
         return;
     };
-    if !input_owners.permits_view_cube_location(link.main_camera, &drag.pointer_location) {
+    if !permits_view_cube_interaction(
+        &input_owners,
+        link.main_camera,
+        &drag.pointer_location,
+        &windows,
+        &overlay_cameras,
+    ) {
         if dragging_roots.get(root).is_ok() {
             editor_cam.end_move();
             commands.entity(root).remove::<ViewCubeDragging>();
@@ -1341,6 +1360,8 @@ pub fn on_arrow_pressed(
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
     input_owners: Res<UiInputOwners>,
+    windows: Query<&Window>,
+    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut hold: ResMut<ActiveArrowHold>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
@@ -1365,7 +1386,13 @@ pub fn on_arrow_pressed(
     let Ok((_, link)) = root_query.get(source) else {
         return;
     };
-    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
+    if !permits_view_cube_interaction(
+        &input_owners,
+        link.main_camera,
+        &trigger.pointer_location,
+        &windows,
+        &overlay_cameras,
+    ) {
         return;
     }
 
@@ -1389,6 +1416,8 @@ pub fn on_action_button_click(
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
     input_owners: Res<UiInputOwners>,
+    windows: Query<&Window>,
+    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     if trigger.event().button != PointerButton::Primary {
@@ -1412,7 +1441,13 @@ pub fn on_action_button_click(
     let Ok((_, link)) = root_query.get(source) else {
         return;
     };
-    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
+    if !permits_view_cube_interaction(
+        &input_owners,
+        link.main_camera,
+        &trigger.pointer_location,
+        &windows,
+        &overlay_cameras,
+    ) {
         return;
     }
 
@@ -1574,6 +1609,46 @@ fn find_root_for_camera_child(
     None
 }
 
+fn permits_view_cube_interaction(
+    input_owners: &UiInputOwners,
+    main_camera: Entity,
+    location: &Location,
+    windows: &Query<&Window>,
+    overlay_cameras: &Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+) -> bool {
+    if input_owners.permits_view_cube_location(main_camera, location) {
+        return true;
+    }
+
+    pointer_in_view_cube_overlay_viewport(main_camera, location, windows, overlay_cameras)
+}
+
+fn pointer_in_view_cube_overlay_viewport(
+    main_camera: Entity,
+    location: &Location,
+    windows: &Query<&Window>,
+    overlay_cameras: &Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+) -> bool {
+    let NormalizedRenderTarget::Window(window_ref) = &location.target else {
+        return false;
+    };
+    let Ok(window) = windows.get(window_ref.entity()) else {
+        return false;
+    };
+    let cursor = location.position * window.scale_factor();
+
+    overlay_cameras
+        .iter()
+        .filter(|(camera, link)| camera.is_active && link.main_camera == main_camera)
+        .any(|(camera, _)| {
+            camera.viewport.as_ref().is_some_and(|viewport| {
+                let min = viewport.physical_position.as_vec2();
+                let max = min + viewport.physical_size.as_vec2();
+                cursor.x >= min.x && cursor.x < max.x && cursor.y >= min.y && cursor.y < max.y
+            })
+        })
+}
+
 fn find_ancestor(
     entity: Entity,
     parents_query: &Query<&ChildOf>,
@@ -1621,6 +1696,8 @@ fn corner_local_direction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::camera::Viewport;
+    use bevy::ecs::system::SystemState;
 
     fn context(camera_dir_cube: Vec3) -> EdgeInteractionContext {
         let (front_face, front_dot) = front_face(camera_dir_cube);
@@ -1717,6 +1794,58 @@ mod tests {
             })
             .collect();
         assert!(corners.len() >= 2);
+    }
+
+    fn location(window: Entity, x: f32, y: f32) -> Location {
+        Location {
+            target: NormalizedRenderTarget::Window(
+                bevy::window::WindowRef::Entity(window)
+                    .normalize(None)
+                    .expect("normalized window"),
+            ),
+            position: Vec2::new(x, y),
+        }
+    }
+
+    #[test]
+    fn view_cube_interaction_can_use_overlay_viewport_when_owner_is_stale() {
+        let mut app = App::new();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let main_camera = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((
+            Camera {
+                viewport: Some(Viewport {
+                    physical_position: UVec2::new(100, 20),
+                    physical_size: UVec2::new(128, 128),
+                    depth: 0.0..1.0,
+                }),
+                ..default()
+            },
+            ViewCubeCamera,
+            ViewCubeLink { main_camera },
+        ));
+
+        let mut system_state: SystemState<(
+            Query<'static, 'static, &'static Window>,
+            Query<'static, 'static, (&'static Camera, &'static ViewCubeLink), With<ViewCubeCamera>>,
+        )> = SystemState::new(app.world_mut());
+        let (windows, overlay_cameras) = system_state.get(app.world());
+        let owners = UiInputOwners::default();
+
+        assert!(permits_view_cube_interaction(
+            &owners,
+            main_camera,
+            &location(window, 120.0, 40.0),
+            &windows,
+            &overlay_cameras,
+        ));
+        assert!(!permits_view_cube_interaction(
+            &owners,
+            main_camera,
+            &location(window, 20.0, 40.0),
+            &windows,
+            &overlay_cameras,
+        ));
     }
 
     #[test]

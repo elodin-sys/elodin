@@ -113,9 +113,9 @@ fn build_dps_exhaust() -> EffectAsset {
 
     let mut color = Gradient::<Vec4>::new();
     color.add_key(0.0, Vec4::new(1.0, 0.94, 0.82, 0.42));
-    color.add_key(0.1, Vec4::new(1.0, 0.68, 0.16, 0.34));
-    color.add_key(0.35, Vec4::new(1.0, 0.4, 0.05, 0.22));
-    color.add_key(0.7, Vec4::new(0.82, 0.24, 0.03, 0.08));
+    color.add_key(0.1, Vec4::new(1.0, 0.74, 0.28, 0.34));
+    color.add_key(0.35, Vec4::new(0.95, 0.48, 0.12, 0.22));
+    color.add_key(0.7, Vec4::new(0.68, 0.28, 0.08, 0.08));
     color.add_key(1.0, Vec4::ZERO);
 
     let mut size_over_life = Gradient::<Vec3>::new();

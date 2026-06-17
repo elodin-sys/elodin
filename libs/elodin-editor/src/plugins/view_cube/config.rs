@@ -241,7 +241,10 @@ impl Default for ViewCubeConfig {
 impl ViewCubeConfig {
     /// Single supported mode: editor overlay integration.
     pub fn editor_mode() -> Self {
-        Self::default()
+        Self {
+            rotation_increment: 5.0 * PI / 180.0,
+            ..Self::default()
+        }
     }
 }
 
@@ -271,5 +274,18 @@ mod tests {
         assert_eq!(west.position, Vec3::NEG_X);
         assert_eq!(up.position, Vec3::Y);
         assert_eq!(south.position, Vec3::Z);
+    }
+
+    #[test]
+    fn editor_mode_uses_fine_rotation_increment() {
+        assert!(
+            (ViewCubeConfig::editor_mode()
+                .rotation_increment
+                .to_degrees()
+                - 5.0)
+                .abs()
+                < 1e-5
+        );
+        assert!((ViewCubeConfig::default().rotation_increment.to_degrees() - 15.0).abs() < 1e-5);
     }
 }
