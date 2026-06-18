@@ -116,10 +116,13 @@ impl CommandPaletteState {
                 prev_page_label,
             } => {
                 self.error = None;
-                self.filter = "".to_string();
-                if let Some(prev_page_label) = prev_page_label {
-                    self.page_stack.last_mut().expect("unreachable").label = Some(prev_page_label);
+                if let Some(prev) = self.page_stack.last_mut() {
+                    prev.remembered_filter = Some(std::mem::take(&mut self.filter));
+                    if let Some(prev_page_label) = prev_page_label {
+                        prev.label = Some(prev_page_label);
+                    }
                 }
+                self.filter = String::new();
                 self.page_stack.push(next_page);
                 self.input_focus = true;
                 self.selected_index = 0;
@@ -396,6 +399,11 @@ impl WidgetSystem for PaletteSearch<'_> {
                             popped_page = true;
                             command_palette_state.page_stack.pop();
                             command_palette_state.selected_index = 0;
+                            command_palette_state.filter = command_palette_state
+                                .page_stack
+                                .last_mut()
+                                .and_then(|prev| prev.remembered_filter.take())
+                                .unwrap_or_default();
                         }
                     }
 

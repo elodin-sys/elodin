@@ -23,6 +23,7 @@ use bevy::{
 };
 use bevy_ai_skybox::prelude::{
     GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings, SkyboxGenerationUi,
+    SkyboxResolution, SkyboxStyle,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
@@ -76,6 +77,9 @@ pub struct PalettePage {
     pub label: Option<String>,
     initialized: bool,
     pub prompt: Option<String>,
+    /// Filter text active on this page when it was left for a sub-page, so it
+    /// can be restored when the user navigates back (e.g. a skybox prompt).
+    pub remembered_filter: Option<String>,
 }
 
 impl PalettePage {
@@ -85,6 +89,7 @@ impl PalettePage {
             initialized: false,
             label: None,
             prompt: None,
+            remembered_filter: None,
         }
     }
 
@@ -1305,10 +1310,7 @@ fn generate_skybox_from_prompt() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Describe a new skybox..."),
         SKYBOX_LABEL,
-        |In(prompt): In<String>,
-         settings: Option<Res<SkyboxGenerationSettings>>,
-         skybox_ui: Res<SkyboxGenerationUi>,
-         mut skyboxes: MessageWriter<GenerateSkybox>| {
+        |In(prompt): In<String>| {
             let prompt = prompt.trim();
             if prompt.is_empty() {
                 error!(
@@ -1317,6 +1319,55 @@ fn generate_skybox_from_prompt() -> PaletteItem {
                 );
                 return PaletteEvent::Error("Prompt cannot be empty".into());
             }
+
+            PalettePage::new(skybox_style_items(prompt.to_string()))
+                .label("Skybox Style")
+                .prompt("Select skybox style...")
+                .into_event()
+        },
+    )
+    .default()
+}
+
+fn skybox_style_items(prompt: String) -> Vec<PaletteItem> {
+    [
+        ("M3 Photoreal (default)", SkyboxStyle::M3Photoreal),
+        ("M3 UHD Render", SkyboxStyle::M3UhdRender),
+        ("M3 Advanced", SkyboxStyle::M3Advanced),
+    ]
+    .into_iter()
+    .map(|(label, style)| {
+        let prompt = prompt.clone();
+        PaletteItem::new(label, SKYBOX_LABEL, move |_: In<String>| {
+            PalettePage::new(skybox_resolution_items(prompt.clone(), style))
+                .label("Skybox Resolution")
+                .prompt("Select skybox resolution...")
+                .into_event()
+        })
+    })
+    .collect()
+}
+
+fn skybox_resolution_items(prompt: String, style: SkyboxStyle) -> Vec<PaletteItem> {
+    // Default (4K) first so confirming with Enter without moving the selection
+    // picks the documented default, matching the style page convention.
+    [
+        ("4K (default, 1024 px faces)", SkyboxResolution::FourK),
+        ("1K (256 px faces)", SkyboxResolution::OneK),
+        ("2K (512 px faces)", SkyboxResolution::TwoK),
+        ("8K (2048 px faces)", SkyboxResolution::EightK),
+        ("16K (4096 px faces)", SkyboxResolution::SixteenK),
+    ]
+    .into_iter()
+    .map(|(label, resolution)| {
+        let prompt = prompt.clone();
+        PaletteItem::new(
+            label,
+            SKYBOX_LABEL,
+            move |_: In<String>,
+                  settings: Option<Res<SkyboxGenerationSettings>>,
+                  skybox_ui: Res<SkyboxGenerationUi>,
+                  mut skyboxes: MessageWriter<GenerateSkybox>| {
             if skybox_ui.is_busy() {
                 error!(
                     target: "bevy_ai_skybox",
@@ -1349,13 +1400,16 @@ fn generate_skybox_from_prompt() -> PaletteItem {
             }
 
             skyboxes.write(GenerateSkybox {
-                prompt: prompt.to_string(),
+                prompt: prompt.clone(),
+                style: Some(style),
+                resolution: Some(resolution),
                 ..Default::default()
             });
             PaletteEvent::Exit
         },
-    )
-    .default()
+        )
+    })
+    .collect()
 }
 
 fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
