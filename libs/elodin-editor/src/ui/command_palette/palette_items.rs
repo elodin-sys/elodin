@@ -77,6 +77,9 @@ pub struct PalettePage {
     pub label: Option<String>,
     initialized: bool,
     pub prompt: Option<String>,
+    /// Filter text active on this page when it was left for a sub-page, so it
+    /// can be restored when the user navigates back (e.g. a skybox prompt).
+    pub remembered_filter: Option<String>,
 }
 
 impl PalettePage {
@@ -86,6 +89,7 @@ impl PalettePage {
             initialized: false,
             label: None,
             prompt: None,
+            remembered_filter: None,
         }
     }
 
