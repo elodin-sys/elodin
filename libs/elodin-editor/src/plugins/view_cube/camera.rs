@@ -6,7 +6,7 @@ use crate::spatial::{FloatingOriginSettings, GridCell, WithFloatingOrigin};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
-use bevy::log::{debug, warn};
+use bevy::log::warn;
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::scene::{SceneInstance, SceneSpawner};
@@ -567,7 +567,7 @@ pub fn handle_view_cube_editor(
         }
 
         if let ViewCubeEvent::ArrowClicked { arrow, .. } = event {
-            if let Some((previous_depth, refreshed_depth)) = refresh_anchor_depth_for_arrow(
+            refresh_anchor_depth_for_arrow(
                 entity,
                 camera_pose.translation,
                 &mut editor_cam,
@@ -575,65 +575,27 @@ pub fn handle_view_cube_editor(
                 lookup.entity_map.as_ref(),
                 &lookup.values,
                 origin_world,
-            ) {
-                debug!(
-                    target: "view_cube::arrow",
-                    camera = ?entity,
-                    arrow = ?arrow,
-                    previous_depth,
-                    refreshed_depth,
-                    "refreshed anchor depth from orbit target before arrow step"
-                );
-            } else {
-                debug!(
-                    target: "view_cube::arrow",
-                    camera = ?entity,
-                    arrow = ?arrow,
-                    current_depth = editor_cam.last_anchor_depth,
-                    "anchor depth refresh unavailable; keeping current depth"
-                );
-            }
+            );
 
             let angle = config.rotation_increment;
-            let (base_rotation, base_source) =
+            // Chain rapid repeats from the last applied arrow target so a held
+            // button steps cleanly; otherwise base off the live pose.
+            let base_rotation =
                 if let Some(cached) = lookup.arrow_cache.get_valid_target(entity, now_secs) {
                     let drift = cached
                         .target_rotation
                         .angle_between(transform.rotation)
                         .abs();
-                    if cached.source != ArrowTargetSource::ArrowStep {
-                        debug!(
-                            target: "view_cube::arrow",
-                            camera = ?entity,
-                            arrow = ?arrow,
-                            cached_source = ?cached.source,
-                            drift_deg = drift.to_degrees(),
-                            "ignoring non-arrow cached target"
-                        );
-                        (transform.rotation, "current_rotation")
-                    } else if drift <= ARROW_CACHE_MAX_DRIFT_RADIANS {
-                        debug!(
-                            target: "view_cube::arrow",
-                            camera = ?entity,
-                            arrow = ?arrow,
-                            drift_deg = drift.to_degrees(),
-                            "using cached arrow target as rotation base"
-                        );
-                        (cached.target_rotation, "cached_arrow_target")
+                    if cached.source == ArrowTargetSource::ArrowStep
+                        && drift <= ARROW_CACHE_MAX_DRIFT_RADIANS
+                    {
+                        cached.target_rotation
                     } else {
-                        debug!(
-                            target: "view_cube::arrow",
-                            camera = ?entity,
-                            arrow = ?arrow,
-                            drift_deg = drift.to_degrees(),
-                            drift_threshold_deg = ARROW_CACHE_MAX_DRIFT_RADIANS.to_degrees(),
-                            "dropping stale cached arrow target"
-                        );
                         lookup.arrow_cache.clear(entity);
-                        (transform.rotation, "current_rotation")
+                        transform.rotation
                     }
                 } else {
-                    (transform.rotation, "current_rotation")
+                    transform.rotation
                 };
             let base_forward_local = base_rotation * Vec3::NEG_Z;
             let base_up_local = base_rotation * Vec3::Y;
@@ -643,9 +605,8 @@ pub fn handle_view_cube_editor(
             let base_right_world = parent_rotation * base_right_local;
 
             // Left/Right is a turntable azimuth: yaw around the orbit's fixed up
-            // (world vertical) like a drag-orbit, so the horizon stays level and
-            // the focus stays put. Falling back to the camera up (the old
-            // behavior) only when the orbit is unconstrained.
+            // (world vertical) like a drag-orbit, so the horizon stays level.
+            // Falls back to the camera up only when the orbit is unconstrained.
             let orbit_up_world = match editor_cam.orbit_constraint {
                 OrbitConstraint::Fixed { up, .. } => up,
                 OrbitConstraint::Free => base_up_world,
@@ -659,47 +620,51 @@ pub fn handle_view_cube_editor(
                 orbit_up_world,
             );
             let step_rotation_world = Quat::from_axis_angle(*step_axis_world, signed_angle);
-            let new_forward_world = step_rotation_world * base_forward_world;
-            let new_up_world = step_rotation_world * base_up_world;
-            let new_forward_local = parent_rotation.inverse() * new_forward_world;
-            let new_up_local = parent_rotation.inverse() * new_up_world;
 
-            if let Ok(facing) = Dir3::new(new_forward_local)
-                && let Ok(up_dir) = Dir3::new(new_up_local)
-            {
-                let trigger = LookToTrigger {
+            // Orbit the live camera around the focus object (the viewport
+            // `look_at`) rather than the screen-center view axis: rotating about
+            // the latter pushed an off-center module out of frame on Left/Right.
+            // With no resolvable focus, pivot around the on-axis anchor so the
+            // behavior degrades to the previous in-place spin.
+            let parent_inv = parent_rotation.inverse();
+            let new_world_rotation = step_rotation_world * (parent_rotation * base_rotation);
+            let new_rotation_local = parent_inv * new_world_rotation;
+
+            let focus_world = view_cube_orbit_target(
+                entity,
+                &lookup.viewports,
+                lookup.entity_map.as_ref(),
+                &lookup.values,
+            )
+            .map(|target| (target - origin_world).as_vec3())
+            .unwrap_or_else(|| {
+                camera_pose.translation
+                    + base_forward_world * (editor_cam.last_anchor_depth.abs() as f32)
+            });
+
+            let camera_world = camera_pose.translation;
+            let new_camera_world = focus_world + step_rotation_world * (camera_world - focus_world);
+
+            transform.translation += parent_inv * (new_camera_world - camera_world);
+            transform.rotation = new_rotation_local;
+
+            // Record the step for chaining, and cancel any in-flight snap
+            // animation by re-targeting the orientation we just applied (a no-op
+            // move for LookTo on the next frame).
+            lookup.arrow_cache.set_target(
+                entity,
+                new_rotation_local,
+                now_secs,
+                ArrowTargetSource::ArrowStep,
+            );
+            let facing_local = new_rotation_local * Vec3::NEG_Z;
+            let up_local = new_rotation_local * Vec3::Y;
+            if let (Ok(facing), Ok(up_dir)) = (Dir3::new(facing_local), Dir3::new(up_local)) {
+                look_to.write(LookToTrigger {
                     target_facing_direction: facing,
                     target_up_direction: up_dir,
                     camera: entity,
-                };
-                let target_rotation = trigger_rotation(&trigger);
-                let target_delta_deg = transform
-                    .rotation
-                    .angle_between(target_rotation)
-                    .to_degrees();
-                debug!(
-                    target: "view_cube::arrow",
-                    camera = ?entity,
-                    arrow = ?arrow,
-                    step_deg = angle.to_degrees(),
-                    base_source,
-                    target_delta_deg,
-                    "arrow click resolved target rotation"
-                );
-                lookup.arrow_cache.set_target(
-                    entity,
-                    target_rotation,
-                    now_secs,
-                    ArrowTargetSource::ArrowStep,
-                );
-                look_to.write(trigger);
-            } else {
-                warn!(
-                    arrow = ?arrow,
-                    new_forward_local = ?new_forward_local,
-                    new_up_local = ?new_up_local,
-                    "view cube: invalid arrow directions"
-                );
+                });
             }
         }
 
