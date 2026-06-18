@@ -28,9 +28,7 @@
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
     elodinOverlay = gitRev: final: prev: {
-      tracy = final.callPackage ./nix/pkgs/tracy.nix {
-        tracy = prev.tracy;
-      };
+      tracy = prev.tracy.override {withWayland = false;};
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain gitRev;
