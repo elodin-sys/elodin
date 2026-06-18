@@ -97,8 +97,8 @@ tests = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jax", specifier = "==0.8.1" },
-    { name = "jax-cuda12-plugin", extras = ["with-cuda"], marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.8.1" },
+    { name = "jax", specifier = "==0.10.0" },
+    { name = "jax-cuda12-plugin", extras = ["with-cuda"], marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.10.0" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "polars" },

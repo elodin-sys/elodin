@@ -23,7 +23,7 @@ dynamic = ["version"]
 [project.optional-dependencies]
 tests = ["pytest"]
 # Install for backend="jax-gpu" on Linux. Omit to avoid CUDA plugin init when using Cranelift only.
-cuda = ["jax-cuda12-plugin[with-cuda]==0.8.1; sys_platform == 'linux'"]
+cuda = ["jax-cuda12-plugin[with-cuda]==0.10.0; sys_platform == 'linux'"]
 dynamic = []
 
 [tool.maturin]
