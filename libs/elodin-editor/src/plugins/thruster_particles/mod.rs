@@ -5,22 +5,25 @@
 //! DPS plumes are authored this way in the lander schematic; this plugin only
 //! evaluates the nodes and drives the particle effects.
 
+use bevy::asset::RenderAssetUsages;
 use bevy::math::{DVec3, Quat, Vec4};
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::transform::TransformSystems;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use bevy_hanabi::{
-    AlphaMode, Attribute, EffectAsset, EffectSpawner, Gradient, HanabiPlugin, Module,
-    ParticleEffect, SimulationSpace, SpawnerSettings,
+    AlphaMode, Attribute, EffectAsset, EffectMaterial, EffectSpawner, Gradient, HanabiPlugin,
+    Module, ParticleEffect, SimulationSpace, SpawnerSettings,
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
         force::LinearDragModifier,
         output::{
-            ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier, OrientMode, OrientModifier,
-            SizeOverLifetimeModifier,
+            ColorBlendMask, ColorBlendMode, ColorOverLifetimeModifier, ImageSampleMapping,
+            OrientMode, OrientModifier, ParticleTextureModifier, SizeOverLifetimeModifier,
         },
         position::SetPositionCone3dModifier,
+        velocity::SetVelocitySphereModifier,
     },
 };
 use impeller2_bevy::EntityMap;
@@ -39,6 +42,8 @@ const MIN_THRUST_VECTOR_LENGTH_SQUARED: f32 = 1e-12;
 struct ThrusterEffectAssets {
     plume: Handle<EffectAsset>,
     cold_gas: Handle<EffectAsset>,
+    /// Soft radial mask so billboards render as round puffs, not hard squares.
+    mask: Handle<Image>,
 }
 
 impl ThrusterEffectAssets {
@@ -93,10 +98,48 @@ impl Plugin for ThrusterParticlesPlugin {
     }
 }
 
-fn setup_thruster_effects(mut commands: Commands, mut effects: ResMut<Assets<EffectAsset>>) {
+fn setup_thruster_effects(
+    mut commands: Commands,
+    mut effects: ResMut<Assets<EffectAsset>>,
+    mut images: ResMut<Assets<Image>>,
+) {
     let plume = effects.add(build_dps_exhaust());
     let cold_gas = effects.add(build_rcs_jet());
-    commands.insert_resource(ThrusterEffectAssets { plume, cold_gas });
+    let mask = images.add(build_soft_particle_image());
+    commands.insert_resource(ThrusterEffectAssets {
+        plume,
+        cold_gas,
+        mask,
+    });
+}
+
+/// Single-channel radial falloff (opacity 1 at center, 0 at the rim), sampled
+/// via `ImageSampleMapping::ModulateOpacityFromR` so square billboard quads
+/// render as soft round puffs even when zoomed in.
+fn build_soft_particle_image() -> Image {
+    const SIZE: u32 = 64;
+    let mut data = vec![0u8; (SIZE * SIZE) as usize];
+    let center = (SIZE as f32 - 1.0) * 0.5;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = (x as f32 - center) / center;
+            let dy = (y as f32 - center) / center;
+            let dist = (dx * dx + dy * dy).sqrt().clamp(0.0, 1.0);
+            let falloff = (1.0 - dist) * (1.0 - dist);
+            data[(y * SIZE + x) as usize] = (falloff * 255.0) as u8;
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    )
 }
 
 fn build_dps_exhaust() -> EffectAsset {
@@ -127,6 +170,9 @@ fn build_dps_exhaust() -> EffectAsset {
     size_over_life.add_key(0.75, Vec3::new(1.18, 0.52, 0.52));
     size_over_life.add_key(1.0, Vec3::new(0.42, 0.2, 0.2));
 
+    let mask_slot = module.lit(0u32);
+    module.add_texture_slot("mask");
+
     EffectAsset::new(16384, SpawnerSettings::rate(220.0.into()), module)
         .with_name("dps_exhaust")
         .with_simulation_space(SimulationSpace::Local)
@@ -137,6 +183,11 @@ fn build_dps_exhaust() -> EffectAsset {
         .init(size)
         .update(drag)
         .render(OrientModifier::new(OrientMode::AlongVelocity))
+        // Soft round mask so the quads are not visible flat squares up close.
+        .render(ParticleTextureModifier {
+            texture_slot: mask_slot,
+            sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
+        })
         .render(SizeOverLifetimeModifier {
             gradient: size_over_life,
             screen_space_size: false,
@@ -154,45 +205,63 @@ fn build_rcs_jet() -> EffectAsset {
     // Miniature DPS-style plume: anchored at the nozzle mouth, expanding back
     // into the emitter volume while velocity carries particles outward.
     let init_pos = SetPositionCone3dModifier {
-        height: module.lit(0.12),
-        base_radius: module.lit(0.025),
-        top_radius: module.lit(0.09),
+        height: module.lit(0.08),
+        base_radius: module.lit(0.02),
+        top_radius: module.lit(0.04),
         dimension: ShapeDimension::Volume,
     };
 
-    let init_vel =
-        SetAttributeModifier::new(Attribute::VELOCITY, module.lit(DPS_EXHAUST_BODY * 8.0));
+    // Tighter, faster cone (center farther behind the nozzle = smaller
+    // divergence) so the jet reads as a punchy collimated gas thruster that
+    // shoots out, not a slow diffuse vent puff.
+    let init_vel = SetVelocitySphereModifier {
+        center: module.lit(Vec3::new(0.0, 0.42, 0.0)),
+        speed: module.lit(11.0),
+    };
 
-    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.42));
-    let size = SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::new(0.26, 0.08, 0.08)));
-    let drag = LinearDragModifier::new(module.lit(2.0));
+    // Slightly longer reach with low drag so particles keep momentum and the
+    // stream stays continuous instead of popping out in discrete puffs.
+    let lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(0.5));
+    let size = SetAttributeModifier::new(Attribute::SIZE3, module.lit(Vec3::splat(0.09)));
+    let drag = LinearDragModifier::new(module.lit(1.2));
 
-    // Blue-white cold gas, brighter than the earlier transparent haze but
-    // still slimmer than the DPS exhaust.
+    // Blue-white cold gas. Alpha-blended (not additive) and slightly toned down
+    // so a dense puff stays readable instead of blooming into a dazzling glow.
     let mut gradient = Gradient::<Vec4>::new();
-    gradient.add_key(0.0, Vec4::new(0.85, 0.95, 1.35, 0.9));
-    gradient.add_key(0.1, Vec4::new(0.58, 0.78, 1.25, 0.8));
-    gradient.add_key(0.35, Vec4::new(0.34, 0.56, 1.0, 0.58));
-    gradient.add_key(0.7, Vec4::new(0.18, 0.34, 0.78, 0.28));
+    gradient.add_key(0.0, Vec4::new(0.85, 0.95, 1.2, 0.6));
+    gradient.add_key(0.1, Vec4::new(0.58, 0.78, 1.1, 0.5));
+    gradient.add_key(0.35, Vec4::new(0.34, 0.56, 0.95, 0.34));
+    gradient.add_key(0.7, Vec4::new(0.18, 0.34, 0.72, 0.16));
     gradient.add_key(1.0, Vec4::ZERO);
 
+    // Round puffs that grow modestly downstream: a tight jet near the nozzle
+    // widening slightly, kept dense by the emission rate rather than by size.
     let mut size_over_life = Gradient::<Vec3>::new();
-    size_over_life.add_key(0.0, Vec3::new(0.22, 0.07, 0.07));
-    size_over_life.add_key(0.15, Vec3::new(0.46, 0.16, 0.16));
-    size_over_life.add_key(0.45, Vec3::new(0.64, 0.22, 0.22));
-    size_over_life.add_key(0.75, Vec3::new(0.48, 0.17, 0.17));
-    size_over_life.add_key(1.0, Vec3::new(0.18, 0.06, 0.06));
+    size_over_life.add_key(0.0, Vec3::splat(0.07));
+    size_over_life.add_key(0.15, Vec3::splat(0.16));
+    size_over_life.add_key(0.45, Vec3::splat(0.22));
+    size_over_life.add_key(0.75, Vec3::splat(0.17));
+    size_over_life.add_key(1.0, Vec3::splat(0.07));
 
-    EffectAsset::new(8192, SpawnerSettings::rate(360.0.into()), module)
+    let mask_slot = module.lit(0u32);
+    module.add_texture_slot("mask");
+
+    EffectAsset::new(16384, SpawnerSettings::rate(1100.0.into()), module)
         .with_name("rcs_jet")
         .with_simulation_space(SimulationSpace::Local)
-        .with_alpha_mode(AlphaMode::Add)
+        .with_alpha_mode(AlphaMode::Blend)
         .init(init_pos)
         .init(init_vel)
         .init(lifetime)
         .init(size)
         .update(drag)
-        .render(OrientModifier::new(OrientMode::AlongVelocity))
+        // Camera-facing billboards keep the jet volumetric from any angle.
+        .render(OrientModifier::new(OrientMode::FaceCameraPosition))
+        // Soft round mask so the quads are not visible flat squares up close.
+        .render(ParticleTextureModifier {
+            texture_slot: mask_slot,
+            sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
+        })
         .render(SizeOverLifetimeModifier {
             gradient: size_over_life,
             screen_space_size: false,
@@ -233,6 +302,9 @@ fn ensure_kdl_thrusters(
                 .spawn((
                     KdlThrusterJet::from_config(config, state.data.frame, intensity),
                     ParticleEffect::new(assets.by_name(&config.effect)),
+                    EffectMaterial {
+                        images: vec![assets.mask.clone()],
+                    },
                     Transform::default(),
                     GlobalTransform::default(),
                     Visibility::Hidden,
