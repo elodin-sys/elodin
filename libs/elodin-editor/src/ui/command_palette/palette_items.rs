@@ -1345,10 +1345,12 @@ fn skybox_style_items(prompt: String) -> Vec<PaletteItem> {
 }
 
 fn skybox_resolution_items(prompt: String, style: SkyboxStyle) -> Vec<PaletteItem> {
+    // Default (4K) first so confirming with Enter without moving the selection
+    // picks the documented default, matching the style page convention.
     [
+        ("4K (default, 1024 px faces)", SkyboxResolution::FourK),
         ("1K (256 px faces)", SkyboxResolution::OneK),
         ("2K (512 px faces)", SkyboxResolution::TwoK),
-        ("4K (default, 1024 px faces)", SkyboxResolution::FourK),
         ("8K (2048 px faces)", SkyboxResolution::EightK),
         ("16K (4096 px faces)", SkyboxResolution::SixteenK),
     ]
