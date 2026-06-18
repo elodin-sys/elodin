@@ -10,7 +10,7 @@ use bevy::log::{debug, warn};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::scene::{SceneInstance, SceneSpawner};
-use bevy_editor_cam::controller::component::EditorCam;
+use bevy_editor_cam::controller::component::{EditorCam, OrbitConstraint};
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use impeller2_bevy::EntityMap;
@@ -642,12 +642,21 @@ pub fn handle_view_cube_editor(
             let base_up_world = parent_rotation * base_up_local;
             let base_right_world = parent_rotation * base_right_local;
 
+            // Left/Right is a turntable azimuth: yaw around the orbit's fixed up
+            // (world vertical) like a drag-orbit, so the horizon stays level and
+            // the focus stays put. Falling back to the camera up (the old
+            // behavior) only when the orbit is unconstrained.
+            let orbit_up_world = match editor_cam.orbit_constraint {
+                OrbitConstraint::Fixed { up, .. } => up,
+                OrbitConstraint::Free => base_up_world,
+            };
+
             let (step_axis_world, signed_angle, _) = arrow_camera_axis_angle(
                 *arrow,
                 angle,
                 base_right_world,
-                base_up_world,
                 base_forward_world,
+                orbit_up_world,
             );
             let step_rotation_world = Quat::from_axis_angle(*step_axis_world, signed_angle);
             let new_forward_world = step_rotation_world * base_forward_world;
@@ -796,19 +805,19 @@ fn arrow_camera_axis_angle(
     arrow: RotationArrow,
     angle: f32,
     camera_right_world: Vec3,
-    camera_up_world: Vec3,
     camera_forward_world: Vec3,
+    orbit_up_world: Vec3,
 ) -> (Dir3, f32, &'static str) {
     match arrow {
         RotationArrow::Left => (
-            Dir3::new(camera_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
+            Dir3::new(orbit_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
             angle,
-            "camera_up",
+            "orbit_up",
         ),
         RotationArrow::Right => (
-            Dir3::new(camera_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
+            Dir3::new(orbit_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
             -angle,
-            "camera_up",
+            "orbit_up",
         ),
         RotationArrow::Up => (
             Dir3::new(camera_right_world).unwrap_or(Dir3::new_unchecked(Vec3::X)),
@@ -1229,41 +1238,43 @@ mod tests {
     fn arrow_camera_axis_angle_maps_each_pair_to_camera_axis() {
         let angle = 0.25;
         let right = Vec3::Y;
-        let up = Vec3::Z;
         let forward = Vec3::X;
+        // Distinct from the camera up so we can assert yaw uses the orbit axis.
+        let orbit_up = Vec3::Z;
 
+        // Left/Right yaw around the orbit (world) up, not the camera up.
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Left, angle, right, up, forward);
-        assert_eq!(*axis, up);
+            arrow_camera_axis_angle(RotationArrow::Left, angle, right, forward, orbit_up);
+        assert_eq!(*axis, orbit_up);
         assert_eq!(signed_angle, angle);
-        assert_eq!(source, "camera_up");
+        assert_eq!(source, "orbit_up");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Right, angle, right, up, forward);
-        assert_eq!(*axis, up);
+            arrow_camera_axis_angle(RotationArrow::Right, angle, right, forward, orbit_up);
+        assert_eq!(*axis, orbit_up);
         assert_eq!(signed_angle, -angle);
-        assert_eq!(source, "camera_up");
+        assert_eq!(source, "orbit_up");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Up, angle, right, up, forward);
+            arrow_camera_axis_angle(RotationArrow::Up, angle, right, forward, orbit_up);
         assert_eq!(*axis, right);
         assert_eq!(signed_angle, angle);
         assert_eq!(source, "camera_right");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Down, angle, right, up, forward);
+            arrow_camera_axis_angle(RotationArrow::Down, angle, right, forward, orbit_up);
         assert_eq!(*axis, right);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_right");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::RollLeft, angle, right, up, forward);
+            arrow_camera_axis_angle(RotationArrow::RollLeft, angle, right, forward, orbit_up);
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, angle);
         assert_eq!(source, "camera_forward");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::RollRight, angle, right, up, forward);
+            arrow_camera_axis_angle(RotationArrow::RollRight, angle, right, forward, orbit_up);
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_forward");
