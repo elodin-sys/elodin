@@ -489,8 +489,8 @@ the command palette.</li>
 <li><code>Skybox...</code>: submenu for skybox actions against <code>assets/skyboxes/manifest.ron</code> or
 <code>$ELODIN_ASSETS_DIR/skyboxes/manifest.ron</code>.
 <ul>
-<li><code>Generate Skybox...</code>: prompt for a description, generate a new skybox via Blockade, add it to
-the manifest, and activate it.</li>
+<li><code>Generate Skybox...</code>: prompt for a description, then choose a Blockade style and local cubemap
+resolution before generating the skybox, adding it to the manifest, and activating it.</li>
 <li><code>Clear Skybox</code>: shown when a skybox is active; removes it from viewports and sensor cameras and
 removes the top-level <code>skybox</code> node from the current schematic.</li>
 <li><code>Revert to …</code>: shown after AI generation replaced an active skybox.</li>
@@ -501,9 +501,9 @@ removes the top-level <code>skybox</code> node from the current schematic.</li>
 <p>Selecting a cached skybox sets <code>skybox name="..."</code> on the current schematic and applies it
 immediately. Use <strong>Save Schematic</strong> or <strong>Save Schematic To DB</strong> to persist changes.</p>
 <p>Skybox generation requires <code>BLOCKADE_API_KEY</code> in the editor environment. Generated cubemaps are
-resampled locally to the configured face size (default 2048 px per face); Blockade always returns an
-~8K equirect source, so higher local presets upscale rather than fetching a higher remote tier.
-Generated assets are written next to the manifest used by the editor.</p>
+resampled locally to the selected face size (<code>4K</code> is the default, 1024 px per face); Blockade always
+returns an ~8K equirect source, so higher local presets upscale rather than fetching a higher remote
+tier. Generated assets are written next to the manifest used by the editor.</p>
 <h2 id="simulation">Simulation</h2>
 <ul>
 <li><code>Toggle Recording</code>: start/stop recording on the connected database.</li>
