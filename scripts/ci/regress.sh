@@ -209,11 +209,21 @@ PY
     csv_status=$?
   fi
 
-  if "${python_bin}" scripts/ci/compare_profile_metrics.py \
-    --example "${example_name}" \
-    --baseline "${baseline_dir}/profile-metrics.json" \
-    --candidate "${metrics_path}" \
-    --tolerances "${tolerances_file}"; then
+  local -a perf_args=(
+    --example "${example_name}"
+    --baseline "${baseline_dir}/profile-metrics.json"
+    --candidate "${metrics_path}"
+    --tolerances "${tolerances_file}"
+  )
+  # real_time_factor is an absolute wall-clock throughput measured in a single
+  # run; on shared CI runners it is noise-prone, so perf regressions are
+  # warn-only by default. The CSV bit-for-bit check above stays the hard gate.
+  # Set REGRESSION_PERF_ENFORCE=1 to make perf regressions fail the run.
+  if [[ "${perf_enforce}" != "1" ]]; then
+    perf_args+=(--warn-only)
+  fi
+
+  if "${python_bin}" scripts/ci/compare_profile_metrics.py "${perf_args[@]}"; then
     :
   else
     perf_status=$?
@@ -344,6 +354,7 @@ baseline_root="${BASELINE_ROOT:-scripts/ci/baseline}"
 tolerances_file="${TOLERANCES_FILE:-${baseline_root}/tolerances.json}"
 ticks="${REGRESSION_TICKS:-100}"
 python_bin="${PYTHON:-python3}"
+perf_enforce="${REGRESSION_PERF_ENFORCE:-0}"
 
 if [[ ! -d "${baseline_root}" ]]; then
   echo "FAIL: baseline root not found: ${baseline_root}"

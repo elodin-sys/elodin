@@ -42,6 +42,15 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         help="Path to tolerances JSON configuration",
     )
+    parser.add_argument(
+        "--warn-only",
+        action="store_true",
+        help=(
+            "Report regressions as non-blocking warnings (exit 0). "
+            "real_time_factor on shared CI runners is noise-prone; the CSV "
+            "bit-for-bit check remains the hard gate."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -172,10 +181,14 @@ def main() -> int:
     print(f"RTF_DELTA: {args.example} {rtf_baseline:.3f} {rtf_candidate:.3f} {rtf_pct:.1f}")
 
     if failures:
-        print(f"FAIL: profile metric regression(s) detected for example '{args.example}'")
+        prefix = "WARN" if args.warn_only else "FAIL"
+        suffix = " (non-blocking)" if args.warn_only else ""
+        print(
+            f"{prefix}: profile metric regression(s) detected for example '{args.example}'{suffix}"
+        )
         for failure in failures:
             print(f"  - {failure}")
-        return 1
+        return 0 if args.warn_only else 1
 
     print(f"PASS: {args.example} profile metrics within tolerance (ticks={candidate_ticks})")
     print(f"  real_time_factor: {rtf_detail}")
