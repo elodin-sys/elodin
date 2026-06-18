@@ -642,8 +642,15 @@ pub fn handle_view_cube_editor(
                     + base_forward_world * (editor_cam.last_anchor_depth.abs() as f32)
             });
 
+            // Yaw/pitch orbit the focus object so it stays framed; roll is about
+            // the view axis and must spin in place (pivot on the camera itself),
+            // otherwise an off-center focus would drift the camera on roll.
             let camera_world = camera_pose.translation;
-            let new_camera_world = focus_world + step_rotation_world * (camera_world - focus_world);
+            let pivot_world = match *arrow {
+                RotationArrow::RollLeft | RotationArrow::RollRight => camera_world,
+                _ => focus_world,
+            };
+            let new_camera_world = pivot_world + step_rotation_world * (camera_world - pivot_world);
 
             transform.translation += parent_inv * (new_camera_world - camera_world);
             transform.rotation = new_rotation_local;
