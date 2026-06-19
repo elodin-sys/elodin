@@ -1,8 +1,10 @@
 use bevy::{
     ecs::query::Or,
+    math::{DQuat, DVec3},
     pbr::wireframe::{Wireframe, WireframeColor},
     prelude::*,
 };
+use bevy_geo_frames::{GeoPosition, GeoRotation, OrDefault};
 use bevy_world_mesh::prelude::WorldMeshPlugin as BevyWorldMeshRendererPlugin;
 use bevy_world_mesh::terrain::{
     math::TerrainModel,
@@ -96,6 +98,7 @@ pub(crate) fn spawn_world_mesh_terrain(
                 ))
                 .id();
 
+            insert_geo_components(commands, entity, world_mesh);
             insert_big_space_cell(commands, entity);
             entity
         }
@@ -119,18 +122,34 @@ fn apply_world_mesh_transform_and_visibility(
     terrain_bundle: &mut TerrainBundle,
     world_mesh: &impeller2_wkt::WorldMesh,
 ) {
-    if let Some((tx, ty, tz)) = world_mesh.translate {
-        terrain_bundle.transform.translation += Vec3::new(tx as f32, ty as f32, tz as f32);
-    }
+    terrain_bundle.transform = world_mesh_transform(world_mesh);
     terrain_bundle.visibility = world_mesh_visibility(world_mesh);
 }
 
 fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
     let mut transform = Transform::default();
+    if world_mesh.frame.or_default().is_some() {
+        return transform;
+    }
     if let Some((tx, ty, tz)) = world_mesh.translate {
         transform.translation += Vec3::new(tx as f32, ty as f32, tz as f32);
     }
     transform
+}
+
+fn insert_geo_components(
+    commands: &mut Commands,
+    entity: Entity,
+    world_mesh: &impeller2_wkt::WorldMesh,
+) {
+    let Some(frame) = world_mesh.frame.or_default() else {
+        return;
+    };
+    let (x, y, z) = world_mesh.translate.unwrap_or_default();
+    commands.entity(entity).insert((
+        GeoPosition(frame, DVec3::new(x, y, z)),
+        GeoRotation::absolute(frame, DQuat::IDENTITY),
+    ));
 }
 
 fn world_mesh_visibility(world_mesh: &impeller2_wkt::WorldMesh) -> Visibility {
@@ -343,6 +362,7 @@ fn spawn_world_mesh_fallback(
         }
     };
 
+    insert_geo_components(commands, entity, world_mesh);
     insert_big_space_cell(commands, entity);
     entity
 }
@@ -487,6 +507,8 @@ fn sync_terrain_view_positions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_geo_frames::GeoFrame;
+    use impeller2_wkt::{NodeId, WorldMesh};
 
     #[test]
     fn planar_lod_count_defaults_to_preprocessed_depth() {
@@ -501,5 +523,30 @@ mod tests {
     #[test]
     fn planar_lod_count_keeps_lower_values() {
         assert_eq!(planar_lod_count(Some(3)), 3);
+    }
+
+    #[test]
+    fn framed_world_mesh_transform_stays_at_origin_for_geo_pipeline() {
+        let world_mesh = world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0)));
+
+        assert_eq!(world_mesh_transform(&world_mesh).translation, Vec3::ZERO);
+    }
+
+    #[test]
+    fn unframed_world_mesh_transform_uses_default_geo_frame() {
+        let world_mesh = world_mesh(None, Some((1.0, 2.0, 3.0)));
+
+        assert_eq!(world_mesh_transform(&world_mesh).translation, Vec3::ZERO);
+    }
+
+    fn world_mesh(frame: Option<GeoFrame>, translate: Option<(f64, f64, f64)>) -> WorldMesh {
+        WorldMesh {
+            region: "no_such_region".to_string(),
+            lod_count: None,
+            translate,
+            frame,
+            visible: true,
+            node_id: NodeId::default(),
+        }
     }
 }

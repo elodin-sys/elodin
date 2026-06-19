@@ -1527,30 +1527,35 @@ impl WorldBuilder {
     #[pyo3(signature = (default_content = None, path = None,))]
     pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
         let requested_path = path.map(PathBuf::from);
-        let resolved_path = requested_path
+        let file_contents = requested_path
             .as_ref()
-            .map(|p| impeller2_kdl::env::schematic_file(Path::new(p)));
-        let file_contents = resolved_path.as_ref().and_then(|path| {
-            if path.exists() {
-                std::fs::read_to_string(path)
-                    .inspect(|_| info!("read schematic at {:?}", path.display()))
-                    .inspect_err(|err| {
-                        error!(
-                            ?err,
-                            "could not read schematic file at {:?}",
-                            path.display()
-                        )
-                    })
-                    .ok()
-            } else {
-                None
-            }
-        });
-        self.world.metadata.schematic_path = if file_contents.is_some() {
-            resolved_path
-        } else {
-            requested_path
-        };
+            .map(|p| impeller2_kdl::env::schematic_file(p))
+            .and_then(|path| {
+                if path.exists() {
+                    std::fs::read_to_string(&path)
+                        .inspect(|_| {
+                            if default_content.is_some() {
+                                tracing::warn!(
+                                    "using schematic file {:?} instead of the default KDL; \
+                                     delete the file to use the default",
+                                    path.display()
+                                );
+                            } else {
+                                info!("read schematic at {:?}", path.display());
+                            }
+                        })
+                        .inspect_err(|err| {
+                            error!(
+                                ?err,
+                                "could not read schematic file at {:?}",
+                                path.display()
+                            )
+                        })
+                        .ok()
+                } else {
+                    None
+                }
+            });
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 

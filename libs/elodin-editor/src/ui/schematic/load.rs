@@ -128,8 +128,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
-    pub geo_context: Res<'w, GeoContext>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
+    pub geo_context: ResMut<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
     cameras: Query<'w, 's, &'static mut Camera>,
@@ -233,6 +233,23 @@ impl LoadSchematicParams<'_, '_> {
     ) {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
+
+        // Set the GeoContext origin from the schematic (degrees -> radians),
+        // resetting to the default when absent so reloads are deterministic.
+        // Only write on change: mutating GeoContext re-touches every
+        // GeoPosition/GeoRotation in the world.
+        let origin = schematic
+            .origin
+            .map(|o| {
+                bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude)
+            })
+            .unwrap_or_default();
+        let current = &self.geo_context.origin;
+        if (current.latitude, current.longitude, current.altitude)
+            != (origin.latitude, origin.longitude, origin.altitude)
+        {
+            self.geo_context.origin = origin;
+        }
 
         for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
@@ -648,10 +665,12 @@ impl LoadSchematicParams<'_, '_> {
         spawn.insert(Name::new("line_3d"));
 
         // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
+        // The rotation is Absolute: the line's vertex data is raw frame
+        // coordinates, so its transform must carry the frame -> Bevy basis change.
         if let Some(frame) = frame.or_default() {
             spawn.insert((
                 bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
-                bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
+                bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
             ));
         }
         spawn.insert(SchematicSpawned);
@@ -681,7 +700,8 @@ impl LoadSchematicParams<'_, '_> {
                 .ok()
         });
 
-        let frame = vector_arrow.frame;
+        // The arrow's frame is carried by VectorArrow3d and applied to its
+        // endpoint entities in `evaluate_vector_arrows`.
         let mut spawn = self.commands.spawn((
             vector_arrow,
             VectorArrowState {
@@ -693,14 +713,6 @@ impl LoadSchematicParams<'_, '_> {
             },
             SchematicSpawned,
         ));
-
-        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
-        if let Some(frame) = frame.or_default() {
-            spawn.insert((
-                bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
-                bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
-            ));
-        }
 
         if let Some(camera) = viewport_camera {
             spawn.insert(ViewportArrow { camera });
@@ -1323,10 +1335,11 @@ mod tests {
     use bevy::{
         asset::{AssetApp, AssetPlugin, UnapprovedPathMode},
         ecs::system::SystemState,
+        math::DVec3,
         prelude::*,
         window::{PrimaryWindow, Window},
     };
-    use bevy_geo_frames::{GeoFrame, GeoFramePlugin};
+    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation};
     use bevy_mat3_material::Mat3Material;
     use impeller2_bevy::ComponentSchemaRegistry;
     use impeller2_kdl::FromKdl;
@@ -1516,6 +1529,50 @@ mod tests {
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    #[test]
+    fn geo_origin_is_applied_and_reset_on_clear() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl("coordinate frame=NED lat=34.72 lon=-86.64 alt=180.0")
+            .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        let origin = app.world().resource::<bevy_geo_frames::GeoContext>().origin;
+        assert_eq!(origin.latitude, 34.72f64.to_radians());
+        assert_eq!(origin.longitude, (-86.64f64).to_radians());
+        assert_eq!(origin.altitude, 180.0);
+
+        load_schematic(&mut app, &Schematic::default());
+        let origin = app.world().resource::<bevy_geo_frames::GeoContext>().origin;
+        let default_origin = bevy_geo_frames::GeoOrigin::default();
+        assert_eq!(origin.latitude, default_origin.latitude);
+        assert_eq!(origin.longitude, default_origin.longitude);
+        assert_eq!(origin.altitude, default_origin.altitude);
+    }
+
+    #[test]
+    fn world_mesh_inherits_coordinate_frame_and_translate() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="NED"
+            world_mesh "no_such_region" translate="(1, 2, 3)"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query_filtered::<
+            (&GeoPosition, &GeoRotation),
+            With<crate::plugins::world_mesh::WorldMeshTerrain>,
+        >();
+        let (geo_pos, geo_rot) = query.iter(app.world()).next().expect("world_mesh terrain");
+
+        assert_eq!(geo_pos.0, GeoFrame::NED);
+        assert_eq!(geo_pos.1, DVec3::new(1.0, 2.0, 3.0));
+        assert_eq!(geo_rot.0, GeoFrame::NED);
     }
 
     #[test]

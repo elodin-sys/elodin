@@ -9,6 +9,7 @@ repository = "https://github.com/elodin-sys/elodin"
 [features]
 default = []
 std = ["thiserror/std", "faer/std", "num-traits/std", "nox-array/std"]
+bevy_math = ["dep:bevy_math"]
 jax = ["pyo3", "numpy", "noxpr"]
 noxpr = ["boxcar", "paste", "itertools", "indent_write", "std"]
 shared = []
@@ -55,6 +56,9 @@ serde.optional = true
 traversal = "0.1.2"
 
 tracing = "0.1"
+
+bevy_math.workspace = true
+bevy_math.optional = true
 
 [build-dependencies]
 which = "6.0.3"

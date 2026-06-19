@@ -83,6 +83,7 @@ pub struct SchematicParam<'w, 's> {
     pub metadata: Res<'w, ComponentMetadataRegistry>,
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
     pub coordinate: Res<'w, crate::Coordinate>,
+    pub geo_context: Res<'w, bevy_geo_frames::GeoContext>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -411,6 +412,22 @@ pub fn tiles_to_schematic(
 ) {
     schematic.elems.clear();
     schematic.frame = param.coordinate.0;
+
+    // Persist the GeoContext origin (radians -> degrees), omitting the
+    // default origin so plain schematics stay unchanged.
+    let origin = &param.geo_context.origin;
+    let default_origin = bevy_geo_frames::GeoOrigin::default();
+    schematic.origin = ((origin.latitude, origin.longitude, origin.altitude)
+        != (
+            default_origin.latitude,
+            default_origin.longitude,
+            default_origin.altitude,
+        ))
+        .then(|| impeller2_wkt::GeoOriginConfig {
+            latitude: origin.latitude.to_degrees(),
+            longitude: origin.longitude.to_degrees(),
+            altitude: origin.altitude,
+        });
     bindings.clear_ephemeral();
 
     if let Some(root_panels) =

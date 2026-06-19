@@ -56,7 +56,8 @@ use ui::{
 /// Global coordinate frame resource set by the schematic's top-level `coordinate` node.
 /// Individual elements (viewport, object_3d, line_3d, vector_arrow) use this as a fallback
 /// when they don't specify their own frame.
-#[derive(Resource, Default, Clone, Copy, Debug)]
+#[derive(Resource, Default, Clone, Copy, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct Coordinate(pub Option<GeoFrame>);
 
 mod embedded_lfs;
@@ -183,6 +184,8 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        // Must run before anything can spawn a `WorldPos` entity.
+        register_world_pos_components(app);
         let composite_alpha_mode = if cfg!(target_os = "macos") {
             bevy::window::CompositeAlphaMode::PostMultiplied
         } else {
@@ -325,6 +328,8 @@ impl Plugin for EditorPlugin {
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
+                    #[cfg(not(feature = "big_space"))]
+                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
                     #[cfg(feature = "big_space")]
                     spatial::apply_big_translation,
@@ -395,9 +400,9 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sensor_camera::patch_sensor_view_dims)
             .add_systems(Update, throttle_for_sensor_cameras);
 
+        app.add_systems(PreUpdate, warn_missing_geo.before(PositionSync));
         #[cfg(feature = "big_space")]
-        app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.))
-            .add_systems(PreUpdate, setup_cell.before(PositionSync));
+        app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -933,22 +938,61 @@ fn set_icon_mac() {
     }
 }
 
-#[cfg(feature = "big_space")]
-pub fn setup_cell(
-    query: Query<Entity, (With<WorldPos>, Without<crate::spatial::GridCell>)>,
-    mut cmds: Commands,
+/// `WorldPos` entities are positioned exclusively by the geo pipeline
+/// (`sync_pos` -> `GeoPosition`/`GeoRotation` -> `Transform`/`GridCell`), so
+/// inserting `WorldPos` must always bring the pipeline components along.
+/// Spawners that need a non-default frame insert their own `Geo*` components,
+/// which take precedence over these defaults.
+pub fn register_world_pos_components(app: &mut App) {
+    app.register_required_components_with::<WorldPos, GeoPosition>(|| {
+        GeoPosition(GeoFrame::default(), DVec3::ZERO)
+    });
+    app.register_required_components_with::<WorldPos, GeoRotation>(|| {
+        GeoRotation::new(GeoFrame::default(), DQuat::IDENTITY)
+    });
+    app.register_required_components::<WorldPos, Transform>();
+    #[cfg(feature = "big_space")]
+    app.register_required_components::<WorldPos, crate::spatial::GridCell>();
+}
+
+/// `WorldPos` requires the `Geo*` components ([`register_world_pos_components`]),
+/// so this should never fire; an entity that escapes the geo pipeline is never
+/// positioned.
+#[allow(clippy::type_complexity)]
+pub fn warn_missing_geo(
+    query: Query<
+        (Entity, Option<&Name>),
+        (
+            With<WorldPos>,
+            Or<(Without<GeoPosition>, Without<GeoRotation>)>,
+        ),
+    >,
 ) {
-    for e in query.iter() {
-        cmds.entity(e)
-            .insert((Transform::default(), crate::spatial::GridCell::default()));
+    for (entity, name) in query.iter() {
+        bevy::log::warn_once!(
+            "{entity} ({name:?}) has WorldPos without GeoPosition/GeoRotation; it will not be positioned"
+        );
     }
 }
 
+/// Accessors for `WorldPos` simulation coordinates.
+///
+/// Positioning goes exclusively through the geo pipeline: read `pos()`/`att()`
+/// and convert with `GeoPosition`/`GeoRotation` + `GeoContext`. The `bevy_*`
+/// methods hard-code the ENU-Plane mapping and exist only as legacy oracles
+/// for tests; they silently disagree with `Present::Sphere` and non-ENU
+/// frames.
 pub trait WorldPosExt {
+    /// Legacy ENU-Plane position swizzle `(x, z, -y)`. Test oracle only;
+    /// use `GeoPosition::to_bevy` instead.
     fn bevy_pos(&self) -> DVec3;
+    /// Legacy ENU-Plane attitude swizzle. Test oracle only; use
+    /// `GeoRotation::to_bevy` instead.
     fn bevy_att(&self) -> DQuat;
 
+    /// Position in simulation coordinates.
     fn pos(&self) -> DVec3;
+    /// Attitude in simulation coordinates.
     fn att(&self) -> DQuat;
 }
 
@@ -1012,87 +1056,27 @@ pub fn follow_latest(
     current_ts.0 = latest.0;
 }
 
-#[cfg(feature = "big_space")]
-#[allow(clippy::type_complexity)]
+/// Sync `WorldPos` (sim coordinates) into the entity's `GeoPosition` and
+/// `GeoRotation`. The geo pipeline (`apply_transforms`/`apply_big_translation`
+/// plus `apply_geo_rotation`) then produces the Bevy `Transform`/`GridCell`.
+///
+/// Every `WorldPos` entity gets its `Geo*` components at insertion
+/// ([`register_world_pos_components`]) or from its spawner, so there is no
+/// direct `WorldPos` -> `Transform` path.
 pub fn sync_pos(
-    mut query: Query<
-        (
-            &mut Transform,
-            Option<&mut GeoPosition>,
-            Option<&mut GeoRotation>,
-            &mut crate::spatial::GridCell,
-            &WorldPos,
-        ),
-        Changed<WorldPos>,
-    >,
-    geo_context: Res<GeoContext>,
-    floating_origin: Res<FloatingOriginSettings>,
-) {
-    query.iter_mut().for_each(
-        |(mut transform, mut geo_pos, mut geo_rot, mut grid_cell, world_pos)| {
-            if let Some(ref mut geo_pos) = geo_pos {
-                geo_pos.1 = world_pos.pos();
-            }
-            if let Some(ref mut geo_rot) = geo_rot {
-                // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
-                //geo_rot.1 = world_pos.att();
-            }
-
-            if geo_pos.is_none() {
-                // We only update the transform here if geo_pos is not present.
-                let pos = world_pos.bevy_pos();
-                let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
-                *grid_cell = new_grid_cell;
-                transform.translation = translation;
-            }
-            if geo_rot.is_none() {
-                // We only update the transform here if geo_rot is not present.
-                let att = world_pos.bevy_att();
-                // Preserve the existing scale when updating position and rotation
-                transform.rotation = att.as_quat();
-            }
-        },
-    );
-}
-
-#[cfg(not(feature = "big_space"))]
-#[allow(clippy::type_complexity)]
-pub fn sync_pos(
-    mut query: Query<
-        (
-            &mut Transform,
-            Option<&mut GeoPosition>,
-            Option<&mut GeoRotation>,
-            &WorldPos,
-        ),
-        Changed<WorldPos>,
-    >,
-    geo_context: Res<GeoContext>,
+    mut query: Query<(&mut GeoPosition, &mut GeoRotation, &WorldPos), Changed<WorldPos>>,
 ) {
     query
         .iter_mut()
-        .for_each(|(mut transform, mut geo_pos, mut geo_rot, world_pos)| {
-            if let Some(ref mut geo_pos) = geo_pos {
-                geo_pos.1 = world_pos.pos();
-            }
-            if let Some(ref mut geo_rot) = geo_rot {
-                // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
-                //geo_rot.1 = world_pos.att();
-            }
-
-            if geo_pos.is_none() {
-                // We only update the transform here if geo_pos is not present.
-                let pos = world_pos.bevy_pos();
-                transform.translation = pos.as_vec3();
-            }
-            if geo_rot.is_none() {
-                // We only update the transform here if geo_rot is not present.
-                let att = world_pos.bevy_att();
-                // Preserve the existing scale when updating position and rotation
-                transform.rotation = att.as_quat();
-            }
+        .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
+            geo_pos.1 = world_pos.pos();
+            // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
+            // (`GeoRotation::new(ENU, att).to_bevy` matches the legacy
+            // `bevy_att()` swizzle in Plane mode; see
+            // `test_bevy_att_vs_geo_frames_plane`.)
+            geo_rot.1 = world_pos.att();
+            // let bevy_att = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&geo_context);
+            // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
         });
 }
 
@@ -1424,6 +1408,7 @@ pub enum TimeRangeError {
 }
 
 #[derive(Resource, PartialEq, Eq, Clone, Copy, Debug)]
+
 enum Offset {
     Earliest(Duration),
     Latest(Duration),
@@ -1691,4 +1676,50 @@ pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut
 
 pub fn dirs() -> directories::ProjectDirs {
     directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::app::App;
+    use bevy::math::{DQuat, EulerRot};
+
+    /// Inserting a bare `WorldPos` must pull in the `Geo*` components
+    /// (required components) and end up at the same Bevy pose the old
+    /// `sync_pos` fallback (`bevy_pos()`/`bevy_att()`) produced.
+    #[test]
+    fn world_pos_geo_pipeline_matches_legacy_swizzle() {
+        let ctx = GeoContext::default();
+        let mut app = App::new();
+        app.insert_resource(ctx.clone());
+        register_world_pos_components(&mut app);
+        app.add_systems(bevy::app::Update, sync_pos);
+
+        let att = DQuat::from_euler(EulerRot::XYZ, 0.3, -0.8, 1.1);
+        let world_pos = WorldPos {
+            att: nox::Quaternion::new(att.w, att.x, att.y, att.z),
+            pos: nox::Vector3::new(1.0, 2.0, 3.0),
+        };
+        let entity = app.world_mut().spawn(world_pos).id();
+        app.update();
+
+        let world = app.world();
+        let wp = world.get::<WorldPos>(entity).unwrap();
+        let geo_pos = world.get::<GeoPosition>(entity).unwrap();
+        let geo_rot = world.get::<GeoRotation>(entity).unwrap();
+        assert!(world.get::<Transform>(entity).is_some());
+
+        let pos = geo_pos.to_bevy(&ctx);
+        assert!(
+            (pos - wp.bevy_pos()).length() < 1e-9,
+            "got {pos:?}, expected {:?}",
+            wp.bevy_pos()
+        );
+        let q = geo_rot.to_bevy(&ctx);
+        assert!(
+            q.dot(wp.bevy_att()).abs() > 1.0 - 1e-9,
+            "got {q:?}, expected {:?}",
+            wp.bevy_att()
+        );
+    }
 }

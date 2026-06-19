@@ -61,6 +61,8 @@ pub struct HeadlessEditorPlugin;
 
 impl Plugin for HeadlessEditorPlugin {
     fn build(&self, app: &mut App) {
+        // Must run before anything can spawn a `WorldPos` entity.
+        crate::register_world_pos_components(app);
         app.add_plugins(crate::plugins::WebAssetPlugin)
             .add_plugins(crate::plugins::env_asset_source::plugin)
             .add_plugins(
@@ -122,6 +124,8 @@ impl Plugin for HeadlessEditorPlugin {
                     // with the sensor camera's pose (which reads the TelemetryCache
                     // directly), preventing one-frame jitter in `sensor_view`.
                     sync_pos,
+                    #[cfg(not(feature = "big_space"))]
+                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
                     #[cfg(feature = "big_space")]
                     crate::spatial::apply_big_translation,
@@ -147,9 +151,9 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Update, load_headless_scene)
             .set_runner(render_server_runner);
 
+        app.add_systems(PreUpdate, crate::warn_missing_geo.before(PositionSync));
         #[cfg(feature = "big_space")]
-        app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
-            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink));
+        app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<HeadlessMode>()
@@ -185,8 +189,8 @@ fn load_headless_scene(
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     mut world_mesh_materials: ResMut<Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
     asset_server: Res<AssetServer>,
-    geo_context: Res<GeoContext>,
     connection_addr: Option<Res<ConnectionAddr>>,
+    mut geo_context: ResMut<GeoContext>,
 ) {
     if *loaded {
         return;
@@ -207,6 +211,11 @@ fn load_headless_scene(
     };
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
     let fallback_frame = schematic.frame;
+
+    if let Some(o) = schematic.origin {
+        geo_context.origin =
+            bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude);
+    }
 
     for elem in &schematic.elems {
         match elem {

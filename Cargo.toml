@@ -102,7 +102,8 @@ debug = true
 
 [workspace.dependencies.bevy_editor_cam]
 version = "0.8"
-
+[workspace.dependencies.bevy_math]
+version = "0.18"
 [workspace.dependencies.bevy]
 version = "0.18.1"
 default-features = false

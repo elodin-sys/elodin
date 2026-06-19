@@ -9575,6 +9575,7 @@ name = "nox"
 version = "0.17.4-alpha.0"
 dependencies = [
  "approx",
+ "bevy_math",
  "boxcar",
  "faer",
  "fn-traits",

@@ -33,7 +33,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
             SchematicElem::Timeline(timeline) => schematic.timeline = Some(timeline),
-            SchematicElem::Coordinate(frame) => schematic.frame = Some(frame),
+            SchematicElem::Coordinate(coordinate) => {
+                schematic.frame = Some(coordinate.frame);
+                schematic.origin = coordinate.origin;
+            }
             other => schematic.elems.push(other),
         }
     }
@@ -240,7 +243,7 @@ fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchema
     })
 }
 
-fn parse_coordinate(node: &KdlNode, src: &str) -> Result<GeoFrame, KdlSchematicError> {
+fn parse_coordinate(node: &KdlNode, src: &str) -> Result<CoordinateConfig, KdlSchematicError> {
     let frame_str = node
         .get("frame")
         .and_then(|v| v.as_string())
@@ -251,13 +254,52 @@ fn parse_coordinate(node: &KdlNode, src: &str) -> Result<GeoFrame, KdlSchematicE
             span: node.span(),
         })?;
 
-    GeoFrame::from_str(frame_str).map_err(|_| KdlSchematicError::InvalidValue {
+    let frame = GeoFrame::from_str(frame_str).map_err(|_| KdlSchematicError::InvalidValue {
         property: "frame".to_string(),
         node: "coordinate".to_string(),
         expected: "ENU, NED, or ECEF".to_string(),
         src: src.to_string(),
         span: node.span(),
-    })
+    })?;
+
+    let get_number = |property: &str| -> Result<Option<f64>, KdlSchematicError> {
+        node.get(property)
+            .map(|v| {
+                v.as_float()
+                    .or_else(|| v.as_integer().map(|i| i as f64))
+                    .ok_or_else(|| KdlSchematicError::InvalidValue {
+                        property: property.to_string(),
+                        node: "coordinate".to_string(),
+                        expected: "a number".to_string(),
+                        src: src.to_string(),
+                        span: node.span(),
+                    })
+            })
+            .transpose()
+    };
+
+    let lat = get_number("lat")?;
+    let lon = get_number("lon")?;
+    let alt = get_number("alt")?;
+    let origin = match (lat, lon) {
+        (Some(latitude), Some(longitude)) => Some(GeoOriginConfig {
+            latitude,
+            longitude,
+            altitude: alt.unwrap_or(0.0),
+        }),
+        (None, None) if alt.is_none() => None,
+        _ => {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "lat/lon".to_string(),
+                node: "coordinate".to_string(),
+                expected: "both lat and lon (alt optional)".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        }
+    };
+
+    Ok(CoordinateConfig { frame, origin })
 }
 
 fn parse_world_mesh(node: &KdlNode, src: &str) -> Result<WorldMesh, KdlSchematicError> {
@@ -2239,6 +2281,49 @@ object_3d "a.world_pos" {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_parse_coordinate_with_origin() {
+        let kdl = r#"coordinate frame="NED" lat=34.72 lon=-86.64 alt=180"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.frame, Some(GeoFrame::NED));
+        assert_eq!(
+            schematic.origin,
+            Some(GeoOriginConfig {
+                latitude: 34.72,
+                longitude: -86.64,
+                altitude: 180.0,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_coordinate_origin_alt_defaults_to_zero() {
+        let kdl = r#"coordinate frame="ENU" lat=10.5 lon=20.25"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(
+            schematic.origin,
+            Some(GeoOriginConfig {
+                latitude: 10.5,
+                longitude: 20.25,
+                altitude: 0.0,
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_coordinate_without_origin() {
+        let schematic = parse_schematic(r#"coordinate frame="NED""#).unwrap();
+        assert_eq!(schematic.frame, Some(GeoFrame::NED));
+        assert_eq!(schematic.origin, None);
+    }
+
+    #[test]
+    fn test_parse_coordinate_lat_without_lon_is_an_error() {
+        assert!(parse_schematic(r#"coordinate frame="NED" lat=34.72"#).is_err());
+        assert!(parse_schematic(r#"coordinate frame="NED" lon=-86.64"#).is_err());
+        assert!(parse_schematic(r#"coordinate frame="NED" alt=100.0"#).is_err());
     }
 
     #[test]

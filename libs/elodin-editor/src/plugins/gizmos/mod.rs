@@ -13,7 +13,7 @@ use bevy::{
         gizmos::Gizmos,
     },
     log::warn,
-    math::{DQuat, DVec3},
+    math::DVec3,
     prelude::*,
     text::{TextColor, TextFont},
     transform::components::Transform,
@@ -24,6 +24,7 @@ use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
+    WorldPos,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -34,7 +35,8 @@ use crate::{
     ui::tiles::ViewportConfig,
     ui::window::window_entity_from_target,
     vector_arrow::{
-        ArrowLabelScope, ArrowVisual, VectorArrowState, ViewportArrow, component_value_tail_to_vec3,
+        ArrowEndpoint, ArrowEndpoints, ArrowLabelScope, ArrowVisual, VectorArrowState,
+        ViewportArrow, component_value_tail_to_vec3,
     },
 };
 
@@ -43,7 +45,6 @@ type ArrowLabelCameraItem<'w> = (
     &'w Camera,
     &'w RenderTarget,
     &'w GlobalTransform,
-    Option<&'w ChildOf>,
     Option<&'w ViewportConfig>,
 );
 
@@ -78,20 +79,19 @@ const MIN_RADIUS_WORLD: f32 = 0.005;
 const MAX_RADIUS_WORLD: f32 = 0.05;
 const MAX_FINAL_RADIUS_WORLD: f32 = 0.1;
 
-#[derive(Clone)]
-pub struct EvaluatedVectorArrow {
-    pub start: DVec3,
-    pub end: DVec3,
-    pub color: Color,
-    pub name: Option<String>,
-    pub label_position: LabelPosition,
-}
-
 pub struct GizmoPlugin;
 
 impl Plugin for GizmoPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (gizmo_setup, arrow_mesh_setup));
+        // Evaluate arrow expressions into endpoint `WorldPos` before the
+        // canonical position pipeline converts them to Transforms.
+        app.add_systems(
+            bevy::app::PreUpdate,
+            evaluate_vector_arrows
+                .after(impeller2_bevy::apply_cached_data)
+                .before(crate::sync_pos),
+        );
         // This is how the `big_space` crate did it.
         // app.add_systems(PostUpdate, render_vector_arrow.after(TransformSystem::TransformPropagate));
         app.add_systems(
@@ -163,21 +163,16 @@ fn arrow_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     commands.insert_resource(ArrowMeshes { shaft, head });
 }
 
-/// Evaluate a vector arrow's expressions and return its world-space positions+metadata.
-pub fn evaluate_vector_arrow(
+/// Evaluate a vector arrow's expressions entirely in simulation coordinates,
+/// returning the start and end poses as `WorldPos` (same frame as the arrow).
+fn evaluate_arrow_endpoints(
     arrow: &VectorArrow3d,
     state: &VectorArrowState,
     entity_map: &EntityMap,
     component_values: &Query<'_, '_, &'static WktComponentValue>,
-    geo_context: &GeoContext,
-) -> Option<EvaluatedVectorArrow> {
-    let Some(vector_expr) = &state.vector_expr else {
-        return None;
-    };
-
-    let Ok(vector_value) = vector_expr.execute(entity_map, component_values) else {
-        return None;
-    };
+) -> Option<(WorldPos, WorldPos)> {
+    let vector_expr = state.vector_expr.as_ref()?;
+    let vector_value = vector_expr.execute(entity_map, component_values).ok()?;
 
     let mut direction = component_value_tail_to_vec3(&vector_value)?;
 
@@ -194,66 +189,128 @@ pub fn evaluate_vector_arrow(
         return None;
     }
 
-    let mut start_world = DVec3::ZERO;
-    let mut rotation = DQuat::IDENTITY;
+    let mut start = WorldPos::default();
     if let Some(origin_expr) = &state.origin_expr {
-        let Ok(origin_value) = origin_expr.execute(entity_map, component_values) else {
-            return None;
-        };
+        let origin_value = origin_expr.execute(entity_map, component_values).ok()?;
         if let Some(world_pos) = origin_value.as_world_pos() {
-            // Use ENU if no frame is specified.
-            if let Some(frame) = arrow.frame.or_default() {
-                start_world = GeoPosition(frame, world_pos.pos()).to_bevy(geo_context);
-                rotation = GeoRotation(frame, world_pos.att()).to_bevy(geo_context);
-            } else {
-                start_world = world_pos.bevy_pos();
-                rotation = world_pos.bevy_att();
-            }
+            start = world_pos;
         } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-            // Use ENU if no frame is specified.
-            if let Some(frame) = arrow.frame.or_default() {
-                start_world = GeoPosition(frame, origin).to_bevy(geo_context);
-            } else {
-                start_world = origin;
-            }
+            start.pos = nox::Vector3::new(origin.x, origin.y, origin.z);
         }
     }
 
-    if arrow.body_frame {
-        // Body-frame vectors are rotated by the body's orientation directly to Bevy world
-        direction = rotation * direction;
-    } else {
-        // World-frame vectors need geo-frame to Bevy transformation
-        direction =
-            GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
+    Some((start, arrow_end_pos(&start, direction, arrow.body_frame)))
+}
+
+/// Compute the arrow's end pose in simulation coordinates: body-frame vectors
+/// are rotated by the body's attitude, world-frame vectors are added as-is.
+fn arrow_end_pos(start: &WorldPos, mut direction: DVec3, body_frame: bool) -> WorldPos {
+    if body_frame {
+        direction = start.att() * direction;
     }
+    let end_pos = start.pos() + direction;
+    WorldPos {
+        att: start.att,
+        pos: nox::Vector3::new(end_pos.x, end_pos.y, end_pos.z),
+    }
+}
 
-    let end_world = start_world + direction;
-    let label_position = arrow.label_position.clone();
+fn spawn_arrow_endpoint(
+    commands: &mut Commands,
+    owner: Entity,
+    world_pos: WorldPos,
+    frame: Option<GeoFrame>,
+    name: &'static str,
+) -> Entity {
+    let mut endpoint = commands.spawn((
+        world_pos,
+        Transform::default(),
+        #[cfg(feature = "big_space")]
+        GridCell::default(),
+        ArrowEndpoint { owner },
+        Name::new(name),
+    ));
+    if let Some(frame) = frame {
+        endpoint.insert((
+            GeoPosition(frame, DVec3::ZERO),
+            GeoRotation::new(frame, bevy::math::DQuat::IDENTITY),
+        ));
+    }
+    endpoint.id()
+}
 
-    Some(EvaluatedVectorArrow {
-        start: start_world,
-        end: end_world,
-        color: axis_color_from_name(arrow.name.as_deref(), wkt_color_to_bevy(&arrow.color)),
-        name: arrow.name.clone(),
-        label_position,
-    })
+/// Evaluate arrow expressions and write the results into the arrow's two
+/// endpoint entities as `WorldPos`. The canonical position pipeline
+/// (`sync_pos` -> Geo* -> Transform/GridCell) then places the endpoints in
+/// Bevy space; `render_vector_arrow` only reads the resulting poses.
+pub fn evaluate_vector_arrows(
+    mut commands: Commands,
+    entity_map: Res<EntityMap>,
+    component_values: Query<&'static WktComponentValue>,
+    mut arrows: Query<(
+        Entity,
+        &VectorArrow3d,
+        &mut VectorArrowState,
+        Option<&ArrowEndpoints>,
+    )>,
+    mut world_pos: Query<&mut WorldPos>,
+    mut logged_missing: Local<HashSet<Entity>>,
+) {
+    for (entity, arrow, mut state, endpoints) in arrows.iter_mut() {
+        let Some((start, end)) =
+            evaluate_arrow_endpoints(arrow, &state, &entity_map, &component_values)
+        else {
+            if logged_missing.insert(entity) {
+                info!(
+                    ?entity,
+                    name = ?arrow.name,
+                    "vector_arrow: evaluation failed (missing data or zero-length)"
+                );
+            }
+            state.valid = false;
+            continue;
+        };
+        state.valid = true;
+
+        if let Some(endpoints) = endpoints {
+            if let Ok(mut pos) = world_pos.get_mut(endpoints.start) {
+                pos.set_if_neq(start);
+            }
+            if let Ok(mut pos) = world_pos.get_mut(endpoints.end) {
+                pos.set_if_neq(end);
+            }
+        } else {
+            // Use ENU if no frame is specified.
+            let frame = arrow.frame.or_default();
+            let start = spawn_arrow_endpoint(&mut commands, entity, start, frame, "arrow_start");
+            let end = spawn_arrow_endpoint(&mut commands, entity, end, frame, "arrow_end");
+            commands
+                .entity(entity)
+                .insert(ArrowEndpoints { start, end });
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn render_vector_arrow(
     mut commands: Commands,
-    entity_map: Res<EntityMap>,
-    mut vector_arrows: Query<(Entity, &VectorArrow3d, &mut VectorArrowState)>,
-    component_values: Query<&'static WktComponentValue>,
+    mut vector_arrows: Query<(
+        Entity,
+        &VectorArrow3d,
+        &mut VectorArrowState,
+        Option<&ArrowEndpoints>,
+    )>,
+    #[cfg(feature = "big_space")] endpoint_poses: Query<
+        (&Transform, &GridCell),
+        With<ArrowEndpoint>,
+    >,
+    #[cfg(not(feature = "big_space"))] endpoint_poses: Query<&Transform, With<ArrowEndpoint>>,
     #[cfg(feature = "big_space")] floating_origin: Res<FloatingOriginSettings>,
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     main_cameras: Query<MainCameraQueryItem<'_>, With<crate::MainCamera>>,
     viewport_arrows: Query<&ViewportArrow>,
-    mut logged_missing: Local<HashSet<Entity>>,
     mut logged_small: Local<HashSet<Entity>>,
-    geo_context: Res<GeoContext>,
 ) {
     let main_camera_data: Vec<_> = main_cameras.iter().collect();
     let mut camera_index: HashMap<Entity, usize> = HashMap::new();
@@ -264,7 +321,7 @@ fn render_vector_arrow(
         .iter()
         .any(|(_, _, _, _, config, _)| config.as_ref().map(|c| c.show_arrows).unwrap_or(true));
 
-    for (entity, arrow, mut state) in vector_arrows.iter_mut() {
+    for (entity, arrow, mut state, endpoints) in vector_arrows.iter_mut() {
         if !has_show_arrows {
             for visual in state.visuals.values() {
                 hide_arrow_visual(&mut commands, visual);
@@ -273,16 +330,14 @@ fn render_vector_arrow(
             continue;
         }
 
-        let Some(result) =
-            evaluate_vector_arrow(arrow, &state, &entity_map, &component_values, &geo_context)
-        else {
-            if logged_missing.insert(entity) {
-                info!(
-                    ?entity,
-                    name = ?arrow.name,
-                    "vector_arrow: evaluation failed (missing data or zero-length)"
-                );
-            }
+        // Endpoints are spawned and evaluated by `evaluate_vector_arrows` and
+        // placed in Bevy space by the canonical position pipeline.
+        let endpoint_pair = endpoints.filter(|_| state.valid).and_then(|endpoints| {
+            endpoint_poses
+                .get_many([endpoints.start, endpoints.end])
+                .ok()
+        });
+        let Some([start_pose, end_pose]) = endpoint_pair else {
             for visual in state.visuals.values() {
                 hide_arrow_visual(&mut commands, visual);
             }
@@ -292,10 +347,21 @@ fn render_vector_arrow(
 
         cfg_select! {
             feature = "big_space" => {
-                let (start_cell, start) = floating_origin.translation_to_grid(result.start);
+                let (start_transform, start_cell) = start_pose;
+                let (end_transform, end_cell) = end_pose;
+                let start = start_transform.translation;
+                let start_cell = *start_cell;
+                let edge = floating_origin.grid_edge_length();
+                let cell_delta = Vec3::new(
+                    (end_cell.x as f64 - start_cell.x as f64) as f32 * edge,
+                    (end_cell.y as f64 - start_cell.y as f64) as f32 * edge,
+                    (end_cell.z as f64 - start_cell.z as f64) as f32 * edge,
+                );
+                let direction_world = cell_delta + (end_transform.translation - start_transform.translation);
             }
             _ => {
-                let start = result.start.as_vec3();
+                let start = start_pose.translation;
+                let direction_world = end_pose.translation - start_pose.translation;
             }
         }
 
@@ -307,7 +373,6 @@ fn render_vector_arrow(
             continue;
         }
 
-        let direction_world = (result.end - result.start).as_vec3();
         let length = direction_world.length();
         let dir_norm = if length > 0.0 {
             direction_world / length
@@ -315,14 +380,15 @@ fn render_vector_arrow(
             Vec3::Y
         };
         let rotation = Quat::from_rotation_arc(Vec3::Y, dir_norm);
-        let base_color = axis_color_from_name(result.name.as_deref(), result.color);
+        let base_color =
+            axis_color_from_name(arrow.name.as_deref(), wkt_color_to_bevy(&arrow.color));
 
         // Keep a minimum draw length so a near-zero vector still shows a tiny arrow.
         let draw_length = length.max(0.05);
         if draw_length <= (MIN_ARROW_LENGTH_SQUARED as f32).sqrt() && logged_small.insert(entity) {
             info!(
                 ?entity,
-                name = ?result.name,
+                name = ?arrow.name,
                 length,
                 "vector_arrow: very small magnitude, drawing minimum-sized arrow"
             );
@@ -346,7 +412,7 @@ fn render_vector_arrow(
                 if let Some(visual) = state.visuals.remove(&cam_entity) {
                     hide_arrow_visual(&mut commands, &visual);
                 }
-                state.label_grid_pos = None;
+                state.label_offset = None;
                 state.label_name = None;
                 state.label_color = None;
                 if let Some(label_entity) = state.label.take() {
@@ -448,11 +514,11 @@ fn render_vector_arrow(
 
         // Calculate and cache label offset from arrow root for the UI system.
         // Store as offset from arrow start so UI can use arrow's GlobalTransform.
-        if arrow.show_name && result.name.is_some() {
+        if arrow.show_name && arrow.name.is_some() {
             // Use proportional separation (10% of arrow length) with min/max bounds
             // to handle both very small and very large arrows gracefully
             let separation = (length * 0.1).clamp(0.005, 0.08);
-            let total_offset = match result.label_position {
+            let total_offset = match arrow.label_position {
                 LabelPosition::Proportionate(label_position) => {
                     // Place the label near the arrow tip by biasing toward the end of the vector
                     let label_t = label_position.max(0.8);
@@ -469,12 +535,12 @@ fn render_vector_arrow(
                 }
             };
             // Store just the offset from the arrow root
-            state.label_grid_pos = Some((0, 0, 0, total_offset));
-            state.label_name = result.name.clone();
+            state.label_offset = Some(total_offset);
+            state.label_name = arrow.name.clone();
             state.label_color = None;
             state.label_scope = arrow_scope;
         } else {
-            state.label_grid_pos = None;
+            state.label_offset = None;
             state.label_name = None;
             state.label_color = None;
             state.label_scope = ArrowLabelScope::Global;
@@ -578,16 +644,27 @@ fn hide_label(commands: &mut Commands, label: Option<Entity>) {
     }
 }
 
-// Despawn visuals when a VectorArrow3d is removed, to avoid stray meshes.
+// Despawn visuals and endpoints when a VectorArrow3d is removed, to avoid stray entities.
 fn cleanup_removed_arrows(
     mut removed_arrows: RemovedComponents<VectorArrow3d>,
     mut removed_states: RemovedComponents<VectorArrowState>,
     mut commands: Commands,
     mut states: Query<&mut VectorArrowState>,
     visuals: Query<(Entity, &ArrowVisualOwner)>,
+    endpoints: Query<(Entity, &ArrowEndpoint)>,
 ) {
     let mut owners: HashSet<Entity> = removed_arrows.read().collect();
     owners.extend(removed_states.read());
+
+    // Endpoint entities belong to the arrow regardless of whether its state survives.
+    for (endpoint_entity, endpoint) in endpoints.iter() {
+        if owners.contains(&endpoint.owner) {
+            commands.entity(endpoint_entity).despawn();
+            if let Ok(mut owner) = commands.get_entity(endpoint.owner) {
+                owner.remove::<ArrowEndpoints>();
+            }
+        }
+    }
 
     // If the state still exists, use it to clean up the associated visuals.
     for owner in owners.clone() {
@@ -633,44 +710,30 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
-    #[cfg(feature = "big_space")] arrow_transforms: Query<(&Transform, &GridCell)>,
-    #[cfg(not(feature = "big_space"))] arrow_transforms: Query<&Transform>,
+    arrow_transforms: Query<&GlobalTransform>,
     cameras: Query<ArrowLabelCameraItem<'_>, With<MainCamera>>,
-    #[cfg(feature = "big_space")] parent_cells: Query<&GridCell, Without<MainCamera>>,
-    #[cfg(feature = "big_space")] floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     ui_cameras: Query<(Entity, &RenderTarget), With<ArrowLabelUiCamera>>,
     // Key: (arrow_entity, camera_entity) -> label_entity
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
-    #[cfg(feature = "big_space")]
-    let edge = floating_origin.grid_edge_length();
     let Some(primary_entity) = primary_window.iter().next() else {
         return;
     };
 
     let mut window_cameras: HashMap<Entity, Vec<_>> = HashMap::new();
-    for (entity, cam, render_target, gt, _parent, config) in cameras.iter() {
+    for (entity, cam, render_target, gt, config) in cameras.iter() {
         if !cam.is_active {
             continue;
         }
         let Some(window) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
-        let cell = cfg_select! {
-            feature = "big_space" => {
-                _parent
-                .and_then(|parent| parent_cells.get(parent.parent()).ok())
-                .copied()
-                .unwrap_or_default()
-            }
-            _ => { () }
-        };
         window_cameras
             .entry(window)
             .or_default()
-            .push((entity, cam, gt, cell, config));
+            .push((entity, cam, gt, config));
     }
 
     if window_cameras.is_empty() {
@@ -721,18 +784,11 @@ fn update_arrow_label_ui(
         let Some(visual) = arrow_state.visuals.values().next() else {
             continue;
         };
-        cfg_select! {
-            feature = "big_space" => {
-                let Ok((arrow_transform, arrow_cell)) = arrow_transforms.get(visual.root) else {
-                    continue;
-                };
-            }
-            _ => {
-                let Ok(arrow_transform) = arrow_transforms.get(visual.root) else {
-                    continue;
-                };
-            }
-        }
+        // GlobalTransform is propagated grid-aware by big_space, so it is
+        // already relative to the floating origin like the camera's.
+        let Ok(arrow_transform) = arrow_transforms.get(visual.root) else {
+            continue;
+        };
         let Some(ref name) = arrow_state.label_name else {
             continue;
         };
@@ -741,19 +797,16 @@ fn update_arrow_label_ui(
             use crate::ui::colors::ColorExt;
             crate::ui::colors::get_scheme().text_primary.into_bevy()
         };
-        let label_offset = arrow_state
-            .label_grid_pos
-            .map(|(_, _, _, offset)| offset)
-            .unwrap_or(Vec3::ZERO);
+        let label_offset = arrow_state.label_offset.unwrap_or(Vec3::ZERO);
 
         let label_text = name.clone();
-        let label_local = arrow_transform.translation + label_offset;
+        let label_pos = arrow_transform.translation() + label_offset;
 
         for (window, cameras) in &window_cameras {
             let Some(&ui_cam_entity) = window_ui_camera.get(window) else {
                 continue;
             };
-            for (cam_entity, cam, cam_transform, _cam_cell, config) in cameras {
+            for (cam_entity, cam, cam_transform, config) in cameras {
                 let show_arrows = config.map(|config| config.show_arrows).unwrap_or(true);
                 let key = (arrow_entity, *cam_entity);
 
@@ -774,22 +827,7 @@ fn update_arrow_label_ui(
                     continue;
                 }
 
-                let dv = cfg_select! {
-                    feature = "big_space" => {
-                        {
-                            let dx = (arrow_cell.x as f64 - _cam_cell.x as f64) as f32 * edge;
-                            let dy = (arrow_cell.y as f64 - _cam_cell.y as f64) as f32 * edge;
-                            let dz = (arrow_cell.z as f64 - _cam_cell.z as f64) as f32 * edge;
-                            Vec3::new(dx, dy, dz)
-                        }
-                    }
-                    _ => { Vec3::ZERO }
-                };
-
-                let camera_relative_pos = label_local + dv;
-
-                let Ok(screen_pos) = cam.world_to_viewport(cam_transform, camera_relative_pos)
-                else {
+                let Ok(screen_pos) = cam.world_to_viewport(cam_transform, label_pos) else {
                     if let Some(&label_entity) = label_map.get(&key)
                         && let Ok((_, _, mut node, _, _)) = labels.get_mut(label_entity)
                     {
@@ -877,6 +915,67 @@ fn update_arrow_label_ui(
     for key in labels_to_remove {
         if let Some(label_entity) = label_map.remove(&key) {
             commands.entity(label_entity).despawn();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::math::DQuat;
+    use bevy_geo_frames::{GeoContext, GeoRotation};
+
+    fn world_pos(pos: DVec3, att: DQuat) -> WorldPos {
+        WorldPos {
+            att: nox::Quaternion::new(att.w, att.x, att.y, att.z),
+            pos: nox::Vector3::new(pos.x, pos.y, pos.z),
+        }
+    }
+
+    fn bevy_delta(start: &WorldPos, end: &WorldPos, frame: GeoFrame, ctx: &GeoContext) -> DVec3 {
+        GeoPosition(frame, end.pos()).to_bevy(ctx) - GeoPosition(frame, start.pos()).to_bevy(ctx)
+    }
+
+    /// World-frame arrows: routing the endpoints through `GeoPosition::to_bevy`
+    /// must match converting the direction directly with `bevy_R_(frame)`.
+    #[test]
+    fn endpoints_match_direct_world_frame_conversion() {
+        let ctx = GeoContext::default();
+        let start = world_pos(
+            DVec3::new(10.0, -4.0, 2.5),
+            DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.3, -0.8, 1.1),
+        );
+        let direction = DVec3::new(1.0, 2.0, 3.0);
+
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            let end = arrow_end_pos(&start, direction, false);
+            let delta = bevy_delta(&start, &end, frame, &ctx);
+            let expected = GeoFrame::bevy_R_(&frame, &ctx) * direction;
+            assert!(
+                (delta - expected).length() < 1e-9,
+                "{frame:?}: got {delta:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    /// Body-frame arrows: rotating the direction by the body attitude in sim
+    /// coordinates must match the Bevy-space rotation by
+    /// `GeoRotation::absolute(frame, att).to_bevy`.
+    #[test]
+    fn endpoints_match_direct_body_frame_conversion() {
+        let ctx = GeoContext::default();
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, 0.2, -0.7);
+        let start = world_pos(DVec3::new(-3.0, 8.0, 1.0), att);
+        let direction = DVec3::new(0.5, -1.5, 2.0);
+
+        for frame in [GeoFrame::ENU, GeoFrame::NED] {
+            let end = arrow_end_pos(&start, direction, true);
+            let delta = bevy_delta(&start, &end, frame, &ctx);
+            let expected = GeoRotation::absolute(frame, att).to_bevy(&ctx) * direction;
+            assert!(
+                (delta - expected).length() < 1e-9,
+                "{frame:?}: got {delta:?}, expected {expected:?}"
+            );
         }
     }
 }

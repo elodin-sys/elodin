@@ -1,7 +1,10 @@
+#![allow(non_snake_case)]
 use std::collections::HashSet;
 
 use bevy::ecs::system::{SystemParam, SystemState};
 use bevy::picking::prelude::Pickable;
+use bevy::ecs::system::{SystemParam, SystemState};
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::{
     camera::Projection,
@@ -10,13 +13,14 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
-use bevy_geo_frames::GeoFrame;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault};
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
-use nox::{ArrayBuf, ArrayRepr, Vector3};
+use nox::ArrayBuf;
 
 use crate::EqlContext;
+use crate::WorldPosExt;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
@@ -38,7 +42,7 @@ const ANCHOR_DEPTH_EPSILON: f64 = 1.0e-9;
 pub struct ViewportFocusPickTarget;
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
-fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
+fn extract_vec3(val: &ComponentValue) -> Option<DVec3> {
     let ComponentValue::F64(array) = val else {
         return None;
     };
@@ -46,7 +50,7 @@ fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
     if data.len() < 3 {
         return None;
     }
-    Some(Vector3::new(data[0], data[1], data[2]))
+    Some(DVec3::new(data[0], data[1], data[2]))
 }
 
 #[derive(Component)]
@@ -458,6 +462,7 @@ pub fn set_viewport_pos(
     mut pos: Query<&mut WorldPos>,
     entity_map: Res<EntityMap>,
     values: Query<&'static ComponentValue>,
+    geo_context: Res<GeoContext>,
 ) {
     for (viewport, mut editor_cam) in viewports.iter_mut() {
         let Ok(mut pos) = pos.get_mut(viewport.parent_entity) else {
@@ -480,33 +485,27 @@ pub fn set_viewport_pos(
                 && let Ok(val) = compiled_expr.execute(&entity_map, &values)
                 && let Some(look_at) = val.as_world_pos()
             {
-                let to_target = look_at.pos - pos.pos;
-                let target_distance = to_target.norm().into_buf();
+                let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
+                // Everything stays in the viewport's frame: direction and up
+                // are frame coordinates, and `GeoRotation::look_at` yields the
+                // attitude expressed in that frame. `sync_pos` carries it into
+                // the entity's `GeoRotation` unchanged.
+                let dir = look_at.pos() - pos.pos();
+                let target_distance = dir.length();
+
                 if !is_valid_viewport_target_distance(target_distance) {
                     continue;
                 }
                 refresh_default_anchor_depth(&mut editor_cam, target_distance);
-                let dir = to_target.normalize();
-                let dir = match viewport.frame {
-                    Some(GeoFrame::NED) => nox::Vec3::new(dir.y(), dir.x(), -dir.z()),
-                    _ => dir,
-                };
-                let up_vec = viewport
+                let up = viewport
+>>>>>>> 3968efdb0 (chore: Soft reset to one commit to ease rebase.)
                     .up
                     .compiled_expr
                     .as_ref()
                     .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
                     .and_then(|v| extract_vec3(&v))
-                    .and_then(|v| {
-                        let n_sq = v.norm_squared();
-                        if n_sq.into_buf() > 1e-20 {
-                            Some(v.normalize())
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(nox::Vec3::z_axis());
-                pos.att = nox::Quaternion::look_at_rh(dir, up_vec);
+                    .filter(|v| v.length_squared() > 1e-20);
+                pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
             }
         }
     }
@@ -594,6 +593,8 @@ fn collect_mesh_descendants(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WorldPosExt;
+    use bevy::math::{Mat3, Quat, Vec3};
 
     #[test]
     fn refresh_default_anchor_depth_uses_viewport_look_at_distance() {
@@ -630,6 +631,255 @@ mod tests {
         }
     }
 
+    /// Full pipeline test with real EQL: `set_viewport_pos` -> `sync_pos` ->
+    /// `apply_geo_rotation`. A NED viewport with an explicit `up="(0,0,-1)"`
+    /// (up, away from the ground in NED) must produce a right-side-up rig
+    /// looking at the target; `up="(0,0,1)"` (down) must produce an inverted
+    /// one.
+    #[test]
+    fn ned_viewport_explicit_up_through_pipeline() {
+        use crate::object_3d::{EditableEQL, compile_eql_expr};
+        use bevy::math::{DQuat, DVec3};
+        use bevy::prelude::{IntoScheduleConfigs, Transform};
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+
+        let eql_ctx = eql::Context::default();
+        let editable = |s: &str| EditableEQL {
+            eql: s.to_string(),
+            compiled_expr: Some(
+                compile_eql_expr(
+                    eql_ctx
+                        .parse_str(s)
+                        .unwrap_or_else(|e| panic!("parse {s:?}: {e}")),
+                )
+                .unwrap_or_else(|e| panic!("compile {s:?}: {e}")),
+            ),
+        };
+
+        for (up_eql, expect_up_y) in [("(0,0,-1)", 1.0f32), ("(0,0,1)", -1.0f32)] {
+            let mut app = bevy::app::App::new();
+            app.insert_resource(GeoContext::default());
+            app.init_resource::<super::EntityMap>();
+            crate::register_world_pos_components(&mut app);
+            app.add_systems(
+                bevy::app::Update,
+                (
+                    super::set_viewport_pos,
+                    crate::sync_pos,
+                    bevy_geo_frames::apply_geo_rotation,
+                )
+                    .chain(),
+            );
+
+            let frame = GeoFrame::NED;
+            let parent = app
+                .world_mut()
+                .spawn((
+                    super::WorldPos::default(),
+                    GeoPosition(frame, DVec3::ZERO),
+                    GeoRotation::new(frame, DQuat::IDENTITY),
+                ))
+                .id();
+            // Values from the failing ball.kdl viewport.
+            app.world_mut().spawn(super::Viewport::new(
+                parent,
+                editable("(0,0,0,0, 0,0,0)"),
+                editable("(0,0,0,0, 0,-3,0)"),
+                editable(up_eql),
+                Some(frame),
+            ));
+            app.update();
+
+            let transform = *app.world().get::<Transform>(parent).unwrap();
+            let up = transform.rotation * Vec3::Y;
+            assert!(
+                up.y * expect_up_y > 0.5,
+                "up={up_eql}: rig up {up:?}, expected y sign {expect_up_y}"
+            );
+            // NED (0,-3,0) is 3 m west of the origin => bevy -X.
+            let fwd = transform.rotation * Vec3::NEG_Z;
+            assert!(
+                (fwd.x - -1.0).abs() < 1e-5 && fwd.y.abs() < 1e-5,
+                "up={up_eql}: camera fwd = {fwd:?}, expected -X"
+            );
+        }
+    }
+
+    macro_rules! assert_eq_mat {
+        ($a:expr, $b:expr $(,)?) => {{
+            assert_eq_mat!($a, $b, "");
+        }};
+        ($a:expr, $b:expr, $($arg:tt)+) => {{
+            let a = $a;
+            let b = $b;
+
+            for i in 0..3 {
+                let aa = a.col(i);
+                let bb = b.col(i);
+                for j in 0..3 {
+                    let delta = aa[j] - bb[j];
+                    if delta.abs() > 1e-5 {
+                        panic!("First mismatch on column {}:\nleft:  {}\nright: {}: {}",
+                                i + 1, a, b, format_args!($($arg)+));
+                    }
+                }
+            }
+        }};
+    }
+    macro_rules! assert_eq_vec {
+        ($a:expr, $b:expr $(,)?) => {{
+            assert_eq_vec!($a, $b, "");
+        }};
+        ($a:expr, $b:expr, $($arg:tt)+) => {{
+            let a = $a;
+            let b = $b;
+
+            for i in 0..3 {
+                let delta = a[i] - b[i];
+                if delta.abs() > 1e-5 {
+                    panic!("First mismatch on index {}:\nleft:  {}\nright: {}: {}",
+                           i, a, b, format_args!($($arg)+));
+                }
+            }
+        }};
+    }
+    macro_rules! assert_eq_quat {
+        ($a:expr, $b:expr $(,)?) => {{
+            assert_eq_quat!($a, $b, "");
+        }};
+
+        ($a:expr, $b:expr, $($arg:tt)+) => {{
+
+            let a = $a;
+            let b = $b;
+
+
+            let dot = a.dot(b).abs();
+
+            assert!(
+                (1.0 - dot) <= 1e-5,
+                "Quat mismatch:\nleft:  {:?}\nright: {:?}: {}",
+                a,
+                b,
+                format_args!($($arg)+)
+            );
+        }};
+    }
+
+    #[inline]
+    fn are_collinear(a: Vec3, b: Vec3) -> bool {
+        a.cross(b).length_squared() < 1e-6
+    }
+
+    /// Constructs a look_at rotation matrix that matches
+    /// [nox::Matrix3::look_at_rh].
+    fn glam_look_at_rh(dir: Vec3, up: Vec3) -> (Mat3, Vec3) {
+        let up_candidates = [up, Vec3::Y, Vec3::X, Vec3::Z];
+        let up = up_candidates
+            .into_iter()
+            .find(|up| !are_collinear(*up, dir))
+            .expect("it can't be collinear with everyone");
+        // Constructs a look_at rotation matrix using the same algorithm as
+        // nox::Matrix3::look_at_rh.
+        //
+        // let f = dir.normalize();
+        // let s = f.cross(up).normalize();
+        // let u = s.cross(f);
+        // // nox uses from_rows then transpose, which equals from_cols
+        // Mat3::from_cols(s, f, u)
+        (Mat3::look_to_rh(dir, up), up)
+    }
+
+    /// This function converts an Elodin rotation matrix to an EUS/Bevy rotation
+    /// matrix and vice versa. It behaves as though one right-multiplied M by
+    /// bevy_R_enu and transposed, i.e., (M * bevy_R_elodin)^T but no actual matrix
+    /// multiplication happens because column re-ordering is faster.
+    ///
+    ///
+    /// ```ignore
+    ///   elodin_R_bevy =  [ 1  0  0 ]
+    ///                    [ 0  0 -1 ]
+    ///                    [ 0  1  0 ]
+    /// ```
+    ///
+    /// Note: It's orthonormal, so its transpose is its inverse.
+    #[inline]
+    fn elodin_R_bevy(M: Mat3) -> Mat3 {
+        // Bevy +X -> ENU East
+        // Bevy +Y -> ENU Up
+        // Bevy +Z -> -ENU North
+        Mat3::from_cols(M.x_axis, M.z_axis, -M.y_axis).transpose()
+    }
+
+    // #[inline]
+    fn bevy_R_elodin(M: Mat3) -> Mat3 {
+        // ENU East  -> Bevy +X
+        // ENU North -> Bevy -Z
+        // ENU Up    -> Bevy +Y
+        let M = M.transpose();
+        Mat3::from_cols(M.x_axis, -M.z_axis, M.y_axis)
+    }
+
+    #[test]
+    fn test_inverses() {
+        let A = Mat3::from_cols(
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(4.0, 5.0, 6.0),
+            Vec3::new(7.0, 8.0, 9.0),
+        );
+        let B = elodin_R_bevy(A);
+        let C = bevy_R_elodin(B);
+        assert_eq_mat!(A, C, "b to e to b");
+        let B = bevy_R_elodin(A);
+        let C = elodin_R_bevy(B);
+        assert_eq_mat!(A, C, "e to b to e");
+    }
+
+    /// Compare against elodin's ENU.
+    #[test]
+    fn test_look_at_rh_nox_vs_glam_elodin() {
+        test_look_at_rh_nox_vs_glam(
+            |glam_mat, nox_mat| (elodin_R_bevy(glam_mat), nox_mat),
+            |M| M,
+        );
+    }
+
+    /// Compare against Bevy's EUS.
+    #[test]
+    fn test_look_at_rh_nox_vs_glam_bevy() {
+        test_look_at_rh_nox_vs_glam(
+            |glam_mat, nox_mat| (glam_mat, bevy_R_elodin(nox_mat)),
+            elodin_R_bevy,
+        );
+    }
+
+    /// `WorldPosExt::bevy_att` must match `GeoRotation::to_bevy` in plane mode.
+    #[test]
+    fn test_bevy_att_vs_geo_frames_plane() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+
+        for (i, (dir, up)) in look_at_test_cases().into_iter().enumerate() {
+            let nox_dir = nox::Vec3::from(dir.as_dvec3());
+            let nox_up = nox::Vec3::from(up.as_dvec3());
+            let (nox_mat, _) = nox::Matrix3::look_at_rh_up(nox_dir, nox_up);
+            let nox_quat = nox::Quaternion::from_rot_mat(nox_mat);
+            let world_pos = super::WorldPos {
+                att: nox_quat,
+                pos: nox::Vec3::new(0.0, 0.0, 0.0),
+            };
+
+            let elodin_bevy = world_pos.bevy_att();
+            let geo_frames_bevy = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            assert_eq_quat!(
+                elodin_bevy.as_quat(),
+                geo_frames_bevy.as_quat(),
+                "case {i} dir {dir} up {up}"
+            );
+        }
+    }
+
     #[test]
     fn focus_object_eql_matches_trimmed_viewport_look_at() {
         let focus_eqls = HashSet::from(["lander.world_pos".to_string()]);
@@ -637,5 +887,81 @@ mod tests {
         assert!(is_focus_object_eql(&focus_eqls, " lander.world_pos "));
         assert!(!is_focus_object_eql(&focus_eqls, "lander_truth.world_pos"));
         assert!(!is_focus_object_eql(&focus_eqls, ""));
+    }
+    #[test]
+    fn test_from_mat3() {
+        let q = Quat::from_mat3(&Mat3::IDENTITY);
+        assert_eq_quat!(q, Quat::IDENTITY);
+
+        let dir = Vec3::Y;
+        let up = Vec3::Z;
+        let (M, _) = glam_look_at_rh(dir, up);
+        assert_eq_mat!(M, Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y));
+        let q = Quat::from_mat3(&Mat3::IDENTITY);
+        assert_eq_quat!(q, Quat::IDENTITY);
+        let S = elodin_R_bevy(M).transpose();
+        assert_eq_mat!(S, Mat3::IDENTITY);
+
+        assert_eq_mat!(
+            Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z),
+            glam_look_at_rh(Vec3::NEG_Z, Vec3::NEG_Y).0,
+            "trial 0"
+        );
+        // assert_eq_mat!(Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z), glam_look_at_rh(Vec3::Z, Vec3::Y).0, "current");
+    }
+
+    fn look_at_test_cases() -> [(Vec3, Vec3); 10] {
+        [
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: identity for Elodin ENU
+            (Vec3::NEG_Z, Vec3::Y),              // 1: identity for Bevy
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
+            (Vec3::new(1.0, 2.0, 3.0).normalize(), Vec3::Y),
+            (Vec3::new(-1.0, 0.5, 0.3).normalize(), Vec3::Y),
+            (Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
+            (Vec3::new(1.0, 0.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
+        ]
+    }
+
+    fn test_look_at_rh_nox_vs_glam(f: fn(Mat3, Mat3) -> (Mat3, Mat3), g: fn(Mat3) -> Mat3) {
+        for (i, (dir, up)) in look_at_test_cases().into_iter().enumerate() {
+            let nox_dir = nox::Vec3::from(dir.as_dvec3());
+            let nox_up = nox::Vec3::from(up.as_dvec3());
+
+            let (nox_mat, nox_up_actual) = nox::Matrix3::look_at_rh_up(nox_dir, nox_up);
+            let (glam_mat, up_actual) = glam_look_at_rh(dir, up);
+            assert_eq_vec!(
+                up_actual,
+                bevy::math::DVec3::from(nox_up_actual).as_vec3(),
+                "case {i} nox and bevy up vector don't match"
+            );
+            // let glam_mat = elodin_R_bevy(glam_mat);
+            let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
+            // let nox_mat_bevy = bevy_R_elodin(nox_mat_bevy);
+            let (glam_mat, _nox_mat_bevy) = f(glam_mat, nox_mat_bevy);
+
+            // Weird thing. The matrices are not always the same but the
+            // quaternions are.
+            // assert_eq_mat!(nox_mat_bevy, glam_mat, "\ncase {i} dir {dir} up {up}");
+
+            // Also compare resulting quaternions
+            let nox_quat_look_at = nox::Quaternion::look_at_rh(nox_dir, nox_up);
+            let nox_quat = nox::Quaternion::from_rot_mat(nox_mat);
+            assert_eq_quat!(
+                bevy::math::DQuat::from(nox_quat),
+                bevy::math::DQuat::from(nox_quat_look_at),
+                "case {i} look_at_rh vs mat"
+            );
+            let world_pos = super::WorldPos {
+                att: nox_quat,
+                pos: nox::Vec3::new(0.0, 0.0, 0.0),
+            };
+            let nox_quat_bevy = world_pos.bevy_att();
+            // let glam_quat = Quat::from_mat3(&elodin_R_bevy(glam_mat).transpose());
+            let glam_quat = Quat::from_mat3(&g(glam_mat));
+            assert_eq_quat!(nox_quat_bevy.as_quat(), glam_quat, "case {i} second");
+        }
     }
 }

@@ -8,3 +8,5 @@ pub use super::GeoContext;
 pub use super::GeoPosition;
 #[cfg(feature = "bevy")]
 pub use super::GeoRotation;
+#[cfg(feature = "bevy")]
+pub use super::RotationKind;

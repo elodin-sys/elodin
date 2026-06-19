@@ -96,18 +96,34 @@ impl<T: RealField> Matrix3<T, ArrayRepr> {
         dir: impl Into<Vector<T, 3, ArrayRepr>>,
         up: impl Into<Vector<T, 3, ArrayRepr>>,
     ) -> Self {
+        Self::look_at_rh_up(dir, up).0
+    }
+
+    pub fn look_at_rh_up(
+        dir: impl Into<Vector<T, 3, ArrayRepr>>,
+        up: impl Into<Vector<T, 3, ArrayRepr>>,
+    ) -> (Self, Vector<T, 3, ArrayRepr>) {
         let dir = dir.into();
-        let up = up.into();
-        // apply gram-schmidt orthogonalization to create a rot matrix
+        let mut up = up.into();
+        // Apply gram-schmidt orthogonalization to create a rotation matrix.
         let f = dir.normalize();
-        let up = if up.dot(&dir).abs() == T::one() {
-            Vector::y_axis()
-        } else {
-            up
-        };
+
+        // Try up, Y, X, Z as up directions. Ensure up isn't collinear with dir.
+        for i in 0..=2 {
+            if up.dot(&dir).abs() == T::one() {
+                up = match i {
+                    0 => Vector::y_axis(),
+                    1 => Vector::x_axis(),
+                    2 => Vector::z_axis(),
+                    _ => unreachable!(),
+                };
+            } else {
+                break;
+            }
+        }
         let s = f.cross(&up).normalize();
         let u = s.cross(&f);
-        Self::from_rows([s, f, u]).transpose()
+        (Self::from_rows([s, f, u]).transpose(), up)
     }
 }
 
