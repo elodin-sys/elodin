@@ -6,7 +6,7 @@
     ];
   };
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -28,9 +28,11 @@
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
     elodinOverlay = gitRev: final: prev: {
-      tracy = final.callPackage ./nix/pkgs/tracy.nix {
-        tracy = prev.tracy;
-      };
+      tracy = (prev.tracy.override {withWayland = false;}).overrideAttrs (oldAttrs: {
+        buildInputs =
+          (oldAttrs.buildInputs or [])
+          ++ (with prev; [libx11 libxrandr libxcursor libxi]);
+      });
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain gitRev;

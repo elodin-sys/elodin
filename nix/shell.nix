@@ -164,11 +164,11 @@ with pkgs; let
           export XDG_SESSION_TYPE=x11
           # Ensure X11 libraries are available
           export LD_LIBRARY_PATH="${lib.makeLibraryPath (with pkgs; [
-        xorg.libX11
-        xorg.libXcursor
-        xorg.libXrandr
-        xorg.libXi
-        xorg.libXext
+        libx11
+        libxcursor
+        libxrandr
+        libxi
+        libxext
         libxkbcommon
         mesa
         libGL

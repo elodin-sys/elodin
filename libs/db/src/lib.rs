@@ -469,6 +469,7 @@ impl DB {
             if !path.is_dir()
                 || path.file_name() == Some(OsStr::new("msgs"))
                 || path.file_name() == Some(OsStr::new("assets"))
+                || path.file_name() == Some(OsStr::new("simulation_source"))
             {
                 trace!("Skipping non-component directory: {}", path.display());
                 continue;

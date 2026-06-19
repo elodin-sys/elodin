@@ -57,12 +57,12 @@
     vulkan-tools
 
     # X11
-    xorg.libX11
-    xorg.libXcursor
-    xorg.libXrandr
-    xorg.libXi
-    xorg.libXext
-    xorg.libxshmfence
+    libx11
+    libxcursor
+    libxrandr
+    libxi
+    libxext
+    libxshmfence
 
     # Wayland
     wayland
@@ -127,12 +127,12 @@
       vulkan-validation-layers
 
       # X11
-      xorg.libX11
-      xorg.libXcursor
-      xorg.libXrandr
-      xorg.libXi
-      xorg.libXext
-      xorg.libxshmfence
+      libx11
+      libxcursor
+      libxrandr
+      libxi
+      libxext
+      libxshmfence
 
       # Wayland
       wayland
@@ -178,12 +178,12 @@
         vulkan-validation-layers
 
         # X11
-        xorg.libX11
-        xorg.libXcursor
-        xorg.libXrandr
-        xorg.libXi
-        xorg.libXext
-        xorg.libxshmfence
+        libx11
+        libxcursor
+        libxrandr
+        libxi
+        libxext
+        libxshmfence
 
         # Wayland
         wayland

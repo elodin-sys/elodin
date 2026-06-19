@@ -408,8 +408,9 @@ def actuator_allocator(
         control_query,
         RWForce,
         el.SpatialForce(),
-        lambda xs, axis, control_force: xs
-        + el.SpatialForce(torque=np.dot(control_force.torque(), axis) * axis),
+        lambda xs, axis, control_force: (
+            xs + el.SpatialForce(torque=np.dot(control_force.torque(), axis) * axis)
+        ),
     )
 
 
