@@ -396,6 +396,7 @@ pub fn handle_view_cube_editor(
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
+    geo_context: Res<GeoContext>,
     coordinate: Res<Coordinate>,
 ) {
     for event in events.read() {
@@ -644,6 +645,8 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
+                &geo_context,
+                &coordinate,
             )
             .map(|target| (target - origin_world).as_vec3())
             .unwrap_or_else(|| {
@@ -701,6 +704,8 @@ pub fn handle_view_cube_editor(
                         &lookup.viewports,
                         lookup.entity_map.as_ref(),
                         &lookup.values,
+                        &geo_context,
+                        &coordinate,
                         origin_world,
                     );
                     if let Ok(facing) = Dir3::new(Vec3::NEG_Z) {
