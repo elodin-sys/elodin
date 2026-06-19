@@ -679,15 +679,26 @@ mod tests {
                 ))
                 .id();
             // Values from the failing ball.kdl viewport.
-            app.world_mut().spawn(super::Viewport::new(
-                parent,
-                editable("(0,0,0,0, 0,0,0)"),
-                editable("(0,0,0,0, 0,-3,0)"),
-                editable(up_eql),
-                Some(frame),
-            ));
+            let viewport_entity = app
+                .world_mut()
+                .spawn((
+                    super::Viewport::new(
+                        parent,
+                        editable("(0,0,0,0, 0,0,0)"),
+                        editable("(0,0,0,0, 0,-3,0)"),
+                        editable(up_eql),
+                        Some(frame),
+                    ),
+                    EditorCam::default(),
+                ))
+                .id();
             app.update();
 
+            let editor_cam = app.world().get::<EditorCam>(viewport_entity).unwrap();
+            assert!(
+                (editor_cam.last_anchor_depth + 3.0).abs() < 1e-9,
+                "up={up_eql}: viewport positioning system did not run"
+            );
             let transform = *app.world().get::<Transform>(parent).unwrap();
             let up = transform.rotation * Vec3::Y;
             assert!(
