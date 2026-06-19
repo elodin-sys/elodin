@@ -31,7 +31,7 @@
       tracy = (prev.tracy.override {withWayland = false;}).overrideAttrs (oldAttrs: {
         buildInputs =
           (oldAttrs.buildInputs or [])
-          ++ (with prev.xorg; [libX11 libXrandr libXcursor libXi]);
+          ++ (with prev; [libx11 libxrandr libxcursor libxi]);
       });
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
