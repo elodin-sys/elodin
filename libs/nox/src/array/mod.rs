@@ -272,7 +272,7 @@ impl ArrayShape for SmallVec<[usize; 4]> {
 pub trait ArrayBuf<T>: Clone {
     fn as_buf(&self) -> &[T];
     fn as_mut_buf(&mut self) -> &mut [T];
-    fn default(dims: &[usize]) -> Self;
+    fn default_for_shape(dims: &[usize]) -> Self;
 }
 
 impl<T: Elem + Clone> ArrayBuf<T> for T {
@@ -284,7 +284,7 @@ impl<T: Elem + Clone> ArrayBuf<T> for T {
         core::slice::from_mut(self)
     }
 
-    fn default(_dims: &[usize]) -> Self {
+    fn default_for_shape(_dims: &[usize]) -> Self {
         T::default()
     }
 }
@@ -298,7 +298,7 @@ impl<const D: usize, T: Elem + Clone> ArrayBuf<T> for [T; D] {
         self
     }
 
-    fn default(_dims: &[usize]) -> Self {
+    fn default_for_shape(_dims: &[usize]) -> Self {
         [T::default(); D]
     }
 }
@@ -312,7 +312,7 @@ impl<T: Clone + Elem, const D1: usize, const D2: usize> ArrayBuf<T> for [[T; D1]
         self.as_flattened_mut()
     }
 
-    fn default(_dims: &[usize]) -> Self {
+    fn default_for_shape(_dims: &[usize]) -> Self {
         [[T::default(); D1]; D2]
     }
 }
@@ -328,7 +328,7 @@ impl<T: Clone + Elem, const D1: usize, const D2: usize, const D3: usize> ArrayBu
         self.as_flattened_mut().as_flattened_mut()
     }
 
-    fn default(_dims: &[usize]) -> Self {
+    fn default_for_shape(_dims: &[usize]) -> Self {
         [[[T::default(); D1]; D2]; D3]
     }
 }
@@ -336,7 +336,7 @@ impl<T: Clone + Elem, const D1: usize, const D2: usize, const D3: usize> ArrayBu
 impl<T1: Elem, D1: ArrayDim + TensorDim> Array<T1, D1> {
     pub fn zeroed(dims: &[usize]) -> Self {
         Array {
-            buf: D1::Buf::<T1>::default(dims),
+            buf: D1::Buf::<T1>::default_for_shape(dims),
         }
     }
 }
