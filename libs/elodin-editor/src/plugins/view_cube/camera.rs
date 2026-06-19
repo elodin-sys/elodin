@@ -23,9 +23,11 @@ use super::components::{
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
+use crate::Coordinate;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
+use bevy_geo_frames::{GeoContext, GeoPosition};
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
@@ -294,6 +296,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     >,
     entity_map: Res<'w, EntityMap>,
     values: Query<'w, 's, &'static ComponentValue>,
+    geo_context: Res<'w, GeoContext>,
     time: Res<'w, Time>,
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
     camera_parents: CameraParentQuery<'w, 's>,
@@ -384,6 +387,7 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
@@ -392,6 +396,8 @@ pub fn handle_view_cube_editor(
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
+    geo_context: Res<GeoContext>,
+    coordinate: Res<Coordinate>,
 ) {
     for event in events.read() {
         let now_secs = lookup.time.elapsed_secs_f64();
@@ -416,6 +422,8 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
+                &lookup.geo_context,
+                &coordinate,
                 origin_world,
             );
         }
@@ -574,6 +582,8 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
+                &lookup.geo_context,
+                &coordinate,
                 origin_world,
             );
 
@@ -635,6 +645,8 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
+                &geo_context,
+                &coordinate,
             )
             .map(|target| (target - origin_world).as_vec3())
             .unwrap_or_else(|| {
@@ -692,6 +704,8 @@ pub fn handle_view_cube_editor(
                         &lookup.viewports,
                         lookup.entity_map.as_ref(),
                         &lookup.values,
+                        &geo_context,
+                        &coordinate,
                         origin_world,
                     );
                     if let Ok(facing) = Dir3::new(Vec3::NEG_Z) {
@@ -1006,10 +1020,18 @@ fn update_anchor_depth_for_view_cube(
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
+    geo_context: &GeoContext,
+    coordinate: &Coordinate,
     origin_world: DVec3,
 ) {
-    let Some(orbit_target_world) = view_cube_orbit_target(camera, viewports, entity_map, values)
-    else {
+    let Some(orbit_target_world) = view_cube_orbit_target(
+        camera,
+        viewports,
+        entity_map,
+        values,
+        geo_context,
+        coordinate,
+    ) else {
         return;
     };
     let orbit_target = (orbit_target_world - origin_world).as_vec3();
@@ -1027,9 +1049,18 @@ fn refresh_anchor_depth_for_arrow(
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
+    geo_context: &GeoContext,
+    coordinate: &Coordinate,
     origin_world: DVec3,
 ) -> Option<(f32, f32)> {
-    let orbit_target_world = view_cube_orbit_target(camera, viewports, entity_map, values)?;
+    let orbit_target_world = view_cube_orbit_target(
+        camera,
+        viewports,
+        entity_map,
+        values,
+        geo_context,
+        coordinate,
+    )?;
     let orbit_target = (orbit_target_world - origin_world).as_vec3();
     let measured_distance = (orbit_target - camera_translation).length();
     if !measured_distance.is_finite() || measured_distance <= 1.0e-3 {
@@ -1048,12 +1079,14 @@ fn view_cube_orbit_target(
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
+    geo_context: &GeoContext,
+    coordinate: &Coordinate,
 ) -> Option<DVec3> {
     let viewport = viewports.get(camera).ok()?;
     let compiled_expr = viewport.look_at.compiled_expr.as_ref()?;
     let val = compiled_expr.execute(entity_map, values).ok()?;
     let world_pos = val.as_world_pos()?;
-    Some(world_pos.bevy_pos())
+    Some(GeoPosition(coordinate.0.unwrap_or_default(), world_pos.pos()).to_bevy(geo_context))
 }
 
 #[cfg(test)]

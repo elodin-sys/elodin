@@ -50,7 +50,7 @@ impl<T: Elem> ArrayBuf<T> for DynArray<T, Vec<T>> {
         self.storage.as_mut_slice()
     }
 
-    fn default(dims: &[usize]) -> Self {
+    fn default_for_shape(dims: &[usize]) -> Self {
         let len: usize = if dims.is_empty() {
             1
         } else {

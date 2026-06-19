@@ -54,8 +54,32 @@ pub struct Schematic {
     pub timeline: Option<TimelineConfig>,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
+    /// Geographic origin of the schematic's coordinate system, used to set
+    /// the viewer's `GeoContext` origin.
+    #[serde(default)]
+    pub origin: Option<GeoOriginConfig>,
     #[serde(default)]
     pub skybox: Option<SkyboxConfig>,
+}
+
+/// Geographic origin in degrees/meters, as written in the schematic's
+/// `coordinate` node (`lat`/`lon`/`alt`).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct GeoOriginConfig {
+    /// Geodetic latitude [deg]
+    pub latitude: f64,
+    /// Geodetic longitude [deg]
+    pub longitude: f64,
+    /// Altitude above mean radius [m]
+    pub altitude: f64,
+}
+
+/// Contents of the global `coordinate` schematic node.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct CoordinateConfig {
+    pub frame: bevy_geo_frames::GeoFrame,
+    #[serde(default)]
+    pub origin: Option<GeoOriginConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -76,7 +100,7 @@ pub enum SchematicElem {
     Window(WindowSchematic),
     Theme(ThemeConfig),
     Timeline(TimelineConfig),
-    Coordinate(bevy_geo_frames::GeoFrame),
+    Coordinate(CoordinateConfig),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]

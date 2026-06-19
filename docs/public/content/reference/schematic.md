@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `coordinate`, `theme`, `timeline`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
+- Top-level nodes: `coordinate`, `theme`, `timeline`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 - Booleans: KDL booleans are `#true`/`#false`. A bare `True` is a *string*, not a boolean — most flags silently fall back to their default if given one. Viewport flags (`hdr`, `show_grid`, `active`, ...) leniently accept `True`/`"true"` (case-insensitive), but prefer the `#` forms everywhere.
@@ -23,7 +23,7 @@ order = 6
 ### coordinate
 - Optional top-level node that sets the global coordinate frame for the schematic.
 - `frame`: `"ENU"` (default), `"NED"`, or `"ECEF"`.
-- Elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`) that don't specify their own `frame` attribute inherit this global frame.
+- Elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`) that don't specify their own `frame` attribute inherit this global frame.
 - Example: `coordinate frame="NED"` sets the entire schematic to use North-East-Down coordinates.
 
 ### theme
@@ -188,6 +188,13 @@ object_3d lander.world_pos {
    label anchor, or absolutely by specifying a number in a string with an 'm'
    suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").
 
+### world_mesh
+- Positional `region`: required terrain region identifier, e.g. `"death_valley"` or `"globe"`.
+- `lod_count`: optional LOD depth override.
+- `translate`: optional `(x,y,z)` offset in the selected coordinate frame, in meters.
+- `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting terrain axes and translation. Inherits from global `coordinate` if omitted.
+- `visible`: bool, default `#true`.
+
 ## Schema at a glance
 
 Legend: parentheses group alternatives; `|` means “or”; square brackets `[...]` are optional; curly braces `{...}` repeat; `*` is zero-or-more, `+` is one-or-more; angle brackets `<...>` mark positional args.
@@ -203,6 +210,7 @@ schematic =
   | object_3d
   | line_3d
   | vector_arrow
+  | world_mesh
   )*
 
 coordinate = "coordinate"
@@ -376,6 +384,13 @@ vector_arrow = "vector_arrow"
              [show_name=bool]
              [arrow_thickness=float]
              [label_position=0..1]
+
+world_mesh = "world_mesh"
+           <region>
+           [lod_count=int]
+           [translate=(x,y,z)]
+           [frame=ENU|NED|ECEF]
+           [visible=bool]
 
 color = "color"
       ( r g b [a]

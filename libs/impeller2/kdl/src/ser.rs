@@ -9,7 +9,11 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
     let mut doc = KdlDocument::new();
 
     if let Some(frame) = schematic.frame {
-        doc.nodes_mut().push(serialize_coordinate(frame));
+        doc.nodes_mut()
+            .push(serialize_coordinate(&CoordinateConfig {
+                frame,
+                origin: schematic.origin,
+            }));
     }
     if let Some(theme) = schematic.theme.as_ref() {
         doc.nodes_mut().push(serialize_theme(theme));
@@ -42,14 +46,24 @@ fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
         SchematicElem::Window(window) => serialize_window(window),
         SchematicElem::Theme(theme) => serialize_theme(theme),
         SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
-        SchematicElem::Coordinate(frame) => serialize_coordinate(*frame),
+        SchematicElem::Coordinate(coordinate) => serialize_coordinate(coordinate),
     }
 }
 
-fn serialize_coordinate(frame: bevy_geo_frames::GeoFrame) -> KdlNode {
+fn serialize_coordinate(coordinate: &CoordinateConfig) -> KdlNode {
     let mut node = KdlNode::new("coordinate");
     node.entries_mut()
-        .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+        .push(KdlEntry::new_prop("frame", <&str>::from(coordinate.frame)));
+    if let Some(origin) = coordinate.origin {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("lat", origin.latitude));
+        node.entries_mut()
+            .push(KdlEntry::new_prop("lon", origin.longitude));
+        if origin.altitude != 0.0 {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("alt", origin.altitude));
+        }
+    }
     node
 }
 
@@ -1918,6 +1932,39 @@ viewport name=main"#;
             Some(bevy_geo_frames::GeoFrame::NED),
             "Re-parsed schematic should preserve NED frame"
         );
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_origin() {
+        let original = r#"coordinate frame="NED" lat=34.72 lon=-86.64 alt=180.5
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let origin = GeoOriginConfig {
+            latitude: 34.72,
+            longitude: -86.64,
+            altitude: 180.5,
+        };
+        assert_eq!(parsed.origin, Some(origin));
+
+        let serialized = serialize_schematic(&parsed);
+        let expected = r#"coordinate frame=NED lat=34.72 lon=-86.64 alt=180.5
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        assert_eq!(reparsed.origin, Some(origin));
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_origin_zero_alt_omitted() {
+        let parsed = parse_schematic(r#"coordinate frame="ENU" lat=1.5 lon=-2.5"#).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        assert_eq!(serialized, "coordinate frame=ENU lat=1.5 lon=-2.5");
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.origin, parsed.origin);
     }
 
     #[test]
