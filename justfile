@@ -95,7 +95,7 @@ install target="all":
   mkdir -p "${CARGO_HOME:-$HOME/.cargo}/bin"
   case "{{target}}" in
     py)
-      uv venv --python 3.13 --clear
+      uv venv --python "$(command -v python3.13)" --python-preference only-system --clear
       . .venv/bin/activate
       uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"

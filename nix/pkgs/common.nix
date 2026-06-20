@@ -42,6 +42,9 @@
     # Audio
     alsa-lib
     alsa-lib.dev
+    alsa-plugins
+    libpulseaudio
+    pulseaudio
     pipewire
 
     # Graphics - Core
@@ -114,6 +117,7 @@
     lib.makeLibraryPath (with pkgs; [
       # Audio
       alsa-lib
+      libpulseaudio
       pipewire
 
       # Graphics - Core
@@ -145,13 +149,33 @@
     ]);
 
   # Linux graphics environment variables
-  linuxGraphicsEnv = {pkgs}: {
+  linuxGraphicsEnv = {pkgs}: let
+    alsaPluginDir = pkgs.symlinkJoin {
+      name = "elodin-alsa-plugins";
+      paths = [
+        pkgs.alsa-plugins
+        pkgs.pipewire
+      ];
+    };
+    asoundConf = pkgs.writeText "elodin-asound.conf" ''
+      <${pkgs.alsa-lib}/share/alsa/alsa.conf>
+
+      pcm.!default {
+        type pulse
+      }
+
+      ctl.!default {
+        type pulse
+      }
+    '';
+  in {
     LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
     __GLX_VENDOR_LIBRARY_NAME = "mesa";
     LIBVA_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
     VK_ICD_FILENAMES = "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json";
     VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
-    ALSA_PLUGIN_DIR = "${pkgs.pipewire}/lib/alsa-lib";
+    ALSA_PLUGIN_DIR = "${alsaPluginDir}/lib/alsa-lib";
+    ALSA_CONFIG_PATH = "${asoundConf}";
   };
 
   # Common wrapper arguments for executables

@@ -173,6 +173,23 @@ with pkgs; let
         mesa
         libGL
       ])}:''${LD_LIBRARY_PATH}"
+          # Non-NixOS NVIDIA hosts need the host Vulkan/GLX driver. The Nix
+          # Mesa ICDs otherwise force wgpu onto lavapipe, which cannot present
+          # reliably to the NVIDIA X server.
+          if [ -e /proc/driver/nvidia/version ] && [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+            nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
+            mkdir -p "$nvidia_lib_dir"
+            for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
+              /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
+              /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
+              [ -e "$lib" ] && ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+            done
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+            export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json
+            export __GLX_VENDOR_LIBRARY_NAME=nvidia
+            export LD_LIBRARY_PATH="$nvidia_lib_dir:''${LD_LIBRARY_PATH}"
+            unset LIBGL_ALWAYS_SOFTWARE || true
+          fi
         ;;
       esac
       # start the shell if we're in an interactive shell
