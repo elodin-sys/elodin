@@ -94,6 +94,14 @@ fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
     perspective.near_clip_plane = crate::plugins::frustum_common::near_clip_plane(near);
 }
 
+/// Derive zoom bounds from the viewport far plane.
+pub(crate) fn zoom_limits_for_far(far: f32) -> (f64, f64) {
+    let far = (far as f64).max(DEFAULT_VIEWPORT_FAR as f64);
+    let min_size_per_pixel = (far * 1.0e-6).max(1.0e-3);
+    let max_size_per_pixel = (far * 2.0).max(10.0);
+    (min_size_per_pixel, max_size_per_pixel)
+}
+
 fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
     let Some(config) = config else {
         return Bloom::default();
@@ -117,7 +125,22 @@ fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(Startup, setup_primary_window_state);
+        .add_systems(Startup, setup_primary_window_state)
+        .add_systems(Update, sync_editor_cam_zoom_limits);
+}
+
+type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
+
+fn sync_editor_cam_zoom_limits(
+    mut cameras: Query<EditorCamZoomLimitsQuery<'_>, (With<MainCamera>, Changed<Projection>)>,
+) {
+    for (projection, mut editor_cam) in &mut cameras {
+        if let Projection::Perspective(persp) = projection {
+            let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(persp.far);
+            editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
+            editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
+        }
+    }
 }
 
 fn setup_primary_window_state(
@@ -1549,6 +1572,8 @@ impl ViewportPane {
             perspective.far = DEFAULT_VIEWPORT_FAR;
         }
 
+        let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(perspective.far);
+
         let mut camera = commands.spawn((
             Transform::default(),
             Camera3d::default(),
@@ -1574,8 +1599,8 @@ impl ViewportPane {
                     can_pass_tdc: false,
                 },
                 zoom_limits: ZoomLimits {
-                    min_size_per_pixel: 1e-3,
-                    max_size_per_pixel: 10.0,
+                    min_size_per_pixel,
+                    max_size_per_pixel,
                     zoom_through_objects: false,
                 },
                 sensitivity: Sensitivity {

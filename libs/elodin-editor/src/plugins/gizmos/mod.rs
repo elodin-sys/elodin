@@ -1,5 +1,3 @@
-#[cfg(feature = "big_space")]
-use crate::spatial::{FloatingOriginSettings, GridCell};
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::picking::prelude::Pickable;
@@ -29,14 +27,16 @@ use impeller2_wkt::{
 use std::collections::{HashMap, HashSet};
 
 use crate::plugins::render_layer_alloc::RenderLayerLease;
+#[cfg(feature = "big_space")]
+use crate::spatial::GridCell;
 use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
     ui::tiles::ViewportConfig,
     ui::window::window_entity_from_target,
     vector_arrow::{
-        ArrowEndpoint, ArrowEndpoints, ArrowLabelScope, ArrowVisual, VectorArrowState,
-        ViewportArrow, component_value_tail_to_vec3,
+        ArrowEndpoint, ArrowEndpoints, ArrowLabelScope, ArrowVisual, CachedArrowPose,
+        VectorArrowState, ViewportArrow, component_value_tail_to_vec3,
     },
 };
 
@@ -70,14 +70,15 @@ pub(crate) const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
 /// Camera order for arrow label UI cameras. Must be higher than all viewport cameras
 /// (SECONDARY_GRAPH_ORDER_BASE=1000, stride=50 per window) to avoid order collisions.
 const ARROW_LABEL_UI_CAMERA_ORDER: isize = 100_000;
-const BASE_HEAD_LENGTH: f32 = 0.06;
-const HEAD_RADIUS_FACTOR: f32 = 1.6;
-const MAX_HEAD_PORTION: f32 = 0.5;
+const HEAD_LENGTH_FRAC: f32 = 0.32;
+const HEAD_RADIUS_FACTOR: f32 = 2.2;
+const MAX_HEAD_PORTION: f32 = 0.50;
+const MIN_HEAD_LENGTH_PX: f32 = 14.0;
+const MIN_SHAFT_LENGTH_PX: f32 = 4.0;
 const DRAW_RAW_ARROW_MESHES: bool = true;
 const TARGET_DIAMETER_PX: f32 = 7.0;
-const MIN_RADIUS_WORLD: f32 = 0.005;
-const MAX_RADIUS_WORLD: f32 = 0.05;
-const MAX_FINAL_RADIUS_WORLD: f32 = 0.1;
+const MIN_VISIBLE_DIAMETER_PX: f32 = 2.0;
+const MAX_RADIUS_FRAC: f32 = 0.05;
 
 pub struct GizmoPlugin;
 
@@ -92,11 +93,9 @@ impl Plugin for GizmoPlugin {
                 .after(impeller2_bevy::apply_cached_data)
                 .before(crate::sync_pos),
         );
-        // This is how the `big_space` crate did it.
-        // app.add_systems(PostUpdate, render_vector_arrow.after(TransformSystem::TransformPropagate));
         app.add_systems(
-            bevy::app::PreUpdate,
-            render_vector_arrow.after(crate::PositionSync),
+            PostUpdate,
+            render_vector_arrow.after(bevy::transform::TransformSystems::Propagate),
         );
         app.add_systems(bevy::app::PostUpdate, cleanup_removed_arrows);
         app.add_systems(Update, render_body_axis);
@@ -105,6 +104,34 @@ impl Plugin for GizmoPlugin {
             PostUpdate,
             update_arrow_label_ui.after(bevy::transform::TransformSystems::Propagate),
         );
+    }
+}
+
+fn arrow_head_and_shaft_lengths(draw_length: f32, world_per_px: f32) -> (f32, f32) {
+    let mut head_length = (draw_length * HEAD_LENGTH_FRAC)
+        .max(world_per_px * MIN_HEAD_LENGTH_PX)
+        .min(draw_length * MAX_HEAD_PORTION)
+        .min(draw_length);
+    let min_shaft_length = world_per_px * MIN_SHAFT_LENGTH_PX;
+    if draw_length - head_length < min_shaft_length {
+        head_length = (draw_length - min_shaft_length).max(0.0);
+    }
+    let shaft_length = (draw_length - head_length).max(0.0);
+    (head_length, shaft_length)
+}
+
+/// Pixel-based shaft radius with a length-fraction cap when zoomed in. When zoomed
+/// out, the length-fraction cap can fall below the screen-minimum diameter — in that
+/// case screen visibility wins so arrows stay visible at planetary scale.
+fn compute_shaft_radius(draw_length: f32, world_per_px: f32, thickness: f32) -> f32 {
+    let desired_radius = TARGET_DIAMETER_PX * 0.5 * world_per_px * thickness;
+    let screen_min_radius = MIN_VISIBLE_DIAMETER_PX * 0.5 * world_per_px;
+    let max_radius = draw_length * MAX_RADIUS_FRAC;
+
+    if max_radius < screen_min_radius {
+        screen_min_radius
+    } else {
+        desired_radius.clamp(screen_min_radius, max_radius)
     }
 }
 
@@ -291,6 +318,36 @@ pub fn evaluate_vector_arrows(
     }
 }
 
+fn resolve_arrow_pose(
+    endpoints: &ArrowEndpoints,
+    endpoint_gt: &Query<&GlobalTransform, With<ArrowEndpoint>>,
+) -> Option<CachedArrowPose> {
+    let Ok([start_gt, end_gt]) = endpoint_gt.get_many([endpoints.start, endpoints.end]) else {
+        return None;
+    };
+    let direction_world = end_gt.translation() - start_gt.translation();
+    if direction_world.length_squared() <= MIN_ARROW_LENGTH_SQUARED as f32 {
+        return None;
+    }
+    let dir_local = start_gt
+        .affine()
+        .inverse()
+        .transform_vector3(direction_world);
+    let local_rotation = rotation_y_to(dir_local);
+    Some(CachedArrowPose {
+        direction_world,
+        local_rotation,
+    })
+}
+
+fn rotation_y_to(direction: Vec3) -> Quat {
+    let len_sq = direction.length_squared();
+    if len_sq <= MIN_ARROW_LENGTH_SQUARED as f32 {
+        return Quat::IDENTITY;
+    }
+    Quat::from_rotation_arc(Vec3::Y, direction / len_sq.sqrt())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_vector_arrow(
     mut commands: Commands,
@@ -300,12 +357,7 @@ fn render_vector_arrow(
         &mut VectorArrowState,
         Option<&ArrowEndpoints>,
     )>,
-    #[cfg(feature = "big_space")] endpoint_poses: Query<
-        (&Transform, &GridCell),
-        With<ArrowEndpoint>,
-    >,
-    #[cfg(not(feature = "big_space"))] endpoint_poses: Query<&Transform, With<ArrowEndpoint>>,
-    #[cfg(feature = "big_space")] floating_origin: Res<FloatingOriginSettings>,
+    endpoint_gt: Query<&GlobalTransform, With<ArrowEndpoint>>,
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     main_cameras: Query<MainCameraQueryItem<'_>, With<crate::MainCamera>>,
@@ -324,62 +376,49 @@ fn render_vector_arrow(
     for (entity, arrow, mut state, endpoints) in vector_arrows.iter_mut() {
         if !has_show_arrows {
             for visual in state.visuals.values() {
-                hide_arrow_visual(&mut commands, visual);
+                despawn_arrow_visual(&mut commands, visual);
             }
             state.visuals.clear();
+            state.cached_pose = None;
             continue;
         }
 
-        // Endpoints are spawned and evaluated by `evaluate_vector_arrows` and
-        // placed in Bevy space by the canonical position pipeline.
-        let endpoint_pair = endpoints.filter(|_| state.valid).and_then(|endpoints| {
-            endpoint_poses
-                .get_many([endpoints.start, endpoints.end])
-                .ok()
-        });
-        let Some([start_pose, end_pose]) = endpoint_pair else {
-            for visual in state.visuals.values() {
-                hide_arrow_visual(&mut commands, visual);
-            }
-            state.visuals.clear();
+        let Some(endpoints) = endpoints else {
             continue;
         };
 
-        cfg_select! {
-            feature = "big_space" => {
-                let (start_transform, start_cell) = start_pose;
-                let (end_transform, end_cell) = end_pose;
-                let start = start_transform.translation;
-                let start_cell = *start_cell;
-                let edge = floating_origin.grid_edge_length();
-                let cell_delta = Vec3::new(
-                    (end_cell.x as f64 - start_cell.x as f64) as f32 * edge,
-                    (end_cell.y as f64 - start_cell.y as f64) as f32 * edge,
-                    (end_cell.z as f64 - start_cell.z as f64) as f32 * edge,
-                );
-                let direction_world = cell_delta + (end_transform.translation - start_transform.translation);
+        if !state.valid {
+            for visual in state.visuals.values() {
+                despawn_arrow_visual(&mut commands, visual);
             }
-            _ => {
-                let start = start_pose.translation;
-                let direction_world = end_pose.translation - start_pose.translation;
-            }
+            state.visuals.clear();
+            state.cached_pose = None;
+            continue;
         }
+
+        let live_pose = resolve_arrow_pose(endpoints, &endpoint_gt);
+        let pose = live_pose.clone().or_else(|| state.cached_pose.clone());
+        if live_pose.is_some() {
+            state.cached_pose = live_pose;
+        }
+        let Some(pose) = pose else {
+            continue;
+        };
+
+        let direction_world = pose.direction_world;
+        let local_rotation = pose.local_rotation;
 
         if !DRAW_RAW_ARROW_MESHES {
             for visual in state.visuals.values() {
-                hide_arrow_visual(&mut commands, visual);
+                despawn_arrow_visual(&mut commands, visual);
             }
             state.visuals.clear();
+            state.cached_pose = None;
             continue;
         }
 
         let length = direction_world.length();
-        let dir_norm = if length > 0.0 {
-            direction_world / length
-        } else {
-            Vec3::Y
-        };
-        let rotation = Quat::from_rotation_arc(Vec3::Y, dir_norm);
+        let dir_norm = direction_world / length;
         let base_color =
             axis_color_from_name(arrow.name.as_deref(), wkt_color_to_bevy(&arrow.color));
 
@@ -394,10 +433,13 @@ fn render_vector_arrow(
             );
         }
 
-        let mut head_length = BASE_HEAD_LENGTH.min(draw_length * MAX_HEAD_PORTION);
-        // Ensure the head never exceeds the total length.
-        head_length = head_length.min(draw_length);
-        let shaft_length = (draw_length - head_length).max(0.0);
+        // Skip this frame if the start endpoint transform is unavailable. The
+        // visual is parented to the start endpoint, so a transient read failure
+        // must not fall back to the world origin for screen-space sizing.
+        let Ok(start_world) = endpoint_gt.get(endpoints.start).map(|gt| gt.translation()) else {
+            continue;
+        };
+
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
 
         let mut render_for_camera = |idx: usize| {
@@ -410,7 +452,7 @@ fn render_vector_arrow(
                 .unwrap_or(true);
             if !show_arrows {
                 if let Some(visual) = state.visuals.remove(&cam_entity) {
-                    hide_arrow_visual(&mut commands, &visual);
+                    despawn_arrow_visual(&mut commands, &visual);
                 }
                 state.label_offset = None;
                 state.label_name = None;
@@ -427,33 +469,35 @@ fn render_vector_arrow(
             // otherwise independent viewports.
             let Some(arrow_layers) = render_layer_lease.map(RenderLayerLease::render_layers) else {
                 if let Some(visual) = state.visuals.remove(&cam_entity) {
-                    hide_arrow_visual(&mut commands, &visual);
+                    despawn_arrow_visual(&mut commands, &visual);
                 }
                 return;
             };
 
-            let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start);
-            let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)
-                .clamp(MIN_RADIUS_WORLD, MAX_RADIUS_WORLD)
-                * arrow.thickness.value();
-            let shaft_radius = shaft_radius.clamp(MIN_RADIUS_WORLD, MAX_FINAL_RADIUS_WORLD);
+            let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start_world);
+            let (head_length, shaft_length) =
+                arrow_head_and_shaft_lengths(draw_length, world_per_px);
+            let thickness = arrow.thickness.value();
+            let shaft_radius = compute_shaft_radius(draw_length, world_per_px, thickness);
             let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(draw_length * 0.75);
 
             let visual = state.visuals.entry(cam_entity).or_insert_with(|| {
-                spawn_arrow_visual(
+                let visual = spawn_arrow_visual(
                     &mut commands,
                     &arrow_meshes,
                     &mut materials,
                     base_color,
                     entity,
                     arrow_layers.clone(),
-                )
+                );
+                commands
+                    .entity(visual.root)
+                    .insert(ChildOf(endpoints.start));
+                visual
             });
 
             commands.entity(visual.root).insert((
-                Transform::from_translation(start).with_rotation(rotation),
-                #[cfg(feature = "big_space")]
-                start_cell,
+                Transform::from_rotation(local_rotation),
                 Visibility::Visible,
                 arrow_layers.clone(),
             ));
@@ -477,7 +521,7 @@ fn render_vector_arrow(
                 true
             } else {
                 for visual in state.visuals.values() {
-                    hide_arrow_visual(&mut commands, visual);
+                    despawn_arrow_visual(&mut commands, visual);
                 }
                 state.visuals.clear();
                 false
@@ -508,7 +552,7 @@ fn render_vector_arrow(
         }
         for cam_entity in to_remove {
             if let Some(visual) = state.visuals.remove(&cam_entity) {
-                hide_arrow_visual(&mut commands, &visual);
+                despawn_arrow_visual(&mut commands, &visual);
             }
         }
 
@@ -634,8 +678,8 @@ fn spawn_arrow_visual(
     ArrowVisual { root, shaft, head }
 }
 
-fn hide_arrow_visual(commands: &mut Commands, visual: &ArrowVisual) {
-    commands.entity(visual.root).insert(Visibility::Hidden);
+fn despawn_arrow_visual(commands: &mut Commands, visual: &ArrowVisual) {
+    commands.entity(visual.root).despawn();
 }
 
 fn hide_label(commands: &mut Commands, label: Option<Entity>) {
@@ -934,6 +978,44 @@ mod tests {
 
     fn bevy_delta(start: &WorldPos, end: &WorldPos, frame: GeoFrame, ctx: &GeoContext) -> DVec3 {
         GeoPosition(frame, end.pos()).to_bevy(ctx) - GeoPosition(frame, start.pos()).to_bevy(ctx)
+    }
+
+    #[test]
+    fn compute_shaft_radius_visible_when_zoomed_out() {
+        let draw_length = 1_000_000.0;
+        let world_per_px = 50_000.0;
+        let thickness = 2500.0;
+        let radius = compute_shaft_radius(draw_length, world_per_px, thickness);
+        let diameter_px = radius * 2.0 / world_per_px;
+        assert!(diameter_px >= MIN_VISIBLE_DIAMETER_PX);
+        assert_eq!(radius, MIN_VISIBLE_DIAMETER_PX * 0.5 * world_per_px);
+    }
+
+    #[test]
+    fn compute_shaft_radius_caps_when_zoomed_in() {
+        let draw_length = 1_000_000.0;
+        let world_per_px = 1.0;
+        let thickness = 1.0;
+        let radius = compute_shaft_radius(draw_length, world_per_px, thickness);
+        assert!(radius <= draw_length * MAX_RADIUS_FRAC);
+        assert!(radius >= MIN_VISIBLE_DIAMETER_PX * 0.5 * world_per_px);
+    }
+
+    #[test]
+    fn arrow_head_and_shaft_lengths_keep_visible_shaft() {
+        let draw_length = 100.0;
+        let world_per_px = 10.0;
+        let (head, shaft) = arrow_head_and_shaft_lengths(draw_length, world_per_px);
+        assert!(shaft > 0.0);
+        assert!(head + shaft <= draw_length);
+        assert!(shaft >= world_per_px * MIN_SHAFT_LENGTH_PX);
+    }
+
+    #[test]
+    fn arrow_head_and_shaft_lengths_degenerate_when_very_short() {
+        let (head, shaft) = arrow_head_and_shaft_lengths(0.05, 10.0);
+        assert_eq!(head, 0.0);
+        assert_eq!(shaft, 0.05);
     }
 
     /// World-frame arrows: routing the endpoints through `GeoPosition::to_bevy`

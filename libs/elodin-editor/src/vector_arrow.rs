@@ -24,12 +24,21 @@ pub struct ArrowEndpoint {
     pub owner: Entity,
 }
 
+/// Last successfully rendered arrow pose, reused when endpoint reads fail transiently.
+#[derive(Clone)]
+pub struct CachedArrowPose {
+    pub direction_world: Vec3,
+    /// Shaft direction in the start endpoint's local space (mesh +Y).
+    pub local_rotation: Quat,
+}
+
 #[derive(Component, Default)]
 pub struct VectorArrowState {
     pub vector_expr: Option<CompiledExpr>,
     pub origin_expr: Option<CompiledExpr>,
     /// Whether the last expression evaluation produced a drawable arrow.
     pub valid: bool,
+    pub cached_pose: Option<CachedArrowPose>,
     pub visuals: HashMap<Entity, ArrowVisual>,
     pub label: Option<Entity>,
     /// Label offset from the arrow root, cached in render_vector_arrow for UI sync.
