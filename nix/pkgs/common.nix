@@ -2,7 +2,44 @@
   lib,
   pkgs,
   ...
-}: {
+}: let
+  alsaPluginDir = pkgs.symlinkJoin {
+    name = "elodin-alsa-plugins";
+    paths = [
+      pkgs.alsa-plugins
+      pkgs.pipewire
+    ];
+  };
+  asoundConf = pkgs.writeText "elodin-asound.conf" ''
+    <${pkgs.alsa-lib}/share/alsa/alsa.conf>
+
+    pcm.!default {
+      type pulse
+    }
+
+    ctl.!default {
+      type pulse
+    }
+  '';
+  nvidiaHookScript = pkgs.writeShellScript "elodin-nvidia-gpu-hook" ''
+    if [ -e /proc/driver/nvidia/version ] && [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+      nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
+      mkdir -p "$nvidia_lib_dir"
+      for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
+        /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
+        /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
+        [ -e "$lib" ] && ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+      done
+      export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+      export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json
+      export __GLX_VENDOR_LIBRARY_NAME=nvidia
+      export LD_LIBRARY_PATH="$nvidia_lib_dir''${LD_LIBRARY_PATH:+:''${LD_LIBRARY_PATH}}"
+      unset LIBGL_ALWAYS_SOFTWARE || true
+    fi
+  '';
+in {
+  inherit alsaPluginDir asoundConf nvidiaHookScript;
+
   src = let
     includeSrc = orig_path: type: let
       path = toString orig_path;
@@ -149,26 +186,7 @@
     ]);
 
   # Linux graphics environment variables
-  linuxGraphicsEnv = {pkgs}: let
-    alsaPluginDir = pkgs.symlinkJoin {
-      name = "elodin-alsa-plugins";
-      paths = [
-        pkgs.alsa-plugins
-        pkgs.pipewire
-      ];
-    };
-    asoundConf = pkgs.writeText "elodin-asound.conf" ''
-      <${pkgs.alsa-lib}/share/alsa/alsa.conf>
-
-      pcm.!default {
-        type pulse
-      }
-
-      ctl.!default {
-        type pulse
-      }
-    '';
-  in {
+  linuxGraphicsEnv = {pkgs}: {
     LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
     __GLX_VENDOR_LIBRARY_NAME = "mesa";
     LIBVA_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
@@ -189,6 +207,7 @@
       lib.makeLibraryPath (with pkgs; [
         # Audio
         alsa-lib
+        libpulseaudio
         pipewire
 
         # Graphics - Core
@@ -223,9 +242,11 @@
       --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
       --set __GLX_VENDOR_LIBRARY_NAME "mesa" \
       --set LIBVA_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-      --prefix VK_ICD_FILENAMES : "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json" \
+      --set VK_ICD_FILENAMES "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json" \
       --prefix VK_LAYER_PATH : "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d" \
-      --set ALSA_PLUGIN_DIR "${pkgs.pipewire}/lib/alsa-lib"
+      --set ALSA_PLUGIN_DIR "${alsaPluginDir}/lib/alsa-lib" \
+      --set ALSA_CONFIG_PATH "${asoundConf}" \
+      --run "source ${nvidiaHookScript}"
     '';
   in ''
     --prefix PATH : "${python}/bin" \
