@@ -87,6 +87,36 @@ public-changelog:
 install target="all":
   #!/usr/bin/env sh
   set -e
+  write_runtime_wrapper() {
+    wrapper="$1"
+    real_name="$2"
+    default_runtime_library_path="${ELODIN_RUNTIME_LIBRARY_PATH:-}"
+    default_gpu_hook="${ELODIN_GPU_HOOK:-}"
+    {
+      printf '%s\n' '#!/usr/bin/env sh'
+      printf '%s\n' "default_runtime_library_path='$default_runtime_library_path'"
+      printf '%s\n' "default_gpu_hook='$default_gpu_hook'"
+      printf '%s\n' 'runtime_library_path="${ELODIN_RUNTIME_LIBRARY_PATH:-$default_runtime_library_path}"'
+      printf '%s\n' 'gpu_hook="${ELODIN_GPU_HOOK:-$default_gpu_hook}"'
+      printf '%s\n' 'if [ -n "$runtime_library_path" ]; then'
+      printf '%s\n' '  export LD_LIBRARY_PATH="$runtime_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'
+      printf '%s\n' 'fi'
+      printf '%s\n' 'if [ -n "$gpu_hook" ] && [ -r "$gpu_hook" ]; then'
+      printf '%s\n' '  . "$gpu_hook"'
+      printf '%s\n' 'fi'
+      printf '%s\n' "exec \"\$(dirname \"\$0\")/$real_name\" \"\$@\""
+    } > "$wrapper"
+    chmod +x "$wrapper"
+  }
+  wrap_venv_python() {
+    [ -n "${ELODIN_RUNTIME_LIBRARY_PATH:-}" ] || return 0
+    for exe in .venv/bin/python .venv/bin/python3 .venv/bin/python3.13; do
+      [ -e "$exe" ] || continue
+      [ ! -e "$exe-real" ] || continue
+      mv "$exe" "$exe-real"
+      write_runtime_wrapper "$exe" "$(basename "$exe")-real"
+    done
+  }
   # Drop 0-byte libelodin.so left by maturin 1.13+'s broken staging dance
   # (PyO3/maturin#3054); cargo's fingerprint accepts empty outputs and would
   # otherwise short-circuit forever. The maturin@1.12.6 pin below stops new
@@ -98,11 +128,13 @@ install target="all":
       uv venv --python 3.13 --python-preference only-system --clear
       . .venv/bin/activate
       uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
+      wrap_venv_python
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       ;;
     editor)
       cargo build --release -p elodin
-      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/elodin-real"
+      write_runtime_wrapper "${CARGO_HOME:-$HOME/.cargo}/bin/elodin" "elodin-real"
       ;;
     db)
       cargo build --release -p elodin-db
@@ -118,9 +150,11 @@ install target="all":
       uv venv --python 3.13 --python-preference only-system --clear
       . .venv/bin/activate
       uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml -F tracy
+      wrap_venv_python
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       cargo build --release -p elodin -p elodin-db --features tracy
-      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/elodin-real"
+      write_runtime_wrapper "${CARGO_HOME:-$HOME/.cargo}/bin/elodin" "elodin-real"
       install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
       ;;
     all) just install py && just install editor && just install db;;

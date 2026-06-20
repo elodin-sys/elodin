@@ -21,21 +21,58 @@
       type pulse
     }
   '';
-  nvidiaHookScript = pkgs.writeShellScript "elodin-nvidia-gpu-hook" ''
-    if [ -e /proc/driver/nvidia/version ] && [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
-      nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
-      mkdir -p "$nvidia_lib_dir"
-      for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
-        /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
-        /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
-        [ -e "$lib" ] && ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+  gpuDetectScript = pkgs.writeShellScript "elodin-gpu-detect" ''
+    set -u
+    shopt -s nullglob
+
+    mode="''${ELODIN_GPU:-auto}"
+
+    nvidia_present() {
+      [ -e /proc/driver/nvidia/version ] && [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]
+    }
+
+    has_non_nvidia_gpu() {
+      for vendor in /sys/class/drm/renderD*/device/vendor; do
+        [ "$(cat "$vendor" 2>/dev/null)" != "0x10de" ] && return 0
       done
-      export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-      export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json
-      export __GLX_VENDOR_LIBRARY_NAME=nvidia
-      export LD_LIBRARY_PATH="$nvidia_lib_dir''${LD_LIBRARY_PATH:+:''${LD_LIBRARY_PATH}}"
-      unset LIBGL_ALWAYS_SOFTWARE || true
-    fi
+      return 1
+    }
+
+    use_nvidia=0
+    case "$mode" in
+      nvidia)
+        if nvidia_present; then
+          use_nvidia=1
+        fi
+        ;;
+      mesa)
+        use_nvidia=0
+        ;;
+      *)
+        if nvidia_present && ! has_non_nvidia_gpu; then
+          use_nvidia=1
+        fi
+        ;;
+    esac
+
+    [ "$use_nvidia" = 1 ] || exit 0
+
+    nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
+    mkdir -p "$nvidia_lib_dir"
+    for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
+      /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
+      /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
+      [ -e "$lib" ] && ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+    done
+
+    printf 'export VK_ICD_FILENAMES=%s\n' /usr/share/vulkan/icd.d/nvidia_icd.json
+    printf 'export VK_DRIVER_FILES=%s\n' /usr/share/vulkan/icd.d/nvidia_icd.json
+    printf 'export __GLX_VENDOR_LIBRARY_NAME=nvidia\n'
+    printf 'export LD_LIBRARY_PATH="%s''${LD_LIBRARY_PATH:+:''${LD_LIBRARY_PATH}}"\n' "$nvidia_lib_dir"
+    printf 'unset LIBGL_ALWAYS_SOFTWARE\n'
+  '';
+  nvidiaHookScript = pkgs.writeShellScript "elodin-gpu-hook" ''
+    eval "$(${gpuDetectScript})"
   '';
 in {
   inherit alsaPluginDir asoundConf nvidiaHookScript;
