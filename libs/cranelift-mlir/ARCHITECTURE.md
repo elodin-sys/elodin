@@ -443,6 +443,7 @@ jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const 
 | Elementwise | add, sub, mul, div, negate, sqrt, abs, ... | f64, i64, i32 variants |
 | Broadcast | broadcast_f64, broadcast_nd_f64, broadcast_i32 | N-D shape-aware |
 | Shape | transpose_f64, transpose_nd_f64, concat_nd_f64 | Element-size-aware concat |
+| Matrix | matmul_f64 | Row-major C = A·B; used by pointer-ABI `dot_general` batched fast path |
 | Reduce | reduce_sum_f64, reduce_max_f64, reduce_min_f64 | Outer x inner dimensions |
 | Indexing | gather_f64, gather_nd_f64, scatter_f64 | N-D with element-size param |
 | Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
@@ -455,6 +456,42 @@ to handle mixed-type tensors. For example, `tensor_concat_nd_f64` operates on ra
 with an explicit element size. This was added after discovering that concatenating
 `tensor<65x1xi32>` data (4 bytes per element) as if it were f64 (8 bytes) corrupted
 index tensors used by the EGM08 gravity model's N-D gather.
+
+### Pointer-ABI `dot_general` and `concatenate`
+
+Two shape ops have non-obvious pointer-ABI lowering that is easy to get wrong
+when extending the compiler.
+
+**`stablehlo.concatenate`**
+
+| Case | Lowering |
+|------|----------|
+| `dim == 0`, rank ≤ 1, or a single operand | Contiguous `memcpy` of each operand back-to-back |
+| `dim > 0` (any operand count) | Pairwise fold through `tensor_concat_nd_f64` |
+
+A naive back-to-back `memcpy` along a non-zero dimension lays out
+`[x…x y…y z…z]` instead of interleaved `[xyzw]…`. That breaks quaternion
+assembly (`[B×1]×4` along dim 1 → `[B×4]`) once a function crosses the
+pointer-ABI threshold.
+
+**`stablehlo.dot_general`**
+
+The scalar path has a dedicated batched rank-2 handler (`batching_dims=[0]`,
+contracting on dim 1). The pointer-ABI path adds a `matmul_f64` fast path only
+when the batch slices are contiguous row-major `m×k` and `k×n` blocks:
+
+- Leading batch dims: `[0, 1, …, nb−1]` on both operands
+- Single contracting dim on lhs: `lhs_contracting[0] == rank(lhs) − 1`
+- Single contracting dim on rhs: `rhs_contracting[0] == nb` (contracting axis
+  immediately after the batch axes — e.g. `[batch…, k, n]` not `[batch…, n, k]`)
+
+Each batch index `b` calls `matmul_f64` on slice offsets `b·m·k` and `b·k·n`.
+This covers the common Elodin pattern `tensor<B×K> · tensor<B×K> → tensor<B>`
+(per-entity inner products in `six_dof`). Layouts outside the guard fall back
+to the generic pointer-ABI `dot_general` lowering.
+
+Golden tests: `test_concatenate_dim1_four_operands_mem`, `test_dot_general_batched_mem`
+in [`tests/ops.rs`](tests/ops.rs).
 
 ---
 
@@ -819,7 +856,7 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 | stablehlo.reshape | yes | yes | yes | arbitrary shape changes |
 | stablehlo.broadcast_in_dim | yes | yes | yes (all types) | byte-generic for non-f64 |
 | stablehlo.slice | yes | yes | yes (all types) | byte-generic for non-f64 |
-| stablehlo.concatenate | yes | yes | yes (all types) | byte-aware via `elem_sz` |
+| stablehlo.concatenate | yes | yes | yes (all types) | dim 0: contiguous memcpy; dim > 0: pairwise `concat_nd_f64` (never memcpy for 3+ operands on non-zero dim) |
 | stablehlo.transpose | yes | yes | yes (all types) | byte-generic for non-f64 |
 | stablehlo.pad | yes | yes | yes | |
 | stablehlo.reverse | yes | yes | yes | |
@@ -851,7 +888,7 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 ### Linear Algebra
 | Op | Tested | Notes |
 |----|--------|-------|
-| stablehlo.dot_general | yes | scalar, 1D inner product, rank1-rank2, matvec, matmul, batched |
+| stablehlo.dot_general | yes | scalar + pointer ABI: 1D inner product, rank1-rank2, matvec, matmul, batched rank-2; pointer batched fast path when slices are row-major `[…,m,k]·[…,k,n]` ([details](#pointer-abi-dot_general-and-concatenate)) |
 | stablehlo.reduce | yes | add/min/max (f64 + i64), and/or, all dimensions |
 | stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index |
 
@@ -921,6 +958,13 @@ improvement ideas live in [Opportunities](#opportunities).
   [`tests/checkpoint_test.rs`](tests/checkpoint_test.rs)'s `verify_checkpoint`
   uses the same 256 MB for parity. Bisection helpers run on 64 MB, adequate for
   their scope.
+
+- **Pointer-ABI threshold sensitivity.** Any single tensor > 64 elements
+  classifies the whole function to pointer ABI. Simulations with many entities
+  (e.g. `WorldPos` as `[N×7]` once `N ≥ 10`) therefore exercise the pointer
+  paths for ops like `dot_general` and `concatenate` even when most per-entity
+  math is small. Regress with `run_mlir_mem` / `_mem` golden tests when touching
+  those lowerings.
 
 - **CPU-only by design.** There is no GPU execution path. Elodin simulations are
   single-threaded, small-tensor physics ticks where kernel launch and
