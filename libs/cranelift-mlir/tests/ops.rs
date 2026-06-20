@@ -2337,6 +2337,48 @@ module @module {
 }
 
 #[test]
+fn test_concatenate_dim1_four_operands_mem() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%a: tensor<3x1xf64>, %b: tensor<3x1xf64>, %c: tensor<3x1xf64>, %d: tensor<3x1xf64>) -> tensor<3x4xf64> {
+    %0 = stablehlo.concatenate %a, %b, %c, %d, dim = 1 : (tensor<3x1xf64>, tensor<3x1xf64>, tensor<3x1xf64>, tensor<3x1xf64>) -> tensor<3x4xf64>
+    return %0 : tensor<3x4xf64>
+  }
+}
+"#;
+    let a = f64_buf(&[1.0, 2.0, 3.0]);
+    let b = f64_buf(&[10.0, 20.0, 30.0]);
+    let c = f64_buf(&[100.0, 200.0, 300.0]);
+    let d = f64_buf(&[1000.0, 2000.0, 3000.0]);
+    let out = run_mlir_mem(mlir, &[&a, &b, &c, &d], &[96]);
+    assert_f64s_close(
+        &read_f64s(&out[0]),
+        &[
+            1.0, 10.0, 100.0, 1000.0, 2.0, 20.0, 200.0, 2000.0, 3.0, 30.0, 300.0, 3000.0,
+        ],
+    );
+}
+
+#[test]
+fn test_dot_general_batched_mem() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<3x4xf64>, %arg1: tensor<3x4xf64>) -> tensor<3xf64> {
+    %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [1] x [1], precision = [DEFAULT, DEFAULT] : (tensor<3x4xf64>, tensor<3x4xf64>) -> tensor<3xf64>
+    return %0 : tensor<3xf64>
+  }
+}
+"#;
+    let a = f64_buf(&[
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+    ]);
+    let b = f64_buf(&[1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+    let out = run_mlir_mem(mlir, &[&a, &b], &[24]);
+    // row dots: [1,2,3,4]·[1,0,0,0]=1, [5,6,7,8]·[0,1,0,0]=6, [9,10,11,12]·[0,0,1,0]=11
+    assert_f64s_close(&read_f64s(&out[0]), &[1.0, 6.0, 11.0]);
+}
+
+#[test]
 fn test_gather_nd_2d_index_mem() {
     // Gather individual elements from a 3x3 matrix using 2D index vectors
     // Matrix: [[10,20,30],[40,50,60],[70,80,90]]

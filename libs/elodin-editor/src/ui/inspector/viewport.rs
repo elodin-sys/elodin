@@ -221,8 +221,16 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         persp.far = far;
                         configured_clip_planes = Some((near, far));
 
-                        if near_changed && let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
-                            editor_cam.perspective.near_clip_limits = near..near;
+                        if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
+                            if near_changed {
+                                editor_cam.perspective.near_clip_limits = near..near;
+                            }
+                            if far_changed {
+                                let (min_size_per_pixel, max_size_per_pixel) =
+                                    crate::ui::tiles::zoom_limits_for_far(far);
+                                editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
+                                editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
+                            }
                         }
                     }
 

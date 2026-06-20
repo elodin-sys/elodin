@@ -4284,7 +4284,7 @@ fn lower_instruction_mem(
             let dim = *dimension as usize;
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
 
-            if dim == 0 || rt.rank() <= 1 {
+            if dim == 0 || rt.rank() <= 1 || operands.len() == 1 {
                 let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
                 let mut byte_off = 0i64;
                 for vid in operands {
@@ -4295,44 +4295,52 @@ fn lower_instruction_mem(
                     builder.ins().call(memcpy_ref, &[d, get(vid)?, nb]);
                     byte_off += src_bytes as i64;
                 }
-            } else if operands.len() == 2 {
-                let a_ty = type_map.get(&operands[0]).cloned().unwrap_or(rt.clone());
-                let b_ty = type_map.get(&operands[1]).cloned().unwrap_or(rt.clone());
+            } else {
                 let func_ref = jit_module.declare_func_in_func(trt_ids.concat_nd_f64, builder.func);
-                let n_dst_v = builder.ins().iconst(types::I64, n as i64);
-                let n_a_v = builder.ins().iconst(types::I64, a_ty.num_elements() as i64);
-                let n_b_v = builder.ins().iconst(types::I64, b_ty.num_elements() as i64);
-                let dst_shape_ptr = store_i64_array(builder, &rt.shape);
-                let a_shape_ptr = store_i64_array(builder, &a_ty.shape);
                 let rank_v = builder.ins().iconst(types::I64, rt.rank() as i64);
                 let dim_v = builder.ins().iconst(types::I64, dim as i64);
                 let esz_v = builder.ins().iconst(types::I64, elem_sz as i64);
-                builder.ins().call(
-                    func_ref,
-                    &[
-                        dst,
-                        n_dst_v,
-                        get(&operands[0])?,
-                        n_a_v,
-                        get(&operands[1])?,
-                        n_b_v,
-                        dst_shape_ptr,
-                        a_shape_ptr,
-                        rank_v,
-                        dim_v,
-                        esz_v,
-                    ],
-                );
-            } else {
-                let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
-                let mut byte_off = 0i64;
-                for vid in operands {
-                    let src_ty = type_map.get(vid).cloned().unwrap_or(rt.clone());
-                    let src_bytes = src_ty.byte_size();
-                    let d = builder.ins().iadd_imm(dst, byte_off);
-                    let nb = builder.ins().iconst(types::I64, src_bytes as i64);
-                    builder.ins().call(memcpy_ref, &[d, get(vid)?, nb]);
-                    byte_off += src_bytes as i64;
+
+                let a0_ty = type_map.get(&operands[0]).cloned().unwrap_or(rt.clone());
+                let mut acc_ptr = get(&operands[0])?;
+                let mut acc_shape = a0_ty.shape.clone();
+                let mut acc_n = a0_ty.num_elements();
+                for (i, vid) in operands.iter().enumerate().skip(1) {
+                    let b_ty = type_map.get(vid).cloned().unwrap_or(rt.clone());
+                    let b_n = b_ty.num_elements();
+                    let mut new_shape = acc_shape.clone();
+                    new_shape[dim] += b_ty.shape[dim];
+                    let new_n: usize = new_shape.iter().map(|&d| d as usize).product();
+                    let is_last = i == operands.len() - 1;
+                    let out_ptr = if is_last {
+                        dst
+                    } else {
+                        alloc_slot(builder, new_n * elem_sz)
+                    };
+                    let n_dst_v = builder.ins().iconst(types::I64, new_n as i64);
+                    let n_a_v = builder.ins().iconst(types::I64, acc_n as i64);
+                    let n_b_v = builder.ins().iconst(types::I64, b_n as i64);
+                    let dst_shape_ptr = store_i64_array(builder, &new_shape);
+                    let a_shape_ptr = store_i64_array(builder, &acc_shape);
+                    builder.ins().call(
+                        func_ref,
+                        &[
+                            out_ptr,
+                            n_dst_v,
+                            acc_ptr,
+                            n_a_v,
+                            get(vid)?,
+                            n_b_v,
+                            dst_shape_ptr,
+                            a_shape_ptr,
+                            rank_v,
+                            dim_v,
+                            esz_v,
+                        ],
+                    );
+                    acc_ptr = out_ptr;
+                    acc_shape = new_shape;
+                    acc_n = new_n;
                 }
             }
             Ok(vec![LaneRepr::scalar(vec![dst])])
@@ -4638,6 +4646,61 @@ fn lower_instruction_mem(
         Instruction::DotGeneral { lhs, rhs, dims } => {
             let l_ty = type_map.get(lhs).cloned().unwrap_or(rt.clone());
             let r_ty = type_map.get(rhs).cloned().unwrap_or(rt.clone());
+
+            let nb = dims.lhs_batch.len();
+            let leading_batch: Vec<i64> = (0..nb as i64).collect();
+            let lhs_contract_last = dims.lhs_contracting.len() == 1
+                && dims.lhs_contracting[0] == l_ty.rank() as i64 - 1;
+            let rhs_contract_after_batch =
+                dims.rhs_contracting.len() == 1 && dims.rhs_contracting[0] == nb as i64;
+            if nb > 0
+                && dims.lhs_batch == leading_batch
+                && dims.rhs_batch == leading_batch
+                && !dims.lhs_contracting.is_empty()
+                && lhs_contract_last
+                && rhs_contract_after_batch
+            {
+                let batch: usize = dims
+                    .lhs_batch
+                    .iter()
+                    .map(|&d| l_ty.shape[d as usize] as usize)
+                    .product();
+                let k = l_ty.shape[dims.lhs_contracting[0] as usize] as usize;
+                let m: usize = (0..l_ty.rank())
+                    .filter(|&d| {
+                        !dims.lhs_batch.contains(&(d as i64))
+                            && !dims.lhs_contracting.contains(&(d as i64))
+                    })
+                    .map(|d| l_ty.shape[d] as usize)
+                    .product();
+                let nn: usize = (0..r_ty.rank())
+                    .filter(|&d| {
+                        !dims.rhs_batch.contains(&(d as i64))
+                            && !dims.rhs_contracting.contains(&(d as i64))
+                    })
+                    .map(|d| r_ty.shape[d] as usize)
+                    .product();
+                let out_size = batch * m * nn * elem_sz;
+                let dst = alloc_slot_for_vid(builder, pool, result_vid, out_size);
+                let func_ref = jit_module.declare_func_in_func(trt_ids.matmul_f64, builder.func);
+                let m_v = builder.ins().iconst(types::I64, m as i64);
+                let k_v = builder.ins().iconst(types::I64, k as i64);
+                let n_v = builder.ins().iconst(types::I64, nn as i64);
+                let lhs_ptr = get(lhs)?;
+                let rhs_ptr = get(rhs)?;
+                for b in 0..batch {
+                    let lp = builder
+                        .ins()
+                        .iadd_imm(lhs_ptr, (b * m * k * elem_sz) as i64);
+                    let rp = builder
+                        .ins()
+                        .iadd_imm(rhs_ptr, (b * k * nn * elem_sz) as i64);
+                    let dp = builder.ins().iadd_imm(dst, (b * m * nn * elem_sz) as i64);
+                    builder.ins().call(func_ref, &[dp, lp, rp, m_v, k_v, n_v]);
+                }
+                return Ok(vec![LaneRepr::scalar(vec![dst])]);
+            }
+
             let (m, k, nn) = if l_ty.rank() == 1 && r_ty.rank() == 1 {
                 let k = l_ty.shape[0] as usize;
                 (1usize, k, 1usize)

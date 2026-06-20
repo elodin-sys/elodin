@@ -66,10 +66,6 @@ impl FloatingOriginSettings {
         self.grid.translation_to_grid(translation)
     }
 
-    pub fn grid_edge_length(&self) -> f32 {
-        self.grid.cell_edge_length()
-    }
-
     pub fn grid_position_double(&self, grid_cell: &GridCell, transform: &Transform) -> DVec3 {
         self.grid.grid_position_double(grid_cell, transform)
     }
