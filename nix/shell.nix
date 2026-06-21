@@ -26,27 +26,6 @@ with pkgs; let
     + ":"
     + common.makeLinuxLibraryPath {inherit pkgs;}
   );
-  elodinDevWrapper = writeShellScriptBin "elodin" ''
-    set -eu
-
-    elodin_bin="''${CARGO_HOME:-$HOME/.cargo}/bin/elodin-real"
-    if [ ! -x "$elodin_bin" ]; then
-      elodin_bin="''${CARGO_HOME:-$HOME/.cargo}/bin/elodin"
-    fi
-    if [ ! -x "$elodin_bin" ]; then
-      echo "error: $elodin_bin not found; run 'just install editor'" >&2
-      exit 127
-    fi
-
-    if [ -n "''${ELODIN_RUNTIME_LIBRARY_PATH:-}" ]; then
-      export LD_LIBRARY_PATH="''${ELODIN_RUNTIME_LIBRARY_PATH}''${LD_LIBRARY_PATH:+:''${LD_LIBRARY_PATH}}"
-    fi
-    if [ -n "''${ELODIN_GPU_HOOK:-}" ] && [ -r "''${ELODIN_GPU_HOOK}" ]; then
-      . "''${ELODIN_GPU_HOOK}"
-    fi
-
-    exec "$elodin_bin" "$@"
-  '';
   shellAttrs = {
     name = "elo-unified-shell";
     buildInputs =
@@ -106,7 +85,6 @@ with pkgs; let
         gettext
         just
         jq
-        procps
         yq
         git
         git-filter-repo
@@ -131,7 +109,6 @@ with pkgs; let
           fontconfig
           lldb
           autoPatchelfHook
-          elodinDevWrapper
           # Tracy profiler (Linux-only: requires std::jthread, not in Apple libc++)
           tracy
           cudaPackages.cuda_cudart
@@ -158,7 +135,6 @@ with pkgs; let
     # the surplus so Python can import the extension without ENOMEM.
     GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
     ELODIN_RUNTIME_LIBRARY_PATH = linuxRuntimeLibraryPath;
-    ELODIN_GPU_HOOK = lib.optionalString pkgs.stdenv.isLinux "${common.nvidiaHookScript}";
 
     # GStreamer plugin path for elodinsink
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
@@ -185,8 +161,9 @@ with pkgs; let
           export WINIT_UNIX_BACKEND=x11
           unset WAYLAND_DISPLAY
           export XDG_SESSION_TYPE=x11
-          # Runtime wrappers apply graphics libraries per process so host tools
-          # do not accidentally load Nix shared libraries.
+          # Binaries get Nix libs via patchelf RUNPATH (see justfile); no global
+          # LD_LIBRARY_PATH is exported. Select GPU with ELODIN_GPU=auto|nvidia|mesa.
+          . ${common.nvidiaHookScript}
         ;;
       esac
       # start the shell if we're in an interactive shell
