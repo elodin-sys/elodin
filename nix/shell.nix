@@ -19,13 +19,6 @@ with pkgs; let
       polars
       numpy
     ]);
-  linuxRuntimeLibraryPath = lib.optionalString pkgs.stdenv.isLinux (
-    lib.makeLibraryPath [
-      cudaPackages.cuda_cudart
-    ]
-    + ":"
-    + common.makeLinuxLibraryPath {inherit pkgs;}
-  );
   shellAttrs = {
     name = "elo-unified-shell";
     buildInputs =
@@ -134,7 +127,6 @@ with pkgs; let
     # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise
     # the surplus so Python can import the extension without ENOMEM.
     GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
-    ELODIN_RUNTIME_LIBRARY_PATH = linuxRuntimeLibraryPath;
 
     # GStreamer plugin path for elodinsink
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
@@ -147,6 +139,15 @@ with pkgs; let
     ];
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
+
+    # Set up library paths for Linux graphics/audio
+    LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
+      lib.makeLibraryPath [
+        cudaPackages.cuda_cudart
+      ]
+      + ":"
+      + common.makeLinuxLibraryPath {inherit pkgs;}
+    );
 
     doCheck = false;
     shellHook = ''
@@ -161,8 +162,19 @@ with pkgs; let
           export WINIT_UNIX_BACKEND=x11
           unset WAYLAND_DISPLAY
           export XDG_SESSION_TYPE=x11
-          # Binaries get Nix libs via patchelf RUNPATH (see justfile); no global
-          # LD_LIBRARY_PATH is exported. Select GPU with ELODIN_GPU=auto|nvidia|mesa.
+          # Ensure X11 libraries are available
+          export LD_LIBRARY_PATH="${lib.makeLibraryPath (with pkgs; [
+        libx11
+        libxcursor
+        libxrandr
+        libxi
+        libxext
+        libxkbcommon
+        mesa
+        libGL
+      ])}:''${LD_LIBRARY_PATH}"
+          # Mesa by default; route to the host NVIDIA driver only when it is the
+          # sole GPU (or ELODIN_GPU=nvidia). No-op on hybrid/Mesa hosts.
           . ${common.nvidiaHookScript}
         ;;
       esac

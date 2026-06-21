@@ -87,19 +87,6 @@ public-changelog:
 install target="all":
   #!/usr/bin/env sh
   set -e
-  rpath_add() {
-    [ "$(uname -s)" = "Linux" ] || return 0
-    [ -n "${ELODIN_RUNTIME_LIBRARY_PATH:-}" ] || return 0
-    old_rpath="$(patchelf --print-rpath "$1" 2>/dev/null || true)"
-    patchelf --set-rpath "$ELODIN_RUNTIME_LIBRARY_PATH${old_rpath:+:$old_rpath}" "$1" 2>/dev/null || true
-  }
-  rpath_add_venv() {
-    [ "$(uname -s)" = "Linux" ] || return 0
-    [ -n "${ELODIN_RUNTIME_LIBRARY_PATH:-}" ] || return 0
-    find .venv -name '*.so' -type f | while IFS= read -r so; do
-      rpath_add "$so"
-    done
-  }
   # Drop 0-byte libelodin.so left by maturin 1.13+'s broken staging dance
   # (PyO3/maturin#3054); cargo's fingerprint accepts empty outputs and would
   # otherwise short-circuit forever. The maturin@1.12.6 pin below stops new
@@ -111,14 +98,11 @@ install target="all":
       uv venv --python 3.13 --python-preference only-system --clear
       . .venv/bin/activate
       uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
-      rpath_add_venv
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       ;;
     editor)
       cargo build --release -p elodin
       install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
-      rm -f "${CARGO_HOME:-$HOME/.cargo}/bin/elodin-real"
-      rpath_add "${CARGO_HOME:-$HOME/.cargo}/bin/elodin"
       ;;
     db)
       cargo build --release -p elodin-db
@@ -134,12 +118,9 @@ install target="all":
       uv venv --python 3.13 --python-preference only-system --clear
       . .venv/bin/activate
       uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml -F tracy
-      rpath_add_venv
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       cargo build --release -p elodin -p elodin-db --features tracy
       install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
-      rm -f "${CARGO_HOME:-$HOME/.cargo}/bin/elodin-real"
-      rpath_add "${CARGO_HOME:-$HOME/.cargo}/bin/elodin"
       install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
       ;;
     all) just install py && just install editor && just install db;;
