@@ -173,6 +173,9 @@ with pkgs; let
         mesa
         libGL
       ])}:''${LD_LIBRARY_PATH}"
+          # Mesa by default; route to the host NVIDIA driver only when it is the
+          # sole GPU (or ELODIN_GPU=nvidia). No-op on hybrid/Mesa hosts.
+          . ${common.nvidiaHookScript}
         ;;
       esac
       # start the shell if we're in an interactive shell
