@@ -988,7 +988,11 @@ for a gated pipeline.</p>
 <li><code>--plan &lt;PLAN.csv&gt;</code>: materialized one-row-per-run plan.</li>
 <li><code>--spec &lt;SPEC.toml&gt;</code>: sampling spec; sampled into a plan before execution.</li>
 <li><code>--campaign &lt;CAMPAIGN.toml&gt;</code>: worker count, resource slots, hooks, retries, timeouts.</li>
-<li><code>--workers &lt;N&gt;</code>: override the auto-sized campaign worker count.</li>
+<li><code>--workers &lt;N&gt;</code>: override the auto-sized campaign worker count. When omitted,
+the runner plans the per-run recipe, counts its processes, then uses
+<code>floor(S10_MAX_INFLIGHT / recipe_weight)</code> workers (clamped to the number of
+planned runs). <code>S10_MAX_INFLIGHT</code> defaults to the host's logical core count;
+raise it to oversubscribe I/O-bound SITL stacks.</li>
 <li><code>--runtime-threads &lt;N&gt;</code>: override the auto-sized orchestrator I/O thread
 pool. Use <code>0</code> or omit the option for the default auto-sized pool.</li>
 <li><code>--memory-probe</code>: enable expensive shared-constant PSS sampling and
@@ -1001,8 +1005,8 @@ Also configurable as <code>fail_on_run_errors = true</code> in <code>campaign.to
 gates, prefer a <code>post_campaign</code> hook that raises on <code>summary.failed</code> (see
 <code>examples/apollo-lander/hooks/ci_gate.py</code>) instead of relying on this flag.</li>
 <li><code>--post-run &lt;HOOK.py&gt;</code> / <code>--post-campaign &lt;HOOK.py&gt;</code>: plain-Python lifecycle hooks.</li>
-<li><code>--clean</code>: prune <code>runs/</code> directories that are not part of the active plan.
-Campaigns always display a live progress TUI with aggregate counts and active
+<li><code>--clean</code>: prune <code>runs/</code> directories that are not part of the active plan.</li>
+<li>Campaigns always display a live progress TUI with aggregate counts and active
 worker progress while they run.</li>
 </ul>
 <p>Simulations that ingest parameters from a file (rather than via
