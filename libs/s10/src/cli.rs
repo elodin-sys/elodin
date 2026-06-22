@@ -1,8 +1,10 @@
 use crate::admission::{self, AdmissionPermit};
+use crate::cgroup::CgroupScope;
 use crate::recipe::Recipe;
 use clap::Parser;
 use miette::miette;
 use std::collections::HashMap;
+use std::sync::Arc;
 use stellarator::util::CancelToken;
 
 #[derive(Parser, Debug)]
@@ -65,13 +67,55 @@ pub async fn run_recipe_with_token(
     .await
 }
 
+pub async fn run_recipe_with_token_admitted_in_cgroup(
+    recipe_name: String,
+    recipe: Recipe,
+    watch: bool,
+    release: bool,
+    cancel_token: CancelToken,
+    admission_permit: Option<AdmissionPermit>,
+    cgroup: Option<Arc<CgroupScope>>,
+) -> miette::Result<()> {
+    run_recipe_with_token_admitted_inner(
+        recipe_name,
+        recipe,
+        watch,
+        release,
+        cancel_token,
+        admission_permit,
+        cgroup,
+    )
+    .await
+}
+
 pub async fn run_recipe_with_token_admitted(
     recipe_name: String,
     recipe: Recipe,
     watch: bool,
     release: bool,
     cancel_token: CancelToken,
+    admission_permit: Option<AdmissionPermit>,
+) -> miette::Result<()> {
+    run_recipe_with_token_admitted_inner(
+        recipe_name,
+        recipe,
+        watch,
+        release,
+        cancel_token,
+        admission_permit,
+        None,
+    )
+    .await
+}
+
+async fn run_recipe_with_token_admitted_inner(
+    recipe_name: String,
+    recipe: Recipe,
+    watch: bool,
+    release: bool,
+    cancel_token: CancelToken,
     _admission_permit: Option<AdmissionPermit>,
+    cgroup: Option<Arc<CgroupScope>>,
 ) -> miette::Result<()> {
     // Set up Ctrl+C handling so the recipe can be cancelled interactively
     let ctrl_c_cancel_token = cancel_token.clone();
@@ -81,9 +125,11 @@ pub async fn run_recipe_with_token_admitted(
     });
 
     let res = if watch {
-        recipe.watch(recipe_name, release, cancel_token).await
+        recipe
+            .watch(recipe_name, release, cancel_token, cgroup)
+            .await
     } else {
-        recipe.run(recipe_name, release, cancel_token).await
+        recipe.run(recipe_name, release, cancel_token, cgroup).await
     };
     Ok(res?)
 }

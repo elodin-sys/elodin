@@ -114,6 +114,9 @@ cwd = "/path/to/dir"        # Working directory
 env = { KEY = "value" }     # Environment variables
 no_watch = false            # Disable watch mode for this recipe
 restart_policy = "instant"  # "instant" or "never"
+depends_on = ["database"]   # Optional: wait for recipes that report ready
+ready = { type = "tcp", addr = "127.0.0.1:9000" } # file/tcp/log/delay
+ready_timeout = "10s"
 ```
 
 ### Group Recipe
@@ -135,7 +138,7 @@ recipes = {
 ```
 
 Features:
-- Parallel execution of all recipes in the group
+- Parallel execution of recipes once their `depends_on` dependencies are ready
 - Terminates all when any recipe fails
 - Combines output with colored prefixes
 
@@ -312,7 +315,8 @@ S10 follows these principles:
 
 ## Limitations
 
-- Linux sim shutdown uses direct process-tree signalling instead of `process_group(0)` / `killpg`
+- Linux shutdown uses cgroup v2 cleanup when a delegated cgroup is available,
+  with process-tree signalling as the fallback.
 - Windows support is limited (no `sim` recipe type)
 - Watch mode may not detect all filesystem events on network drives
 

@@ -133,6 +133,9 @@ impl WorldBuilder {
             optimize,
             env: HashMap::new(),
             log_path: None,
+            depends_on: Vec::new(),
+            ready: None,
+            ready_timeout: None,
         };
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
@@ -160,6 +163,9 @@ impl WorldBuilder {
                         restart_policy: ::s10::RestartPolicy::Never,
                         fail_on_error: false,
                         log_path: None,
+                        depends_on: Vec::new(),
+                        ready: None,
+                        ready_timeout: None,
                     },
                     no_watch: true,
                 }),

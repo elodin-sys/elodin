@@ -9,8 +9,13 @@ args = ["build", "--release", "--manifest-path", "examples/apollo-lander/control
 [resources]
 port_stride = 40
 db_port = 2240
-state_port = 9013
-command_port = 9012
+
+[resources.ports]
+state = 9013
+command = 9012
+
+[retention]
+keep_run_db = "on-fail"
 
 [hooks]
 post_run = "examples/apollo-lander/hooks/score.py"

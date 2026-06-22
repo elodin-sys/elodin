@@ -34,16 +34,18 @@ elodin monte-carlo run examples/monte-carlo/main.py \
 The terminal shows campaign progress, success/failure counts, and a final
 campaign summary. Individual simulation stdout/stderr is written to per-run log
 files under `runs/<run_id>/logs/` instead of being interleaved in the terminal.
-At startup, `elodin monte-carlo run` reaps pre-existing `elodin` and
-`elodin-db` processes so stale editor/database sessions cannot occupy campaign
-ports. Pass `--keep-existing` only if you intentionally want to manage those
-processes yourself.
+At startup, `elodin monte-carlo run` reaps prior campaign-scoped cgroups so
+stale sidecars from interrupted runs cannot occupy worker ports. Pass
+`--keep-existing` only if you intentionally want to manage those processes
+yourself. Per-worker UDP ports are declared in `[resources.ports]` and consumed
+with `el.monte_carlo.port("state")` / `ELODIN_MC_PORT_STATE`.
 
 The campaign output includes per-run databases, `sim_summary.json`, `results.csv`,
 `perf.csv`, `resources.csv`, `campaign_summary.txt`, and `summary.json`.
 `summary.json` always includes total campaign wall time,
 aggregate/average per-run wall time, worker parallel efficiency, disk usage,
-CPU/RAM resource rollups, and the merged simulation phase summary.
+CPU/RAM resource rollups, promoted hook metrics, invalid-run counts, and the
+merged simulation phase summary.
 
 ## Scaling vs. Memory Profiles
 

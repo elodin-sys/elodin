@@ -59,8 +59,6 @@ pub struct RunArgs {
     #[arg(long)]
     pub post_campaign: Option<PathBuf>,
     #[arg(long)]
-    pub params_compat: Option<String>,
-    #[arg(long)]
     pub fail_fast: bool,
     #[arg(long)]
     pub fail_on_errors: bool,
@@ -70,6 +68,8 @@ pub struct RunArgs {
     pub memory_probe: bool,
     #[arg(long)]
     pub keep_existing: bool,
+    #[arg(long)]
+    pub clean: bool,
     #[arg(long, value_enum, default_value = "auto")]
     pub progress: ProgressMode,
     #[arg(long)]
@@ -154,12 +154,12 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         timeout: args.timeout,
         post_run: args.post_run,
         post_campaign: args.post_campaign,
-        params_compat: args.params_compat,
         fail_fast: args.fail_fast,
         fail_on_run_errors: args.fail_on_errors,
         dry_run: args.dry_run,
         memory_probe: args.memory_probe,
         keep_existing: args.keep_existing,
+        clean: args.clean,
         progress: match args.progress {
             ProgressMode::Auto => monte_carlo::ProgressMode::Auto,
             ProgressMode::Always => monte_carlo::ProgressMode::Always,

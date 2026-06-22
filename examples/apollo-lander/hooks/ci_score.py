@@ -16,6 +16,7 @@ def post_run(ctx):
     if rmse is None:
         raise RuntimeError(f"CI smoke: {result_path} has no traj_rmse")
     return {
+        "valid": True,
         "pass": True,
         "smoke": True,
         "landed": bool(result.get("landed", False)),

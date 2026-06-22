@@ -1,13 +1,17 @@
 pub mod admission;
+pub mod cgroup;
 pub mod cli;
 pub mod error;
 pub mod liveness;
+pub mod probe;
 pub mod recipe;
 #[cfg(not(target_os = "windows"))]
 pub mod sim;
 pub mod watch;
 
+pub use cgroup::*;
 pub use error::*;
+pub use probe::*;
 pub use recipe::*;
 #[cfg(not(target_os = "windows"))]
 pub use sim::*;

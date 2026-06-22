@@ -136,8 +136,9 @@ and the state teaches more than hiding it.
 - Keep the LHS `seed` fixed while iterating so campaign-to-campaign deltas
   reflect your changes, not resampling.
 - Use the `[build]` hook in `campaign.toml` to compile external FSW once
-  before workers start; per-worker ports come from `ELODIN_MONTE_CARLO_*` env
-  with `port_stride`.
+  before workers start. Put per-worker resources under `[resources.ports]` and
+  read them with `el.monte_carlo.port("name", default)` or
+  `ELODIN_MC_PORT_<NAME>`.
 
 ## 6. Diagnose with the data, not by staring at code
 
@@ -187,12 +188,11 @@ weakness. Patterns that survived:
 
 ## 8. Operational pitfalls
 
-- **Stale processes hold UDP ports.** An interrupted editor session can leave
-  an FSW controller bound to a worker port; the next campaign's worker fails
-  instantly with `AddrInUse` (a run with `wall_ms` of a few ms). Check
-  `ss -ulnp` / `pgrep` before campaigns and kill leftovers.
-- One campaign or editor session at a time — they share DB port 2240 by
-  default.
+- **Stale processes hold UDP ports.** Prefer direct `world.recipe()` sidecars
+  plus s10 readiness probes. Linux campaigns use cgroup teardown to reap
+  reparented daemons; `--keep-existing` opts out of scoped pre-reaping.
+- Return `valid = False` from `post_run` hooks for infrastructure failures so
+  they are reported separately from scored misses.
 - CI hygiene per repo rules: `ruff format && ruff check --fix` for the Python,
   `cargo fmt`/`cargo clippy -- -Dwarnings` for external controllers.
 

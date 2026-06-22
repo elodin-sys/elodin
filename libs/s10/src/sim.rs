@@ -1,5 +1,6 @@
 use std::iter;
 use std::process::Stdio;
+use std::sync::Arc;
 #[allow(unused_imports)]
 use std::{
     collections::HashMap,
@@ -13,6 +14,8 @@ use tracing::{debug, error};
 use which::which;
 
 use crate::DEFAULT_WATCH_TIMEOUT;
+use crate::cgroup::CgroupScope;
+use crate::probe::ReadyProbe;
 use crate::{error::Error, watch::watch};
 use std::time::Duration;
 #[cfg(target_os = "linux")]
@@ -31,6 +34,12 @@ pub struct SimRecipe {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub log_path: Option<PathBuf>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub ready: Option<ReadyProbe>,
+    #[serde(default)]
+    pub ready_timeout: Option<String>,
 }
 
 fn default_addr() -> SocketAddr {
@@ -109,7 +118,11 @@ fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Si
 fn signal_process_group(_root_pid: nix::unistd::Pid, _signal: nix::sys::signal::Signal) {}
 
 impl SimRecipe {
-    pub async fn run(self, cancel_token: CancelToken) -> Result<(), Error> {
+    pub async fn run(
+        self,
+        cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
+    ) -> Result<(), Error> {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
@@ -136,6 +149,9 @@ impl SimRecipe {
         }
         let mut child = child.spawn()?;
         let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
+        if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
+            scope.add_pid(pid)?;
+        }
 
         if let Some(stdout) = child.stdout.take() {
             let log_path = self.log_path.clone();
@@ -208,7 +224,11 @@ impl SimRecipe {
         }
     }
 
-    pub async fn watch(self, cancel_token: CancelToken) -> Result<(), Error> {
+    pub async fn watch(
+        self,
+        cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
+    ) -> Result<(), Error> {
         let dir = if self.path.is_dir() {
             self.path.clone()
         } else {
@@ -221,8 +241,9 @@ impl SimRecipe {
             DEFAULT_WATCH_TIMEOUT,
             |token| {
                 let this = self.clone();
+                let cgroup = cgroup.clone();
                 async move {
-                    if let Err(err) = this.run(token).await {
+                    if let Err(err) = this.run(token, cgroup).await {
                         error!(?err, "error running sim");
                     }
                     Ok(())
@@ -236,6 +257,9 @@ impl SimRecipe {
 }
 
 pub fn python_command() -> Result<std::process::Command, Error> {
+    if let Ok(python) = std::env::var("ELODIN_PYTHON") {
+        return Ok(std::process::Command::new(python));
+    }
     let venv_python = std::path::Path::new(".venv/bin/python");
     if venv_python.exists() {
         let mut cmd = std::process::Command::new(venv_python);

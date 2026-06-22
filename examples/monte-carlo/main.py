@@ -13,8 +13,6 @@ import numpy as np
 
 from sim import DEFAULT_MAX_TICKS, PARAMS, SIMULATION_RATE_HZ, build
 
-STATE_PORT_ENV = "ELODIN_MONTE_CARLO_STATE_PORT"
-COMMAND_PORT_ENV = "ELODIN_MONTE_CARLO_COMMAND_PORT"
 DEFAULT_STATE_PORT = 9003
 DEFAULT_COMMAND_PORT = 9002
 CONTROLLER_ENV = "ELODIN_MONTE_CARLO_CONTROLLER"
@@ -22,8 +20,8 @@ CONTROLLER_ENV = "ELODIN_MONTE_CARLO_CONTROLLER"
 
 class SitlBridge:
     def __init__(self) -> None:
-        self.state_port = int(os.environ.get(STATE_PORT_ENV, str(DEFAULT_STATE_PORT)))
-        self.command_port = int(os.environ.get(COMMAND_PORT_ENV, str(DEFAULT_COMMAND_PORT)))
+        self.state_port = el.monte_carlo.port("state", DEFAULT_STATE_PORT)
+        self.command_port = el.monte_carlo.port("command", DEFAULT_COMMAND_PORT)
         self.state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.command_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.command_sock.bind(("127.0.0.1", self.command_port))

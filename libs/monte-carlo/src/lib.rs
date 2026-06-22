@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -16,7 +16,6 @@ use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use stellarator::util::CancelToken;
-use sysinfo::{Pid, ProcessesToUpdate, Signal, System};
 use tokio::task::JoinSet;
 
 pub const CONTEXT_ENV: &str = "ELODIN_MONTE_CARLO_CONTEXT";
@@ -32,7 +31,8 @@ pub struct CampaignConfig {
     pub build: Option<BuildConfig>,
     pub resources: ResourceConfig,
     pub hooks: HookConfig,
-    pub params_compat: Option<String>,
+    pub params_delivery: Option<ParamsDeliveryConfig>,
+    pub retention: RetentionConfig,
     pub continue_on_error: bool,
     /// When true, the campaign process exits non-zero if any run failed scoring
     /// or crashed. Defaults to false so exploratory campaigns can finish with
@@ -50,7 +50,8 @@ impl Default for CampaignConfig {
             build: None,
             resources: ResourceConfig::default(),
             hooks: HookConfig::default(),
-            params_compat: None,
+            params_delivery: None,
+            retention: RetentionConfig::default(),
             continue_on_error: true,
             fail_on_run_errors: false,
         }
@@ -72,8 +73,7 @@ pub struct ResourceConfig {
     pub bind_ip: IpAddr,
     pub port_stride: u16,
     pub db_port: u16,
-    pub state_port: u16,
-    pub command_port: u16,
+    pub ports: BTreeMap<String, u16>,
 }
 
 impl Default for ResourceConfig {
@@ -82,10 +82,52 @@ impl Default for ResourceConfig {
             bind_ip: IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             port_stride: 20,
             db_port: 2240,
-            state_port: 9003,
-            command_port: 9002,
+            ports: BTreeMap::from([("state".to_string(), 9003), ("command".to_string(), 9002)]),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ParamsDeliveryConfig {
+    pub file: PathBuf,
+    pub format: ParamsDeliveryFormat,
+    pub env_var: Option<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+impl Default for ParamsDeliveryConfig {
+    fn default() -> Self {
+        Self {
+            file: PathBuf::from("params.json"),
+            format: ParamsDeliveryFormat::Json,
+            env_var: None,
+            env: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ParamsDeliveryFormat {
+    #[default]
+    Json,
+    Toml,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RetentionConfig {
+    pub keep_run_db: RunDbRetention,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunDbRetention {
+    #[default]
+    Always,
+    Never,
+    OnFail,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -107,13 +149,13 @@ pub struct RunOptions {
     pub timeout: Option<String>,
     pub post_run: Option<PathBuf>,
     pub post_campaign: Option<PathBuf>,
-    pub params_compat: Option<String>,
     pub fail_fast: bool,
     pub fail_on_run_errors: bool,
     pub dry_run: bool,
     pub progress: ProgressMode,
     pub memory_probe: bool,
     pub keep_existing: bool,
+    pub clean: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -143,8 +185,7 @@ pub struct ResourceSlot {
     pub worker_id: usize,
     pub db_addr: SocketAddr,
     pub db_port: u16,
-    pub state_port: u16,
-    pub command_port: u16,
+    pub ports: BTreeMap<String, u16>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -161,6 +202,10 @@ pub struct RunMetric {
     /// outcome, in which case the run is judged purely on `exit_ok`.
     #[serde(default)]
     pub scored_pass: Option<bool>,
+    #[serde(default)]
+    pub scored_valid: Option<bool>,
+    #[serde(default)]
+    pub hook_scalars: BTreeMap<String, String>,
     pub wall_ms: u128,
     pub started_at: DateTime<Utc>,
     pub finished_at: DateTime<Utc>,
@@ -185,7 +230,11 @@ impl RunMetric {
     /// `post_run` hook scored it, the hook's `pass` outcome must be true. A
     /// run can exit successfully yet fail its scoring criteria.
     pub fn passed(&self) -> bool {
-        self.exit_ok && self.scored_pass.unwrap_or(true)
+        self.valid() && self.exit_ok && self.scored_pass.unwrap_or(true)
+    }
+
+    pub fn valid(&self) -> bool {
+        self.status != "skipped" && self.scored_valid.unwrap_or(true)
     }
 }
 
@@ -196,6 +245,8 @@ pub struct CampaignSummary {
     pub total_runs: usize,
     pub passed: usize,
     pub failed: usize,
+    #[serde(default)]
+    pub invalid: usize,
     pub skipped: usize,
     pub workers: usize,
     pub wall_ms: u128,
@@ -208,6 +259,17 @@ pub struct CampaignSummary {
     pub sim_phase_summary: Option<SimSummaryAggregate>,
     pub phase_attribution: PhaseAttributionSummary,
     pub concurrency_summary: ConcurrencySummary,
+    #[serde(default)]
+    pub hook_metrics: BTreeMap<String, ScalarMetricSummary>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ScalarMetricSummary {
+    pub count: usize,
+    pub min: f64,
+    pub mean: f64,
+    pub p95: f64,
+    pub max: f64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -345,8 +407,6 @@ pub struct SimSummaryAggregate {
 enum Error {
     #[error("campaign generated no runs")]
     EmptyPlan,
-    #[error("unsupported params compatibility mode: {0}")]
-    UnsupportedCompat(String),
 }
 
 #[derive(Clone)]
@@ -355,6 +415,7 @@ struct CampaignReporter {
     log_file: Arc<Mutex<fs::File>>,
     ok: Arc<AtomicUsize>,
     failed: Arc<AtomicUsize>,
+    invalid: Arc<AtomicUsize>,
     skipped: Arc<AtomicUsize>,
 }
 
@@ -381,7 +442,7 @@ impl CampaignReporter {
                 .unwrap_or_else(|_| ProgressStyle::default_bar())
                 .progress_chars("#>-"),
             );
-            bar.set_message(format!("0 fail=0 workers={workers}"));
+            bar.set_message(format!("0 fail=0 invalid=0 workers={workers}"));
             bar
         });
         let reporter = Self {
@@ -389,6 +450,7 @@ impl CampaignReporter {
             log_file: Arc::new(Mutex::new(log_file)),
             ok: Arc::new(AtomicUsize::new(0)),
             failed: Arc::new(AtomicUsize::new(0)),
+            invalid: Arc::new(AtomicUsize::new(0)),
             skipped: Arc::new(AtomicUsize::new(0)),
         };
         reporter.line(format!(
@@ -417,6 +479,8 @@ impl CampaignReporter {
     fn record(&self, metric: &RunMetric) {
         if metric.status == "skipped" {
             self.skipped.fetch_add(1, Ordering::SeqCst);
+        } else if !metric.valid() {
+            self.invalid.fetch_add(1, Ordering::SeqCst);
         } else if metric.passed() {
             self.ok.fetch_add(1, Ordering::SeqCst);
         } else {
@@ -424,11 +488,14 @@ impl CampaignReporter {
         }
         let ok = self.ok.load(Ordering::SeqCst);
         let failed = self.failed.load(Ordering::SeqCst);
+        let invalid = self.invalid.load(Ordering::SeqCst);
         let skipped = self.skipped.load(Ordering::SeqCst);
         let worker = worker_label(metric.worker_id);
         if let Some(progress) = &self.progress {
             progress.inc(1);
-            progress.set_message(format!("{ok} fail={failed} skip={skipped} worker={worker}"));
+            progress.set_message(format!(
+                "{ok} fail={failed} invalid={invalid} skip={skipped} worker={worker}"
+            ));
             let line = format!(
                 "[{}] {} worker={} wall_ms={} log={}",
                 metric.status,
@@ -458,9 +525,10 @@ impl CampaignReporter {
             progress.finish_and_clear();
         }
         self.line(format!(
-            "finished monte-carlo campaign: ok={} failed={} skipped={}",
+            "finished monte-carlo campaign: ok={} failed={} invalid={} skipped={}",
             self.ok.load(Ordering::SeqCst),
             self.failed.load(Ordering::SeqCst),
+            self.invalid.load(Ordering::SeqCst),
             self.skipped.load(Ordering::SeqCst)
         ));
     }
@@ -493,120 +561,6 @@ fn run_build_step(build: Option<&BuildConfig>, reporter: &CampaignReporter) -> R
         ));
     }
     Ok(())
-}
-
-fn reap_existing_elodin(reporter: &CampaignReporter) {
-    let current_pid = Pid::from_u32(std::process::id());
-    let mut system = System::new();
-    system.refresh_processes(ProcessesToUpdate::All, true);
-    let protected_pids = current_process_ancestry(&system, current_pid);
-    let current_start_time = system
-        .process(current_pid)
-        .map(|process| process.start_time())
-        .unwrap_or_default();
-    let targets = system
-        .processes()
-        .iter()
-        .filter_map(|(pid, process)| {
-            if protected_pids.contains(pid)
-                || (process.start_time() >= current_start_time
-                    && has_protected_ancestor(&system, *pid, &protected_pids))
-            {
-                return None;
-            }
-            let name = elodin_process_name(process)?;
-            matches!(name.as_str(), "elodin" | "elodin-db").then_some((*pid, name))
-        })
-        .collect::<Vec<_>>();
-
-    if targets.is_empty() {
-        return;
-    }
-
-    reporter.line(format!(
-        "reaping {} existing elodin process(es) before monte-carlo campaign",
-        targets.len()
-    ));
-    reporter.log_only(&format!(
-        "protected current process ancestry: {:?}",
-        protected_pids
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-    ));
-
-    for (pid, name) in &targets {
-        reporter.log_only(&format!("reaping existing {name} process {pid}"));
-        match system
-            .process(*pid)
-            .and_then(|process| process.kill_with(Signal::Term))
-        {
-            Some(true) => reporter.log_only(&format!("reaped {pid} {name} with SIGTERM")),
-            Some(false) | None => reporter.log_only(&format!(
-                "warning: failed to send SIGTERM to existing {name} process {pid}"
-            )),
-        }
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-        system.refresh_processes(ProcessesToUpdate::All, true);
-        if targets
-            .iter()
-            .all(|(pid, _)| system.process(*pid).is_none())
-        {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    system.refresh_processes(ProcessesToUpdate::All, true);
-    for (pid, name) in &targets {
-        if let Some(process) = system.process(*pid) {
-            if process.kill() {
-                reporter.log_only(&format!("force-killed lingering {name} process {pid}"));
-            } else {
-                reporter.log_only(&format!(
-                    "warning: failed to force-kill lingering {name} process {pid}"
-                ));
-            }
-        }
-    }
-}
-
-fn current_process_ancestry(system: &System, current_pid: Pid) -> HashSet<Pid> {
-    let mut protected = HashSet::from([current_pid]);
-    let mut pid = current_pid;
-    while let Some(parent) = system.process(pid).and_then(|process| process.parent()) {
-        if !protected.insert(parent) {
-            break;
-        }
-        pid = parent;
-    }
-    protected
-}
-
-fn has_protected_ancestor(system: &System, mut pid: Pid, protected: &HashSet<Pid>) -> bool {
-    loop {
-        if protected.contains(&pid) {
-            return true;
-        }
-        let Some(parent) = system.process(pid).and_then(|process| process.parent()) else {
-            return false;
-        };
-        if parent == pid {
-            return false;
-        }
-        pid = parent;
-    }
-}
-
-fn elodin_process_name(process: &sysinfo::Process) -> Option<String> {
-    process
-        .exe()
-        .and_then(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-        .or_else(|| Some(process.name().to_string_lossy().into_owned()))
 }
 
 pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
@@ -654,6 +608,9 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     if !same_file_or_path(&options.plan_path, &plan_dest) {
         fs::copy(&options.plan_path, &plan_dest).into_diagnostic()?;
     }
+    if options.clean {
+        prune_stale_run_dirs(&options.out_dir, &plan)?;
+    }
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
     write_json(
         &options.out_dir.join("campaign.manifest.json"),
@@ -677,6 +634,31 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         keep_existing: options.keep_existing,
     })
     .await
+}
+
+fn prune_stale_run_dirs(out_dir: &Path, plan: &[PlanRow]) -> Result<()> {
+    let runs_dir = out_dir.join("runs");
+    if !runs_dir.exists() {
+        return Ok(());
+    }
+    let planned = plan
+        .iter()
+        .map(|row| row.run_id.as_str())
+        .collect::<HashSet<_>>();
+    for entry in fs::read_dir(&runs_dir).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        if !entry.file_type().into_diagnostic()?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !planned.contains(name.as_ref()) {
+            fs::remove_dir_all(entry.path())
+                .into_diagnostic()
+                .with_context(|| format!("remove stale run dir {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Persisted next to the campaign so `resume` can reconstruct the run inputs
@@ -734,8 +716,10 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     let reporter = CampaignReporter::new(&out_dir, total_runs, workers, progress)?;
     run_build_step(config.build.as_ref(), &reporter)?;
     if !keep_existing {
-        reap_existing_elodin(&reporter);
+        s10::CgroupScope::reap_prefix("elodin-mc-").into_diagnostic()?;
     }
+    let campaign_cgroup =
+        s10::CgroupScope::create(format!("elodin-mc-{}", std::process::id())).into_diagnostic()?;
     // Count already-passed runs toward the report without re-running them.
     for metric in &preserved {
         reporter.record(metric);
@@ -774,6 +758,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         let out_dir = out_dir.clone();
         let cache_dir = cache_dir.clone();
         let reporter = reporter.clone();
+        let campaign_cgroup = campaign_cgroup.clone();
         worker_tasks.spawn(async move {
             let slot = resource_slot(worker_id, &config.resources)?;
             loop {
@@ -794,6 +779,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
                     &config,
                     &out_dir,
                     &cache_dir,
+                    campaign_cgroup.as_ref(),
                 )
                 .await
                 {
@@ -1077,11 +1063,15 @@ fn summarize_campaign(
         .iter()
         .filter(|metric| metric.status == "skipped")
         .count();
-    // Anything that ran but didn't pass (clean exit yet failed scoring, or a
-    // hard failure) counts as failed, keeping passed + failed + skipped == total.
+    let invalid = metrics
+        .iter()
+        .filter(|metric| metric.status != "skipped" && !metric.valid())
+        .count();
+    // Invalid runs are infrastructure/no-data samples, so they are reported
+    // separately and excluded from the scored pass/fail distribution.
     let failed = metrics
         .iter()
-        .filter(|metric| metric.status != "skipped" && !metric.passed())
+        .filter(|metric| metric.status != "skipped" && metric.valid() && !metric.passed())
         .count();
     let sim_phase_summary = aggregate_sim_summaries(metrics);
     let phase_attribution = summarize_phase_attribution(metrics);
@@ -1100,6 +1090,7 @@ fn summarize_campaign(
         total_runs: metrics.len(),
         passed,
         failed,
+        invalid,
         skipped,
         workers,
         wall_ms,
@@ -1120,7 +1111,48 @@ fn summarize_campaign(
         sim_phase_summary,
         phase_attribution,
         concurrency_summary: concurrency_summary.clone(),
+        hook_metrics: summarize_hook_metrics(metrics),
     }
+}
+
+fn summarize_hook_metrics(metrics: &[RunMetric]) -> BTreeMap<String, ScalarMetricSummary> {
+    let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    for metric in metrics.iter().filter(|metric| metric.valid()) {
+        for (key, value) in &metric.hook_scalars {
+            if matches!(key.as_str(), "pass" | "valid") {
+                continue;
+            }
+            if let Ok(value) = value.parse::<f64>()
+                && value.is_finite()
+            {
+                grouped.entry(key.clone()).or_default().push(value);
+            }
+        }
+    }
+    grouped
+        .into_iter()
+        .filter_map(|(key, mut values)| {
+            values.sort_by(f64::total_cmp);
+            let count = values.len();
+            if count == 0 {
+                return None;
+            }
+            let sum = values.iter().sum::<f64>();
+            let p95_idx = ((count as f64 * 0.95).ceil() as usize)
+                .saturating_sub(1)
+                .min(count - 1);
+            Some((
+                key,
+                ScalarMetricSummary {
+                    count,
+                    min: values[0],
+                    mean: sum / count as f64,
+                    p95: values[p95_idx],
+                    max: values[count - 1],
+                },
+            ))
+        })
+        .collect()
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
@@ -1166,6 +1198,7 @@ fn load_existing_metric(out_dir: &Path, run_id: &str) -> Option<RunMetric> {
     Some(metric)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_with_retries(
     row: PlanRow,
     worker_id: usize,
@@ -1174,6 +1207,7 @@ async fn run_with_retries(
     config: &CampaignConfig,
     out_dir: &Path,
     cache_dir: &Path,
+    campaign_cgroup: Option<&Arc<s10::CgroupScope>>,
 ) -> Result<RunMetric> {
     let mut last_metric = None;
     let ctx = RunContext {
@@ -1181,6 +1215,7 @@ async fn run_with_retries(
         config,
         out_dir,
         cache_dir,
+        campaign_cgroup,
     };
     for attempt in 0..=config.retries {
         let metric = run_one(&row, worker_id, &slot, &ctx, attempt).await?;
@@ -1198,6 +1233,7 @@ struct RunContext<'a> {
     config: &'a CampaignConfig,
     out_dir: &'a Path,
     cache_dir: &'a Path,
+    campaign_cgroup: Option<&'a Arc<s10::CgroupScope>>,
 }
 
 async fn run_one(
@@ -1245,25 +1281,38 @@ async fn run_one(
     let spawn_unix_ns = unix_now_ns();
     let start = Instant::now();
     let token = CancelToken::new();
-    let fut = s10::cli::run_recipe_with_token_admitted(
+    let run_cgroup = ctx.campaign_cgroup.and_then(|scope| {
+        s10::CgroupScope::create_child(scope, &row.run_id)
+            .ok()
+            .flatten()
+    });
+    let fut = s10::cli::run_recipe_with_token_admitted_in_cgroup(
         row.run_id.clone(),
         recipe,
         false,
         false,
         token.clone(),
         admission_permit,
+        run_cgroup.clone(),
     );
     let result = if let Some(timeout) = parse_duration(ctx.config.timeout.as_deref())? {
         match tokio::time::timeout(timeout, fut).await {
             Ok(result) => result,
             Err(_) => {
                 token.cancel();
+                if let Some(scope) = &run_cgroup {
+                    let _ = scope.kill();
+                }
                 Err(miette!("run {} timed out after {:?}", row.run_id, timeout))
             }
         }
     } else {
         fut.await
     };
+    if let Some(scope) = &run_cgroup {
+        let _ = scope.kill();
+        let _ = scope.remove();
+    }
     let exit_unix_ns = unix_now_ns();
     let exit_ok = result.is_ok();
     let sim_summary = read_sim_run_summary(&run_dir.join("sim_summary.json"));
@@ -1289,6 +1338,8 @@ async fn run_one(
         status: if exit_ok { "ok" } else { "failed" }.to_string(),
         exit_ok,
         scored_pass: None,
+        scored_valid: None,
+        hook_scalars: BTreeMap::new(),
         wall_ms: start.elapsed().as_millis(),
         started_at,
         finished_at: Utc::now(),
@@ -1324,18 +1375,69 @@ async fn run_one(
         // The hook scores the run via `post_run_result.json`; fold its verdict
         // into the metric so summaries don't count a criteria-failing run as
         // passed just because the process exited cleanly.
-        metric.scored_pass = read_post_run_pass(&run_dir.join("post_run_result.json"));
+        let outcome = read_post_run_outcome(&run_dir.join("post_run_result.json"));
+        metric.scored_pass = outcome.pass;
+        metric.scored_valid = outcome.valid;
+        metric.hook_scalars = outcome.scalars;
+        if !metric.valid() {
+            metric.status = "invalid".to_string();
+        }
     }
+    apply_retention(ctx.config.retention.keep_run_db, &metric);
     write_json(&run_dir.join("metrics.json"), &metric)?;
     Ok(metric)
 }
 
-/// Reads the `pass` outcome from a `post_run_result.json` produced by a scoring
-/// hook. Returns `None` if the file is absent or has no boolean `pass` field.
-fn read_post_run_pass(path: &Path) -> Option<bool> {
-    let contents = fs::read_to_string(path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
-    value.get("pass").and_then(serde_json::Value::as_bool)
+#[derive(Default)]
+struct HookOutcome {
+    pass: Option<bool>,
+    valid: Option<bool>,
+    scalars: BTreeMap<String, String>,
+}
+
+/// Reads scalar output from a `post_run_result.json` produced by a scoring hook.
+fn read_post_run_outcome(path: &Path) -> HookOutcome {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return HookOutcome::default();
+    };
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&contents) else {
+        return HookOutcome::default();
+    };
+    let pass = map.get("pass").and_then(Value::as_bool);
+    let valid = map.get("valid").and_then(Value::as_bool).or_else(|| {
+        map.get("status")
+            .and_then(Value::as_str)
+            .map(|status| status != "invalid")
+    });
+    let scalars = map
+        .into_iter()
+        .filter_map(|(key, value)| scalar_value(&value).map(|value| (key, value)))
+        .collect();
+    HookOutcome {
+        pass,
+        valid,
+        scalars,
+    }
+}
+
+fn scalar_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::String(value) => Some(value.clone()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn apply_retention(policy: RunDbRetention, metric: &RunMetric) {
+    let keep = match policy {
+        RunDbRetention::Always => true,
+        RunDbRetention::Never => false,
+        RunDbRetention::OnFail => !metric.passed(),
+    };
+    if !keep {
+        let _ = fs::remove_dir_all(&metric.db_path);
+    }
 }
 
 fn load_config(path: Option<&Path>) -> Result<CampaignConfig> {
@@ -1418,9 +1520,6 @@ fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     }
     if let Some(hook) = options.post_campaign.take() {
         config.hooks.post_campaign = Some(hook);
-    }
-    if let Some(compat) = options.params_compat.take() {
-        config.params_compat = Some(compat);
     }
     if options.fail_fast {
         config.continue_on_error = false;
@@ -1542,14 +1641,6 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
             port_offset.to_string(),
         ),
         (
-            "ELODIN_MONTE_CARLO_STATE_PORT".to_string(),
-            ctx.slot.state_port.to_string(),
-        ),
-        (
-            "ELODIN_MONTE_CARLO_COMMAND_PORT".to_string(),
-            ctx.slot.command_port.to_string(),
-        ),
-        (
             "ELODIN_DB_PATH".to_string(),
             ctx.db_path.to_string_lossy().to_string(),
         ),
@@ -1564,22 +1655,23 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
     if let Some(seed) = row.seed {
         env.insert("ELODIN_MONTE_CARLO_SEED".to_string(), seed.to_string());
     }
-    if ctx.config.params_compat.as_deref() == Some("revere-overrides-file") {
-        let overrides_path = ctx.context_path.with_file_name("revere_overrides.json");
-        write_json(&overrides_path, &row.params)?;
+    for (name, port) in &ctx.slot.ports {
+        env.insert(named_port_env(name), port.to_string());
+    }
+    if let Some(port) = ctx.slot.ports.get("state") {
         env.insert(
-            "REVERE_SIM_OVERRIDES_FILE".to_string(),
-            overrides_path.to_string_lossy().to_string(),
+            "ELODIN_MONTE_CARLO_STATE_PORT".to_string(),
+            port.to_string(),
         );
-        if let Some(seed) = row.seed {
-            env.insert("SIM_SEED".to_string(), seed.to_string());
-        }
+    }
+    if let Some(port) = ctx.slot.ports.get("command") {
         env.insert(
-            "REVERE_DB_PATH".to_string(),
-            ctx.db_path.to_string_lossy().to_string(),
+            "ELODIN_MONTE_CARLO_COMMAND_PORT".to_string(),
+            port.to_string(),
         );
-    } else if let Some(mode) = ctx.config.params_compat.as_deref() {
-        return Err(Error::UnsupportedCompat(mode.to_string())).into_diagnostic();
+    }
+    if let Some(delivery) = &ctx.config.params_delivery {
+        write_params_delivery(delivery, row, ctx, &mut env)?;
     }
 
     Ok(patch_recipe_env(
@@ -1589,6 +1681,62 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
         ctx.run_dir,
         "recipe",
     ))
+}
+
+fn named_port_env(name: &str) -> String {
+    let suffix = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("ELODIN_MC_PORT_{suffix}")
+}
+
+fn write_params_delivery(
+    delivery: &ParamsDeliveryConfig,
+    row: &PlanRow,
+    ctx: &PatchContext<'_>,
+    env: &mut HashMap<String, String>,
+) -> Result<()> {
+    let relative = render_template(&delivery.file.to_string_lossy(), row, ctx);
+    let path = if Path::new(&relative).is_absolute() {
+        PathBuf::from(relative)
+    } else {
+        ctx.run_dir.join(relative)
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).into_diagnostic()?;
+    }
+    match delivery.format {
+        ParamsDeliveryFormat::Json => write_json(&path, &row.params)?,
+        ParamsDeliveryFormat::Toml => {
+            let text = toml::to_string_pretty(&row.params).into_diagnostic()?;
+            fs::write(&path, text).into_diagnostic()?;
+        }
+    }
+    if let Some(env_var) = &delivery.env_var {
+        env.insert(env_var.clone(), path.to_string_lossy().to_string());
+    }
+    for (key, value) in &delivery.env {
+        env.insert(key.clone(), render_template(value, row, ctx));
+    }
+    Ok(())
+}
+
+fn render_template(template: &str, row: &PlanRow, ctx: &PatchContext<'_>) -> String {
+    template
+        .replace(
+            "{seed}",
+            &row.seed.map(|seed| seed.to_string()).unwrap_or_default(),
+        )
+        .replace("{run_id}", &row.run_id)
+        .replace("{db_path}", &ctx.db_path.to_string_lossy())
+        .replace("{run_dir}", &ctx.run_dir.to_string_lossy())
 }
 
 struct PatchContext<'a> {
@@ -1664,12 +1812,22 @@ fn resource_slot(worker_id: usize, resources: &ResourceConfig) -> Result<Resourc
         u16::try_from(port).into_diagnostic()
     };
     let db_port = shift(resources.db_port)?;
+    let ports = resources
+        .ports
+        .iter()
+        .map(|(name, port)| Ok((name.clone(), shift(*port)?)))
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let mut all_ports = HashSet::from([db_port]);
+    for (name, port) in &ports {
+        if !all_ports.insert(*port) {
+            return Err(miette!("resource port collision for `{name}` at {port}"));
+        }
+    }
     Ok(ResourceSlot {
         worker_id,
         db_port,
         db_addr: SocketAddr::new(resources.bind_ip, db_port),
-        state_port: shift(resources.state_port)?,
-        command_port: shift(resources.command_port)?,
+        ports,
     })
 }
 
@@ -1694,8 +1852,7 @@ fn write_run_context(
         "slots": {
             "worker_id": slot.worker_id,
             "db_port": slot.db_port,
-            "state_port": slot.state_port,
-            "command_port": slot.command_port,
+            "ports": slot.ports,
         },
     });
     write_json(path, &value)
@@ -1738,8 +1895,102 @@ async fn run_hook(kind: &str, hook: &Path, context: &Path) -> Result<()> {
 
 fn write_perf_csv(path: &Path, metrics: &[RunMetric]) -> Result<()> {
     let mut writer = csv::Writer::from_path(path).into_diagnostic()?;
+    writer
+        .write_record([
+            "run_id",
+            "worker_id",
+            "attempt",
+            "status",
+            "exit_ok",
+            "scored_pass",
+            "scored_valid",
+            "wall_ms",
+            "started_at",
+            "finished_at",
+            "spawn_unix_ns",
+            "exit_unix_ns",
+            "entry_unix_ns",
+            "compile_done_unix_ns",
+            "loop_start_unix_ns",
+            "loop_end_unix_ns",
+            "summary_written_unix_ns",
+            "python_import_ms",
+            "compile_ms",
+            "loop_ms",
+            "teardown_ms",
+            "process_shutdown_ms",
+            "db_path",
+            "run_dir",
+        ])
+        .into_diagnostic()?;
     for metric in metrics {
-        writer.serialize(metric).into_diagnostic()?;
+        writer
+            .write_record([
+                metric.run_id.clone(),
+                metric
+                    .worker_id
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric.attempt.to_string(),
+                metric.status.clone(),
+                metric.exit_ok.to_string(),
+                metric
+                    .scored_pass
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .scored_valid
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric.wall_ms.to_string(),
+                metric.started_at.to_rfc3339(),
+                metric.finished_at.to_rfc3339(),
+                metric.spawn_unix_ns.to_string(),
+                metric.exit_unix_ns.to_string(),
+                metric
+                    .entry_unix_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .compile_done_unix_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .loop_start_unix_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .loop_end_unix_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .summary_written_unix_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .python_import_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .compile_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .loop_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .teardown_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .process_shutdown_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric.db_path.to_string_lossy().to_string(),
+                metric.run_dir.to_string_lossy().to_string(),
+            ])
+            .into_diagnostic()?;
     }
     writer.flush().into_diagnostic()
 }
@@ -1770,42 +2021,59 @@ fn write_process_csv(path: &Path, samples: &[ProcessSample]) -> Result<()> {
 
 fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Result<()> {
     let mut writer = csv::Writer::from_path(path).into_diagnostic()?;
-    writer
-        .write_record([
-            "run_id",
-            "status",
-            "passed",
-            "scored_pass",
-            "worker_id",
-            "wall_ms",
-            "db_path",
-            "result_json",
-        ])
-        .into_diagnostic()?;
+    let hook_keys = metrics
+        .iter()
+        .flat_map(|metric| metric.hook_scalars.keys().cloned())
+        .collect::<BTreeSet<_>>();
+    let mut header = vec![
+        "run_id".to_string(),
+        "status".to_string(),
+        "passed".to_string(),
+        "valid".to_string(),
+        "scored_pass".to_string(),
+        "scored_valid".to_string(),
+        "worker_id".to_string(),
+        "wall_ms".to_string(),
+        "db_path".to_string(),
+        "result_json".to_string(),
+    ];
+    header.extend(hook_keys.iter().cloned());
+    writer.write_record(&header).into_diagnostic()?;
     for metric in metrics {
         let result_json = metric.run_dir.join("result.json");
         let scored_pass = metric
             .scored_pass
             .map(|pass| pass.to_string())
             .unwrap_or_default();
-        writer
-            .write_record([
-                metric.run_id.as_str(),
-                metric.status.as_str(),
-                &metric.passed().to_string(),
-                &scored_pass,
-                &metric
-                    .worker_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                &metric.wall_ms.to_string(),
-                &metric.db_path.to_string_lossy(),
-                &result_json
-                    .strip_prefix(out_dir)
-                    .unwrap_or(&result_json)
-                    .to_string_lossy(),
-            ])
-            .into_diagnostic()?;
+        let scored_valid = metric
+            .scored_valid
+            .map(|valid| valid.to_string())
+            .unwrap_or_default();
+        let mut row = vec![
+            metric.run_id.clone(),
+            metric.status.clone(),
+            metric.passed().to_string(),
+            metric.valid().to_string(),
+            scored_pass,
+            scored_valid,
+            metric
+                .worker_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            metric.wall_ms.to_string(),
+            metric.db_path.to_string_lossy().to_string(),
+            result_json
+                .strip_prefix(out_dir)
+                .unwrap_or(&result_json)
+                .to_string_lossy()
+                .to_string(),
+        ];
+        row.extend(
+            hook_keys
+                .iter()
+                .map(|key| metric.hook_scalars.get(key).cloned().unwrap_or_default()),
+        );
+        writer.write_record(&row).into_diagnostic()?;
     }
     writer.flush().into_diagnostic()
 }
@@ -1858,6 +2126,8 @@ fn placeholder_metric(
         status: status.to_string(),
         exit_ok: false,
         scored_pass: None,
+        scored_valid: None,
+        hook_scalars: BTreeMap::new(),
         wall_ms: 0,
         started_at: now,
         finished_at: now,
@@ -1981,8 +2251,8 @@ fn write_campaign_summary(
     let mut rendered = String::new();
     rendered.push_str("──── elodin monte-carlo campaign summary ────\n");
     rendered.push_str(&format!(
-        "  runs:              {} ok / {} failed / {} skipped / {} total\n",
-        summary.passed, summary.failed, summary.skipped, summary.total_runs
+        "  runs:              {} ok / {} failed / {} invalid / {} skipped / {} total\n",
+        summary.passed, summary.failed, summary.invalid, summary.skipped, summary.total_runs
     ));
     rendered.push_str(&format!("  workers:           {}\n", summary.workers));
     rendered.push_str(&format!(
@@ -2023,6 +2293,16 @@ fn write_campaign_summary(
                 bucket.concurrency,
                 bucket.runs,
                 fmt_ms(bucket.average_run_wall_ms)
+            ));
+        }
+    }
+    if !summary.hook_metrics.is_empty() {
+        rendered.push('\n');
+        rendered.push_str("  hook metrics (count / min / mean / p95 / max):\n");
+        for (name, metric) in &summary.hook_metrics {
+            rendered.push_str(&format!(
+                "    {:<20} {:>6} {:>10.4} {:>10.4} {:>10.4} {:>10.4}\n",
+                name, metric.count, metric.min, metric.mean, metric.p95, metric.max
             ));
         }
     }
@@ -2980,23 +3260,35 @@ mod tests {
     }
 
     #[test]
-    fn read_post_run_pass_extracts_bool_pass_field() {
+    fn read_post_run_outcome_extracts_hook_fields() {
         let dir = std::env::temp_dir().join(format!("mc-post-run-{}", unix_now_ns()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("post_run_result.json");
 
         fs::write(&path, r#"{"pass": false, "traj_rmse_m": 12.5}"#).unwrap();
-        assert_eq!(read_post_run_pass(&path), Some(false));
+        let outcome = read_post_run_outcome(&path);
+        assert_eq!(outcome.pass, Some(false));
+        assert_eq!(outcome.valid, None);
+        assert_eq!(
+            outcome.scalars.get("traj_rmse_m"),
+            Some(&"12.5".to_string())
+        );
 
-        fs::write(&path, r#"{"pass": true}"#).unwrap();
-        assert_eq!(read_post_run_pass(&path), Some(true));
+        fs::write(&path, r#"{"pass": true, "valid": false}"#).unwrap();
+        let outcome = read_post_run_outcome(&path);
+        assert_eq!(outcome.pass, Some(true));
+        assert_eq!(outcome.valid, Some(false));
 
         // No `pass` field -> fall back to exit-based judgement.
         fs::write(&path, r#"{"traj_rmse_m": 1.0}"#).unwrap();
-        assert_eq!(read_post_run_pass(&path), None);
+        let outcome = read_post_run_outcome(&path);
+        assert_eq!(outcome.pass, None);
+        assert_eq!(outcome.scalars.get("traj_rmse_m"), Some(&"1.0".to_string()));
 
-        // Missing file -> None.
-        assert_eq!(read_post_run_pass(&dir.join("missing.json")), None);
+        // Missing file -> empty outcome.
+        let outcome = read_post_run_outcome(&dir.join("missing.json"));
+        assert_eq!(outcome.pass, None);
+        assert!(outcome.scalars.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3036,8 +3328,9 @@ mod tests {
 
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("passed"));
+        assert!(text.contains("valid"));
         assert!(text.contains("scored_pass"));
-        assert!(text.contains("run_0000000,ok,false,false"));
+        assert!(text.contains("run_0000000,ok,false,true,false,"));
 
         let _ = fs::remove_dir_all(&dir);
     }

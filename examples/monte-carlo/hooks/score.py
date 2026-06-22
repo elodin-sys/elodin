@@ -14,5 +14,6 @@ def post_run(ctx):
     error = float(result.get("error", float("inf")))
     return {
         "error": error,
+        "valid": bool(result),
         "pass": error < 2.0,
     }

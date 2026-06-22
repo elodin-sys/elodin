@@ -39,13 +39,13 @@ def post_run(ctx):
     if result_path.exists():
         result = json.loads(result_path.read_text())
 
-    # Edit this to express your own pass/fail criterion. By default a run passes
-    # when it produced a result.json (i.e. the sim ran to completion).
+    # Edit this to express your own pass/fail criterion. Return {"valid": False}
+    # when infrastructure failed and the sample should be excluded from stats.
     passed = bool(result)
 
     # Spread result first so the hook's computed `pass` always wins, even when
     # the sim already emitted its own `pass` field via el.monte_carlo.result(...).
-    return {**result, "pass": passed}
+    return {**result, "valid": bool(result), "pass": passed}
 '''
 
 GATE_HOOK = '''"""post_campaign hook: fail the campaign process when any run failed.
@@ -124,6 +124,17 @@ def write_quickstart(sim_path: Path, out_dir: Path) -> list[Path]:
                 'timeout = "120s"',
                 "retries = 0",
                 "continue_on_error = true",
+                "",
+                "[resources]",
+                "port_stride = 40",
+                "db_port = 2240",
+                "",
+                "[resources.ports]",
+                "state = 9003",
+                "command = 9002",
+                "",
+                "[retention]",
+                'keep_run_db = "on-fail"',
                 "",
                 "[hooks]",
                 f'post_run = "{hook_prefix}/hooks/score.py"',

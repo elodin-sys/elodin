@@ -81,6 +81,9 @@ mod tests {
                 restart_policy: crate::recipe::RestartPolicy::Never,
                 fail_on_error: false,
                 log_path: None,
+                depends_on: Vec::new(),
+                ready: None,
+                ready_timeout: None,
             },
             no_watch: false,
         })

@@ -65,7 +65,7 @@ pub async fn run_recipe(
     }
 
     recipe
-        .watch("sim".to_string(), false, cancel_token.clone())
+        .watch("sim".to_string(), false, cancel_token.clone(), None)
         .await?;
     cancel_token.cancel();
     Ok(())
@@ -179,6 +179,9 @@ mod tests {
             restart_policy: RestartPolicy::Never,
             fail_on_error: false,
             log_path: None,
+            depends_on: Vec::new(),
+            ready: None,
+            ready_timeout: None,
         }
     }
 }

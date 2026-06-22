@@ -1,9 +1,12 @@
 #![allow(clippy::too_many_arguments)]
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use s10::{CargoRecipe, GroupRecipe, ProcessArgs, ProcessRecipe, Recipe as RustRecipe, SimRecipe};
+use s10::{
+    CargoRecipe, GroupRecipe, ProcessArgs, ProcessRecipe, ReadyProbe, Recipe as RustRecipe,
+    SimRecipe,
+};
 use std::collections::HashMap;
-use std::net::AddrParseError;
+use std::net::{AddrParseError, SocketAddr};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +22,9 @@ pub enum Recipe {
         cwd: Option<String>,
         env: HashMap<String, String>,
         restart_policy: RestartPolicy,
+        depends_on: Vec<String>,
+        ready: Option<Ready>,
+        ready_timeout: Option<String>,
     },
     Process {
         name: String,
@@ -28,6 +34,9 @@ pub enum Recipe {
         env: HashMap<String, String>,
         restart_policy: RestartPolicy,
         no_watch: bool,
+        depends_on: Vec<String>,
+        ready: Option<Ready>,
+        ready_timeout: Option<String>,
     },
     Group {
         name: String,
@@ -39,6 +48,9 @@ pub enum Recipe {
         addr: String,
         optimize: bool,
         env: HashMap<String, String>,
+        depends_on: Vec<String>,
+        ready: Option<Ready>,
+        ready_timeout: Option<String>,
     },
 }
 
@@ -47,6 +59,48 @@ pub enum Recipe {
 pub enum RestartPolicy {
     Never,
     Instant,
+}
+
+#[pyclass]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ready {
+    inner: ReadyProbe,
+}
+
+#[pymethods]
+impl Ready {
+    #[staticmethod]
+    fn tcp(addr: String) -> PyResult<Self> {
+        let addr = addr
+            .parse::<SocketAddr>()
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(Self {
+            inner: ReadyProbe::Tcp { addr },
+        })
+    }
+
+    #[staticmethod]
+    fn file(path: String) -> Self {
+        Self {
+            inner: ReadyProbe::File {
+                path: PathBuf::from(path),
+            },
+        }
+    }
+
+    #[staticmethod]
+    fn log(pattern: String) -> Self {
+        Self {
+            inner: ReadyProbe::Log { pattern },
+        }
+    }
+
+    #[staticmethod]
+    fn delay(ms: u64) -> Self {
+        Self {
+            inner: ReadyProbe::Delay { ms },
+        }
+    }
 }
 
 impl Recipe {
@@ -70,6 +124,9 @@ impl Recipe {
                 cwd,
                 env,
                 restart_policy,
+                depends_on,
+                ready,
+                ready_timeout,
                 ..
             } => Ok(RustRecipe::Cargo(CargoRecipe {
                 path: path.clone(),
@@ -86,6 +143,9 @@ impl Recipe {
                     },
                     fail_on_error: false,
                     log_path: None,
+                    depends_on: depends_on.clone(),
+                    ready: ready.as_ref().map(|ready| ready.inner.clone()),
+                    ready_timeout: ready_timeout.clone(),
                 },
                 destination: s10::Destination::Local,
             })),
@@ -96,6 +156,9 @@ impl Recipe {
                 env,
                 restart_policy,
                 no_watch,
+                depends_on,
+                ready,
+                ready_timeout,
                 ..
             } => Ok(RustRecipe::Process(ProcessRecipe {
                 cmd: cmd.clone(),
@@ -109,6 +172,9 @@ impl Recipe {
                     },
                     fail_on_error: false,
                     log_path: None,
+                    depends_on: depends_on.clone(),
+                    ready: ready.as_ref().map(|ready| ready.inner.clone()),
+                    ready_timeout: ready_timeout.clone(),
                 },
                 no_watch: *no_watch,
             })),
@@ -124,6 +190,9 @@ impl Recipe {
                 addr,
                 optimize,
                 env,
+                depends_on,
+                ready,
+                ready_timeout,
                 ..
             } => Ok(RustRecipe::Sim(SimRecipe {
                 path: path.clone(),
@@ -131,6 +200,9 @@ impl Recipe {
                 optimize: *optimize,
                 env: env.clone(),
                 log_path: None,
+                depends_on: depends_on.clone(),
+                ready: ready.as_ref().map(|ready| ready.inner.clone()),
+                ready_timeout: ready_timeout.clone(),
             })),
         }
     }
@@ -147,13 +219,16 @@ pub struct PyRecipe {
 #[pymethods]
 impl PyRecipe {
     #[new]
-    #[pyo3(signature = (name, path=None, addr=None, optimize=None, env=None))]
+    #[pyo3(signature = (name, path=None, addr=None, optimize=None, env=None, depends_on=None, ready=None, ready_timeout=None))]
     fn new(
         name: String,
         path: Option<String>,
         addr: Option<String>,
         optimize: Option<bool>,
         env: Option<HashMap<String, String>>,
+        depends_on: Option<Vec<String>>,
+        ready: Option<Ready>,
+        ready_timeout: Option<String>,
     ) -> PyResult<Self> {
         let path = path.map(PathBuf::from).unwrap_or_default();
         let addr = addr.unwrap_or_else(|| "[::]:2240".to_string());
@@ -165,6 +240,9 @@ impl PyRecipe {
             addr,
             optimize,
             env: env.unwrap_or_default(),
+            depends_on: depends_on.unwrap_or_default(),
+            ready,
+            ready_timeout,
         };
 
         Ok(PyRecipe { inner })
@@ -180,7 +258,7 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the binary
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None))]
+    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None, depends_on=None, ready=None, ready_timeout=None))]
     fn cargo(
         name: String,
         path: String,
@@ -189,6 +267,9 @@ impl PyRecipe {
         args: Option<Vec<String>>,
         cwd: Option<String>,
         env: Option<HashMap<String, String>>,
+        depends_on: Option<Vec<String>>,
+        ready: Option<Ready>,
+        ready_timeout: Option<String>,
     ) -> PyResult<Self> {
         let inner = Recipe::Cargo {
             name,
@@ -200,6 +281,9 @@ impl PyRecipe {
             cwd,
             env: env.unwrap_or_default(),
             restart_policy: RestartPolicy::Never,
+            depends_on: depends_on.unwrap_or_default(),
+            ready,
+            ready_timeout,
         };
         Ok(PyRecipe { inner })
     }
@@ -212,13 +296,16 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the process
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None))]
+    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None, depends_on=None, ready=None, ready_timeout=None))]
     fn process(
         name: String,
         cmd: String,
         args: Option<Vec<String>>,
         cwd: Option<String>,
         env: Option<HashMap<String, String>>,
+        depends_on: Option<Vec<String>>,
+        ready: Option<Ready>,
+        ready_timeout: Option<String>,
     ) -> PyResult<Self> {
         let inner = Recipe::Process {
             name,
@@ -228,6 +315,9 @@ impl PyRecipe {
             env: env.unwrap_or_default(),
             restart_policy: RestartPolicy::Never,
             no_watch: true,
+            depends_on: depends_on.unwrap_or_default(),
+            ready,
+            ready_timeout,
         };
         Ok(PyRecipe { inner })
     }
@@ -247,5 +337,6 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     // Use our PyRecipe wrapper instead of the original Recipe
     child.add_class::<PyRecipe>()?;
     child.add_class::<RestartPolicy>()?;
+    child.add_class::<Ready>()?;
     parent_module.add_submodule(&child)
 }

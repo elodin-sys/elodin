@@ -5,8 +5,13 @@ continue_on_error = true
 [resources]
 port_stride = 40
 db_port = 2240
-state_port = 9003
-command_port = 9002
+
+[resources.ports]
+state = 9003
+command = 9002
+
+[retention]
+keep_run_db = "on-fail"
 
 [hooks]
 post_run = "examples/monte-carlo/hooks/score.py"

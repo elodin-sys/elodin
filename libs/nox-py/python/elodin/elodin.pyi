@@ -464,6 +464,16 @@ class S10RestartPolicy:
     Never: ClassVar[S10RestartPolicy]
     Instant: ClassVar[S10RestartPolicy]
 
+class S10Ready:
+    @staticmethod
+    def tcp(addr: str) -> S10Ready: ...
+    @staticmethod
+    def file(path: str) -> S10Ready: ...
+    @staticmethod
+    def log(pattern: str) -> S10Ready: ...
+    @staticmethod
+    def delay(ms: int) -> S10Ready: ...
+
 class S10PyRecipe:
     def __init__(
         self,
@@ -472,6 +482,9 @@ class S10PyRecipe:
         addr: str | None = None,
         optimize: bool | None = None,
         env: dict[str, str] | None = None,
+        depends_on: list[str] | None = None,
+        ready: S10Ready | None = None,
+        ready_timeout: str | None = None,
     ): ...
     @staticmethod
     def cargo(
@@ -482,6 +495,9 @@ class S10PyRecipe:
         args: list[str] | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        depends_on: list[str] | None = None,
+        ready: S10Ready | None = None,
+        ready_timeout: str | None = None,
     ) -> S10PyRecipe: ...
     @staticmethod
     def process(
@@ -490,6 +506,9 @@ class S10PyRecipe:
         args: list[str] | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        depends_on: list[str] | None = None,
+        ready: S10Ready | None = None,
+        ready_timeout: str | None = None,
     ) -> S10PyRecipe: ...
     def to_json(self) -> str: ...
     def name(self) -> str: ...
@@ -497,6 +516,7 @@ class S10PyRecipe:
 class _S10Module:
     PyRecipe: ClassVar[type[S10PyRecipe]]
     RestartPolicy: ClassVar[type[S10RestartPolicy]]
+    Ready: ClassVar[type[S10Ready]]
 
 s10: _S10Module
 
@@ -545,7 +565,9 @@ class MonteCarloParams:
     db_addr: str | None
     cache_dir: str | None
     run_dir: str | None
+    meta: dict[str, Any]
     def get(self, key: str, default: Any = None) -> Any: ...
     def __getitem__(self, key: str) -> Any: ...
     def as_overrides_dict(self) -> dict[str, Any]: ...
     def slots(self) -> dict[str, Any]: ...
+    def ports(self) -> dict[str, int]: ...

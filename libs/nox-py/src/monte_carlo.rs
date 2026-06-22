@@ -37,6 +37,8 @@ struct ContextData {
     #[serde(default)]
     params: HashMap<String, Value>,
     #[serde(default)]
+    meta: HashMap<String, Value>,
+    #[serde(default)]
     slots: HashMap<String, Value>,
 }
 
@@ -104,6 +106,7 @@ pub struct PyParams {
     cache_dir: Option<String>,
     run_dir: Option<String>,
     params: HashMap<String, Value>,
+    meta: HashMap<String, Value>,
     slots: HashMap<String, Value>,
 }
 
@@ -166,8 +169,21 @@ impl PyParams {
         json_map_to_dict(py, &self.params)
     }
 
+    #[getter]
+    fn meta(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        json_map_to_dict(py, &self.meta)
+    }
+
     fn slots(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         json_map_to_dict(py, &self.slots)
+    }
+
+    fn ports(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, port) in ports_from_slots(&self.slots) {
+            dict.set_item(name, port)?;
+        }
+        Ok(dict.unbind())
     }
 }
 
@@ -230,6 +246,7 @@ fn params(spec: Option<&PyParamsSpec>) -> PyResult<PyParams> {
             cache_dir: context.cache_dir,
             run_dir: context.run_dir,
             params: values,
+            meta: context.meta,
             slots: context.slots,
         })
     } else {
@@ -241,9 +258,25 @@ fn params(spec: Option<&PyParamsSpec>) -> PyResult<PyParams> {
             cache_dir: None,
             run_dir: None,
             params: values,
+            meta: HashMap::new(),
             slots: HashMap::new(),
         })
     }
+}
+
+#[pyfunction]
+#[pyo3(signature = (name, default = None))]
+fn port(name: &str, default: Option<u16>) -> PyResult<u16> {
+    if let Ok(raw) = std::env::var(named_port_env(name)) {
+        return raw.parse::<u16>().map_err(|err| {
+            PyValueError::new_err(format!("invalid port value for `{name}`: {err}"))
+        });
+    }
+    let params = params(None)?;
+    if let Some(port) = ports_from_slots(&params.slots).get(name).copied() {
+        return Ok(port);
+    }
+    default.ok_or_else(|| PyKeyError::new_err(name.to_string()))
 }
 
 #[pyfunction]
@@ -287,8 +320,42 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_function(wrap_pyfunction!(params_spec, &child)?)?;
     child.add_function(wrap_pyfunction!(params, &child)?)?;
     child.add_function(wrap_pyfunction!(result, &child)?)?;
+    child.add_function(wrap_pyfunction!(port, &child)?)?;
     child.add_function(wrap_pyfunction!(spec_json, &child)?)?;
     parent_module.add_submodule(&child)
+}
+
+fn ports_from_slots(slots: &HashMap<String, Value>) -> HashMap<String, u16> {
+    let mut ports = HashMap::new();
+    if let Some(Value::Object(map)) = slots.get("ports") {
+        for (name, value) in map {
+            if let Some(port) = value.as_u64().and_then(|port| u16::try_from(port).ok()) {
+                ports.insert(name.clone(), port);
+            }
+        }
+    }
+    for (name, value) in slots {
+        if let Some(port_name) = name.strip_suffix("_port")
+            && let Some(port) = value.as_u64().and_then(|port| u16::try_from(port).ok())
+        {
+            ports.entry(port_name.to_string()).or_insert(port);
+        }
+    }
+    ports
+}
+
+fn named_port_env(name: &str) -> String {
+    let suffix = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("ELODIN_MC_PORT_{suffix}")
 }
 
 fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {
