@@ -115,8 +115,22 @@ env = { KEY = "value" }     # Environment variables
 no_watch = false            # Disable watch mode for this recipe
 restart_policy = "instant"  # "instant" or "never"
 depends_on = ["database"]   # Optional: wait for recipes that report ready
-ready = { type = "tcp", addr = "127.0.0.1:9000" } # file/tcp/log/delay
+ready = { type = "tcp", addr = "127.0.0.1:9000" } # tcp/unix/file/log/delay
 ready_timeout = "10s"
+```
+
+#### Environment placeholders in args/cwd/readiness
+
+`args`, `cwd`, and the `ready` probe path/addr support shell-style
+`${VAR}` and `${VAR:-default}` placeholders, expanded at spawn from the
+recipe's `env` overlaid on the inherited environment (`$$` escapes a literal
+`$`). This lets one planned recipe carry values that are only known per launch
+(for example, monte-carlo injects per-worker `ELODIN_MC_PORT_<NAME>` and
+`ELODIN_MONTE_CARLO_RUN_DIR`):
+
+```toml
+args = ["--port", "${ELODIN_MC_PORT_CONTROLLER:-31337}"]
+ready = { type = "unix", path = "${ELODIN_MONTE_CARLO_RUN_DIR:-/tmp}/controller.sock" }
 ```
 
 ### Group Recipe

@@ -28,7 +28,7 @@ use tokio::{
 use crate::{
     cgroup::CgroupScope,
     error::Error,
-    probe::{ReadyProbe, parse_duration},
+    probe::{ReadyProbe, expand_env, parse_duration},
     watch::watch,
 };
 
@@ -83,6 +83,16 @@ impl Recipe {
             Recipe::Group(_) => None,
             #[cfg(not(target_os = "windows"))]
             Recipe::Sim(s) => s.log_path.as_deref(),
+        }
+    }
+
+    fn env(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            Recipe::Cargo(c) => Some(&c.process_args.env),
+            Recipe::Process(p) => Some(&p.process_args.env),
+            Recipe::Group(_) => None,
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(s) => Some(&s.env),
         }
     }
 
@@ -250,7 +260,7 @@ async fn run_with_readiness(
     dependencies: Vec<sync_watch::Receiver<bool>>,
     ready_tx: sync_watch::Sender<bool>,
 ) -> Result<(), Error> {
-    let probe = recipe.ready_probe().cloned();
+    let probe = expand_ready_probe(&recipe);
     let ready_timeout = recipe.ready_timeout().map(str::to_string);
     let log_path = recipe.log_path().map(PathBuf::from);
     wait_for_dependencies(&name, dependencies).await?;
@@ -268,13 +278,21 @@ async fn watch_with_readiness(
     dependencies: Vec<sync_watch::Receiver<bool>>,
     ready_tx: sync_watch::Sender<bool>,
 ) -> Result<(), Error> {
-    let probe = recipe.ready_probe().cloned();
+    let probe = expand_ready_probe(&recipe);
     let ready_timeout = recipe.ready_timeout().map(str::to_string);
     let log_path = recipe.log_path().map(PathBuf::from);
     wait_for_dependencies(&name, dependencies).await?;
 
     let mut run_fut = recipe.watch(name, release, cancel_token, cgroup);
     mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+}
+
+/// Resolves a recipe's readiness probe placeholders against its env (overlaid
+/// on the inherited environment), so probes can target per-run ports/sockets.
+fn expand_ready_probe(recipe: &Recipe) -> Option<ReadyProbe> {
+    let probe = recipe.ready_probe()?;
+    let env = recipe.env().cloned().unwrap_or_default();
+    Some(probe.expand(move |name| env.get(name).cloned().or_else(|| std::env::var(name).ok())))
 }
 
 async fn wait_for_dependencies(
@@ -407,14 +425,33 @@ impl ProcessArgs {
         cancel_token: CancelToken,
         cgroup: Option<Arc<CgroupScope>>,
     ) -> Result<(), ProcessError> {
+        // Resolve `${VAR:-default}` placeholders in args/cwd from the recipe env
+        // (overlaid on the inherited environment). This lets a single planned
+        // recipe carry per-run values (e.g. monte-carlo worker ports) that are
+        // only known when the process is spawned.
+        let (args, cwd) = {
+            let lookup = |name: &str| {
+                self.env
+                    .get(name)
+                    .cloned()
+                    .or_else(|| std::env::var(name).ok())
+            };
+            let args: Vec<String> = self
+                .args
+                .iter()
+                .map(|arg| expand_env(arg, lookup))
+                .collect();
+            let cwd = self.cwd.as_ref().map(|cwd| expand_env(cwd, lookup));
+            (args, cwd)
+        };
         loop {
             let mut child = Command::new(&cmd);
             child
-                .args(self.args.iter())
+                .args(args.iter())
                 .envs(self.env.iter())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            if let Some(cwd) = &self.cwd {
+            if let Some(cwd) = &cwd {
                 child.current_dir(cwd);
             }
             let mut child = child.spawn().map_err(|source| ProcessError::Spawn {

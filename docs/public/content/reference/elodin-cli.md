@@ -189,9 +189,15 @@ Key options:
   gates, prefer a `post_campaign` hook that raises on `summary.failed` (see
   `examples/apollo-lander/hooks/ci_gate.py`) instead of relying on this flag.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
-- `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
+- `--clean`: prune `runs/` directories that are not part of the active plan.
 - `--progress <auto|always|never>`: control the live progress bar. `auto` shows
   a bar only when stderr is a terminal.
+
+Simulations that ingest parameters from a file (rather than via
+`el.monte_carlo.params(...)`) can configure `[params_delivery]` in
+`campaign.toml`: the runner writes each run's sampled params to a JSON/TOML file
+and sets the env vars the simulation expects (with `{seed}` / `{db_path}` /
+`{run_id}` / `{run_dir}` placeholders).
 
 Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
 `resources.csv`, `campaign_summary.txt`, and `summary.json`. With

@@ -1645,6 +1645,10 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
             ctx.db_path.to_string_lossy().to_string(),
         ),
         (
+            "ELODIN_MONTE_CARLO_RUN_DIR".to_string(),
+            ctx.run_dir.to_string_lossy().to_string(),
+        ),
+        (
             "ELODIN_SIM_SUMMARY_JSON".to_string(),
             ctx.run_dir
                 .join("sim_summary.json")

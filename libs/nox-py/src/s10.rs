@@ -6,7 +6,7 @@ use s10::{
     SimRecipe,
 };
 use std::collections::HashMap;
-use std::net::{AddrParseError, SocketAddr};
+use std::net::AddrParseError;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,13 +70,12 @@ pub struct Ready {
 #[pymethods]
 impl Ready {
     #[staticmethod]
-    fn tcp(addr: String) -> PyResult<Self> {
-        let addr = addr
-            .parse::<SocketAddr>()
-            .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        Ok(Self {
+    fn tcp(addr: String) -> Self {
+        // Stored verbatim so `${VAR:-default}` placeholders survive to spawn;
+        // the address is parsed when the readiness probe runs.
+        Self {
             inner: ReadyProbe::Tcp { addr },
-        })
+        }
     }
 
     #[staticmethod]
