@@ -1001,9 +1001,9 @@ Also configurable as <code>fail_on_run_errors = true</code> in <code>campaign.to
 gates, prefer a <code>post_campaign</code> hook that raises on <code>summary.failed</code> (see
 <code>examples/apollo-lander/hooks/ci_gate.py</code>) instead of relying on this flag.</li>
 <li><code>--post-run &lt;HOOK.py&gt;</code> / <code>--post-campaign &lt;HOOK.py&gt;</code>: plain-Python lifecycle hooks.</li>
-<li><code>--clean</code>: prune <code>runs/</code> directories that are not part of the active plan.</li>
-<li><code>--progress &lt;auto|always|never&gt;</code>: control the live progress bar. <code>auto</code> shows
-a bar only when stderr is a terminal.</li>
+<li><code>--clean</code>: prune <code>runs/</code> directories that are not part of the active plan.
+Campaigns always display a live progress TUI with aggregate counts and active
+worker progress while they run.</li>
 </ul>
 <p>Simulations that ingest parameters from a file (rather than via
 <code>el.monte_carlo.params(...)</code>) can configure <code>[params_delivery]</code> in
