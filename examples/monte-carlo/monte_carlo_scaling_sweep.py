@@ -60,8 +60,6 @@ def run_case(
         str(plan),
         "--workers",
         str(workers),
-        "--progress",
-        "never",
         "--out",
         str(out_dir),
     ]

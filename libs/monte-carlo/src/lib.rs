@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{IsTerminal, Write};
+use std::io::Write;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -152,18 +152,9 @@ pub struct RunOptions {
     pub fail_fast: bool,
     pub fail_on_run_errors: bool,
     pub dry_run: bool,
-    pub progress: ProgressMode,
     pub memory_probe: bool,
     pub keep_existing: bool,
     pub clean: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ProgressMode {
-    #[default]
-    Auto,
-    Always,
-    Never,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -418,18 +409,33 @@ enum Error {
     EmptyPlan,
 }
 
+const MAX_WORKER_PROGRESS_BARS: usize = 16;
+const PROGRESS_TICK_MS: u64 = 120;
+
+#[derive(Clone)]
+struct ActiveRun {
+    run_id: String,
+    started: Instant,
+}
+
 #[derive(Clone)]
 struct CampaignReporter {
-    progress: Option<ProgressBar>,
+    multi: MultiProgress,
+    progress: ProgressBar,
+    worker_bars: Arc<Vec<ProgressBar>>,
+    slots: Arc<Vec<Mutex<Option<ActiveRun>>>>,
+    durations: Arc<Mutex<Vec<u128>>>,
     log_file: Arc<Mutex<fs::File>>,
     ok: Arc<AtomicUsize>,
     failed: Arc<AtomicUsize>,
     invalid: Arc<AtomicUsize>,
     skipped: Arc<AtomicUsize>,
+    active: Arc<AtomicUsize>,
+    workers: usize,
 }
 
 impl CampaignReporter {
-    fn new(out_dir: &Path, total_runs: usize, workers: usize, mode: ProgressMode) -> Result<Self> {
+    fn new(out_dir: &Path, total_runs: usize, workers: usize) -> Result<Self> {
         let log_path = out_dir.join("campaign.log");
         let log_file = fs::OpenOptions::new()
             .create(true)
@@ -437,31 +443,49 @@ impl CampaignReporter {
             .open(&log_path)
             .into_diagnostic()
             .with_context(|| format!("open {}", log_path.display()))?;
-        let progress_enabled = match mode {
-            ProgressMode::Always => true,
-            ProgressMode::Never => false,
-            ProgressMode::Auto => std::io::stderr().is_terminal(),
+        let multi = MultiProgress::new();
+        let progress = multi.add(ProgressBar::new(total_runs as u64));
+        progress.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}",
+            )
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("#>-"),
+        );
+
+        let worker_bars = if workers <= MAX_WORKER_PROGRESS_BARS {
+            (0..workers)
+                .map(|worker| {
+                    let bar = multi.add(ProgressBar::new(100));
+                    bar.set_style(
+                        ProgressStyle::with_template("  {prefix:>3} {bar:30.cyan/blue} {msg}")
+                            .unwrap_or_else(|_| ProgressStyle::default_bar())
+                            .progress_chars("#>-"),
+                    );
+                    bar.set_prefix(format!("w{worker}"));
+                    bar.set_message("idle");
+                    bar
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
         };
-        let progress = progress_enabled.then(|| {
-            let bar = ProgressBar::new(total_runs as u64);
-            bar.set_style(
-                ProgressStyle::with_template(
-                    "{spinner:.green} [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ok={msg}",
-                )
-                .unwrap_or_else(|_| ProgressStyle::default_bar())
-                .progress_chars("#>-"),
-            );
-            bar.set_message(format!("0 fail=0 invalid=0 workers={workers}"));
-            bar
-        });
+
         let reporter = Self {
+            multi,
             progress,
+            worker_bars: Arc::new(worker_bars),
+            slots: Arc::new((0..workers).map(|_| Mutex::new(None)).collect()),
+            durations: Arc::new(Mutex::new(Vec::new())),
             log_file: Arc::new(Mutex::new(log_file)),
             ok: Arc::new(AtomicUsize::new(0)),
             failed: Arc::new(AtomicUsize::new(0)),
             invalid: Arc::new(AtomicUsize::new(0)),
             skipped: Arc::new(AtomicUsize::new(0)),
+            active: Arc::new(AtomicUsize::new(0)),
+            workers,
         };
+        reporter.progress.set_message(reporter.main_message());
         reporter.line(format!(
             "starting monte-carlo campaign: runs={total_runs} workers={workers} out_dir={}",
             out_dir.display()
@@ -471,11 +495,7 @@ impl CampaignReporter {
 
     fn line(&self, line: impl AsRef<str>) {
         let line = line.as_ref();
-        if let Some(progress) = &self.progress {
-            progress.suspend(|| eprintln!("{line}"));
-        } else {
-            eprintln!("{line}");
-        }
+        self.multi.suspend(|| eprintln!("{line}"));
         self.log_only(line);
     }
 
@@ -483,6 +503,47 @@ impl CampaignReporter {
         if let Ok(mut file) = self.log_file.lock() {
             let _ = writeln!(file, "{line}");
         }
+    }
+
+    fn main_message(&self) -> String {
+        format!(
+            "ok={} fail={} invalid={} skip={} active={}/{}",
+            self.ok.load(Ordering::SeqCst),
+            self.failed.load(Ordering::SeqCst),
+            self.invalid.load(Ordering::SeqCst),
+            self.skipped.load(Ordering::SeqCst),
+            self.active.load(Ordering::SeqCst),
+            self.workers,
+        )
+    }
+
+    fn run_started(&self, worker_id: usize, run_id: &str) {
+        if let Some(slot) = self.slots.get(worker_id)
+            && let Ok(mut slot) = slot.lock()
+        {
+            *slot = Some(ActiveRun {
+                run_id: run_id.to_string(),
+                started: Instant::now(),
+            });
+            self.active.fetch_add(1, Ordering::SeqCst);
+            self.progress.set_message(self.main_message());
+        }
+    }
+
+    fn run_finished(&self, worker_id: usize, wall_ms: Option<u128>) {
+        if let Some(slot) = self.slots.get(worker_id)
+            && let Ok(mut slot) = slot.lock()
+            && slot.take().is_some()
+        {
+            self.active.fetch_sub(1, Ordering::SeqCst);
+        }
+        if let Some(wall_ms) = wall_ms {
+            self.durations
+                .lock()
+                .expect("duration mutex poisoned")
+                .push(wall_ms);
+        }
+        self.progress.set_message(self.main_message());
     }
 
     fn record(&self, metric: &RunMetric) {
@@ -495,44 +556,79 @@ impl CampaignReporter {
         } else {
             self.failed.fetch_add(1, Ordering::SeqCst);
         }
-        let ok = self.ok.load(Ordering::SeqCst);
-        let failed = self.failed.load(Ordering::SeqCst);
-        let invalid = self.invalid.load(Ordering::SeqCst);
-        let skipped = self.skipped.load(Ordering::SeqCst);
         let worker = worker_label(metric.worker_id);
-        if let Some(progress) = &self.progress {
-            progress.inc(1);
-            progress.set_message(format!(
-                "{ok} fail={failed} invalid={invalid} skip={skipped} worker={worker}"
-            ));
-            let line = format!(
-                "[{}] {} worker={} wall_ms={} log={}",
-                metric.status,
-                metric.run_id,
-                worker,
-                metric.wall_ms,
-                metric.run_dir.join("logs").display()
-            );
-            self.log_only(&line);
-            if !metric.passed() {
-                progress.suspend(|| eprintln!("{line}"));
+        self.progress.inc(1);
+        self.progress.set_message(self.main_message());
+        let line = format!(
+            "[{}] {} worker={} wall_ms={} log={}",
+            metric.status,
+            metric.run_id,
+            worker,
+            metric.wall_ms,
+            metric.run_dir.join("logs").display()
+        );
+        self.log_only(&line);
+        if !metric.passed() {
+            self.multi.suspend(|| eprintln!("{line}"));
+        }
+    }
+
+    fn spawn_progress_ticker(&self, stop: Arc<AtomicBool>) -> tokio::task::JoinHandle<()> {
+        let progress = self.progress.clone();
+        let worker_bars = self.worker_bars.clone();
+        let slots = self.slots.clone();
+        let durations = self.durations.clone();
+        let reporter = self.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::SeqCst) {
+                reporter.refresh_progress(&progress, &worker_bars, &slots, &durations);
+                tokio::time::sleep(Duration::from_millis(PROGRESS_TICK_MS)).await;
             }
-        } else {
-            self.line(format!(
-                "[{}] {} worker={} wall_ms={} log={}",
-                metric.status,
-                metric.run_id,
-                worker,
-                metric.wall_ms,
-                metric.run_dir.join("logs").display()
-            ));
+            reporter.refresh_progress(&progress, &worker_bars, &slots, &durations);
+        })
+    }
+
+    fn refresh_progress(
+        &self,
+        progress: &ProgressBar,
+        worker_bars: &[ProgressBar],
+        slots: &[Mutex<Option<ActiveRun>>],
+        durations: &Mutex<Vec<u128>>,
+    ) {
+        progress.set_message(self.main_message());
+        let estimate_ms = median_duration_ms(durations);
+        for (worker, bar) in worker_bars.iter().enumerate() {
+            let active = slots
+                .get(worker)
+                .and_then(|slot| slot.lock().ok().and_then(|slot| slot.clone()));
+            if let Some(active) = active {
+                let elapsed = active.started.elapsed();
+                let elapsed_ms = elapsed.as_millis();
+                if let Some(estimate_ms) = estimate_ms {
+                    let percent = elapsed_ms
+                        .saturating_mul(100)
+                        .checked_div(estimate_ms)
+                        .unwrap_or(0)
+                        .min(99) as u64;
+                    bar.set_position(percent);
+                    bar.set_message(format!(
+                        "~{percent}% {} ({}s)",
+                        active.run_id,
+                        elapsed.as_secs()
+                    ));
+                } else {
+                    bar.set_position(0);
+                    bar.set_message(format!("{} ({}s)", active.run_id, elapsed.as_secs()));
+                }
+            } else {
+                bar.set_position(0);
+                bar.set_message("idle");
+            }
         }
     }
 
     fn finish(&self) {
-        if let Some(progress) = &self.progress {
-            progress.finish_and_clear();
-        }
+        self.clear_progress();
         self.line(format!(
             "finished monte-carlo campaign: ok={} failed={} invalid={} skipped={}",
             self.ok.load(Ordering::SeqCst),
@@ -541,6 +637,22 @@ impl CampaignReporter {
             self.skipped.load(Ordering::SeqCst)
         ));
     }
+
+    fn clear_progress(&self) {
+        for bar in self.worker_bars.iter() {
+            bar.finish_and_clear();
+        }
+        self.progress.finish_and_clear();
+    }
+}
+
+fn median_duration_ms(durations: &Mutex<Vec<u128>>) -> Option<u128> {
+    let mut values = durations.lock().expect("duration mutex poisoned").clone();
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    Some(values[values.len() / 2])
 }
 
 fn run_build_step(build: Option<&BuildConfig>, reporter: &CampaignReporter) -> Result<()> {
@@ -639,7 +751,6 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         preserved: Vec::new(),
         started_at,
         memory_probe: options.memory_probe,
-        progress: options.progress,
         keep_existing: options.keep_existing,
     })
     .await
@@ -695,7 +806,6 @@ struct ExecuteParams {
     preserved: Vec<RunMetric>,
     started_at: DateTime<Utc>,
     memory_probe: bool,
-    progress: ProgressMode,
     keep_existing: bool,
 }
 
@@ -712,7 +822,6 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         preserved,
         started_at,
         memory_probe,
-        progress,
         keep_existing,
     } = params;
     fs::create_dir_all(&out_dir)
@@ -722,7 +831,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     let workers = config.workers.unwrap_or(1).max(1);
     let total_runs = preserved.len() + plan.len();
 
-    let reporter = CampaignReporter::new(&out_dir, total_runs, workers, progress)?;
+    let reporter = CampaignReporter::new(&out_dir, total_runs, workers)?;
     run_build_step(config.build.as_ref(), &reporter)?;
     // Only one `elodin monte-carlo` campaign is expected per host: campaigns share
     // the default DB port (2240) and the `elodin-mc-` cgroup namespace, so this
@@ -761,6 +870,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         resource_samples.clone(),
         memory_probe.then_some(process_samples.clone()),
     );
+    let progress_ticker = reporter.spawn_progress_ticker(stop_sampling.clone());
     let mut worker_tasks = JoinSet::new();
 
     for worker_id in 0..workers {
@@ -785,6 +895,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
                     break;
                 };
                 let run_id = row.run_id.clone();
+                reporter.run_started(worker_id, &run_id);
                 let metric = match run_with_retries(
                     row,
                     worker_id,
@@ -801,6 +912,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
                     Err(err) => {
                         let metric =
                             placeholder_metric(&run_id, Some(worker_id), &out_dir, "failed");
+                        reporter.run_finished(worker_id, None);
                         reporter.line(format!(
                             "[failed] {run_id} worker={worker_id} setup_error={err}"
                         ));
@@ -816,6 +928,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
                 if failed {
                     *failure.lock().expect("failure mutex poisoned") = Some(metric.run_id.clone());
                 }
+                reporter.run_finished(worker_id, Some(metric.wall_ms));
                 reporter.record(&metric);
                 metrics.lock().expect("metrics mutex poisoned").push(metric);
             }
@@ -841,6 +954,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         memory_sampler.await.into_diagnostic()?;
     }
     resource_sampler.await.into_diagnostic()?;
+    progress_ticker.await.into_diagnostic()?;
 
     let metrics = metrics.lock().expect("metrics mutex poisoned").clone();
     write_perf_csv(&out_dir.join("perf.csv"), &metrics)?;
@@ -879,6 +993,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         &concurrency_summary,
     );
     write_json(&out_dir.join("summary.json"), &summary)?;
+    reporter.clear_progress();
     write_campaign_summary(
         &out_dir,
         &summary,
@@ -916,7 +1031,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
 
 /// Resume a previously started campaign: keep the runs that already passed,
 /// re-run everything else, then rewrite the merged report.
-pub async fn resume_campaign(campaign_dir: PathBuf, progress: ProgressMode) -> Result<()> {
+pub async fn resume_campaign(campaign_dir: PathBuf) -> Result<()> {
     let out_dir = campaign_dir;
     if !out_dir.exists() {
         return Err(miette!(
@@ -980,7 +1095,6 @@ pub async fn resume_campaign(campaign_dir: PathBuf, progress: ProgressMode) -> R
         preserved,
         started_at: Utc::now(),
         memory_probe: manifest.memory_probe,
-        progress,
         keep_existing: manifest.keep_existing,
     })
     .await
@@ -3494,8 +3608,7 @@ mod tests {
         ));
         fs::create_dir_all(&out_dir).expect("create temp dir");
         let marker = out_dir.join("marker");
-        let reporter =
-            CampaignReporter::new(&out_dir, 1, 1, ProgressMode::Never).expect("reporter");
+        let reporter = CampaignReporter::new(&out_dir, 1, 1).expect("reporter");
         let config = BuildConfig {
             command: Some("touch".to_string()),
             args: vec![marker.to_string_lossy().to_string()],
@@ -3516,8 +3629,7 @@ mod tests {
             unix_now_ns()
         ));
         fs::create_dir_all(&out_dir).expect("create temp dir");
-        let reporter =
-            CampaignReporter::new(&out_dir, 1, 1, ProgressMode::Never).expect("reporter");
+        let reporter = CampaignReporter::new(&out_dir, 1, 1).expect("reporter");
         let config = BuildConfig {
             command: Some("false".to_string()),
             args: Vec::new(),

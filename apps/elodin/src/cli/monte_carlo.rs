@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args as ClapArgs, Subcommand, ValueEnum};
+use clap::{Args as ClapArgs, Subcommand};
 use miette::{IntoDiagnostic, Result, miette};
 
 use super::Cli;
@@ -70,17 +70,8 @@ pub struct RunArgs {
     pub keep_existing: bool,
     #[arg(long)]
     pub clean: bool,
-    #[arg(long, value_enum, default_value = "auto")]
-    pub progress: ProgressMode,
     #[arg(long)]
     pub runtime_threads: Option<usize>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum ProgressMode {
-    Auto,
-    Always,
-    Never,
 }
 
 impl Cli {
@@ -96,10 +87,9 @@ impl Cli {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
             }
             Command::Run(args) => run_with_runtime(*args, rt),
-            Command::Resume { campaign_dir } => rt.block_on(monte_carlo::resume_campaign(
-                campaign_dir,
-                monte_carlo::ProgressMode::Auto,
-            )),
+            Command::Resume { campaign_dir } => {
+                rt.block_on(monte_carlo::resume_campaign(campaign_dir))
+            }
             Command::Report { campaign_dir } => monte_carlo::rebuild_report(&campaign_dir),
         }
     }
@@ -160,11 +150,6 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         memory_probe: args.memory_probe,
         keep_existing: args.keep_existing,
         clean: args.clean,
-        progress: match args.progress {
-            ProgressMode::Auto => monte_carlo::ProgressMode::Auto,
-            ProgressMode::Always => monte_carlo::ProgressMode::Always,
-            ProgressMode::Never => monte_carlo::ProgressMode::Never,
-        },
     })
 }
 

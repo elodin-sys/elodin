@@ -190,8 +190,8 @@ Key options:
   `examples/apollo-lander/hooks/ci_gate.py`) instead of relying on this flag.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
 - `--clean`: prune `runs/` directories that are not part of the active plan.
-- `--progress <auto|always|never>`: control the live progress bar. `auto` shows
-  a bar only when stderr is a terminal.
+Campaigns always display a live progress TUI with aggregate counts and active
+worker progress while they run.
 
 Simulations that ingest parameters from a file (rather than via
 `el.monte_carlo.params(...)`) can configure `[params_delivery]` in
