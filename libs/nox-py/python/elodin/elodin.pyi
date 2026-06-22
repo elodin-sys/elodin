@@ -468,6 +468,8 @@ class S10Ready:
     @staticmethod
     def tcp(addr: str) -> S10Ready: ...
     @staticmethod
+    def unix(path: str) -> S10Ready: ...
+    @staticmethod
     def file(path: str) -> S10Ready: ...
     @staticmethod
     def log(pattern: str) -> S10Ready: ...
@@ -495,6 +497,7 @@ class S10PyRecipe:
         args: list[str] | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        restart_policy: S10RestartPolicy | None = None,
         depends_on: list[str] | None = None,
         ready: S10Ready | None = None,
         ready_timeout: str | None = None,
@@ -506,6 +509,7 @@ class S10PyRecipe:
         args: list[str] | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        restart_policy: S10RestartPolicy | None = None,
         depends_on: list[str] | None = None,
         ready: S10Ready | None = None,
         ready_timeout: str | None = None,

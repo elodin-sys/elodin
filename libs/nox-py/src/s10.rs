@@ -80,6 +80,15 @@ impl Ready {
     }
 
     #[staticmethod]
+    fn unix(path: String) -> Self {
+        Self {
+            inner: ReadyProbe::Unix {
+                path: PathBuf::from(path),
+            },
+        }
+    }
+
+    #[staticmethod]
     fn file(path: String) -> Self {
         Self {
             inner: ReadyProbe::File {
@@ -258,7 +267,7 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the binary
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None, depends_on=None, ready=None, ready_timeout=None))]
+    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None))]
     fn cargo(
         name: String,
         path: String,
@@ -267,6 +276,7 @@ impl PyRecipe {
         args: Option<Vec<String>>,
         cwd: Option<String>,
         env: Option<HashMap<String, String>>,
+        restart_policy: Option<RestartPolicy>,
         depends_on: Option<Vec<String>>,
         ready: Option<Ready>,
         ready_timeout: Option<String>,
@@ -280,7 +290,7 @@ impl PyRecipe {
             args: args.unwrap_or_default(),
             cwd,
             env: env.unwrap_or_default(),
-            restart_policy: RestartPolicy::Never,
+            restart_policy: restart_policy.unwrap_or(RestartPolicy::Never),
             depends_on: depends_on.unwrap_or_default(),
             ready,
             ready_timeout,
@@ -296,13 +306,14 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the process
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None, depends_on=None, ready=None, ready_timeout=None))]
+    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None))]
     fn process(
         name: String,
         cmd: String,
         args: Option<Vec<String>>,
         cwd: Option<String>,
         env: Option<HashMap<String, String>>,
+        restart_policy: Option<RestartPolicy>,
         depends_on: Option<Vec<String>>,
         ready: Option<Ready>,
         ready_timeout: Option<String>,
@@ -313,7 +324,7 @@ impl PyRecipe {
             args: args.unwrap_or_default(),
             cwd,
             env: env.unwrap_or_default(),
-            restart_policy: RestartPolicy::Never,
+            restart_policy: restart_policy.unwrap_or(RestartPolicy::Never),
             no_watch: true,
             depends_on: depends_on.unwrap_or_default(),
             ready,

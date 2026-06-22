@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use tokio::{
     fs,
     io::{AsyncBufReadExt, AsyncSeekExt, BufReader},
@@ -16,6 +18,7 @@ use tokio::{
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ReadyProbe {
     Tcp { addr: SocketAddr },
+    Unix { path: PathBuf },
     File { path: PathBuf },
     Log { pattern: String },
     Delay { ms: u64 },
@@ -28,6 +31,11 @@ impl ReadyProbe {
             match self {
                 ReadyProbe::Tcp { addr } => {
                     if TcpStream::connect(addr).await.is_ok() {
+                        return Ok(());
+                    }
+                }
+                ReadyProbe::Unix { path } => {
+                    if unix_connect(path).await.is_ok() {
                         return Ok(());
                     }
                 }
@@ -61,6 +69,19 @@ impl ReadyProbe {
             sleep(Duration::from_millis(50)).await;
         }
     }
+}
+
+#[cfg(unix)]
+async fn unix_connect(path: &Path) -> io::Result<UnixStream> {
+    UnixStream::connect(path).await
+}
+
+#[cfg(not(unix))]
+async fn unix_connect(_path: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unix readiness probes are only supported on Unix",
+    ))
 }
 
 async fn wait_for_log(path: &Path, pattern: &str, deadline: Instant) -> io::Result<()> {
