@@ -34,3 +34,9 @@ Elodin solves these problems by introducing a cloud-based simulation runner that
 - Using the [ECS](https://en.wikipedia.org/wiki/Entity_component_system) architecture to exploit the inherent parallelism in running the same compute kernel against different sets of data.
 - Leveraging our [Cranelift](https://cranelift.dev/)-based JIT backend to compile simulation code to native machine code for fast execution.
 - Using the cloud's elasticity to scale up and down as needed.
+
+## Next Steps
+
+{% cardlink(title="Apollo Lander Tutorial", icon="rocket", href="/home/apollo-lander") %}
+Run a software-in-the-loop Monte Carlo campaign and calibrate it against real telemetry.
+{% end %}
