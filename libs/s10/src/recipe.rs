@@ -144,28 +144,34 @@ impl GroupRecipe {
         cancel_token: CancelToken,
         cgroup: Option<Arc<CgroupScope>>,
     ) -> Result<(), Error> {
-        let ready_signals = self
+        // One readiness channel per recipe. Receivers don't keep a channel open,
+        // so clone them up front for dependency wiring, then move each Sender into
+        // its own task as the sole owner: when a task ends without signaling ready,
+        // the channel closes and dependents observe it instead of blocking forever.
+        let mut channels = self
             .recipes
             .keys()
             .map(|name| (name.clone(), sync_watch::channel(false)))
+            .collect::<HashMap<_, _>>();
+        let receivers = channels
+            .iter()
+            .map(|(name, (_, rx))| (name.clone(), rx.clone()))
             .collect::<HashMap<_, _>>();
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
             .map(|(name, r)| {
                 let token = cancel_token.clone();
-                let ready_tx = ready_signals
-                    .get(&name)
-                    .expect("recipe has a readiness signal")
-                    .0
-                    .clone();
+                let (ready_tx, _) = channels
+                    .remove(&name)
+                    .expect("recipe has a readiness signal");
                 let dependencies = r
                     .depends_on()
                     .iter()
                     .map(|dep| {
-                        ready_signals
+                        receivers
                             .get(dep)
-                            .map(|(_, rx)| rx.clone())
+                            .map(|rx| (dep.clone(), rx.clone()))
                             .ok_or_else(|| Error::UnresolvedRecipe(dep.clone()))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -200,28 +206,34 @@ impl GroupRecipe {
         cancel_token: CancelToken,
         cgroup: Option<Arc<CgroupScope>>,
     ) -> Result<(), Error> {
-        let ready_signals = self
+        // One readiness channel per recipe. Receivers don't keep a channel open,
+        // so clone them up front for dependency wiring, then move each Sender into
+        // its own task as the sole owner: when a task ends without signaling ready,
+        // the channel closes and dependents observe it instead of blocking forever.
+        let mut channels = self
             .recipes
             .keys()
             .map(|name| (name.clone(), sync_watch::channel(false)))
+            .collect::<HashMap<_, _>>();
+        let receivers = channels
+            .iter()
+            .map(|(name, (_, rx))| (name.clone(), rx.clone()))
             .collect::<HashMap<_, _>>();
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
             .map(|(name, r)| {
                 let token = cancel_token.clone();
-                let ready_tx = ready_signals
-                    .get(&name)
-                    .expect("recipe has a readiness signal")
-                    .0
-                    .clone();
+                let (ready_tx, _) = channels
+                    .remove(&name)
+                    .expect("recipe has a readiness signal");
                 let dependencies = r
                     .depends_on()
                     .iter()
                     .map(|dep| {
-                        ready_signals
+                        receivers
                             .get(dep)
-                            .map(|(_, rx)| rx.clone())
+                            .map(|rx| (dep.clone(), rx.clone()))
                             .ok_or_else(|| Error::UnresolvedRecipe(dep.clone()))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -257,7 +269,7 @@ async fn run_with_readiness(
     release: bool,
     cancel_token: CancelToken,
     cgroup: Option<Arc<CgroupScope>>,
-    dependencies: Vec<sync_watch::Receiver<bool>>,
+    dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
     ready_tx: sync_watch::Sender<bool>,
 ) -> Result<(), Error> {
     let probe = expand_ready_probe(&recipe);
@@ -275,7 +287,7 @@ async fn watch_with_readiness(
     release: bool,
     cancel_token: CancelToken,
     cgroup: Option<Arc<CgroupScope>>,
-    dependencies: Vec<sync_watch::Receiver<bool>>,
+    dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
     ready_tx: sync_watch::Sender<bool>,
 ) -> Result<(), Error> {
     let probe = expand_ready_probe(&recipe);
@@ -297,14 +309,18 @@ fn expand_ready_probe(recipe: &Recipe) -> Option<ReadyProbe> {
 
 async fn wait_for_dependencies(
     name: &str,
-    dependencies: Vec<sync_watch::Receiver<bool>>,
+    dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
 ) -> Result<(), Error> {
-    for mut dependency in dependencies {
-        while !*dependency.borrow() {
-            dependency
-                .changed()
-                .await
-                .map_err(|_| Error::Readiness(format!("{name} dependency task exited")))?;
+    for (dep, mut rx) in dependencies {
+        while !*rx.borrow() {
+            // A closed channel means the dependency's task ended without ever
+            // signaling ready (early exit or readiness failure), so name it
+            // rather than emitting a generic "task exited" message.
+            rx.changed().await.map_err(|_| {
+                Error::Readiness(format!(
+                    "dependency \"{dep}\" exited before \"{name}\" became ready"
+                ))
+            })?;
         }
     }
     Ok(())
@@ -325,6 +341,10 @@ async fn mark_ready_or_wait(
     let timeout = parse_duration(ready_timeout.as_deref(), Duration::from_secs(30))
         .map_err(|err| Error::Readiness(err.to_string()))?;
     tokio::select! {
+        // The child exited before the probe signaled ready: return its result
+        // and let `ready_tx` drop, closing the channel so dependents fail fast
+        // instead of blocking. This task is the first in the group to finish, so
+        // the child's own exit status/error is what surfaces.
         result = &mut *run_fut => result,
         result = probe.wait(log_path.as_deref(), timeout) => {
             result.map_err(|err| Error::Readiness(err.to_string()))?;
@@ -776,4 +796,107 @@ impl CargoRecipe {
 pub enum Destination {
     #[default]
     Local,
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn process_recipe(
+        cmd: &str,
+        args: &[&str],
+        fail_on_error: bool,
+        ready: Option<ReadyProbe>,
+        depends_on: Vec<String>,
+    ) -> Recipe {
+        Recipe::Process(ProcessRecipe {
+            cmd: cmd.to_string(),
+            process_args: ProcessArgs {
+                args: args.iter().map(|a| a.to_string()).collect(),
+                cwd: None,
+                env: HashMap::new(),
+                restart_policy: RestartPolicy::Never,
+                fail_on_error,
+                log_path: None,
+                depends_on,
+                ready,
+                ready_timeout: None,
+            },
+            no_watch: false,
+        })
+    }
+
+    /// A dependency that exits before its readiness probe fires must close its
+    /// channel so dependents stop waiting; otherwise the whole group hangs until
+    /// an external timeout. The wrapping `timeout` turns that hang into a failure.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dependency_exit_before_ready_does_not_hang() {
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: HashMap::from([
+                (
+                    "a".to_string(),
+                    process_recipe(
+                        "false",
+                        &[],
+                        true,
+                        Some(ReadyProbe::Delay { ms: 60_000 }),
+                        vec![],
+                    ),
+                ),
+                (
+                    "b".to_string(),
+                    process_recipe("sleep", &["30"], false, None, vec!["a".to_string()]),
+                ),
+            ]),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            group.run(false, CancelToken::new(), None),
+        )
+        .await
+        .expect("group hung waiting on a dependency that exited before becoming ready");
+        assert!(
+            result.is_err(),
+            "the failed dependency should fail the group"
+        );
+    }
+
+    /// When a dependency exits cleanly before signaling ready, the dependent's
+    /// error should name the dead dependency rather than a generic message.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dependent_names_dependency_that_exited_before_ready() {
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: HashMap::from([
+                (
+                    "a".to_string(),
+                    process_recipe(
+                        "true",
+                        &[],
+                        false,
+                        Some(ReadyProbe::Delay { ms: 60_000 }),
+                        vec![],
+                    ),
+                ),
+                (
+                    "b".to_string(),
+                    process_recipe("sleep", &["30"], false, None, vec!["a".to_string()]),
+                ),
+            ]),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            group.run(false, CancelToken::new(), None),
+        )
+        .await
+        .expect("group hung");
+        let err = result.expect_err("expected a readiness error");
+        assert!(
+            err.to_string()
+                .contains("dependency \"a\" exited before \"b\" became ready"),
+            "unexpected error: {err}"
+        );
+    }
 }

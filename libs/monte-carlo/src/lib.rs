@@ -34,9 +34,9 @@ pub struct CampaignConfig {
     pub params_delivery: Option<ParamsDeliveryConfig>,
     pub retention: RetentionConfig,
     pub continue_on_error: bool,
-    /// When true, the campaign process exits non-zero if any run failed scoring
-    /// or crashed. Defaults to false so exploratory campaigns can finish with
-    /// partial failures and still produce reports.
+    /// When true, the campaign process exits non-zero if any run failed scoring,
+    /// crashed, or was marked invalid/no-data. Defaults to false so exploratory
+    /// campaigns can finish with partial failures and still produce reports.
     pub fail_on_run_errors: bool,
 }
 
@@ -261,6 +261,15 @@ pub struct CampaignSummary {
     pub concurrency_summary: ConcurrencySummary,
     #[serde(default)]
     pub hook_metrics: BTreeMap<String, ScalarMetricSummary>,
+}
+
+impl CampaignSummary {
+    /// Runs that should trip a `fail_on_run_errors` CI gate: scored failures
+    /// plus invalid (no-data / infrastructure) runs that never produced a
+    /// scoreable result. Matches the documented "failed or missed scoring".
+    pub fn error_runs(&self) -> usize {
+        self.failed + self.invalid
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -715,6 +724,11 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
 
     let reporter = CampaignReporter::new(&out_dir, total_runs, workers, progress)?;
     run_build_step(config.build.as_ref(), &reporter)?;
+    // Only one `elodin monte-carlo` campaign is expected per host: campaigns share
+    // the default DB port (2240) and the `elodin-mc-` cgroup namespace, so this
+    // prefix reap is intentionally host-wide. It clears scopes (and their
+    // reparented sidecars) left by a crashed or previous campaign before we start;
+    // `--keep-existing` opts out when the operator manages those processes.
     if !keep_existing {
         s10::CgroupScope::reap_prefix("elodin-mc-").into_diagnostic()?;
     }
@@ -889,10 +903,11 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         run_hook("post_campaign", hook, &context).await?;
     }
 
-    if config.fail_on_run_errors && summary.failed > 0 {
+    if config.fail_on_run_errors && summary.error_runs() > 0 {
         return Err(miette!(
-            "monte-carlo campaign finished with {} failed run(s) (fail_on_run_errors=true)",
-            summary.failed
+            "monte-carlo campaign finished with {} failed and {} invalid run(s) (fail_on_run_errors=true)",
+            summary.failed,
+            summary.invalid
         ));
     }
 
@@ -988,12 +1003,19 @@ pub fn rebuild_report(campaign_dir: &Path) -> Result<()> {
             out_dir.join("perf.csv").display()
         ));
     }
-    // Reconstruct per-run paths relative to this directory so sim summaries and
-    // result paths resolve even if the campaign was moved since it ran.
     for metric in &mut metrics {
-        let run_dir = out_dir.join("runs").join(&metric.run_id);
-        metric.db_path = run_dir.join("db");
-        metric.run_dir = run_dir;
+        // perf.csv is a flat schema and cannot represent the dynamic
+        // hook_scalars map, so promoted columns / hook_metrics would be lost on
+        // rebuild. Prefer the per-run metrics.json (the full RunMetric written
+        // after scoring) when present; otherwise keep the perf.csv row and fix
+        // up its paths.
+        if let Some(stored) = load_existing_metric(out_dir, &metric.run_id) {
+            *metric = stored;
+        } else {
+            let run_dir = out_dir.join("runs").join(&metric.run_id);
+            metric.db_path = run_dir.join("db");
+            metric.run_dir = run_dir;
+        }
     }
 
     let started_at = metrics
@@ -1661,18 +1683,6 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
     }
     for (name, port) in &ctx.slot.ports {
         env.insert(named_port_env(name), port.to_string());
-    }
-    if let Some(port) = ctx.slot.ports.get("state") {
-        env.insert(
-            "ELODIN_MONTE_CARLO_STATE_PORT".to_string(),
-            port.to_string(),
-        );
-    }
-    if let Some(port) = ctx.slot.ports.get("command") {
-        env.insert(
-            "ELODIN_MONTE_CARLO_COMMAND_PORT".to_string(),
-            port.to_string(),
-        );
     }
     if let Some(delivery) = &ctx.config.params_delivery {
         write_params_delivery(delivery, row, ctx, &mut env)?;
@@ -3264,6 +3274,42 @@ mod tests {
     }
 
     #[test]
+    fn invalid_runs_count_toward_fail_on_errors() {
+        let out_dir = std::env::temp_dir().join(format!("mc-invalid-{}", unix_now_ns()));
+        fs::create_dir_all(&out_dir).unwrap();
+
+        let mut passed = placeholder_metric("run_0000000", Some(0), &out_dir, "ok");
+        passed.exit_ok = true;
+        passed.scored_pass = Some(true);
+        passed.scored_valid = Some(true);
+
+        let mut invalid = placeholder_metric("run_0000001", Some(0), &out_dir, "ok");
+        invalid.exit_ok = true;
+        invalid.scored_pass = Some(true);
+        invalid.scored_valid = Some(false);
+
+        let metrics = vec![passed, invalid];
+        let (_, concurrency_summary) = build_timeline(&metrics);
+        let now = Utc::now();
+        let summary = summarize_campaign(
+            &out_dir,
+            &metrics,
+            &[],
+            now,
+            now,
+            0,
+            1,
+            &concurrency_summary,
+        );
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.invalid, 1);
+        assert_eq!(summary.error_runs(), 1);
+
+        let _ = fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
     fn read_post_run_outcome_extracts_hook_fields() {
         let dir = std::env::temp_dir().join(format!("mc-post-run-{}", unix_now_ns()));
         fs::create_dir_all(&dir).unwrap();
@@ -3317,6 +3363,40 @@ mod tests {
         assert!(loaded[0].passed());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rebuild_report_recovers_hook_scalars() {
+        let out_dir = std::env::temp_dir().join(format!("mc-rebuild-{}", unix_now_ns()));
+        let run_dir = out_dir.join("runs").join("run_0000000");
+        fs::create_dir_all(&run_dir).unwrap();
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &out_dir, "ok");
+        metric.exit_ok = true;
+        metric.scored_pass = Some(true);
+        metric.scored_valid = Some(true);
+        metric
+            .hook_scalars
+            .insert("traj_rmse_m".to_string(), "12.5".to_string());
+
+        write_perf_csv(&out_dir.join("perf.csv"), std::slice::from_ref(&metric)).unwrap();
+        write_json(&run_dir.join("metrics.json"), &metric).unwrap();
+
+        rebuild_report(&out_dir).unwrap();
+
+        let results = fs::read_to_string(out_dir.join("results.csv")).unwrap();
+        assert!(results.contains("traj_rmse_m"));
+        assert!(results.contains("12.5"));
+
+        let summary: CampaignSummary = read_json(&out_dir.join("summary.json")).unwrap();
+        let rmse = summary
+            .hook_metrics
+            .get("traj_rmse_m")
+            .expect("traj_rmse_m hook metric");
+        assert_eq!(rmse.count, 1);
+        assert_eq!(rmse.mean, 12.5);
+
+        let _ = fs::remove_dir_all(&out_dir);
     }
 
     #[test]

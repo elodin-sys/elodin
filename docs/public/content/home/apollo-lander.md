@@ -13,7 +13,7 @@ order = 4
 icon = ""
 +++
 
-<img src="/assets/apollo-lander-screenshot.jpg" alt="apollo-lander-screenshot"/>
+<img src="/assets/apollo-lander.png" alt="apollo-lander-screenshot"/>
 <br></br>
 
 The bouncing-ball and three-body tutorials build a simulation and watch it run. Real

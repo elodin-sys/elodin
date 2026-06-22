@@ -1,4 +1,4 @@
-"""CI post-campaign gate: fail the hook (and thus the campaign) on run failures."""
+"""CI post-campaign gate: fail the hook on failed or invalid runs."""
 
 from __future__ import annotations
 
@@ -21,18 +21,21 @@ def post_campaign(ctx):
     summary_path = Path(ctx.summary)
     summary = json.loads(summary_path.read_text())
     failed = int(summary.get("failed", 0))
+    invalid = int(summary.get("invalid", 0))
     passed = int(summary.get("passed", 0))
     total = int(summary.get("total_runs", 0))
-    if failed > 0:
+    if failed + invalid > 0:
         run_ids = _failed_run_ids(Path(ctx.results))
         detail = f" ({', '.join(run_ids)})" if run_ids else ""
         raise RuntimeError(
-            f"apollo-lander monte-carlo CI gate: {failed}/{total} run(s) failed "
+            f"apollo-lander monte-carlo CI gate: {failed} failed and {invalid} invalid "
+            f"of {total} run(s) "
             f"({passed} passed){detail}"
         )
     return {
         "pass": True,
         "passed": passed,
         "failed": failed,
+        "invalid": invalid,
         "total_runs": total,
     }
