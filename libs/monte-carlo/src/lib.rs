@@ -435,7 +435,12 @@ struct CampaignReporter {
 }
 
 impl CampaignReporter {
-    fn new(out_dir: &Path, total_runs: usize, workers: usize) -> Result<Self> {
+    fn new(
+        out_dir: &Path,
+        total_runs: usize,
+        workers: usize,
+        worker_resolution: impl AsRef<str>,
+    ) -> Result<Self> {
         let log_path = out_dir.join("campaign.log");
         let log_file = fs::OpenOptions::new()
             .create(true)
@@ -487,7 +492,8 @@ impl CampaignReporter {
         };
         reporter.progress.set_message(reporter.main_message());
         reporter.line(format!(
-            "starting monte-carlo campaign: runs={total_runs} workers={workers} out_dir={}",
+            "starting monte-carlo campaign: runs={total_runs} workers={workers} {} out_dir={}",
+            worker_resolution.as_ref(),
             out_dir.display()
         ));
         Ok(reporter)
@@ -655,7 +661,19 @@ fn median_duration_ms(durations: &Mutex<Vec<u128>>) -> Option<u128> {
     Some(values[values.len() / 2])
 }
 
-fn run_build_step(build: Option<&BuildConfig>, reporter: &CampaignReporter) -> Result<()> {
+fn log_campaign_line(out_dir: &Path, line: &str) -> Result<()> {
+    eprintln!("{line}");
+    let log_path = out_dir.join("campaign.log");
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .into_diagnostic()
+        .with_context(|| format!("open {}", log_path.display()))?;
+    writeln!(file, "{line}").into_diagnostic()
+}
+
+fn run_build_step(build: Option<&BuildConfig>, out_dir: &Path) -> Result<()> {
     let Some(build) = build else {
         return Ok(());
     };
@@ -663,9 +681,10 @@ fn run_build_step(build: Option<&BuildConfig>, reporter: &CampaignReporter) -> R
         return Ok(());
     };
     let display_args = build.args.join(" ");
-    reporter.line(format!(
-        "building campaign artifacts: {program} {display_args}"
-    ));
+    log_campaign_line(
+        out_dir,
+        &format!("building campaign artifacts: {program} {display_args}"),
+    )?;
     let mut command = Command::new(program);
     command.args(&build.args);
     if let Some(cwd) = &build.cwd {
@@ -693,10 +712,12 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     if plan.is_empty() {
         return Err(Error::EmptyPlan).into_diagnostic();
     }
-    let workers = resolve_workers(config.workers, plan.len());
-    config.workers = Some(workers);
 
     if options.dry_run {
+        let workers = config
+            .workers
+            .map(|workers| workers.max(1).min(plan.len().max(1)).to_string())
+            .unwrap_or_else(|| "auto".to_string());
         println!(
             "monte-carlo dry run: runs={} workers={} out_dir={}",
             plan.len(),
@@ -828,11 +849,9 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         .into_diagnostic()
         .with_context(|| format!("create campaign output {}", out_dir.display()))?;
     let wall_start = Instant::now();
-    let workers = config.workers.unwrap_or(1).max(1);
     let total_runs = preserved.len() + plan.len();
 
-    let reporter = CampaignReporter::new(&out_dir, total_runs, workers)?;
-    run_build_step(config.build.as_ref(), &reporter)?;
+    run_build_step(config.build.as_ref(), &out_dir)?;
     // Only one `elodin monte-carlo` campaign is expected per host: campaigns share
     // the default DB port (2240) and the `elodin-mc-` cgroup namespace, so this
     // prefix reap is intentionally host-wide. It clears scopes (and their
@@ -843,12 +862,18 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     }
     let campaign_cgroup =
         s10::CgroupScope::create(format!("elodin-mc-{}", std::process::id())).into_diagnostic()?;
+    let base_recipe = plan_recipe(&sim_path, &out_dir).await?;
+    let recipe_weight = s10::admission::recipe_weight(&base_recipe);
+    let admission_max = s10::admission::max_inflight();
+    let workers =
+        resolve_effective_workers(config.workers, total_runs, recipe_weight, admission_max);
+    let worker_resolution = worker_resolution_label(config.workers, recipe_weight, admission_max);
+    let reporter = CampaignReporter::new(&out_dir, total_runs, workers, worker_resolution)?;
     // Count already-passed runs toward the report without re-running them.
     for metric in &preserved {
         reporter.record(metric);
     }
 
-    let base_recipe = plan_recipe(&sim_path, &out_dir).await?;
     let rows = Arc::new(Mutex::new(VecDeque::from(plan)));
     let metrics = Arc::new(Mutex::new(preserved));
     let failure = Arc::new(Mutex::new(None::<String>));
@@ -1046,7 +1071,7 @@ pub async fn resume_campaign(campaign_dir: PathBuf) -> Result<()> {
                 out_dir.display()
             )
         })?;
-    let mut config: CampaignConfig = read_json(&out_dir.join("campaign.resolved.json"))
+    let config: CampaignConfig = read_json(&out_dir.join("campaign.resolved.json"))
         .with_context(|| format!("read resolved config in {}", out_dir.display()))?;
     let plan = read_plan(&out_dir.join("plan.csv"))?;
     if plan.is_empty() {
@@ -1076,8 +1101,6 @@ pub async fn resume_campaign(campaign_dir: PathBuf) -> Result<()> {
         out_dir.display()
     );
 
-    let workers = resolve_workers(config.workers, pending.len());
-    config.workers = Some(workers);
     let cache_dir = config
         .cache_dir
         .clone()
@@ -1618,6 +1641,50 @@ fn resolve_workers(config_workers: Option<usize>, plan_len: usize) -> usize {
         .saturating_sub(reserve)
         .max(1)
         .min(plan_len.max(1))
+}
+
+fn resolve_effective_workers(
+    requested: Option<usize>,
+    total_runs: usize,
+    weight: usize,
+    admission_max: Option<usize>,
+) -> usize {
+    let cap = total_runs.max(1);
+    if let Some(requested) = requested {
+        return requested.max(1).min(cap);
+    }
+
+    let weight = weight.max(1);
+    let slots = match admission_max {
+        Some(max) => (max / weight).max(1),
+        None => available_cpus().max(1),
+    };
+    slots.min(cap)
+}
+
+fn worker_resolution_label(
+    requested: Option<usize>,
+    weight: usize,
+    admission_max: Option<usize>,
+) -> String {
+    let weight = weight.max(1);
+    match (requested, admission_max) {
+        (Some(requested), Some(max)) => {
+            format!("(requested={requested}, S10_MAX_INFLIGHT={max}, recipe_weight={weight})")
+        }
+        (Some(requested), None) => {
+            format!("(requested={requested}, S10_MAX_INFLIGHT=off, recipe_weight={weight})")
+        }
+        (None, Some(max)) => {
+            format!("(auto=S10_MAX_INFLIGHT={max}/recipe_weight={weight})")
+        }
+        (None, None) => {
+            format!(
+                "(auto=cores={}, S10_MAX_INFLIGHT=off, recipe_weight={weight})",
+                available_cpus()
+            )
+        }
+    }
 }
 
 fn resolve_runtime_threads(workers: usize, override_threads: Option<usize>) -> usize {
@@ -3598,6 +3665,19 @@ mod tests {
         assert!(ci.fail_on_run_errors);
     }
 
+    #[test]
+    fn resolve_effective_workers_uses_admission_budget_for_auto() {
+        assert_eq!(resolve_effective_workers(None, 100, 2, Some(8)), 4);
+        assert_eq!(resolve_effective_workers(None, 100, 9, Some(8)), 1);
+        assert_eq!(resolve_effective_workers(None, 3, 2, Some(8)), 3);
+        assert_eq!(resolve_effective_workers(Some(12), 6, 2, Some(8)), 6);
+        assert_eq!(resolve_effective_workers(Some(0), 6, 2, Some(8)), 1);
+        assert_eq!(
+            resolve_effective_workers(None, 100, 2, None),
+            available_cpus().min(100)
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn build_step_runs_command_once() {
@@ -3608,14 +3688,13 @@ mod tests {
         ));
         fs::create_dir_all(&out_dir).expect("create temp dir");
         let marker = out_dir.join("marker");
-        let reporter = CampaignReporter::new(&out_dir, 1, 1).expect("reporter");
         let config = BuildConfig {
             command: Some("touch".to_string()),
             args: vec![marker.to_string_lossy().to_string()],
             cwd: None,
             env: HashMap::new(),
         };
-        run_build_step(Some(&config), &reporter).expect("build step");
+        run_build_step(Some(&config), &out_dir).expect("build step");
         assert!(marker.exists());
         let _ = fs::remove_dir_all(out_dir);
     }
@@ -3629,14 +3708,13 @@ mod tests {
             unix_now_ns()
         ));
         fs::create_dir_all(&out_dir).expect("create temp dir");
-        let reporter = CampaignReporter::new(&out_dir, 1, 1).expect("reporter");
         let config = BuildConfig {
             command: Some("false".to_string()),
             args: Vec::new(),
             cwd: None,
             env: HashMap::new(),
         };
-        assert!(run_build_step(Some(&config), &reporter).is_err());
+        assert!(run_build_step(Some(&config), &out_dir).is_err());
         let _ = fs::remove_dir_all(out_dir);
     }
 }

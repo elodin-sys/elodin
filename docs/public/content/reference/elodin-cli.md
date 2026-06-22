@@ -176,7 +176,11 @@ Key options:
 - `--plan <PLAN.csv>`: materialized one-row-per-run plan.
 - `--spec <SPEC.toml>`: sampling spec; sampled into a plan before execution.
 - `--campaign <CAMPAIGN.toml>`: worker count, resource slots, hooks, retries, timeouts.
-- `--workers <N>`: override the auto-sized campaign worker count.
+- `--workers <N>`: override the auto-sized campaign worker count. When omitted,
+  the runner plans the per-run recipe, counts its processes, then uses
+  `floor(S10_MAX_INFLIGHT / recipe_weight)` workers (clamped to the number of
+  planned runs). `S10_MAX_INFLIGHT` defaults to the host's logical core count;
+  raise it to oversubscribe I/O-bound SITL stacks.
 - `--runtime-threads <N>`: override the auto-sized orchestrator I/O thread
   pool. Use `0` or omit the option for the default auto-sized pool.
 - `--memory-probe`: enable expensive shared-constant PSS sampling and
@@ -190,8 +194,8 @@ Key options:
   `examples/apollo-lander/hooks/ci_gate.py`) instead of relying on this flag.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
 - `--clean`: prune `runs/` directories that are not part of the active plan.
-Campaigns always display a live progress TUI with aggregate counts and active
-worker progress while they run.
+- Campaigns always display a live progress TUI with aggregate counts and active
+  worker progress while they run.
 
 Simulations that ingest parameters from a file (rather than via
 `el.monte_carlo.params(...)`) can configure `[params_delivery]` in

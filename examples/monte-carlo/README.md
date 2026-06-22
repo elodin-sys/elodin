@@ -56,6 +56,11 @@ The example has two useful modes:
   compilation, and SITL overhead without intentionally saturating memory
   bandwidth.
 
+  When `--workers` is omitted, the runner sizes workers from the s10 admission
+  budget: `floor(S10_MAX_INFLIGHT / per-run recipe weight)`, capped by the plan
+  size. `S10_MAX_INFLIGHT` defaults to logical cores; raise it to oversubscribe
+  I/O-bound SITL recipes.
+
   ```sh
   elodin monte-carlo run examples/monte-carlo/main.py \
     --campaign examples/monte-carlo/campaign.toml \
