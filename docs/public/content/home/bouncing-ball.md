@@ -417,7 +417,6 @@ You should be able to run the simulation and see the same behavior as before, bu
 Success! We've added a wind force to our simulation. The ball now bounces around the world with the wind
 affecting its trajectory, steadily blowing the ball in a single direction, losing energy as it bounces.
 If you'd like to check your work, you can compare to the example at `examples/ball/`.
-```
 
 {% alert(kind="notice") %}
 You'll notice that the example code is broken into multiple files. This is meant to serve as an example of how you can organize your code as it grows.
@@ -425,6 +424,10 @@ You'll notice that the example code is broken into multiple files. This is meant
 
 
 ## Next Steps
+
+{% cardlink(title="Apollo Lander Tutorial", icon="rocket", href="/home/apollo-lander") %}
+Put it together: a software-in-the-loop Monte Carlo campaign against real telemetry.
+{% end %}
 
 {% cardlink(title="The Tao of Elodin", icon="book", href="/home/tao/introduction") %}
 Learn about the design principles behind Elodin.

@@ -39,10 +39,11 @@ rm -rf "$OUT_DIR"
 # ~5 s of sim at 120 Hz: enough to exercise JAX, SITL, hooks, and reporting.
 export ELODIN_APOLLO_MAX_TICKS="${ELODIN_APOLLO_MAX_TICKS:-600}"
 
+# Serial run (one in flight at a time) keeps CI light and deterministic.
+export S10_MAX_INFLIGHT=1
 "$ELODIN_BIN" monte-carlo run examples/apollo-lander/main.py \
   --campaign examples/apollo-lander/campaign.ci.toml \
   --spec examples/apollo-lander/spec.ci.toml \
-  --out "$OUT_DIR" \
-  --workers 1
+  --out "$OUT_DIR"
 
 echo "apollo-lander monte-carlo CI passed (out_dir=$OUT_DIR)"

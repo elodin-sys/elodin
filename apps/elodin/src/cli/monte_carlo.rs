@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args as ClapArgs, Subcommand, ValueEnum};
+use clap::{Args as ClapArgs, Subcommand};
 use miette::{IntoDiagnostic, Result, miette};
 
 use super::Cli;
@@ -45,8 +45,6 @@ pub struct RunArgs {
     #[arg(long)]
     pub campaign: Option<PathBuf>,
     #[arg(long)]
-    pub workers: Option<usize>,
-    #[arg(long)]
     pub out: Option<PathBuf>,
     #[arg(long)]
     pub cache_dir: Option<PathBuf>,
@@ -59,8 +57,6 @@ pub struct RunArgs {
     #[arg(long)]
     pub post_campaign: Option<PathBuf>,
     #[arg(long)]
-    pub params_compat: Option<String>,
-    #[arg(long)]
     pub fail_fast: bool,
     #[arg(long)]
     pub fail_on_errors: bool,
@@ -70,17 +66,10 @@ pub struct RunArgs {
     pub memory_probe: bool,
     #[arg(long)]
     pub keep_existing: bool,
-    #[arg(long, value_enum, default_value = "auto")]
-    pub progress: ProgressMode,
+    #[arg(long)]
+    pub clean: bool,
     #[arg(long)]
     pub runtime_threads: Option<usize>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum ProgressMode {
-    Auto,
-    Always,
-    Never,
 }
 
 impl Cli {
@@ -96,10 +85,9 @@ impl Cli {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
             }
             Command::Run(args) => run_with_runtime(*args, rt),
-            Command::Resume { campaign_dir } => rt.block_on(monte_carlo::resume_campaign(
-                campaign_dir,
-                monte_carlo::ProgressMode::Auto,
-            )),
+            Command::Resume { campaign_dir } => {
+                rt.block_on(monte_carlo::resume_campaign(campaign_dir))
+            }
             Command::Report { campaign_dir } => monte_carlo::rebuild_report(&campaign_dir),
         }
     }
@@ -111,7 +99,6 @@ fn run_with_runtime(args: RunArgs, rt: tokio::runtime::Runtime) -> Result<()> {
     let shape = monte_carlo::resolve_run_shape(
         options.campaign_path.as_deref(),
         &options.plan_path,
-        options.workers,
         runtime_threads,
     )?;
     if shape.runtime_threads > 1 {
@@ -148,23 +135,17 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         plan_path,
         campaign_path: args.campaign,
         out_dir,
-        workers: args.workers,
         cache_dir: args.cache_dir,
         retries: args.retries,
         timeout: args.timeout,
         post_run: args.post_run,
         post_campaign: args.post_campaign,
-        params_compat: args.params_compat,
         fail_fast: args.fail_fast,
         fail_on_run_errors: args.fail_on_errors,
         dry_run: args.dry_run,
         memory_probe: args.memory_probe,
         keep_existing: args.keep_existing,
-        progress: match args.progress {
-            ProgressMode::Auto => monte_carlo::ProgressMode::Auto,
-            ProgressMode::Always => monte_carlo::ProgressMode::Always,
-            ProgressMode::Never => monte_carlo::ProgressMode::Never,
-        },
+        clean: args.clean,
     })
 }
 

@@ -34,16 +34,18 @@ elodin monte-carlo run examples/monte-carlo/main.py \
 The terminal shows campaign progress, success/failure counts, and a final
 campaign summary. Individual simulation stdout/stderr is written to per-run log
 files under `runs/<run_id>/logs/` instead of being interleaved in the terminal.
-At startup, `elodin monte-carlo run` reaps pre-existing `elodin` and
-`elodin-db` processes so stale editor/database sessions cannot occupy campaign
-ports. Pass `--keep-existing` only if you intentionally want to manage those
-processes yourself.
+At startup, `elodin monte-carlo run` reaps prior campaign-scoped cgroups so
+stale sidecars from interrupted runs cannot occupy worker ports. Pass
+`--keep-existing` only if you intentionally want to manage those processes
+yourself. Per-worker UDP ports are declared in `[resources.ports]` and consumed
+with `el.monte_carlo.port("state")` / `ELODIN_MC_PORT_STATE`.
 
 The campaign output includes per-run databases, `sim_summary.json`, `results.csv`,
 `perf.csv`, `resources.csv`, `campaign_summary.txt`, and `summary.json`.
 `summary.json` always includes total campaign wall time,
 aggregate/average per-run wall time, worker parallel efficiency, disk usage,
-CPU/RAM resource rollups, and the merged simulation phase summary.
+CPU/RAM resource rollups, promoted hook metrics, invalid-run counts, and the
+merged simulation phase summary.
 
 ## Scaling vs. Memory Profiles
 
@@ -53,6 +55,12 @@ The example has two useful modes:
   the sparse page-fault probe, measuring campaign scheduling, process startup,
   compilation, and SITL overhead without intentionally saturating memory
   bandwidth.
+
+  Concurrency is controlled by `S10_MAX_INFLIGHT` (default: logical cores): the
+  runner executes `floor(S10_MAX_INFLIGHT / per-run recipe weight)` runs at once,
+  capped by the plan size, and sizes its I/O thread pool from the same budget.
+  Raise it to oversubscribe I/O-bound SITL recipes, or set it to `off` to
+  disable admission limiting.
 
   ```sh
   elodin monte-carlo run examples/monte-carlo/main.py \
@@ -80,11 +88,12 @@ Set `ELODIN_MONTE_CARLO_CONTROLLER=0` to disable the external UDP controller and
 use an in-process control law. This isolates campaign/process overhead from the
 SITL two-process lockstep path.
 
-To repeat the scaling investigation across worker counts and ablations:
+To repeat the scaling investigation across concurrency levels and ablations
+(the sweep sets `S10_MAX_INFLIGHT` per case):
 
 ```sh
 python monte_carlo_scaling_sweep.py \
-  --workers 1,5,10,20 \
+  --inflight 1,5,10,20 \
   --controllers 0,1 \
   --out dbs/monte-carlo-scaling
 ```

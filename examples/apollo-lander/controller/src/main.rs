@@ -255,8 +255,8 @@ fn encode(values: [f64; COMMAND_F64S]) -> [u8; COMMAND_F64S * 8] {
 }
 
 fn main() -> io::Result<()> {
-    let state_port = port_env("ELODIN_MONTE_CARLO_STATE_PORT", 9013);
-    let command_port = port_env("ELODIN_MONTE_CARLO_COMMAND_PORT", 9012);
+    let state_port = port_env("ELODIN_MC_PORT_STATE", 9013);
+    let command_port = port_env("ELODIN_MC_PORT_COMMAND", 9012);
     let recv = UdpSocket::bind(("127.0.0.1", state_port))?;
     let send = UdpSocket::bind(("127.0.0.1", 0))?;
     recv.set_read_timeout(Some(Duration::from_millis(250)))?;

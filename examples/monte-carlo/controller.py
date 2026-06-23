@@ -8,8 +8,8 @@ import signal
 import socket
 import threading
 
-STATE_PORT = int(os.environ.get("ELODIN_MONTE_CARLO_STATE_PORT", "9003"))
-COMMAND_PORT = int(os.environ.get("ELODIN_MONTE_CARLO_COMMAND_PORT", "9002"))
+STATE_PORT = int(os.environ.get("ELODIN_MC_PORT_STATE", "9003"))
+COMMAND_PORT = int(os.environ.get("ELODIN_MC_PORT_COMMAND", "9002"))
 STOP = threading.Event()
 
 

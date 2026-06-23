@@ -13,6 +13,7 @@ use std::{
     io::{self, Write, stdout},
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::Duration,
 };
 use stellarator::util::CancelToken;
@@ -20,10 +21,16 @@ use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
     process::Command,
+    sync::watch as sync_watch,
     task::JoinSet,
 };
 
-use crate::{error::Error, watch::watch};
+use crate::{
+    cgroup::CgroupScope,
+    error::Error,
+    probe::{ReadyProbe, expand_env, parse_duration},
+    watch::watch,
+};
 
 pub const DEFAULT_WATCH_TIMEOUT: Duration = Duration::from_millis(200);
 
@@ -39,18 +46,69 @@ pub enum Recipe {
 }
 
 impl Recipe {
+    fn depends_on(&self) -> &[String] {
+        match self {
+            Recipe::Cargo(c) => &c.process_args.depends_on,
+            Recipe::Process(p) => &p.process_args.depends_on,
+            Recipe::Group(_) => &[],
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(s) => &s.depends_on,
+        }
+    }
+
+    fn ready_probe(&self) -> Option<&ReadyProbe> {
+        match self {
+            Recipe::Cargo(c) => c.process_args.ready.as_ref(),
+            Recipe::Process(p) => p.process_args.ready.as_ref(),
+            Recipe::Group(_) => None,
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(s) => s.ready.as_ref(),
+        }
+    }
+
+    fn ready_timeout(&self) -> Option<&str> {
+        match self {
+            Recipe::Cargo(c) => c.process_args.ready_timeout.as_deref(),
+            Recipe::Process(p) => p.process_args.ready_timeout.as_deref(),
+            Recipe::Group(_) => None,
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(s) => s.ready_timeout.as_deref(),
+        }
+    }
+
+    fn log_path(&self) -> Option<&Path> {
+        match self {
+            Recipe::Cargo(c) => c.process_args.log_path.as_deref(),
+            Recipe::Process(p) => p.process_args.log_path.as_deref(),
+            Recipe::Group(_) => None,
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(s) => s.log_path.as_deref(),
+        }
+    }
+
+    fn env(&self) -> Option<&HashMap<String, String>> {
+        match self {
+            Recipe::Cargo(c) => Some(&c.process_args.env),
+            Recipe::Process(p) => Some(&p.process_args.env),
+            Recipe::Group(_) => None,
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(s) => Some(&s.env),
+        }
+    }
+
     pub fn run(
         self,
         name: String,
         release: bool,
         cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
-            Recipe::Cargo(c) => c.run(name, release, cancel_token).boxed(),
-            Recipe::Process(p) => p.run(name, cancel_token).boxed(),
-            Recipe::Group(g) => g.run(release, cancel_token).boxed(),
+            Recipe::Cargo(c) => c.run(name, release, cancel_token, cgroup).boxed(),
+            Recipe::Process(p) => p.run(name, cancel_token, cgroup).boxed(),
+            Recipe::Group(g) => g.run(release, cancel_token, cgroup).boxed(),
             #[cfg(not(target_os = "windows"))]
-            Recipe::Sim(s) => s.run(cancel_token).boxed(),
+            Recipe::Sim(s) => s.run(cancel_token, cgroup).boxed(),
         }
     }
 
@@ -59,13 +117,14 @@ impl Recipe {
         name: String,
         release: bool,
         cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
-            Recipe::Cargo(c) => c.watch(name, release, cancel_token).boxed(),
-            Recipe::Process(p) => p.watch(name, cancel_token).boxed(),
-            Recipe::Group(g) => g.watch(release, cancel_token).boxed(),
+            Recipe::Cargo(c) => c.watch(name, release, cancel_token, cgroup).boxed(),
+            Recipe::Process(p) => p.watch(name, cancel_token, cgroup).boxed(),
+            Recipe::Group(g) => g.watch(release, cancel_token, cgroup).boxed(),
             #[cfg(not(target_os = "windows"))]
-            Recipe::Sim(s) => s.watch(cancel_token).boxed(),
+            Recipe::Sim(s) => s.watch(cancel_token, cgroup).boxed(),
         }
     }
 }
@@ -79,13 +138,52 @@ pub struct GroupRecipe {
 }
 
 impl GroupRecipe {
-    async fn run(self, release: bool, cancel_token: CancelToken) -> Result<(), Error> {
+    async fn run(
+        self,
+        release: bool,
+        cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
+    ) -> Result<(), Error> {
+        // One readiness channel per recipe. Receivers don't keep a channel open,
+        // so clone them up front for dependency wiring, then move each Sender into
+        // its own task as the sole owner: when a task ends without signaling ready,
+        // the channel closes and dependents observe it instead of blocking forever.
+        let mut channels = self
+            .recipes
+            .keys()
+            .map(|name| (name.clone(), sync_watch::channel(false)))
+            .collect::<HashMap<_, _>>();
+        let receivers = channels
+            .iter()
+            .map(|(name, (_, rx))| (name.clone(), rx.clone()))
+            .collect::<HashMap<_, _>>();
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
             .map(|(name, r)| {
                 let token = cancel_token.clone();
-                Ok(r.run(name, release, token))
+                let (ready_tx, _) = channels
+                    .remove(&name)
+                    .expect("recipe has a readiness signal");
+                let dependencies = r
+                    .depends_on()
+                    .iter()
+                    .map(|dep| {
+                        receivers
+                            .get(dep)
+                            .map(|rx| (dep.clone(), rx.clone()))
+                            .ok_or_else(|| Error::UnresolvedRecipe(dep.clone()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(run_with_readiness(
+                    name,
+                    r,
+                    release,
+                    token,
+                    cgroup.clone(),
+                    dependencies,
+                    ready_tx,
+                ))
             })
             .collect::<Result<_, Error>>()?;
 
@@ -102,13 +200,52 @@ impl GroupRecipe {
         result
     }
 
-    async fn watch(self, release: bool, cancel_token: CancelToken) -> Result<(), Error> {
+    async fn watch(
+        self,
+        release: bool,
+        cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
+    ) -> Result<(), Error> {
+        // One readiness channel per recipe. Receivers don't keep a channel open,
+        // so clone them up front for dependency wiring, then move each Sender into
+        // its own task as the sole owner: when a task ends without signaling ready,
+        // the channel closes and dependents observe it instead of blocking forever.
+        let mut channels = self
+            .recipes
+            .keys()
+            .map(|name| (name.clone(), sync_watch::channel(false)))
+            .collect::<HashMap<_, _>>();
+        let receivers = channels
+            .iter()
+            .map(|(name, (_, rx))| (name.clone(), rx.clone()))
+            .collect::<HashMap<_, _>>();
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
             .map(|(name, r)| {
                 let token = cancel_token.clone();
-                Ok(r.watch(name, release, token))
+                let (ready_tx, _) = channels
+                    .remove(&name)
+                    .expect("recipe has a readiness signal");
+                let dependencies = r
+                    .depends_on()
+                    .iter()
+                    .map(|dep| {
+                        receivers
+                            .get(dep)
+                            .map(|rx| (dep.clone(), rx.clone()))
+                            .ok_or_else(|| Error::UnresolvedRecipe(dep.clone()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(watch_with_readiness(
+                    name,
+                    r,
+                    release,
+                    token,
+                    cgroup.clone(),
+                    dependencies,
+                    ready_tx,
+                ))
             })
             .collect::<Result<_, Error>>()?;
 
@@ -123,6 +260,124 @@ impl GroupRecipe {
             }
         }
         result
+    }
+}
+
+async fn run_with_readiness(
+    name: String,
+    recipe: Recipe,
+    release: bool,
+    cancel_token: CancelToken,
+    cgroup: Option<Arc<CgroupScope>>,
+    dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
+    ready_tx: sync_watch::Sender<bool>,
+) -> Result<(), Error> {
+    let probe = expand_ready_probe(&recipe);
+    let ready_timeout = recipe.ready_timeout().map(str::to_string);
+    let log_path = recipe.log_path().map(PathBuf::from);
+    wait_for_dependencies(&name, dependencies).await?;
+
+    // Compile Cargo recipes before the readiness window opens so time-based
+    // probes (e.g. `Ready.delay`) measure from process spawn, not from build
+    // start. Otherwise a slow compile can elapse the delay and release
+    // `depends_on` dependents while the sidecar is still building.
+    let recipe = prebuild(recipe, release, &cancel_token).await?;
+    let mut run_fut = recipe.run(name, release, cancel_token, cgroup);
+    mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+}
+
+/// Performs a recipe's build phase (if any) up front so it does not overlap the
+/// readiness probe. A built Cargo recipe becomes a prebuilt `Process` recipe so
+/// the subsequent `run` only spawns the binary. Non-Cargo recipes pass through
+/// unchanged. Only used on the `run` path; `watch` keeps its own rebuild loop.
+async fn prebuild(
+    recipe: Recipe,
+    release: bool,
+    cancel_token: &CancelToken,
+) -> Result<Recipe, Error> {
+    match recipe {
+        Recipe::Cargo(mut cargo) => {
+            let bin = cargo.build(release, cancel_token.clone()).await?;
+            Ok(Recipe::Process(ProcessRecipe {
+                cmd: bin.to_string(),
+                process_args: cargo.process_args,
+                no_watch: true,
+            }))
+        }
+        other => Ok(other),
+    }
+}
+
+async fn watch_with_readiness(
+    name: String,
+    recipe: Recipe,
+    release: bool,
+    cancel_token: CancelToken,
+    cgroup: Option<Arc<CgroupScope>>,
+    dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
+    ready_tx: sync_watch::Sender<bool>,
+) -> Result<(), Error> {
+    let probe = expand_ready_probe(&recipe);
+    let ready_timeout = recipe.ready_timeout().map(str::to_string);
+    let log_path = recipe.log_path().map(PathBuf::from);
+    wait_for_dependencies(&name, dependencies).await?;
+
+    let mut run_fut = recipe.watch(name, release, cancel_token, cgroup);
+    mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+}
+
+/// Resolves a recipe's readiness probe placeholders against its env (overlaid
+/// on the inherited environment), so probes can target per-run ports/sockets.
+fn expand_ready_probe(recipe: &Recipe) -> Option<ReadyProbe> {
+    let probe = recipe.ready_probe()?;
+    let env = recipe.env().cloned().unwrap_or_default();
+    Some(probe.expand(move |name| env.get(name).cloned().or_else(|| std::env::var(name).ok())))
+}
+
+async fn wait_for_dependencies(
+    name: &str,
+    dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
+) -> Result<(), Error> {
+    for (dep, mut rx) in dependencies {
+        while !*rx.borrow() {
+            // A closed channel means the dependency's task ended without ever
+            // signaling ready (early exit or readiness failure), so name it
+            // rather than emitting a generic "task exited" message.
+            rx.changed().await.map_err(|_| {
+                Error::Readiness(format!(
+                    "dependency \"{dep}\" exited before \"{name}\" became ready"
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+async fn mark_ready_or_wait(
+    probe: Option<ReadyProbe>,
+    ready_timeout: Option<String>,
+    log_path: Option<PathBuf>,
+    ready_tx: sync_watch::Sender<bool>,
+    run_fut: &mut BoxFuture<'static, Result<(), Error>>,
+) -> Result<(), Error> {
+    let Some(probe) = probe else {
+        let _ = ready_tx.send(true);
+        return run_fut.await;
+    };
+
+    let timeout = parse_duration(ready_timeout.as_deref(), Duration::from_secs(30))
+        .map_err(|err| Error::Readiness(err.to_string()))?;
+    tokio::select! {
+        // The child exited before the probe signaled ready: return its result
+        // and let `ready_tx` drop, closing the channel so dependents fail fast
+        // instead of blocking. This task is the first in the group to finish, so
+        // the child's own exit status/error is what surfaces.
+        result = &mut *run_fut => result,
+        result = probe.wait(log_path.as_deref(), timeout) => {
+            result.map_err(|err| Error::Readiness(err.to_string()))?;
+            let _ = ready_tx.send(true);
+            run_fut.await
+        }
     }
 }
 
@@ -135,19 +390,31 @@ pub struct ProcessRecipe {
 }
 
 impl ProcessRecipe {
-    pub async fn run(self, name: String, cancel_token: CancelToken) -> Result<(), Error> {
-        self.process_args.run(name, self.cmd, cancel_token).await?;
+    pub async fn run(
+        self,
+        name: String,
+        cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
+    ) -> Result<(), Error> {
+        self.process_args
+            .run(name, self.cmd, cancel_token, cgroup)
+            .await?;
         Ok(())
     }
 
-    pub async fn watch(self, name: String, cancel_token: CancelToken) -> Result<(), Error> {
+    pub async fn watch(
+        self,
+        name: String,
+        cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
+    ) -> Result<(), Error> {
         if self.no_watch {
-            return self.run(name, cancel_token).await;
+            return self.run(name, cancel_token, cgroup).await;
         }
         let dirs = self.process_args.watch_dirs();
         watch(
             DEFAULT_WATCH_TIMEOUT,
-            |token| self.clone().run(name.clone(), token),
+            |token| self.clone().run(name.clone(), token, cgroup.clone()),
             cancel_token,
             dirs,
         )
@@ -181,6 +448,14 @@ pub struct ProcessArgs {
     pub fail_on_error: bool,
     #[serde(default)]
     pub log_path: Option<PathBuf>,
+    #[serde(default)]
+    pub silence: bool,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub ready: Option<ReadyProbe>,
+    #[serde(default)]
+    pub ready_timeout: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Default, Clone)]
@@ -197,15 +472,36 @@ impl ProcessArgs {
         name: String,
         cmd: String,
         cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
     ) -> Result<(), ProcessError> {
+        // Resolve `${VAR:-default}` placeholders in args/cwd from the recipe env
+        // (overlaid on the inherited environment). This lets a single planned
+        // recipe carry per-run values (e.g. monte-carlo worker ports) that are
+        // only known when the process is spawned.
+        let (args, cwd) = {
+            let lookup = |name: &str| {
+                self.env
+                    .get(name)
+                    .cloned()
+                    .or_else(|| std::env::var(name).ok())
+            };
+            let args: Vec<String> = self
+                .args
+                .iter()
+                .map(|arg| expand_env(arg, lookup))
+                .collect();
+            let cwd = self.cwd.as_ref().map(|cwd| expand_env(cwd, lookup));
+            (args, cwd)
+        };
         loop {
             let mut child = Command::new(&cmd);
-            child
-                .args(self.args.iter())
-                .envs(self.env.iter())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            if let Some(cwd) = &self.cwd {
+            child.args(args.iter()).envs(self.env.iter());
+            if self.silence {
+                child.stdout(Stdio::null()).stderr(Stdio::null());
+            } else {
+                child.stdout(Stdio::piped()).stderr(Stdio::piped());
+            }
+            if let Some(cwd) = &cwd {
                 child.current_dir(cwd);
             }
             let mut child = child.spawn().map_err(|source| ProcessError::Spawn {
@@ -213,25 +509,30 @@ impl ProcessArgs {
                 cmd: cmd.clone(),
                 recipe: name.clone(),
             })?;
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or(ProcessError::ProcessMissingStdout)?;
-            let stderr = child
-                .stderr
-                .take()
-                .ok_or(ProcessError::ProcessMissingStderr)?;
+            if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
+                scope.add_pid(pid)?;
+            }
+            if !self.silence {
+                let stdout = child
+                    .stdout
+                    .take()
+                    .ok_or(ProcessError::ProcessMissingStdout)?;
+                let stderr = child
+                    .stderr
+                    .take()
+                    .ok_or(ProcessError::ProcessMissingStderr)?;
 
-            let stdout_name = name.clone();
-            let stderr_name = name.clone();
-            let stdout_log_path = self.log_path.clone();
-            let stderr_log_path = self.log_path.clone();
-            tokio::spawn(async move {
-                print_logs(stdout, &stdout_name, Color::Blue, stdout_log_path).await
-            });
-            tokio::spawn(async move {
-                print_logs(stderr, &stderr_name, Color::Red, stderr_log_path).await
-            });
+                let stdout_name = name.clone();
+                let stderr_name = name.clone();
+                let stdout_log_path = self.log_path.clone();
+                let stderr_log_path = self.log_path.clone();
+                tokio::spawn(async move {
+                    print_logs(stdout, &stdout_name, Color::Blue, stdout_log_path).await
+                });
+                tokio::spawn(async move {
+                    print_logs(stderr, &stderr_name, Color::Red, stderr_log_path).await
+                });
+            }
             tokio::select! {
                 _ = cancel_token.wait() => {
                     // Graceful shutdown: send SIGTERM, wait up to 2 seconds, then force kill
@@ -479,10 +780,11 @@ impl CargoRecipe {
         name: String,
         release: bool,
         cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
     ) -> Result<(), Error> {
         let path = self.build(release, cancel_token.clone()).await?;
         self.process_args
-            .run(name, path.to_string(), cancel_token)
+            .run(name, path.to_string(), cancel_token, cgroup)
             .await?;
         Ok(())
     }
@@ -492,12 +794,16 @@ impl CargoRecipe {
         name: String,
         release: bool,
         cancel_token: CancelToken,
+        cgroup: Option<Arc<CgroupScope>>,
     ) -> Result<(), Error> {
         let dirs = self.watch_dirs();
 
         watch(
             DEFAULT_WATCH_TIMEOUT,
-            |token| self.clone().run(name.clone(), release, token),
+            |token| {
+                self.clone()
+                    .run(name.clone(), release, token, cgroup.clone())
+            },
             cancel_token,
             dirs,
         )
@@ -522,4 +828,108 @@ impl CargoRecipe {
 pub enum Destination {
     #[default]
     Local,
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn process_recipe(
+        cmd: &str,
+        args: &[&str],
+        fail_on_error: bool,
+        ready: Option<ReadyProbe>,
+        depends_on: Vec<String>,
+    ) -> Recipe {
+        Recipe::Process(ProcessRecipe {
+            cmd: cmd.to_string(),
+            process_args: ProcessArgs {
+                args: args.iter().map(|a| a.to_string()).collect(),
+                cwd: None,
+                env: HashMap::new(),
+                restart_policy: RestartPolicy::Never,
+                fail_on_error,
+                log_path: None,
+                silence: false,
+                depends_on,
+                ready,
+                ready_timeout: None,
+            },
+            no_watch: false,
+        })
+    }
+
+    /// A dependency that exits before its readiness probe fires must close its
+    /// channel so dependents stop waiting; otherwise the whole group hangs until
+    /// an external timeout. The wrapping `timeout` turns that hang into a failure.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dependency_exit_before_ready_does_not_hang() {
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: HashMap::from([
+                (
+                    "a".to_string(),
+                    process_recipe(
+                        "false",
+                        &[],
+                        true,
+                        Some(ReadyProbe::Delay { ms: 60_000 }),
+                        vec![],
+                    ),
+                ),
+                (
+                    "b".to_string(),
+                    process_recipe("sleep", &["30"], false, None, vec!["a".to_string()]),
+                ),
+            ]),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            group.run(false, CancelToken::new(), None),
+        )
+        .await
+        .expect("group hung waiting on a dependency that exited before becoming ready");
+        assert!(
+            result.is_err(),
+            "the failed dependency should fail the group"
+        );
+    }
+
+    /// When a dependency exits cleanly before signaling ready, the dependent's
+    /// error should name the dead dependency rather than a generic message.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dependent_names_dependency_that_exited_before_ready() {
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: HashMap::from([
+                (
+                    "a".to_string(),
+                    process_recipe(
+                        "true",
+                        &[],
+                        false,
+                        Some(ReadyProbe::Delay { ms: 60_000 }),
+                        vec![],
+                    ),
+                ),
+                (
+                    "b".to_string(),
+                    process_recipe("sleep", &["30"], false, None, vec!["a".to_string()]),
+                ),
+            ]),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            group.run(false, CancelToken::new(), None),
+        )
+        .await
+        .expect("group hung");
+        let err = result.expect_err("expected a readiness error");
+        assert!(
+            err.to_string()
+                .contains("dependency \"a\" exited before \"b\" became ready"),
+            "unexpected error: {err}"
+        );
+    }
 }

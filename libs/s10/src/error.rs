@@ -21,6 +21,8 @@ pub enum Error {
     PackageMetadataNotFound(String),
     #[error("unreseolved recipe {0}")]
     UnresolvedRecipe(String),
+    #[error("recipe readiness failed: {0}")]
+    Readiness(String),
     #[error("failed to build sim {0:?}")]
     SimBuildFailed(Option<i32>),
     #[error("join error")]

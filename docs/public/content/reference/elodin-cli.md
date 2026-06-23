@@ -101,11 +101,11 @@ Run a simulation campaign with a bounded worker pool. Each worker owns a
 deterministic resource slot (DB port and user-defined SITL ports), and the
 runner recycles those slots across arbitrarily many runs. The campaign pins a
 shared `ELODIN_CACHE_DIR` so large Cranelift constants are mapped once across
-workers. When worker or runtime-thread counts are unset, the runner auto-sizes
-them from available CPUs: workers consume the CPU budget, while the orchestrator
-uses a small I/O thread pool for process/log handling. Campaign startup reaps
-pre-existing `elodin` and `elodin-db` processes by default so stale editor or
-database sessions cannot collide with worker ports.
+workers. Concurrency is governed by the s10 admission budget `S10_MAX_INFLIGHT`
+(default: logical cores): the runner executes `floor(S10_MAX_INFLIGHT /
+recipe_weight)` runs at once and sizes its orchestrator I/O thread pool from the
+same budget. Campaign startup reaps prior campaign-scoped cgroups by default so
+stale sidecars from an interrupted run cannot collide with worker ports.
 
 **Usage:** `elodin monte-carlo <COMMAND>`
 
@@ -175,10 +175,15 @@ Key options:
 
 - `--plan <PLAN.csv>`: materialized one-row-per-run plan.
 - `--spec <SPEC.toml>`: sampling spec; sampled into a plan before execution.
-- `--campaign <CAMPAIGN.toml>`: worker count, resource slots, hooks, retries, timeouts.
-- `--workers <N>`: override the auto-sized campaign worker count.
-- `--runtime-threads <N>`: override the auto-sized orchestrator I/O thread
-  pool. Use `0` or omit the option for the default auto-sized pool.
+- `--campaign <CAMPAIGN.toml>`: resource slots, hooks, retries, timeouts.
+- `S10_MAX_INFLIGHT` (environment variable, not a flag): the single concurrency
+  knob. The runner plans the per-run recipe, counts its processes
+  (`recipe_weight`), and executes `floor(S10_MAX_INFLIGHT / recipe_weight)` runs
+  at once (clamped to the plan size). Defaults to the host's logical core count;
+  set it higher to oversubscribe I/O-bound SITL stacks, or `off` to disable
+  admission limiting entirely.
+- `--runtime-threads <N>`: override the orchestrator I/O thread pool. When unset
+  (or `0`) it is auto-sized from `S10_MAX_INFLIGHT`, capped at logical cores.
 - `--memory-probe`: enable expensive shared-constant PSS sampling and
   `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
 - `--keep-existing`: do not reap existing `elodin` / `elodin-db` processes at
@@ -189,9 +194,15 @@ Key options:
   gates, prefer a `post_campaign` hook that raises on `summary.failed` (see
   `examples/apollo-lander/hooks/ci_gate.py`) instead of relying on this flag.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
-- `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
-- `--progress <auto|always|never>`: control the live progress bar. `auto` shows
-  a bar only when stderr is a terminal.
+- `--clean`: prune `runs/` directories that are not part of the active plan.
+- Campaigns always display a live progress TUI with aggregate counts and active
+  worker progress while they run.
+
+Simulations that ingest parameters from a file (rather than via
+`el.monte_carlo.params(...)`) can configure `[params_delivery]` in
+`campaign.toml`: the runner writes each run's sampled params to a JSON/TOML file
+and sets the env vars the simulation expects (with `{seed}` / `{db_path}` /
+`{run_id}` / `{run_dir}` placeholders).
 
 Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
 `resources.csv`, `campaign_summary.txt`, and `summary.json`. With

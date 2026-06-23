@@ -31,8 +31,6 @@ from sim import (
     truth_pitch,
 )
 
-STATE_PORT_ENV = "ELODIN_MONTE_CARLO_STATE_PORT"
-COMMAND_PORT_ENV = "ELODIN_MONTE_CARLO_COMMAND_PORT"
 DEFAULT_STATE_PORT = 9013
 DEFAULT_COMMAND_PORT = 9012
 MAX_TICKS_ENV = "ELODIN_APOLLO_MAX_TICKS"
@@ -40,8 +38,8 @@ MAX_TICKS_ENV = "ELODIN_APOLLO_MAX_TICKS"
 
 class SitlBridge:
     def __init__(self, throttle: float, attitude: list[float]) -> None:
-        self.state_port = int(os.environ.get(STATE_PORT_ENV, str(DEFAULT_STATE_PORT)))
-        self.command_port = int(os.environ.get(COMMAND_PORT_ENV, str(DEFAULT_COMMAND_PORT)))
+        self.state_port = el.monte_carlo.port("state", DEFAULT_STATE_PORT)
+        self.command_port = el.monte_carlo.port("command", DEFAULT_COMMAND_PORT)
         self.state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.command_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.command_sock.bind(("127.0.0.1", self.command_port))
@@ -124,9 +122,19 @@ if os.environ.get("ELODIN_MONTE_CARLO_PLANNING") == "1":
             "(`cargo build --release --manifest-path examples/apollo-lander/controller/Cargo.toml`) "
             "before generating the Monte Carlo plan."
         )
-    controller = el.s10.PyRecipe.process(name="Apollo LGC", cmd=str(controller_binary))
+    controller = el.s10.PyRecipe.process(
+        name="Apollo LGC",
+        cmd=str(controller_binary),
+        ready=el.s10.Ready.delay(100),
+        ready_timeout="1s",
+    )
 else:
-    controller = el.s10.PyRecipe.cargo(name="Apollo LGC", path=str(controller_dir))
+    controller = el.s10.PyRecipe.cargo(
+        name="Apollo LGC",
+        path=str(controller_dir),
+        ready=el.s10.Ready.delay(100),
+        ready_timeout="1s",
+    )
 world.recipe(controller)
 
 

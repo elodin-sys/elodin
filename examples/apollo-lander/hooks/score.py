@@ -16,6 +16,7 @@ def post_run(ctx):
     return {
         "landed": landed,
         "soft_landing": passed,
+        "valid": bool(result),
         "pass": passed,
         "touchdown_speed_mps": to_float(result.get("touchdown_speed"), float("inf")),
         "horizontal_speed_mps": to_float(result.get("horizontal_speed"), float("inf")),
