@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use miette::Context;
 use miette::IntoDiagnostic;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
+mod auth;
 mod editor;
 mod monte_carlo;
 
@@ -15,6 +16,22 @@ mod monte_carlo;
 pub struct Cli {
     #[arg(short, long, default_value = "https://app.elodin.systems")]
     url: String,
+    /// OIDC issuer (Keycloak realm) used by `elodin login`.
+    #[arg(
+        long,
+        env = "ELODIN_ISSUER",
+        default_value = "https://auth.elodin.systems/realms/elodin",
+        global = true
+    )]
+    issuer: String,
+    /// Elodin Cloud API base URL used by authenticated commands.
+    #[arg(
+        long,
+        env = "ELODIN_API_URL",
+        default_value = "https://api.elodin.systems",
+        global = true
+    )]
+    api_url: String,
     #[command(subcommand)]
     command: Option<Commands>,
     #[arg(long, hide = true)]
@@ -23,6 +40,16 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone)]
 enum Commands {
+    /// Sign up for Elodin Cloud (creates your account + organization)
+    Signup(auth::SignupArgs),
+    /// Log in to Elodin Cloud through your browser (OIDC + PKCE)
+    Login(auth::LoginArgs),
+    /// Remove stored Elodin Cloud credentials and end the session
+    Logout,
+    /// Print the currently authenticated Elodin Cloud identity
+    Whoami(auth::WhoamiArgs),
+    /// Create and list Elodin Cloud projects
+    Projects(auth::ProjectsArgs),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulation in headless mode
@@ -97,12 +124,27 @@ impl Cli {
             .build()
             .expect("tokio runtime failed to start");
 
-        if let Err(err) = self.first_launch() {
+        // Auth commands manage their own config dir and must not be gated by the
+        // first-launch onboarding (which exits early to nudge the Python SDK install).
+        let is_auth_command = matches!(
+            self.command,
+            Some(Commands::Signup(_))
+                | Some(Commands::Login(_))
+                | Some(Commands::Logout)
+                | Some(Commands::Whoami(_))
+                | Some(Commands::Projects(_))
+        );
+        if !is_auth_command && let Err(err) = self.first_launch() {
             eprintln!("Error: {:#}", err);
             std::process::exit(1);
         }
 
         match &self.command {
+            Some(Commands::Signup(args)) => self.clone().signup(args.clone(), rt),
+            Some(Commands::Login(args)) => self.clone().login(args.clone(), rt),
+            Some(Commands::Logout) => self.clone().logout(rt),
+            Some(Commands::Whoami(args)) => self.clone().whoami(args.clone(), rt),
+            Some(Commands::Projects(args)) => self.clone().projects(args.clone(), rt),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
