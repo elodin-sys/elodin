@@ -55,13 +55,14 @@ sed -i.bak 's/^n_samples = .*/n_samples = 2/' "$CAMPAIGN_DIR/spec.toml"
 rm -f "$CAMPAIGN_DIR/spec.toml.bak"
 export ELODIN_MONTE_CARLO_CONTROLLER=0
 export ELODIN_MONTE_CARLO_GRID_SIZE="${ELODIN_MONTE_CARLO_GRID_SIZE:-1024}"
+# Serial run (one in flight at a time); replaces the old --workers 1.
+export S10_MAX_INFLIGHT=1
 
 # 4. Run the generated artifacts unedited.
 "$ELODIN_BIN" monte-carlo run "$SIM" \
   --campaign "$CAMPAIGN_DIR/campaign.toml" \
   --spec "$CAMPAIGN_DIR/spec.toml" \
-  --out "$OUT_DIR" \
-  --workers 1
+  --out "$OUT_DIR"
 
 # 5. Every run must have completed and passed the generated score hook,
 #    which proves the hooks resolved and ran (not just that the sim ran).

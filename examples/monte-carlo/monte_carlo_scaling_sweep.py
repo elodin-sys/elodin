@@ -20,7 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--campaign", type=Path, default=Path("examples/monte-carlo/campaign.toml"))
     parser.add_argument("--plan", type=Path, default=Path("examples/monte-carlo/plan.csv"))
     parser.add_argument("--out", type=Path, default=Path("dbs/monte-carlo-scaling"))
-    parser.add_argument("--workers", default="1,2,5,8,11,15,20,22,30")
+    # Sweeps S10_MAX_INFLIGHT (the single concurrency knob); each value sets how
+    # much recipe weight may run at once (workers = S10_MAX_INFLIGHT / weight).
+    parser.add_argument("--inflight", default="1,2,5,8,11,15,20,22,30")
     parser.add_argument("--grid-size", default="4096")
     parser.add_argument("--probe-rows", default="0")
     parser.add_argument("--controllers", default="0,1")
@@ -36,7 +38,7 @@ def run_case(
     campaign: Path,
     plan: Path,
     out_dir: Path,
-    workers: int,
+    inflight: int,
     grid_size: str,
     probe_rows: int,
     controller: int,
@@ -49,6 +51,8 @@ def run_case(
     env["ELODIN_MONTE_CARLO_GRID_SIZE"] = grid_size
     env["ELODIN_MONTE_CARLO_PROBE_ROWS"] = str(probe_rows)
     env["ELODIN_MONTE_CARLO_CONTROLLER"] = str(controller)
+    # S10_MAX_INFLIGHT is the single concurrency knob now that --workers is gone.
+    env["S10_MAX_INFLIGHT"] = str(inflight)
     cmd = [
         "elodin",
         "monte-carlo",
@@ -58,8 +62,6 @@ def run_case(
         str(campaign),
         "--plan",
         str(plan),
-        "--workers",
-        str(workers),
         "--out",
         str(out_dir),
     ]
@@ -78,7 +80,7 @@ def run_case(
     resource = summary.get("resource_summary") or {}
     concurrency = summary.get("concurrency_summary") or {}
     return {
-        "workers": workers,
+        "inflight": inflight,
         "probe_rows": probe_rows,
         "controller": controller,
         "runtime_threads": runtime_threads,
@@ -108,7 +110,7 @@ def run_case(
 
 def main() -> None:
     args = parse_args()
-    workers = parse_csv_ints(args.workers)
+    inflight_values = parse_csv_ints(args.inflight)
     probe_rows = parse_csv_ints(args.probe_rows)
     controllers = parse_csv_ints(args.controllers)
     runtime_threads = parse_csv_ints(args.runtime_threads)
@@ -120,19 +122,19 @@ def main() -> None:
             campaign=args.campaign,
             plan=args.plan,
             out_dir=args.out / "warmup",
-            workers=1,
+            inflight=1,
             grid_size=args.grid_size,
             probe_rows=0,
             controller=1,
             runtime_threads=0,
             memory_probe=args.memory_probe,
         )
-    for worker in workers:
+    for inflight in inflight_values:
         for probe in probe_rows:
             for controller in controllers:
                 for runtime_thread in runtime_threads:
                     name = (
-                        f"workers-{worker}_probe-{probe}_controller-{controller}"
+                        f"inflight-{inflight}_probe-{probe}_controller-{controller}"
                         f"_runtime-{runtime_thread}"
                     )
                     row = run_case(
@@ -140,7 +142,7 @@ def main() -> None:
                         campaign=args.campaign,
                         plan=args.plan,
                         out_dir=args.out / name,
-                        workers=worker,
+                        inflight=inflight,
                         grid_size=args.grid_size,
                         probe_rows=probe,
                         controller=controller,
@@ -157,7 +159,7 @@ def main() -> None:
             int(row["runtime_threads"]),
             int(row["memory_probe"]),
         )
-        if int(row["workers"]) == 1 and row["wall_ms"] != "" and row.get("failed") == 0:
+        if int(row["inflight"]) == 1 and row["wall_ms"] != "" and row.get("failed") == 0:
             baselines[key] = float(row["wall_ms"])
     for row in rows:
         key = (
@@ -168,9 +170,9 @@ def main() -> None:
         )
         baseline = baselines.get(key)
         if baseline and row["wall_ms"] != "" and row.get("failed") == 0:
-            row["speedup_vs_1worker"] = baseline / float(row["wall_ms"])
+            row["speedup_vs_serial"] = baseline / float(row["wall_ms"])
         else:
-            row["speedup_vs_1worker"] = ""
+            row["speedup_vs_serial"] = ""
     output = args.out / "scaling.csv"
     if rows:
         with output.open("w", newline="") as f:

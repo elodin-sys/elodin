@@ -45,8 +45,6 @@ pub struct RunArgs {
     #[arg(long)]
     pub campaign: Option<PathBuf>,
     #[arg(long)]
-    pub workers: Option<usize>,
-    #[arg(long)]
     pub out: Option<PathBuf>,
     #[arg(long)]
     pub cache_dir: Option<PathBuf>,
@@ -101,7 +99,6 @@ fn run_with_runtime(args: RunArgs, rt: tokio::runtime::Runtime) -> Result<()> {
     let shape = monte_carlo::resolve_run_shape(
         options.campaign_path.as_deref(),
         &options.plan_path,
-        options.workers,
         runtime_threads,
     )?;
     if shape.runtime_threads > 1 {
@@ -138,7 +135,6 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         plan_path,
         campaign_path: args.campaign,
         out_dir,
-        workers: args.workers,
         cache_dir: args.cache_dir,
         retries: args.retries,
         timeout: args.timeout,

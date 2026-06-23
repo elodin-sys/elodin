@@ -56,10 +56,11 @@ The example has two useful modes:
   compilation, and SITL overhead without intentionally saturating memory
   bandwidth.
 
-  When `--workers` is omitted, the runner sizes workers from the s10 admission
-  budget: `floor(S10_MAX_INFLIGHT / per-run recipe weight)`, capped by the plan
-  size. `S10_MAX_INFLIGHT` defaults to logical cores; raise it to oversubscribe
-  I/O-bound SITL recipes.
+  Concurrency is controlled by `S10_MAX_INFLIGHT` (default: logical cores): the
+  runner executes `floor(S10_MAX_INFLIGHT / per-run recipe weight)` runs at once,
+  capped by the plan size, and sizes its I/O thread pool from the same budget.
+  Raise it to oversubscribe I/O-bound SITL recipes, or set it to `off` to
+  disable admission limiting.
 
   ```sh
   elodin monte-carlo run examples/monte-carlo/main.py \
@@ -87,11 +88,12 @@ Set `ELODIN_MONTE_CARLO_CONTROLLER=0` to disable the external UDP controller and
 use an in-process control law. This isolates campaign/process overhead from the
 SITL two-process lockstep path.
 
-To repeat the scaling investigation across worker counts and ablations:
+To repeat the scaling investigation across concurrency levels and ablations
+(the sweep sets `S10_MAX_INFLIGHT` per case):
 
 ```sh
 python monte_carlo_scaling_sweep.py \
-  --workers 1,5,10,20 \
+  --inflight 1,5,10,20 \
   --controllers 0,1 \
   --out dbs/monte-carlo-scaling
 ```

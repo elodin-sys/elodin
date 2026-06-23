@@ -21,10 +21,15 @@ use tokio::task::JoinSet;
 pub const CONTEXT_ENV: &str = "ELODIN_MONTE_CARLO_CONTEXT";
 pub const CACHE_ENV: &str = "ELODIN_CACHE_DIR";
 
+/// Hook scalar keys that have dedicated, typed columns elsewhere (`pass` is the
+/// raw scoring verdict surfaced as `scored_pass`/`passed`; `valid` as
+/// `scored_valid`/`valid`). They are excluded from the dynamic `hook_scalars`
+/// columns so results.csv never emits a duplicate `valid`/`pass` header.
+const RESERVED_HOOK_KEYS: &[&str] = &["pass", "valid"];
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CampaignConfig {
-    pub workers: Option<usize>,
     pub timeout: Option<String>,
     pub retries: usize,
     pub cache_dir: Option<PathBuf>,
@@ -43,7 +48,6 @@ pub struct CampaignConfig {
 impl Default for CampaignConfig {
     fn default() -> Self {
         Self {
-            workers: None,
             timeout: None,
             retries: 0,
             cache_dir: None,
@@ -143,7 +147,6 @@ pub struct RunOptions {
     pub plan_path: PathBuf,
     pub campaign_path: Option<PathBuf>,
     pub out_dir: PathBuf,
-    pub workers: Option<usize>,
     pub cache_dir: Option<PathBuf>,
     pub retries: Option<usize>,
     pub timeout: Option<String>,
@@ -159,7 +162,6 @@ pub struct RunOptions {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ResolvedRunShape {
-    pub workers: usize,
     pub runtime_threads: usize,
 }
 
@@ -714,14 +716,16 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     }
 
     if options.dry_run {
-        let workers = config
-            .workers
-            .map(|workers| workers.max(1).min(plan.len().max(1)).to_string())
-            .unwrap_or_else(|| "auto".to_string());
+        // Worker count is `S10_MAX_INFLIGHT / recipe_weight`, but the recipe is
+        // not planned during a dry run, so report the admission budget itself.
+        let inflight = match s10::admission::max_inflight() {
+            Some(max) => max.to_string(),
+            None => "off".to_string(),
+        };
         println!(
-            "monte-carlo dry run: runs={} workers={} out_dir={}",
+            "monte-carlo dry run: runs={} S10_MAX_INFLIGHT={} out_dir={}",
             plan.len(),
-            workers,
+            inflight,
             options.out_dir.display()
         );
         for row in &plan {
@@ -865,9 +869,8 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     let base_recipe = plan_recipe(&sim_path, &out_dir).await?;
     let recipe_weight = s10::admission::recipe_weight(&base_recipe);
     let admission_max = s10::admission::max_inflight();
-    let workers =
-        resolve_effective_workers(config.workers, total_runs, recipe_weight, admission_max);
-    let worker_resolution = worker_resolution_label(config.workers, recipe_weight, admission_max);
+    let workers = resolve_auto_workers(total_runs, recipe_weight, admission_max);
+    let worker_resolution = worker_resolution_label(recipe_weight, admission_max);
     let reporter = CampaignReporter::new(&out_dir, total_runs, workers, worker_resolution)?;
     // Count already-passed runs toward the report without re-running them.
     for metric in &preserved {
@@ -1278,7 +1281,7 @@ fn summarize_hook_metrics(metrics: &[RunMetric]) -> BTreeMap<String, ScalarMetri
     let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     for metric in metrics.iter().filter(|metric| metric.valid()) {
         for (key, value) in &metric.hook_scalars {
-            if matches!(key.as_str(), "pass" | "valid") {
+            if RESERVED_HOOK_KEYS.contains(&key.as_str()) {
                 continue;
             }
             if let Ok(value) = value.parse::<f64>()
@@ -1614,46 +1617,30 @@ fn load_config(path: Option<&Path>) -> Result<CampaignConfig> {
 pub fn resolve_run_shape(
     campaign_path: Option<&Path>,
     plan_path: &Path,
-    workers_override: Option<usize>,
     runtime_threads_override: Option<usize>,
 ) -> Result<ResolvedRunShape> {
-    let mut config = load_config(campaign_path)?;
-    if let Some(workers) = workers_override {
-        config.workers = Some(workers.max(1));
-    }
+    // Validate the campaign config up front (surfaces errors before the run).
+    // Concurrency is governed entirely by the s10 admission budget now, so the
+    // only thing left to size here is the orchestrator's I/O thread pool.
+    let _config = load_config(campaign_path)?;
     let plan = read_plan(plan_path)?;
     if plan.is_empty() {
         return Err(Error::EmptyPlan).into_diagnostic();
     }
-    let workers = resolve_workers(config.workers, plan.len());
     Ok(ResolvedRunShape {
-        workers,
-        runtime_threads: resolve_runtime_threads(workers, runtime_threads_override),
+        runtime_threads: resolve_runtime_threads(
+            s10::admission::max_inflight(),
+            plan.len(),
+            runtime_threads_override,
+        ),
     })
 }
 
-fn resolve_workers(config_workers: Option<usize>, plan_len: usize) -> usize {
-    if let Some(workers) = config_workers {
-        return workers.max(1).min(plan_len.max(1));
-    }
-    let reserve = if available_cpus() > 4 { 2 } else { 1 };
-    available_cpus()
-        .saturating_sub(reserve)
-        .max(1)
-        .min(plan_len.max(1))
-}
-
-fn resolve_effective_workers(
-    requested: Option<usize>,
-    total_runs: usize,
-    weight: usize,
-    admission_max: Option<usize>,
-) -> usize {
+/// Number of runs allowed in flight at once: the s10 admission budget
+/// (`S10_MAX_INFLIGHT`) divided by the per-run recipe weight, clamped to the
+/// plan size. `S10_MAX_INFLIGHT=off` falls back to logical cores.
+fn resolve_auto_workers(total_runs: usize, weight: usize, admission_max: Option<usize>) -> usize {
     let cap = total_runs.max(1);
-    if let Some(requested) = requested {
-        return requested.max(1).min(cap);
-    }
-
     let weight = weight.max(1);
     let slots = match admission_max {
         Some(max) => (max / weight).max(1),
@@ -1662,41 +1649,35 @@ fn resolve_effective_workers(
     slots.min(cap)
 }
 
-fn worker_resolution_label(
-    requested: Option<usize>,
-    weight: usize,
-    admission_max: Option<usize>,
-) -> String {
+fn worker_resolution_label(weight: usize, admission_max: Option<usize>) -> String {
     let weight = weight.max(1);
-    match (requested, admission_max) {
-        (Some(requested), Some(max)) => {
-            format!("(requested={requested}, S10_MAX_INFLIGHT={max}, recipe_weight={weight})")
-        }
-        (Some(requested), None) => {
-            format!("(requested={requested}, S10_MAX_INFLIGHT=off, recipe_weight={weight})")
-        }
-        (None, Some(max)) => {
-            format!("(auto=S10_MAX_INFLIGHT={max}/recipe_weight={weight})")
-        }
-        (None, None) => {
-            format!(
-                "(auto=cores={}, S10_MAX_INFLIGHT=off, recipe_weight={weight})",
-                available_cpus()
-            )
-        }
+    match admission_max {
+        Some(max) => format!("(S10_MAX_INFLIGHT={max}/recipe_weight={weight})"),
+        None => format!(
+            "(S10_MAX_INFLIGHT=off, cores={}, recipe_weight={weight})",
+            available_cpus()
+        ),
     }
 }
 
-fn resolve_runtime_threads(workers: usize, override_threads: Option<usize>) -> usize {
+/// Sizes the orchestrator's Tokio worker threads to track the admission budget
+/// (each in-flight run streams its logs/IO), capped at logical cores so a large
+/// `S10_MAX_INFLIGHT` does not oversubscribe the thread pool. Falls back to
+/// cores when admission is disabled; never exceeds the plan size.
+fn resolve_runtime_threads(
+    admission_max: Option<usize>,
+    plan_len: usize,
+    override_threads: Option<usize>,
+) -> usize {
     if let Some(threads) = override_threads.filter(|threads| *threads > 0) {
         return threads.max(1);
     }
     let available = available_cpus();
     if available <= 1 {
-        1
-    } else {
-        workers.clamp(2, available.min(8))
+        return 1;
     }
+    let budget = admission_max.unwrap_or(available);
+    budget.min(plan_len.max(1)).clamp(2, available)
 }
 
 fn available_cpus() -> usize {
@@ -1706,9 +1687,6 @@ fn available_cpus() -> usize {
 }
 
 fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
-    if let Some(workers) = options.workers {
-        config.workers = Some(workers.max(1));
-    }
     if let Some(cache_dir) = options.cache_dir.take() {
         config.cache_dir = Some(cache_dir);
     }
@@ -1730,7 +1708,6 @@ fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     if options.fail_on_run_errors {
         config.fail_on_run_errors = true;
     }
-    config.workers = config.workers.map(|workers| workers.max(1));
 }
 
 fn same_file_or_path(left: &Path, right: &Path) -> bool {
@@ -2219,6 +2196,7 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
     let hook_keys = metrics
         .iter()
         .flat_map(|metric| metric.hook_scalars.keys().cloned())
+        .filter(|key| !RESERVED_HOOK_KEYS.contains(&key.as_str()))
         .collect::<BTreeSet<_>>();
     let mut header = vec![
         "run_id".to_string(),
@@ -3601,6 +3579,42 @@ mod tests {
     }
 
     #[test]
+    fn results_csv_does_not_duplicate_reserved_hook_columns() {
+        let dir = std::env::temp_dir().join(format!("mc-results-reserved-{}", unix_now_ns()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("results.csv");
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &dir, "ok");
+        metric.exit_ok = true;
+        metric.scored_pass = Some(true);
+        metric.scored_valid = Some(true);
+        // Scoring hooks echo `pass`/`valid` into their scalar map; those must not
+        // become duplicate columns alongside the dedicated `valid`/`scored_*` ones.
+        metric
+            .hook_scalars
+            .insert("valid".to_string(), "true".to_string());
+        metric
+            .hook_scalars
+            .insert("pass".to_string(), "true".to_string());
+        metric
+            .hook_scalars
+            .insert("traj_rmse_m".to_string(), "12.5".to_string());
+        write_results_csv(&path, &dir, std::slice::from_ref(&metric)).unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        let header = text.lines().next().expect("header row");
+        let columns: Vec<&str> = header.split(',').collect();
+        assert_eq!(columns.iter().filter(|col| **col == "valid").count(), 1);
+        assert_eq!(columns.iter().filter(|col| **col == "pass").count(), 0);
+        assert_eq!(
+            columns.iter().filter(|col| **col == "traj_rmse_m").count(),
+            1
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn load_existing_metric_only_returns_recorded_runs() {
         let out_dir = std::env::temp_dir().join(format!("mc-load-{}", unix_now_ns()));
         let run_dir = out_dir.join("runs").join("run_0000000");
@@ -3666,16 +3680,32 @@ mod tests {
     }
 
     #[test]
-    fn resolve_effective_workers_uses_admission_budget_for_auto() {
-        assert_eq!(resolve_effective_workers(None, 100, 2, Some(8)), 4);
-        assert_eq!(resolve_effective_workers(None, 100, 9, Some(8)), 1);
-        assert_eq!(resolve_effective_workers(None, 3, 2, Some(8)), 3);
-        assert_eq!(resolve_effective_workers(Some(12), 6, 2, Some(8)), 6);
-        assert_eq!(resolve_effective_workers(Some(0), 6, 2, Some(8)), 1);
+    fn resolve_auto_workers_uses_admission_budget() {
+        // S10_MAX_INFLIGHT / recipe_weight, clamped to the plan size.
+        assert_eq!(resolve_auto_workers(100, 2, Some(8)), 4);
+        assert_eq!(resolve_auto_workers(100, 9, Some(8)), 1);
+        assert_eq!(resolve_auto_workers(3, 2, Some(8)), 3);
+        // Admission disabled falls back to logical cores (clamped to the plan).
         assert_eq!(
-            resolve_effective_workers(None, 100, 2, None),
-            available_cpus().min(100)
+            resolve_auto_workers(100, 2, None),
+            available_cpus().max(1).min(100)
         );
+    }
+
+    #[test]
+    fn resolve_runtime_threads_track_admission_budget() {
+        // An explicit override always wins.
+        assert_eq!(resolve_runtime_threads(Some(4), 100, Some(6)), 6);
+        let cores = available_cpus();
+        if cores > 1 {
+            // A large budget scales threads but never exceeds logical cores.
+            assert_eq!(
+                resolve_runtime_threads(Some(1000), 100, None),
+                cores.min(100).max(2)
+            );
+            // Never spins up more threads than there are runs (floor of 2).
+            assert_eq!(resolve_runtime_threads(Some(1000), 1, None), 2);
+        }
     }
 
     #[cfg(unix)]

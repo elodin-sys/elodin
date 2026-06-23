@@ -277,8 +277,35 @@ async fn run_with_readiness(
     let log_path = recipe.log_path().map(PathBuf::from);
     wait_for_dependencies(&name, dependencies).await?;
 
+    // Compile Cargo recipes before the readiness window opens so time-based
+    // probes (e.g. `Ready.delay`) measure from process spawn, not from build
+    // start. Otherwise a slow compile can elapse the delay and release
+    // `depends_on` dependents while the sidecar is still building.
+    let recipe = prebuild(recipe, release, &cancel_token).await?;
     let mut run_fut = recipe.run(name, release, cancel_token, cgroup);
     mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+}
+
+/// Performs a recipe's build phase (if any) up front so it does not overlap the
+/// readiness probe. A built Cargo recipe becomes a prebuilt `Process` recipe so
+/// the subsequent `run` only spawns the binary. Non-Cargo recipes pass through
+/// unchanged. Only used on the `run` path; `watch` keeps its own rebuild loop.
+async fn prebuild(
+    recipe: Recipe,
+    release: bool,
+    cancel_token: &CancelToken,
+) -> Result<Recipe, Error> {
+    match recipe {
+        Recipe::Cargo(mut cargo) => {
+            let bin = cargo.build(release, cancel_token.clone()).await?;
+            Ok(Recipe::Process(ProcessRecipe {
+                cmd: bin.to_string(),
+                process_args: cargo.process_args,
+                no_watch: true,
+            }))
+        }
+        other => Ok(other),
+    }
 }
 
 async fn watch_with_readiness(
@@ -466,14 +493,6 @@ impl ProcessArgs {
             let cwd = self.cwd.as_ref().map(|cwd| expand_env(cwd, lookup));
             (args, cwd)
         };
-        if self.silence {
-            let style = Style::new().fg(Color::Yellow).bold();
-            writeln!(
-                stdout(),
-                "{} output silenced by recipe config",
-                style.paint(&name)
-            )?;
-        }
         loop {
             let mut child = Command::new(&cmd);
             child.args(args.iter()).envs(self.env.iter());
