@@ -929,11 +929,10 @@ generated into <code>$ELODIN_ASSETS_DIR/skyboxes</code>; otherwise <code>./asset
 deterministic resource slot (DB port and user-defined SITL ports), and the
 runner recycles those slots across arbitrarily many runs. The campaign pins a
 shared <code>ELODIN_CACHE_DIR</code> so large Cranelift constants are mapped once across
-workers. When worker or runtime-thread counts are unset, the runner auto-sizes
-them from available CPUs: workers consume the CPU budget, while the orchestrator
-uses a small I/O thread pool for process/log handling. Campaign startup reaps
-pre-existing <code>elodin</code> and <code>elodin-db</code> processes by default so stale editor or
-database sessions cannot collide with worker ports.</p>
+workers. Concurrency is governed by the s10 admission budget <code>S10_MAX_INFLIGHT</code>
+(default: logical cores): the runner executes <code>floor(S10_MAX_INFLIGHT / recipe_weight)</code> runs at once and sizes its orchestrator I/O thread pool from the
+same budget. Campaign startup reaps prior campaign-scoped cgroups by default so
+stale sidecars from an interrupted run cannot collide with worker ports.</p>
 <p><strong>Usage:</strong> <code>elodin monte-carlo &lt;COMMAND&gt;</code></p>
 <h6 id="subcommands-1"><strong>Subcommands</strong></h6>
 <ul>
@@ -987,14 +986,15 @@ for a gated pipeline.</p>
 <ul>
 <li><code>--plan &lt;PLAN.csv&gt;</code>: materialized one-row-per-run plan.</li>
 <li><code>--spec &lt;SPEC.toml&gt;</code>: sampling spec; sampled into a plan before execution.</li>
-<li><code>--campaign &lt;CAMPAIGN.toml&gt;</code>: worker count, resource slots, hooks, retries, timeouts.</li>
-<li><code>--workers &lt;N&gt;</code>: override the auto-sized campaign worker count. When omitted,
-the runner plans the per-run recipe, counts its processes, then uses
-<code>floor(S10_MAX_INFLIGHT / recipe_weight)</code> workers (clamped to the number of
-planned runs). <code>S10_MAX_INFLIGHT</code> defaults to the host's logical core count;
-raise it to oversubscribe I/O-bound SITL stacks.</li>
-<li><code>--runtime-threads &lt;N&gt;</code>: override the auto-sized orchestrator I/O thread
-pool. Use <code>0</code> or omit the option for the default auto-sized pool.</li>
+<li><code>--campaign &lt;CAMPAIGN.toml&gt;</code>: resource slots, hooks, retries, timeouts.</li>
+<li><code>S10_MAX_INFLIGHT</code> (environment variable, not a flag): the single concurrency
+knob. The runner plans the per-run recipe, counts its processes
+(<code>recipe_weight</code>), and executes <code>floor(S10_MAX_INFLIGHT / recipe_weight)</code> runs
+at once (clamped to the plan size). Defaults to the host's logical core count;
+set it higher to oversubscribe I/O-bound SITL stacks, or <code>off</code> to disable
+admission limiting entirely.</li>
+<li><code>--runtime-threads &lt;N&gt;</code>: override the orchestrator I/O thread pool. When unset
+(or <code>0</code>) it is auto-sized from <code>S10_MAX_INFLIGHT</code>, capped at logical cores.</li>
 <li><code>--memory-probe</code>: enable expensive shared-constant PSS sampling and
 <code>memory.json</code>/<code>processes.csv</code> output. Leave this off for scaling benchmarks.</li>
 <li><code>--keep-existing</code>: do not reap existing <code>elodin</code> / <code>elodin-db</code> processes at
