@@ -40,13 +40,13 @@ impl WidgetSystem for InspectorTimeline<'_> {
                 .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
-        node_color_picker(ui, "PLAYED TRAIL", &mut timeline_settings.played_color);
-        node_color_picker(ui, "FUTURE TRAIL", &mut timeline_settings.future_color);
+        node_color_picker(ui, "PLAYED COLOR", &mut timeline_settings.played_color);
+        node_color_picker(ui, "FUTURE COLOR", &mut timeline_settings.future_color);
 
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("FUTURE TRAIL ALPHA").color(scheme.text_secondary));
+                ui.label(egui::RichText::new("FUTURE TRAIL OPACITY").color(scheme.text_secondary));
 
                 ui.label(
                     egui::RichText::new(format!("{:.2}", timeline_settings.future_trail_alpha))
