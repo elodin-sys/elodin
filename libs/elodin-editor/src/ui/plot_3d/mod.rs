@@ -23,7 +23,7 @@ use impeller2_wkt::{ComponentValue, EntityMetadata, GetTimeSeries, Line3d};
 
 use gpu::{LineConfig, LineUniform};
 
-use super::plot::{CollectedGraphData, Line, PlotDataComponent, gpu::LineHandle};
+use super::plot::{CollectedGraphData, Line, PlotDataComponent};
 use crate::{
     EqlContext,
     object_3d::{CompiledExpr, EditableEQL, compile_eql_expr},
@@ -34,7 +34,7 @@ pub mod gpu;
 
 pub fn sync_line_plot_3d(
     line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
-    mut uniforms: Query<(&Line3d, &mut LineUniform), With<LineHandle>>,
+    mut uniforms: Query<(&Line3d, &mut LineUniform), With<gpu::LineHandles>>,
     mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
     eql_ctx: Res<EqlContext>,
