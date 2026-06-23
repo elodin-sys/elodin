@@ -13,6 +13,7 @@ use bevy::{
         system::{Commands, Query, Res, ResMut},
     },
     math::{DQuat, Mat4, Vec4},
+    prelude::Color,
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use eql;
@@ -30,6 +31,13 @@ use crate::{
 };
 
 pub mod gpu;
+
+/// Convert a schematic (sRGB) color into the linear RGB the line pipeline renders,
+/// keeping it consistent with meshes/gizmos. Alpha is forced opaque.
+fn line_color_linear(color: &impeller2_wkt::Color) -> Vec4 {
+    let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
+    Vec4::new(linear.red, linear.green, linear.blue, 1.0)
+}
 
 pub fn sync_line_plot_3d(
     line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
@@ -85,7 +93,7 @@ pub fn sync_line_plot_3d(
                 gpu::LineHandles([x, y, z]),
                 LineUniform {
                     line_width: line_plot.line_width,
-                    color: Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0),
+                    color: line_color_linear(&line_plot.color),
                     depth_bias: 0.0,
                     model: Mat4::IDENTITY,
                     perspective: if line_plot.perspective { 1 } else { 0 },
@@ -104,7 +112,7 @@ pub fn sync_line_plot_3d(
         }
     }
     for (line_plot, mut uniform) in uniforms.iter_mut() {
-        uniform.color = Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0);
+        uniform.color = line_color_linear(&line_plot.color);
         uniform.line_width = line_plot.line_width;
         uniform.perspective = if line_plot.perspective { 1 } else { 0 };
     }
