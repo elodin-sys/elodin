@@ -25,6 +25,7 @@ pub enum Recipe {
         depends_on: Vec<String>,
         ready: Option<Ready>,
         ready_timeout: Option<String>,
+        silence: bool,
     },
     Process {
         name: String,
@@ -37,6 +38,7 @@ pub enum Recipe {
         depends_on: Vec<String>,
         ready: Option<Ready>,
         ready_timeout: Option<String>,
+        silence: bool,
     },
     Group {
         name: String,
@@ -135,6 +137,7 @@ impl Recipe {
                 depends_on,
                 ready,
                 ready_timeout,
+                silence,
                 ..
             } => Ok(RustRecipe::Cargo(CargoRecipe {
                 path: path.clone(),
@@ -151,6 +154,7 @@ impl Recipe {
                     },
                     fail_on_error: false,
                     log_path: None,
+                    silence: *silence,
                     depends_on: depends_on.clone(),
                     ready: ready.as_ref().map(|ready| ready.inner.clone()),
                     ready_timeout: ready_timeout.clone(),
@@ -167,6 +171,7 @@ impl Recipe {
                 depends_on,
                 ready,
                 ready_timeout,
+                silence,
                 ..
             } => Ok(RustRecipe::Process(ProcessRecipe {
                 cmd: cmd.clone(),
@@ -180,6 +185,7 @@ impl Recipe {
                     },
                     fail_on_error: false,
                     log_path: None,
+                    silence: *silence,
                     depends_on: depends_on.clone(),
                     ready: ready.as_ref().map(|ready| ready.inner.clone()),
                     ready_timeout: ready_timeout.clone(),
@@ -266,7 +272,7 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the binary
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None))]
+    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None, silence=None))]
     fn cargo(
         name: String,
         path: String,
@@ -279,6 +285,7 @@ impl PyRecipe {
         depends_on: Option<Vec<String>>,
         ready: Option<Ready>,
         ready_timeout: Option<String>,
+        silence: Option<bool>,
     ) -> PyResult<Self> {
         let inner = Recipe::Cargo {
             name,
@@ -293,6 +300,7 @@ impl PyRecipe {
             depends_on: depends_on.unwrap_or_default(),
             ready,
             ready_timeout,
+            silence: silence.unwrap_or(false),
         };
         Ok(PyRecipe { inner })
     }
@@ -305,7 +313,7 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the process
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None))]
+    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None, silence=None))]
     fn process(
         name: String,
         cmd: String,
@@ -316,6 +324,7 @@ impl PyRecipe {
         depends_on: Option<Vec<String>>,
         ready: Option<Ready>,
         ready_timeout: Option<String>,
+        silence: Option<bool>,
     ) -> PyResult<Self> {
         let inner = Recipe::Process {
             name,
@@ -328,6 +337,7 @@ impl PyRecipe {
             depends_on: depends_on.unwrap_or_default(),
             ready,
             ready_timeout,
+            silence: silence.unwrap_or(false),
         };
         Ok(PyRecipe { inner })
     }

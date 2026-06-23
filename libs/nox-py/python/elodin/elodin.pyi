@@ -501,6 +501,7 @@ class S10PyRecipe:
         depends_on: list[str] | None = None,
         ready: S10Ready | None = None,
         ready_timeout: str | None = None,
+        silence: bool = False,
     ) -> S10PyRecipe: ...
     @staticmethod
     def process(
@@ -513,6 +514,7 @@ class S10PyRecipe:
         depends_on: list[str] | None = None,
         ready: S10Ready | None = None,
         ready_timeout: str | None = None,
+        silence: bool = False,
     ) -> S10PyRecipe: ...
     def to_json(self) -> str: ...
     def name(self) -> str: ...

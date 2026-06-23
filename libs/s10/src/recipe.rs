@@ -422,6 +422,8 @@ pub struct ProcessArgs {
     #[serde(default)]
     pub log_path: Option<PathBuf>,
     #[serde(default)]
+    pub silence: bool,
+    #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default)]
     pub ready: Option<ReadyProbe>,
@@ -464,13 +466,22 @@ impl ProcessArgs {
             let cwd = self.cwd.as_ref().map(|cwd| expand_env(cwd, lookup));
             (args, cwd)
         };
+        if self.silence {
+            let style = Style::new().fg(Color::Yellow).bold();
+            writeln!(
+                stdout(),
+                "{} output silenced by recipe config",
+                style.paint(&name)
+            )?;
+        }
         loop {
             let mut child = Command::new(&cmd);
-            child
-                .args(args.iter())
-                .envs(self.env.iter())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+            child.args(args.iter()).envs(self.env.iter());
+            if self.silence {
+                child.stdout(Stdio::null()).stderr(Stdio::null());
+            } else {
+                child.stdout(Stdio::piped()).stderr(Stdio::piped());
+            }
             if let Some(cwd) = &cwd {
                 child.current_dir(cwd);
             }
@@ -482,25 +493,27 @@ impl ProcessArgs {
             if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
                 scope.add_pid(pid)?;
             }
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or(ProcessError::ProcessMissingStdout)?;
-            let stderr = child
-                .stderr
-                .take()
-                .ok_or(ProcessError::ProcessMissingStderr)?;
+            if !self.silence {
+                let stdout = child
+                    .stdout
+                    .take()
+                    .ok_or(ProcessError::ProcessMissingStdout)?;
+                let stderr = child
+                    .stderr
+                    .take()
+                    .ok_or(ProcessError::ProcessMissingStderr)?;
 
-            let stdout_name = name.clone();
-            let stderr_name = name.clone();
-            let stdout_log_path = self.log_path.clone();
-            let stderr_log_path = self.log_path.clone();
-            tokio::spawn(async move {
-                print_logs(stdout, &stdout_name, Color::Blue, stdout_log_path).await
-            });
-            tokio::spawn(async move {
-                print_logs(stderr, &stderr_name, Color::Red, stderr_log_path).await
-            });
+                let stdout_name = name.clone();
+                let stderr_name = name.clone();
+                let stdout_log_path = self.log_path.clone();
+                let stderr_log_path = self.log_path.clone();
+                tokio::spawn(async move {
+                    print_logs(stdout, &stdout_name, Color::Blue, stdout_log_path).await
+                });
+                tokio::spawn(async move {
+                    print_logs(stderr, &stderr_name, Color::Red, stderr_log_path).await
+                });
+            }
             tokio::select! {
                 _ = cancel_token.wait() => {
                     // Graceful shutdown: send SIGTERM, wait up to 2 seconds, then force kill
@@ -819,6 +832,7 @@ mod tests {
                 restart_policy: RestartPolicy::Never,
                 fail_on_error,
                 log_path: None,
+                silence: false,
                 depends_on,
                 ready,
                 ready_timeout: None,

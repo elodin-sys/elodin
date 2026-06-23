@@ -179,6 +179,7 @@ mod tests {
             restart_policy: RestartPolicy::Never,
             fail_on_error: false,
             log_path: None,
+            silence: false,
             depends_on: Vec::new(),
             ready: None,
             ready_timeout: None,
