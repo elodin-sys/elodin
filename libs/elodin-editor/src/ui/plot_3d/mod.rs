@@ -39,19 +39,20 @@ fn line_color_linear(color: &impeller2_wkt::Color) -> Vec4 {
     Vec4::new(linear.red, linear.green, linear.blue, 1.0)
 }
 
-/// Resolve a `line_3d` color: an explicit KDL color uses the line's own color,
-/// otherwise the timeline played/future trail colors are used at render time.
-fn line_color_and_source(color: &Option<impeller2_wkt::Color>) -> (Vec4, gpu::LineColorSource) {
-    match color {
-        Some(color) => (line_color_linear(color), gpu::LineColorSource::Explicit),
-        None => (Vec4::ZERO, gpu::LineColorSource::Timeline),
+/// Resolve a `line_3d`'s played/future trail colors from its KDL `color`/
+/// `future_color`. `None` entries fall back to the timeline colors at render
+/// time (see `extract_lines`).
+fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
+    gpu::LineTrailColors {
+        played: line_plot.color.as_ref().map(line_color_linear),
+        future: line_plot.future_color.as_ref().map(line_color_linear),
     }
 }
 
 pub fn sync_line_plot_3d(
     line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
     mut uniforms: Query<
-        (&Line3d, &mut LineUniform, &mut gpu::LineColorSource),
+        (&Line3d, &mut LineUniform, &mut gpu::LineTrailColors),
         With<gpu::LineHandles>,
     >,
     mut lines: ResMut<Assets<Line>>,
@@ -100,20 +101,20 @@ pub fn sync_line_plot_3d(
             continue;
         };
 
-        let (color, color_source) = line_color_and_source(&line_plot.color);
+        let trail = line_trail_colors(line_plot);
         if let Ok(mut entity) = commands.get_entity(entity) {
             entity.try_insert((
                 gpu::LineHandles([x, y, z]),
                 LineUniform {
                     line_width: line_plot.line_width,
-                    color,
+                    color: trail.played.unwrap_or(Vec4::ZERO),
                     depth_bias: 0.0,
                     model: Mat4::IDENTITY,
                     perspective: if line_plot.perspective { 1 } else { 0 },
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),
                 },
-                color_source,
+                trail,
                 LineConfig {
                     render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
                 },
@@ -125,12 +126,12 @@ pub fn sync_line_plot_3d(
             }
         }
     }
-    for (line_plot, mut uniform, mut color_source) in uniforms.iter_mut() {
-        let (color, source) = line_color_and_source(&line_plot.color);
-        uniform.color = color;
+    for (line_plot, mut uniform, mut trail) in uniforms.iter_mut() {
+        let next = line_trail_colors(line_plot);
+        uniform.color = next.played.unwrap_or(Vec4::ZERO);
         uniform.line_width = line_plot.line_width;
         uniform.perspective = if line_plot.perspective { 1 } else { 0 };
-        *color_source = source;
+        *trail = next;
     }
 }
 

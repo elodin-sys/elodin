@@ -924,6 +924,10 @@ fn serialize_line_3d(line: &Line3d) -> KdlNode {
         serialize_color_to_node(&mut node, &color);
     }
 
+    if let Some(future_color) = line.future_color {
+        serialize_color_to_node_named(&mut node, &future_color, Some("future_color"));
+    }
+
     if !line.perspective {
         node.entries_mut()
             .push(KdlEntry::new_prop("perspective", false));
@@ -1616,6 +1620,7 @@ object_3d lander.world_pos {
             eql: "ball.world_pos".to_string(),
             line_width: 2.0,
             color: Some(Color::WHITE),
+            future_color: None,
             perspective: true,
             frame: Some(GeoFrame::ENU),
             node_id: NodeId::next(),
@@ -1726,6 +1731,7 @@ object_3d lander.world_pos {
             eql: "trajectory".to_string(),
             line_width: 2.0,
             color: Some(Color::MINT),
+            future_color: Some(Color::WHITE),
             perspective: false,
             frame: None,
             node_id: NodeId::default(),
@@ -1739,6 +1745,7 @@ object_3d lander.world_pos {
             assert_eq!(line.eql, "trajectory");
             assert_eq!(line.line_width, 2.0);
             assert_color_close(line.color.expect("color"), Color::MINT);
+            assert_color_close(line.future_color.expect("future_color"), Color::WHITE);
             assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");

@@ -365,9 +365,13 @@ pub enum GraphType {
 pub struct Line3d {
     pub eql: String,
     pub line_width: f32,
-    /// `None` falls back to the timeline played/future trail colors.
+    /// Played-segment color. `None` falls back to the timeline played color.
     #[serde(default)]
     pub color: Option<Color>,
+    /// Future-segment color. `None` falls back to `color`, then the timeline
+    /// future color.
+    #[serde(default)]
+    pub future_color: Option<Color>,
     pub perspective: bool,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,

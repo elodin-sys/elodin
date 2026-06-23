@@ -88,7 +88,7 @@ All scene nodes support an optional `frame` attribute (`ENU`, `NED`, or `ECEF`) 
   - `plane [size=10.0] [width=size] [depth=size]`
   - `ellipsoid [scale="(1, 1, 1)"]`
   - mesh nodes support optional `color` and optional `emissivity` (clamped to `[0.0, 1.0]` on serialization).
-- `line_3d <eql> [frame=ENU|NED|ECEF] [line_width=1.0] [color] [perspective=#true]`
+- `line_3d <eql> [frame=ENU|NED|ECEF] [line_width=1.0] [color] [future_color] [perspective=#true]` — `color` is the played segment (falls back to timeline `played_color`); `future_color` is the future segment (falls back to `color`, then timeline `future_color`).
 - `vector_arrow <vector-eql> [frame=ENU|NED|ECEF] [origin] [scale=1.0] [name] [body_frame|in_body_frame=#false] [normalize=#false] [show_name|display_name=#true] [arrow_thickness=0.1] [label_position] [color]`
 
 ## Defaults And Aliases

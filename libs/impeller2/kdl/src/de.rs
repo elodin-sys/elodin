@@ -1462,6 +1462,7 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         .unwrap_or(1.0) as f32;
 
     let color = parse_color_from_node_or_children(node, None);
+    let future_color = parse_named_color_field(node, "future_color");
 
     let perspective = node
         .get("perspective")
@@ -1477,10 +1478,34 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         eql,
         line_width,
         color,
+        future_color,
         perspective,
         frame,
         node_id: NodeId::default(),
     })
+}
+
+/// Parses a named color field (e.g. `future_color`) from a property string or a
+/// matching child node. Unlike [`parse_color_from_node_or_children`], this never
+/// reads the node's own positional color args.
+fn parse_named_color_field(node: &KdlNode, field: &str) -> Option<Color> {
+    if let Some(text) = node.get(field).and_then(|v| v.as_string())
+        && let Some(color) = parse_color_from_text(text)
+    {
+        return Some(color);
+    }
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == field
+                && let Some(color) = parse_color_from_node(child)
+            {
+                return Some(color);
+            }
+        }
+    }
+
+    None
 }
 
 fn parse_arrow_thickness(node: &KdlNode, src: &str) -> Result<ArrowThickness, KdlSchematicError> {
@@ -2864,6 +2889,29 @@ tabs {
             panic!("Expected line_3d");
         };
         assert_eq!(line.color, None);
+        assert_eq!(line.future_color, None);
+    }
+
+    #[test]
+    fn test_parse_line_3d_future_color() {
+        // Played and future colors can be set independently from KDL.
+        let schematic =
+            parse_schematic(r#"line_3d "traj" { color 0 255 0; future_color 255 255 255 }"#)
+                .unwrap();
+        let SchematicElem::Line3d(line) = &schematic.elems[0] else {
+            panic!("Expected line_3d");
+        };
+        assert_eq!(line.color, Some(Color::GREEN));
+        assert_eq!(line.future_color, Some(Color::WHITE));
+
+        // `future_color` also accepts a named color as a child node.
+        let schematic =
+            parse_schematic(r#"line_3d "traj" { color green; future_color green }"#).unwrap();
+        let SchematicElem::Line3d(line) = &schematic.elems[0] else {
+            panic!("Expected line_3d");
+        };
+        assert_eq!(line.color, Some(Color::GREEN));
+        assert_eq!(line.future_color, Some(Color::GREEN));
     }
 
     #[test]
