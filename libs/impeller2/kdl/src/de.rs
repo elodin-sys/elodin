@@ -1461,7 +1461,7 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         .and_then(|v| v.as_float())
         .unwrap_or(1.0) as f32;
 
-    let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
+    let color = parse_color_from_node_or_children(node, None);
 
     let perspective = node
         .get("perspective")
@@ -2839,13 +2839,31 @@ tabs {
         if let SchematicElem::Line3d(line) = &schematic.elems[0] {
             assert_eq!(line.eql, "trajectory");
             assert_eq!(line.line_width, 2.0);
-            assert_eq!(line.color.r, Color::MINT.r);
-            assert_eq!(line.color.g, Color::MINT.g);
-            assert_eq!(line.color.b, Color::MINT.b);
+            let color = line.color.expect("color");
+            assert_eq!(color.r, Color::MINT.r);
+            assert_eq!(color.g, Color::MINT.g);
+            assert_eq!(color.b, Color::MINT.b);
             assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");
         }
+    }
+
+    #[test]
+    fn test_parse_line_3d_color_optional() {
+        // Explicit KDL color must be honored.
+        let schematic = parse_schematic(r#"line_3d "traj" { color 0 255 0 }"#).unwrap();
+        let SchematicElem::Line3d(line) = &schematic.elems[0] else {
+            panic!("Expected line_3d");
+        };
+        assert_eq!(line.color, Some(Color::GREEN));
+
+        // No color falls back to the timeline trail colors (None at parse time).
+        let schematic = parse_schematic(r#"line_3d "traj""#).unwrap();
+        let SchematicElem::Line3d(line) = &schematic.elems[0] else {
+            panic!("Expected line_3d");
+        };
+        assert_eq!(line.color, None);
     }
 
     #[test]

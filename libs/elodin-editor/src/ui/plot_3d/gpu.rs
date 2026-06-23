@@ -169,6 +169,24 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
 
+/// Where a `line_3d` gets its color from.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineColorSource {
+    /// Use the line's own `LineUniform.color` (set from the KDL `color`).
+    Explicit,
+    /// Fall back to the timeline played/future trail colors.
+    Timeline,
+}
+
+/// Linearize a schematic (sRGB) color for the line shader, preserving alpha.
+fn wkt_color_linear(color: impeller2_wkt::Color) -> Vec4 {
+    Vec4::from_array(
+        Color::srgba(color.r, color.g, color.b, color.a)
+            .to_linear()
+            .to_f32_array(),
+    )
+}
+
 #[derive(Component, ShaderType, Clone, Copy, Reflect)]
 pub struct LineUniform {
     pub line_width: f32,
@@ -432,6 +450,7 @@ type LineQueryMut = (
     &'static LineHandles,
     &'static LineConfig,
     &'static mut LineUniform,
+    Option<&'static LineColorSource>,
     Option<&'static mut GpuLine>,
 );
 
@@ -462,20 +481,11 @@ fn extract_lines(
         } else {
             selected_range.clone()
         };
-        let played_color = timeline_settings.played_color;
-        let played_trail_color = Vec4::new(
-            played_color.r,
-            played_color.g,
-            played_color.b,
-            played_color.a,
-        );
-        let mut future_color = Vec4::new(
-            timeline_settings.future_color.r,
-            timeline_settings.future_color.g,
-            timeline_settings.future_color.b,
-            timeline_settings.future_color.a,
-        );
-        future_color.w *= timeline_settings.future_trail_alpha;
+        let future_trail_alpha = timeline_settings.future_trail_alpha;
+        // Fallback colors for lines without an explicit KDL `color`.
+        let played_timeline_color = wkt_color_linear(timeline_settings.played_color);
+        let mut future_timeline_color = wkt_color_linear(timeline_settings.future_color);
+        future_timeline_color.w *= future_trail_alpha;
 
         // Live-follow mode: the whole trail is "already played", so render
         // everything in the played color (yolk) and skip the future pass
@@ -497,7 +507,10 @@ fn extract_lines(
         // the split back onto the previous sample boundary instead.
         let split = selected_range.start.max(current_timestamp.0);
 
-        'outer: for (entity, line_handles, config, uniform, gpu_line) in lines.iter_mut() {
+        'outer: for (entity, line_handles, config, uniform, color_source, gpu_line) in
+            lines.iter_mut()
+        {
+            let use_timeline_colors = color_source.copied() == Some(LineColorSource::Timeline);
             for line in &line_handles.0 {
                 let Some(line) = line_assets.get_mut(line) else {
                     continue 'outer;
@@ -617,7 +630,9 @@ fn extract_lines(
 
             if let Some(gpu_line) = build_gpu_line(played_range.clone()) {
                 let mut played_uniform = *uniform;
-                played_uniform.color = played_trail_color;
+                if use_timeline_colors {
+                    played_uniform.color = played_timeline_color;
+                }
                 commands.spawn((
                     MainEntity::from(entity),
                     line_handles.clone(),
@@ -649,7 +664,11 @@ fn extract_lines(
 
             if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
                 let mut future_uniform = *uniform;
-                future_uniform.color = future_color;
+                if use_timeline_colors {
+                    future_uniform.color = future_timeline_color;
+                } else {
+                    future_uniform.color.w *= future_trail_alpha;
+                }
                 commands.spawn((
                     MainEntity::from(entity),
                     line_handles.clone(),
