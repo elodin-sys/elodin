@@ -119,13 +119,13 @@ in {
     };
 
     environment.systemPackages = [elodin-db];
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [
+    networking.firewall.allowedTCPPortRanges = lib.optionals cfg.openFirewall [
       {
         from = 1;
         to = 65535;
       }
     ];
-    networking.firewall.allowedUDPPorts = lib.optionals cfg.openFirewall [
+    networking.firewall.allowedUDPPortRanges = lib.optionals cfg.openFirewall [
       {
         from = 1;
         to = 65535;
