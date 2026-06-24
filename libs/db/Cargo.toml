@@ -30,6 +30,7 @@ axum = [
 ]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
+rtsp = ["dep:retina", "dep:url", "dep:rtsp-ingest", "dep:tokio"]
 tracy = ["dep:tracing-tracy"]
 
 [dependencies]
@@ -116,8 +117,13 @@ axum-streams.optional = true
 serde_json.version = "1"
 serde_json.optional = true
 tokio.version = "1"
-tokio.features = ["rt-multi-thread"]
+tokio.features = ["rt-multi-thread", "time"]
 tokio.optional = true
+
+# rtsp ingest (opt-in, off by default)
+retina = { version = "0.4", optional = true }
+url = { version = "2", optional = true }
+rtsp-ingest = { path = "../rtsp-ingest", optional = true }
 impeller2-kdl.path = "../impeller2/kdl"
 impeller2-kdl.optional = true
 reqwest = { version = "0.12", default-features = false, features = [

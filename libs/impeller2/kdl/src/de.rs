@@ -432,6 +432,7 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "schematic_tree" => Ok(Panel::SchematicTree(parse_name(node))),
         "data_overview" => Ok(Panel::DataOverview(parse_name(node))),
         "video_stream" => parse_video_stream(node),
+        "rtsp_stream" => parse_rtsp_stream(node),
         "sensor_view" => parse_sensor_view(node),
         "log_stream" => parse_log_stream(node),
         _ => Err(KdlSchematicError::UnknownNode {
@@ -864,6 +865,20 @@ fn parse_video_stream(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
     let name = parse_name(node);
 
     Ok(Panel::VideoStream(VideoStream { msg_name, name }))
+}
+
+fn parse_rtsp_stream(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+    let msg_name = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .unwrap_or_default()
+        .to_string();
+
+    let name = parse_name(node);
+
+    Ok(Panel::RtspStream(RtspStream { msg_name, name }))
 }
 
 fn parse_sensor_view(node: &KdlNode) -> Result<Panel, KdlSchematicError> {

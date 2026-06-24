@@ -1013,6 +1013,40 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
             }
+            Panel::RtspStream(rtsp_stream) => {
+                let msg_id = impeller2::types::msg_id(&rtsp_stream.msg_name);
+                let label = rtsp_stream
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("RTSP Camera {}", rtsp_stream.msg_name));
+
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::video_stream::VideoStream {
+                            msg_id,
+                            msg_name: rtsp_stream.msg_name.clone(),
+                            ..Default::default()
+                        },
+                        bevy::ui::Node {
+                            position_type: bevy::ui::PositionType::Absolute,
+                            ..Default::default()
+                        },
+                        bevy::prelude::ImageNode {
+                            image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                            ..Default::default()
+                        },
+                        crate::ui::video_stream::VideoDecoderHandle::default(),
+                        crate::ui::video_stream::VideoFrameCache::default(),
+                    ))
+                    .id();
+
+                let pane = crate::ui::video_stream::VideoStreamPane {
+                    entity,
+                    name: label,
+                };
+                tile_state.insert_tile(Tile::Pane(Pane::RtspStream(pane)), parent_id, false)
+            }
             Panel::SensorView(sensor_view) => {
                 let msg_id = impeller2::types::msg_id(&sensor_view.msg_name);
                 let label = sensor_view
@@ -1482,6 +1516,7 @@ mod tests {
     #[test_case("hsplit { data_overview share=0.5 data_overview share=0.5 }" => (true, false, false) ; "hsplit")]
     #[test_case("vsplit { data_overview share=0.5 data_overview share=0.5 }" => (true, false, false) ; "vsplit")]
     #[test_case("tabs { video_stream \"obs-camera\" }" => (true, false, false) ; "video_stream")]
+    #[test_case("tabs { rtsp_stream \"rtsp-camera\" }" => (true, false, false) ; "rtsp_stream")]
     #[test_case("tabs { sensor_view \"drone.scene_cam\" }" => (true, false, false) ; "sensor_view")]
     #[test_case("tabs { log_stream \"fsw.log\" }" => (true, false, false) ; "log_stream")]
     fn panel_roots_clear_cleanly(content: &str) -> (bool, bool, bool) {

@@ -349,14 +349,19 @@ fn export_one(
 }
 
 /// Build a mapping from msg PacketId to friendly name by scanning the
-/// schematic KDL for `video_stream "name"` entries and computing `msg_id(name)`.
+/// schematic KDL for `video_stream "name"` / `rtsp_stream "name"` entries and
+/// computing `msg_id(name)`.
 fn video_name_map_from_schematic(schematic: &str) -> HashMap<PacketId, String> {
     let mut map = HashMap::new();
     // Parse KDL entries like:  video_stream "test-video" name="Test Pattern"
-    // The first string argument after video_stream is the msg_name.
+    // (and the RTSP-ingest variant: rtsp_stream "rtsp-camera" name="RTSP Camera").
+    // The first string argument after the node name is the msg_name.
     for line in schematic.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("video_stream") {
+        if let Some(rest) = trimmed
+            .strip_prefix("video_stream")
+            .or_else(|| trimmed.strip_prefix("rtsp_stream"))
+        {
             let rest = rest.trim();
             // Extract the first quoted string argument (the msg_name)
             if let Some(start) = rest.find('"')

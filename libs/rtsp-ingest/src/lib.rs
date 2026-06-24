@@ -15,12 +15,15 @@
 
 pub mod annexb;
 pub mod clock;
+pub mod config;
 
 /// Errors produced while reframing RTSP H.264 into the DB storage contract.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("access unit contains an IDR slice but no SPS/PPS are available to inject")]
     MissingParameterSets,
+    #[error("invalid RTSP source spec (expected NAME=URL)")]
+    InvalidSourceSpec,
     #[error("AVC NAL length prefix is truncated")]
     TruncatedNal,
     #[error("AVC NAL has a declared length of zero")]

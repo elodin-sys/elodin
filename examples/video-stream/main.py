@@ -215,6 +215,7 @@ world.schematic("""
             tabs {
                 video_stream "test-video" name="Test Pattern"
                 video_stream "obs-camera" name="OBS Camera"
+                rtsp_stream "rtsp-camera" name="RTSP Camera"
             }
             graph "ball.wind" name="Wind (m/s)"
         }

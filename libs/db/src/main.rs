@@ -98,6 +98,13 @@ struct RunArgs {
         help = "Target packet size in bytes for follow streaming (data is buffered to this size before sending)"
     )]
     follow_packet_size: usize,
+    #[cfg(feature = "rtsp")]
+    #[clap(
+        long = "rtsp-source",
+        value_name = "NAME=URL",
+        help = "Pull an H.264 RTSP stream into message-log NAME (repeatable)"
+    )]
+    rtsp_sources: Vec<String>,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -397,6 +404,8 @@ async fn main() -> miette::Result<()> {
             start_timestamp,
             follows,
             follow_packet_size,
+            #[cfg(feature = "rtsp")]
+            rtsp_sources,
             ..
         }) => {
             let path = path.unwrap_or_else(|| {
@@ -442,6 +451,8 @@ async fn main() -> miette::Result<()> {
                     .into_diagnostic()?;
             }
             let axum_db = server.db.clone();
+            #[cfg(feature = "rtsp")]
+            let rtsp_db = server.db.clone();
             if let Some(config) = follow_config {
                 let follow_db = server.db.clone();
                 stellarator::struc_con::stellar(move || {
@@ -452,6 +463,17 @@ async fn main() -> miette::Result<()> {
             if let Some(http_addr) = http_addr {
                 stellarator::struc_con::tokio(move |_| async move {
                     elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
+                });
+            }
+            #[cfg(feature = "rtsp")]
+            if !rtsp_sources.is_empty() {
+                let sources = rtsp_sources
+                    .iter()
+                    .map(|spec| rtsp_ingest::config::RtspSource::parse(spec))
+                    .collect::<Result<Vec<_>, _>>()
+                    .into_diagnostic()?;
+                stellarator::struc_con::tokio(move |_| async move {
+                    elodin_db::rtsp_ingest::run(sources, rtsp_db).await
                 });
             }
             if let Some(lua_config) = config {
