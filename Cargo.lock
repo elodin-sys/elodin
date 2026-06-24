@@ -12081,6 +12081,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtsp-ingest"
+version = "0.17.4-alpha.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
