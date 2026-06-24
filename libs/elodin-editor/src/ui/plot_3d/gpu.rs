@@ -1,10 +1,8 @@
-use std::mem;
-
 use crate::{
     SelectedTimeRange,
     ui::plot::{
         Line,
-        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
+        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, VALUE_BUFFER_SIZE},
     },
     ui::timeline::TimelineSettings,
 };
@@ -19,9 +17,8 @@ use bevy::{
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
     ecs::{
-        bundle::Bundle,
         component::Component,
-        entity::{ContainsEntity, Entity},
+        entity::Entity,
         query::Has,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
@@ -34,7 +31,7 @@ use bevy::{
     math::{Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref, Reflect, Resource},
+    prelude::{Color, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -52,7 +49,6 @@ use bevy::{
 use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
-    view::RetainedViewEntity,
 };
 use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
@@ -382,7 +378,6 @@ pub struct LineConfig {
 pub struct GpuLine {
     values_bind_group: BindGroup,
     index_bind_group: BindGroup,
-    index_buffers: [Buffer; 3],
     count: u32,
 }
 
@@ -446,19 +441,21 @@ type DrawLineData = (
     DrawLine,
 );
 
+type ExtractLinesParams = (
+    Query<'static, 'static, LineQueryMut>,
+    ResMut<'static, Assets<Line>>,
+    Commands<'static, 'static>,
+    Res<'static, SelectedTimeRange>,
+    Res<'static, EarliestTimestamp>,
+    Res<'static, LastUpdated>,
+    Res<'static, CurrentTimestamp>,
+    Res<'static, TimelineSettings>,
+    Res<'static, crate::ui::timeline::LatestFollow>,
+);
+
 #[derive(Resource)]
 struct CachedSystemState {
-    state: SystemState<(
-        Query<'static, 'static, LineQueryMut>,
-        ResMut<'static, Assets<Line>>,
-        Commands<'static, 'static>,
-        Res<'static, SelectedTimeRange>,
-        Res<'static, EarliestTimestamp>,
-        Res<'static, LastUpdated>,
-        Res<'static, CurrentTimestamp>,
-        Res<'static, TimelineSettings>,
-        Res<'static, crate::ui::timeline::LatestFollow>,
-    )>,
+    state: SystemState<ExtractLinesParams>,
 }
 
 impl FromWorld for CachedSystemState {
@@ -595,7 +592,7 @@ fn extract_lines(
                 render_device.create_bind_group("line values", &values_layout.layout, &entries)
             };
 
-            let mut build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>| {
+            let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>| {
                 if range.start >= range.end {
                     return None;
                 }
@@ -651,7 +648,6 @@ fn extract_lines(
                 Some(GpuLine {
                     values_bind_group: values_bind_group.clone(),
                     index_bind_group,
-                    index_buffers,
                     count,
                 })
             };
