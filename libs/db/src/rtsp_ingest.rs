@@ -136,11 +136,14 @@ async fn stream_once(
         };
 
         if (converter.is_none() || frame.has_new_parameters())
-            && let Some(params) = video_parameters(&demuxed, video_i)
+            && let Some((params, nal_length_size)) = video_parameters(&demuxed, video_i)
         {
             match converter.as_mut() {
                 Some(c) => c.update_parameter_sets(params),
-                None => converter = Some(AnnexBConverter::new(params)),
+                None => {
+                    converter =
+                        Some(AnnexBConverter::new(params).with_nal_length_size(nal_length_size)?)
+                }
             }
         }
         let Some(converter) = converter.as_ref() else {
@@ -173,21 +176,27 @@ async fn stream_once(
     Ok(())
 }
 
-/// Extracts H.264 SPS/PPS for `stream_id` from retina's out-of-band parameters.
-fn video_parameters(demuxed: &retina::client::Demuxed, stream_id: usize) -> Option<ParameterSets> {
+/// Extracts H.264 SPS/PPS and the AVC NAL length size for `stream_id` from
+/// retina's out-of-band parameters.
+fn video_parameters(
+    demuxed: &retina::client::Demuxed,
+    stream_id: usize,
+) -> Option<(ParameterSets, usize)> {
     match demuxed.streams().get(stream_id)?.parameters()? {
         ParametersRef::Video(params) => parse_avcc(params.extra_data()),
         _ => None,
     }
 }
 
-/// Parses SPS/PPS NAL units from an `AVCDecoderConfigurationRecord` (avcC),
-/// retina's `extra_data` for H.264 with length-prefixed framing.
-fn parse_avcc(extra: &[u8]) -> Option<ParameterSets> {
-    // configurationVersion(1) profile(1) compat(1) level(1) lengthSize(1) numSPS(1)
+/// Parses SPS/PPS NAL units and the NAL length-prefix size from an
+/// `AVCDecoderConfigurationRecord` (avcC), retina's `extra_data` for H.264.
+fn parse_avcc(extra: &[u8]) -> Option<(ParameterSets, usize)> {
+    // configurationVersion(1) profile(1) compat(1) level(1) lengthSizeMinusOne(1) numSPS(1)
     if extra.len() < 7 || extra[0] != 1 {
         return None;
     }
+    // Low 2 bits of byte 4 are lengthSizeMinusOne; the prefix is 1..=4 bytes.
+    let nal_length_size = (extra[4] & 0x03) as usize + 1;
     let num_sps = extra[5] & 0x1f;
     let mut i = 6;
     let mut sps = Vec::new();
@@ -207,5 +216,5 @@ fn parse_avcc(extra: &[u8]) -> Option<ParameterSets> {
         i += len;
     }
     let params = ParameterSets::new(sps, pps);
-    params.is_complete().then_some(params)
+    params.is_complete().then_some((params, nal_length_size))
 }
