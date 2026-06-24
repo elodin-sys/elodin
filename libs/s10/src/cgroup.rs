@@ -68,6 +68,28 @@ impl CgroupScope {
         Ok(())
     }
 
+    /// Give every process in this cgroup a larger share of the CPU under
+    /// contention (cgroup-v2 `cpu.weight`, 1..=10000, default 100), so the
+    /// real-time simulation stack is scheduled promptly when other work (an
+    /// editor render loop, co-located services) competes for cores.
+    ///
+    /// Entirely best-effort: the `cpu.weight` knob only exists when the `cpu`
+    /// controller is delegated to this cgroup (we try to enable it in the
+    /// parent's `cgroup.subtree_control` first), and we never fail a simulation
+    /// because priority could not be raised. A no-op on non-Linux and on hosts
+    /// where the controller isn't available.
+    #[cfg(target_os = "linux")]
+    pub fn set_cpu_weight(&self, weight: u32) {
+        let weight = weight.clamp(1, 10_000);
+        if let Some(parent) = self.path.parent() {
+            let _ = fs::write(parent.join("cgroup.subtree_control"), "+cpu");
+        }
+        let _ = fs::write(self.path.join("cpu.weight"), weight.to_string());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn set_cpu_weight(&self, _weight: u32) {}
+
     #[cfg(target_os = "linux")]
     pub fn kill(&self) -> io::Result<()> {
         match fs::write(self.path.join("cgroup.kill"), "1") {
@@ -132,6 +154,27 @@ impl CgroupScope {
     pub fn reap_prefix(_prefix: &str) -> io::Result<()> {
         Ok(())
     }
+}
+
+/// Whether s10 should prioritize the simulation stack (via cgroup `cpu.weight`).
+/// On by default; set `ELODIN_S10_PRIORITY=off` to disable (for A/B comparison
+/// or debugging).
+pub fn priority_enabled() -> bool {
+    !matches!(
+        std::env::var("ELODIN_S10_PRIORITY").as_deref(),
+        Ok("off") | Ok("0") | Ok("false")
+    )
+}
+
+/// cgroup-v2 `cpu.weight` to apply to the simulation stack. Defaults to the
+/// maximum share (the sim is latency-critical but low-duty, so a high weight
+/// gets it scheduled promptly without meaningfully starving others). Override
+/// with `ELODIN_S10_CPU_WEIGHT`.
+pub fn sim_cpu_weight() -> u32 {
+    std::env::var("ELODIN_S10_CPU_WEIGHT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000)
 }
 
 #[cfg(target_os = "linux")]
