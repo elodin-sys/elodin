@@ -1130,8 +1130,11 @@ async fn tick(
         }
         if !db.recording_cell.is_playing() {
             next_tick_deadline = None;
+            last_behind_warning = None;
             first_pacing_at = None;
             rate_win_start = None;
+            rate_win_start_cycles = 0;
+            pacing_cycles = 0;
             let _ = futures_lite::future::race(db.recording_cell.wait(), async {
                 cancel_token.wait().await;
                 false
@@ -1193,6 +1196,11 @@ async fn tick(
         if !warmup_done && tick >= warmup_ticks {
             metrics.reset_after_warmup(tick);
             warmup_done = true;
+            last_behind_warning = None;
+            first_pacing_at = None;
+            rate_win_start = None;
+            rate_win_start_cycles = 0;
+            pacing_cycles = 0;
         }
 
         let copy_in_start = Instant::now();
@@ -1297,7 +1305,8 @@ async fn tick(
             if first_pacing_at.is_none() {
                 first_pacing_at = Some(now);
             }
-            let in_grace = now.duration_since(first_pacing_at.unwrap_or(now)) < pacing_grace;
+            let in_grace =
+                !warmup_done || now.duration_since(first_pacing_at.unwrap_or(now)) < pacing_grace;
             if in_grace || rate_win_start.is_none() {
                 // Pin the window to `now` during grace so it starts clean after.
                 rate_win_start = Some(now);
