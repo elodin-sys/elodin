@@ -144,9 +144,9 @@ class DroneConfig:
 
     # Physics simulation rate in Hz (8kHz for high-performance Betaflight PID loop)
     # simulation_rate: float = 8000.0  # 125µs
-    simulation_rate: float = 4000.0  # 250µs
+    # simulation_rate: float = 4000.0  # 250µs
     # simulation_rate: float = 2000.0  # 500µs
-    # simulation_rate: float = 1000.0  # 1000µs
+    simulation_rate: float = 1500.0  # 667µs
 
     # Total simulation time in seconds
     simulation_time: float = 15.0
