@@ -1,6 +1,4 @@
 use clap::{Parser, Subcommand};
-use miette::Context;
-use miette::IntoDiagnostic;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 mod monte_carlo;
@@ -97,11 +95,6 @@ impl Cli {
             .build()
             .expect("tokio runtime failed to start");
 
-        if let Err(err) = self.first_launch() {
-            eprintln!("Error: {:#}", err);
-            std::process::exit(1);
-        }
-
         match &self.command {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
@@ -112,29 +105,6 @@ impl Cli {
             Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
-    }
-
-    fn first_launch(&self) -> miette::Result<()> {
-        let dirs = self.dirs().into_diagnostic()?;
-        let data_dir = dirs.data_dir();
-        let is_first_launch = !data_dir.exists();
-        std::fs::create_dir_all(data_dir)
-            .into_diagnostic()
-            .context("failed to create data directory")?;
-
-        if is_first_launch {
-            println!("This is your first use of the Elodin CLI!\n");
-
-            println!(
-                "Ensure the Elodin Python SDK is installed in your preferred Python virtual environment:"
-            );
-            println!("    pip install -U elodin\n");
-
-            println!("Check out our docs (at https://docs.elodin.systems) for more information.");
-            std::process::exit(0);
-        }
-
-        Ok(())
     }
 
     fn is_dev(&self) -> bool {
