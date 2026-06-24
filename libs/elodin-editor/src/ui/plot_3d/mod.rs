@@ -13,7 +13,6 @@ use bevy::{
         system::{Commands, Query, Res, ResMut},
     },
     math::{DQuat, Mat4, Vec4},
-    prelude::Transform,
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use eql;
@@ -96,9 +95,6 @@ pub fn sync_line_plot_3d(
                 LineConfig {
                     render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
                 },
-                Transform::default(),
-                #[cfg(feature = "big_space")]
-                crate::spatial::GridCell::default(),
             ));
             if let Some(frame) = line_plot.frame {
                 // Absolute: the line's vertex data is raw frame coordinates, so
