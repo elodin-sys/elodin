@@ -93,7 +93,7 @@ pub fn annexb_contains_idr(buf: &[u8]) -> bool {
 }
 
 /// Splits an Annex-B buffer into NAL unit payloads (handles 3- and 4-byte start codes).
-fn split_annexb_nals(buf: &[u8]) -> Vec<&[u8]> {
+pub fn split_annexb_nals(buf: &[u8]) -> Vec<&[u8]> {
     // For each NAL, track where its start code begins and where its payload starts.
     let mut code_begins = Vec::new();
     let mut payload_starts = Vec::new();
