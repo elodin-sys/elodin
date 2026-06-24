@@ -1,0 +1,3 @@
+tabs {
+    rtsp_stream "rtsp-camera" name="RTSP Camera"
+}

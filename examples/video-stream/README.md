@@ -175,6 +175,26 @@ The **RTSP Camera** tab shows an H.264 RTSP stream (an IP camera, or OBS via the
 [OBS-RTSPServer](https://github.com/iamscottxu/obs-rtspserver) plugin). There are
 two ways to get an RTSP stream into the `rtsp-camera` message:
 
+### Quick manual test (one command, no camera)
+
+For reviewers and quick local checks, a single script wires up the whole native
+path end-to-end — a fake RTSP source, the RTSP-pulling DB, and the editor:
+
+```bash
+nix develop --command bash examples/video-stream/run-rtsp-demo.sh
+```
+
+It builds `elodin` + `elodin-db --features rtsp`, starts `mediamtx` (which
+self-publishes an H.264 test pattern via `ffmpeg`), runs `elodin-db` pulling
+`rtsp://127.0.0.1:8554/test` into the `rtsp-camera` message, and opens the editor
+on the `rtsp_stream` panel. You should see the moving test pattern in the **RTSP
+Camera** tab within a few seconds. Close the editor window to stop everything.
+
+`mediamtx` is fetched automatically via `nix build nixpkgs#mediamtx` (needs nix +
+network); runtime data/logs go to `examples/video-stream/.rtsp-demo/` (git-ignored).
+
+The two manual routes below explain the moving parts the script automates.
+
 ### Option A — Native ingest (the feature)
 
 Elodin DB can act as the RTSP **client** itself (via [`retina`](https://crates.io/crates/retina)):
