@@ -15,7 +15,7 @@ use impeller2::types::{Timestamp, msg_id};
 use impeller2_wkt::{MsgMetadata, opaque_bytes_msg_schema};
 use retina::client::{Credentials, PlayOptions, Session, SessionOptions, SetupOptions, Transport};
 use retina::codec::{CodecItem, ParametersRef};
-use rtsp_ingest::annexb::{AnnexBConverter, ParameterSets};
+use rtsp_ingest::annexb::{AnnexBConverter, ParameterSets, annexb_contains_idr};
 use rtsp_ingest::clock::ClockMapper;
 use rtsp_ingest::config::RtspSource;
 use tracing::{info, warn};
@@ -150,12 +150,10 @@ async fn stream_once(
             continue; // no parameter sets yet; wait for them
         };
 
-        if !seen_keyframe {
-            if frame.is_random_access_point() {
-                seen_keyframe = true;
-            } else {
-                continue; // wait for the first IDR so the log starts decodable
-            }
+        // Skip non-keyframes until the log is anchored, without yet trusting
+        // retina's flag: a flagged IDR can still fail to convert below.
+        if !seen_keyframe && !frame.is_random_access_point() {
+            continue;
         }
 
         let annexb = match converter.convert(frame.data()) {
@@ -165,6 +163,17 @@ async fn stream_once(
                 continue;
             }
         };
+
+        // Open the gate only on a successfully converted access unit that
+        // actually carries an IDR, so a dropped keyframe never lets later
+        // non-IDR frames be stored without a decodable keyframe at the start.
+        if !seen_keyframe {
+            if annexb_contains_idr(&annexb) {
+                seen_keyframe = true;
+            } else {
+                continue;
+            }
+        }
 
         let ts = frame.timestamp();
         let pts_us = (ts.elapsed() as i128 * 1_000_000 / ts.clock_rate().get() as i128) as i64;
