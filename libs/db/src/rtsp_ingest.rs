@@ -112,17 +112,6 @@ async fn stream_once(
     let session = session.play(PlayOptions::default()).await?;
     let mut demuxed = session.demuxed()?;
 
-    // Anchor to the DB's current time (like elodinsink's last_updated anchor);
-    // fall back to wall clock for an otherwise-empty DB. Re-anchoring (vs a fresh
-    // mapper) preserves monotonicity across reconnects: the first frame is bumped
-    // past the last stored timestamp instead of repeating `last_updated`.
-    let base = db.last_updated.latest();
-    let base_us = if base.0 == i64::MIN {
-        Timestamp::now().0
-    } else {
-        base.0
-    };
-    clock.reanchor(base_us);
     let mut converter: Option<AnnexBConverter> = None;
     // The stored log must start on a keyframe: the export muxer rejects a
     // leading non-IDR frame and the editor decoder can only seek from an IDR.
@@ -169,6 +158,18 @@ async fn stream_once(
         // non-IDR frames be stored without a decodable keyframe at the start.
         if !seen_keyframe {
             if annexb_contains_idr(&annexb) {
+                // Anchor here, right before the first write, not at PLAY time:
+                // other writers may have advanced last_updated while we waited
+                // for an IDR, so this keeps stored timestamps aligned with live.
+                // re-anchoring (vs a fresh mapper) preserves last_written_us, so
+                // timestamps stay monotonic across reconnects.
+                let base = db.last_updated.latest();
+                let base_us = if base.0 == i64::MIN {
+                    Timestamp::now().0
+                } else {
+                    base.0
+                };
+                clock.reanchor(base_us);
                 seen_keyframe = true;
             } else {
                 continue;
