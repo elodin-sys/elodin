@@ -42,7 +42,7 @@ in
       --set VK_ICD_FILENAMES "${nvidiaIcd}" \
       --set VK_DRIVER_FILES "${nvidiaIcd}" \
       --prefix VK_LAYER_PATH : "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d" \
-      --set-default ELODIN_ASSETS_DIR "/root/assets" \
+      --set-default ELODIN_ASSETS_DIR "/var/lib/elodin/assets" \
       --set ALSA_PLUGIN_DIR "${common.alsaPluginDir}/lib/alsa-lib" \
       --set ALSA_CONFIG_PATH "${common.asoundConf}"
     '';

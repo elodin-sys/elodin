@@ -5,7 +5,6 @@ pkgs.runCommand "elodin-examples" {} ''
   cp -R ${../../examples/sensor-camera} "$out/sensor-camera"
   cp -R ${../../examples/video-stream} "$out/video-stream"
   cp -R ${../../examples/drone} "$out/drone"
-  cp -R ${../../examples/cube-sat} "$out/cube-sat"
   cp -R ${../../examples/three-body} "$out/three-body"
 
   chmod -R u+w "$out"

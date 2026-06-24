@@ -10,8 +10,16 @@ in {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
+      description = "Whether to install the Elodin simulation CLI.";
+    };
+
+    examples = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
       description = ''
-        Whether to install the Elodin simulation CLI and packaged examples.
+        Whether to seed the packaged examples and their default assets. The
+        shared asset root is created regardless of this flag so customers can
+        deploy their own assets.
       '';
     };
 
@@ -24,7 +32,13 @@ in {
     examplesPackage = lib.mkOption {
       type = lib.types.package;
       default = pkgs.elodin-examples;
-      description = "Packaged Elodin examples for on-device testing.";
+      description = "Packaged Elodin examples, symlinked into /var/lib/elodin.";
+    };
+
+    assetsPackage = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.elodin-assets;
+      description = "Default assets seeded into ELODIN_ASSETS_DIR.";
     };
 
     enableRenderer = lib.mkOption {
@@ -37,159 +51,30 @@ in {
   };
 
   config = lib.mkIf cfg.enable (let
-    # EGM08 spherical-harmonic gravity coefficients used by the cube-sat example.
-    # The SDK downloads these into el._get_cache_dir() on first run; pre-fetch
-    # them so the example runs offline and reproducibly on-device.
-    egm08C = pkgs.fetchurl {
-      url = "https://assets.elodin.systems/assets/C_normal.npy";
-      hash = "sha256-sZKrOEr/1MzAs7OMR5DreWcu/16E3hurVoFNwLIUTWU=";
-    };
-    egm08S = pkgs.fetchurl {
-      url = "https://assets.elodin.systems/assets/S_normal.npy";
-      hash = "sha256-Y6ophu4G7hitgrO9QxYYmpyC/1u2nkbTPqWYpo71ojk=";
-    };
-    elodinRunExample = pkgs.writeShellScriptBin "elodin-run-example" ''
-      set -euo pipefail
-
-      export PATH="${lib.makeBinPath [
-        pkgs.coreutils
-        pkgs.gnugrep
-        pkgs.iproute2
-        pkgs.systemd
-      ]}:$PATH"
-
-      usage() {
-        echo "Usage: elodin-run-example {ball|sensor-camera|video-stream|drone|cube-sat|three-body}"
-      }
-
-      if [ "$#" -ne 1 ]; then
-        usage
-        exit 2
-      fi
-
-      example="$1"
-      examples_root="${cfg.examplesPackage}"
-      db_path="/db/example-$example"
-      work_dir="/tmp/elodin-example-$example"
-      run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-60s}"
-
-      case "$example" in
-        ball)
-          main="$examples_root/ball/main.py"
-          run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-30s}"
-          ;;
-        sensor-camera)
-          main="$examples_root/sensor-camera/main.py"
-          run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-90s}"
-          export ELODIN_SENSOR_CAMERA_MAX_TICKS="''${ELODIN_SENSOR_CAMERA_MAX_TICKS:-1800}"
-          export ELODIN_SENSOR_CAMERA_DB="$db_path"
-          ;;
-        video-stream)
-          main="$examples_root/video-stream/main.py"
-          work_dir="/tmp/elodin-example-video-stream"
-          run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-45s}"
-          ;;
-        drone)
-          main="$examples_root/drone/main.py"
-          run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-90s}"
-          ;;
-        cube-sat)
-          main="$examples_root/cube-sat/main.py"
-          run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-240s}"
-          # Seed the EGM08 gravity coefficients into the SDK cache so the
-          # example does not need network access at runtime.
-          cache_dir="''${HOME:-/root}/.cache/elodin-cli"
-          mkdir -p "$cache_dir"
-          cp -n ${egm08C} "$cache_dir/C_normal.npy" || true
-          cp -n ${egm08S} "$cache_dir/S_normal.npy" || true
-          ;;
-        three-body)
-          main="$examples_root/three-body/main.py"
-          run_timeout="''${ELODIN_EXAMPLE_TIMEOUT:-30s}"
-          ;;
-        *)
-          usage
-          exit 2
-          ;;
-      esac
-
-      port_in_use() {
-        ss -H -tln 'sport = :2240' | grep -q .
-      }
-
-      stop_elodin_db() {
-        systemctl stop elodin-db-default.service 2>/dev/null || true
-        systemctl list-units --type=service --state=active --plain --no-legend 'elodin-db@*.service' |
-          while read -r unit _; do
-            [ -n "$unit" ] && systemctl stop "$unit" || true
-          done
-
-        for _ in $(seq 1 40); do
-          if ! port_in_use; then
-            return 0
-          fi
-          sleep 0.25
-        done
-
-        echo "ERROR: port 2240 is still in use after stopping elodin-db services" >&2
-        ss -tlnp 'sport = :2240' >&2 || true
-        exit 1
-      }
-
-      mkdir -p /db /root/.local/share/cli "$work_dir"
-      rm -rf "$db_path"
-      rm -rf "$work_dir/video-stream-db"
-      log_file="$work_dir/$example.log"
-
-      echo "Stopping system elodin-db services so the simulation can bind :2240..."
-      stop_elodin_db
-
-      echo "Running $example with DB path $db_path"
-      cd "$work_dir"
-
-      set +e
-      ELODIN_DB_PATH="$db_path" timeout --signal=INT --kill-after=10s "$run_timeout" "${cfg.package}/bin/elodin" run "$main" 2>&1 | tee "$log_file"
-      status="''${PIPESTATUS[0]}"
-      set -e
-
-      if [ "$example" = "video-stream" ] && [ -d "$work_dir/video-stream-db" ]; then
-        rm -rf "$db_path"
-        mv "$work_dir/video-stream-db" "$db_path"
-      fi
-
-      if [ "$status" -ne 0 ]; then
-        if { [ "$status" -eq 124 ] || [ "$status" -eq 130 ] || [ "$status" -eq 143 ]; } && [ -d "$db_path" ]; then
-          echo "$example stopped after timeout; DB was created, so the smoke run succeeded."
-        else
-          echo "ERROR: $example failed with status $status" >&2
-          exit "$status"
-        fi
-      fi
-
-      if [ "$example" = "sensor-camera" ] && ! grep -q "verification: PASS" "$log_file"; then
-        echo "ERROR: sensor-camera did not report verification: PASS" >&2
-        exit 1
-      fi
-
-      echo "DB saved at $db_path"
-    '';
+    assetsDir = "/var/lib/elodin/assets";
   in {
     # jetpack's graphics module already sets hardware.graphics.package to
     # l4t-3d-core (the Jetson Vulkan/GL driver) when graphics is enabled, so we
     # only need to ensure graphics is on for the headless renderer.
     hardware.graphics.enable = lib.mkDefault cfg.enableRenderer;
 
-    environment.systemPackages = [
-      cfg.package
-      cfg.examplesPackage
-      elodinRunExample
-    ];
+    environment.systemPackages = [cfg.package];
 
-    systemd.services.elodin-assets-seed = {
-      description = "Seed the writable Elodin asset root with packaged defaults";
+    # Every user resolves assets from the shared, writable asset root.
+    environment.sessionVariables.ELODIN_ASSETS_DIR = assetsDir;
+
+    # Pre-create each user's CLI data dir so the first-launch notice does not
+    # short-circuit an interactive `elodin run`.
+    environment.loginShellInit = ''
+      mkdir -p "''${XDG_DATA_HOME:-$HOME/.local/share}/cli"
+    '';
+
+    systemd.services.elodin-assets-seed = lib.mkIf cfg.examples {
+      description = "Seed the shared Elodin asset root with packaged defaults";
       wantedBy = ["multi-user.target"];
       path = with pkgs; [
         coreutils
+        findutils
         gnugrep
       ];
       serviceConfig = {
@@ -197,26 +82,30 @@ in {
         RemainAfterExit = true;
       };
       script = ''
-        mkdir -p /root/assets
+        install -d -m 2775 -g wheel ${assetsDir}
 
         # Migrate the tiny auto-created empty skybox manifest so the packaged
         # default skybox is selectable. Preserve real customer manifests.
-        manifest=/root/assets/skyboxes/manifest.ron
+        manifest=${assetsDir}/skyboxes/manifest.ron
         if [ -f "$manifest" ] && [ "$(wc -c < "$manifest")" -le 128 ] && ! grep -q "desert_night" "$manifest"; then
           rm -f "$manifest"
         fi
 
-        cp -rn --no-preserve=mode,ownership ${pkgs.elodin-assets}/. /root/assets/
-        chmod -R u+rwX /root/assets
+        cp -rn --no-preserve=mode,ownership ${cfg.assetsPackage}/. ${assetsDir}/
+        chgrp -R wheel ${assetsDir}
+        chmod -R g+rwX ${assetsDir}
+        find ${assetsDir} -type d -exec chmod g+s {} +
       '';
     };
 
-    systemd.tmpfiles.rules = [
-      "d /root 0700 root root - -"
-      "d /root/.local 0755 root root - -"
-      "d /root/.local/share 0755 root root - -"
-      "d /root/.local/share/cli 0755 root root - -"
-      "L+ /root/examples - - - - ${cfg.examplesPackage}"
-    ];
+    systemd.tmpfiles.rules =
+      [
+        "d /var/lib/elodin 0755 root root - -"
+        # setgid + group-writable so any wheel user can add assets.
+        "d ${assetsDir} 2775 root wheel - -"
+      ]
+      ++ lib.optionals cfg.examples [
+        "L+ /var/lib/elodin/examples - - - - ${cfg.examplesPackage}"
+      ];
   });
 }

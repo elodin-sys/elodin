@@ -84,11 +84,18 @@
       #   openFirewall = true;              # Open ports 2240, 2241, 2248, 9000
       # };
 
-      # Elodin simulation CLI and examples
+      # Elodin simulation CLI, examples, and assets
       # services.elodin = {
-      #   enable = true;                    # Install elodin CLI and examples (default: true)
+      #   enable = true;                    # Install the elodin CLI (default: true)
+      #   examples = true;                  # Seed packaged examples + default assets (default: true)
       #   enableRenderer = true;            # Enable headless sensor-camera renderer support
       # };
+      #
+      # Any user can run sims. Shared, writable asset root:
+      #   ELODIN_ASSETS_DIR=/var/lib/elodin/assets   (drop your own meshes/skyboxes here)
+      # Packaged examples: /var/lib/elodin/examples
+      # To deploy your own assets/sims declaratively, override
+      #   services.elodin.assetsPackage / services.elodin.examplesPackage
 
       # GPS module (optional, connected on J7)
       # Uncomment ONE line to enable GPS-disciplined timestamping:
