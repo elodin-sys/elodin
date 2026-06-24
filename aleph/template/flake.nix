@@ -34,6 +34,7 @@
         minimal # strips down nixos to an even more minimal set of defaults
 
         # elodin-db and integrations
+        elodin # elodin simulation CLI and packaged examples
         elodin-db # brings in elodin-db as a default service
         aleph-serial-bridge # pushes sensor data into elodin-db from the default expansion board firmware
         tegrastats-bridge # pushes telemetry form the Orin SoC into elodin-db (i.e cpu usage, temps, etc)
@@ -80,7 +81,13 @@
       #   enable = true;                    # Enable elodin-db (default: true)
       #   autostart = true;                 # Set to false to configure but not auto-start
       #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
-      #   openFirewall = true;              # Open ports 2240 and 2248
+      #   openFirewall = true;              # Open ports 2240, 2241, 2248, 9000
+      # };
+
+      # Elodin simulation CLI and examples
+      # services.elodin = {
+      #   enable = true;                    # Install elodin CLI and examples (default: true)
+      #   enableRenderer = true;            # Enable headless sensor-camera renderer support
       # };
 
       # GPS module (optional, connected on J7)

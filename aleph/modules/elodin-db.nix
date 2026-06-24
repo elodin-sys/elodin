@@ -119,6 +119,6 @@ in {
     };
 
     environment.systemPackages = [elodin-db];
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [2240 2248];
+    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [2240 2241 2248 9000];
   };
 }
