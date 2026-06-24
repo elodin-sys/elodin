@@ -866,6 +866,13 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     }
     let campaign_cgroup =
         s10::CgroupScope::create(format!("elodin-mc-{}", std::process::id())).into_diagnostic()?;
+    // Prioritize the campaign's sims over background work under contention
+    // (Linux cgroup cpu.weight; best-effort, no-op elsewhere).
+    if s10::priority_enabled()
+        && let Some(scope) = &campaign_cgroup
+    {
+        scope.set_cpu_weight(s10::sim_cpu_weight());
+    }
     let base_recipe = plan_recipe(&sim_path, &out_dir).await?;
     let recipe_weight = s10::admission::recipe_weight(&base_recipe);
     let admission_max = s10::admission::max_inflight();

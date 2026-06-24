@@ -64,10 +64,38 @@ pub async fn run_recipe(
         pin_render_server_recipe(&mut recipe, &exe);
     }
 
-    recipe
-        .watch("sim".to_string(), false, cancel_token.clone(), None)
-        .await?;
+    // Run the whole sim stack (sim + Betaflight/controller/render-server) inside
+    // one prioritized cgroup so it is scheduled promptly under contention
+    // (Linux `cpu.weight`; a no-op on macOS/Windows, which are dev-only). Every
+    // spawned recipe process is added to this cgroup by s10. Best-effort:
+    // priority is never allowed to fail the run.
+    let cgroup = if s10::priority_enabled() {
+        let _ = s10::CgroupScope::reap_prefix("elodin-sim-");
+        let scope = s10::CgroupScope::create(format!("elodin-sim-{}", std::process::id()))
+            .ok()
+            .flatten();
+        if let Some(scope) = &scope {
+            scope.set_cpu_weight(s10::sim_cpu_weight());
+        }
+        scope
+    } else {
+        None
+    };
+
+    let result = recipe
+        .watch(
+            "sim".to_string(),
+            false,
+            cancel_token.clone(),
+            cgroup.clone(),
+        )
+        .await;
     cancel_token.cancel();
+    if let Some(scope) = cgroup {
+        let _ = scope.kill();
+        let _ = scope.remove();
+    }
+    result?;
     Ok(())
 }
 

@@ -1146,12 +1146,6 @@ async fn tick(
             // Deadline is set after effective_batch is known for this iteration.
         }
         let tick = tick_counter.load(Ordering::SeqCst);
-        // Once past warmup, discard the spin-up samples so the summary reflects
-        // steady state (do this before this cycle's phases are observed).
-        if !warmup_done && tick >= warmup_ticks {
-            metrics.reset_after_warmup(tick);
-            warmup_done = true;
-        }
         let tick_nanos = time_step.as_nanos() * (tick as u128);
         let tick_duration = Duration::from_nanos(tick_nanos.min(u64::MAX as u128) as u64);
         let timestamp = start_timestamp + tick_duration;
@@ -1188,6 +1182,15 @@ async fn tick(
             db.last_updated.store(Timestamp(i64::MIN));
             next_tick_deadline = None;
             continue;
+        }
+
+        // Once past warmup, discard the spin-up samples so the summary reflects
+        // steady state. Wait until after pre_step/rollback handling so
+        // StepContext::truncate() does not mark warmup complete for a run that is
+        // about to restart from tick 0.
+        if !warmup_done && tick >= warmup_ticks {
+            metrics.reset_after_warmup(tick);
+            warmup_done = true;
         }
 
         let copy_in_start = Instant::now();
