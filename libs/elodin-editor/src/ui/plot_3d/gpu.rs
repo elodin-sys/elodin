@@ -378,6 +378,14 @@ pub struct LineConfig {
 pub struct GpuLine {
     values_bind_group: BindGroup,
     index_bind_group: BindGroup,
+    /// Strip indices (decimated by a uniform sampling step to fit
+    /// `INDEX_BUFFER_LEN`) backing `index_bind_group`. This is the GPU-side
+    /// point reduction, distinct from the upstream Hamann-Chen (1994) in-memory
+    /// simplification done on the `LineTree`. Never read directly, but owned
+    /// here so the buffers outlive the bind group / draw rather than relying on
+    /// wgpu's internal reference counting.
+    #[allow(dead_code)]
+    index_buffers: [Buffer; 3],
     count: u32,
 }
 
@@ -648,6 +656,7 @@ fn extract_lines(
                 Some(GpuLine {
                     values_bind_group: values_bind_group.clone(),
                     index_bind_group,
+                    index_buffers,
                     count,
                 })
             };
