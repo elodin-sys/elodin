@@ -24,7 +24,7 @@ fn default_true() -> bool {
 }
 
 pub fn default_timeline_played_color() -> Color {
-    Color::YELLOW
+    Color::YALK
 }
 
 pub fn default_timeline_future_color() -> Color {
@@ -365,7 +365,13 @@ pub enum GraphType {
 pub struct Line3d {
     pub eql: String,
     pub line_width: f32,
-    pub color: Color,
+    /// Played-segment color. `None` falls back to the timeline played color.
+    #[serde(default)]
+    pub color: Option<Color>,
+    /// Future-segment color. `None` falls back to `color`, then the timeline
+    /// future color.
+    #[serde(default)]
+    pub future_color: Option<Color>,
     pub perspective: bool,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,

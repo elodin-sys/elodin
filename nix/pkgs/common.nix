@@ -257,6 +257,7 @@ in {
     python,
     pythonPath,
     pythonMajorMinor,
+    graphicsWrapperArgs ? null,
   }: let
     linuxLibPath = lib.optionalString pkgs.stdenv.isLinux (
       lib.makeLibraryPath (with pkgs; [
@@ -292,7 +293,7 @@ in {
         systemd
       ])
     );
-    graphicsEnv = lib.optionalString pkgs.stdenv.isLinux ''
+    defaultGraphicsWrapperArgs = lib.optionalString pkgs.stdenv.isLinux ''
       --prefix LD_LIBRARY_PATH : "${linuxLibPath}" \
       --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
       --set __GLX_VENDOR_LIBRARY_NAME "mesa" \
@@ -303,11 +304,15 @@ in {
       --set ALSA_CONFIG_PATH "${asoundConf}" \
       --run "source ${nvidiaHookScript}"
     '';
+    graphicsArgs =
+      if graphicsWrapperArgs == null
+      then defaultGraphicsWrapperArgs
+      else graphicsWrapperArgs;
   in ''
     --prefix PATH : "${python}/bin" \
     --prefix PYTHONPATH : "${pythonPath}" \
     --prefix PYTHONPATH : "${python}/lib/python${pythonMajorMinor}" \
-    ${graphicsEnv}
+    ${graphicsArgs}
   '';
 
   # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
