@@ -54,7 +54,7 @@ def post_campaign(ctx):
         context_path = out_dir / "runs" / row.get("run_id", "") / "post_run_context.json"
         try:
             context = json.loads(context_path.read_text())
-        except OSError:
+        except (OSError, json.JSONDecodeError):
             context = {}
         worst.append((error, row.get("run_id", ""), context.get("params", {})))
     worst.sort(reverse=True, key=lambda item: item[0])

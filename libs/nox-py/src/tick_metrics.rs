@@ -291,8 +291,10 @@ pub struct TickMetrics {
     /// Count of cycles where the deadline was reset forward to `now`
     /// because we were more than two tick-periods behind (drift cap).
     pub pacing_resets: u64,
-    /// Count of cycles where no sleep happened because the deadline had
-    /// already elapsed (we were behind and trying to catch up).
+    /// Count of cycles where no sleep happened because the *real* deadline had
+    /// already elapsed (we were behind and trying to catch up). Does not count
+    /// cycles that only consumed the lead buffer (`deadline - lead` target in
+    /// the past while the real deadline is still in the future).
     pub pacing_no_sleep: u64,
     /// Optional per-cycle pacing trace. Allocated up front (capacity from
     /// `ELODIN_PACING_TRACE_MAX`) and flushed to the CSV path in
@@ -436,11 +438,12 @@ impl TickMetrics {
         self.total_cycle.observe(d);
     }
 
-    /// Record one real-time pacing cycle. `work` is the cycle's compute
-    /// time, `requested` the sleep we asked for (`Duration::ZERO` when we
-    /// were behind and skipped sleeping), `actual` the sleep that actually
-    /// elapsed, `deadline_err_ns` the signed `now - deadline` at the pacing
-    /// check (negative = ahead), and `reset` whether the drift cap fired.
+    /// Record one real-time pacing cycle. `work` is the cycle's compute time,
+    /// `requested` the sleep we asked for (`Duration::ZERO` when either the
+    /// lead-buffer target or the real deadline was already past), `actual` the
+    /// sleep that actually elapsed, `deadline_err_ns` the signed `now -
+    /// deadline` at the pacing check (negative = ahead), and `reset` whether
+    /// the drift cap fired.
     #[inline]
     pub fn observe_pacing(
         &mut self,
@@ -458,9 +461,9 @@ impl TickMetrics {
         if reset {
             self.pacing_resets += 1;
         }
-        if requested.is_zero() {
+        if requested.is_zero() && deadline_err_ns > 0 {
             self.pacing_no_sleep += 1;
-        } else {
+        } else if !requested.is_zero() {
             self.real_time_oversleep
                 .observe(actual.saturating_sub(requested));
         }
@@ -613,7 +616,7 @@ impl TickMetrics {
             format_commas(paced),
         );
         println!(
-            "    {:<18} {}    skipped sleep: {}",
+            "    {:<18} {}    catch-up no sleep: {}",
             "drift resets:",
             format_commas(self.pacing_resets),
             format_commas(self.pacing_no_sleep),
@@ -832,5 +835,31 @@ mod tests {
         m.set_rates(300.0, 100.0);
         assert_eq!(m.simulation_rate_hz, 300.0);
         assert_eq!(m.telemetry_rate_hz, 100.0);
+    }
+
+    #[test]
+    fn no_sleep_counts_only_when_behind_real_deadline() {
+        let mut m = TickMetrics::new();
+        m.silent = true;
+
+        // Lead target already elapsed, but the real deadline is still ahead.
+        m.observe_pacing(
+            Duration::from_micros(500),
+            Duration::ZERO,
+            Duration::ZERO,
+            -1_000,
+            false,
+        );
+        assert_eq!(m.pacing_no_sleep, 0);
+
+        // Real deadline elapsed: this is a catch-up no-sleep cycle.
+        m.observe_pacing(
+            Duration::from_micros(500),
+            Duration::ZERO,
+            Duration::ZERO,
+            1_000,
+            false,
+        );
+        assert_eq!(m.pacing_no_sleep, 1);
     }
 }

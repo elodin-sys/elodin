@@ -70,10 +70,14 @@ pub async fn run_recipe(
     // spawned recipe process is added to this cgroup by s10. Best-effort:
     // priority is never allowed to fail the run.
     let cgroup = if s10::priority_enabled() {
-        let _ = s10::CgroupScope::reap_prefix("elodin-sim-");
-        let scope = s10::CgroupScope::create(format!("elodin-sim-{}", std::process::id()))
-            .ok()
-            .flatten();
+        let created_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let scope =
+            s10::CgroupScope::create(format!("elodin-sim-{}-{created_ns}", std::process::id()))
+                .ok()
+                .flatten();
         if let Some(scope) = &scope {
             scope.set_cpu_weight(s10::sim_cpu_weight());
         }
