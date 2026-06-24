@@ -21,11 +21,13 @@ use crate::{EqlContext, ui::schematic::EqlExt};
 
 pub mod gpu;
 
-/// Convert a schematic (sRGB) color into the linear RGB the line pipeline renders,
-/// keeping it consistent with meshes/gizmos. Alpha is forced opaque.
+/// Convert a schematic (sRGB) color into the linear RGBA the line pipeline
+/// renders, keeping it consistent with meshes/gizmos. Alpha is preserved so a
+/// KDL `color`/`future_color` can set per-line opacity (the future segment is
+/// additionally faded by the timeline `future_trail_alpha`).
 fn line_color_linear(color: &impeller2_wkt::Color) -> Vec4 {
     let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
-    Vec4::new(linear.red, linear.green, linear.blue, 1.0)
+    Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
 }
 
 /// Resolve a `line_3d`'s played/future trail colors from its KDL `color`/
@@ -41,7 +43,12 @@ fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
 pub fn sync_line_plot_3d(
     line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
     mut uniforms: Query<
-        (&Line3d, &mut LineUniform, &mut gpu::LineTrailColors),
+        (
+            Entity,
+            &Line3d,
+            &mut LineUniform,
+            Option<&mut gpu::LineTrailColors>,
+        ),
         With<gpu::LineHandles>,
     >,
     mut commands: Commands,
@@ -113,12 +120,22 @@ pub fn sync_line_plot_3d(
             }
         }
     }
-    for (line_plot, mut uniform, mut trail) in uniforms.iter_mut() {
+    for (entity, line_plot, mut uniform, trail) in uniforms.iter_mut() {
         let next = line_trail_colors(line_plot);
         uniform.color = next.played.unwrap_or(Vec4::ZERO);
         uniform.line_width = line_plot.line_width;
         uniform.perspective = if line_plot.perspective { 1 } else { 0 };
-        *trail = next;
+        // Entities that have handles but lost their trail colors (e.g. an older
+        // build) still get width/perspective/color re-applied; re-attach the
+        // trail colors so rendering doesn't silently fall back to defaults.
+        match trail {
+            Some(mut trail) => *trail = next,
+            None => {
+                if let Ok(mut entity) = commands.get_entity(entity) {
+                    entity.try_insert(next);
+                }
+            }
+        }
     }
 }
 
@@ -129,5 +146,19 @@ impl bevy::app::Plugin for LinePlot3dPlugin {
         app.init_resource::<CollectedGraphData>()
             .add_plugins(gpu::Plot3dGpuPlugin)
             .add_systems(Update, sync_line_plot_3d);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_color_linear_preserves_alpha() {
+        // A KDL color/future_color alpha must survive into the line uniform
+        // (sRGB->linear leaves alpha untouched); only the timeline
+        // future_trail_alpha should fade it further, applied in `resolve`.
+        let color = impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
+        assert_eq!(line_color_linear(&color).w, 0.25);
     }
 }
