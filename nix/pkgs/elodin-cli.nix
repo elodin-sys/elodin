@@ -7,6 +7,7 @@
   python,
   pythonPackages,
   enableTracy ? false,
+  graphicsWrapperArgs ? null,
   ...
 }: let
   # Import shared configuration
@@ -55,6 +56,7 @@
         --set TOKTX "${common.ktxTools}/bin/toktx" \
         ${common.makeWrapperArgs {
         inherit pkgs python pythonPath pythonMajorMinor;
+        inherit graphicsWrapperArgs;
       }}
     '';
 

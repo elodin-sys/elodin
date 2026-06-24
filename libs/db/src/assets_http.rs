@@ -296,9 +296,18 @@ async fn get_asset(
     let full = state.assets_dir.join(rel);
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
         Ok(Ok(bytes)) => Ok(bytes),
-        Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => Err(StatusCode::NOT_FOUND),
-        Ok(Err(_)) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
+            tracing::warn!(asset = %path, "asset http 404 (not found)");
+            Err(StatusCode::NOT_FOUND)
+        }
+        Ok(Err(err)) => {
+            tracing::error!(asset = %path, ?err, "asset http 500 (read error)");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+        Err(err) => {
+            tracing::error!(asset = %path, ?err, "asset http 500 (read task failed)");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
