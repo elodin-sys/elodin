@@ -81,7 +81,7 @@
       #   enable = true;                    # Enable elodin-db (default: true)
       #   autostart = true;                 # Set to false to configure but not auto-start
       #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
-      #   openFirewall = true;              # Open ports 2240, 2241, 2248, 9000
+      #   openFirewall = true;              # Open TCP & UDP ports for external access
       # };
 
       # Elodin simulation CLI, examples, and assets
