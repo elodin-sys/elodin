@@ -57,8 +57,13 @@ async fn run_source(source: RtspSource, db: Arc<DB>) {
         warn!(msg_name = %source.msg_name, error = %e, "failed to set RTSP msg metadata");
     }
 
+    // One clock for the source's whole lifetime: reconnects re-anchor it but
+    // keep `last_written_us`, so the first post-reconnect frame can't repeat or
+    // precede an already-stored timestamp (elodinsink keeps this state too).
+    let mut clock = ClockMapper::new(Timestamp::now().0);
+
     loop {
-        match stream_once(&source, id, &db).await {
+        match stream_once(&source, id, &db, &mut clock).await {
             Ok(()) => info!(msg_name = %source.msg_name, "RTSP stream ended; reconnecting"),
             Err(e) => {
                 warn!(msg_name = %source.msg_name, error = %e, "RTSP stream error; reconnecting")
@@ -73,6 +78,7 @@ async fn stream_once(
     source: &RtspSource,
     id: impeller2::types::PacketId,
     db: &DB,
+    clock: &mut ClockMapper,
 ) -> Result<(), BoxError> {
     let mut url = Url::parse(&source.url)?;
     // Pull any userinfo out of the URL into retina credentials.
@@ -107,14 +113,16 @@ async fn stream_once(
     let mut demuxed = session.demuxed()?;
 
     // Anchor to the DB's current time (like elodinsink's last_updated anchor);
-    // fall back to wall clock for an otherwise-empty DB.
+    // fall back to wall clock for an otherwise-empty DB. Re-anchoring (vs a fresh
+    // mapper) preserves monotonicity across reconnects: the first frame is bumped
+    // past the last stored timestamp instead of repeating `last_updated`.
     let base = db.last_updated.latest();
     let base_us = if base.0 == i64::MIN {
         Timestamp::now().0
     } else {
         base.0
     };
-    let mut clock = ClockMapper::new(base_us);
+    clock.reanchor(base_us);
     let mut converter: Option<AnnexBConverter> = None;
     // The stored log must start on a keyframe: the export muxer rejects a
     // leading non-IDR frame and the editor decoder can only seek from an IDR.
