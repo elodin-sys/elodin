@@ -1130,6 +1130,8 @@ async fn tick(
         }
         if !db.recording_cell.is_playing() {
             next_tick_deadline = None;
+            first_pacing_at = None;
+            rate_win_start = None;
             let _ = futures_lite::future::race(db.recording_cell.wait(), async {
                 cancel_token.wait().await;
                 false
