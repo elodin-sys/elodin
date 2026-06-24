@@ -1,11 +1,6 @@
-#![allow(warnings)]
-
-use std::collections::BTreeMap;
-
 use bevy::{
-    animation::graph,
-    app::{Startup, Update},
-    asset::{Assets, Handle},
+    app::Update,
+    asset::Handle,
     camera::visibility::RenderLayers,
     ecs::{
         entity::Entity,
@@ -15,20 +10,14 @@ use bevy::{
     math::{DQuat, Mat4, Vec4},
     prelude::Color,
 };
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
-use eql;
-use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
-use impeller2_wkt::LastUpdated;
-use impeller2_wkt::{ComponentValue, EntityMetadata, GetTimeSeries, Line3d};
+use bevy_geo_frames::GeoRotation;
+use impeller2_bevy::ComponentMetadataRegistry;
+use impeller2_wkt::Line3d;
 
 use gpu::{LineConfig, LineUniform};
 
 use super::plot::{CollectedGraphData, Line, PlotDataComponent};
-use crate::{
-    EqlContext,
-    object_3d::{CompiledExpr, EditableEQL, compile_eql_expr},
-    ui::schematic::EqlExt,
-};
+use crate::{EqlContext, ui::schematic::EqlExt};
 
 pub mod gpu;
 
@@ -55,12 +44,10 @@ pub fn sync_line_plot_3d(
         (&Line3d, &mut LineUniform, &mut gpu::LineTrailColors),
         With<gpu::LineHandles>,
     >,
-    mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
     eql_ctx: Res<EqlContext>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     metadata_store: Res<ComponentMetadataRegistry>,
-    geo_ctx: Option<Res<GeoContext>>,
 ) {
     for (entity, line_plot) in line_plot_3d_query.iter() {
         // Parse and compile the EQL expression
