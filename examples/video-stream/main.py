@@ -267,6 +267,6 @@ sim = world.run(
     sys,
     simulation_rate=1.0 / SIM_TIME_STEP,
     generate_real_time=True,
-    start_timestamp=0,
+    # start_timestamp=0,
     db_path="./video-stream-db",
 )

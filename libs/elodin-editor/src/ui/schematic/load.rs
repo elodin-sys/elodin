@@ -662,7 +662,13 @@ impl LoadSchematicParams<'_, '_> {
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
         let frame = line_3d.frame;
         let mut spawn = self.commands.spawn(line_3d);
-        spawn.insert(Name::new("line_3d"));
+        spawn.insert((
+            Name::new("line_3d"),
+            Transform::default(),
+            GlobalTransform::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+        ));
 
         // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
         // The rotation is Absolute: the line's vertex data is raw frame
@@ -1529,6 +1535,35 @@ mod tests {
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    #[test]
+    fn line_3d_spawns_with_frame_and_transform_components() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            line_3d frame="ECEF" "sat.world_pos"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<(
+            &impeller2_wkt::Line3d,
+            &GeoPosition,
+            &GeoRotation,
+            &Transform,
+            &GlobalTransform,
+        )>();
+        let (line, geo_pos, geo_rot, _, _) = query
+            .iter(app.world())
+            .next()
+            .expect("line_3d should spawn");
+
+        assert_eq!(line.frame, Some(GeoFrame::ECEF));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::ECEF);
     }
 
     #[test]

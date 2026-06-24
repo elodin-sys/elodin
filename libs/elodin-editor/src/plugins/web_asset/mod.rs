@@ -105,7 +105,7 @@ impl Client {
                 if let Some(CachedAsset { etag, .. }) = &cached_asset {
                     request = request.header("If-None-Match", etag);
                 }
-                let response = request.send().await.map_err(http_err)?;
+                let response = request.send().await.map_err(|err| http_err(&url, err))?;
                 if let Some(CachedAsset { data, .. }) = cached_asset
                     && response.status() == StatusCode::NOT_MODIFIED
                 {
@@ -117,7 +117,11 @@ impl Client {
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_owned());
 
-                let data = response.bytes().await.map_err(http_err)?.to_vec();
+                let data = response
+                    .bytes()
+                    .await
+                    .map_err(|err| http_err(&url, err))?
+                    .to_vec();
                 Ok((data, etag))
             })
             .await
@@ -165,10 +169,11 @@ impl AssetReader for Client {
     }
 }
 
-fn http_err(err: reqwest::Error) -> AssetReaderError {
-    let status_code = err
-        .status()
-        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-        .as_u16();
-    AssetReaderError::HttpError(status_code)
+fn http_err(url: &str, err: reqwest::Error) -> AssetReaderError {
+    if let Some(status) = err.status() {
+        return AssetReaderError::HttpError(status.as_u16());
+    }
+    let message = format!("{url}: {err}");
+    tracing::warn!(error = %message, "failed to fetch web asset");
+    AssetReaderError::Io(io::Error::other(message).into())
 }

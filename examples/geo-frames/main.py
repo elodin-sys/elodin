@@ -4,6 +4,7 @@ import math
 
 import elodin as el
 import jax.numpy as jnp
+import numpy as np
 
 SIM_RATE = 60.0
 
@@ -15,8 +16,11 @@ WGS84_E2 = 6.6943799901413165e-3
 WGS84_B_M = WGS84_A_M * math.sqrt(1.0 - WGS84_E2)
 CUBE_SIZE_M = 500_000.0
 CUBE_SEPARATION_M = 1_500_000.0
+ASSET_MESH_SCALE_M = 1_000_000.0
 AXIS_ARROW_SCALE_M = 1_000_000.0
 AXIS_ARROW_THICKNESS = 2500.0
+ORBIT_RADIUS_M = WGS84_A_M + 1_200_000.0
+ORBIT_PERIOD_S = 20.0
 SPIN_RATE_RAD_S = math.radians(10.0)
 PURPLE = "156 39 176"
 ECEF_MARKERS = (
@@ -75,6 +79,12 @@ def _ecef_marker_objects() -> str:
             box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
                 color {PURPLE}
             }}
+            icon builtin="location_on" size=48 {{
+                color {PURPLE}
+            }}
+        }}
+        object_3d frame="ECEF" {name}.world_pos {{
+            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}""".rstrip()
         for name, _ in ECEF_MARKERS
     )
@@ -96,6 +106,7 @@ def world() -> el.World:
     for name, pos in ECEF_MARKERS:
         world.spawn(_body(jnp.array(pos)), name=name)
     world.spawn(_body(jnp.array([0.0, 0.0, 0.0])), name="earth")
+    world.spawn(_body(jnp.array([ORBIT_RADIUS_M, 0.0, 0.0])), name="ecef_orbit_line")
 
     world.schematic(
         f"""
@@ -110,21 +121,50 @@ def world() -> el.World:
 
         object_3d frame="ECEF" earth.world_pos {{
             glb path="earth.glb"
+            icon builtin="public" size=64 {{
+                color 255 255 255
+            }}
         }}
         {_ecef_marker_objects()}
         object_3d frame="NED" ned_origin.world_pos {{
             box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
                 color 244 67 54
             }}
+            icon builtin="my_location" size=56 {{
+                color 244 67 54
+            }}
+        }}
+        object_3d frame="NED" ned_origin.world_pos {{
+            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}
         object_3d frame="ENU" enu_far_east.world_pos {{
             box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
                 color 33 150 243
             }}
+            icon builtin="explore" size=56 {{
+                color 33 150 243
+            }}
+        }}
+        object_3d frame="ENU" enu_far_east.world_pos {{
+            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}
         object_3d frame="ECEF" ecef_far_up.world_pos {{
             box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
                 color 76 175 80
+            }}
+            icon builtin="gps_fixed" size=56 {{
+                color 76 175 80
+            }}
+        }}
+        object_3d frame="ECEF" ecef_far_up.world_pos {{
+            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
+        }}
+        object_3d frame="ECEF" ecef_orbit_line.world_pos {{
+            sphere radius={CUBE_SIZE_M * 0.25} {{
+                color cyan
+            }}
+            icon builtin="satellite_alt" size=48 {{
+                color cyan
             }}
         }}
 
@@ -136,6 +176,9 @@ def world() -> el.World:
         }}
         line_3d frame="ECEF" ecef_far_up.world_pos line_width=2.0 {{
             color 76 175 80
+        }}
+        line_3d frame="ECEF" ecef_orbit_line.world_pos line_width=4.0 perspective=#false {{
+            color cyan
         }}
 
         vector_arrow frame="NED" "(0, 1, 0)" origin="ned_origin.world_pos" scale={AXIS_ARROW_SCALE_M} normalize=#true arrow_thickness={AXIS_ARROW_THICKNESS} label_position=0.0 name="NED Y-axis" show_name=#true body_frame=#true {{
@@ -162,5 +205,21 @@ def system() -> el.System:
     return el.six_dof(sys=no_force)
 
 
+def post_step(tick: int, ctx: el.StepContext) -> None:
+    angle = 2.0 * math.pi * (tick / SIM_RATE) / ORBIT_PERIOD_S
+    pos = np.array(
+        [
+            ORBIT_RADIUS_M * math.cos(angle),
+            ORBIT_RADIUS_M * math.sin(angle),
+            0.0,
+        ],
+        dtype=np.float64,
+    )
+    ctx.write_component(
+        "ecef_orbit_line.world_pos",
+        np.array([0.0, 0.0, 0.0, 1.0, pos[0], pos[1], pos[2]], dtype=np.float64),
+    )
+
+
 if __name__ == "__main__":
-    world().run(system(), simulation_rate=SIM_RATE, max_ticks=1200)
+    world().run(system(), simulation_rate=SIM_RATE, max_ticks=1200, post_step=post_step)
