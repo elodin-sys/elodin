@@ -84,6 +84,15 @@ public-changelog:
     fi
   EOF
 
+build-windows-gnu:
+  #!/usr/bin/env sh
+  env \
+    CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc-posix \
+    CXX_x86_64_pc_windows_gnu=x86_64-w64-mingw32-g++-posix \
+    AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc-ar-posix \
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc-posix \
+    cargo build --release -p elodin --target x86_64-pc-windows-gnu
+
 install target="all":
   #!/usr/bin/env sh
   set -e
