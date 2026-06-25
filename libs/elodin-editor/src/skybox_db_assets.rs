@@ -4,9 +4,9 @@ use bevy_ai_skybox::{
     ManifestEntry, SkyboxManifest,
     prelude::{SetActiveSkybox, SkyboxAssetSettings, SkyboxCache},
 };
-use impeller2_bevy::ConnectionAddr;
+use impeller2_bevy::{ConnectionAddr, PacketTx};
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{DbConfig, Schematic};
+use impeller2_wkt::{DbConfig, Schematic, StoreAsset};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -217,6 +217,106 @@ pub fn sync_db_skybox_assets_from_config(
     }));
 }
 
+/// Tracks the `(addr, skybox)` whose local assets were last uploaded to the DB,
+/// so we push each active skybox's bytes at most once per session.
+#[derive(Resource, Default)]
+pub struct DbSkyboxUploaded {
+    uploaded: Option<MirrorKey>,
+}
+
+/// Counterpart to [`sync_db_skybox_assets_from_config`]: mirror the active
+/// skybox's local `manifest.ron` + cubemap *up* to the DB via [`StoreAsset`].
+///
+/// Skyboxes added at runtime (default, command palette, AI generation) only
+/// have their bytes on the editor's local cache; without this the DB asset
+/// server 404s and the render-server/followers cannot mirror them.
+pub fn upload_active_skybox_assets_to_db(
+    config: Res<DbConfig>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    settings: Option<Res<SkyboxAssetSettings>>,
+    cache: Option<Res<SkyboxCache>>,
+    tx: Option<Res<PacketTx>>,
+    mut uploaded: ResMut<DbSkyboxUploaded>,
+) {
+    let Some(connection_addr) = connection_addr else {
+        return;
+    };
+    let (Some(settings), Some(cache), Some(tx)) = (settings, cache, tx) else {
+        return;
+    };
+
+    let desired = match desired_skybox_from_config(&config) {
+        Some(Some(name)) => name,
+        Some(None) => {
+            uploaded.uploaded = None;
+            return;
+        }
+        None => return,
+    };
+
+    let key = MirrorKey {
+        addr: connection_addr.0,
+        skybox: desired.clone(),
+    };
+    if uploaded.uploaded.as_ref() == Some(&key) {
+        return;
+    }
+
+    let Some(cubemap_file) = cache
+        .manifest
+        .get(&desired)
+        .map(|entry| entry.cubemap_file.clone())
+    else {
+        return; // no local manifest entry for the active skybox yet
+    };
+
+    let manifest_path = settings.manifest_path();
+    let cubemap_path = settings.cache_dir.join(&cubemap_file);
+    if !manifest_path.exists() || !cubemap_path.exists() {
+        // Bytes not on disk yet (e.g. generation still running) — retry later.
+        return;
+    }
+
+    match skybox_upload_payload(&settings, &cubemap_file) {
+        Ok(uploads) => {
+            for (key, bytes) in uploads {
+                tx.send_msg(StoreAsset { key, bytes });
+            }
+            uploaded.uploaded = Some(key);
+        }
+        Err(error) => {
+            tracing::warn!(
+                skybox = %desired,
+                error = %error,
+                "failed to read local skybox assets for db upload"
+            );
+        }
+    }
+}
+
+/// Reads the local skybox `manifest.ron` and cubemap, returning `(db key, bytes)`
+/// pairs ready to send as [`StoreAsset`] messages.
+fn skybox_upload_payload(
+    settings: &SkyboxAssetSettings,
+    cubemap_file: &str,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(cubemap_file)
+        .ok_or_else(|| format!("invalid skybox cubemap file path `{cubemap_file}`"))?;
+    let manifest_path = settings.manifest_path();
+    let manifest_bytes = std::fs::read(&manifest_path)
+        .map_err(|err| format!("{}: {err}", manifest_path.display()))?;
+    let cubemap_path = settings.cache_dir.join(cubemap_file);
+    let cubemap_bytes =
+        std::fs::read(&cubemap_path).map_err(|err| format!("{}: {err}", cubemap_path.display()))?;
+    Ok(vec![
+        (
+            impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
+            manifest_bytes,
+        ),
+        (cubemap_name, cubemap_bytes),
+    ])
+}
+
 async fn fetch_asset(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     let response = client
         .get(url)
@@ -328,6 +428,41 @@ mod tests {
     #[test]
     fn cubemap_cache_path_rejects_traversal() {
         assert!(cubemap_cache_path(Path::new("cache"), "../bad.ktx2").is_err());
+    }
+
+    #[test]
+    fn skybox_upload_payload_reads_manifest_and_cubemap() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("skyboxes");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("manifest.ron"), b"manifest").unwrap();
+        std::fs::write(cache_dir.join("desert_night.cubemap.ktx2"), b"ktx2").unwrap();
+
+        let settings = SkyboxAssetSettings {
+            cache_dir,
+            ..Default::default()
+        };
+
+        let uploads = skybox_upload_payload(&settings, "desert_night.cubemap.ktx2").unwrap();
+        assert_eq!(
+            uploads,
+            vec![
+                (
+                    impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
+                    b"manifest".to_vec()
+                ),
+                (
+                    "skyboxes/desert_night.cubemap.ktx2".to_string(),
+                    b"ktx2".to_vec()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn skybox_upload_payload_rejects_cubemap_traversal() {
+        let settings = SkyboxAssetSettings::default();
+        assert!(skybox_upload_payload(&settings, "../escape.ktx2").is_err());
     }
 
     #[test]
