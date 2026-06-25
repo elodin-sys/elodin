@@ -100,7 +100,7 @@ async fn run_once(
             && let Some((params, nal_length_size)) = video_parameters(&demuxed, video_i)
         {
             match converter.as_mut() {
-                Some(c) => c.update_parameter_sets(params),
+                Some(c) => c.update_parameter_sets(params, nal_length_size)?,
                 None => {
                     converter =
                         Some(AnnexBConverter::new(params).with_nal_length_size(nal_length_size)?)

@@ -147,9 +147,19 @@ impl AnnexBConverter {
         Ok(self)
     }
 
-    /// Replaces the parameter sets, e.g. after a mid-stream resolution change.
-    pub fn update_parameter_sets(&mut self, params: ParameterSets) {
+    /// Replaces the parameter sets and NAL length size, e.g. after a mid-stream
+    /// resolution change where a fresh avcC may use a different length prefix.
+    pub fn update_parameter_sets(
+        &mut self,
+        params: ParameterSets,
+        nal_length_size: usize,
+    ) -> Result<(), Error> {
+        if !(1..=4).contains(&nal_length_size) {
+            return Err(Error::InvalidNalLengthSize(nal_length_size));
+        }
         self.params = params;
+        self.nal_length_size = nal_length_size;
+        Ok(())
     }
 
     /// Converts one AVC-framed access unit into a self-contained Annex-B access
