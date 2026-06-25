@@ -1029,6 +1029,7 @@ mod tests {
     /// commands applying (e.g. skybox generation reloads the schematic). The
     /// queued command must be silenced rather than panic on the dead entity.
     #[test]
+    #[allow(clippy::type_complexity)]
     fn sync_viewport_focus_pick_targets_survives_despawned_target() {
         let mut world = World::new();
         let parent = world.spawn(focus_object_state("e.world_pos")).id();
