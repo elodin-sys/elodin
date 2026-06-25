@@ -1,6 +1,6 @@
 {
   nixConfig = {
-    extra-substituters = ["https://elodin-nix-cache.s3.us-west-2.amazonaws.com"];
+    extra-substituters = ["https://s3-us-west-2.amazonaws.com/elodin-nix-cache"];
     extra-trusted-public-keys = [
       "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
