@@ -31,6 +31,10 @@
 
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
+    secureBzip2Overlay = _final: prev: {
+      # JetPack only needs a non-ancient unpacker; avoid nixpkgs' insecure 1.1 snapshot.
+      bzip2_1_1 = prev.bzip2;
+    };
     gitReposOverlay = final: prev: {
       # Our packing of deepstream7 still needs nvidia sources, so we can't use upstream nixpkgs yet!
       # Start with upstream nixpkgs _cuda/manifests and overlay jetpack ones (where prevCuda is jetpack-nixos cuda)
@@ -40,8 +44,6 @@
           (import "${nixpkgs}/pkgs/development/cuda-modules/_cuda/manifests" {inherit (final) lib;})
           prevCuda.manifests;
       });
-      # JetPack only needs a non-ancient unpacker; avoid nixpkgs' insecure 1.1 snapshot.
-      bzip2_1_1 = prev.bzip2;
       # Override jetpack-nixos gitrepos with other sources specific to the aleph carrier board configuration
       nvidia-jetpack6 = prev.nvidia-jetpack6.overrideScope (jetpackFinal: jetpackPrev: {
         gitRepos =
@@ -59,6 +61,7 @@
         callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
       // (rust-overlay.overlays.default final prev)
+      // (secureBzip2Overlay final prev)
       // (gitReposOverlay final prev);
 
     baseModules = {
@@ -191,6 +194,7 @@
         flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
           modules = [
             {nixpkgs.buildPlatform.system = "x86_64-linux";}
+            {nixpkgs.overlays = [secureBzip2Overlay];}
           ];
         };
       in {
