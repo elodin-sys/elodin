@@ -173,58 +173,37 @@ You should see the GStreamer test pattern that was streamed during the simulatio
 
 The **RTSP Camera** tab shows an H.264 RTSP stream (an IP camera, or OBS via the
 [OBS-RTSPServer](https://github.com/iamscottxu/obs-rtspserver) plugin), pulled by
-the `rtsp-streamer` producer and streamed **into** Elodin DB.
-
-Like every other source, Elodin DB stays passive: `rtsp-streamer` is a standalone
-producer that connects to the DB and pushes frames (same model as the OBS/SRT and
-GStreamer paths). It reframes each access unit to Annex-B (repeating SPS/PPS ahead
-of every keyframe), so once the bytes land, playback/scrub/export/replication all
-work unchanged. v1 expects H.264 **baseline/main** with `bframes=0`.
+the standalone `rtsp-streamer` producer and pushed **into** Elodin DB — same model
+as the OBS/SRT and GStreamer paths (the DB stays passive). H.264 baseline/main
+(`bframes=0`) only.
 
 ### Run it
 
-The example already registers an `rtsp-receiver` recipe. Just set the source URL
-and run the example — the producer connects to the embedded DB automatically:
+The example registers an `rtsp-receiver` recipe; just set the source URL:
 
 ```bash
 RTSP_URL="rtsp://USER:PASS@CAMERA_IP:554/stream" \
     elodin editor examples/video-stream/main.py
 ```
 
-Without `RTSP_URL` the recipe is a no-op (the RTSP Camera tab stays empty). The
-producer auto-reconnects if the source drops; credentials may be embedded in the
-URL and are stripped from logs. The message name (`rtsp-camera`) must match the
-`video_stream "rtsp-camera"` panel in the schematic.
+Without `RTSP_URL` it's a no-op (the tab stays empty). The producer auto-reconnects
+and strips URL credentials from logs; `MSG_NAME` must match the
+`video_stream "rtsp-camera"` panel.
 
-### Run the producer standalone
+### Standalone / Nix delivery
 
-`rtsp-streamer` is a standalone producer; point it at a source and a DB:
-
-```bash
-rtsp-streamer rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
-```
-
-From a source checkout, run it with `cargo run -p rtsp-streamer -- <args>`.
-
-### Delivery (Nix)
-
-`rtsp-streamer` is packaged with Nix and exposed from the flake (just like
-`elodinsink`), so downstream consumers can pull it into their own flakes:
-
-```nix
-# in your flake inputs
-inputs.elodin.url = "github:elodin-sys/elodin";
-
-# then reference the producer
-inputs.elodin.packages.${system}.rtsp-streamer
-```
-
-Or build/run it directly without cloning:
+`rtsp-streamer` is an ordinary producer you can run against any DB, Nix-packaged
+from the flake like `elodinsink`:
 
 ```bash
-nix run github:elodin-sys/elodin#rtsp-streamer -- \
-    rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
+# from a source checkout
+cargo run -p rtsp-streamer -- rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
+
+# or straight from the flake, no clone
+nix run github:elodin-sys/elodin#rtsp-streamer -- rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
 ```
+
+Downstream flakes pull it via `inputs.elodin.packages.${system}.rtsp-streamer`.
 
 ### Using OBS
 
