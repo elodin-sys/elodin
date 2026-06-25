@@ -3336,7 +3336,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = DB::create(dir.path().join("db")).unwrap();
 
-        db.store_asset("skyboxes/manifest.ron", b"manifest").unwrap();
+        db.store_asset("skyboxes/manifest.ron", b"manifest")
+            .unwrap();
 
         let assets_dir = crate::assets_http::assets_dir(&db.path);
         assert_eq!(

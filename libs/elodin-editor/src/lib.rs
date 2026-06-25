@@ -360,9 +360,14 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
+            .init_resource::<skybox_db_assets::DbSkyboxUploaded>()
             .add_systems(
                 PostUpdate,
                 skybox_db_assets::sync_db_skybox_assets_from_config,
+            )
+            .add_systems(
+                PostUpdate,
+                skybox_db_assets::upload_active_skybox_assets_to_db,
             )
             .add_systems(PostUpdate, set_clear_color)
             .insert_resource(WireframeConfig {
