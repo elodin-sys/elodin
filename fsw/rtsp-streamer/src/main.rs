@@ -273,13 +273,15 @@ async fn read_len_packet(read: &mut OwnedReadHalf) -> std::io::Result<Vec<u8>> {
 /// Opens an RTSP session (TCP-interleaved) and returns the H.264 demuxer.
 async fn rtsp_connect(url_str: &str) -> Result<(retina::client::Demuxed, usize)> {
     let mut url = Url::parse(url_str).context("parse RTSP URL")?;
-    // Pull any userinfo out of the URL into retina credentials.
-    let creds = match url.password() {
-        Some(password) if !url.username().is_empty() => Some(Credentials {
+    // Pull any userinfo out of the URL into retina credentials. Accept a
+    // username, a password, or both (some cameras use `rtsp://:pass@host`).
+    let creds = if !url.username().is_empty() || url.password().is_some() {
+        Some(Credentials {
             username: url.username().to_string(),
-            password: password.to_string(),
-        }),
-        _ => None,
+            password: url.password().unwrap_or("").to_string(),
+        })
+    } else {
+        None
     };
     let _ = url.set_username("");
     let _ = url.set_password(None);
@@ -294,7 +296,7 @@ async fn rtsp_connect(url_str: &str) -> Result<(retina::client::Demuxed, usize)>
     let video_i = session
         .streams()
         .iter()
-        .position(|s| s.media() == "video" && s.encoding_name() == "h264")
+        .position(|s| s.media() == "video" && s.encoding_name().eq_ignore_ascii_case("h264"))
         .context("no H.264 video stream in RTSP presentation")?;
 
     session
