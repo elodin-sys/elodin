@@ -1061,10 +1061,54 @@ async fn tick(
         world.profiler_mut().detailed_timing = true;
         info!("detailed timing enabled (ELODIN_DETAILED_TIMING)");
     }
+    // Real-time pacing lead buffer: aim to wake this far *before* each tick
+    // deadline so the sim runs slightly ahead of wall-clock. A transient slow
+    // cycle (e.g. a lockstep `post_step` round-trip that overruns one period)
+    // then spends the buffer instead of crossing the deadline and logging
+    // "cannot achieve real-time". The schedule stays anchored, so the sim is
+    // bounded to at most `lead` ahead of real-time — data is available a few ms
+    // early, which is harmless for telemetry/SITL. It is an absolute time
+    // buffer (may span several ticks for high-rate sims, which is the point).
+    // Default covers the observed lockstep tail; `ELODIN_PACING_LEAD_US`
+    // overrides. Sanity-capped at 1s to swallow pathological env values.
+    let pacing_lead: Duration = std::env::var("ELODIN_PACING_LEAD_US")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_micros)
+        .unwrap_or(Duration::from_micros(2000))
+        .min(Duration::from_secs(1));
+    // Startup grace: suppress real-time warnings for this long after pacing
+    // begins, so a slow SITL/controller boot (e.g. Betaflight's multi-second
+    // init) doesn't fire a spurious "cannot achieve real-time". Overridable via
+    // `ELODIN_PACING_GRACE_US`.
+    let pacing_grace: Duration = std::env::var("ELODIN_PACING_GRACE_US")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_micros)
+        .unwrap_or(Duration::from_secs(5));
+    // Summary warmup: discard the first `warmup_ticks` ticks from the end-of-run
+    // stats so the simulator/SITL spin-up (the first cycle can stall for seconds
+    // while a flight controller boots) doesn't poison mean cycle / post_step /
+    // lateness. Overridable via `ELODIN_SIM_WARMUP_TICKS`; 0 disables.
+    let warmup_ticks: u64 = std::env::var("ELODIN_SIM_WARMUP_TICKS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(100);
+    let mut warmup_done = warmup_ticks == 0;
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
     let mut next_tick_deadline: Option<Instant> = None;
     let mut last_behind_warning: Option<Instant> = None;
+    // Trustworthy-warning state. The honest "cannot achieve real-time" signal is
+    // the *achieved cycle rate vs target* measured over a recent window — it is
+    // immune to the per-cycle jitter, the lead buffer, and the drift-cap resets
+    // that confound an instantaneous "now > deadline" check. We skip a startup
+    // grace (the SITL boot stall) and then, each window, warn if the sim is
+    // running materially slower than real-time.
+    let mut first_pacing_at: Option<Instant> = None;
+    let mut rate_win_start: Option<Instant> = None;
+    let mut rate_win_start_cycles: u64 = 0;
+    let mut pacing_cycles: u64 = 0;
     let mut last_timing_log: Option<Instant> = None;
     // Always-on per-phase timing summary. Dropping `metrics` prints
     // the one-block stdout summary on any exit (cancel, max_tick,
@@ -1086,6 +1130,11 @@ async fn tick(
         }
         if !db.recording_cell.is_playing() {
             next_tick_deadline = None;
+            last_behind_warning = None;
+            first_pacing_at = None;
+            rate_win_start = None;
+            rate_win_start_cycles = 0;
+            pacing_cycles = 0;
             let _ = futures_lite::future::race(db.recording_cell.wait(), async {
                 cancel_token.wait().await;
                 false
@@ -1138,6 +1187,20 @@ async fn tick(
             db.last_updated.store(Timestamp(i64::MIN));
             next_tick_deadline = None;
             continue;
+        }
+
+        // Once past warmup, discard the spin-up samples so the summary reflects
+        // steady state. Wait until after pre_step/rollback handling so
+        // StepContext::truncate() does not mark warmup complete for a run that is
+        // about to restart from tick 0.
+        if !warmup_done && tick >= warmup_ticks {
+            metrics.reset_after_warmup(tick);
+            warmup_done = true;
+            last_behind_warning = None;
+            first_pacing_at = None;
+            rate_win_start = None;
+            rate_win_start_cycles = 0;
+            pacing_cycles = 0;
         }
 
         let copy_in_start = Instant::now();
@@ -1215,38 +1278,93 @@ async fn tick(
         metrics.observe_post_step(post_step_start.elapsed());
         if generate_real_time && let Some(deadline) = next_tick_deadline.as_mut() {
             let pacing_start = Instant::now();
-            let now = Instant::now();
-            if now > *deadline {
-                let should_warn = last_behind_warning
-                    .map(|last| now.duration_since(last) >= Duration::from_secs(1))
-                    .unwrap_or(true);
-                if should_warn {
-                    let behind_ms = now.duration_since(*deadline).as_secs_f64() * 1000.0;
-                    let target_ms = effective_batch_time_step.as_secs_f64() * 1000.0;
-                    let factor = if target_ms > 0.0 {
-                        (behind_ms + target_ms) / target_ms
-                    } else {
-                        0.0
-                    };
-                    info!(
-                        "simulation cannot achieve real-time; {:.2}ms behind target {:.2}ms/tick ({:.2}x behind)",
-                        behind_ms, target_ms, factor
-                    );
-                    last_behind_warning = Some(now);
+            let now = pacing_start;
+            // Signed deadline error: negative = ahead of schedule (we will
+            // sleep), positive = already behind (we will skip the sleep).
+            let deadline_err_ns: i64 = if now >= *deadline {
+                i64::try_from(now.duration_since(*deadline).as_nanos()).unwrap_or(i64::MAX)
+            } else {
+                -i64::try_from(deadline.duration_since(now).as_nanos()).unwrap_or(i64::MAX)
+            };
+            // Lateness vs the *true* deadline (the real-time violation). Warn
+            // only when it is SUSTAINED (a run of late cycles persisting past
+            // `warn_window`) and beyond a tolerance, so transient jitter and the
+            // boot stall — which the lead buffer + a fast recovery absorb — do
+            // not spam the log. The message reports the achieved-vs-target rate
+            // and mean lateness over the run, not a single instantaneous miss.
+            // Drift cap: re-anchor the schedule on a large one-time gap (the SITL
+            // boot stall, a pause/resume, a render-bridge connection) so we don't
+            // sprint a long burst of fast ticks to catch up. Transient slow cycles
+            // below this stay on the fixed schedule (the lead buffer absorbs them).
+            let was_reset = now > *deadline + effective_batch_time_step * 2;
+
+            // Trustworthy warning: compare achieved cycle rate to the target over
+            // a recent window, after a startup grace. This is the honest
+            // real-time signal and ignores per-cycle jitter / resets / the lead.
+            pacing_cycles += 1;
+            if first_pacing_at.is_none() {
+                first_pacing_at = Some(now);
+            }
+            let in_grace =
+                !warmup_done || now.duration_since(first_pacing_at.unwrap_or(now)) < pacing_grace;
+            if in_grace || rate_win_start.is_none() {
+                // Pin the window to `now` during grace so it starts clean after.
+                rate_win_start = Some(now);
+                rate_win_start_cycles = pacing_cycles;
+            } else if let Some(win_start) = rate_win_start {
+                let win_elapsed = now.duration_since(win_start);
+                // Evaluate over a 3 s window and only warn below 85% of target,
+                // so a transient stall doesn't trip a "cannot achieve real-time"
+                // — it fires only on a genuine, sustained deficit (a sim that is
+                // basically keeping up, e.g. ~95%, stays quiet).
+                if win_elapsed >= Duration::from_secs(3) {
+                    let cycles_in_win = pacing_cycles - rate_win_start_cycles;
+                    let achieved_hz = cycles_in_win as f64 / win_elapsed.as_secs_f64();
+                    let target_hz = 1.0 / effective_batch_time_step.as_secs_f64();
+                    if achieved_hz < 0.85 * target_hz {
+                        let should_warn = last_behind_warning
+                            .map(|last| now.duration_since(last) >= Duration::from_secs(1))
+                            .unwrap_or(true);
+                        if should_warn {
+                            info!(
+                                "simulation cannot achieve real-time; {:.0}/{:.0} cycles/s ({:.0}% of real-time)",
+                                achieved_hz,
+                                target_hz,
+                                100.0 * achieved_hz / target_hz,
+                            );
+                            last_behind_warning = Some(now);
+                        }
+                    }
+                    rate_win_start = Some(now);
+                    rate_win_start_cycles = pacing_cycles;
                 }
             }
-            // Cap deadline drift: if we're more than 2 tick periods behind,
-            // reset the deadline to now. This prevents a burst of fast ticks
-            // (visible as timeline stutter in the editor) when a one-time
-            // delay occurs, such as the initial render bridge connection.
-            if now > *deadline + effective_batch_time_step * 2 {
+            if was_reset {
                 *deadline = now;
             }
-            if *deadline > now {
-                stellarator::sleep(*deadline - now).await;
+            // Pace to `deadline - lead` (run slightly ahead) rather than to the
+            // deadline itself, so a transient slow cycle spends the lead buffer
+            // instead of crossing the deadline. `requested` is the sleep we ask
+            // the runtime for; `actual` is what really elapsed (their difference
+            // is the timer/OS oversleep we record as a diagnostic).
+            let target = deadline.checked_sub(pacing_lead).unwrap_or(*deadline);
+            let mut requested = Duration::ZERO;
+            let mut actual = Duration::ZERO;
+            if target > now {
+                requested = target.duration_since(now);
+                let sleep_start = Instant::now();
+                stellarator::sleep(requested).await;
+                actual = sleep_start.elapsed();
             }
             *deadline += effective_batch_time_step;
             metrics.observe_real_time_pacing(pacing_start.elapsed());
+            metrics.observe_pacing(
+                pacing_start.duration_since(start),
+                requested,
+                actual,
+                deadline_err_ns,
+                was_reset,
+            );
         }
         if detailed_timing {
             let now = Instant::now();

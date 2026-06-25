@@ -47,6 +47,14 @@ aggregate/average per-run wall time, worker parallel efficiency, disk usage,
 CPU/RAM resource rollups, promoted hook metrics, invalid-run counts, and the
 merged simulation phase summary.
 
+This campaign is intentionally not all-green. It samples a tiny point-mass plant
+with a simple saturated PD controller over a range that includes recoverable and
+missed cases. The default scoring hook treats the vehicle as "captured" when
+the final position is within `8.5 m` of the target, which should produce a
+mostly-successful campaign with a visible failure tail (roughly 70-85 passes out
+of 100 on the default spec). Set `ELODIN_MONTE_CARLO_CAPTURE_RADIUS_M` to make
+the score stricter or looser while preserving the raw `error` metric.
+
 ## Scaling vs. Memory Profiles
 
 The example has two useful modes:

@@ -1,10 +1,8 @@
-use std::mem;
-
 use crate::{
     SelectedTimeRange,
     ui::plot::{
         Line,
-        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
+        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, VALUE_BUFFER_SIZE},
     },
     ui::timeline::TimelineSettings,
 };
@@ -19,9 +17,8 @@ use bevy::{
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
     ecs::{
-        bundle::Bundle,
         component::Component,
-        entity::{ContainsEntity, Entity},
+        entity::Entity,
         query::Has,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
@@ -34,7 +31,7 @@ use bevy::{
     math::{Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref, Reflect, Resource},
+    prelude::{Color, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -52,7 +49,6 @@ use bevy::{
 use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
-    view::RetainedViewEntity,
 };
 use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
@@ -168,6 +164,48 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
+
+/// Per-line trail colors resolved from the KDL `color`/`future_color`.
+///
+/// Each is linear RGBA; `None` falls back to the timeline trail colors. A line
+/// with only `color` set leaves `future = None`, so the future segment reuses
+/// `played` (the whole line takes that color, just faded).
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct LineTrailColors {
+    pub played: Option<Vec4>,
+    pub future: Option<Vec4>,
+}
+
+impl LineTrailColors {
+    /// Resolve the played/future segment colors against the timeline fallbacks.
+    ///
+    /// - played: explicit `played`, else the timeline played color.
+    /// - future: explicit `future`, else explicit `played` (a lone KDL `color`
+    ///   paints the whole line), else the timeline future color.
+    ///
+    /// The future segment's alpha fade (`future_alpha`) is applied uniformly,
+    /// regardless of where the color came from.
+    fn resolve(
+        &self,
+        played_timeline: Vec4,
+        future_timeline: Vec4,
+        future_alpha: f32,
+    ) -> (Vec4, Vec4) {
+        let played = self.played.unwrap_or(played_timeline);
+        let mut future = self.future.or(self.played).unwrap_or(future_timeline);
+        future.w *= future_alpha;
+        (played, future)
+    }
+}
+
+/// Linearize a schematic (sRGB) color for the line shader, preserving alpha.
+fn wkt_color_linear(color: impeller2_wkt::Color) -> Vec4 {
+    Vec4::from_array(
+        Color::srgba(color.r, color.g, color.b, color.a)
+            .to_linear()
+            .to_f32_array(),
+    )
+}
 
 #[derive(Component, ShaderType, Clone, Copy, Reflect)]
 pub struct LineUniform {
@@ -340,6 +378,13 @@ pub struct LineConfig {
 pub struct GpuLine {
     values_bind_group: BindGroup,
     index_bind_group: BindGroup,
+    /// Strip indices (decimated by a uniform sampling step to fit
+    /// `INDEX_BUFFER_LEN`) backing `index_bind_group`. This is the GPU-side
+    /// point reduction, distinct from the upstream Hamann-Chen (1994) in-memory
+    /// simplification done on the `LineTree`. Never read directly, but owned
+    /// here so the buffers outlive the bind group / draw rather than relying on
+    /// wgpu's internal reference counting.
+    #[allow(dead_code)]
     index_buffers: [Buffer; 3],
     count: u32,
 }
@@ -404,19 +449,21 @@ type DrawLineData = (
     DrawLine,
 );
 
+type ExtractLinesParams = (
+    Query<'static, 'static, LineQueryMut>,
+    ResMut<'static, Assets<Line>>,
+    Commands<'static, 'static>,
+    Res<'static, SelectedTimeRange>,
+    Res<'static, EarliestTimestamp>,
+    Res<'static, LastUpdated>,
+    Res<'static, CurrentTimestamp>,
+    Res<'static, TimelineSettings>,
+    Res<'static, crate::ui::timeline::LatestFollow>,
+);
+
 #[derive(Resource)]
 struct CachedSystemState {
-    state: SystemState<(
-        Query<'static, 'static, LineQueryMut>,
-        ResMut<'static, Assets<Line>>,
-        Commands<'static, 'static>,
-        Res<'static, SelectedTimeRange>,
-        Res<'static, EarliestTimestamp>,
-        Res<'static, LastUpdated>,
-        Res<'static, CurrentTimestamp>,
-        Res<'static, TimelineSettings>,
-        Res<'static, crate::ui::timeline::LatestFollow>,
-    )>,
+    state: SystemState<ExtractLinesParams>,
 }
 
 impl FromWorld for CachedSystemState {
@@ -432,6 +479,7 @@ type LineQueryMut = (
     &'static LineHandles,
     &'static LineConfig,
     &'static mut LineUniform,
+    Option<&'static LineTrailColors>,
     Option<&'static mut GpuLine>,
 );
 
@@ -462,20 +510,11 @@ fn extract_lines(
         } else {
             selected_range.clone()
         };
-        let played_color = timeline_settings.played_color;
-        let played_trail_color = Vec4::new(
-            played_color.r,
-            played_color.g,
-            played_color.b,
-            played_color.a,
-        );
-        let mut future_color = Vec4::new(
-            timeline_settings.future_color.r,
-            timeline_settings.future_color.g,
-            timeline_settings.future_color.b,
-            timeline_settings.future_color.a,
-        );
-        future_color.w *= timeline_settings.future_trail_alpha;
+        let future_trail_alpha = timeline_settings.future_trail_alpha;
+        // Fallback colors for lines without explicit KDL colors. Kept unfaded
+        // here; the future segment's alpha fade is applied uniformly below.
+        let played_timeline_color = wkt_color_linear(timeline_settings.played_color);
+        let future_timeline_color = wkt_color_linear(timeline_settings.future_color);
 
         // Live-follow mode: the whole trail is "already played", so render
         // everything in the played color (yolk) and skip the future pass
@@ -497,7 +536,14 @@ fn extract_lines(
         // the split back onto the previous sample boundary instead.
         let split = selected_range.start.max(current_timestamp.0);
 
-        'outer: for (entity, line_handles, config, uniform, gpu_line) in lines.iter_mut() {
+        'outer: for (entity, line_handles, config, uniform, trail_colors, gpu_line) in
+            lines.iter_mut()
+        {
+            let (played_color, future_color) = trail_colors.copied().unwrap_or_default().resolve(
+                played_timeline_color,
+                future_timeline_color,
+                future_trail_alpha,
+            );
             for line in &line_handles.0 {
                 let Some(line) = line_assets.get_mut(line) else {
                     continue 'outer;
@@ -554,7 +600,7 @@ fn extract_lines(
                 render_device.create_bind_group("line values", &values_layout.layout, &entries)
             };
 
-            let mut build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>| {
+            let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>| {
                 if range.start >= range.end {
                     return None;
                 }
@@ -617,7 +663,7 @@ fn extract_lines(
 
             if let Some(gpu_line) = build_gpu_line(played_range.clone()) {
                 let mut played_uniform = *uniform;
-                played_uniform.color = played_trail_color;
+                played_uniform.color = played_color;
                 commands.spawn((
                     MainEntity::from(entity),
                     line_handles.clone(),
@@ -742,5 +788,62 @@ fn queue_line(
                 indexed: true,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PLAYED_TL: Vec4 = Vec4::new(1.0, 1.0, 0.0, 1.0); // timeline played (yalk-ish)
+    const FUTURE_TL: Vec4 = Vec4::new(1.0, 1.0, 1.0, 1.0); // timeline future (white)
+    const G: Vec4 = Vec4::new(0.0, 1.0, 0.0, 1.0); // KDL `color green`
+    const W: Vec4 = Vec4::new(1.0, 1.0, 1.0, 1.0); // KDL `future_color white`
+    const ALPHA: f32 = 0.5;
+
+    fn resolve(trail: LineTrailColors) -> (Vec4, Vec4) {
+        trail.resolve(PLAYED_TL, FUTURE_TL, ALPHA)
+    }
+
+    fn faded(mut c: Vec4) -> Vec4 {
+        c.w *= ALPHA;
+        c
+    }
+
+    #[test]
+    fn no_kdl_colors_use_timeline() {
+        let (played, future) = resolve(LineTrailColors::default());
+        assert_eq!(played, PLAYED_TL);
+        assert_eq!(future, faded(FUTURE_TL));
+    }
+
+    #[test]
+    fn color_only_paints_whole_line() {
+        let (played, future) = resolve(LineTrailColors {
+            played: Some(G),
+            future: None,
+        });
+        assert_eq!(played, G);
+        assert_eq!(future, faded(G));
+    }
+
+    #[test]
+    fn color_and_future_color_are_independent() {
+        let (played, future) = resolve(LineTrailColors {
+            played: Some(G),
+            future: Some(W),
+        });
+        assert_eq!(played, G);
+        assert_eq!(future, faded(W));
+    }
+
+    #[test]
+    fn future_color_only_keeps_timeline_played() {
+        let (played, future) = resolve(LineTrailColors {
+            played: None,
+            future: Some(W),
+        });
+        assert_eq!(played, PLAYED_TL);
+        assert_eq!(future, faded(W));
     }
 }
