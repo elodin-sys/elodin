@@ -40,6 +40,8 @@
           (import "${nixpkgs}/pkgs/development/cuda-modules/_cuda/manifests" {inherit (final) lib;})
           prevCuda.manifests;
       });
+      # JetPack only needs a non-ancient unpacker; avoid nixpkgs' insecure 1.1 snapshot.
+      bzip2_1_1 = prev.bzip2;
       # Override jetpack-nixos gitrepos with other sources specific to the aleph carrier board configuration
       nvidia-jetpack6 = prev.nvidia-jetpack6.overrideScope (jetpackFinal: jetpackPrev: {
         gitRepos =
