@@ -26,11 +26,22 @@ impl ClockMapper {
     }
 
     /// Maps a source PTS (microseconds) to a strictly-increasing DB timestamp
-    /// (microseconds). The first call establishes the PTS origin and returns
-    /// `base_us`; later calls return `base_us + (pts - first_pts)`, bumped by
-    /// one microsecond if needed to stay strictly above the last value.
+    /// (microseconds), committing it as the latest written frame. Convenience
+    /// for callers that write unconditionally; otherwise use [`peek`](Self::peek)
+    /// + [`commit`](Self::commit) so a failed write never advances the clock.
     pub fn map(&mut self, pts_us: i64) -> i64 {
-        let first = *self.first_pts_us.get_or_insert(pts_us);
+        let ts = self.peek(pts_us);
+        self.commit(pts_us, ts);
+        ts
+    }
+
+    /// Computes the DB timestamp for `pts_us` **without** mutating state. The
+    /// first frame returns `base_us`; later frames return `base_us + (pts -
+    /// first_pts)`, bumped one microsecond above the last written value if
+    /// needed. Pair with [`commit`](Self::commit) once the frame is durably
+    /// written so a dropped frame leaves no gap in the timeline.
+    pub fn peek(&self, pts_us: i64) -> i64 {
+        let first = self.first_pts_us.unwrap_or(pts_us);
         let offset = pts_us.saturating_sub(first).max(0);
         let mut ts = self.base_us.saturating_add(offset);
         if let Some(last) = self.last_written_us
@@ -38,8 +49,15 @@ impl ClockMapper {
         {
             ts = last.saturating_add(1);
         }
-        self.last_written_us = Some(ts);
         ts
+    }
+
+    /// Records `pts_us`/`ts` as the latest written frame (call only after a
+    /// successful DB write). `ts` must come from a prior [`peek`](Self::peek)
+    /// with the same `pts_us`.
+    pub fn commit(&mut self, pts_us: i64, ts: i64) {
+        self.first_pts_us.get_or_insert(pts_us);
+        self.last_written_us = Some(ts);
     }
 
     /// Re-anchors after a reconnect: refresh the base and reset the PTS origin,
@@ -99,6 +117,20 @@ mod tests {
         c.reanchor(2_000_000);
         assert_eq!(c.map(500_000), 2_000_000);
         assert_eq!(c.map(533_333), 2_033_333);
+    }
+
+    #[test]
+    fn peek_does_not_mutate_until_commit() {
+        let mut c = ClockMapper::new(1_000_000);
+        // Repeated peeks (e.g. a write that keeps failing) must not advance.
+        assert_eq!(c.peek(50_000), 1_000_000);
+        assert_eq!(c.peek(50_000), 1_000_000);
+        assert_eq!(c.last_written_us(), None);
+
+        // Commit advances exactly once; the next frame builds on it.
+        c.commit(50_000, 1_000_000);
+        assert_eq!(c.last_written_us(), Some(1_000_000));
+        assert_eq!(c.peek(83_333), 1_033_333);
     }
 
     #[test]

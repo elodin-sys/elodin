@@ -147,18 +147,34 @@ async fn run_once(
 
         let ts = frame.timestamp();
         let pts_us = (ts.elapsed() as i128 * 1_000_000 / ts.clock_rate().get() as i128) as i64;
-        let out_ts = clock.map(pts_us);
 
-        let mut pkt = LenPacket::msg_with_timestamp(id, Timestamp(out_ts), annexb.len());
-        pkt.extend_from_slice(&annexb);
-        if conn.write.write_all(&pkt.inner).await.is_err() {
+        // Compute the timestamp without committing: the clock must advance only
+        // once the frame is durably written, so a fully-failed send leaves no
+        // gap in the timeline.
+        let out_ts = clock.peek(pts_us);
+        let pkt = build_pkt(id, out_ts, &annexb);
+        let committed_ts = if conn.write.write_all(&pkt.inner).await.is_ok() {
+            out_ts
+        } else {
             warn!("elodin-db send failed; reconnecting");
             conn = connect_db(args.db_addr, &args.msg_name, latest_base.clone()).await?;
+            // The DB clock may have moved while we were disconnected; re-anchor
+            // and recompute so the retried frame lands at a live timestamp
+            // instead of a stale one (mirrors elodinsink).
+            let base = latest_base.load(Ordering::Relaxed);
+            if base != i64::MIN {
+                clock.reanchor(base);
+            }
+            let retry_ts = clock.peek(pts_us);
+            let retry_pkt = build_pkt(id, retry_ts, &annexb);
             conn.write
-                .write_all(&pkt.inner)
+                .write_all(&retry_pkt.inner)
                 .await
                 .context("resend frame after reconnect")?;
-        }
+            retry_ts
+        };
+        // Only now that the write succeeded do we advance the clock.
+        clock.commit(pts_us, committed_ts);
     }
     Ok(())
 }
@@ -235,6 +251,13 @@ async fn connect_db(
     });
 
     Ok(DbConn { write, reader })
+}
+
+/// Builds a timestamped opaque-bytes message packet for the video log.
+fn build_pkt(id: impeller2::types::PacketId, ts: i64, annexb: &[u8]) -> LenPacket {
+    let mut pkt = LenPacket::msg_with_timestamp(id, Timestamp(ts), annexb.len());
+    pkt.extend_from_slice(annexb);
+    pkt
 }
 
 /// Reads one length-prefixed (u32 LE) impeller2 packet body from `read`.
