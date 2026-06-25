@@ -56,6 +56,7 @@
           inherit rustToolchain gitRev;
         };
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
+        rtsp-streamer = final.callPackage ./nix/pkgs/rtsp-streamer.nix {inherit rustToolchain;};
       };
     };
   in
@@ -82,7 +83,7 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db elodinsink;
+          inherit elodin-cli elodin-db elodinsink rtsp-streamer;
           elodin-py = elodin-py.py;
         };
 

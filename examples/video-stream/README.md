@@ -193,37 +193,38 @@ RTSP_URL="rtsp://USER:PASS@CAMERA_IP:554/stream" \
 
 Without `RTSP_URL` the recipe is a no-op (the RTSP Camera tab stays empty). The
 producer auto-reconnects if the source drops; credentials may be embedded in the
-URL and are stripped from logs.
+URL and are stripped from logs. The message name (`rtsp-camera`) must match the
+`video_stream "rtsp-camera"` panel in the schematic.
 
-You can also run the producer directly against any running DB:
+### Run the producer standalone
+
+`rtsp-streamer` is a standalone producer; point it at a source and a DB:
 
 ```bash
-cargo run -p rtsp-streamer -- \
+rtsp-streamer rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
+```
+
+From a source checkout, run it with `cargo run -p rtsp-streamer -- <args>`.
+
+### Delivery (Nix)
+
+`rtsp-streamer` is packaged with Nix and exposed from the flake (just like
+`elodinsink`), so downstream consumers can pull it into their own flakes:
+
+```nix
+# in your flake inputs
+inputs.elodin.url = "github:elodin-sys/elodin";
+
+# then reference the producer
+inputs.elodin.packages.${system}.rtsp-streamer
+```
+
+Or build/run it directly without cloning:
+
+```bash
+nix run github:elodin-sys/elodin#rtsp-streamer -- \
     rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
 ```
-
-The message name (`rtsp-camera`) must match the `video_stream "rtsp-camera"` panel
-in the schematic.
-
-### Local test source (no camera needed)
-
-Use [`mediamtx`](https://github.com/bluenviron/mediamtx) as a tiny RTSP server and
-publish a test pattern to it with `ffmpeg`:
-
-```bash
-# Terminal 1: RTSP server.
-# Pass the bundled config explicitly — run bare, mediamtx 1.19+ loads an empty
-# configuration that rejects publishing with "400 Bad Request". The Homebrew
-# config allows anonymous publish/read.
-mediamtx /opt/homebrew/etc/mediamtx/mediamtx.yml
-
-# Terminal 2: publish an H.264 baseline test pattern to it (TCP transport)
-ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=30 \
-    -c:v libx264 -profile:v baseline -tune zerolatency -pix_fmt yuv420p -g 30 \
-    -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/test
-```
-
-Then point `RTSP_URL` (or the producer) at `rtsp://127.0.0.1:8554/test`.
 
 ### Using OBS
 
@@ -274,7 +275,7 @@ The `receive-rtsp-stream.sh` recipe is configured via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `RTSP_URL` | _(unset → no-op)_ | RTSP source URL (IP camera / OBS / mediamtx) |
+| `RTSP_URL` | _(unset → no-op)_ | RTSP source URL (IP camera or OBS-RTSPServer) |
 | `DB_ADDRESS` | `127.0.0.1:2240` | Elodin DB address |
 | `MSG_NAME` | `rtsp-camera` | Video message name (must match schematic) |
 
