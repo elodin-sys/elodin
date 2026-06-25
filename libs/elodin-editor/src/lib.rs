@@ -111,6 +111,7 @@ pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSky
     }
 }
 
+#[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
 pub(crate) fn skybox_asset_plugin_headless() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
     let mut plugin = skybox_asset_plugin();
     plugin.watch_manifest = true;
