@@ -34,6 +34,14 @@ impl<R: AsyncRead> PacketStream<R> {
         Self { reader }
     }
 
+    /// Reject packets whose length prefix exceeds `max` bytes (see
+    /// [`LengthDelReader::with_max_len`]). Bounds memory for [`Self::next_grow`].
+    pub fn with_max_len(self, max: usize) -> Self {
+        Self {
+            reader: self.reader.with_max_len(max),
+        }
+    }
+
     pub async fn next<B: IoBufMut>(&mut self, buf: B) -> Result<OwnedPacket<Slice<B>>, Error> {
         let packet_buf = self.reader.recv(buf).await?;
         OwnedPacket::parse(packet_buf).map_err(Error::from)
