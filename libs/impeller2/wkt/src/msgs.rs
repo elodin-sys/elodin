@@ -270,6 +270,22 @@ impl Msg for SetDbConfig {
     const ID: PacketId = [224, 19];
 }
 
+/// Editor→DB asset upload: stores `bytes` at `{db}/assets/<key>`.
+///
+/// `key` is sanitized server-side (rejects `..` and absolute paths). Used to
+/// mirror assets added at runtime (e.g. a generated skybox's `manifest.ron`
+/// and cubemap) so followers and the render-server can fetch them over the DB
+/// asset HTTP server. It is a generic asset feature, not skybox-specific.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct StoreAsset {
+    pub key: String,
+    pub bytes: Vec<u8>,
+}
+
+impl Msg for StoreAsset {
+    const ID: PacketId = [224, 40];
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct DbConfig {

@@ -379,6 +379,16 @@ impl DB {
         Ok(needs_asset_sync)
     }
 
+    /// Store an uploaded asset at `{db}/assets/<key>`.
+    ///
+    /// `key` is sanitized (rejects `..` and absolute paths) by
+    /// `assets_http::write_asset_file`, so an out-of-tree key is refused rather
+    /// than escaping the assets directory.
+    pub fn store_asset(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        crate::assets_http::write_asset_file(&assets_dir, key, bytes)
+    }
+
     pub fn flush_all(&self) -> Result<(), Error> {
         self.with_state(|state| -> Result<(), Error> {
             // Ensure time-series data is fully flushed
@@ -2000,6 +2010,18 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             db.apply_set_db_config(update)?;
             tx.send_msg(&db.db_config()).await?;
         }
+        Packet::Msg(m) if m.id == StoreAsset::ID => {
+            let StoreAsset { key, bytes } = m.parse::<StoreAsset>()?;
+            // A bad/unwritable asset is logged but must not drop the connection.
+            match db.store_asset(&key, &bytes) {
+                Ok(()) => {
+                    tracing::info!(asset = %key, len = bytes.len(), "stored uploaded asset")
+                }
+                Err(err) => {
+                    tracing::warn!(asset = %key, ?err, "failed to store uploaded asset")
+                }
+            }
+        }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             tx.send_msg(&EarliestTimestamp(db.earliest_timestamp.latest()))
                 .await?;
@@ -3307,5 +3329,29 @@ mod tests {
             db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
             None
         );
+    }
+
+    #[test]
+    fn store_asset_writes_into_assets_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        db.store_asset("skyboxes/manifest.ron", b"manifest").unwrap();
+
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("skyboxes/manifest.ron")).unwrap(),
+            b"manifest".to_vec()
+        );
+    }
+
+    #[test]
+    fn store_asset_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        let err = db.store_asset("../escape.bin", b"x").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!dir.path().join("escape.bin").exists());
     }
 }
