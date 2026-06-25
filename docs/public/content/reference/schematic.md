@@ -325,9 +325,6 @@ sensor_view = "sensor_view" <camera_name>
 video_stream = "video_stream" <msg_name>
              [name=string]
 
-rtsp_stream = "rtsp_stream" <msg_name>
-            [name=string]
-
 dashboard      = "dashboard" { dashboard_node }+
 
 object_3d = "object_3d"

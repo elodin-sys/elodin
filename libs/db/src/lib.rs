@@ -77,8 +77,6 @@ pub mod merge;
 pub mod msg_log;
 pub mod prune;
 pub mod query;
-#[cfg(feature = "rtsp")]
-pub mod rtsp_ingest;
 pub mod time_align;
 pub(crate) mod time_series;
 pub mod trim;

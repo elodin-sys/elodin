@@ -47,6 +47,7 @@ members = [
     "fsw/blackbox",
     "apps/inscriber",
     "fsw/video-streamer",
+    "fsw/rtsp-streamer",
     "fsw/gstreamer",
     "fsw/msp-osd",
     "fsw/udp_component_broadcast/impeller_py",

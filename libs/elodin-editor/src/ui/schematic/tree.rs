@@ -133,7 +133,6 @@ fn panel(
         Panel::SchematicTree(_) => icons.viewport,
         Panel::DataOverview(_) => icons.viewport,
         Panel::VideoStream(_) => icons.viewport,
-        Panel::RtspStream(_) => icons.viewport,
         Panel::SensorView(_) => icons.viewport,
         Panel::LogStream(_) => icons.viewport,
     };

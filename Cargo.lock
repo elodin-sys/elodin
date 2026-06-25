@@ -5398,7 +5398,6 @@ dependencies = [
  "rayon",
  "reflink-copy",
  "reqwest",
- "retina",
  "rtsp-ingest",
  "rustfft",
  "ryu",
@@ -5417,7 +5416,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-tracy",
- "url",
  "zerocopy",
 ]
 
@@ -12198,6 +12196,24 @@ name = "rtsp-ingest"
 version = "0.17.4-alpha.0"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rtsp-streamer"
+version = "0.17.4-alpha.0"
+dependencies = [
+ "anyhow",
+ "clap 4.6.1",
+ "futures-lite",
+ "impeller2",
+ "impeller2-wkt",
+ "postcard",
+ "retina",
+ "rtsp-ingest",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

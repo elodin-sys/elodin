@@ -47,7 +47,6 @@ examples/rocket-barrowman/*.log
 **/rocket.glb
 dbs
 video-stream-db/
-examples/video-stream/.rtsp-demo/
 logstream-db/
 testvids/
 *.log

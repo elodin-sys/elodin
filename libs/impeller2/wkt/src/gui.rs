@@ -169,7 +169,6 @@ pub enum Panel {
     SchematicTree(Option<String>),
     DataOverview(Option<String>),
     VideoStream(VideoStream),
-    RtspStream(RtspStream),
     SensorView(SensorView),
     LogStream(LogStream),
 }
@@ -193,7 +192,6 @@ impl Panel {
             Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
-            Panel::RtspStream(v) => v.name.as_deref().unwrap_or("RTSP Camera"),
             Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
             Panel::LogStream(l) => l.name.as_deref().unwrap_or("Log Stream"),
         }
@@ -976,14 +974,6 @@ pub struct ComponentMonitor {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VideoStream {
     /// Message name containing H.264 video frames
-    pub msg_name: String,
-    /// Display name for the tile
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RtspStream {
-    /// Message name containing H.264 video frames pulled from an RTSP source
     pub msg_name: String,
     /// Display name for the tile
     pub name: Option<String>,

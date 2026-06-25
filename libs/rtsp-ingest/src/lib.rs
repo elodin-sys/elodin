@@ -11,19 +11,17 @@
 //!
 //! These modules are deliberately free of `retina`, `tokio`, and the DB so they
 //! can be unit-tested without any network or hardware. The `retina` session
-//! manager that drives them lives behind a separate (future) feature.
+//! manager that drives them lives in the `rtsp-streamer` producer binary
+//! (`fsw/rtsp-streamer`), which streams the frames into elodin-db.
 
 pub mod annexb;
 pub mod clock;
-pub mod config;
 
 /// Errors produced while reframing RTSP H.264 into the DB storage contract.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("access unit contains an IDR slice but no SPS/PPS are available to inject")]
     MissingParameterSets,
-    #[error("invalid RTSP source spec (expected NAME=URL)")]
-    InvalidSourceSpec,
     #[error("AVC NAL length prefix is truncated")]
     TruncatedNal,
     #[error("AVC NAL has a declared length of zero")]
