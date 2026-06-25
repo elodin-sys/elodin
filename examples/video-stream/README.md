@@ -211,13 +211,16 @@ Use [`mediamtx`](https://github.com/bluenviron/mediamtx) as a tiny RTSP server a
 publish a test pattern to it with `ffmpeg`:
 
 ```bash
-# Terminal 1: RTSP server
-mediamtx
+# Terminal 1: RTSP server.
+# Pass the bundled config explicitly — run bare, mediamtx 1.19+ loads an empty
+# configuration that rejects publishing with "400 Bad Request". The Homebrew
+# config allows anonymous publish/read.
+mediamtx /opt/homebrew/etc/mediamtx/mediamtx.yml
 
-# Terminal 2: publish an H.264 baseline test pattern to it
+# Terminal 2: publish an H.264 baseline test pattern to it (TCP transport)
 ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=30 \
     -c:v libx264 -profile:v baseline -tune zerolatency -pix_fmt yuv420p -g 30 \
-    -f rtsp rtsp://127.0.0.1:8554/test
+    -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/test
 ```
 
 Then point `RTSP_URL` (or the producer) at `rtsp://127.0.0.1:8554/test`.

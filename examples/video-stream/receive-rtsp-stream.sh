@@ -50,9 +50,13 @@ while ! nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do
 done
 echo "Elodin DB is ready!"
 
+# Strip any user:pass@ userinfo so credentials never reach the terminal/CI logs
+# (the rtsp-streamer binary redacts URLs in its own traces too).
+REDACTED_URL="$(printf '%s' "$RTSP_URL" | sed -E 's#://[^/@]*@#://#')"
+
 echo ""
 echo "Starting RTSP receiver..."
-echo "  RTSP source:  ${RTSP_URL}"
+echo "  RTSP source:  ${REDACTED_URL}"
 echo "  DB address:   ${DB_ADDRESS}"
 echo "  Message name: ${MSG_NAME}"
 echo ""

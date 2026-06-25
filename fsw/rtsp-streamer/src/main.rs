@@ -26,7 +26,7 @@ use rtsp_ingest::annexb::{AnnexBConverter, ParameterSets, annexb_contains_idr};
 use rtsp_ingest::clock::ClockMapper;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::OwnedWriteHalf;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tracing::{info, warn};
 use url::Url;
 
@@ -133,13 +133,12 @@ async fn run_once(
                 // Anchor here, right before the first send: the DB may have
                 // advanced last_updated while we waited for an IDR, so this
                 // keeps stored timestamps aligned with live playback.
+                // `connect_db` blocks until the DB's first `last_updated`, so
+                // this is the DB timeline, never wall-clock time.
                 let base = latest_base.load(Ordering::Relaxed);
-                let base_us = if base == i64::MIN {
-                    Timestamp::now().0
-                } else {
-                    base
-                };
-                clock.reanchor(base_us);
+                if base != i64::MIN {
+                    clock.reanchor(base);
+                }
                 seen_keyframe = true;
             } else {
                 continue;
@@ -208,23 +207,27 @@ async fn connect_db(
         .await
         .context("send SetMsgMetadata")?;
 
+    // Block for the DB's current timeline position before returning: the DB
+    // streams `last_updated` immediately on subscribe, so the first stored
+    // keyframe anchors to the DB clock rather than wall-clock time.
+    loop {
+        let buf = read_len_packet(&mut read)
+            .await
+            .context("read first last_updated from elodin-db")?;
+        if let Some(payload) = buf.get(PACKET_HEADER_LEN..)
+            && let Ok(last_updated) = postcard::from_bytes::<LastUpdated>(payload)
+        {
+            latest_base.store(last_updated.0.0, Ordering::Relaxed);
+            break;
+        }
+    }
+
     // Continuously drain LastUpdated so the DB's send buffer never back-pressures
     // and `latest_base` always holds the DB's current timeline position.
     let reader = tokio::spawn(async move {
-        let mut len_buf = [0u8; 4];
-        loop {
-            if read.read_exact(&mut len_buf).await.is_err() {
-                break;
-            }
-            let len = u32::from_le_bytes(len_buf) as usize;
-            let mut buf = vec![0u8; len];
-            if read.read_exact(&mut buf).await.is_err() {
-                break;
-            }
-            if len < PACKET_HEADER_LEN {
-                continue;
-            }
-            if let Ok(last_updated) = postcard::from_bytes::<LastUpdated>(&buf[PACKET_HEADER_LEN..])
+        while let Ok(buf) = read_len_packet(&mut read).await {
+            if let Some(payload) = buf.get(PACKET_HEADER_LEN..)
+                && let Ok(last_updated) = postcard::from_bytes::<LastUpdated>(payload)
             {
                 latest_base.store(last_updated.0.0, Ordering::Relaxed);
             }
@@ -232,6 +235,16 @@ async fn connect_db(
     });
 
     Ok(DbConn { write, reader })
+}
+
+/// Reads one length-prefixed (u32 LE) impeller2 packet body from `read`.
+async fn read_len_packet(read: &mut OwnedReadHalf) -> std::io::Result<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    read.read_exact(&mut len_buf).await?;
+    let len = u32::from_le_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    read.read_exact(&mut buf).await?;
+    Ok(buf)
 }
 
 /// Opens an RTSP session (TCP-interleaved) and returns the H.264 demuxer.
