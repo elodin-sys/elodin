@@ -70,6 +70,8 @@ pub enum Error {
 
     #[error("buffer overflow")]
     BufferOverflow,
+    #[error("packet length {len} exceeds maximum {max}")]
+    PacketTooLarge { len: usize, max: usize },
     #[error("end of file")]
     EOF,
     #[error("integer overflow")]

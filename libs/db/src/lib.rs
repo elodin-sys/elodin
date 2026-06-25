@@ -1555,16 +1555,22 @@ impl Server {
     pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
         let socket = UdpSocket::bind(addr)?;
         let (rx, tx) = socket.split();
-        let rx = PacketStream::new(rx);
+        let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
         let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
         handle_conn_inner(tx, rx, db).await?;
         Ok(())
     }
 }
 
+/// Upper bound on a single inbound packet. Large asset uploads (e.g. skybox
+/// cubemaps, several MB) arrive as one [`StoreAsset`] message, so the
+/// per-connection read buffer grows on demand; this caps that growth to bound
+/// memory and reject malformed/hostile length prefixes.
+const MAX_PACKET_LEN: usize = 256 * 1024 * 1024;
+
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     let (rx, tx) = stream.split();
-    let rx = PacketStream::new(rx);
+    let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
     match handle_conn_inner(tx, rx, db).await {
         Ok(_) => {}
@@ -1585,7 +1591,9 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], RESPONSE_PACKET_CAPACITY);
     let mut silent = false;
     loop {
-        let pkt = rx.next(buf).await?;
+        // `next_grow` lets the buffer grow past its initial 8 MiB for large
+        // asset uploads; `with_max_len` above bounds that growth.
+        let pkt = rx.next_grow(buf).await?;
         let req_id = pkt.req_id();
         let mut pkt_tx = PacketTx {
             req_id,
