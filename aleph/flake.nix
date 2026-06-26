@@ -1,6 +1,6 @@
 {
   nixConfig = {
-    extra-substituters = ["https://elodin-nix-cache.s3.us-west-2.amazonaws.com"];
+    extra-substituters = ["https://s3-us-west-2.amazonaws.com/elodin-nix-cache"];
     extra-trusted-public-keys = [
       "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
@@ -31,6 +31,10 @@
 
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
+    secureBzip2Overlay = _final: prev: {
+      # JetPack only needs a non-ancient unpacker; avoid nixpkgs' insecure 1.1 snapshot.
+      bzip2_1_1 = prev.bzip2;
+    };
     gitReposOverlay = final: prev: {
       # Our packing of deepstream7 still needs nvidia sources, so we can't use upstream nixpkgs yet!
       # Start with upstream nixpkgs _cuda/manifests and overlay jetpack ones (where prevCuda is jetpack-nixos cuda)
@@ -57,6 +61,7 @@
         callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
       // (rust-overlay.overlays.default final prev)
+      // (secureBzip2Overlay final prev)
       // (gitReposOverlay final prev);
 
     baseModules = {
@@ -189,6 +194,7 @@
         flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
           modules = [
             {nixpkgs.buildPlatform.system = "x86_64-linux";}
+            {nixpkgs.overlays = [secureBzip2Overlay];}
           ];
         };
       in {

@@ -6,7 +6,7 @@ If you run `nix develop` and it looks like this:
 ```sh
 $ nix develop
 warning: Git tree '/Users/shane/Projects/elodin' has uncommitted changes
-warning: ignoring untrusted substituter 'https://elodin-nix-cache.s3.us-west-2.amazonaws.com', you are not a trusted user.
+warning: ignoring untrusted substituter 'https://s3-us-west-2.amazonaws.com/elodin-nix-cache', you are not a trusted user.
 ...
 ```
 Edit the following files to look like this:
@@ -14,7 +14,7 @@ Edit the following files to look like this:
 ```sh
 $ cat /etc/nix/nix.custom.conf
 trusted-users = root YOUR-USER-NAME-HERE
-extra-trusted-substituters = https://elodin-nix-cache.s3.us-west-2.amazonaws.com
+extra-trusted-substituters = https://s3-us-west-2.amazonaws.com/elodin-nix-cache
 extra-trusted-public-keys = elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=
 ```
 
