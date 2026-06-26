@@ -170,9 +170,9 @@ object_3d lander.world_pos {
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting the line points. Inherits from global `coordinate` if omitted.
 - `line_width`: default 1.0.
-- The trail is split into a *played* segment (up to the current playback time) and a *future* segment (ahead of it). The future segment is always faded by the timeline's `future_trail_alpha`.
-- `color`: color of the played segment. When omitted, falls back to the timeline `played_color` (default `yalk`). If set without `future_color`, it also colors the future segment — a single `color` paints the whole line.
-- `future_color`: color of the future segment. When omitted, falls back to `color` (if set), otherwise the timeline `future_color` (default `white`).
+- The trail is split into a *played* segment (up to the current playback time) and a *future* segment (ahead of it). When no `future_color` is set, the future segment is dimmed by a default fade so it reads as lighter than the played segment.
+- `color`: color of the played segment. When omitted, falls back to the timeline `played_color` (default `yalk`). It does not affect the future segment.
+- `future_color`: color of the future segment, independent of `color`. Its alpha sets the future opacity and is used as-is (no extra fade). When omitted, falls back to the timeline `future_color` (default `white`, faded).
 - `perspective`: default true (set false for screen-space lines).
 
 ### vector_arrow

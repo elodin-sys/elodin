@@ -21,6 +21,7 @@ pub mod action;
 pub mod data_overview;
 pub mod entity;
 pub mod graph;
+pub mod line3d;
 pub mod monitor;
 pub mod object3d;
 pub mod query_table;

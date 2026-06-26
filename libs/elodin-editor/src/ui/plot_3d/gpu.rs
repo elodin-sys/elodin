@@ -165,11 +165,17 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
 
+/// Default opacity applied to the future (not-yet-played) trail segment when a
+/// line does not set its own `future_color`, so the future reads as dimmer than
+/// the played segment. A per-line `future_color` overrides this with its own
+/// alpha.
+pub const DEFAULT_FUTURE_TRAIL_ALPHA: f32 = 0.35;
+
 /// Per-line trail colors resolved from the KDL `color`/`future_color`.
 ///
-/// Each is linear RGBA; `None` falls back to the timeline trail colors. A line
-/// with only `color` set leaves `future = None`, so the future segment reuses
-/// `played` (the whole line takes that color, just faded).
+/// Each is linear RGBA; `None` falls back to the timeline trail colors. The
+/// played and future segments are independent: a line with only `color` set
+/// keeps the timeline future color (faded) for its future segment.
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct LineTrailColors {
     pub played: Option<Vec4>,
@@ -180,11 +186,10 @@ impl LineTrailColors {
     /// Resolve the played/future segment colors against the timeline fallbacks.
     ///
     /// - played: explicit `played`, else the timeline played color.
-    /// - future: explicit `future`, else explicit `played` (a lone KDL `color`
-    ///   paints the whole line), else the timeline future color.
-    ///
-    /// The future segment's alpha fade (`future_alpha`) is applied uniformly,
-    /// regardless of where the color came from.
+    /// - future: explicit `future` is authoritative (its alpha is the per-line
+    ///   opacity, used as-is); otherwise the timeline future color, faded by
+    ///   `future_alpha` so the not-yet-played segment reads dimmer. The future
+    ///   does not inherit the played color.
     fn resolve(
         &self,
         played_timeline: Vec4,
@@ -192,8 +197,14 @@ impl LineTrailColors {
         future_alpha: f32,
     ) -> (Vec4, Vec4) {
         let played = self.played.unwrap_or(played_timeline);
-        let mut future = self.future.or(self.played).unwrap_or(future_timeline);
-        future.w *= future_alpha;
+        let future = match self.future {
+            Some(future) => future,
+            None => {
+                let mut fallback = future_timeline;
+                fallback.w *= future_alpha;
+                fallback
+            }
+        };
         (played, future)
     }
 }
@@ -510,9 +521,9 @@ fn extract_lines(
         } else {
             selected_range.clone()
         };
-        let future_trail_alpha = timeline_settings.future_trail_alpha;
+        let future_trail_alpha = DEFAULT_FUTURE_TRAIL_ALPHA;
         // Fallback colors for lines without explicit KDL colors. Kept unfaded
-        // here; the future segment's alpha fade is applied uniformly below.
+        // here; the default future fade is applied only to fallback futures.
         let played_timeline_color = wkt_color_linear(timeline_settings.played_color);
         let future_timeline_color = wkt_color_linear(timeline_settings.future_color);
 
@@ -818,32 +829,47 @@ mod tests {
     }
 
     #[test]
-    fn color_only_paints_whole_line() {
+    fn color_only_keeps_timeline_future() {
+        // A lone played color leaves the future on the timeline future color
+        // (faded); the future does not inherit the played color.
         let (played, future) = resolve(LineTrailColors {
             played: Some(G),
             future: None,
         });
         assert_eq!(played, G);
-        assert_eq!(future, faded(G));
+        assert_eq!(future, faded(FUTURE_TL));
     }
 
     #[test]
     fn color_and_future_color_are_independent() {
+        // An explicit future color is authoritative: its alpha is used as-is.
         let (played, future) = resolve(LineTrailColors {
             played: Some(G),
             future: Some(W),
         });
         assert_eq!(played, G);
-        assert_eq!(future, faded(W));
+        assert_eq!(future, W);
     }
 
     #[test]
     fn future_color_only_keeps_timeline_played() {
+        // Explicit future color keeps its own alpha (no global fade applied).
         let (played, future) = resolve(LineTrailColors {
             played: None,
             future: Some(W),
         });
         assert_eq!(played, PLAYED_TL);
-        assert_eq!(future, faded(W));
+        assert_eq!(future, W);
+    }
+
+    #[test]
+    fn explicit_future_alpha_is_not_faded() {
+        // A half-opaque future color renders at exactly that opacity.
+        let half = Vec4::new(1.0, 1.0, 1.0, 0.5);
+        let (_, future) = resolve(LineTrailColors {
+            played: Some(G),
+            future: Some(half),
+        });
+        assert_eq!(future, half);
     }
 }

@@ -257,6 +257,7 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
         ECheckboxButton::new(label, true)
             .margin(egui::Margin::symmetric(0, 8))
             .on_color(egui_color)
+            .border_color(get_scheme().text_primary)
             .text_color(get_scheme().text_secondary)
             .left_label(true),
     );
