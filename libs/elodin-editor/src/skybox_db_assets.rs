@@ -260,7 +260,7 @@ enum UploadPhase {
 }
 
 /// Size + content hash of a cubemap, to detect stale vs. freshly uploaded bytes.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CubemapDigest {
     len: u64,
     hash: u64,
@@ -453,11 +453,8 @@ async fn prepare_skybox_upload(
     entry: ManifestEntry,
     cubemap_path: PathBuf,
 ) -> Result<PrepareOutput, String> {
-    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
-        .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
-    let cubemap_bytes =
-        std::fs::read(&cubemap_path).map_err(|err| format!("{}: {err}", cubemap_path.display()))?;
-    let digest = digest_bytes(&cubemap_bytes);
+    let (cubemap_name, cubemap_bytes, digest) =
+        read_local_cubemap(&entry.cubemap_file, &cubemap_path)?;
 
     let mut manifest = fetch_db_skybox_manifest(connection_addr).await?;
     manifest.upsert(entry);
@@ -473,6 +470,20 @@ async fn prepare_skybox_upload(
         ],
         digest,
     ))
+}
+
+/// Local (no-network) portion of an upload: validates the cubemap file path,
+/// reads its bytes, and returns the db asset key, bytes, and content digest.
+fn read_local_cubemap(
+    cubemap_file: &str,
+    cubemap_path: &Path,
+) -> Result<(String, Vec<u8>, CubemapDigest), String> {
+    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(cubemap_file)
+        .ok_or_else(|| format!("invalid skybox cubemap file path `{cubemap_file}`"))?;
+    let cubemap_bytes =
+        std::fs::read(cubemap_path).map_err(|err| format!("{}: {err}", cubemap_path.display()))?;
+    let digest = digest_bytes(&cubemap_bytes);
+    Ok((cubemap_name, cubemap_bytes, digest))
 }
 
 /// Fetches the DB's current skybox manifest, or an empty one if absent.
@@ -679,38 +690,28 @@ mod tests {
     }
 
     #[test]
-    fn skybox_upload_payload_reads_manifest_and_cubemap() {
+    fn read_local_cubemap_reads_bytes_name_and_digest() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_dir = dir.path().join("skyboxes");
-        std::fs::create_dir_all(&cache_dir).unwrap();
-        std::fs::write(cache_dir.join("manifest.ron"), b"manifest").unwrap();
-        std::fs::write(cache_dir.join("desert_night.cubemap.ktx2"), b"ktx2").unwrap();
+        let cubemap_path = dir.path().join("desert_night.cubemap.ktx2");
+        std::fs::write(&cubemap_path, b"ktx2").unwrap();
 
-        let settings = SkyboxAssetSettings {
-            cache_dir,
-            ..Default::default()
-        };
-
-        let uploads = skybox_upload_payload(&settings, "desert_night.cubemap.ktx2").unwrap();
-        assert_eq!(
-            uploads,
-            vec![
-                (
-                    impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
-                    b"manifest".to_vec()
-                ),
-                (
-                    "skyboxes/desert_night.cubemap.ktx2".to_string(),
-                    b"ktx2".to_vec()
-                ),
-            ]
-        );
+        let (name, bytes, digest) =
+            read_local_cubemap("desert_night.cubemap.ktx2", &cubemap_path).unwrap();
+        assert_eq!(name, "skyboxes/desert_night.cubemap.ktx2");
+        assert_eq!(bytes, b"ktx2".to_vec());
+        assert_eq!(digest, digest_bytes(b"ktx2"));
     }
 
     #[test]
-    fn skybox_upload_payload_rejects_cubemap_traversal() {
-        let settings = SkyboxAssetSettings::default();
-        assert!(skybox_upload_payload(&settings, "../escape.ktx2").is_err());
+    fn read_local_cubemap_rejects_cubemap_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_local_cubemap("../escape.ktx2", &dir.path().join("escape.ktx2")).is_err());
+    }
+
+    #[test]
+    fn cubemap_digest_changes_with_content() {
+        assert_ne!(digest_bytes(b"old-cubemap"), digest_bytes(b"new-cubemap"));
+        assert_eq!(digest_bytes(b"same"), digest_bytes(b"same"));
     }
 
     #[test]
