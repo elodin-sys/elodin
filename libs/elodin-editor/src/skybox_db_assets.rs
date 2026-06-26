@@ -247,11 +247,33 @@ struct DbSkyboxUpload {
 /// `(db asset key, bytes)` pairs ready to send as [`StoreAsset`] messages.
 type UploadPayload = Vec<(String, Vec<u8>)>;
 
+/// Output of the prepare step: the messages to send plus the digest of the
+/// cubemap bytes, used to confirm the *fresh* bytes (not a stale same-named
+/// file) actually landed in the DB.
+type PrepareOutput = (UploadPayload, CubemapDigest);
+
 enum UploadPhase {
     /// Fetching the DB manifest and merging our entry off the main thread.
-    Preparing(Task<Result<UploadPayload, String>>),
+    Preparing(Task<Result<PrepareOutput, String>>),
     /// Confirming the DB now serves the uploaded assets.
     Verifying(Task<Result<bool, String>>),
+}
+
+/// Size + content hash of a cubemap, to detect stale vs. freshly uploaded bytes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CubemapDigest {
+    len: u64,
+    hash: u64,
+}
+
+fn digest_bytes(bytes: &[u8]) -> CubemapDigest {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    CubemapDigest {
+        len: bytes.len() as u64,
+        hash: hasher.finish(),
+    }
 }
 
 /// Identifies the on-disk cubemap content, so a same-name regeneration (new
@@ -274,11 +296,15 @@ fn cubemap_fingerprint(path: &Path) -> Option<UploadFingerprint> {
     })
 }
 
-fn spawn_skybox_verify(skybox: String, addr: SocketAddr) -> Task<Result<bool, String>> {
+fn spawn_skybox_verify(
+    skybox: String,
+    addr: SocketAddr,
+    digest: CubemapDigest,
+) -> Task<Result<bool, String>> {
     IoTaskPool::get().spawn(async move {
         tokio::runtime::Runtime::new()
             .map_err(|err| err.to_string())?
-            .block_on(verify_db_skybox_assets(&skybox, addr))
+            .block_on(verify_db_skybox_assets(&skybox, addr, digest))
     })
 }
 
@@ -347,15 +373,18 @@ pub fn upload_active_skybox_assets_to_db(
         } else {
             match &mut up.phase {
                 UploadPhase::Preparing(task) => match future::block_on(future::poll_once(task)) {
-                    Some(Ok(uploads)) => {
+                    Some(Ok((uploads, digest))) => {
                         for (asset_key, bytes) in uploads {
                             tx.send_msg(StoreAsset {
                                 key: asset_key,
                                 bytes,
                             });
                         }
-                        up.phase =
-                            UploadPhase::Verifying(spawn_skybox_verify(desired.clone(), addr));
+                        up.phase = UploadPhase::Verifying(spawn_skybox_verify(
+                            desired.clone(),
+                            addr,
+                            digest,
+                        ));
                         return;
                     }
                     Some(Err(error)) => {
@@ -423,23 +452,27 @@ async fn prepare_skybox_upload(
     connection_addr: SocketAddr,
     entry: ManifestEntry,
     cubemap_path: PathBuf,
-) -> Result<UploadPayload, String> {
+) -> Result<PrepareOutput, String> {
     let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
     let cubemap_bytes =
         std::fs::read(&cubemap_path).map_err(|err| format!("{}: {err}", cubemap_path.display()))?;
+    let digest = digest_bytes(&cubemap_bytes);
 
     let mut manifest = fetch_db_skybox_manifest(connection_addr).await?;
     manifest.upsert(entry);
     let manifest_bytes = manifest.to_ron_bytes().map_err(|err| err.to_string())?;
 
-    Ok(vec![
-        (
-            impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
-            manifest_bytes,
-        ),
-        (cubemap_name, cubemap_bytes),
-    ])
+    Ok((
+        vec![
+            (
+                impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
+                manifest_bytes,
+            ),
+            (cubemap_name, cubemap_bytes),
+        ],
+        digest,
+    ))
 }
 
 /// Fetches the DB's current skybox manifest, or an empty one if absent.
@@ -512,11 +545,14 @@ async fn download_db_skybox_assets(
 }
 
 /// Confirms the DB asset server actually serves the active skybox's manifest
-/// entry and cubemap. `Ok(false)` means the assets aren't present yet (caller
-/// re-sends); `Err` is an unexpected failure (caller retries).
+/// entry and the *freshly uploaded* cubemap bytes (matched by digest, so a
+/// stale same-named cubemap or a manifest that lands ahead of the new bytes
+/// does not pass). `Ok(false)` means not ready yet (caller re-sends); `Err` is
+/// an unexpected failure (caller retries).
 async fn verify_db_skybox_assets(
     skybox: &str,
     connection_addr: SocketAddr,
+    expected: CubemapDigest,
 ) -> Result<bool, String> {
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
@@ -548,20 +584,28 @@ async fn verify_db_skybox_assets(
     let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
     let cubemap_url = format!("{base}/{cubemap_name}");
-    // HEAD avoids transferring the (large) cubemap just to check presence;
+
+    // Cheap precheck: a HEAD reveals presence + length without transferring the
+    // (large) cubemap; a length mismatch means the fresh bytes haven't landed.
     // axum serves HEAD for `get` routes automatically.
-    let cubemap_resp = client
+    let head = client
         .head(&cubemap_url)
         .send()
         .await
         .map_err(|err| format!("{cubemap_url}: {err}"))?;
-    if cubemap_resp.status() == reqwest::StatusCode::NOT_FOUND {
+    if head.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(false);
     }
-    cubemap_resp
+    let head = head
         .error_for_status()
         .map_err(|err| format!("{cubemap_url}: {err}"))?;
-    Ok(true)
+    if head.content_length().is_some_and(|len| len != expected.len) {
+        return Ok(false);
+    }
+
+    // Confirm the served bytes are exactly the ones we uploaded.
+    let cubemap_bytes = fetch_asset(&client, &cubemap_url).await?;
+    Ok(digest_bytes(&cubemap_bytes) == expected)
 }
 
 fn cubemap_cache_path(cache_dir: &Path, cubemap_file: &str) -> Result<PathBuf, String> {
