@@ -10,6 +10,7 @@ use bevy::{
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    ecs::observer::Observer,
     ecs::system::NonSendMarker,
     light::DirectionalLightShadowMap,
     log::LogPlugin,
@@ -300,6 +301,7 @@ impl Plugin for EditorPlugin {
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
             .add_systems(Update, setup_egui_context)
+            .add_systems(Update, organize_observer_entities)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
@@ -569,10 +571,25 @@ fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
     }
 }
 
+#[derive(Component)]
+struct ObserverRoot;
+
+fn organize_observer_entities(
+    mut commands: Commands,
+    mut root: Local<Option<Entity>>,
+    observers: Query<Entity, (With<Observer>, Without<ChildOf>)>,
+) {
+    let root =
+        *root.get_or_insert_with(|| commands.spawn((ObserverRoot, Name::new("observers"))).id());
+    for observer in &observers {
+        commands.entity(observer).insert(ChildOf(root));
+    }
+}
+
 #[derive(Component, Clone)]
 pub struct MainCamera;
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct GridHandle {
     pub grid: Entity,
 }
