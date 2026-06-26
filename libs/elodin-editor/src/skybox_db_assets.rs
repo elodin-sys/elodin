@@ -67,6 +67,7 @@ fn skybox_in_flight_still_desired(
 }
 
 /// Returns `true` when DB skybox assets were mirrored and activation was already dispatched.
+#[cfg(any(test, all(not(target_family = "wasm"), target_family = "unix")))]
 pub fn db_skybox_mirror_synced(
     connection_addr: SocketAddr,
     skybox: &str,
@@ -79,6 +80,7 @@ pub fn db_skybox_mirror_synced(
 }
 
 /// Returns `true` while headless (or other consumers) should wait before activating a DB skybox.
+#[cfg(any(test, all(not(target_family = "wasm"), target_family = "unix")))]
 pub fn db_skybox_mirror_pending(
     connection_addr: SocketAddr,
     skybox: &str,

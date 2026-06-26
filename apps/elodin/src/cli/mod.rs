@@ -3,6 +3,7 @@ use miette::Context;
 use miette::IntoDiagnostic;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
+#[cfg(not(target_os = "windows"))]
 mod monte_carlo;
 
 #[derive(Parser, Clone)]

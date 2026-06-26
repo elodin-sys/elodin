@@ -139,7 +139,6 @@ tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 # os
 directories = "5.0"
 rfd = "0.15.2"
-s10.path = "../s10"
 
 # async
 stellarator.path = "../../libs/stellarator"
@@ -171,6 +170,9 @@ winapi = { version = "0.3", features = ["winuser", "dwmapi", "uxtheme"] }
 image.version = "0.25"
 image.default-features = false
 image.features = ["png"]
+
+[target.'cfg(all(not(target_family = "wasm"), not(target_os = "windows")))'.dependencies]
+s10.path = "../s10"
 
 # non-macos
 [target.'cfg(not(target_os = "macos"))'.dependencies]

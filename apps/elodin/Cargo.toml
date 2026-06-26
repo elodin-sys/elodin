@@ -50,6 +50,7 @@ ring = "0.17"
 # machine id
 machine-uid = "0.5.1"
 
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 s10.path = "../../libs/s10"
 monte-carlo.path = "../../libs/monte-carlo"
 
