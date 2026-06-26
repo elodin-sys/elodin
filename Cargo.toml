@@ -47,6 +47,7 @@ members = [
     "fsw/blackbox",
     "apps/inscriber",
     "fsw/video-streamer",
+    "fsw/rtsp-streamer",
     "fsw/gstreamer",
     "fsw/msp-osd",
     "fsw/udp_component_broadcast/impeller_py",
@@ -60,6 +61,7 @@ members = [
     "libs/bevy_ai_skybox",
     "libs/cranelift-mlir",
     "libs/monte-carlo",
+    "libs/rtsp-ingest",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

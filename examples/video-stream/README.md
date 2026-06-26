@@ -1,16 +1,17 @@
 # Video Streaming Example
 
-This example demonstrates streaming video from GStreamer into Elodin DB and displaying it in the Elodin Editor. It includes two video sources:
+This example demonstrates streaming video into Elodin DB and displaying it in the Elodin Editor. It includes three video sources:
 
 1. **Test Pattern** - A local GStreamer test pattern that starts automatically
 2. **OBS Camera** - An SRT receiver that accepts a live stream from OBS Studio
+3. **RTSP Camera** - An H.264 RTSP stream pulled from an IP camera or OBS by the `rtsp-streamer` producer and streamed into Elodin DB
 
 ## What It Does
 
 - Runs a rolling ball simulation with rotating wind and wall bouncing
 - Launches a GStreamer pipeline that streams an H.264 test pattern to Elodin DB
 - Launches an SRT receiver that listens for OBS Studio connections on port 9000
-- Displays both video streams in tabs alongside the 3D viewport
+- Displays the video streams (Test Pattern, OBS Camera, RTSP Camera) in tabs alongside the 3D viewport
 - Stores all data (telemetry + video) to `./video-stream-db` for replay and export
 
 ## Simulation Features
@@ -88,9 +89,10 @@ This builds the Elodin Editor, Elodin DB, and all supporting tools.
 elodin editor examples/video-stream/main.py
 ```
 
-The editor opens with a 3D viewport (showing a rolling ball) and two video stream tabs:
+The editor opens with a 3D viewport (showing a rolling ball) and three video stream tabs:
 - **Test Pattern**: Shows a GStreamer test pattern immediately
 - **OBS Camera**: Shows "Initializing..." until OBS connects
+- **RTSP Camera**: Shows "No video at this time" until an RTSP source feeds the `rtsp-camera` message (see [RTSP Camera](#rtsp-camera))
 
 The GStreamer plugin (`elodinsink`) is built automatically on first run.
 
@@ -165,7 +167,50 @@ open ./videos/test-video.mp4
 xdg-open ./videos/test-video.mp4
 ```
 
-You should see the GStreamer test pattern that was streamed during the simulation. If you also streamed from OBS, `obs-camera.mp4` will also be present.
+You should see the GStreamer test pattern that was streamed during the simulation. If you also streamed from OBS, `obs-camera.mp4` will be present; if you fed the RTSP Camera, `rtsp-camera.mp4` will be too.
+
+## RTSP Camera
+
+The **RTSP Camera** tab shows an H.264 RTSP stream (an IP camera, or OBS via the
+[OBS-RTSPServer](https://github.com/iamscottxu/obs-rtspserver) plugin), pulled by
+the standalone `rtsp-streamer` producer and pushed **into** Elodin DB — same model
+as the OBS/SRT and GStreamer paths (the DB stays passive). H.264 baseline/main
+(`bframes=0`) only.
+
+### Run it
+
+The example registers an `rtsp-receiver` recipe; just set the source URL:
+
+```bash
+RTSP_URL="rtsp://USER:PASS@CAMERA_IP:554/stream" \
+    elodin editor examples/video-stream/main.py
+```
+
+Without `RTSP_URL` it's a no-op (the tab stays empty). The producer auto-reconnects
+and strips URL credentials from logs; `MSG_NAME` must match the
+`video_stream "rtsp-camera"` panel.
+
+### Standalone / Nix delivery
+
+`rtsp-streamer` is an ordinary producer you can run against any DB, Nix-packaged
+from the flake like `elodinsink`:
+
+```bash
+# from a source checkout
+cargo run -p rtsp-streamer -- rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
+
+# or straight from the flake, no clone
+nix run github:elodin-sys/elodin#rtsp-streamer -- rtsp://USER:PASS@CAMERA_IP:554/stream rtsp-camera --db-addr 127.0.0.1:2240
+```
+
+Downstream flakes pull it via `inputs.elodin.packages.${system}.rtsp-streamer`.
+
+### Using OBS
+
+Install the [OBS-RTSPServer](https://github.com/iamscottxu/obs-rtspserver) plugin,
+start the RTSP server in OBS (Tools → RTSP Server), and point `RTSP_URL` at the URL
+it advertises (typically `rtsp://OBS_IP:554/live`). Use an H.264 encoder (not
+H.265/HEVC).
 
 ## Alternative: obs-gstreamer Direct Pipeline
 
@@ -201,6 +246,23 @@ Example with custom settings:
 
 ```bash
 bash examples/video-stream/receive-obs-stream.sh --srt-port 9001 --msg-name "webcam" --latency 200
+```
+
+## RTSP Receiver Script Options
+
+The `receive-rtsp-stream.sh` recipe is configured via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `RTSP_URL` | _(unset → no-op)_ | RTSP source URL (IP camera or OBS-RTSPServer) |
+| `DB_ADDRESS` | `127.0.0.1:2240` | Elodin DB address |
+| `MSG_NAME` | `rtsp-camera` | Video message name (must match schematic) |
+
+Example:
+
+```bash
+RTSP_URL="rtsp://192.168.1.50:554/stream" MSG_NAME="rtsp-camera" \
+    bash examples/video-stream/receive-rtsp-stream.sh
 ```
 
 ## Troubleshooting

@@ -353,7 +353,7 @@ fn export_one(
 fn video_name_map_from_schematic(schematic: &str) -> HashMap<PacketId, String> {
     let mut map = HashMap::new();
     // Parse KDL entries like:  video_stream "test-video" name="Test Pattern"
-    // The first string argument after video_stream is the msg_name.
+    // The first string argument after the node name is the msg_name.
     for line in schematic.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("video_stream") {

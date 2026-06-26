@@ -1,0 +1,34 @@
+[package]
+name = "rtsp-streamer"
+version.workspace = true
+edition = "2024"
+description = "Pulls an H.264 RTSP stream and streams it into elodin-db"
+publish = false
+
+[dependencies]
+# impeller wire protocol
+impeller2.path = "../../libs/impeller2"
+impeller2.features = ["std"]
+impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+rtsp-ingest.path = "../../libs/rtsp-ingest"
+
+# RTSP client (control + RTP H.264 depacketization)
+retina = "0.4"
+url = "2"
+
+# async runtime (retina is tokio-based)
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "io-util",
+    "time",
+] }
+futures-lite = "2.5"
+
+# ser-de / cli / logs
+postcard = "1"
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
