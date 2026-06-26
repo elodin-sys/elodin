@@ -151,10 +151,13 @@ pub fn sync_db_skybox_assets_from_config(
                         }
                     },
                     Err(error) => {
-                        tracing::warn!(
+                        // Transient while the editor is still uploading the
+                        // cubemap to the db; the mirror retries and recovers,
+                        // so this is info rather than a warning.
+                        tracing::info!(
                             skybox = %key.skybox,
                             error = %error,
-                            "failed to mirror skybox assets from database"
+                            "skybox assets not yet available in database, will retry"
                         );
                         mirror.last_failed = Some((key, Instant::now()));
                     }
