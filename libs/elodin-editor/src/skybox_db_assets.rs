@@ -224,22 +224,62 @@ pub fn sync_db_skybox_assets_from_config(
 ///
 /// [`StoreAsset`] is fire-and-forget (the channel can drop on backpressure, the
 /// server only logs store failures, and a mid-upload disconnect is silent), so
-/// we don't trust the send alone: we mark an `(addr, skybox)` done only once the
-/// DB asset server actually serves the bytes back, and otherwise re-send with a
-/// backoff.
+/// we don't trust the send alone: we mark an `(addr, skybox, content)` done only
+/// once the DB asset server actually serves the bytes back, and otherwise
+/// re-send with a backoff. The content fingerprint ensures that regenerating a
+/// skybox under the same name re-uploads the new bytes.
 #[derive(Resource, Default)]
 pub struct DbSkyboxUploaded {
-    /// `(addr, skybox)` confirmed queryable from the DB asset server.
-    confirmed: Option<MirrorKey>,
+    /// `(addr, skybox, fingerprint)` confirmed queryable from the DB.
+    confirmed: Option<(MirrorKey, UploadFingerprint)>,
     /// Last (re)send attempt, throttles retries until the upload is confirmed.
     last_attempt: Option<(MirrorKey, Instant)>,
-    /// In-flight probe verifying the DB actually serves the uploaded assets.
-    verify: Option<DbSkyboxUploadVerify>,
+    /// In-flight upload/verify state machine for the active skybox.
+    in_flight: Option<DbSkyboxUpload>,
 }
 
-struct DbSkyboxUploadVerify {
+struct DbSkyboxUpload {
     key: MirrorKey,
-    task: Task<Result<bool, String>>,
+    fingerprint: UploadFingerprint,
+    phase: UploadPhase,
+}
+
+/// `(db asset key, bytes)` pairs ready to send as [`StoreAsset`] messages.
+type UploadPayload = Vec<(String, Vec<u8>)>;
+
+enum UploadPhase {
+    /// Fetching the DB manifest and merging our entry off the main thread.
+    Preparing(Task<Result<UploadPayload, String>>),
+    /// Confirming the DB now serves the uploaded assets.
+    Verifying(Task<Result<bool, String>>),
+}
+
+/// Identifies the on-disk cubemap content, so a same-name regeneration (new
+/// bytes) invalidates a prior confirmed upload.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct UploadFingerprint {
+    len: u64,
+    modified: Option<Duration>,
+}
+
+fn cubemap_fingerprint(path: &Path) -> Option<UploadFingerprint> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok());
+    Some(UploadFingerprint {
+        len: meta.len(),
+        modified,
+    })
+}
+
+fn spawn_skybox_verify(skybox: String, addr: SocketAddr) -> Task<Result<bool, String>> {
+    IoTaskPool::get().spawn(async move {
+        tokio::runtime::Runtime::new()
+            .map_err(|err| err.to_string())?
+            .block_on(verify_db_skybox_assets(&skybox, addr))
+    })
 }
 
 /// Counterpart to [`sync_db_skybox_assets_from_config`]: mirror the active
@@ -268,44 +308,89 @@ pub fn upload_active_skybox_assets_to_db(
         Some(None) => {
             uploaded.confirmed = None;
             uploaded.last_attempt = None;
-            uploaded.verify = None;
+            uploaded.in_flight = None;
             return;
         }
         None => return,
     };
 
+    let addr = connection_addr.0;
     let key = MirrorKey {
-        addr: connection_addr.0,
+        addr,
         skybox: desired.clone(),
     };
-    if uploaded.confirmed.as_ref() == Some(&key) {
+
+    // Local entry + cubemap must be on disk before we can upload.
+    let Some(entry) = cache.manifest.get(&desired).cloned() else {
+        return;
+    };
+    let cubemap_path = settings.cache_dir.join(&entry.cubemap_file);
+    let Some(fingerprint) = cubemap_fingerprint(&cubemap_path) else {
+        return; // bytes not on disk yet (e.g. generation still running)
+    };
+    if !settings.manifest_path().exists() {
         return;
     }
 
-    // Poll a pending verification probe; only latch `confirmed` once the DB
-    // actually serves the assets back, otherwise fall through to re-send.
-    if let Some(verify) = uploaded.verify.as_mut() {
-        if verify.key != key {
-            uploaded.verify = None; // desired skybox changed
-        } else if let Some(result) = future::block_on(future::poll_once(&mut verify.task)) {
-            uploaded.verify = None;
-            match result {
-                Ok(true) => {
-                    uploaded.confirmed = Some(key);
-                    uploaded.last_attempt = None;
-                    return;
-                }
-                Ok(false) => {} // not present yet — re-send after backoff below
-                Err(error) => {
-                    tracing::info!(
-                        skybox = %desired,
-                        error = %error,
-                        "could not verify skybox upload in database, will retry"
-                    );
-                }
-            }
+    if uploaded
+        .confirmed
+        .as_ref()
+        .is_some_and(|(confirmed, fp)| confirmed == &key && *fp == fingerprint)
+    {
+        return;
+    }
+
+    // Drive the upload/verify state machine.
+    if let Some(up) = uploaded.in_flight.as_mut() {
+        if up.key != key || up.fingerprint != fingerprint {
+            uploaded.in_flight = None; // desired skybox or local content changed
         } else {
-            return; // still verifying
+            match &mut up.phase {
+                UploadPhase::Preparing(task) => match future::block_on(future::poll_once(task)) {
+                    Some(Ok(uploads)) => {
+                        for (asset_key, bytes) in uploads {
+                            tx.send_msg(StoreAsset {
+                                key: asset_key,
+                                bytes,
+                            });
+                        }
+                        up.phase =
+                            UploadPhase::Verifying(spawn_skybox_verify(desired.clone(), addr));
+                        return;
+                    }
+                    Some(Err(error)) => {
+                        tracing::warn!(
+                            skybox = %desired,
+                            error = %error,
+                            "failed to prepare skybox assets for db upload"
+                        );
+                        uploaded.in_flight = None;
+                        uploaded.last_attempt = Some((key, Instant::now()));
+                        return;
+                    }
+                    None => return, // still preparing
+                },
+                UploadPhase::Verifying(task) => match future::block_on(future::poll_once(task)) {
+                    Some(Ok(true)) => {
+                        uploaded.confirmed = Some((key, fingerprint));
+                        uploaded.last_attempt = None;
+                        uploaded.in_flight = None;
+                        return;
+                    }
+                    Some(Ok(false)) => {
+                        uploaded.in_flight = None; // not present yet — re-send below
+                    }
+                    Some(Err(error)) => {
+                        tracing::info!(
+                            skybox = %desired,
+                            error = %error,
+                            "could not verify skybox upload in database, will retry"
+                        );
+                        uploaded.in_flight = None;
+                    }
+                    None => return, // still verifying
+                },
+            }
         }
     }
 
@@ -317,66 +402,37 @@ pub fn upload_active_skybox_assets_to_db(
         return;
     }
 
-    let Some(cubemap_file) = cache
-        .manifest
-        .get(&desired)
-        .map(|entry| entry.cubemap_file.clone())
-    else {
-        return; // no local manifest entry for the active skybox yet
-    };
-
-    let manifest_path = settings.manifest_path();
-    let cubemap_path = settings.cache_dir.join(&cubemap_file);
-    if !manifest_path.exists() || !cubemap_path.exists() {
-        // Bytes not on disk yet (e.g. generation still running) — retry later.
-        return;
-    }
-
-    match skybox_upload_payload(&settings, &cubemap_file) {
-        Ok(uploads) => {
-            for (asset_key, bytes) in uploads {
-                tx.send_msg(StoreAsset {
-                    key: asset_key,
-                    bytes,
-                });
-            }
-            uploaded.last_attempt = Some((key.clone(), Instant::now()));
-            let addr = connection_addr.0;
-            let probe_skybox = desired.clone();
-            uploaded.verify = Some(DbSkyboxUploadVerify {
-                key,
-                task: IoTaskPool::get().spawn(async move {
-                    tokio::runtime::Runtime::new()
-                        .map_err(|err| err.to_string())?
-                        .block_on(verify_db_skybox_assets(&probe_skybox, addr))
-                }),
-            });
-        }
-        Err(error) => {
-            tracing::warn!(
-                skybox = %desired,
-                error = %error,
-                "failed to read local skybox assets for db upload"
-            );
-            uploaded.last_attempt = Some((key, Instant::now()));
-        }
-    }
+    uploaded.last_attempt = Some((key.clone(), Instant::now()));
+    uploaded.in_flight = Some(DbSkyboxUpload {
+        key,
+        fingerprint,
+        phase: UploadPhase::Preparing(IoTaskPool::get().spawn(async move {
+            tokio::runtime::Runtime::new()
+                .map_err(|err| err.to_string())?
+                .block_on(prepare_skybox_upload(addr, entry, cubemap_path))
+        })),
+    });
 }
 
-/// Reads the local skybox `manifest.ron` and cubemap, returning `(db key, bytes)`
-/// pairs ready to send as [`StoreAsset`] messages.
-fn skybox_upload_payload(
-    settings: &SkyboxAssetSettings,
-    cubemap_file: &str,
-) -> Result<Vec<(String, Vec<u8>)>, String> {
-    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(cubemap_file)
-        .ok_or_else(|| format!("invalid skybox cubemap file path `{cubemap_file}`"))?;
-    let manifest_path = settings.manifest_path();
-    let manifest_bytes = std::fs::read(&manifest_path)
-        .map_err(|err| format!("{}: {err}", manifest_path.display()))?;
-    let cubemap_path = settings.cache_dir.join(cubemap_file);
+/// Prepares the `(db key, bytes)` pairs to upload for the active skybox.
+///
+/// The manifest is **merged** into the DB's current copy rather than sent
+/// wholesale, so entries written by `persist_schematic_assets` or other clients
+/// are preserved instead of being clobbered by the editor's local manifest.
+async fn prepare_skybox_upload(
+    connection_addr: SocketAddr,
+    entry: ManifestEntry,
+    cubemap_path: PathBuf,
+) -> Result<UploadPayload, String> {
+    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
+        .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
     let cubemap_bytes =
         std::fs::read(&cubemap_path).map_err(|err| format!("{}: {err}", cubemap_path.display()))?;
+
+    let mut manifest = fetch_db_skybox_manifest(connection_addr).await?;
+    manifest.upsert(entry);
+    let manifest_bytes = manifest.to_ron_bytes().map_err(|err| err.to_string())?;
+
     Ok(vec![
         (
             impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
@@ -384,6 +440,32 @@ fn skybox_upload_payload(
         ),
         (cubemap_name, cubemap_bytes),
     ])
+}
+
+/// Fetches the DB's current skybox manifest, or an empty one if absent.
+async fn fetch_db_skybox_manifest(connection_addr: SocketAddr) -> Result<SkyboxManifest, String> {
+    let client = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|err| err.to_string())?;
+    let base = assets_http_base(connection_addr);
+    let url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|err| format!("{url}: {err}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(SkyboxManifest::default());
+    }
+    let bytes = response
+        .error_for_status()
+        .map_err(|err| format!("{url}: {err}"))?
+        .bytes()
+        .await
+        .map_err(|err| format!("{url}: {err}"))?;
+    let text = std::str::from_utf8(&bytes).map_err(|err| err.to_string())?;
+    SkyboxManifest::from_ron_str(text).map_err(|err| err.to_string())
 }
 
 async fn fetch_asset(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
