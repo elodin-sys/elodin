@@ -220,11 +220,26 @@ pub fn sync_db_skybox_assets_from_config(
     }));
 }
 
-/// Tracks the `(addr, skybox)` whose local assets were last uploaded to the DB,
-/// so we push each active skybox's bytes at most once per session.
+/// Tracks the upload of the active skybox's local assets to the DB.
+///
+/// [`StoreAsset`] is fire-and-forget (the channel can drop on backpressure, the
+/// server only logs store failures, and a mid-upload disconnect is silent), so
+/// we don't trust the send alone: we mark an `(addr, skybox)` done only once the
+/// DB asset server actually serves the bytes back, and otherwise re-send with a
+/// backoff.
 #[derive(Resource, Default)]
 pub struct DbSkyboxUploaded {
-    uploaded: Option<MirrorKey>,
+    /// `(addr, skybox)` confirmed queryable from the DB asset server.
+    confirmed: Option<MirrorKey>,
+    /// Last (re)send attempt, throttles retries until the upload is confirmed.
+    last_attempt: Option<(MirrorKey, Instant)>,
+    /// In-flight probe verifying the DB actually serves the uploaded assets.
+    verify: Option<DbSkyboxUploadVerify>,
+}
+
+struct DbSkyboxUploadVerify {
+    key: MirrorKey,
+    task: Task<Result<bool, String>>,
 }
 
 /// Counterpart to [`sync_db_skybox_assets_from_config`]: mirror the active
@@ -251,7 +266,9 @@ pub fn upload_active_skybox_assets_to_db(
     let desired = match desired_skybox_from_config(&config) {
         Some(Some(name)) => name,
         Some(None) => {
-            uploaded.uploaded = None;
+            uploaded.confirmed = None;
+            uploaded.last_attempt = None;
+            uploaded.verify = None;
             return;
         }
         None => return,
@@ -261,7 +278,42 @@ pub fn upload_active_skybox_assets_to_db(
         addr: connection_addr.0,
         skybox: desired.clone(),
     };
-    if uploaded.uploaded.as_ref() == Some(&key) {
+    if uploaded.confirmed.as_ref() == Some(&key) {
+        return;
+    }
+
+    // Poll a pending verification probe; only latch `confirmed` once the DB
+    // actually serves the assets back, otherwise fall through to re-send.
+    if let Some(verify) = uploaded.verify.as_mut() {
+        if verify.key != key {
+            uploaded.verify = None; // desired skybox changed
+        } else if let Some(result) = future::block_on(future::poll_once(&mut verify.task)) {
+            uploaded.verify = None;
+            match result {
+                Ok(true) => {
+                    uploaded.confirmed = Some(key);
+                    uploaded.last_attempt = None;
+                    return;
+                }
+                Ok(false) => {} // not present yet — re-send after backoff below
+                Err(error) => {
+                    tracing::info!(
+                        skybox = %desired,
+                        error = %error,
+                        "could not verify skybox upload in database, will retry"
+                    );
+                }
+            }
+        } else {
+            return; // still verifying
+        }
+    }
+
+    // Throttle (re)attempts so a slow/failing upload doesn't resend every frame.
+    if let Some((attempted, at)) = &uploaded.last_attempt
+        && attempted == &key
+        && at.elapsed() < RETRY_DELAY
+    {
         return;
     }
 
@@ -282,10 +334,23 @@ pub fn upload_active_skybox_assets_to_db(
 
     match skybox_upload_payload(&settings, &cubemap_file) {
         Ok(uploads) => {
-            for (key, bytes) in uploads {
-                tx.send_msg(StoreAsset { key, bytes });
+            for (asset_key, bytes) in uploads {
+                tx.send_msg(StoreAsset {
+                    key: asset_key,
+                    bytes,
+                });
             }
-            uploaded.uploaded = Some(key);
+            uploaded.last_attempt = Some((key.clone(), Instant::now()));
+            let addr = connection_addr.0;
+            let probe_skybox = desired.clone();
+            uploaded.verify = Some(DbSkyboxUploadVerify {
+                key,
+                task: IoTaskPool::get().spawn(async move {
+                    tokio::runtime::Runtime::new()
+                        .map_err(|err| err.to_string())?
+                        .block_on(verify_db_skybox_assets(&probe_skybox, addr))
+                }),
+            });
         }
         Err(error) => {
             tracing::warn!(
@@ -293,6 +358,7 @@ pub fn upload_active_skybox_assets_to_db(
                 error = %error,
                 "failed to read local skybox assets for db upload"
             );
+            uploaded.last_attempt = Some((key, Instant::now()));
         }
     }
 }
@@ -361,6 +427,59 @@ async fn download_db_skybox_assets(
         entry,
         cubemap_bytes,
     })
+}
+
+/// Confirms the DB asset server actually serves the active skybox's manifest
+/// entry and cubemap. `Ok(false)` means the assets aren't present yet (caller
+/// re-sends); `Err` is an unexpected failure (caller retries).
+async fn verify_db_skybox_assets(
+    skybox: &str,
+    connection_addr: SocketAddr,
+) -> Result<bool, String> {
+    let client = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|err| err.to_string())?;
+    let base = assets_http_base(connection_addr);
+
+    let manifest_url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_resp = client
+        .get(&manifest_url)
+        .send()
+        .await
+        .map_err(|err| format!("{manifest_url}: {err}"))?;
+    if manifest_resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    let manifest_bytes = manifest_resp
+        .error_for_status()
+        .map_err(|err| format!("{manifest_url}: {err}"))?
+        .bytes()
+        .await
+        .map_err(|err| format!("{manifest_url}: {err}"))?;
+    let manifest = std::str::from_utf8(&manifest_bytes).map_err(|err| err.to_string())?;
+    let manifest = SkyboxManifest::from_ron_str(manifest).map_err(|err| err.to_string())?;
+    let Some(entry) = manifest.get(skybox) else {
+        return Ok(false);
+    };
+
+    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
+        .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
+    let cubemap_url = format!("{base}/{cubemap_name}");
+    // HEAD avoids transferring the (large) cubemap just to check presence;
+    // axum serves HEAD for `get` routes automatically.
+    let cubemap_resp = client
+        .head(&cubemap_url)
+        .send()
+        .await
+        .map_err(|err| format!("{cubemap_url}: {err}"))?;
+    if cubemap_resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    cubemap_resp
+        .error_for_status()
+        .map_err(|err| format!("{cubemap_url}: {err}"))?;
+    Ok(true)
 }
 
 fn cubemap_cache_path(cache_dir: &Path, cubemap_file: &str) -> Result<PathBuf, String> {
