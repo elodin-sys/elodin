@@ -1463,6 +1463,7 @@ impl ViewportPane {
                     ..Default::default()
                 },
                 grid_layers,
+                Name::new("viewport grid"),
             ))
             .id();
 
