@@ -4,19 +4,17 @@ use bevy_egui::egui;
 use impeller2_wkt::Line3d;
 
 use crate::ui::colors::get_scheme;
-use crate::ui::schematic::CurrentSchematic;
 use crate::ui::timeline::TimelineSettings;
 use crate::ui::widgets::WidgetSystem;
 use crate::ui::{label::ELabel, utils::MarginSides};
 
-use super::line3d::{line3d_controls, persist_to_schematic};
+use super::line3d::line3d_controls;
 use super::node_color_picker;
 
 #[derive(SystemParam)]
 pub struct InspectorTimeline<'w, 's> {
     timeline_settings: ResMut<'w, TimelineSettings>,
     lines: Query<'w, 's, (Entity, &'static mut Line3d)>,
-    schematic: ResMut<'w, CurrentSchematic>,
 }
 
 impl WidgetSystem for InspectorTimeline<'_, '_> {
@@ -33,7 +31,6 @@ impl WidgetSystem for InspectorTimeline<'_, '_> {
         let InspectorTimeline {
             mut timeline_settings,
             mut lines,
-            mut schematic,
         } = state.get_mut(world);
 
         ui.spacing_mut().item_spacing.y = 8.0;
@@ -77,9 +74,9 @@ impl WidgetSystem for InspectorTimeline<'_, '_> {
                     .id_salt(("line3d_inspector", *entity))
                     .default_open(single_line)
                     .show(ui, |ui| {
-                        if line3d_controls(ui, line, played_tl, future_tl) {
-                            persist_to_schematic(&mut schematic, line);
-                        }
+                        // Edits mutate the live `Line3d`; `tiles_to_schematic`
+                        // mirrors it into `CurrentSchematic` (and KDL on save).
+                        line3d_controls(ui, line, played_tl, future_tl);
                     });
                 });
         }
