@@ -93,4 +93,3 @@ fn color_square(ui: &mut egui::Ui, label: &str, color: &mut Color) -> bool {
         false
     }
 }
-
