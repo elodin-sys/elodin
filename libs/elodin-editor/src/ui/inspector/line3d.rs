@@ -58,33 +58,25 @@ pub fn line3d_controls(
     changed
 }
 
-/// A plain color square (label left, swatch right) that opens the shared color
-/// popup. Returns `true` only when the popup actually edits the color, so it
-/// never spuriously materializes an inherited color from a redraw.
+/// A plain color square below its label that opens the shared color popup.
+/// Returns `true` only when the popup actually edits the color, so it never
+/// spuriously materializes an inherited color from a redraw.
 fn color_square(ui: &mut egui::Ui, label: &str, color: &mut Color) -> bool {
     let scheme = get_scheme();
     let mut egui_color = color.into_color32();
 
-    let resp = ui
-        .horizontal(|ui| {
-            ui.label(RichText::new(label).color(scheme.text_secondary));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (rect, resp) =
-                    ui.allocate_exact_size(egui::vec2(36.0, 16.0), egui::Sense::click());
-                if ui.is_rect_visible(rect) {
-                    ui.painter().rect(
-                        rect,
-                        egui::CornerRadius::same(3),
-                        egui_color,
-                        egui::Stroke::new(1.0, scheme.border_primary),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-            })
-            .inner
-        })
-        .inner;
+    ui.label(RichText::new(label).color(scheme.text_secondary));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect(
+            rect,
+            egui::CornerRadius::same(3),
+            egui_color,
+            egui::Stroke::new(1.0, scheme.border_primary),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     ui.separator();
 
     let popup_id = ui.auto_id_with(("line3d_color", label));
