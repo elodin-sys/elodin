@@ -1,6 +1,6 @@
 {
   nixConfig = {
-    extra-substituters = ["https://s3-us-west-2.amazonaws.com/elodin-nix-cache"];
+    extra-substituters = ["https://elodin-nix-cache.s3.us-west-2.amazonaws.com"];
     extra-trusted-public-keys = [
       "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
@@ -9,12 +9,17 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
-      url = "github:oxalica/rust-overlay";
+      url = "github:oxalica/rust-overlay/77a8263847fb02dc49dbe377278ef6b952f1c6bb";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
       inputs.systems.follows = "systems";
+    };
+    aleph = {
+      url = "path:./aleph";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
     };
   };
 

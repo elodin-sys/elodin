@@ -1,5 +1,53 @@
 {
   "nodes": {
+    "aleph": {
+      "inputs": {
+        "jetpack": "jetpack",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "nixpkgs-unstable": "nixpkgs-unstable",
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "path": "./aleph",
+        "type": "path"
+      },
+      "original": {
+        "path": "./aleph",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "cuda-legacy": {
+      "inputs": {
+        "flake-parts": [
+          "aleph",
+          "jetpack",
+          "cuda-legacy"
+        ],
+        "nixpkgs": [
+          "aleph",
+          "jetpack",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1768505959,
+        "narHash": "sha256-oFCx/ApQ+S1/apUKWsvT9vq+Eo1m2vINWEDkW7/nckA=",
+        "owner": "nixos-cuda",
+        "repo": "cuda-legacy",
+        "rev": "86ad7e2c2e314f0234539cbbc66b5cd7746bcd32",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos-cuda",
+        "repo": "cuda-legacy",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": [
@@ -20,6 +68,29 @@
         "type": "github"
       }
     },
+    "jetpack": {
+      "inputs": {
+        "cuda-legacy": "cuda-legacy",
+        "nixpkgs": [
+          "aleph",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780334549,
+        "narHash": "sha256-SVmtu81BtkU+3+6CQvarnijlwLunY64CVH+e3GsSl8s=",
+        "owner": "anduril",
+        "repo": "jetpack-nixos",
+        "rev": "4a4e93a7b3fbe1915870ec54002c616f01367195",
+        "type": "github"
+      },
+      "original": {
+        "owner": "anduril",
+        "repo": "jetpack-nixos",
+        "rev": "4a4e93a7b3fbe1915870ec54002c616f01367195",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1782116945,
@@ -36,8 +107,25 @@
         "type": "github"
       }
     },
+    "nixpkgs-unstable": {
+      "locked": {
+        "lastModified": 1781577229,
+        "narHash": "sha256-lrp67w8AulE9Ks53n27I45ADSzbOCn4H+CNW1Ck8B+8=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
+        "aleph": "aleph",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay",
@@ -61,6 +149,7 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "rev": "77a8263847fb02dc49dbe377278ef6b952f1c6bb",
         "type": "github"
       }
     },
