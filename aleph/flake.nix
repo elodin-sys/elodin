@@ -62,7 +62,14 @@
       })
       // (rust-overlay.overlays.default final prev)
       // (secureBzip2Overlay final prev)
-      // (gitReposOverlay final prev);
+      // (gitReposOverlay final prev)
+      // {
+        # cudaSupport (aleph-cuda.nix) pulls jax-cuda12-plugin -> nccl (badPlatforms
+        # aarch64), unused (sim=cranelift, render=Vulkan). Force CPU jax everywhere.
+        pythonPackagesExtensions =
+          (prev.pythonPackagesExtensions or [])
+          ++ [(_pyfinal: pyprev: {jax = pyprev.jax.override {cudaSupport = false;};})];
+      };
 
     baseModules = {
       default = defaultModule;

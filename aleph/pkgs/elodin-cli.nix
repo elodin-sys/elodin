@@ -4,15 +4,11 @@
   rustToolchain,
   ...
 }: let
-  # The Aleph sets nixpkgs.config.cudaSupport = true (aleph-cuda.nix), which
-  # flips jax's default to pull the CUDA plugin (-> nccl, unsupported on
-  # aarch64). Build jax without CUDA; the sim uses the cranelift backend and the
-  # renderer uses Vulkan, so GPU jax is not needed on-device.
-  pythonPackages = pkgs.python313Packages.overrideScope (_final: prev: {
-    jax = prev.jax.override {cudaSupport = false;};
-  });
+  # jax is forced CPU by the aleph overlay (pythonPackagesExtensions); cudaSupport
+  # (aleph-cuda.nix) would otherwise pull jax-cuda12-plugin -> nccl (unused).
   elodinPy = pkgs.callPackage ../../nix/pkgs/elodin-py.nix {
-    inherit rustToolchain pythonPackages;
+    inherit rustToolchain;
+    pythonPackages = pkgs.python313Packages;
     python = pkgs.python313;
   };
   common = pkgs.callPackage ../../nix/pkgs/common.nix {};
