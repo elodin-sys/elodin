@@ -550,16 +550,19 @@ pub fn sync_viewport_focus_pick_targets(
         }
     }
 
+    // `try_*` variants silence the command if the entity was despawned between
+    // building the target set and applying these deferred commands (e.g. a
+    // schematic reload triggered by skybox generation despawns Object3D meshes).
     for entity in current_targets.difference(&desired_targets) {
         commands
             .entity(*entity)
-            .remove::<(Pickable, ViewportFocusPickTarget)>();
+            .try_remove::<(Pickable, ViewportFocusPickTarget)>();
     }
 
     for entity in desired_targets.difference(&current_targets) {
         commands
             .entity(*entity)
-            .insert((Pickable::default(), ViewportFocusPickTarget));
+            .try_insert((Pickable::default(), ViewportFocusPickTarget));
     }
 }
 
@@ -980,5 +983,87 @@ mod tests {
             let glam_quat = Quat::from_mat3(&g(glam_mat));
             assert_eq_quat!(nox_quat_bevy.as_quat(), glam_quat, "case {i} second");
         }
+    }
+
+    fn focus_object_state(eql: &str) -> Object3DState {
+        use impeller2_wkt::{Object3D, Object3DMesh};
+        Object3DState {
+            compiled_expr: None,
+            scale_expr: None,
+            scale_error: None,
+            error_covariance_cholesky_expr: None,
+            joint_animations: Vec::new(),
+            data: Object3D {
+                eql: eql.to_string(),
+                mesh: Object3DMesh::glb("model.glb"),
+                frame: None,
+                icon: None,
+                thrusters: Vec::new(),
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            },
+        }
+    }
+
+    fn focus_viewport(eql: &str, parent_entity: Entity) -> Viewport {
+        Viewport {
+            parent_entity,
+            pos: EditableEQL {
+                eql: String::new(),
+                compiled_expr: None,
+            },
+            look_at: EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: None,
+            },
+            up: EditableEQL {
+                eql: String::new(),
+                compiled_expr: None,
+            },
+            frame: None,
+        }
+    }
+
+    /// Regression for the panic where a focus mesh entity is despawned between
+    /// `sync_viewport_focus_pick_targets` queueing its `insert` and the deferred
+    /// commands applying (e.g. skybox generation reloads the schematic). The
+    /// queued command must be silenced rather than panic on the dead entity.
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn sync_viewport_focus_pick_targets_survives_despawned_target() {
+        let mut world = World::new();
+        let parent = world.spawn(focus_object_state("e.world_pos")).id();
+        let mesh = world.spawn(Mesh3d(Handle::default())).id();
+        world.entity_mut(parent).add_child(mesh);
+        let viewport_parent = world.spawn_empty().id();
+        world.spawn(focus_viewport("e.world_pos", viewport_parent));
+
+        let mut state: SystemState<(
+            Commands,
+            Query<&Viewport>,
+            Query<(Entity, &Object3DState)>,
+            Query<&Children>,
+            Query<(), With<Mesh3d>>,
+            Query<Entity, With<ViewportFocusPickTarget>>,
+        )> = SystemState::new(&mut world);
+
+        {
+            let (commands, viewports, objects, children, mesh_entities, current_targets) =
+                state.get_mut(&mut world);
+            sync_viewport_focus_pick_targets(
+                commands,
+                viewports,
+                objects,
+                children,
+                mesh_entities,
+                current_targets,
+            );
+        }
+
+        // Despawn the target after the insert is queued but before it applies.
+        world.entity_mut(mesh).despawn();
+        state.apply(&mut world);
+
+        assert!(world.get_entity(mesh).is_err());
     }
 }

@@ -97,7 +97,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                             *selected_object = SelectedObject::Object3D { entity };
                         }
                     }
-                    impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
+                    impeller2_wkt::SchematicElem::Line3d(_line_3d) => {}
                     impeller2_wkt::SchematicElem::VectorArrow(_arrow) => {}
                     impeller2_wkt::SchematicElem::WorldMesh(_world_mesh) => {}
                     impeller2_wkt::SchematicElem::Window(_window) => {}

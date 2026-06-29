@@ -297,7 +297,9 @@ async fn get_asset(
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
         Ok(Ok(bytes)) => Ok(bytes),
         Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
-            tracing::warn!(asset = %path, "asset http 404 (not found)");
+            // A 404 is a routine client outcome (e.g. a mirror polling for an
+            // asset still being uploaded), not a server fault — log at info.
+            tracing::info!(asset = %path, "asset http 404 (not found)");
             Err(StatusCode::NOT_FOUND)
         }
         Ok(Err(err)) => {

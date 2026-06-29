@@ -379,6 +379,16 @@ impl DB {
         Ok(needs_asset_sync)
     }
 
+    /// Store an uploaded asset at `{db}/assets/<key>`.
+    ///
+    /// `key` is sanitized (rejects `..` and absolute paths) by
+    /// `assets_http::write_asset_file`, so an out-of-tree key is refused rather
+    /// than escaping the assets directory.
+    pub fn store_asset(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        crate::assets_http::write_asset_file(&assets_dir, key, bytes)
+    }
+
     pub fn flush_all(&self) -> Result<(), Error> {
         self.with_state(|state| -> Result<(), Error> {
             // Ensure time-series data is fully flushed
@@ -1545,16 +1555,22 @@ impl Server {
     pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
         let socket = UdpSocket::bind(addr)?;
         let (rx, tx) = socket.split();
-        let rx = PacketStream::new(rx);
+        let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
         let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
         handle_conn_inner(tx, rx, db).await?;
         Ok(())
     }
 }
 
+/// Upper bound on a single inbound packet. Large asset uploads (e.g. skybox
+/// cubemaps, several MB) arrive as one [`StoreAsset`] message, so the
+/// per-connection read buffer grows on demand; this caps that growth to bound
+/// memory and reject malformed/hostile length prefixes.
+const MAX_PACKET_LEN: usize = 256 * 1024 * 1024;
+
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     let (rx, tx) = stream.split();
-    let rx = PacketStream::new(rx);
+    let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
     match handle_conn_inner(tx, rx, db).await {
         Ok(_) => {}
@@ -1575,7 +1591,9 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], RESPONSE_PACKET_CAPACITY);
     let mut silent = false;
     loop {
-        let pkt = rx.next(buf).await?;
+        // `next_grow` lets the buffer grow past its initial 8 MiB for large
+        // asset uploads; `with_max_len` above bounds that growth.
+        let pkt = rx.next_grow(buf).await?;
         let req_id = pkt.req_id();
         let mut pkt_tx = PacketTx {
             req_id,
@@ -1999,6 +2017,18 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let update = m.parse::<SetDbConfig>()?;
             db.apply_set_db_config(update)?;
             tx.send_msg(&db.db_config()).await?;
+        }
+        Packet::Msg(m) if m.id == StoreAsset::ID => {
+            let StoreAsset { key, bytes } = m.parse::<StoreAsset>()?;
+            // A bad/unwritable asset is logged but must not drop the connection.
+            match db.store_asset(&key, &bytes) {
+                Ok(()) => {
+                    tracing::info!(asset = %key, len = bytes.len(), "stored uploaded asset")
+                }
+                Err(err) => {
+                    tracing::warn!(asset = %key, ?err, "failed to store uploaded asset")
+                }
+            }
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             tx.send_msg(&EarliestTimestamp(db.earliest_timestamp.latest()))
@@ -3307,5 +3337,30 @@ mod tests {
             db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
             None
         );
+    }
+
+    #[test]
+    fn store_asset_writes_into_assets_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        db.store_asset("skyboxes/manifest.ron", b"manifest")
+            .unwrap();
+
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("skyboxes/manifest.ron")).unwrap(),
+            b"manifest".to_vec()
+        );
+    }
+
+    #[test]
+    fn store_asset_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        let err = db.store_asset("../escape.bin", b"x").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!dir.path().join("escape.bin").exists());
     }
 }
