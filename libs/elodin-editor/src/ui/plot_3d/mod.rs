@@ -23,8 +23,9 @@ pub mod gpu;
 
 /// Convert a schematic (sRGB) color into the linear RGBA the line pipeline
 /// renders, keeping it consistent with meshes/gizmos. Alpha is preserved so a
-/// KDL `color`/`future_color` can set per-line opacity (the future segment is
-/// additionally faded by the timeline `future_trail_alpha`).
+/// KDL `color`/`future_color` can set per-line opacity. An explicit
+/// `future_color` alpha is used as-is; only fallback futures get the default
+/// fade (see `LineTrailColors::resolve`).
 fn line_color_linear(color: &impeller2_wkt::Color) -> Vec4 {
     let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
     Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
@@ -156,8 +157,8 @@ mod tests {
     #[test]
     fn line_color_linear_preserves_alpha() {
         // A KDL color/future_color alpha must survive into the line uniform
-        // (sRGB->linear leaves alpha untouched); only the timeline
-        // future_trail_alpha should fade it further, applied in `resolve`.
+        // (sRGB->linear leaves alpha untouched). An explicit future_color keeps
+        // this alpha as-is; fallback futures get the default fade in `resolve`.
         let color = impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
         assert_eq!(line_color_linear(&color).w, 0.25);
     }

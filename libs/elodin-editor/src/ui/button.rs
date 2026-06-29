@@ -109,6 +109,7 @@ pub struct ECheckboxButton {
     on_color: egui::Color32,
     off_color: egui::Color32,
     text_color: egui::Color32,
+    border_color: Option<egui::Color32>,
     margin: egui::Margin,
     is_on: bool,
     label: String,
@@ -122,6 +123,7 @@ impl ECheckboxButton {
             on_color: get_scheme().text_primary,
             off_color: get_scheme().bg_secondary,
             text_color: get_scheme().text_primary,
+            border_color: None,
             margin: egui::Margin::same(8),
             is_on,
             label: label.to_string(),
@@ -137,6 +139,13 @@ impl ECheckboxButton {
 
     pub fn on_color(mut self, color: egui::Color32) -> Self {
         self.on_color = color;
+        self
+    }
+
+    /// Resting border color. Defaults to `on_color` (the box is monochrome);
+    /// set this to keep a fixed border while the fill shows a different color.
+    pub fn border_color(mut self, color: egui::Color32) -> Self {
+        self.border_color = Some(color);
         self
     }
 
@@ -173,7 +182,8 @@ impl ECheckboxButton {
         // Paint the UI
         if ui.is_rect_visible(rect) {
             let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, self.on_color);
+            style.visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0, self.border_color.unwrap_or(self.on_color));
             let visuals = ui.style().interact(&response);
 
             let inner_rect = rect.shrink4(self.margin);
