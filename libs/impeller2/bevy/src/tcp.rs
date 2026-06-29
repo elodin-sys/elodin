@@ -24,14 +24,11 @@ impl TcpImpellerPlugin {
 impl Plugin for TcpImpellerPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
             app.insert_resource(ConnectionAddr(addr));
-            let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
             spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
-            app.insert_resource(msg_tx)
-                .insert_resource(msg_rx)
-                .add_systems(PreUpdate, msg_sink);
             spawn_tcp_connect(
                 addr,
                 outgoing_packet_rx,
@@ -44,9 +41,11 @@ impl Plugin for TcpImpellerPlugin {
         };
         app.insert_resource(packet_tx)
             .insert_resource(packet_rx)
+            .insert_resource(msg_tx)
+            .insert_resource(msg_rx)
             .insert_resource(CurrentStreamId(stream_id))
             .insert_resource(status)
-            .add_systems(PreUpdate, sink);
+            .add_systems(PreUpdate, (sink, msg_sink));
     }
 }
 
