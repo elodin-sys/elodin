@@ -718,9 +718,9 @@ larger the error confidence interval, the larger the ellipsoid.</li>
 <li>Positional <code>eql</code>: required; expects 3 values (or 7 where the last 3 are XYZ).</li>
 <li><code>frame</code>: optional; <code>ENU</code>, <code>NED</code>, or <code>ECEF</code>. Specifies the coordinate frame for interpreting the line points. Inherits from global <code>coordinate</code> if omitted.</li>
 <li><code>line_width</code>: default 1.0.</li>
-<li>The trail is split into a <em>played</em> segment (up to the current playback time) and a <em>future</em> segment (ahead of it). The future segment is always faded by the timeline's <code>future_trail_alpha</code>.</li>
-<li><code>color</code>: color of the played segment. When omitted, falls back to the timeline <code>played_color</code> (default <code>yalk</code>). If set without <code>future_color</code>, it also colors the future segment — a single <code>color</code> paints the whole line.</li>
-<li><code>future_color</code>: color of the future segment. When omitted, falls back to <code>color</code> (if set), otherwise the timeline <code>future_color</code> (default <code>white</code>).</li>
+<li>The trail is split into a <em>played</em> segment (up to the current playback time) and a <em>future</em> segment (ahead of it). When no <code>future_color</code> is set, the future segment is dimmed by a default fade so it reads as lighter than the played segment.</li>
+<li><code>color</code>: color of the played segment. When omitted, falls back to the timeline <code>played_color</code> (default <code>yalk</code>). It does not affect the future segment.</li>
+<li><code>future_color</code>: color of the future segment, independent of <code>color</code>. Its alpha sets the future opacity and is used as-is (no extra fade). When omitted, falls back to the timeline <code>future_color</code> (default <code>white</code>, faded).</li>
 <li><code>perspective</code>: default true (set false for screen-space lines).</li>
 </ul>
 <h3 id="vector-arrow">vector_arrow</h3>
