@@ -38,6 +38,7 @@ impl SkyboxDocumentSyncMut<'_> {
         );
         sync_cache_active_from_skybox(self.cache, skybox.as_ref());
         record_synced_schematic_content(self.last_synced_content, &kdl);
+        self.last_synced_content.1 = Some(self.active_key.to_string());
         let active = self
             .schematic
             .skybox
@@ -189,6 +190,9 @@ pub(crate) fn on_document_loaded(
     }
 
     record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
+    // Track which active key this content came from so a later switch to a
+    // different key reloads even when the KDL is byte-identical.
+    last_synced_content.1 = config.schematic_active().map(str::to_string);
 }
 
 pub(crate) fn record_reloaded_schematic_content(

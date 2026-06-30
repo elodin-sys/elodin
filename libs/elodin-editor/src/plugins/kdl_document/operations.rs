@@ -446,7 +446,12 @@ pub fn sync_document_from_config(
     // The mirrored `schematic.content` doubles as the change guard (the shim
     // keeps it equal to the active asset) and as the offline fallback.
     if let Some(active_key) = config.schematic_active() {
-        if let Some(mirror) = config.schematic_content()
+        // Skip the reload only when both the content *and* the active key are
+        // unchanged: opening another stored schematic that happens to have the
+        // same KDL still switches the active key, and the editor must follow it.
+        let key_unchanged = last_synced_content.1.as_deref() == Some(active_key);
+        if key_unchanged
+            && let Some(mirror) = config.schematic_content()
             && last_synced_content
                 .0
                 .as_deref()

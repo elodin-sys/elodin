@@ -10,10 +10,12 @@ use thiserror::Error;
 #[derive(Resource, Default)]
 pub struct InitialKdlPath(pub Option<PathBuf>);
 
-/// Last `schematic.content` applied from `DbConfig`; skips redundant full reloads when only
-/// other metadata (e.g. `skybox.active`) changes.
+/// Last schematic synced from `DbConfig`, to skip redundant full reloads when
+/// only other metadata (e.g. `skybox.active`) changes. `.0` is the applied
+/// `schematic.content`; `.1` is the `schematic.active` key it came from, so a
+/// reload still fires when the active key changes even if the KDL is identical.
 #[derive(Resource, Default)]
-pub struct LastSyncedSchematicContent(pub Option<String>);
+pub struct LastSyncedSchematicContent(pub Option<String>, pub Option<String>);
 
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct SchematicDocumentAsset {
