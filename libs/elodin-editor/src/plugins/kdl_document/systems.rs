@@ -1,5 +1,6 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use impeller2_wkt::SkyboxConfig;
 use std::path::PathBuf;
@@ -10,6 +11,21 @@ use super::operations::{
     fetch_active_schematic_kdl, open_document_from_content, open_document_path,
 };
 use super::types::*;
+
+/// In-flight async fetch of the active schematic's KDL from the DB Asset Server.
+/// Keeps the blocking HTTP request off the main thread (RFD #724): an
+/// `OpenDocumentFromActiveRequest` spawns the fetch here and the same system
+/// applies the result once it lands, so a slow or unreachable DB never freezes
+/// the UI mid-frame.
+#[derive(Resource, Default)]
+pub(crate) struct ActiveSchematicFetch {
+    task: Option<Task<ActiveSchematicFetched>>,
+}
+
+struct ActiveSchematicFetched {
+    request: OpenDocumentFromActiveRequest,
+    result: Result<String, String>,
+}
 
 fn cloned_current_document_asset(
     current_document: &CurrentDocument,
@@ -77,44 +93,62 @@ pub(super) fn handle_open_document_from_content_requests(
 pub(super) fn handle_open_document_from_active_requests(
     mut requests: MessageReader<OpenDocumentFromActiveRequest>,
     connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
-    let addr = connection_addr.as_deref().map(|c| c.0);
-    for request in requests.read() {
-        let content = match fetch_active_schematic_kdl(&request.key, addr) {
-            Ok(content) => content,
-            Err(error) => match request.content_fallback.as_deref() {
-                Some(fallback) => {
-                    bevy::log::warn!(
-                        "Active schematic fetch failed ({error}); using content mirror fallback"
-                    );
-                    fallback.to_string()
-                }
-                None => {
-                    failed.write(DocumentCommandFailed {
-                        title: "Failed to Load Active Schematic".to_string(),
-                        message: error,
-                    });
-                    continue;
-                }
-            },
-        };
-        match open_document_from_content(&content, request.save_path.clone(), &mut current_document)
-        {
-            Ok(document) => {
-                loaded.write(DocumentLoaded {
-                    save_path: current_document.save_path.clone(),
-                    document,
-                });
+    // Latest request wins: a newer active schematic supersedes any in-flight
+    // fetch so we never apply a stale load after the user switched schematics.
+    if let Some(request) = requests.read().last().cloned() {
+        let addr = connection_addr.as_deref().map(|c| c.0);
+        let key = request.key.clone();
+        fetch.task = Some(IoTaskPool::get().spawn(async move {
+            let result = fetch_active_schematic_kdl(&key, addr);
+            ActiveSchematicFetched { request, result }
+        }));
+    }
+
+    let Some(task) = fetch.task.as_mut() else {
+        return;
+    };
+    let Some(ActiveSchematicFetched { request, result }) =
+        future::block_on(future::poll_once(task))
+    else {
+        return;
+    };
+    fetch.task = None;
+
+    let content = match result {
+        Ok(content) => content,
+        Err(error) => match request.content_fallback.as_deref() {
+            Some(fallback) => {
+                bevy::log::warn!(
+                    "Active schematic fetch failed ({error}); using content mirror fallback"
+                );
+                fallback.to_string()
             }
-            Err(error) => {
+            None => {
                 failed.write(DocumentCommandFailed {
-                    title: "Invalid Active Schematic".to_string(),
-                    message: error.to_string(),
+                    title: "Failed to Load Active Schematic".to_string(),
+                    message: error,
                 });
+                return;
             }
+        },
+    };
+    match open_document_from_content(&content, request.save_path.clone(), &mut current_document) {
+        Ok(document) => {
+            loaded.write(DocumentLoaded {
+                save_path: current_document.save_path.clone(),
+                document,
+            });
+        }
+        Err(error) => {
+            failed.write(DocumentCommandFailed {
+                title: "Invalid Active Schematic".to_string(),
+                message: error.to_string(),
+            });
         }
     }
 }
