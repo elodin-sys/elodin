@@ -20,8 +20,9 @@ DB's HTTP asset server.
   file dialogs and the `read_dir` picker. Named schematics: "Save Schematic
   As..." stores under `schematics/<name>.kdl` and "Save Schematic" overwrites
   the currently active key, so several schematics can coexist. "Open
-  Schematic..." lists them via `GET /__index__/schematics/` and loads the chosen
-  one over HTTP (`OpenDocumentFromActiveRequest`). The DB skybox mirror no longer
+  Schematic..." lists them via `GET /__index__/schematics/` and repoints
+  `schematic.active` at the chosen one, so config sync loads it over HTTP and it
+  stays the authoritative active schematic. The DB skybox mirror no longer
   fights a local clear: it re-asserts a synced skybox only for an external drift,
   not for a state the user just pushed locally while the `SetDbConfig` echo is in
   flight. (Renaming an existing schematic is deferred — it needs a server-side
