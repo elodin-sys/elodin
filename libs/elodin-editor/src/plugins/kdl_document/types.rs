@@ -110,27 +110,3 @@ pub enum SchematicDocumentLoaderError {
     #[error(transparent)]
     RootKdl(#[from] KdlSchematicError),
 }
-
-#[derive(Debug, Error)]
-pub enum SaveCurrentDocumentError {
-    #[error("No save path is available for the current document")]
-    MissingSavePath,
-    #[error("Could not save schematic to {path}: {source}")]
-    WriteRoot {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("Could not create directory for window schematic {path}: {source}")]
-    CreateWindowDir {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("Could not save window schematic to {path}: {source}")]
-    WriteWindow {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-}

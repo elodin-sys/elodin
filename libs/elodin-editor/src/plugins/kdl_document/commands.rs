@@ -1,4 +1,3 @@
-use super::types::WindowDocumentSave;
 use bevy::prelude::*;
 use std::path::PathBuf;
 
@@ -25,10 +24,3 @@ pub struct OpenDocumentFromActiveRequest {
 /// Matches the key the Python SDK primes, so editor saves overwrite the same
 /// active schematic.
 pub const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
-
-#[derive(Message, Clone, Debug)]
-pub struct SaveCurrentDocumentRequest {
-    pub path: Option<PathBuf>,
-    pub root_kdl: String,
-    pub windows: Vec<WindowDocumentSave>,
-}

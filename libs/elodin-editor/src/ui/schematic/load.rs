@@ -27,8 +27,7 @@ use crate::{
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
-            DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
-            SchematicWindow,
+            DocumentLoaded, DocumentReloaded, SchematicDocumentAsset, SchematicWindow,
         },
         render_layer_alloc::RenderLayerAllocator,
     },
@@ -1321,25 +1320,6 @@ pub fn apply_document_cleared(
         return;
     }
     params.load_default_data_overview();
-}
-
-pub fn apply_document_saved(
-    mut events: MessageReader<DocumentSaved>,
-    mut windows_state: Query<(&WindowId, &mut WindowState)>,
-) {
-    for event in events.read() {
-        info!(path = %event.save_path.display(), "Saved schematic");
-        let base_dir = event.save_path.parent().unwrap_or_else(|| Path::new("."));
-        for (id, mut state) in &mut windows_state {
-            if id.is_primary() {
-                state.descriptor.path = Some(event.save_path.clone());
-                continue;
-            }
-            if let Some(info) = event.windows.iter().find(|w| w.window_id == *id) {
-                state.descriptor.path = Some(base_dir.join(&info.file_name));
-            }
-        }
-    }
 }
 
 pub fn show_document_command_failures(
