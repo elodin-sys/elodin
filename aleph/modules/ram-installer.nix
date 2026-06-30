@@ -1,0 +1,45 @@
+# RAM-resident variant of the USB sd-image installer.
+#
+# The normal installer mounts its ext4 root from the USB drive, which fails on
+# units where USB-mass-storage enumeration is unreliable. This module embeds the
+# whole Nix store in the initrd (NixOS netboot / live-media style) so the
+# installer runs entirely from RAM: UEFI loads the kernel + (large) initrd from
+# the ESP and nothing needs a USB block device. Once booted, run
+# `aleph-installer` to write the system to NVMe.
+#
+# Only imported by the `ram-installer` configuration (see flake.nix).
+{
+  config,
+  lib,
+  modulesPath,
+  ...
+}: {
+  imports = [(modulesPath + "/installer/netboot/netboot.nix")];
+
+  # netboot.nix and sd-image.nix (via fs.nix) both define the generic image
+  # outputs; we flash the sd-image (USB) artifact, so pin these to the sd-image
+  # values to resolve the duplicate definitions.
+  image.fileName = lib.mkForce "aleph-ram-installer.img";
+  image.extension = lib.mkForce "img";
+  image.filePath = lib.mkForce "sd-image/${config.image.fileName}";
+  system.build.image = lib.mkForce config.system.build.sdImage;
+  sdImage.compressImage = lib.mkForce false;
+
+  # Both hardware.nix and netboot.nix disable grub; resolve the duplicate def.
+  boot.loader.grub.enable = lib.mkForce false;
+
+  # The entire store ships inside the initrd, so the ESP/firmware partition must
+  # be large enough to hold the netboot ramdisk. Tune this if the image build
+  # reports the firmware partition is too small.
+  sdImage.firmwareSize = lib.mkForce 4096; # MiB
+
+  # hardware.nix uses `lib.mkForce` on boot.initrd.availableKernelModules, which
+  # drops netboot's squashfs/overlay entries. Force-load the live-media modules
+  # via kernelModules (which hardware.nix does not override) so they are present
+  # in the initrd regardless.
+  boot.initrd.kernelModules = ["squashfs" "overlay" "loop"];
+
+  # Boot the store-in-initrd ramdisk from the ESP instead of the bootspec initrd
+  # so nothing needs to mount a USB block device.
+  aleph.espInitrd = "${config.system.build.netbootRamdisk}/initrd";
+}

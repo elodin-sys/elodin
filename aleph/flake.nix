@@ -143,6 +143,28 @@
           })
         ];
       };
+
+    # Same as `installerSystem`, but the booted installer embeds the store in
+    # its initrd (NixOS netboot/live-media style) so it runs from RAM and never
+    # mounts a USB block device. The install target (`baseNixosConfig`) is the
+    # normal disk-booting system, unchanged.
+    ramInstallerSystem = module: let
+      baseNixosConfig = nixpkgs.lib.nixosSystem {
+        system = alephSystem;
+        modules = [module];
+      };
+    in
+      nixpkgs.lib.nixosSystem {
+        system = alephSystem;
+        modules = [
+          module
+          ({...}: {
+            imports = [./modules/installer.nix ./modules/ram-installer.nix];
+            aleph.sd.enable = true;
+            aleph.installer.system = baseNixosConfig.config.system.build.toplevel;
+          })
+        ];
+      };
     baseConfigurationModules =
       builtins.attrValues baseModules
       ++ builtins.attrValues fswModules
@@ -191,11 +213,18 @@
           installer = installerSystem ({...}: {
             imports = builtins.attrValues baseModules;
           });
+          # Like `installer`, but the whole store lives in the initrd so it runs
+          # entirely from RAM — no USB block device is mounted. Use this to
+          # provision NVMe on units where USB-mass-storage boot is unreliable.
+          ram-installer = ramInstallerSystem ({...}: {
+            imports = builtins.attrValues baseModules;
+          });
         }
         // customConfigurations;
       packages.aarch64-linux = {
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;
+        ram-installer = nixosConfigurations.ram-installer.config.system.build.sdImage;
       };
       packages.x86_64-linux = let
         flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {

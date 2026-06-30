@@ -37,6 +37,17 @@
     };
   };
 
+  options.aleph.espInitrd = lib.mkOption {
+    type = lib.types.nullOr lib.types.path;
+    default = null;
+    description = ''
+      Override the initrd written to the ESP/firmware partition. When null, the
+      initrd referenced by the toplevel's bootspec is used. Set this to a
+      store-in-initrd ramdisk (e.g. `''${config.system.build.netbootRamdisk}/initrd`)
+      to boot the system entirely from RAM without mounting a root block device.
+    '';
+  };
+
   config = {
     image.fileName = "aleph-os.img";
 
@@ -65,7 +76,8 @@
         ${pkgs.buildPackages.python3}/bin/python3 ${mkESPContent} \
           --toplevel ${config.system.build.toplevel} \
           --output firmware/ \
-          --device-tree ${fdtPath}
+          --device-tree ${fdtPath} \
+          ${lib.optionalString (config.aleph.espInitrd != null) "--initrd ${config.aleph.espInitrd}"}
       '';
       populateRootCommands = '''';
       postBuildCommands = ''
