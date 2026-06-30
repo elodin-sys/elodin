@@ -42,4 +42,53 @@
   # Boot the store-in-initrd ramdisk from the ESP instead of the bootspec initrd
   # so nothing needs to mount a USB block device.
   aleph.espInitrd = "${config.system.build.netbootRamdisk}/initrd";
+
+  # This is a fully offline installer (the whole closure ships in the initrd).
+  # `nixos-install` copies the system into /mnt by substituting from the local
+  # store (it passes `--extra-substituters auto?trusted=1`). Drop the network
+  # binary caches so that substitution doesn't emit noisy "could not resolve
+  # host" retries for cache.nixos.org / the Elodin cache. NOTE: do not disable
+  # substitution entirely (`substitute false`) — nixos-install needs the local
+  # `auto` substituter to populate /mnt.
+  nix.settings.substituters = lib.mkForce [];
+  nix.settings.extra-substituters = lib.mkForce [];
+
+  # The squashfs store + nix-path-registration are built from the closure of
+  # `netboot.storeContents` (see nixos/lib/make-squashfs.nix). netboot.nix only
+  # lists the live system by default, so the system we install to NVMe is not
+  # guaranteed to be present/registered in the offline store — making
+  # `nixos-install` try (and fail) to fetch it from the network. Add the install
+  # target explicitly so the whole thing works offline.
+  netboot.storeContents = lib.mkForce [
+    config.system.build.toplevel
+    config.aleph.installer.system
+  ];
+
+  # Both netboot.nix and sd-image.nix (via fs.nix) define a `register-nix-paths`
+  # service; merged, sd-image's `ConditionPathExists = /nix-path-registration`
+  # wins. That path only exists on the sd-image's ext4 root — in this
+  # store-in-initrd image the registration is at /nix/store/nix-path-registration
+  # — so the service is SKIPPED, the Nix DB is never populated before nix-daemon
+  # starts, and offline `nixos-install` treats the (present) install target as
+  # missing and tries the network. Replace it with one clean definition that
+  # loads the correct file *before* the daemon (so the daemon sees the paths;
+  # a late `nix-store --load-db` doesn't help because the daemon caches validity).
+  systemd.services.register-nix-paths = lib.mkForce {
+    description = "Register Nix Store Paths";
+    unitConfig.DefaultDependencies = false;
+    wantedBy = ["sysinit.target"];
+    before = ["sysinit.target" "shutdown.target" "nix-daemon.socket" "nix-daemon.service"];
+    after = ["local-fs.target"];
+    conflicts = ["shutdown.target"];
+    restartIfChanged = false;
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      ${lib.getExe' config.nix.package "nix-store"} --load-db < /nix/store/nix-path-registration
+      touch /etc/NIXOS
+      ${lib.getExe' config.nix.package "nix-env"} -p /nix/var/nix/profiles/system --set /run/current-system
+    '';
+  };
 }
