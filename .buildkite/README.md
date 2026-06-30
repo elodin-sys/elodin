@@ -170,7 +170,7 @@ The user-data script automatically detects the instance architecture using `unam
 
 - **x86-64 agents**: Queue `nixos-x86-aws` (default for most steps)
   - Detected architectures: `x86_64`, `amd64`
-- **ARM64 agents**: Queue `nixos-arm-aws` (for Aleph-OS builds: toplevel, sdimage)
+- **ARM64 agents**: Queue `nixos-arm-aws` (for Aleph-OS builds: toplevel, ram-installer)
   - Detected architectures: `aarch64`, `arm64`
 
 This means you can use the same user-data script for both x86 and ARM instances!

@@ -33,6 +33,12 @@
   # reports the firmware partition is too small.
   sdImage.firmwareSize = lib.mkForce 4096; # MiB
 
+  # The store lives in the initrd squashfs; root is a tmpfs and the sd-image ext4
+  # root partition is never mounted. By default sd-image writes the whole system
+  # closure into that (unused) ext4 partition — a second ~GB-scale copy of the
+  # closure that roughly doubles build time and image size. Leave it empty.
+  sdImage.storePaths = lib.mkForce [];
+
   # hardware.nix uses `lib.mkForce` on boot.initrd.availableKernelModules, which
   # drops netboot's squashfs/overlay entries. Force-load the live-media modules
   # via kernelModules (which hardware.nix does not override) so they are present

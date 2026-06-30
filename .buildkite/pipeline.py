@@ -157,11 +157,11 @@ test_steps = [
                 agents={"queue": "nixos-arm-aws"},
             ),
             step(
-                label=":nix: sdimage",
-                key="sdimage",
+                label=":nix: ram-installer",
+                key="ram-installer",
                 command=[
                     "cd aleph",
-                    "nix build --accept-flake-config .#sdimage",
+                    "nix build --accept-flake-config .#ram-installer",
                 ],
                 agents={"queue": "nixos-arm-aws"},
             ),
