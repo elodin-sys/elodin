@@ -19,6 +19,7 @@ use super::types::*;
 /// the UI mid-frame.
 #[derive(Resource, Default)]
 pub(crate) struct ActiveSchematicFetch {
+    key: Option<String>,
     task: Option<Task<ActiveSchematicFetched>>,
 }
 
@@ -100,13 +101,19 @@ pub(super) fn handle_open_document_from_active_requests(
 ) {
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
+    // A repeated request for the key already being fetched is ignored, so an
+    // unrelated DbConfig change mid-load can't cancel a nearly-complete fetch.
     if let Some(request) = requests.read().last().cloned() {
-        let addr = connection_addr.as_deref().map(|c| c.0);
-        let key = request.key.clone();
-        fetch.task = Some(IoTaskPool::get().spawn(async move {
-            let result = fetch_active_schematic_kdl(&key, addr);
-            ActiveSchematicFetched { request, result }
-        }));
+        let already_fetching = fetch.key.as_deref() == Some(request.key.as_str());
+        if !already_fetching {
+            let addr = connection_addr.as_deref().map(|c| c.0);
+            let key = request.key.clone();
+            fetch.key = Some(request.key.clone());
+            fetch.task = Some(IoTaskPool::get().spawn(async move {
+                let result = fetch_active_schematic_kdl(&key, addr);
+                ActiveSchematicFetched { request, result }
+            }));
+        }
     }
 
     let Some(task) = fetch.task.as_mut() else {
@@ -118,6 +125,7 @@ pub(super) fn handle_open_document_from_active_requests(
         return;
     };
     fetch.task = None;
+    fetch.key = None;
 
     let content = match result {
         Ok(content) => content,
