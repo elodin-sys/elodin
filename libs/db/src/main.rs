@@ -460,6 +460,23 @@ async fn main() -> miette::Result<()> {
                         }
                     }
                 }
+
+                // A CLI-started DB should also advertise an active schematic so
+                // connected editors auto-load it over HTTP (RFD #724), matching
+                // what the Python SDK primes. If the ingested tree carries the
+                // conventional schematics/main.kdl and no active pointer is set
+                // yet, point at it (mirroring its content into schematic.content).
+                if !server
+                    .db
+                    .with_state(|s| s.db_config.schematic_active().is_some())
+                {
+                    match server.db.set_active_schematic("schematics/main.kdl") {
+                        Ok(()) => info!("set active schematic to schematics/main.kdl"),
+                        Err(err) => {
+                            tracing::debug!(?err, "no schematics/main.kdl to set active; skipping")
+                        }
+                    }
+                }
             }
             #[cfg(feature = "axum")]
             // A follower mirrors its source read-only; only a primary DB accepts
