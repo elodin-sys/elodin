@@ -90,6 +90,11 @@ struct RunArgs {
     http_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
+    #[clap(
+        long,
+        help = "Source assets/ tree to ingest into the DB on creation (overrides ELODIN_ASSETS)"
+    )]
+    assets: Option<PathBuf>,
     #[clap(long, help = "Follow another elodin-db instance, replicating all data")]
     follows: Option<SocketAddr>,
     #[clap(
@@ -394,6 +399,7 @@ async fn main() -> miette::Result<()> {
             path,
             config,
             reset,
+            assets,
             start_timestamp,
             follows,
             follow_packet_size,
@@ -432,6 +438,28 @@ async fn main() -> miette::Result<()> {
                 elodin_db::follow::prime_follower_state(config, &server.db)
                     .await
                     .into_diagnostic()?;
+            }
+            #[cfg(feature = "axum")]
+            if follow_config.is_none() {
+                let source = assets
+                    .clone()
+                    .or_else(|| elodin_db::assets::resolve_assets_root(None));
+                if let Some(source) = source {
+                    match elodin_db::assets::ingest_asset_dir(&path, &source) {
+                        Ok(report) if report.skipped => {
+                            info!(source = %source.display(), "assets already ingested; skipping")
+                        }
+                        Ok(report) => info!(
+                            source = %source.display(),
+                            files = report.file_count,
+                            bytes = report.byte_count,
+                            "ingested assets into db"
+                        ),
+                        Err(err) => {
+                            tracing::warn!(?err, source = %source.display(), "failed to ingest assets")
+                        }
+                    }
+                }
             }
             #[cfg(feature = "axum")]
             elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;

@@ -341,6 +341,21 @@ impl DbConfig {
         self.metadata.get("schematic.content").map(String::as_str)
     }
 
+    /// Asset key of the active schematic under `{db}/assets/`
+    /// (e.g. `schematics/main.kdl`). Consumers fetch it over the Asset Server
+    /// HTTP rather than reading inline `schematic.content` (RFD #724).
+    pub fn set_schematic_active(&mut self, key: impl Into<String>) {
+        self.metadata
+            .insert("schematic.active".to_string(), key.into());
+    }
+
+    pub fn schematic_active(&self) -> Option<&str> {
+        self.metadata
+            .get("schematic.active")
+            .filter(|key| !key.is_empty())
+            .map(String::as_str)
+    }
+
     pub fn set_skybox_active(&mut self, name: Option<&str>) {
         match name {
             Some(name) => {

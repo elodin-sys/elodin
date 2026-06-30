@@ -140,6 +140,13 @@ where
             rewrite_icon_path(&mut obj.icon, map);
         }
         SchematicElem::Panel(panel) => rewrite_panel(panel, map),
+        SchematicElem::Window(window) => {
+            if let Some(path) = &mut window.path
+                && let Some(new_path) = map(path)
+            {
+                *path = new_path;
+            }
+        }
         _ => {}
     }
 }
@@ -239,6 +246,13 @@ fn collect_elem_db_asset_names(elem: &SchematicElem, names: &mut Vec<String>) {
             }
         }
         SchematicElem::Panel(panel) => collect_panel_db_asset_names(panel, names),
+        SchematicElem::Window(window) => {
+            if let Some(path) = &window.path
+                && let Some(name) = db_asset_name(path)
+            {
+                names.push(name);
+            }
+        }
         _ => {}
     }
 }
@@ -276,6 +290,13 @@ fn collect_elem_paths(elem: &SchematicElem, paths: &mut Vec<String>) {
             }
         }
         SchematicElem::Panel(panel) => collect_panel_paths(panel, paths),
+        SchematicElem::Window(window) => {
+            if let Some(path) = &window.path
+                && is_local_asset_path(path)
+            {
+                paths.push(path.clone());
+            }
+        }
         _ => {}
     }
 }
@@ -735,6 +756,54 @@ mod tests {
             skybox_manifest_cubemap_asset_name(manifest, "desert_night").unwrap(),
             Some("skyboxes/desert_night.cubemap.ktx2".to_string())
         );
+    }
+
+    #[test]
+    fn rewrite_and_collect_window_schematic_path() {
+        use impeller2_wkt::WindowSchematic;
+
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Window(WindowSchematic {
+                title: Some("detail".into()),
+                path: Some("schematics/window-detail.kdl".into()),
+                screen: None,
+                screen_rect: None,
+            })],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            collect_local_asset_paths(&schematic),
+            vec!["schematics/window-detail.kdl".to_string()]
+        );
+
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
+        });
+
+        let SchematicElem::Window(window) = &schematic.elems[0] else {
+            panic!("expected window");
+        };
+        assert_eq!(
+            window.path.as_deref(),
+            Some("db:schematics/window-detail.kdl")
+        );
+        assert_eq!(
+            collect_db_asset_names(&schematic),
+            vec!["schematics/window-detail.kdl".to_string()]
+        );
+    }
+
+    #[test]
+    fn collect_window_without_path_is_empty() {
+        use impeller2_wkt::WindowSchematic;
+
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Window(WindowSchematic::default())],
+            ..Default::default()
+        };
+        assert!(collect_local_asset_paths(&schematic).is_empty());
+        assert!(collect_db_asset_names(&schematic).is_empty());
     }
 
     #[test]
