@@ -2,10 +2,9 @@ use crate::Error;
 use bytemuck;
 use elodin_db::{AtomicTimestampExt, DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata, Schematic};
+use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use std::{
     collections::HashSet,
-    io,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -88,28 +87,60 @@ impl Server {
     }
 }
 
-/// Copy schematic-referenced files into `{db}/assets/` and rewrite KDL paths to `db:…`.
+/// Asset key under `{db}/assets/` for the active schematic the editor loads.
+const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
+
+/// Ingest the source `assets/` tree into `{db}/assets/` once and register the
+/// generated schematic as a stored asset (RFD #724).
 ///
-/// Call once before starting the DB Asset Server so early HTTP requests do not 404.
-/// `init_db` does not call this — `world.run` primes before `spawn_assets_http`.
-pub fn prime_schematic_assets(
-    db: &elodin_db::DB,
-    world: &mut World,
-) -> Result<(), elodin_db::Error> {
-    let Some(content) = world.metadata.schematic.clone() else {
+/// The DB owns all KDL handling: `ingest_asset_dir` copies the whole tree and
+/// rewrites local asset paths to `db:`, and `store_asset` rewrites the active
+/// schematic the same way. This producer does no KDL parsing or rewriting and
+/// never mutates `world.metadata.schematic`. Call once before starting the DB
+/// Asset Server so early HTTP requests do not 404.
+pub fn prime_schematic_assets(db: &elodin_db::DB, world: &World) -> Result<(), elodin_db::Error> {
+    if let Some(source) = resolve_source_assets_root(world.metadata.schematic_path.as_deref()) {
+        match elodin_db::assets::ingest_asset_dir(&db.path, &source) {
+            Ok(report) if report.skipped => {
+                tracing::info!(source = %source.display(), "assets already ingested; skipping")
+            }
+            Ok(report) => tracing::info!(
+                source = %source.display(),
+                files = report.file_count,
+                bytes = report.byte_count,
+                "ingested assets into db"
+            ),
+            Err(err) => {
+                tracing::warn!(?err, source = %source.display(), "failed to ingest assets into db")
+            }
+        }
+    }
+
+    // Register the generated schematic as a stored asset. `store_asset` rewrites
+    // its asset paths to `db:` (unparsable KDL is stored verbatim), then
+    // `set_active_schematic` points `schematic.active` at it. Failures are
+    // logged, not fatal: a missing schematic asset must not abort the sim.
+    let Some(content) = world.metadata.schematic.as_deref() else {
         return Ok(());
     };
-    match impeller2_kdl::parse_schematic(&content) {
-        Ok(mut schematic) => {
-            persist_schematic_assets(db, &mut schematic, world.metadata.schematic_path.as_deref());
-            world.metadata.schematic = Some(impeller2_kdl::serialize_schematic(&schematic));
-        }
+    // Store the schematic as the active asset and point at it. If either step
+    // fails, fall back to inline `schematic.content` so consumers still receive
+    // the generated schematic instead of empty metadata.
+    let active_set = match db.store_asset(ACTIVE_SCHEMATIC_KEY, content.as_bytes()) {
+        Ok(()) => match db.set_active_schematic(ACTIVE_SCHEMATIC_KEY) {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::warn!(?err, "failed to set active schematic pointer");
+                false
+            }
+        },
         Err(err) => {
-            return Err(elodin_db::Error::Io(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("failed to parse schematic KDL for DB asset upload: {err}"),
-            )));
+            tracing::warn!(?err, "failed to store active schematic into db assets");
+            false
         }
+    };
+    if !active_set && let Err(err) = db.set_schematic_content(content) {
+        tracing::warn!(?err, "failed to set fallback schematic content");
     }
     Ok(())
 }
@@ -121,7 +152,6 @@ pub fn init_db(
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
     db.set_earliest_timestamp(start_timestamp)?;
-    let schematic_content = world.metadata.schematic.clone();
 
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
@@ -162,9 +192,6 @@ pub fn init_db(
             state
                 .db_config
                 .set_schematic_path(path.to_string_lossy().to_string());
-        }
-        if let Some(content) = &schematic_content {
-            state.db_config.set_schematic_content(content.clone());
         }
         if !world.metadata.sensor_cameras.is_empty() {
             match serde_json::to_string(&world.metadata.sensor_cameras) {
@@ -207,233 +234,32 @@ pub fn init_db(
     Ok(())
 }
 
-const DEFAULT_ASSETS_DIR: &str = "assets";
-
-fn elodin_assets_root() -> PathBuf {
-    let dir_name = std::env::var_os("ELODIN_ASSETS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_ASSETS_DIR));
-    if dir_name.is_absolute() {
-        dir_name
+/// Resolve the source `assets/` tree to ingest. Defers to the shared
+/// [`elodin_db::assets::resolve_assets_root`] (which honors `$ELODIN_ASSETS`,
+/// the entry directory, cwd, and ancestors), then falls back to the legacy
+/// `$ELODIN_ASSETS_DIR` so existing projects keep working until it is removed
+/// (RFD #724, Phase 4).
+fn resolve_source_assets_root(schematic_path: Option<&Path>) -> Option<PathBuf> {
+    if let Some(root) = elodin_db::assets::resolve_assets_root(schematic_path) {
+        return Some(root);
+    }
+    let legacy = std::env::var_os("ELODIN_ASSETS_DIR").map(PathBuf::from)?;
+    let legacy = if legacy.is_absolute() {
+        legacy
     } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(dir_name)
-    }
-}
-
-fn local_asset_path_candidates(local_path: &str, schematic_path: Option<&Path>) -> Vec<PathBuf> {
-    let path = PathBuf::from(local_path);
-    if path.is_absolute() {
-        return vec![path];
-    }
-
-    let mut candidates = Vec::new();
-    if let Some(schematic_path) = schematic_path
-        && let Some(base) = schematic_path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-    {
-        candidates.push(base.join(&path));
-    }
-    candidates.push(elodin_assets_root().join(&path));
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_path = cwd.join(&path);
-        if !candidates.contains(&cwd_path) {
-            candidates.push(cwd_path);
-        }
-    }
-    candidates
-}
-
-fn read_local_asset_file(
-    local_path: &str,
-    schematic_path: Option<&Path>,
-) -> Result<Vec<u8>, (PathBuf, io::Error)> {
-    let candidates = local_asset_path_candidates(local_path, schematic_path);
-    let mut last_err = None;
-    for candidate in &candidates {
-        match std::fs::read(candidate) {
-            Ok(data) => return Ok(data),
-            Err(err) => last_err = Some((candidate.clone(), err)),
-        }
-    }
-    Err(last_err.unwrap_or_else(|| {
-        (
-            PathBuf::from(local_path),
-            io::Error::new(io::ErrorKind::NotFound, "asset not found"),
-        )
-    }))
-}
-
-/// Best-effort: append the active skybox's `manifest.ron` and cubemap to
-/// `local_paths`. A missing/unreadable manifest or an absent skybox entry is
-/// logged and skipped so it never blocks the mandatory meshes/icons.
-fn add_local_skybox_cubemap_path(
-    local_paths: &mut Vec<String>,
-    schematic: &Schematic,
-    schematic_path: Option<&Path>,
-    active_skybox_name: Option<&str>,
-) {
-    let skybox_name =
-        active_skybox_name.or_else(|| schematic.skybox.as_ref().map(|skybox| skybox.name.as_str()));
-    let Some(skybox_name) = skybox_name else {
-        return;
+        std::env::current_dir().unwrap_or_default().join(legacy)
     };
-    local_paths.push(impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string());
-    let manifest_data =
-        match read_local_asset_file(impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME, schematic_path) {
-            Ok(data) => data,
-            Err((path, err)) => {
-                tracing::warn!(
-                    ?err,
-                    path = %path.display(),
-                    skybox = %skybox_name,
-                    "skipping skybox cubemap: local manifest unreadable for db upload"
-                );
-                return;
-            }
-        };
-    let manifest = match std::str::from_utf8(&manifest_data) {
-        Ok(manifest) => manifest,
-        Err(err) => {
-            tracing::warn!(%err, skybox = %skybox_name, "skipping skybox cubemap: manifest is not utf-8");
-            return;
-        }
-    };
-    match impeller2_kdl::skybox_manifest_cubemap_asset_name(manifest, skybox_name) {
-        Ok(Some(cubemap_path)) => local_paths.push(cubemap_path),
-        Ok(None) => tracing::warn!(
-            skybox = %skybox_name,
-            "skipping skybox cubemap: skybox not present in {}",
-            impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME
-        ),
-        Err(err) => tracing::warn!(
-            %err,
-            skybox = %skybox_name,
-            "skipping skybox cubemap: failed to resolve from local manifest"
-        ),
-    }
-}
-
-/// Copy schematic-referenced files into `{db}/assets/`, rewriting only the
-/// successfully stored ones to `db:`. Per-asset read/write failures are
-/// non-fatal (logged and skipped) so one bad file cannot block the rest; a
-/// skipped asset keeps its original local path rather than gaining a dangling
-/// `db:` reference.
-fn persist_schematic_assets(db: &DB, schematic: &mut Schematic, schematic_path: Option<&Path>) {
-    let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-    let active_skybox = db.with_state(|state| state.db_config.skybox_active_desired());
-    let mut local_paths = impeller2_kdl::collect_local_asset_paths(schematic);
-    add_local_skybox_cubemap_path(
-        &mut local_paths,
-        schematic,
-        schematic_path,
-        active_skybox.as_ref().and_then(|name| name.as_deref()),
-    );
-    local_paths.sort();
-    local_paths.dedup();
-
-    let mut stored: HashSet<String> = HashSet::new();
-    for local_path in &local_paths {
-        let Some(name) = impeller2_kdl::local_asset_name(local_path) else {
-            continue;
-        };
-        let data = match read_local_asset_file(local_path, schematic_path) {
-            Ok(data) => data,
-            Err((path, err)) => {
-                tracing::warn!(
-                    ?err,
-                    path = %path.display(),
-                    asset = %name,
-                    "skipping unreadable local asset for db upload"
-                );
-                continue;
-            }
-        };
-        if let Err(err) = elodin_db::assets_http::write_asset_file(&assets_dir, &name, &data) {
-            tracing::warn!(
-                ?err,
-                asset = %name,
-                "skipping asset that failed to write into database assets folder"
-            );
-            continue;
-        }
-        tracing::info!(asset = %name, "stored schematic asset in database");
-        stored.insert(name);
-    }
-
-    impeller2_kdl::rewrite_asset_paths(schematic, |path| {
-        impeller2_kdl::local_asset_name(path)
-            .filter(|name| stored.contains(name))
-            .map(|name| format!("db:{name}"))
-    });
+    legacy.is_dir().then_some(legacy)
 }
 
 #[cfg(test)]
 mod asset_tests {
     use super::*;
-    use impeller2_wkt::{
-        Object3D, Object3DIcon, Object3DIconSource, Object3DMesh, SchematicElem, SkyboxConfig,
-        default_icon_color, default_icon_size,
-    };
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
-    fn glb_object(path: &str) -> SchematicElem {
-        SchematicElem::Object3d(Object3D {
-            eql: "e.world_pos".into(),
-            mesh: Object3DMesh::glb(path),
-            frame: None,
-            frame_orientation: None,
-            orientation: Default::default(),
-            icon: None,
-            thrusters: Vec::new(),
-            mesh_visibility_range: None,
-            node_id: Default::default(),
-        })
-    }
-
-    fn resolve_local_asset_path(local_path: &str, schematic_path: Option<&Path>) -> PathBuf {
-        local_asset_path_candidates(local_path, schematic_path)
-            .into_iter()
-            .find(|candidate| candidate.exists())
-            .unwrap_or_else(|| {
-                local_asset_path_candidates(local_path, schematic_path)
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| PathBuf::from(local_path))
-            })
-    }
-
-    #[test]
-    fn resolve_local_asset_path_relative_to_schematic_parent() {
-        let schematic = PathBuf::from("/sim/layout/schematic.kdl");
-        assert_eq!(
-            resolve_local_asset_path("models/rocket.glb", Some(schematic.as_path())),
-            PathBuf::from("/sim/layout/models/rocket.glb")
-        );
-    }
-
-    #[test]
-    fn resolve_local_asset_path_honors_absolute_paths() {
-        assert_eq!(
-            resolve_local_asset_path("/abs/rocket.glb", Some(Path::new("/sim/schematic.kdl"))),
-            PathBuf::from("/abs/rocket.glb")
-        );
-    }
-
-    #[test]
-    fn prime_schematic_assets_rejects_invalid_kdl() {
-        let dir = tempdir().unwrap();
-        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let mut world = World::default();
-        world.metadata.schematic = Some("object_3d {\n".to_string());
-
-        let err = prime_schematic_assets(&db, &mut world).unwrap_err();
-        assert!(
-            matches!(err, elodin_db::Error::Io(ref io) if io.kind() == io::ErrorKind::InvalidData)
-        );
-    }
+    /// Serializes tests that mutate `ELODIN_ASSETS*` env vars (process-global).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvVarGuard {
         key: &'static str,
@@ -443,9 +269,18 @@ mod asset_tests {
     impl EnvVarGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let previous = std::env::var_os(key);
-            // SAFETY: env mutations are scoped to this test via `_guard`.
+            // SAFETY: env mutations are serialized by `ENV_LOCK` and restored on drop.
             unsafe {
                 std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: env mutations are serialized by `ENV_LOCK` and restored on drop.
+            unsafe {
+                std::env::remove_var(key);
             }
             Self { key, previous }
         }
@@ -464,491 +299,109 @@ mod asset_tests {
     }
 
     #[test]
-    fn resolve_local_asset_path_falls_back_to_elodin_assets_dir() {
+    fn prime_stores_active_schematic_and_sets_pointer() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
-        let assets_dir = dir.path().join("assets");
-        std::fs::create_dir_all(&assets_dir).unwrap();
-        std::fs::write(assets_dir.join("f22.glb"), b"jet").unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(assets.join("meshes")).unwrap();
+        std::fs::write(assets.join("meshes/rocket.glb"), b"glb-bytes").unwrap();
 
-        let _guard = EnvVarGuard::set("ELODIN_ASSETS_DIR", assets_dir.to_str().unwrap());
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
+        );
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
+        prime_schematic_assets(&db, &world).unwrap();
+
+        // The whole source tree is copied into the DB once.
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
         assert_eq!(
-            resolve_local_asset_path("f22.glb", Some(Path::new("bdx.kdl"))),
-            assets_dir.join("f22.glb")
+            std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
+            b"glb-bytes".to_vec()
         );
-    }
+        assert!(elodin_db::assets::assets_ingested(&db.path));
 
-    #[test]
-    fn persist_rc_jet_like_flat_glb_names_via_elodin_assets_dir() {
-        let dir = tempdir().unwrap();
-        let assets_dir = dir.path().join("assets");
-        std::fs::create_dir_all(&assets_dir).unwrap();
-        std::fs::write(assets_dir.join("f22.glb"), b"f22").unwrap();
-        std::fs::write(assets_dir.join("edu-450-v2-drone.glb"), b"drone").unwrap();
-
-        let db = DB::create(dir.path().join("db")).unwrap();
-        let mut schematic = Schematic {
-            elems: vec![glb_object("f22.glb"), glb_object("edu-450-v2-drone.glb")],
-            ..Default::default()
-        };
-
-        let _guard = EnvVarGuard::set("ELODIN_ASSETS_DIR", assets_dir.to_str().unwrap());
-        persist_schematic_assets(&db, &mut schematic, Some(Path::new("bdx.kdl")));
-
-        let stored_assets = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(stored_assets.join("f22.glb")).unwrap(),
-            b"f22".to_vec()
-        );
-        assert_eq!(
-            std::fs::read(stored_assets.join("edu-450-v2-drone.glb")).unwrap(),
-            b"drone".to_vec()
-        );
-
-        let paths: Vec<_> = schematic
-            .elems
-            .iter()
-            .map(|elem| {
-                let SchematicElem::Object3d(obj) = elem else {
-                    panic!("expected object_3d");
-                };
-                let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-                    panic!("expected glb");
-                };
-                path.clone()
-            })
-            .collect();
-        assert_eq!(paths, vec!["db:f22.glb", "db:edu-450-v2-drone.glb"]);
-    }
-
-    #[test]
-    fn persist_flat_glb_next_to_schematic_kdl() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::write(dir.path().join("rocket.glb"), b"glb-data").unwrap();
-
-        let mut schematic = Schematic {
-            elems: vec![glb_object("rocket.glb")],
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
-            b"glb-data".to_vec()
-        );
-        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
-            panic!("expected object_3d");
-        };
-        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-            panic!("expected glb");
-        };
-        assert_eq!(path, "db:rocket.glb");
-    }
-
-    #[test]
-    fn persist_nested_glb_path_preserves_relative_path_on_disk() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::create_dir_all(dir.path().join("models")).unwrap();
-        std::fs::write(dir.path().join("models/rocket.glb"), b"nested-glb").unwrap();
-
-        let mut schematic = Schematic {
-            elems: vec![glb_object("models/rocket.glb")],
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("models/rocket.glb")).unwrap(),
-            b"nested-glb".to_vec()
-        );
-        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
-            panic!("expected object_3d");
-        };
-        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-            panic!("expected glb");
-        };
-        assert_eq!(path, "db:models/rocket.glb");
-    }
-
-    #[test]
-    fn persist_missing_glb_is_skipped_without_error() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        let mut schematic = Schematic {
-            elems: vec![glb_object("missing.glb")],
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
-            panic!("expected object_3d");
-        };
-        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-            panic!("expected glb");
-        };
-        // A missing asset is skipped (non-fatal) and keeps its local path so it
-        // never gains a dangling `db:` reference.
-        assert_eq!(path, "missing.glb");
+        // The DB stores the active schematic with its path rewritten to db: and
+        // points schematic.active at it. The producer never touches
+        // world.metadata.schematic.
+        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
         assert!(
-            !elodin_db::assets_http::assets_dir(&db.path)
-                .join("missing.glb")
-                .exists()
+            active_kdl.contains("path=\"db:meshes/rocket.glb\""),
+            "expected db: path in stored schematic, got:\n{active_kdl}"
+        );
+        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
+
+        // Transition shim: schematic.content mirrors the rewritten active asset.
+        let content = db.with_state(|s| s.db_config.schematic_content().map(str::to_owned));
+        assert_eq!(content.as_deref(), Some(active_kdl.as_str()));
+    }
+
+    #[test]
+    fn prime_ingest_is_copy_once() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("rocket.glb"), b"v1").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let world = World::default();
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
+        prime_schematic_assets(&db, &world).unwrap();
+
+        // A source change after ingest must not leak into the frozen DB record.
+        std::fs::write(assets.join("rocket.glb"), b"v2").unwrap();
+        prime_schematic_assets(&db, &world).unwrap();
+
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored.join("rocket.glb")).unwrap(),
+            b"v1".to_vec()
         );
     }
 
     #[test]
-    fn persist_continues_after_missing_local_file() {
+    fn prime_keeps_active_local_when_asset_absent() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::write(dir.path().join("first.glb"), b"first").unwrap();
+        // No source assets resolved, so nothing is ingested into the DB.
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+        let _no_legacy = EnvVarGuard::unset("ELODIN_ASSETS_DIR");
 
-        let mut schematic = Schematic {
-            elems: vec![glb_object("first.glb"), glb_object("missing.glb")],
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
         );
 
-        // The readable asset is persisted; the missing one is skipped without
-        // aborting or rolling back the rest.
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("first.glb")).unwrap(),
-            b"first".to_vec()
-        );
-        assert!(!assets_dir.join("missing.glb").exists());
+        prime_schematic_assets(&db, &world).unwrap();
 
-        let paths: Vec<_> = schematic
-            .elems
-            .iter()
-            .map(|elem| {
-                let SchematicElem::Object3d(obj) = elem else {
-                    panic!("expected object_3d");
-                };
-                let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-                    panic!("expected glb");
-                };
-                path.clone()
-            })
-            .collect();
-        // Only the stored asset is rewritten to `db:`; the skipped one stays local.
-        assert_eq!(
-            paths,
-            vec!["db:first.glb".to_string(), "missing.glb".to_string()]
-        );
+        // The glb never reached the DB, so store_asset must NOT rewrite the path
+        // to db: (which would make the editor chase a 404). The active pointer is
+        // still set so the editor can load the (local-path) schematic.
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
+        assert!(active_kdl.contains("path=\"meshes/rocket.glb\""));
+        assert!(!active_kdl.contains("db:meshes/rocket.glb"));
+        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
     }
 
     #[test]
-    fn persist_kdl_round_trip_rewrites_glb_to_db_scheme() {
+    fn resolve_source_assets_root_falls_back_to_legacy_env() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::create_dir_all(dir.path().join("models")).unwrap();
-        std::fs::write(dir.path().join("models/rocket.glb"), b"payload").unwrap();
+        let legacy = dir.path().join("legacy_assets");
+        std::fs::create_dir_all(&legacy).unwrap();
 
-        let kdl = r#"
-object_3d "rocket.world_pos" {
-    glb path="models/rocket.glb"
-}
-"#;
-        let mut schematic = impeller2_kdl::parse_schematic(kdl).unwrap();
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let serialized = impeller2_kdl::serialize_schematic(&schematic);
-        assert!(
-            serialized.contains("path=\"db:models/rocket.glb\""),
-            "expected db: path in serialized KDL:\n{serialized}"
-        );
-
-        let reparsed = impeller2_kdl::parse_schematic(&serialized).unwrap();
-        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
-            panic!("expected object_3d");
-        };
-        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-            panic!("expected glb");
-        };
-        assert_eq!(path, "db:models/rocket.glb");
-    }
-
-    #[test]
-    fn persist_basename_collision_keeps_distinct_relative_paths() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::create_dir_all(dir.path().join("a")).unwrap();
-        std::fs::create_dir_all(dir.path().join("b")).unwrap();
-        std::fs::write(dir.path().join("a/rocket.glb"), b"from-a").unwrap();
-        std::fs::write(dir.path().join("b/rocket.glb"), b"from-b").unwrap();
-
-        let mut schematic = Schematic {
-            elems: vec![glb_object("a/rocket.glb"), glb_object("b/rocket.glb")],
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("a/rocket.glb")).unwrap(),
-            b"from-a".to_vec()
-        );
-        assert_eq!(
-            std::fs::read(assets_dir.join("b/rocket.glb")).unwrap(),
-            b"from-b".to_vec()
-        );
-
-        let paths: Vec<_> = schematic
-            .elems
-            .iter()
-            .map(|elem| {
-                let SchematicElem::Object3d(obj) = elem else {
-                    panic!("expected object_3d");
-                };
-                let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-                    panic!("expected glb");
-                };
-                path.clone()
-            })
-            .collect();
-        assert_eq!(paths, vec!["db:a/rocket.glb", "db:b/rocket.glb"]);
-    }
-
-    #[test]
-    fn persist_icon_png_path() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::create_dir_all(dir.path().join("icons")).unwrap();
-        std::fs::write(dir.path().join("icons/marker.png"), b"png-bytes").unwrap();
-
-        let mut schematic = Schematic {
-            elems: vec![SchematicElem::Object3d(Object3D {
-                eql: "e.world_pos".into(),
-                mesh: Object3DMesh::glb("model.glb"),
-                frame: None,
-                frame_orientation: None,
-                orientation: Default::default(),
-                icon: Some(Object3DIcon {
-                    source: Object3DIconSource::Path("icons/marker.png".into()),
-                    color: default_icon_color(),
-                    size: default_icon_size(),
-                    visibility_range: None,
-                }),
-                thrusters: Vec::new(),
-                mesh_visibility_range: None,
-                node_id: Default::default(),
-            })],
-            ..Default::default()
-        };
-        std::fs::write(dir.path().join("model.glb"), b"glb").unwrap();
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("icons/marker.png")).unwrap(),
-            b"png-bytes".to_vec()
-        );
-        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
-            panic!("expected object_3d");
-        };
-        let Object3DIconSource::Path(icon_path) = &obj.icon.as_ref().unwrap().source else {
-            panic!("expected icon path");
-        };
-        assert_eq!(icon_path, "db:icons/marker.png");
-    }
-
-    #[test]
-    fn persist_skybox_manifest_and_ktx2() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::create_dir_all(dir.path().join("skyboxes")).unwrap();
-        let manifest = r#"
-(
-    version: 2,
-    entries: [
-        (
-            name: "desert_night",
-            prompt: "mojave",
-            style: M3Photoreal,
-            blockade: None,
-            cubemap_file: "desert_night.cubemap.ktx2",
-            face_size: 2048,
-            created_at: "2026-05-11T05:34:26Z",
-        ),
-    ],
-    default: Some("desert_night"),
-)
-"#;
-        std::fs::write(dir.path().join("skyboxes/manifest.ron"), manifest).unwrap();
-        std::fs::write(
-            dir.path().join("skyboxes/desert_night.cubemap.ktx2"),
-            b"ktx2-bytes",
-        )
-        .unwrap();
-
-        let mut schematic = Schematic {
-            skybox: Some(SkyboxConfig {
-                name: "desert_night".into(),
-            }),
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("skyboxes/manifest.ron")).unwrap(),
-            manifest.as_bytes().to_vec()
-        );
-        assert_eq!(
-            std::fs::read(assets_dir.join("skyboxes/desert_night.cubemap.ktx2")).unwrap(),
-            b"ktx2-bytes".to_vec()
-        );
-    }
-
-    #[test]
-    fn persist_skybox_uses_active_metadata_over_kdl_name() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        db.with_state_mut(|state| {
-            state.db_config.set_skybox_active(Some("alpine"));
-            Ok::<_, elodin_db::Error>(())
-        })
-        .unwrap();
-        std::fs::create_dir_all(dir.path().join("skyboxes")).unwrap();
-        let manifest = r#"
-(
-    version: 2,
-    entries: [
-        (
-            name: "desert_night",
-            prompt: "mojave",
-            style: M3Photoreal,
-            blockade: None,
-            cubemap_file: "desert_night.cubemap.ktx2",
-            face_size: 2048,
-            created_at: "2026-05-11T05:34:26Z",
-        ),
-        (
-            name: "alpine",
-            prompt: "alpine",
-            style: M3Photoreal,
-            blockade: None,
-            cubemap_file: "alpine.cubemap.ktx2",
-            face_size: 2048,
-            created_at: "2026-05-11T05:34:26Z",
-        ),
-    ],
-    default: Some("desert_night"),
-)
-"#;
-        std::fs::write(dir.path().join("skyboxes/manifest.ron"), manifest).unwrap();
-        std::fs::write(
-            dir.path().join("skyboxes/desert_night.cubemap.ktx2"),
-            b"mojave",
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("skyboxes/alpine.cubemap.ktx2"), b"alpine").unwrap();
-
-        let mut schematic = Schematic {
-            skybox: Some(SkyboxConfig {
-                name: "desert_night".into(),
-            }),
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(assets_dir.join("skyboxes/manifest.ron")).unwrap(),
-            manifest.as_bytes().to_vec()
-        );
-        assert_eq!(
-            std::fs::read(assets_dir.join("skyboxes/alpine.cubemap.ktx2")).unwrap(),
-            b"alpine".to_vec()
-        );
-        assert!(
-            !assets_dir
-                .join("skyboxes/desert_night.cubemap.ktx2")
-                .exists()
-        );
-    }
-
-    #[test]
-    fn persist_missing_skybox_does_not_block_glb() {
-        let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().join("db")).unwrap();
-        std::fs::write(dir.path().join("rocket.glb"), b"rocket").unwrap();
-        // Note: no skyboxes/manifest.ron on disk.
-
-        let mut schematic = Schematic {
-            skybox: Some(SkyboxConfig {
-                name: "desert_night".into(),
-            }),
-            elems: vec![glb_object("rocket.glb")],
-            ..Default::default()
-        };
-
-        persist_schematic_assets(
-            &db,
-            &mut schematic,
-            Some(dir.path().join("schematic.kdl").as_path()),
-        );
-
-        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        // The mandatory mesh is persisted and rewritten despite the missing skybox.
-        assert_eq!(
-            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
-            b"rocket".to_vec()
-        );
-        assert!(!assets_dir.join("skyboxes/manifest.ron").exists());
-        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
-            panic!("expected object_3d");
-        };
-        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-            panic!("expected glb");
-        };
-        assert_eq!(path, "db:rocket.glb");
+        let _no_assets = EnvVarGuard::unset("ELODIN_ASSETS");
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS_DIR", legacy.to_str().unwrap());
+        assert_eq!(resolve_source_assets_root(None), Some(legacy));
     }
 }
 
