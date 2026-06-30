@@ -1117,6 +1117,20 @@ fn poll_schematic_save(
 
     match result {
         Ok(()) => {
+            // Repointing `schematic.active` requires the packet channel. Without
+            // it the PUTs landed but the DB would keep the old active key while
+            // we assumed the new one — so don't update sync state or pin a key we
+            // can't announce; report failure and keep the Save-As name for retry.
+            let Some(tx) = tx else {
+                if pending.is_some() {
+                    pending_key.0 = pending;
+                }
+                failed.write(DocumentCommandFailed {
+                    title: "Failed to Save Schematic".to_string(),
+                    message: "Not connected to a database.".to_string(),
+                });
+                return;
+            };
             if let Some(content) = active_content {
                 last_synced.0 = Some(content);
             }
@@ -1126,14 +1140,12 @@ fn poll_schematic_save(
                 // -stale active pointer until it echoes this repoint, avoiding a
                 // brief revert to the previously active schematic.
                 pending_active.0 = Some(active_key.clone());
-                if let Some(tx) = tx {
-                    tx.send_msg(SetDbConfig {
-                        metadata: [("schematic.active".to_string(), active_key)]
-                            .into_iter()
-                            .collect(),
-                        ..Default::default()
-                    });
-                }
+                tx.send_msg(SetDbConfig {
+                    metadata: [("schematic.active".to_string(), active_key)]
+                        .into_iter()
+                        .collect(),
+                    ..Default::default()
+                });
             }
         }
         Err(err) => {

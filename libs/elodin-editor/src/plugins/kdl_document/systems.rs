@@ -91,10 +91,12 @@ pub(super) fn handle_open_document_from_content_requests(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_open_document_from_active_requests(
     mut requests: MessageReader<OpenDocumentFromActiveRequest>,
     connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
     config: Option<Res<impeller2_wkt::DbConfig>>,
+    pending_active: Res<PendingActiveSchematic>,
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
     mut loaded: MessageWriter<DocumentLoaded>,
@@ -127,6 +129,17 @@ pub(super) fn handle_open_document_from_active_requests(
     };
     fetch.task = None;
     fetch.key = None;
+
+    // The user may have switched schematics (via "Save As…"/"Open Schematic…")
+    // while this fetch was in flight: `PendingActiveSchematic` pins the key they
+    // now want. Drop a completed load for any other key so a late fetch of the
+    // previous active schematic can't briefly show — or strand us on — the wrong
+    // one before the DB echoes the repoint.
+    if let Some(pending) = pending_active.0.as_deref()
+        && pending != request.key.as_str()
+    {
+        return;
+    }
 
     let content = match result {
         Ok(content) => content,
