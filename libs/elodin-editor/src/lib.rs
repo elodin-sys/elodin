@@ -591,7 +591,7 @@ pub struct MainCamera;
 
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct GridHandle {
-    pub grid: Entity,
+    pub layer: usize,
 }
 
 fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
