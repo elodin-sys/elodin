@@ -168,13 +168,31 @@ pub fn rewrite_schematic_kdl_to_db(assets_dir: &Path, content: &str) -> Option<S
     let mut schematic = impeller2_kdl::parse_schematic(content).ok()?;
     impeller2_kdl::rewrite_asset_paths(&mut schematic, |path| {
         let name = impeller2_kdl::local_asset_name(path)?;
-        assets_dir
-            .join(&name)
-            .is_file()
-            .then(|| format!("db:{name}"))
+        resolve_stored_asset_key(assets_dir, &name).map(|key| format!("db:{key}"))
     });
     let serialized = impeller2_kdl::serialize_schematic(&schematic);
     (serialized != content).then_some(serialized)
+}
+
+/// Resolve the stored asset key for a local path referenced by a schematic to
+/// the key actually present under `assets_dir`, or `None` to leave it local.
+///
+/// A direct hit wins. A `.kdl` window reference that is not already under
+/// `schematics/` also resolves there: window sub-schematics live in
+/// `schematics/` but are referenced relative to their sibling schematic (often a
+/// bare `telemetry.kdl`), so without this they would stay local and fail to load
+/// over HTTP after ingest.
+fn resolve_stored_asset_key(assets_dir: &Path, name: &str) -> Option<String> {
+    if assets_dir.join(name).is_file() {
+        return Some(name.to_string());
+    }
+    if name.ends_with(".kdl") && !name.starts_with("schematics/") {
+        let prefixed = format!("schematics/{name}");
+        if assets_dir.join(&prefixed).is_file() {
+            return Some(prefixed);
+        }
+    }
+    None
 }
 
 /// Rewrite local asset paths inside every stored `.kdl` schematic under `dir` to
@@ -443,6 +461,28 @@ mod tests {
         assert!(
             stored.contains("path=\"db:meshes/drone.glb\""),
             "nested window asset path should be rewritten to db:, got:\n{stored}"
+        );
+    }
+
+    #[test]
+    fn ingest_rewrites_bare_window_path_under_schematics() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src_assets");
+        // Root schematic references a sibling window by bare filename; the window
+        // file itself lives alongside it under schematics/.
+        write(
+            &src.join("schematics/main.kdl"),
+            b"window title=\"detail\" path=\"telemetry.kdl\"\n",
+        );
+        write(&src.join("schematics/telemetry.kdl"), b"viewport\n");
+
+        let db = dir.path().join("db");
+        ingest_asset_dir(&db, &src).unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir(&db).join("schematics/main.kdl")).unwrap();
+        assert!(
+            stored.contains("path=\"db:schematics/telemetry.kdl\""),
+            "bare window path should resolve under schematics/, got:\n{stored}"
         );
     }
 
