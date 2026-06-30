@@ -26,10 +26,8 @@ pub(crate) fn plugin(app: &mut App) {
     .add_message::<OpenDocumentRequest>()
     .add_message::<OpenDocumentFromContentRequest>()
     .add_message::<OpenDocumentFromActiveRequest>()
-    .add_message::<SaveCurrentDocumentRequest>()
     .add_message::<DocumentLoaded>()
     .add_message::<DocumentCommandFailed>()
-    .add_message::<DocumentSaved>()
     .add_message::<DocumentReloaded>()
     .add_message::<DocumentLoadFailed>()
     .add_message::<DocumentCleared>()
@@ -39,7 +37,6 @@ pub(crate) fn plugin(app: &mut App) {
             systems::handle_open_document_requests,
             systems::handle_open_document_from_content_requests,
             systems::handle_open_document_from_active_requests,
-            systems::handle_save_current_document_requests,
         )
             .chain()
             .in_set(KdlDocumentSet::Commands),

@@ -242,55 +242,6 @@ fn put_db_asset(
     Ok(())
 }
 
-pub fn save_current_document(
-    path: Option<PathBuf>,
-    root_kdl: &str,
-    windows: &[WindowDocumentSave],
-    asset_server: &AssetServer,
-    current_document: &mut CurrentDocument,
-) -> Result<PathBuf, SaveCurrentDocumentError> {
-    let path = path
-        .or_else(|| current_document.save_path.clone())
-        .ok_or(SaveCurrentDocumentError::MissingSavePath)?;
-    let path = Path::new(&path).with_extension("kdl");
-    let dest = schematic_file(&path);
-
-    std::fs::write(&dest, root_kdl).map_err(|source| SaveCurrentDocumentError::WriteRoot {
-        path: dest.clone(),
-        source,
-    })?;
-    write_window_schematics(dest.parent().unwrap_or_else(|| Path::new(".")), windows)?;
-
-    let asset_path = filesystem_to_asset_path(&dest);
-    let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
-    let root_id = handle.id();
-    current_document.set_file(handle, asset_path, dest.clone());
-    current_document.suppress_ids.insert(root_id);
-    Ok(dest)
-}
-
-fn write_window_schematics(
-    base_dir: &Path,
-    windows: &[WindowDocumentSave],
-) -> Result<(), SaveCurrentDocumentError> {
-    for entry in windows {
-        let dest = base_dir.join(&entry.file_name);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| {
-                SaveCurrentDocumentError::CreateWindowDir {
-                    path: dest.clone(),
-                    source,
-                }
-            })?;
-        }
-
-        std::fs::write(&dest, &entry.kdl)
-            .map_err(|source| SaveCurrentDocumentError::WriteWindow { path: dest, source })?;
-    }
-
-    Ok(())
-}
-
 /// Applies `InitialKdlPath` to `DbConfig` so that document sync can load that file.
 /// Runs before `sync_document_from_config`. Re-applies when the path is missing or different (e.g.
 /// after the connection overwrote DbConfig with metadata) so the schematic loads.

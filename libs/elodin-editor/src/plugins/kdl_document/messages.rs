@@ -14,18 +14,6 @@ pub struct DocumentCommandFailed {
     pub message: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct SavedWindowInfo {
-    pub window_id: crate::ui::tiles::WindowId,
-    pub file_name: String,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentSaved {
-    pub save_path: PathBuf,
-    pub windows: Vec<SavedWindowInfo>,
-}
-
 #[derive(Message, Clone, Debug)]
 pub struct DocumentReloaded {
     pub save_path: Option<PathBuf>,

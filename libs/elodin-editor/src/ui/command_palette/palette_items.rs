@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{collections::BTreeMap, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedSchematicContent,
@@ -19,7 +15,7 @@ use bevy::{
     },
     log::error,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Resource, Transform},
+    prelude::{Entity, In, MessageWriter, Mut, Transform},
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{
@@ -34,7 +30,7 @@ use impeller2::types::Timestamp;
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
 };
-use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
+use impeller2_kdl::ToKdl;
 use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, EarliestTimestamp, IsRecording, LastUpdated,
@@ -51,8 +47,7 @@ use crate::{
         command_palette::CommandPaletteState,
         plot::{GraphBundle, graph_lines_from_component},
         schematic::{
-            CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, OpenDocumentRequest,
-            SaveCurrentDocumentRequest, WindowDocumentSave,
+            CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, WindowDocumentSave,
         },
         tiles::{self, set_mode_all},
         timeline::{
@@ -62,16 +57,7 @@ use crate::{
     },
 };
 
-/// Stores a path to the last directory used in the schematic load dialog.
-///
-/// I would have preferred for this to be a `Local<Option<PathBuf>>`, but the
-/// `BoxedSystem` that PaletteItem stores is regenerated every time.
-#[derive(Debug, Default, Resource, Deref, DerefMut)]
-struct DialogLastPath(Option<PathBuf>);
-
-pub(crate) fn plugin(app: &mut bevy::app::App) {
-    app.init_resource::<DialogLastPath>();
-}
+pub(crate) fn plugin(_app: &mut bevy::app::App) {}
 
 pub struct PalettePage {
     items: Vec<PaletteItem>,
@@ -951,48 +937,13 @@ fn goto_tick() -> PaletteItem {
     })
 }
 
-pub fn save_schematic_as() -> PaletteItem {
-    PaletteItem::new(
-        "Save Schematic As...",
-        PRESETS_LABEL,
-        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into_event(),
-    )
-}
-
 pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
         PRESETS_LABEL,
         |_name: In<String>, mut commands: Commands| {
-            // Capture descriptors/screens, rebuild schematics, then serialize in a dedicated system.
-            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
-            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
-            commands.run_system_cached(queue_save_schematic_now);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-fn queue_save_schematic_now(
-    schematic: Res<CurrentSchematic>,
-    window_schematics: Res<CurrentWindowSchematics>,
-    skybox_cache: Option<Res<SkyboxCache>>,
-    mut requests: MessageWriter<SaveCurrentDocumentRequest>,
-) {
-    requests.write(SaveCurrentDocumentRequest {
-        path: None,
-        root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
-        windows: window_document_saves(&window_schematics),
-    });
-}
-
-pub fn save_schematic_db() -> PaletteItem {
-    PaletteItem::new(
-        "Save Schematic To DB",
-        PRESETS_LABEL,
-        |_name: In<String>, mut commands: Commands| {
             // Capture descriptors/screens and rebuild the schematic from the live
-            // UI, then write it back to the DB in a dedicated system.
+            // UI, then write it back to the DB in a dedicated system (RFD #724).
             commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
             commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
             commands.run_system_cached(queue_save_schematic_db_now);
@@ -1022,12 +973,7 @@ fn queue_save_schematic_db_now(
         return;
     };
 
-    let mut root = schematic.0.clone();
-    if let Some(cache) = skybox_cache.as_deref() {
-        root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
-            name: active.clone(),
-        });
-    }
+    let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
     let windows = window_document_saves(&window_schematics);
     let plan = plan_db_save(&root, &windows);
 
@@ -1062,34 +1008,17 @@ pub fn clear_schematic() -> PaletteItem {
     )
 }
 
-pub fn save_schematic_inner() -> PaletteItem {
-    PaletteItem::new(
-        LabelSource::placeholder("Enter a name for the schematic"),
-        "",
-        move |In(name): In<String>,
-              schematic: Res<CurrentSchematic>,
-              window_schematics: Res<CurrentWindowSchematics>,
-              skybox_cache: Option<Res<SkyboxCache>>,
-              mut requests: MessageWriter<SaveCurrentDocumentRequest>| {
-            requests.write(SaveCurrentDocumentRequest {
-                path: Some(PathBuf::from(name)),
-                root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
-                windows: window_document_saves(&window_schematics),
-            });
-            PaletteEvent::Exit
-        },
-    )
-    .default()
-}
-
-fn root_kdl_for_save(schematic: &CurrentSchematic, skybox_cache: Option<&SkyboxCache>) -> String {
+fn root_schematic_for_save(
+    schematic: &CurrentSchematic,
+    skybox_cache: Option<&SkyboxCache>,
+) -> impeller2_wkt::Schematic {
     let mut root = schematic.0.clone();
     if let Some(cache) = skybox_cache {
         root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
             name: active.clone(),
         });
     }
-    root.to_kdl()
+    root
 }
 
 fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<WindowDocumentSave> {
@@ -1102,78 +1031,6 @@ fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<Win
             kdl: entry.schematic.to_kdl(),
         })
         .collect()
-}
-
-pub fn load_schematic() -> PaletteItem {
-    PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let Ok(dir) = schematic_dir_or_cwd().inspect_err(|e| error!(?e, "getting schematic dir"))
-        else {
-            return PaletteEvent::Exit;
-        };
-        let elems = match std::fs::read_dir(&dir) {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "reading schematic dir {:?}", dir.display());
-                return PaletteEvent::Exit;
-            }
-        };
-
-        let mut items = vec![load_schematic_picker()];
-        let mut file = dir;
-        for elem in elems {
-            let Ok(elem) = elem else { continue };
-            let path = elem.path();
-            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if path.extension().and_then(|e| e.to_str()) != Some("kdl") {
-                continue;
-            }
-            file.push(file_name);
-            if let Some(item) = load_schematic_inner(&file) {
-                items.push(item);
-            }
-            file.pop();
-        }
-        PalettePage::new(items).into()
-    })
-}
-
-pub fn load_schematic_picker() -> PaletteItem {
-    PaletteItem::new(
-        "Use File Dialog",
-        "",
-        |_: In<String>,
-         mut requests: MessageWriter<OpenDocumentRequest>,
-         mut last_dir: ResMut<DialogLastPath>| {
-            let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
-            if let Some(dir) = last_dir.take().or_else(|| schematic_dir_or_cwd().ok()) {
-                dialog = dialog.set_directory(dir);
-            }
-            if let Some(path) = dialog.pick_file() {
-                **last_dir = path.parent().map(PathBuf::from);
-                requests.write(OpenDocumentRequest(path));
-            }
-            PaletteEvent::Exit
-        },
-    )
-}
-
-fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
-    let name = path
-        .file_name()
-        .map(|name_os| name_os.to_string_lossy().into_owned());
-    let path = PathBuf::from(path);
-    name.map(|name| {
-        PaletteItem::new(
-            name,
-            "",
-            move |_: In<String>, mut requests: MessageWriter<OpenDocumentRequest>| {
-                requests.write(OpenDocumentRequest(path.clone()));
-                PaletteEvent::Exit
-            },
-        )
-    })
 }
 
 pub fn set_color_scheme() -> PaletteItem {
@@ -1838,9 +1695,6 @@ impl Default for PalettePage {
             create_data_overview(None),
             create_3d_object(),
             save_schematic(),
-            save_schematic_as(),
-            save_schematic_db(),
-            load_schematic(),
             clear_schematic(),
             skybox_menu(),
             set_color_scheme_mode(),
@@ -1864,6 +1718,7 @@ mod tests {
     use super::*;
     use impeller2_kdl::FromKdl;
     use impeller2_wkt::Schematic;
+    use std::path::PathBuf;
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {
         Schematic::from_kdl(kdl).expect("saved KDL should parse")
@@ -1875,7 +1730,7 @@ mod tests {
         let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
         cache.active = Some("mont_blanc_france".to_string());
 
-        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert_eq!(
@@ -1895,7 +1750,7 @@ mod tests {
         let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
         cache.active = Some("mont_blanc_france".to_string());
 
-        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert_eq!(
@@ -1914,7 +1769,7 @@ mod tests {
         });
         let cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
 
-        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert!(parsed.skybox.is_none());
@@ -1929,7 +1784,7 @@ mod tests {
             ..Default::default()
         });
 
-        let kdl = root_kdl_for_save(&schematic, None);
+        let kdl = root_schematic_for_save(&schematic, None).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert_eq!(

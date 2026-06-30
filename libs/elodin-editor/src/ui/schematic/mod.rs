@@ -31,9 +31,9 @@ pub use tree::*;
 mod load;
 pub use crate::plugins::kdl_document::{
     CurrentDocument, DocumentCleared, DocumentLoadFailed, DocumentLoaded, DocumentReloaded,
-    DocumentSaved, InitialKdlPath, KdlDocumentSet, OpenDocumentFromContentRequest,
-    OpenDocumentRequest, SaveCurrentDocumentRequest, SavedWindowInfo, SchematicDocumentAsset,
-    SchematicWindow, WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
+    InitialKdlPath, KdlDocumentSet, OpenDocumentFromContentRequest, OpenDocumentRequest,
+    SchematicDocumentAsset, SchematicWindow, WindowDocumentSave, apply_initial_kdl_path,
+    sync_document_from_config,
 };
 pub use load::*;
 
@@ -561,7 +561,6 @@ impl Plugin for SchematicPlugin {
                 (
                     load::apply_document_cleared,
                     load::apply_document_loaded.before(crate::ui::sync_windows),
-                    load::apply_document_saved,
                     load::apply_document_reloaded.before(crate::ui::sync_windows),
                     load::show_document_command_failures,
                     load::show_document_load_failures,

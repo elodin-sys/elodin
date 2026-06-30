@@ -8,7 +8,6 @@ use super::commands::*;
 use super::messages::*;
 use super::operations::{
     fetch_active_schematic_kdl, open_document_from_content, open_document_path,
-    save_current_document,
 };
 use super::types::*;
 
@@ -113,44 +112,6 @@ pub(super) fn handle_open_document_from_active_requests(
             Err(error) => {
                 failed.write(DocumentCommandFailed {
                     title: "Invalid Active Schematic".to_string(),
-                    message: error.to_string(),
-                });
-            }
-        }
-    }
-}
-
-pub(super) fn handle_save_current_document_requests(
-    mut requests: MessageReader<SaveCurrentDocumentRequest>,
-    asset_server: Res<AssetServer>,
-    mut current_document: ResMut<CurrentDocument>,
-    mut saved: MessageWriter<DocumentSaved>,
-    mut failed: MessageWriter<DocumentCommandFailed>,
-) {
-    for request in requests.read() {
-        match save_current_document(
-            request.path.clone(),
-            &request.root_kdl,
-            &request.windows,
-            &asset_server,
-            &mut current_document,
-        ) {
-            Ok(save_path) => {
-                saved.write(DocumentSaved {
-                    save_path,
-                    windows: request
-                        .windows
-                        .iter()
-                        .map(|w| SavedWindowInfo {
-                            window_id: w.window_id,
-                            file_name: w.file_name.clone(),
-                        })
-                        .collect(),
-                });
-            }
-            Err(error) => {
-                failed.write(DocumentCommandFailed {
-                    title: "Failed to Save Schematic".to_string(),
                     message: error.to_string(),
                 });
             }
