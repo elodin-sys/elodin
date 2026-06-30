@@ -203,6 +203,19 @@ pub(crate) struct DbSavePlan {
     local_assets: Vec<(String, String)>,
 }
 
+impl DbSavePlan {
+    /// The active schematic's stored bytes as text — the DB mirrors exactly
+    /// these into `schematic.content`. The caller records them as the last
+    /// synced content so the DB's echo of its own save is not mistaken for an
+    /// external change (which would trigger a redundant reload). The active
+    /// schematic is always the final upload.
+    pub(crate) fn active_schematic_content(&self) -> Option<String> {
+        self.schematic_uploads
+            .last()
+            .and_then(|(_, bytes)| String::from_utf8(bytes.clone()).ok())
+    }
+}
+
 /// Rewrites a schematic's local mesh, icon and window references to `db:` keys,
 /// recording mesh/icon uploads in `local_assets` and the file names of any
 /// referenced window sub-schematics in `referenced_windows`. Shared by the root

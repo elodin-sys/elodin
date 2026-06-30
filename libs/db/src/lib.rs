@@ -400,15 +400,35 @@ impl DB {
         // failure we keep the patch's fresh inline content rather than clobber
         // it with the stale on-disk bytes. Reads go through `read_asset_file`,
         // which rejects `..`/absolute keys.
+        enum ContentMirror {
+            /// No mirror intended; leave inline content from the patch as-is.
+            Leave,
+            /// Replace inline content with the active asset's bytes.
+            Set(String),
+            /// We meant to mirror but the active asset is missing/unreadable.
+            /// Drop the inline content so it can't advertise stale bytes under a
+            /// new active key; consumers fall back to fetching it over HTTP.
+            Clear,
+        }
         let should_mirror = active_key.is_some() && (!has_inline_content || stored_active);
-        let mirrored_content = match active_key.as_deref() {
+        let content_mirror = match active_key.as_deref() {
             Some(key) if should_mirror => {
                 let assets_dir = crate::assets_http::assets_dir(&self.path);
-                crate::assets_http::read_asset_file(&assets_dir, key)
+                match crate::assets_http::read_asset_file(&assets_dir, key)
                     .ok()
                     .and_then(|bytes| String::from_utf8(bytes).ok())
+                {
+                    Some(content) => ContentMirror::Set(content),
+                    None => {
+                        tracing::warn!(
+                            key,
+                            "active schematic asset missing or unreadable; clearing stale inline schematic.content"
+                        );
+                        ContentMirror::Clear
+                    }
+                }
             }
-            _ => None,
+            _ => ContentMirror::Leave,
         };
         self.with_state_mut(|s| {
             for (key, value) in update.metadata {
@@ -418,8 +438,12 @@ impl DB {
                     s.db_config.metadata.insert(key, value);
                 }
             }
-            if let Some(content) = mirrored_content {
-                s.db_config.set_schematic_content(content);
+            match content_mirror {
+                ContentMirror::Set(content) => s.db_config.set_schematic_content(content),
+                ContentMirror::Clear => {
+                    s.db_config.metadata.remove("schematic.content");
+                }
+                ContentMirror::Leave => {}
             }
         });
         self.save_db_state()?;
@@ -3598,5 +3622,48 @@ mod tests {
         });
         // Nothing escaped the assets root.
         assert!(!dir.path().join("escape.kdl").exists());
+    }
+
+    #[test]
+    fn apply_set_db_config_clears_stale_content_when_active_asset_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // Prime an active schematic so inline content is populated.
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+        db.apply_set_db_config(SetDbConfig {
+            metadata: [(
+                "schematic.active".to_string(),
+                "schematics/main.kdl".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+        db.with_state(|s| assert_eq!(s.db_config.schematic_content(), Some("viewport")));
+
+        // Repoint to an active key with no stored asset (active-only patch).
+        // The mirror read fails, so the stale inline content must be cleared
+        // rather than left advertising the previous schematic under a new key.
+        db.apply_set_db_config(SetDbConfig {
+            metadata: [(
+                "schematic.active".to_string(),
+                "schematics/missing.kdl".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        db.with_state(|s| {
+            assert_eq!(
+                s.db_config.schematic_active(),
+                Some("schematics/missing.kdl")
+            );
+            assert_eq!(s.db_config.schematic_content(), None);
+        });
     }
 }

@@ -1008,6 +1008,7 @@ fn queue_save_schematic_db_now(
     connection_addr: Option<Res<ConnectionAddr>>,
     config: Res<DbConfig>,
     mut pending_key: ResMut<PendingSchematicSaveKey>,
+    mut last_synced: ResMut<LastSyncedSchematicContent>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     // A "Save As" supplies an explicit key; a plain "Save" overwrites whatever
@@ -1039,6 +1040,14 @@ fn queue_save_schematic_db_now(
             message: err,
         });
         return;
+    }
+
+    // Record what we just stored as the last synced content. The DB mirrors
+    // these exact bytes into `schematic.content` and echoes the updated config;
+    // without this guard, config sync would see its own save as a change and
+    // reload the active schematic over HTTP on the very client that saved it.
+    if let Some(content) = plan.active_schematic_content() {
+        last_synced.0 = Some(content);
     }
 
     tx.send_msg(SetDbConfig {
