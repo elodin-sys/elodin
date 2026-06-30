@@ -20,12 +20,29 @@ use super::types::*;
 #[derive(Resource, Default)]
 pub(crate) struct ActiveSchematicFetch {
     key: Option<String>,
+    /// The content mirror captured when the in-flight fetch was spawned. A new
+    /// request for the same key but a *different* mirror means the asset's bytes
+    /// changed, so the in-flight fetch is stale and must be superseded.
+    content_fallback: Option<String>,
     task: Option<Task<ActiveSchematicFetched>>,
 }
 
 struct ActiveSchematicFetched {
     request: OpenDocumentFromActiveRequest,
     result: Result<String, String>,
+}
+
+/// Whether the in-flight fetch already covers `request`, so a new request must
+/// not supersede (and cancel) it. True only when both the key *and* the content
+/// mirror match: a repeated request from unrelated `DbConfig` churn carries the
+/// same mirror and is ignored, but a same-key request whose mirror changed means
+/// the asset's bytes changed, so the in-flight fetch is stale and must restart.
+fn fetch_covers_request(
+    fetch_key: Option<&str>,
+    fetch_fallback: Option<&str>,
+    request: &OpenDocumentFromActiveRequest,
+) -> bool {
+    fetch_key == Some(request.key.as_str()) && fetch_fallback == request.content_fallback.as_deref()
 }
 
 fn cloned_current_document_asset(
@@ -104,14 +121,21 @@ pub(super) fn handle_open_document_from_active_requests(
 ) {
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
-    // A repeated request for the key already being fetched is ignored, so an
+    // A repeated request for the same key *and same mirror* is ignored, so an
     // unrelated DbConfig change mid-load can't cancel a nearly-complete fetch.
+    // But if the key's bytes changed (the mirror differs), the in-flight fetch
+    // is stale: supersede it so we don't apply the older bytes when it lands.
     if let Some(request) = requests.read().last().cloned() {
-        let already_fetching = fetch.key.as_deref() == Some(request.key.as_str());
+        let already_fetching = fetch_covers_request(
+            fetch.key.as_deref(),
+            fetch.content_fallback.as_deref(),
+            &request,
+        );
         if !already_fetching {
             let addr = connection_addr.as_deref().map(|c| c.0);
             let key = request.key.clone();
             fetch.key = Some(request.key.clone());
+            fetch.content_fallback = request.content_fallback.clone();
             fetch.task = Some(IoTaskPool::get().spawn(async move {
                 let result = fetch_active_schematic_kdl(&key, addr);
                 ActiveSchematicFetched { request, result }
@@ -129,6 +153,7 @@ pub(super) fn handle_open_document_from_active_requests(
     };
     fetch.task = None;
     fetch.key = None;
+    fetch.content_fallback = None;
 
     // The user may have switched schematics (via "Save As…"/"Open Schematic…")
     // while this fetch was in flight: `PendingActiveSchematic` pins the key they
@@ -319,5 +344,58 @@ pub(super) fn emit_document_load_failures(
             path: format!("{:?}", event.path),
             message: event.error.to_string(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(key: &str, fallback: Option<&str>) -> OpenDocumentFromActiveRequest {
+        OpenDocumentFromActiveRequest {
+            key: key.to_string(),
+            content_fallback: fallback.map(str::to_string),
+            save_path: None,
+        }
+    }
+
+    #[test]
+    fn in_flight_fetch_ignores_same_key_same_mirror() {
+        // Unrelated DbConfig churn re-emits the same key + mirror; the in-flight
+        // fetch must not be cancelled.
+        let req = request("schematics/main.kdl", Some("viewport {}"));
+        assert!(fetch_covers_request(
+            Some("schematics/main.kdl"),
+            Some("viewport {}"),
+            &req,
+        ));
+    }
+
+    #[test]
+    fn in_flight_fetch_superseded_when_bytes_change() {
+        // Same key but a changed mirror means the asset's bytes changed: the
+        // in-flight fetch is stale and must restart.
+        let req = request("schematics/main.kdl", Some("viewport { new }"));
+        assert!(!fetch_covers_request(
+            Some("schematics/main.kdl"),
+            Some("viewport {}"),
+            &req,
+        ));
+    }
+
+    #[test]
+    fn in_flight_fetch_superseded_for_different_key() {
+        let req = request("schematics/other.kdl", Some("viewport {}"));
+        assert!(!fetch_covers_request(
+            Some("schematics/main.kdl"),
+            Some("viewport {}"),
+            &req,
+        ));
+    }
+
+    #[test]
+    fn no_in_flight_fetch_never_covers() {
+        let req = request("schematics/main.kdl", None);
+        assert!(!fetch_covers_request(None, None, &req));
     }
 }
