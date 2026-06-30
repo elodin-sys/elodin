@@ -94,6 +94,7 @@ pub(super) fn handle_open_document_from_content_requests(
 pub(super) fn handle_open_document_from_active_requests(
     mut requests: MessageReader<OpenDocumentFromActiveRequest>,
     connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    config: Option<Res<impeller2_wkt::DbConfig>>,
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
     mut loaded: MessageWriter<DocumentLoaded>,
@@ -129,21 +130,35 @@ pub(super) fn handle_open_document_from_active_requests(
 
     let content = match result {
         Ok(content) => content,
-        Err(error) => match request.content_fallback.as_deref() {
-            Some(fallback) => {
-                bevy::log::warn!(
-                    "Active schematic fetch failed ({error}); using content mirror fallback"
-                );
-                fallback.to_string()
+        Err(error) => {
+            // Only fall back to the inline mirror when it still describes the key
+            // we fetched: after a switch, `schematic.content` may belong to a
+            // different schematic, and loading it would show the wrong one. When
+            // connected, trust the current config's mirror only if its active key
+            // matches; offline, the request's captured mirror is all we have.
+            let mirror = match config.as_deref() {
+                Some(cfg) if cfg.schematic_active() == Some(request.key.as_str()) => {
+                    cfg.schematic_content().map(str::to_string)
+                }
+                Some(_) => None,
+                None => request.content_fallback.clone(),
+            };
+            match mirror {
+                Some(fallback) => {
+                    bevy::log::warn!(
+                        "Active schematic fetch failed ({error}); using content mirror fallback"
+                    );
+                    fallback
+                }
+                None => {
+                    failed.write(DocumentCommandFailed {
+                        title: "Failed to Load Active Schematic".to_string(),
+                        message: error,
+                    });
+                    return;
+                }
             }
-            None => {
-                failed.write(DocumentCommandFailed {
-                    title: "Failed to Load Active Schematic".to_string(),
-                    message: error,
-                });
-                return;
-            }
-        },
+        }
     };
     match open_document_from_content(&content, request.save_path.clone(), &mut current_document) {
         Ok(document) => {

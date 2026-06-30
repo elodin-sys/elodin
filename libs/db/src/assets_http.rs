@@ -209,10 +209,23 @@ pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db
                 ?err,
                 "failed to create assets dir for active schematic sync"
             );
-        } else if let Ok(client) = sync_http_client()
-            && let Some(bytes) = sync_one_schematic_asset(&client, &base, &assets_dir, key).await
-        {
-            fetched_active = String::from_utf8(bytes).ok();
+        } else {
+            if let Ok(client) = sync_http_client()
+                && let Some(bytes) =
+                    sync_one_schematic_asset(&client, &base, &assets_dir, key).await
+            {
+                fetched_active = String::from_utf8(bytes).ok();
+            }
+            // The source GET failed but replication mirrored the content into
+            // `schematic.content`: persist that under the active key so this
+            // follower's asset server still serves `schematic.active` instead of
+            // 404ing the key config already points at.
+            if fetched_active.is_none()
+                && let Some(mirror) = content.as_deref()
+                && let Err(err) = write_asset_file(&assets_dir, key, mirror.as_bytes())
+            {
+                warn!(?err, asset = %key, "failed to write fallback active schematic from mirror");
+            }
         }
     }
 
