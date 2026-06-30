@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedSchematicContent,
-    SchematicDocumentAsset, plan_db_save, upload_db_save_plan,
+    OpenDocumentFromActiveRequest, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
+    schematic_save_key_from_name, upload_db_save_plan,
 };
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
@@ -15,7 +16,7 @@ use bevy::{
     },
     log::error,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Entity, In, MessageWriter, Mut, Transform},
+    prelude::{Entity, In, MessageWriter, Mut, Resource, Transform},
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{
@@ -34,8 +35,8 @@ use impeller2_bevy::{
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, CurrentTimestamp, EarliestTimestamp, IsRecording, LastUpdated,
-    Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
+    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
+    LastUpdated, Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
 use nox::ArrayBuf;
 
@@ -57,7 +58,15 @@ use crate::{
     },
 };
 
-pub(crate) fn plugin(_app: &mut bevy::app::App) {}
+pub(crate) fn plugin(app: &mut bevy::app::App) {
+    app.init_resource::<PendingSchematicSaveKey>();
+}
+
+/// Carries the target asset key from a "Save Schematic As..." prompt into the
+/// shared DB-save system. `None` means a plain "Save" that overwrites whatever
+/// schematic is currently active.
+#[derive(Resource, Default)]
+pub(crate) struct PendingSchematicSaveKey(pub Option<String>);
 
 pub struct PalettePage {
     items: Vec<PaletteItem>,
@@ -952,19 +961,66 @@ pub fn save_schematic() -> PaletteItem {
     )
 }
 
+/// Save the current schematic under a new name (RFD #724 Phase 2). Prompts for
+/// a name, stores it as `schematics/<name>.kdl`, and points `schematic.active`
+/// at it — the named counterpart to "Save Schematic", and what populates the
+/// "Open Schematic..." picker.
+pub fn save_schematic_as() -> PaletteItem {
+    PaletteItem::new("Save Schematic As...", PRESETS_LABEL, |_: In<String>| {
+        PalettePage::new(vec![save_schematic_as_prompt()])
+            .label("Save Schematic As")
+            .prompt("Enter a schematic name...")
+            .into_event()
+    })
+}
+
+fn save_schematic_as_prompt() -> PaletteItem {
+    PaletteItem::new(
+        LabelSource::placeholder("Enter a schematic name..."),
+        PRESETS_LABEL,
+        |In(name): In<String>,
+         mut pending_key: ResMut<PendingSchematicSaveKey>,
+         mut commands: Commands| {
+            let key = match schematic_save_key_from_name(&name) {
+                Ok(key) => key,
+                Err(err) => return PaletteEvent::Error(err),
+            };
+            pending_key.0 = Some(key);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(queue_save_schematic_db_now);
+            PaletteEvent::Exit
+        },
+    )
+}
+
 /// DB-native save (RFD #724 Phase 2): upload the active schematic, its window
 /// sub-schematics and any newly added local assets to the DB Asset Server over
 /// HTTP `PUT`, then point `schematic.active` at the uploaded schematic. The
 /// `PUT`s are acknowledged and complete before `SetDbConfig` is sent, so the
 /// pointer never claims a save that did not land.
+#[allow(clippy::too_many_arguments)]
 fn queue_save_schematic_db_now(
     tx: Res<PacketTx>,
     schematic: Res<CurrentSchematic>,
     window_schematics: Res<CurrentWindowSchematics>,
     skybox_cache: Option<Res<SkyboxCache>>,
     connection_addr: Option<Res<ConnectionAddr>>,
+    config: Res<DbConfig>,
+    mut pending_key: ResMut<PendingSchematicSaveKey>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
+    // A "Save As" supplies an explicit key; a plain "Save" overwrites whatever
+    // schematic is currently active (falling back to the default main key on a
+    // fresh DB). Always consume the pending key so it can't leak into a later
+    // plain save.
+    let active_key = pending_key.0.take().unwrap_or_else(|| {
+        config
+            .schematic_active()
+            .map(str::to_string)
+            .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string())
+    });
+
     let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
         failed.write(DocumentCommandFailed {
             title: "Failed to Save Schematic".to_string(),
@@ -975,7 +1031,7 @@ fn queue_save_schematic_db_now(
 
     let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
     let windows = window_document_saves(&window_schematics);
-    let plan = plan_db_save(&root, &windows);
+    let plan = plan_db_save(&root, &windows, &active_key);
 
     if let Err(err) = upload_db_save_plan(&plan, Some(addr)) {
         failed.write(DocumentCommandFailed {
@@ -986,12 +1042,9 @@ fn queue_save_schematic_db_now(
     }
 
     tx.send_msg(SetDbConfig {
-        metadata: [(
-            "schematic.active".to_string(),
-            ACTIVE_SCHEMATIC_KEY.to_string(),
-        )]
-        .into_iter()
-        .collect(),
+        metadata: [("schematic.active".to_string(), active_key)]
+            .into_iter()
+            .collect(),
         ..Default::default()
     });
 }
@@ -1003,6 +1056,53 @@ pub fn clear_schematic() -> PaletteItem {
         |_: In<String>, mut params: LoadSchematicParams| {
             params.current_document.clear();
             params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+/// DB-native load (RFD #724 Phase 2): list the schematics the DB Asset Server
+/// holds (`GET /__index__/schematics/`) and open the chosen one over HTTP.
+pub fn open_schematic() -> PaletteItem {
+    PaletteItem::new(
+        "Open Schematic...",
+        PRESETS_LABEL,
+        |_: In<String>, connection_addr: Option<Res<ConnectionAddr>>| {
+            let addr = connection_addr.as_ref().map(|c| c.0);
+            let keys = match fetch_schematic_index(addr) {
+                Ok(keys) => keys,
+                Err(err) => {
+                    return PaletteEvent::Error(format!("Failed to list schematics: {err}"));
+                }
+            };
+            if keys.is_empty() {
+                return PaletteEvent::Error("No schematics found in the database".into());
+            }
+            let items = keys.into_iter().map(open_schematic_item).collect();
+            PalettePage::new(items)
+                .label("Open Schematic")
+                .prompt("Select a schematic to open...")
+                .into_event()
+        },
+    )
+}
+
+fn open_schematic_item(key: String) -> PaletteItem {
+    let label = key
+        .strip_prefix("schematics/")
+        .unwrap_or(&key)
+        .strip_suffix(".kdl")
+        .map(str::to_string)
+        .unwrap_or_else(|| key.clone());
+    PaletteItem::new(
+        label,
+        PRESETS_LABEL,
+        move |_: In<String>, mut open: MessageWriter<OpenDocumentFromActiveRequest>| {
+            open.write(OpenDocumentFromActiveRequest {
+                key: key.clone(),
+                content_fallback: None,
+                save_path: None,
+            });
             PaletteEvent::Exit
         },
     )
@@ -1692,6 +1792,8 @@ impl Default for PalettePage {
             create_data_overview(None),
             create_3d_object(),
             save_schematic(),
+            save_schematic_as(),
+            open_schematic(),
             clear_schematic(),
             skybox_menu(),
             set_color_scheme_mode(),

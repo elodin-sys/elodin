@@ -117,6 +117,17 @@ pub fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
     Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
 }
 
+/// Whether the DB mirror should re-assert its synced skybox onto the live
+/// cache. It only does so for an *external* drift (`live != desired`). When the
+/// drift matches a state the user just pushed locally (`pushed_locally`) — most
+/// importantly a clear — the live `DbConfig` is simply stale and re-asserting
+/// would resurrect the skybox the user just cleared, so we hold off until the
+/// `SetDbConfig` echo catches up.
+fn should_reassert_db_skybox(live: Option<&str>, desired: &str, pushed_locally: bool) -> bool {
+    live != Some(desired) && !pushed_locally
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn sync_db_skybox_assets_from_config(
     config: Res<DbConfig>,
     connection_addr: Option<Res<ConnectionAddr>>,
@@ -125,6 +136,7 @@ pub fn sync_db_skybox_assets_from_config(
     mut mirror: ResMut<DbSkyboxAssetMirror>,
     mut in_flight: ResMut<DbSkyboxSyncInFlight>,
     mut skyboxes: MessageWriter<SetActiveSkybox>,
+    locally_pushed: Option<Res<crate::skybox_generation::LocallyPushedSkyboxActive>>,
 ) {
     if let Some(task) = in_flight.task.as_mut() {
         if let Some(result) = future::block_on(future::poll_once(task)) {
@@ -196,10 +208,11 @@ pub fn sync_db_skybox_assets_from_config(
         skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
-        if cache
+        let live = cache.as_ref().and_then(|cache| cache.active.as_deref());
+        let pushed_locally = locally_pushed
             .as_ref()
-            .is_some_and(|cache| cache.active.as_deref() != Some(desired.as_str()))
-        {
+            .is_some_and(|pushed| pushed.is_pending(live));
+        if should_reassert_db_skybox(live, &desired, pushed_locally) {
             skyboxes.write(SetActiveSkybox::ByName(desired));
         }
         return;
@@ -682,6 +695,21 @@ mod tests {
         config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
 
         assert_eq!(desired_skybox_from_config(&config), Some(None));
+    }
+
+    #[test]
+    fn reasserts_db_skybox_only_for_external_drift() {
+        // Steady state: live matches desired — nothing to do.
+        assert!(!should_reassert_db_skybox(
+            Some("desert_night"),
+            "desert_night",
+            false
+        ));
+        // External drift (e.g. a schematic reload dropped the skybox) — restore.
+        assert!(should_reassert_db_skybox(None, "desert_night", false));
+        // User just cleared locally; the config echo hasn't landed. The drift is
+        // the user's own pending push, so we must not resurrect the skybox.
+        assert!(!should_reassert_db_skybox(None, "desert_night", true));
     }
 
     #[test]

@@ -76,6 +76,16 @@ impl LocallyPushedSkyboxActive {
         self.pending.remove(index);
         true
     }
+
+    /// Whether `skybox` is still queued as a locally pushed state whose DB echo
+    /// hasn't arrived yet. Lets the DB mirror tell a user-initiated change
+    /// (authoritative until the config catches up) apart from an external drift
+    /// it should re-assert.
+    pub(crate) fn is_pending(&self, skybox: Option<&str>) -> bool {
+        self.pending
+            .iter()
+            .any(|pending| pending.as_deref() == skybox)
+    }
 }
 
 pub(crate) fn sync_cache_active_from_skybox(

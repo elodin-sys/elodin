@@ -141,6 +141,57 @@ pub(crate) fn fetch_active_schematic_kdl(
     response.text().map_err(|err| format!("{url}: {err}"))
 }
 
+/// List the schematic asset keys (`schematics/*.kdl`) the DB Asset Server holds,
+/// via its `GET /__index__/<prefix>` listing (RFD #724). Sorted for a stable
+/// picker; the request is bounded so an unreachable DB cannot hang the UI.
+pub(crate) fn fetch_schematic_index(
+    connection_addr: Option<SocketAddr>,
+) -> Result<Vec<String>, String> {
+    #[derive(serde::Deserialize)]
+    struct IndexEntry {
+        key: String,
+    }
+
+    let url = crate::object_3d::resolve_db_asset_url("db:__index__/schematics/", connection_addr);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|err| format!("{url}: {err}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|err| format!("{url}: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    let entries: Vec<IndexEntry> = response.json().map_err(|err| format!("{url}: {err}"))?;
+    let mut keys: Vec<String> = entries
+        .into_iter()
+        .map(|entry| entry.key)
+        .filter(|key| key.ends_with(".kdl"))
+        .collect();
+    keys.sort();
+    Ok(keys)
+}
+
+/// Builds the DB asset key (`schematics/<name>.kdl`) for a user-entered "Save
+/// As" name. Validates rather than silently mangling: a trailing `.kdl` is
+/// tolerated, but the stem must be non-empty and limited to `[A-Za-z0-9_-]` so
+/// the key can never escape the `schematics/` prefix or hit a reserved/odd key.
+pub(crate) fn schematic_save_key_from_name(name: &str) -> Result<String, String> {
+    let stem = name.trim().strip_suffix(".kdl").unwrap_or(name.trim());
+    if stem.is_empty() {
+        return Err("Schematic name cannot be empty".to_string());
+    }
+    if !stem
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err("Use only letters, digits, '-' or '_' in a schematic name".to_string());
+    }
+    Ok(format!("schematics/{stem}.kdl"))
+}
+
 /// What to `PUT` to the DB Asset Server before pointing `schematic.active` at a
 /// freshly authored schematic (RFD #724 Phase 2).
 pub(crate) struct DbSavePlan {
@@ -183,9 +234,15 @@ fn rewrite_schematic_for_db(
 
 /// Normalizes a root schematic for DB-native storage: rewrites local mesh, icon
 /// and window references to `db:` keys (including assets referenced only inside
-/// detached window sub-schematics) and records what must be uploaded. Pure
-/// (no I/O) so the rewrite and keying stay unit-testable.
-pub(crate) fn plan_db_save(root: &Schematic, windows: &[WindowDocumentSave]) -> DbSavePlan {
+/// detached window sub-schematics) and records what must be uploaded. The active
+/// schematic is stored under `active_key` (e.g. `schematics/main.kdl`, or a
+/// user-named `schematics/<name>.kdl` for "Save As"). Pure (no I/O) so the
+/// rewrite and keying stay unit-testable.
+pub(crate) fn plan_db_save(
+    root: &Schematic,
+    windows: &[WindowDocumentSave],
+    active_key: &str,
+) -> DbSavePlan {
     let window_kdl: HashMap<&str, &str> = windows
         .iter()
         .map(|w| (w.file_name.as_str(), w.kdl.as_str()))
@@ -244,7 +301,7 @@ pub(crate) fn plan_db_save(root: &Schematic, windows: &[WindowDocumentSave]) -> 
 
     // The active schematic is uploaded last so its dependencies are present
     // before `schematic.active` is repointed at it.
-    schematic_uploads.push((ACTIVE_SCHEMATIC_KEY.to_string(), root.to_kdl().into_bytes()));
+    schematic_uploads.push((active_key.to_string(), root.to_kdl().into_bytes()));
 
     DbSavePlan {
         schematic_uploads,
@@ -468,7 +525,7 @@ mod db_save_tests {
             kdl: "viewport {\n}\n".into(),
         }];
 
-        let plan = plan_db_save(&root, &windows);
+        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY);
 
         // The local mesh is queued for upload; the `db:` mesh is left untouched.
         assert_eq!(
@@ -517,7 +574,7 @@ mod db_save_tests {
             kdl: window.to_kdl(),
         }];
 
-        let plan = plan_db_save(&root, &windows);
+        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY);
 
         // The window's local mesh must be queued for upload...
         assert!(
@@ -543,9 +600,35 @@ mod db_save_tests {
 
     #[test]
     fn plan_db_save_without_deps_uploads_only_active() {
-        let plan = plan_db_save(&Schematic::default(), &[]);
+        let plan = plan_db_save(&Schematic::default(), &[], ACTIVE_SCHEMATIC_KEY);
         assert!(plan.local_assets.is_empty());
         assert_eq!(plan.schematic_uploads.len(), 1);
         assert_eq!(plan.schematic_uploads[0].0, ACTIVE_SCHEMATIC_KEY);
+    }
+
+    #[test]
+    fn plan_db_save_stores_active_under_named_key() {
+        let plan = plan_db_save(&Schematic::default(), &[], "schematics/orbit.kdl");
+        assert_eq!(
+            plan.schematic_uploads.last().unwrap().0,
+            "schematics/orbit.kdl"
+        );
+    }
+
+    #[test]
+    fn schematic_save_key_from_name_validates_and_keys() {
+        assert_eq!(
+            schematic_save_key_from_name("orbit"),
+            Ok("schematics/orbit.kdl".to_string())
+        );
+        // A typed `.kdl` suffix is tolerated, not doubled.
+        assert_eq!(
+            schematic_save_key_from_name(" my-run_2.kdl "),
+            Ok("schematics/my-run_2.kdl".to_string())
+        );
+        assert!(schematic_save_key_from_name("   ").is_err());
+        // No traversal or nested keys.
+        assert!(schematic_save_key_from_name("../escape").is_err());
+        assert!(schematic_save_key_from_name("a/b").is_err());
     }
 }
