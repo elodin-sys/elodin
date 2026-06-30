@@ -6,6 +6,7 @@ use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
 use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::{DbConfig, Schematic, SkyboxConfig};
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -151,30 +152,26 @@ pub(crate) struct DbSavePlan {
     local_assets: Vec<(String, String)>,
 }
 
-/// Normalizes a root schematic for DB-native storage: rewrites local mesh, icon
-/// and window references to `db:` keys and records what must be uploaded. Pure
-/// (no I/O) so the rewrite and keying stay unit-testable.
-pub(crate) fn plan_db_save(root: &Schematic, windows: &[WindowDocumentSave]) -> DbSavePlan {
-    use std::collections::HashMap;
-    let window_kdl: HashMap<&str, &str> = windows
-        .iter()
-        .map(|w| (w.file_name.as_str(), w.kdl.as_str()))
-        .collect();
-
-    let mut local_assets = Vec::new();
-    let mut window_keys = Vec::new();
-    let mut root = root.clone();
-    impeller2_kdl::rewrite_asset_paths(&mut root, |path| {
+/// Rewrites a schematic's local mesh, icon and window references to `db:` keys,
+/// recording mesh/icon uploads in `local_assets` and the file names of any
+/// referenced window sub-schematics in `referenced_windows`. Shared by the root
+/// and every detached window so 3D content referenced only inside a window is
+/// stored DB-natively too.
+fn rewrite_schematic_for_db(
+    schematic: &mut Schematic,
+    window_kdl: &HashMap<&str, &str>,
+    local_assets: &mut Vec<(String, String)>,
+    referenced_windows: &mut Vec<String>,
+) {
+    impeller2_kdl::rewrite_asset_paths(schematic, |path| {
         if !impeller2_kdl::is_local_asset_path(path) {
             return None;
         }
         // A detached-window sub-schematic: store it under `schematics/<file>`
-        // and reference it there. Its bytes come from the in-memory window list,
-        // not from disk.
+        // and reference it there. Its rewritten bytes are uploaded separately.
         if window_kdl.contains_key(path) {
-            let key = format!("schematics/{path}");
-            window_keys.push(key.clone());
-            return Some(format!("db:{key}"));
+            referenced_windows.push(path.to_string());
+            return Some(format!("db:schematics/{path}"));
         }
         // A local mesh/icon: key by its component path and upload its bytes from
         // disk at PUT time.
@@ -182,15 +179,69 @@ pub(crate) fn plan_db_save(root: &Schematic, windows: &[WindowDocumentSave]) -> 
         local_assets.push((name.clone(), path.to_string()));
         Some(format!("db:{name}"))
     });
+}
 
+/// Normalizes a root schematic for DB-native storage: rewrites local mesh, icon
+/// and window references to `db:` keys (including assets referenced only inside
+/// detached window sub-schematics) and records what must be uploaded. Pure
+/// (no I/O) so the rewrite and keying stay unit-testable.
+pub(crate) fn plan_db_save(root: &Schematic, windows: &[WindowDocumentSave]) -> DbSavePlan {
+    let window_kdl: HashMap<&str, &str> = windows
+        .iter()
+        .map(|w| (w.file_name.as_str(), w.kdl.as_str()))
+        .collect();
+
+    let mut local_assets = Vec::new();
     let mut schematic_uploads = Vec::new();
-    for key in &window_keys {
-        if let Some(file_name) = key.strip_prefix("schematics/")
-            && let Some(kdl) = window_kdl.get(file_name)
-        {
-            schematic_uploads.push((key.clone(), kdl.as_bytes().to_vec()));
+
+    // Rewrite the root, discovering the window sub-schematics it references.
+    let mut root = root.clone();
+    let mut referenced_windows = Vec::new();
+    rewrite_schematic_for_db(
+        &mut root,
+        &window_kdl,
+        &mut local_assets,
+        &mut referenced_windows,
+    );
+
+    // Rewrite each referenced window the same way and upload the rewritten KDL,
+    // so meshes/icons referenced only inside a window are also `db:`-keyed and
+    // queued for upload. Windows may reference further windows, so follow them
+    // transitively, keying each by `schematics/<file>` and uploading once.
+    let mut uploaded = HashSet::new();
+    let mut next = 0;
+    while next < referenced_windows.len() {
+        let file_name = referenced_windows[next].clone();
+        next += 1;
+        let key = format!("schematics/{file_name}");
+        if !uploaded.insert(key.clone()) {
+            continue;
         }
+        let Some(&kdl) = window_kdl.get(file_name.as_str()) else {
+            continue;
+        };
+        let bytes = match Schematic::from_kdl(kdl) {
+            Ok(mut window_root) => {
+                rewrite_schematic_for_db(
+                    &mut window_root,
+                    &window_kdl,
+                    &mut local_assets,
+                    &mut referenced_windows,
+                );
+                window_root.to_kdl().into_bytes()
+            }
+            // If a window's KDL cannot be parsed, fall back to its raw bytes so
+            // the save still includes it rather than silently dropping it.
+            Err(_) => kdl.as_bytes().to_vec(),
+        };
+        schematic_uploads.push((key, bytes));
     }
+
+    // A window and the root (or another window) may reference the same local
+    // asset; keep only the first upload of each, preserving order.
+    let mut seen_assets = HashSet::new();
+    local_assets.retain(|(key, _)| seen_assets.insert(key.clone()));
+
     // The active schematic is uploaded last so its dependencies are present
     // before `schematic.active` is repointed at it.
     schematic_uploads.push((ACTIVE_SCHEMATIC_KEY.to_string(), root.to_kdl().into_bytes()));
@@ -442,6 +493,52 @@ mod db_save_tests {
         assert!(active.contains("db:models/local.glb"), "{active}");
         assert!(active.contains("db:models/remote.glb"), "{active}");
         assert!(active.contains("db:schematics/detail.kdl"), "{active}");
+    }
+
+    #[test]
+    fn plan_db_save_rewrites_window_internal_assets() {
+        let root = Schematic {
+            elems: vec![SchematicElem::Window(WindowSchematic {
+                title: Some("detail".into()),
+                path: Some("detail.kdl".into()),
+                screen: None,
+                screen_rect: None,
+            })],
+            ..Default::default()
+        };
+        // A mesh referenced only inside the window, nowhere in the root.
+        let window = Schematic {
+            elems: vec![glb_object("c", "models/window_only.glb")],
+            ..Default::default()
+        };
+        let windows = vec![WindowDocumentSave {
+            window_id: WindowId(2),
+            file_name: "detail.kdl".into(),
+            kdl: window.to_kdl(),
+        }];
+
+        let plan = plan_db_save(&root, &windows);
+
+        // The window's local mesh must be queued for upload...
+        assert!(
+            plan.local_assets
+                .iter()
+                .any(|(key, _)| key == "models/window_only.glb"),
+            "{:?}",
+            plan.local_assets
+        );
+
+        // ...and the stored window KDL must reference it over `db:`.
+        let window_upload = plan
+            .schematic_uploads
+            .iter()
+            .find(|(key, _)| key == "schematics/detail.kdl")
+            .map(|(_, bytes)| String::from_utf8(bytes.clone()).unwrap())
+            .expect("window sub-schematic should be uploaded");
+        assert!(
+            window_upload.contains("db:models/window_only.glb"),
+            "{window_upload}"
+        );
     }
 
     #[test]
