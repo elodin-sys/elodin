@@ -22,6 +22,10 @@ pub(crate) struct SkyboxDocumentSyncMut<'a> {
     pub locally_pushed: &'a mut LocallyPushedSkyboxActive,
     pub cache: &'a mut SkyboxCache,
     pub tx: &'a PacketTx,
+    /// DB key the schematic is currently stored under, so a skybox edit writes
+    /// back to the active (possibly "Save As"-named) schematic rather than
+    /// always clobbering `schematics/main.kdl`.
+    pub active_key: &'a str,
 }
 
 impl SkyboxDocumentSyncMut<'_> {
@@ -39,7 +43,13 @@ impl SkyboxDocumentSyncMut<'_> {
             .skybox
             .as_ref()
             .map(|entry| entry.name.as_str());
-        push_skybox_db_sync(self.tx, Some(kdl), active, self.locally_pushed);
+        push_skybox_db_sync(
+            self.tx,
+            Some(kdl),
+            active,
+            self.active_key,
+            self.locally_pushed,
+        );
     }
 }
 
@@ -103,6 +113,7 @@ pub(crate) struct SyncGeneratedSkyboxParams<'w> {
     last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
+    config: Res<'w, DbConfig>,
     tx: Res<'w, PacketTx>,
 }
 
@@ -119,6 +130,10 @@ pub(crate) fn sync_generated_skybox_to_schematic(
             locally_pushed: &mut params.locally_pushed,
             cache: &mut params.cache,
             tx: &params.tx,
+            active_key: params
+                .config
+                .schematic_active()
+                .unwrap_or(ACTIVE_SCHEMATIC_KEY),
         };
         sync.sync_skybox_to_document_and_db(Some(SkyboxConfig {
             name: event.name.clone(),
@@ -163,7 +178,14 @@ pub(crate) fn on_document_loaded(
         && let Some(tx) = tx.as_ref()
     {
         let kdl = document.root.to_kdl();
-        push_skybox_db_sync(tx, Some(kdl), loaded_skybox, &mut locally_pushed);
+        let active_key = config.schematic_active().unwrap_or(ACTIVE_SCHEMATIC_KEY);
+        push_skybox_db_sync(
+            tx,
+            Some(kdl),
+            loaded_skybox,
+            active_key,
+            &mut locally_pushed,
+        );
     }
 
     record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
@@ -186,22 +208,27 @@ pub(crate) fn push_skybox_db_sync(
     tx: &PacketTx,
     kdl: Option<String>,
     skybox: Option<&str>,
+    active_key: &str,
     locally_pushed: &mut LocallyPushedSkyboxActive,
 ) {
     locally_pushed.mark(skybox);
-    push_schematic_metadata(tx, kdl, skybox);
+    push_schematic_metadata(tx, kdl, skybox, active_key);
 }
 
-pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: Option<String>, skybox: Option<&str>) {
+pub(crate) fn push_schematic_metadata(
+    tx: &PacketTx,
+    kdl: Option<String>,
+    skybox: Option<&str>,
+    active_key: &str,
+) {
     let mut metadata = std::collections::HashMap::new();
     // DB-centric write-back (RFD #724): carry the schematic bytes and the active
     // pointer in the same atomic SetDbConfig; the DB persists them as the active
-    // asset and mirrors them into `schematic.content`.
+    // asset and mirrors them into `schematic.content`. The pointer targets the
+    // *current* active key, so editing a named schematic's skybox doesn't
+    // silently repoint the active schematic back to `schematics/main.kdl`.
     if let Some(kdl) = kdl {
-        metadata.insert(
-            "schematic.active".to_string(),
-            ACTIVE_SCHEMATIC_KEY.to_string(),
-        );
+        metadata.insert("schematic.active".to_string(), active_key.to_string());
         metadata.insert("schematic.content".to_string(), kdl);
     }
     metadata.insert(
@@ -231,7 +258,15 @@ pub(crate) fn push_skybox_active_on_pending(
     if last_pushed.as_deref() == Some(name.as_str()) {
         return;
     }
-    push_skybox_db_sync(&tx, None, Some(&name), &mut locally_pushed);
+    // No schematic KDL here (only `skybox.active` is pushed while the cubemap
+    // loads), so the active key is unused; pass the default.
+    push_skybox_db_sync(
+        &tx,
+        None,
+        Some(&name),
+        ACTIVE_SCHEMATIC_KEY,
+        &mut locally_pushed,
+    );
     *last_pushed = Some(name);
 }
 
@@ -271,6 +306,7 @@ pub(crate) struct RevertSkyboxParams<'w> {
     last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
+    config: Res<'w, DbConfig>,
     tx: Res<'w, PacketTx>,
     skyboxes: MessageWriter<'w, SetActiveSkybox>,
 }
@@ -288,6 +324,10 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         locally_pushed: &mut params.locally_pushed,
         cache: &mut params.cache,
         tx: &params.tx,
+        active_key: params
+            .config
+            .schematic_active()
+            .unwrap_or(ACTIVE_SCHEMATIC_KEY),
     };
     sync.sync_skybox_to_document_and_db(Some(skybox));
     params.skyboxes.write(SetActiveSkybox::ByName(name.clone()));
