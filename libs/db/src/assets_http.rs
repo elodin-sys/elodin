@@ -227,6 +227,23 @@ pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db
                 warn!(?err, asset = %key, "failed to write fallback active schematic from mirror");
             }
         }
+
+        // Replication applies the `schematic.active` repoint before this asset
+        // exists locally; a pointer-only patch then clears the inline
+        // `schematic.content` mirror because the not-yet-synced file can't be
+        // read. Now that the active file is on disk, restore the mirror so the
+        // follower's persisted config is self-consistent: a client reading it
+        // gets a working fallback instead of a stale 404, and the loop that
+        // followed the cleared mirror has something to recover to.
+        if let Some(active) = fetched_active.as_deref() {
+            let stale = db.with_state(|s| s.db_config.schematic_content() != Some(active));
+            if stale {
+                db.with_state_mut(|s| s.db_config.set_schematic_content(active.to_string()));
+                if let Err(err) = db.save_db_state() {
+                    warn!(?err, "failed to persist restored schematic.content mirror");
+                }
+            }
+        }
     }
 
     // Resolve `db:` dependencies (meshes, window sub-schematics, skybox) from
@@ -1160,5 +1177,59 @@ viewport "main" { }
         // Names that merely share the prefix are normal assets.
         write_asset_file(&assets, "__index__notreserved.glb", b"x").unwrap();
         assert!(assets.join("__index__notreserved.glb").is_file());
+    }
+
+    #[tokio::test]
+    async fn follower_sync_restores_cleared_content_mirror() {
+        use crate::DB;
+
+        let dir = tempdir().unwrap();
+        let active_key = "schematics/main.kdl";
+        let active_kdl = "viewport {\n}\n";
+
+        // Source serves the active schematic file over its asset server.
+        let source_assets = dir.path().join("source_assets");
+        write_asset_file(&source_assets, active_key, active_kdl.as_bytes()).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        let state = Arc::new(AssetsState {
+            assets_dir: source_assets,
+            writable: true,
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Follower state after a pointer-only repoint replicated from the
+        // source: the active pointer is set but the inline mirror was cleared
+        // (the file wasn't on disk to mirror) and is still missing locally.
+        let follower_db = DB::create(dir.path().join("follower_db")).unwrap();
+        follower_db.with_state_mut(|s| {
+            s.db_config.set_schematic_active(active_key);
+            s.db_config.metadata.remove("schematic.content");
+        });
+        assert!(
+            follower_db
+                .with_state(|s| s.db_config.schematic_content().map(str::to_owned))
+                .is_none()
+        );
+
+        sync_schematic_assets_for_db_from_source(tcp, &follower_db).await;
+
+        // The active file landed locally and the mirror was restored from it, so
+        // a client reading this follower's config gets a working fallback.
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db.path).join(active_key)).unwrap(),
+            active_kdl.as_bytes()
+        );
+        assert_eq!(
+            follower_db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            Some(active_kdl.to_string())
+        );
     }
 }
