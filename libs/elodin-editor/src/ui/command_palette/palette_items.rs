@@ -7,9 +7,11 @@ use crate::plugins::kdl_document::{
 };
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
+    app::Update,
     asset::{AssetServer, Assets},
     camera::visibility::RenderLayers,
     ecs::{
+        change_detection::DetectChanges,
         query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
@@ -17,6 +19,7 @@ use bevy::{
     log::error,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Entity, In, MessageWriter, Mut, Resource, Transform},
+    tasks::{IoTaskPool, Task, futures_lite::future},
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{
@@ -59,7 +62,10 @@ use crate::{
 };
 
 pub(crate) fn plugin(app: &mut bevy::app::App) {
-    app.init_resource::<PendingSchematicSaveKey>();
+    app.init_resource::<PendingSchematicSaveKey>()
+        .init_resource::<SchematicSaveInFlight>()
+        .init_resource::<SchematicIndexCache>()
+        .add_systems(Update, (poll_schematic_save, refresh_schematic_index));
 }
 
 /// Carries the target asset key from a "Save Schematic As..." prompt into the
@@ -67,6 +73,27 @@ pub(crate) fn plugin(app: &mut bevy::app::App) {
 /// schematic is currently active.
 #[derive(Resource, Default)]
 pub(crate) struct PendingSchematicSaveKey(pub Option<String>);
+
+/// In-flight DB-native schematic save (RFD #724). The HTTP `PUT`s run off the
+/// main thread on the IO task pool; `poll_schematic_save` repoints
+/// `schematic.active` once they all land, so a slow DB never freezes the UI.
+#[derive(Resource, Default)]
+pub(crate) struct SchematicSaveInFlight {
+    task: Option<Task<Result<(), String>>>,
+    active_key: Option<String>,
+    active_content: Option<String>,
+}
+
+/// Cached listing of the DB's stored schematics (RFD #724). Refreshed off the
+/// main thread on connect and whenever `DbConfig` changes, so "Open Schematic…"
+/// presents the list without a blocking HTTP request.
+#[derive(Resource, Default)]
+pub(crate) struct SchematicIndexCache {
+    keys: Vec<String>,
+    error: Option<String>,
+    loaded_once: bool,
+    task: Option<Task<Result<Vec<String>, String>>>,
+}
 
 pub struct PalettePage {
     items: Vec<PaletteItem>,
@@ -1001,14 +1028,13 @@ fn save_schematic_as_prompt() -> PaletteItem {
 /// pointer never claims a save that did not land.
 #[allow(clippy::too_many_arguments)]
 fn queue_save_schematic_db_now(
-    tx: Res<PacketTx>,
     schematic: Res<CurrentSchematic>,
     window_schematics: Res<CurrentWindowSchematics>,
     skybox_cache: Option<Res<SkyboxCache>>,
     connection_addr: Option<Res<ConnectionAddr>>,
     config: Res<DbConfig>,
     mut pending_key: ResMut<PendingSchematicSaveKey>,
-    mut last_synced: ResMut<LastSyncedSchematicContent>,
+    mut save_in_flight: ResMut<SchematicSaveInFlight>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     // A "Save As" supplies an explicit key; a plain "Save" overwrites whatever
@@ -1022,6 +1048,14 @@ fn queue_save_schematic_db_now(
             .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string())
     });
 
+    if save_in_flight.task.is_some() {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Schematic".to_string(),
+            message: "A schematic save is already in progress.".to_string(),
+        });
+        return;
+    }
+
     let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
         failed.write(DocumentCommandFailed {
             title: "Failed to Save Schematic".to_string(),
@@ -1034,29 +1068,92 @@ fn queue_save_schematic_db_now(
     let windows = window_document_saves(&window_schematics);
     let plan = plan_db_save(&root, &windows, &active_key);
 
-    if let Err(err) = upload_db_save_plan(&plan, Some(addr)) {
-        failed.write(DocumentCommandFailed {
-            title: "Failed to Save Schematic".to_string(),
-            message: err,
-        });
+    // The bytes the DB will mirror into `schematic.content`, recorded once the
+    // upload lands so config sync doesn't mistake the DB's echo of our own save
+    // for an external change (which would reload over HTTP on the saving client).
+    save_in_flight.active_content = plan.active_schematic_content();
+    save_in_flight.active_key = Some(active_key);
+    // Upload off the main thread; `poll_schematic_save` repoints `schematic.active`
+    // only after every `PUT` is acknowledged, so the pointer never claims a save
+    // that did not land.
+    save_in_flight.task =
+        Some(IoTaskPool::get().spawn(async move { upload_db_save_plan(&plan, Some(addr)) }));
+}
+
+/// Applies the outcome of an in-flight DB-native save: on success, record the
+/// stored content and repoint `schematic.active`; on failure, surface it.
+fn poll_schematic_save(
+    mut save_in_flight: ResMut<SchematicSaveInFlight>,
+    tx: Option<Res<PacketTx>>,
+    mut last_synced: ResMut<LastSyncedSchematicContent>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    let Some(task) = save_in_flight.task.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(task)) else {
+        return;
+    };
+    save_in_flight.task = None;
+    let active_key = save_in_flight.active_key.take();
+    let active_content = save_in_flight.active_content.take();
+
+    match result {
+        Ok(()) => {
+            if let Some(content) = active_content {
+                last_synced.0 = Some(content);
+            }
+            if let Some(active_key) = active_key {
+                last_synced.1 = Some(active_key.clone());
+                if let Some(tx) = tx {
+                    tx.send_msg(SetDbConfig {
+                        metadata: [("schematic.active".to_string(), active_key)]
+                            .into_iter()
+                            .collect(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        Err(err) => {
+            failed.write(DocumentCommandFailed {
+                title: "Failed to Save Schematic".to_string(),
+                message: err,
+            });
+        }
+    }
+}
+
+/// Refreshes [`SchematicIndexCache`] off the main thread: warms it on connect
+/// and re-lists whenever `DbConfig` changes (e.g. after a save adds a schematic).
+fn refresh_schematic_index(
+    config: Option<Res<DbConfig>>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    mut cache: ResMut<SchematicIndexCache>,
+) {
+    if let Some(task) = cache.task.as_mut() {
+        if let Some(result) = future::block_on(future::poll_once(task)) {
+            cache.task = None;
+            cache.loaded_once = true;
+            match result {
+                Ok(keys) => {
+                    cache.keys = keys;
+                    cache.error = None;
+                }
+                Err(err) => cache.error = Some(err),
+            }
+        }
         return;
     }
 
-    // Record what we just stored as the last synced content. The DB mirrors
-    // these exact bytes into `schematic.content` and echoes the updated config;
-    // without this guard, config sync would see its own save as a change and
-    // reload the active schematic over HTTP on the very client that saved it.
-    if let Some(content) = plan.active_schematic_content() {
-        last_synced.0 = Some(content);
+    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+        return;
+    };
+    let config_changed = config.as_ref().is_some_and(|c| c.is_changed());
+    if cache.loaded_once && !config_changed {
+        return;
     }
-    last_synced.1 = Some(active_key.clone());
-
-    tx.send_msg(SetDbConfig {
-        metadata: [("schematic.active".to_string(), active_key)]
-            .into_iter()
-            .collect(),
-        ..Default::default()
-    });
+    cache.task = Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)) }));
 }
 
 pub fn clear_schematic() -> PaletteItem {
@@ -1071,24 +1168,34 @@ pub fn clear_schematic() -> PaletteItem {
     )
 }
 
-/// DB-native load (RFD #724 Phase 2): list the schematics the DB Asset Server
-/// holds (`GET /__index__/schematics/`) and open the chosen one over HTTP.
+/// DB-native load (RFD #724 Phase 2): present the schematics the DB Asset Server
+/// holds — listed off the main thread into [`SchematicIndexCache`] — and open
+/// the chosen one over HTTP.
 pub fn open_schematic() -> PaletteItem {
     PaletteItem::new(
         "Open Schematic...",
         PRESETS_LABEL,
-        |_: In<String>, connection_addr: Option<Res<ConnectionAddr>>| {
-            let addr = connection_addr.as_ref().map(|c| c.0);
-            let keys = match fetch_schematic_index(addr) {
-                Ok(keys) => keys,
-                Err(err) => {
+        |_: In<String>,
+         index: Res<SchematicIndexCache>,
+         connection_addr: Option<Res<ConnectionAddr>>| {
+            if connection_addr.is_none() {
+                return PaletteEvent::Error("Not connected to a database".into());
+            }
+            if index.keys.is_empty() {
+                if let Some(err) = &index.error {
                     return PaletteEvent::Error(format!("Failed to list schematics: {err}"));
                 }
-            };
-            if keys.is_empty() {
+                if !index.loaded_once {
+                    return PaletteEvent::Error("Loading schematics from the database…".into());
+                }
                 return PaletteEvent::Error("No schematics found in the database".into());
             }
-            let items = keys.into_iter().map(open_schematic_item).collect();
+            let items = index
+                .keys
+                .iter()
+                .cloned()
+                .map(open_schematic_item)
+                .collect();
             PalettePage::new(items)
                 .label("Open Schematic")
                 .prompt("Select a schematic to open...")
