@@ -22,6 +22,7 @@ pub(crate) fn plugin(app: &mut App) {
     )
     .init_resource::<InitialKdlPath>()
     .init_resource::<LastSyncedSchematicContent>()
+    .init_resource::<PendingActiveSchematic>()
     .init_resource::<systems::ActiveSchematicFetch>()
     .init_resource::<CurrentDocument>()
     .init_asset::<SchematicDocumentAsset>()
@@ -61,7 +62,7 @@ mod tests {
     use super::{
         CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoaded, DocumentReloaded,
         LastSyncedSchematicContent, OpenDocumentFromActiveRequest, OpenDocumentFromContentRequest,
-        OpenDocumentRequest, SchematicDocumentAsset,
+        OpenDocumentRequest, PendingActiveSchematic, SchematicDocumentAsset,
         operations::{open_document_from_content, sync_document_skybox},
         plugin,
     };
@@ -259,6 +260,7 @@ mod tests {
             .insert_resource(DbConfig::default())
             .init_resource::<CurrentDocument>()
             .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<PendingActiveSchematic>()
             .add_message::<OpenDocumentRequest>()
             .add_message::<OpenDocumentFromContentRequest>()
             .add_message::<OpenDocumentFromActiveRequest>()
@@ -492,6 +494,7 @@ mod tests {
         app.insert_resource(DbConfig::default())
             .init_resource::<CurrentDocument>()
             .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<PendingActiveSchematic>()
             .init_resource::<SeenDocumentCommandFailures>()
             .add_systems(
                 Update,
@@ -553,6 +556,7 @@ mod tests {
             .insert_resource(DbConfig::default())
             .init_resource::<CurrentDocument>()
             .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<PendingActiveSchematic>()
             .init_resource::<SeenActiveRequests>()
             .add_message::<OpenDocumentRequest>()
             .add_message::<OpenDocumentFromContentRequest>()

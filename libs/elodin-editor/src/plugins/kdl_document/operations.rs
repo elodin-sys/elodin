@@ -417,6 +417,7 @@ pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     last_synced_content: Res<LastSyncedSchematicContent>,
+    mut pending_active: ResMut<PendingActiveSchematic>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
     mut open_document_from_active: MessageWriter<OpenDocumentFromActiveRequest>,
@@ -446,6 +447,18 @@ pub fn sync_document_from_config(
     // The mirrored `schematic.content` doubles as the change guard (the shim
     // keeps it equal to the active asset) and as the offline fallback.
     if let Some(active_key) = config.schematic_active() {
+        // A locally-initiated switch ("Save As…"/"Open Schematic…") may not be
+        // echoed by the DB yet. Until `schematic.active` reports the key we
+        // requested, ignore the still-stale pointer so we don't briefly reload
+        // the schematic being replaced; clear the pin once the DB confirms it.
+        if let Some(pending) = pending_active.0.clone() {
+            if pending == active_key {
+                pending_active.0 = None;
+            } else {
+                return;
+            }
+        }
+
         // Skip the reload only when both the content *and* the active key are
         // unchanged: opening another stored schematic that happens to have the
         // same KDL still switches the active key, and the editor must follow it.

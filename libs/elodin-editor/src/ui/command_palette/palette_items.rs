@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedSchematicContent,
-    SchematicDocumentAsset, fetch_schematic_index, plan_db_save, schematic_save_key_from_name,
-    upload_db_save_plan,
+    PendingActiveSchematic, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
+    schematic_save_key_from_name, upload_db_save_plan,
 };
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
@@ -1100,6 +1100,7 @@ fn poll_schematic_save(
     mut save_in_flight: ResMut<SchematicSaveInFlight>,
     tx: Option<Res<PacketTx>>,
     mut pending_key: ResMut<PendingSchematicSaveKey>,
+    mut pending_active: ResMut<PendingActiveSchematic>,
     mut last_synced: ResMut<LastSyncedSchematicContent>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
@@ -1121,6 +1122,10 @@ fn poll_schematic_save(
             }
             if let Some(active_key) = active_key {
                 last_synced.1 = Some(active_key.clone());
+                // Pin the key we just saved so config sync ignores the DB's still
+                // -stale active pointer until it echoes this repoint, avoiding a
+                // brief revert to the previously active schematic.
+                pending_active.0 = Some(active_key.clone());
                 if let Some(tx) = tx {
                     tx.send_msg(SetDbConfig {
                         metadata: [("schematic.active".to_string(), active_key)]
@@ -1248,11 +1253,18 @@ fn open_schematic_item(key: String) -> PaletteItem {
     PaletteItem::new(
         label,
         PRESETS_LABEL,
-        move |_: In<String>, tx: Res<PacketTx>| {
+        move |_: In<String>,
+              tx: Res<PacketTx>,
+              mut pending_active: ResMut<PendingActiveSchematic>| {
             // Repoint the DB's active schematic rather than loading locally:
             // config sync then loads it over HTTP, and `schematic.active` stays
             // authoritative so later DbConfig updates and "Save Schematic" both
             // target the schematic the user just opened.
+            //
+            // Pin the requested key so config sync ignores the DB's still-stale
+            // pointer until it echoes this repoint, instead of momentarily
+            // reloading the schematic we're switching away from.
+            pending_active.0 = Some(key.clone());
             tx.send_msg(SetDbConfig {
                 metadata: [("schematic.active".to_string(), key.clone())]
                     .into_iter()

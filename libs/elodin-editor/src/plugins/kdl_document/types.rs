@@ -17,6 +17,14 @@ pub struct InitialKdlPath(pub Option<PathBuf>);
 #[derive(Resource, Default)]
 pub struct LastSyncedSchematicContent(pub Option<String>, pub Option<String>);
 
+/// Active-schematic key the editor has optimistically switched to (via "Save
+/// As…" or "Open Schematic…") but the DB has not yet echoed. While set and not
+/// yet matched by `DbConfig.schematic_active`, config sync ignores the stale
+/// pointer so it can't briefly reload the schematic being replaced; the pin
+/// clears as soon as the DB confirms the requested key.
+#[derive(Resource, Default)]
+pub struct PendingActiveSchematic(pub Option<String>);
+
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct SchematicDocumentAsset {
     pub root: Schematic,
