@@ -1,6 +1,11 @@
 use crate::icon_rasterizer::IconTextureCache;
 use crate::object_3d::CompileError;
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    ecs::system::SystemParam,
+    prelude::*,
+    tasks::{IoTaskPool, Task, futures_lite::future},
+    window::PrimaryWindow,
+};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
@@ -109,6 +114,26 @@ pub struct SyncedViewport;
 #[derive(Component)]
 pub struct SchematicSpawned;
 
+/// A window sub-schematic whose `db:`/HTTP KDL is being fetched off the main
+/// thread. Spawned by `load_schematic` and drained by
+/// `apply_pending_window_schematics` once the fetch lands, so a slow or
+/// unreachable DB never blocks the load for each window's request timeout.
+struct PendingWindowLoad {
+    descriptor: WindowDescriptor,
+    theme_mode: Option<String>,
+    theme_scheme: String,
+    path: PathBuf,
+    task: Task<Result<String, String>>,
+}
+
+/// Queue of in-flight remote window sub-schematic fetches (RFD #724). Cleared at
+/// the start of every `load_schematic` so a superseded load's windows never
+/// spawn into the new document.
+#[derive(Resource, Default)]
+pub struct PendingWindowSchematics {
+    loads: Vec<PendingWindowLoad>,
+}
+
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -136,6 +161,7 @@ pub struct LoadSchematicParams<'w, 's> {
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
+    pending_windows: ResMut<'w, PendingWindowSchematics>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -292,6 +318,9 @@ impl LoadSchematicParams<'_, '_> {
             self.geo_context.origin = origin;
         }
 
+        // Drop any remote window fetches still in flight from a prior load so
+        // their windows can't spawn into this freshly-cleared document.
+        self.pending_windows.loads.clear();
         for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
                 continue;
@@ -461,6 +490,24 @@ impl LoadSchematicParams<'_, '_> {
 
             if let Some(path) = descriptor.path.clone() {
                 let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+                if path.to_str().is_some_and(is_remote_asset_path) {
+                    // Fetch `db:`/HTTP windows off the main thread: a blocking
+                    // request per window could otherwise stall the UI for the
+                    // full timeout each (RFD #724). The window spawns from
+                    // `apply_pending_window_schematics` once the fetch lands.
+                    let fetch_path = path.clone();
+                    let task = IoTaskPool::get().spawn(async move {
+                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                    });
+                    self.pending_windows.loads.push(PendingWindowLoad {
+                        descriptor,
+                        theme_mode: theme_mode.clone(),
+                        theme_scheme: theme_selection.scheme.clone(),
+                        path,
+                        task,
+                    });
+                    continue;
+                }
                 match read_window_schematic_kdl(&path, connection_addr) {
                     Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
@@ -494,6 +541,54 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.current_schematic.0.skybox = schematic.skybox.clone();
+    }
+
+    /// Spawns windows whose remote sub-schematic fetch (queued by
+    /// `load_schematic`) has completed, draining the in-flight queue. Cheap when
+    /// nothing is pending; called every frame by `apply_pending_window_schematics`.
+    fn poll_pending_window_schematics(&mut self) {
+        if self.pending_windows.loads.is_empty() {
+            return;
+        }
+        let mut ready = Vec::new();
+        self.pending_windows.loads.retain_mut(|load| {
+            match future::block_on(future::poll_once(&mut load.task)) {
+                Some(result) => {
+                    ready.push((
+                        std::mem::take(&mut load.descriptor),
+                        load.theme_mode.take(),
+                        std::mem::take(&mut load.theme_scheme),
+                        std::mem::take(&mut load.path),
+                        result,
+                    ));
+                    false
+                }
+                None => true,
+            }
+        });
+        for (descriptor, theme_mode, theme_scheme, path, result) in ready {
+            match result {
+                Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                    Ok(window_schematic) => {
+                        self.spawn_window(
+                            &window_schematic,
+                            descriptor,
+                            theme_mode.as_deref(),
+                            &theme_scheme,
+                            Some(path.as_path()),
+                        );
+                    }
+                    Err(err) => {
+                        let diag = render_diag(&err);
+                        let report = miette!(err.clone());
+                        warn!(?report, ?path, "Failed to parse window schematic: \n{diag}");
+                    }
+                },
+                Err(err) => {
+                    warn!(%err, ?path, "Failed to read window schematic");
+                }
+            }
+        }
     }
 
     fn spawn_window(
@@ -1312,6 +1407,12 @@ pub fn apply_document_loaded(
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
 }
 
+/// Spawns remote window sub-schematics once their off-thread fetch completes
+/// (RFD #724). Runs each frame and early-returns when nothing is pending.
+pub fn apply_pending_window_schematics(mut params: LoadSchematicParams) {
+    params.poll_pending_window_schematics();
+}
+
 pub fn apply_document_cleared(
     mut events: MessageReader<DocumentCleared>,
     mut params: LoadSchematicParams,
@@ -1403,6 +1504,7 @@ mod tests {
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
+            .init_resource::<super::PendingWindowSchematics>()
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));

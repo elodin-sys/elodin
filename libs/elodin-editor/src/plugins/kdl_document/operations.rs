@@ -335,7 +335,7 @@ pub(crate) fn upload_db_save_plan(
         .map_err(|err| err.to_string())?;
 
     for (key, src) in &plan.local_assets {
-        let path = schematic_file(Path::new(src));
+        let path = local_asset_file(src);
         let bytes = std::fs::read(&path).map_err(|err| format!("{}: {err}", path.display()))?;
         put_db_asset(&client, key, bytes, connection_addr)?;
     }
@@ -343,6 +343,23 @@ pub(crate) fn upload_db_save_plan(
         put_db_asset(&client, key, bytes.clone(), connection_addr)?;
     }
     Ok(())
+}
+
+/// Resolves a local mesh/icon path referenced by a schematic to a filesystem
+/// path for upload. These paths are loaded by the editor's `AssetServer`, whose
+/// default source is `ELODIN_ASSETS_DIR` (default `assets/`) — *not* the
+/// schematic/`ELODIN_KDL_DIR` root. Resolving them the same way here keeps a DB
+/// save reading the exact bytes the editor displays; using `schematic_file`
+/// would read from the wrong root and store broken local paths in the DB.
+fn local_asset_file(src: &str) -> PathBuf {
+    let path = Path::new(src);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    match crate::plugins::env_asset_source::resolve_assets_dir() {
+        Some(root) => root.join(path),
+        None => path.to_path_buf(),
+    }
 }
 
 fn put_db_asset(
