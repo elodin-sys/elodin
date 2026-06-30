@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedSchematicContent,
-    OpenDocumentFromActiveRequest, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
-    schematic_save_key_from_name, upload_db_save_plan,
+    SchematicDocumentAsset, fetch_schematic_index, plan_db_save, schematic_save_key_from_name,
+    upload_db_save_plan,
 };
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
@@ -1106,11 +1106,16 @@ fn open_schematic_item(key: String) -> PaletteItem {
     PaletteItem::new(
         label,
         PRESETS_LABEL,
-        move |_: In<String>, mut open: MessageWriter<OpenDocumentFromActiveRequest>| {
-            open.write(OpenDocumentFromActiveRequest {
-                key: key.clone(),
-                content_fallback: None,
-                save_path: None,
+        move |_: In<String>, tx: Res<PacketTx>| {
+            // Repoint the DB's active schematic rather than loading locally:
+            // config sync then loads it over HTTP, and `schematic.active` stays
+            // authoritative so later DbConfig updates and "Save Schematic" both
+            // target the schematic the user just opened.
+            tx.send_msg(SetDbConfig {
+                metadata: [("schematic.active".to_string(), key.clone())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
             });
             PaletteEvent::Exit
         },
