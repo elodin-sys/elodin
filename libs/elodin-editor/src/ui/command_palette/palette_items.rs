@@ -5,7 +5,8 @@ use std::{
 };
 
 use crate::plugins::kdl_document::{
-    ACTIVE_SCHEMATIC_KEY, CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedSchematicContent,
+    SchematicDocumentAsset, plan_db_save, upload_db_save_plan,
 };
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
@@ -989,32 +990,64 @@ pub fn save_schematic_db() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic To DB",
         PRESETS_LABEL,
-        |_name: In<String>,
-         tx: Res<PacketTx>,
-         schematic: Res<CurrentSchematic>,
-         skybox_cache: Option<Res<SkyboxCache>>| {
-            let kdl = root_kdl_for_save(&schematic, skybox_cache.as_deref());
-            // DB-centric save (RFD #724): carry the schematic bytes and the
-            // active pointer in one atomic SetDbConfig. The DB persists the
-            // bytes as the active asset (rewriting local paths to `db:`) and
-            // mirrors them back into `schematic.content`. Sending the bytes
-            // inline avoids a separate, droppable StoreAsset that could leave
-            // the pointer claiming a save that never landed.
-            tx.send_msg(SetDbConfig {
-                metadata: [
-                    (
-                        "schematic.active".to_string(),
-                        ACTIVE_SCHEMATIC_KEY.to_string(),
-                    ),
-                    ("schematic.content".to_string(), kdl),
-                ]
-                .into_iter()
-                .collect(),
-                ..Default::default()
-            });
+        |_name: In<String>, mut commands: Commands| {
+            // Capture descriptors/screens and rebuild the schematic from the live
+            // UI, then write it back to the DB in a dedicated system.
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(queue_save_schematic_db_now);
             PaletteEvent::Exit
         },
     )
+}
+
+/// DB-native save (RFD #724 Phase 2): upload the active schematic, its window
+/// sub-schematics and any newly added local assets to the DB Asset Server over
+/// HTTP `PUT`, then point `schematic.active` at the uploaded schematic. The
+/// `PUT`s are acknowledged and complete before `SetDbConfig` is sent, so the
+/// pointer never claims a save that did not land.
+fn queue_save_schematic_db_now(
+    tx: Res<PacketTx>,
+    schematic: Res<CurrentSchematic>,
+    window_schematics: Res<CurrentWindowSchematics>,
+    skybox_cache: Option<Res<SkyboxCache>>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Schematic".to_string(),
+            message: "Not connected to a database.".to_string(),
+        });
+        return;
+    };
+
+    let mut root = schematic.0.clone();
+    if let Some(cache) = skybox_cache.as_deref() {
+        root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
+            name: active.clone(),
+        });
+    }
+    let windows = window_document_saves(&window_schematics);
+    let plan = plan_db_save(&root, &windows);
+
+    if let Err(err) = upload_db_save_plan(&plan, Some(addr)) {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Schematic".to_string(),
+            message: err,
+        });
+        return;
+    }
+
+    tx.send_msg(SetDbConfig {
+        metadata: [(
+            "schematic.active".to_string(),
+            ACTIVE_SCHEMATIC_KEY.to_string(),
+        )]
+        .into_iter()
+        .collect(),
+        ..Default::default()
+    });
 }
 
 pub fn clear_schematic() -> PaletteItem {

@@ -140,6 +140,108 @@ pub(crate) fn fetch_active_schematic_kdl(
     response.text().map_err(|err| format!("{url}: {err}"))
 }
 
+/// What to `PUT` to the DB Asset Server before pointing `schematic.active` at a
+/// freshly authored schematic (RFD #724 Phase 2).
+pub(crate) struct DbSavePlan {
+    /// `(asset key, bytes)` for window sub-schematics and, last, the active
+    /// schematic itself.
+    schematic_uploads: Vec<(String, Vec<u8>)>,
+    /// `(asset key, local source path)` for meshes/icons still referenced by a
+    /// local path; their bytes are read from disk at upload time.
+    local_assets: Vec<(String, String)>,
+}
+
+/// Normalizes a root schematic for DB-native storage: rewrites local mesh, icon
+/// and window references to `db:` keys and records what must be uploaded. Pure
+/// (no I/O) so the rewrite and keying stay unit-testable.
+pub(crate) fn plan_db_save(root: &Schematic, windows: &[WindowDocumentSave]) -> DbSavePlan {
+    use std::collections::HashMap;
+    let window_kdl: HashMap<&str, &str> = windows
+        .iter()
+        .map(|w| (w.file_name.as_str(), w.kdl.as_str()))
+        .collect();
+
+    let mut local_assets = Vec::new();
+    let mut window_keys = Vec::new();
+    let mut root = root.clone();
+    impeller2_kdl::rewrite_asset_paths(&mut root, |path| {
+        if !impeller2_kdl::is_local_asset_path(path) {
+            return None;
+        }
+        // A detached-window sub-schematic: store it under `schematics/<file>`
+        // and reference it there. Its bytes come from the in-memory window list,
+        // not from disk.
+        if window_kdl.contains_key(path) {
+            let key = format!("schematics/{path}");
+            window_keys.push(key.clone());
+            return Some(format!("db:{key}"));
+        }
+        // A local mesh/icon: key by its component path and upload its bytes from
+        // disk at PUT time.
+        let name = impeller2_kdl::local_asset_name(path)?;
+        local_assets.push((name.clone(), path.to_string()));
+        Some(format!("db:{name}"))
+    });
+
+    let mut schematic_uploads = Vec::new();
+    for key in &window_keys {
+        if let Some(file_name) = key.strip_prefix("schematics/")
+            && let Some(kdl) = window_kdl.get(file_name)
+        {
+            schematic_uploads.push((key.clone(), kdl.as_bytes().to_vec()));
+        }
+    }
+    // The active schematic is uploaded last so its dependencies are present
+    // before `schematic.active` is repointed at it.
+    schematic_uploads.push((ACTIVE_SCHEMATIC_KEY.to_string(), root.to_kdl().into_bytes()));
+
+    DbSavePlan {
+        schematic_uploads,
+        local_assets,
+    }
+}
+
+/// Uploads a [`DbSavePlan`] to the DB Asset Server over HTTP `PUT`. Returns `Ok`
+/// only when every upload was accepted, so the caller may then point
+/// `schematic.active` at the uploaded schematic with no torn-write window.
+pub(crate) fn upload_db_save_plan(
+    plan: &DbSavePlan,
+    connection_addr: Option<SocketAddr>,
+) -> Result<(), String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    for (key, src) in &plan.local_assets {
+        let path = schematic_file(Path::new(src));
+        let bytes = std::fs::read(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+        put_db_asset(&client, key, bytes, connection_addr)?;
+    }
+    for (key, bytes) in &plan.schematic_uploads {
+        put_db_asset(&client, key, bytes.clone(), connection_addr)?;
+    }
+    Ok(())
+}
+
+fn put_db_asset(
+    client: &reqwest::blocking::Client,
+    key: &str,
+    bytes: Vec<u8>,
+    connection_addr: Option<SocketAddr>,
+) -> Result<(), String> {
+    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), connection_addr);
+    let response = client
+        .put(&url)
+        .body(bytes)
+        .send()
+        .map_err(|err| format!("{url}: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    Ok(())
+}
+
 pub fn save_current_document(
     path: Option<PathBuf>,
     root_kdl: &str,
@@ -323,4 +425,79 @@ pub fn sync_document_from_config(
 
     current_document.clear();
     cleared.write(DocumentCleared);
+}
+
+#[cfg(test)]
+mod db_save_tests {
+    use super::*;
+    use crate::ui::tiles::WindowId;
+    use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem, WindowSchematic};
+
+    fn glb_object(eql: &str, mesh: &str) -> SchematicElem {
+        SchematicElem::Object3d(Object3D {
+            eql: eql.into(),
+            mesh: Object3DMesh::glb(mesh),
+            frame: None,
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            node_id: Default::default(),
+        })
+    }
+
+    #[test]
+    fn plan_db_save_rewrites_local_assets_and_windows() {
+        let root = Schematic {
+            elems: vec![
+                glb_object("a", "models/local.glb"),
+                glb_object("b", "db:models/remote.glb"),
+                SchematicElem::Window(WindowSchematic {
+                    title: Some("detail".into()),
+                    path: Some("detail.kdl".into()),
+                    screen: None,
+                    screen_rect: None,
+                }),
+            ],
+            ..Default::default()
+        };
+        let windows = vec![WindowDocumentSave {
+            window_id: WindowId(1),
+            file_name: "detail.kdl".into(),
+            kdl: "viewport {\n}\n".into(),
+        }];
+
+        let plan = plan_db_save(&root, &windows);
+
+        // The local mesh is queued for upload; the `db:` mesh is left untouched.
+        assert_eq!(
+            plan.local_assets,
+            vec![(
+                "models/local.glb".to_string(),
+                "models/local.glb".to_string()
+            )]
+        );
+
+        // Window content is stored under `schematics/<file>`, and the active
+        // schematic is uploaded last so its deps land first.
+        let keys: Vec<&str> = plan
+            .schematic_uploads
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect();
+        assert_eq!(keys, vec!["schematics/detail.kdl", ACTIVE_SCHEMATIC_KEY]);
+
+        // Every reference in the active schematic is now a `db:` key.
+        let active = String::from_utf8(plan.schematic_uploads.last().unwrap().1.clone()).unwrap();
+        assert!(active.contains("db:models/local.glb"), "{active}");
+        assert!(active.contains("db:models/remote.glb"), "{active}");
+        assert!(active.contains("db:schematics/detail.kdl"), "{active}");
+    }
+
+    #[test]
+    fn plan_db_save_without_deps_uploads_only_active() {
+        let plan = plan_db_save(&Schematic::default(), &[]);
+        assert!(plan.local_assets.is_empty());
+        assert_eq!(plan.schematic_uploads.len(), 1);
+        assert_eq!(plan.schematic_uploads[0].0, ACTIVE_SCHEMATIC_KEY);
+    }
 }
