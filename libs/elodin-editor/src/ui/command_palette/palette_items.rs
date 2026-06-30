@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedSchematicContent,
@@ -96,6 +96,9 @@ pub(crate) struct SchematicIndexCache {
     keys: Vec<String>,
     error: Option<String>,
     loaded_once: bool,
+    /// Connection the cached listing came from, so reconnecting or switching to
+    /// a different DB re-lists instead of showing a previous session's assets.
+    addr: Option<SocketAddr>,
     task: Option<Task<Result<Vec<String>, String>>>,
 }
 
@@ -1170,12 +1173,20 @@ fn refresh_schematic_index(
     }
 
     let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+        // Disconnected: drop the listing so a later connection re-lists and we
+        // never offer assets from a previous session.
+        if cache.loaded_once || !cache.keys.is_empty() || cache.error.is_some() {
+            *cache = SchematicIndexCache::default();
+        }
         return;
     };
     let config_changed = config.as_ref().is_some_and(|c| c.is_changed());
-    if cache.loaded_once && !config_changed {
+    let connection_changed =
+        cache.addr != Some(addr) || connection_addr.as_ref().is_some_and(|c| c.is_changed());
+    if cache.loaded_once && !config_changed && !connection_changed {
         return;
     }
+    cache.addr = Some(addr);
     cache.task = Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)) }));
 }
 
