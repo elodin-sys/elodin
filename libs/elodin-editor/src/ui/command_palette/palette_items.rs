@@ -1214,6 +1214,7 @@ fn clear_skybox() -> PaletteItem {
          mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
          mut last_synced_content: ResMut<LastSyncedSchematicContent>,
          mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+         config: Res<DbConfig>,
          tx: Res<PacketTx>| {
             if cache.active.is_none() && schematic.skybox.is_none() {
                 return PaletteEvent::Error("No skybox is active".into());
@@ -1227,6 +1228,7 @@ fn clear_skybox() -> PaletteItem {
                 locally_pushed: &mut locally_pushed,
                 cache: &mut cache,
                 tx: &tx,
+                active_key: config.schematic_active().unwrap_or(ACTIVE_SCHEMATIC_KEY),
             }
             .sync_skybox_to_document_and_db(None);
             PaletteEvent::Exit
@@ -1246,6 +1248,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
               mut last_synced_content: ResMut<LastSyncedSchematicContent>,
               mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+              config: Res<DbConfig>,
               tx: Res<PacketTx>| {
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
             SkyboxDocumentSyncMut {
@@ -1256,6 +1259,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
                 locally_pushed: &mut locally_pushed,
                 cache: &mut cache,
                 tx: &tx,
+                active_key: config.schematic_active().unwrap_or(ACTIVE_SCHEMATIC_KEY),
             }
             .sync_skybox_to_document_and_db(Some(SkyboxConfig { name: name.clone() }));
             PaletteEvent::Exit
