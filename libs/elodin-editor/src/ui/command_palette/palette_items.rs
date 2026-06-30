@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::plugins::kdl_document::{
-    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
 };
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
@@ -994,10 +994,22 @@ pub fn save_schematic_db() -> PaletteItem {
          schematic: Res<CurrentSchematic>,
          skybox_cache: Option<Res<SkyboxCache>>| {
             let kdl = root_kdl_for_save(&schematic, skybox_cache.as_deref());
+            // DB-centric save (RFD #724): carry the schematic bytes and the
+            // active pointer in one atomic SetDbConfig. The DB persists the
+            // bytes as the active asset (rewriting local paths to `db:`) and
+            // mirrors them back into `schematic.content`. Sending the bytes
+            // inline avoids a separate, droppable StoreAsset that could leave
+            // the pointer claiming a save that never landed.
             tx.send_msg(SetDbConfig {
-                metadata: [("schematic.content".to_string(), kdl)]
-                    .into_iter()
-                    .collect(),
+                metadata: [
+                    (
+                        "schematic.active".to_string(),
+                        ACTIVE_SCHEMATIC_KEY.to_string(),
+                    ),
+                    ("schematic.content".to_string(), kdl),
+                ]
+                .into_iter()
+                .collect(),
                 ..Default::default()
             });
             PaletteEvent::Exit

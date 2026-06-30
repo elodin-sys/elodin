@@ -24,6 +24,7 @@ pub(crate) fn plugin(app: &mut App) {
     .init_asset_loader::<SchematicDocumentLoader>()
     .add_message::<OpenDocumentRequest>()
     .add_message::<OpenDocumentFromContentRequest>()
+    .add_message::<OpenDocumentFromActiveRequest>()
     .add_message::<SaveCurrentDocumentRequest>()
     .add_message::<DocumentLoaded>()
     .add_message::<DocumentCommandFailed>()
@@ -36,6 +37,7 @@ pub(crate) fn plugin(app: &mut App) {
         (
             systems::handle_open_document_requests,
             systems::handle_open_document_from_content_requests,
+            systems::handle_open_document_from_active_requests,
             systems::handle_save_current_document_requests,
         )
             .chain()
@@ -57,8 +59,8 @@ pub(crate) fn plugin(app: &mut App) {
 mod tests {
     use super::{
         CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoaded, DocumentReloaded,
-        LastSyncedSchematicContent, OpenDocumentFromContentRequest, OpenDocumentRequest,
-        SchematicDocumentAsset,
+        LastSyncedSchematicContent, OpenDocumentFromActiveRequest, OpenDocumentFromContentRequest,
+        OpenDocumentRequest, SchematicDocumentAsset,
         operations::{open_document_from_content, sync_document_skybox},
         plugin,
     };
@@ -258,6 +260,7 @@ mod tests {
             .init_resource::<LastSyncedSchematicContent>()
             .add_message::<OpenDocumentRequest>()
             .add_message::<OpenDocumentFromContentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
             .add_message::<DocumentCleared>()
             .init_resource::<SeenOpenDocumentRequests>()
             .add_systems(

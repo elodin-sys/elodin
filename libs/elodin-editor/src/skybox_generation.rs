@@ -9,8 +9,8 @@ use impeller2_wkt::{DbConfig, SetDbConfig, SkyboxConfig};
 use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
-    CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedSchematicContent,
-    SchematicDocumentAsset, sync_document_skybox,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded,
+    LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
@@ -184,7 +184,14 @@ pub(crate) fn push_skybox_db_sync(
 
 pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: Option<String>, skybox: Option<&str>) {
     let mut metadata = std::collections::HashMap::new();
+    // DB-centric write-back (RFD #724): carry the schematic bytes and the active
+    // pointer in the same atomic SetDbConfig; the DB persists them as the active
+    // asset and mirrors them into `schematic.content`.
     if let Some(kdl) = kdl {
+        metadata.insert(
+            "schematic.active".to_string(),
+            ACTIVE_SCHEMATIC_KEY.to_string(),
+        );
         metadata.insert("schematic.content".to_string(), kdl);
     }
     metadata.insert(
