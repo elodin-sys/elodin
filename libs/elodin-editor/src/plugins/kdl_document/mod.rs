@@ -8,6 +8,7 @@ mod types;
 pub use commands::*;
 pub use messages::*;
 pub use operations::{apply_initial_kdl_path, sync_document_from_config, sync_document_skybox};
+pub(crate) use operations::{plan_db_save, upload_db_save_plan};
 pub use types::*;
 
 use bevy::prelude::*;
