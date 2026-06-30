@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path as AxumPath, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -58,7 +59,14 @@ pub enum SanitizeError {
 #[derive(Clone)]
 struct AssetsState {
     assets_dir: PathBuf,
+    /// When false (e.g. on a follower replica), `PUT` uploads are rejected so
+    /// the read-only mirror cannot diverge from its source.
+    writable: bool,
 }
+
+/// Upper bound on a single `PUT` asset upload. Generous enough for large GLB
+/// meshes while bounding memory use from a hostile client.
+const MAX_ASSET_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 
 pub fn assets_http_addr(tcp: SocketAddr) -> SocketAddr {
     SocketAddr::new(tcp.ip(), tcp.port().saturating_add(ASSETS_HTTP_PORT_OFFSET))
@@ -373,6 +381,39 @@ async fn get_asset(
     }
 }
 
+/// `PUT /<key>` writes an asset, the network replacement for a filesystem
+/// write. Path sanitization and reserved-key rejection live in
+/// `write_asset_file`; here we add the write gate (`writable`) so a follower
+/// replica returns `405` instead of diverging from its source.
+async fn put_asset(
+    AxumPath(path): AxumPath<String>,
+    State(state): State<Arc<AssetsState>>,
+    body: Bytes,
+) -> Response {
+    if !state.writable {
+        tracing::warn!(asset = %path, "asset http PUT rejected (read-only server)");
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let assets_dir = state.assets_dir.clone();
+    let name = path.clone();
+    match tokio::task::spawn_blocking(move || write_asset_file(&assets_dir, &name, &body)).await {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(err)) if err.kind() == io::ErrorKind::InvalidInput => {
+            // Reserved key or path escaping the assets root: a client fault.
+            tracing::warn!(asset = %path, ?err, "asset http PUT 400 (invalid key)");
+            StatusCode::BAD_REQUEST.into_response()
+        }
+        Ok(Err(err)) => {
+            tracing::error!(asset = %path, ?err, "asset http PUT 500 (write error)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Err(err) => {
+            tracing::error!(asset = %path, ?err, "asset http PUT 500 (write task failed)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 async fn index_response(assets_dir: PathBuf, prefix: Option<String>) -> Response {
     let walk = tokio::task::spawn_blocking(move || {
         crate::assets::index_assets_in(&assets_dir, prefix.as_deref())
@@ -395,25 +436,34 @@ async fn serve_assets_with_listener(
     listener: tokio::net::TcpListener,
     addr: SocketAddr,
     assets_dir: PathBuf,
+    writable: bool,
 ) -> miette::Result<()> {
-    let state = Arc::new(AssetsState { assets_dir });
+    let state = Arc::new(AssetsState {
+        assets_dir,
+        writable,
+    });
     let app = Router::new()
-        .route("/{*path}", get(get_asset))
+        .route("/{*path}", get(get_asset).put(put_asset))
+        .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
         .with_state(state);
-    tracing::info!(?addr, "assets http server listening");
+    tracing::info!(?addr, writable, "assets http server listening");
     axum::serve(listener, app).await.into_diagnostic()?;
     Ok(())
 }
 
-pub async fn serve_assets(addr: SocketAddr, assets_dir: PathBuf) -> miette::Result<()> {
+pub async fn serve_assets(
+    addr: SocketAddr,
+    assets_dir: PathBuf,
+    writable: bool,
+) -> miette::Result<()> {
     std::fs::create_dir_all(&assets_dir).into_diagnostic()?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .into_diagnostic()?;
-    serve_assets_with_listener(listener, addr, assets_dir).await
+    serve_assets_with_listener(listener, addr, assets_dir, writable).await
 }
 
-pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()> {
+pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr, writable: bool) -> io::Result<()> {
     let addr = assets_http_addr(tcp_addr);
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
@@ -424,7 +474,8 @@ pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()>
         match tokio::net::TcpListener::from_std(listener) {
             Ok(listener) => {
                 if ready_tx.send(Ok(())).is_ok()
-                    && let Err(err) = serve_assets_with_listener(listener, addr, assets_dir).await
+                    && let Err(err) =
+                        serve_assets_with_listener(listener, addr, assets_dir, writable).await
                 {
                     tracing::error!(?err, "assets http server failed");
                 }
@@ -496,7 +547,7 @@ mod tests {
         let assets_addr = assets_http_addr(bound);
         let _conflict = std::net::TcpListener::bind(assets_addr).unwrap();
 
-        let err = spawn_assets_http(dir.path(), bound).unwrap_err();
+        let err = spawn_assets_http(dir.path(), bound, true).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
     }
 
@@ -510,7 +561,7 @@ mod tests {
         let bound = listener.local_addr().unwrap();
         drop(listener);
 
-        spawn_assets_http(dir.path(), bound).unwrap();
+        spawn_assets_http(dir.path(), bound, true).unwrap();
 
         let assets_addr = assets_http_addr(bound);
         let response = reqwest::Client::new()
@@ -532,6 +583,7 @@ mod tests {
 
         let state = Arc::new(AssetsState {
             assets_dir: assets.clone(),
+            writable: true,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -564,7 +616,10 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
 
-        let state = Arc::new(AssetsState { assets_dir: assets });
+        let state = Arc::new(AssetsState {
+            assets_dir: assets,
+            writable: true,
+        });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
             .with_state(state);
@@ -581,6 +636,81 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Builds an in-process asset server and returns its bound address.
+    #[cfg(test)]
+    async fn spawn_test_asset_server(assets_dir: PathBuf, writable: bool) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let state = Arc::new(AssetsState {
+            assets_dir,
+            writable,
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset).put(put_asset))
+            .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        bound
+    }
+
+    #[tokio::test]
+    async fn put_then_get_round_trips_when_writable() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        let bound = spawn_test_asset_server(assets, true).await;
+
+        let client = reqwest::Client::new();
+        let put = client
+            .put(format!("http://{bound}/models/rocket.glb"))
+            .body(b"glb-bytes".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::NO_CONTENT);
+
+        let get = client
+            .get(format!("http://{bound}/models/rocket.glb"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(get.status(), StatusCode::OK);
+        assert_eq!(get.bytes().await.unwrap().as_ref(), b"glb-bytes");
+    }
+
+    #[tokio::test]
+    async fn put_rejected_on_read_only_server() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        let bound = spawn_test_asset_server(assets.clone(), false).await;
+
+        let put = reqwest::Client::new()
+            .put(format!("http://{bound}/models/rocket.glb"))
+            .body(b"glb-bytes".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert!(!assets.join("models/rocket.glb").exists());
+    }
+
+    #[tokio::test]
+    async fn put_rejects_reserved_key() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        let bound = spawn_test_asset_server(assets, true).await;
+
+        let put = reqwest::Client::new()
+            .put(format!("http://{bound}/{INDEX_KEY}"))
+            .body(b"forged-index".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
@@ -637,6 +767,7 @@ mod tests {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -729,6 +860,7 @@ object_3d "rocket.world_pos" {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -822,6 +954,7 @@ object_3d "rocket.world_pos" {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -919,6 +1052,7 @@ object_3d "rocket.world_pos" {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -963,6 +1097,7 @@ viewport "main" { }
         let bound = listener.local_addr().unwrap();
         let state = Arc::new(AssetsState {
             assets_dir: assets.clone(),
+            writable: true,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1012,36 +1147,5 @@ viewport "main" { }
         // Names that merely share the prefix are normal assets.
         write_asset_file(&assets, "__index__notreserved.glb", b"x").unwrap();
         assert!(assets.join("__index__notreserved.glb").is_file());
-    }
-
-    #[tokio::test]
-    async fn put_over_http_is_not_allowed() {
-        let dir = tempdir().unwrap();
-        let assets = dir.path().join("assets");
-        std::fs::create_dir_all(&assets).unwrap();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let bound = listener.local_addr().unwrap();
-
-        let state = Arc::new(AssetsState {
-            assets_dir: assets.clone(),
-        });
-        let app = Router::new()
-            .route("/{*path}", get(get_asset))
-            .with_state(state);
-
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let response = reqwest::Client::new()
-            .put(format!("http://{bound}/rocket.glb"))
-            .body(b"x".to_vec())
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-        assert!(!assets.join("rocket.glb").exists());
     }
 }
