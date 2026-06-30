@@ -3,7 +3,9 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use impeller2_wkt::SkyboxConfig;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::commands::*;
 use super::messages::*;
@@ -17,6 +19,14 @@ use super::types::*;
 /// `OpenDocumentFromActiveRequest` spawns the fetch here and the same system
 /// applies the result once it lands, so a slow or unreachable DB never freezes
 /// the UI mid-frame.
+/// Maximum number of fetch attempts for one active-schematic key before the
+/// load is surfaced as a failure. Covers the transition window where the asset
+/// is still being synced/uploaded (follower lag, slow `PUT`).
+const MAX_ACTIVE_FETCH_ATTEMPTS: u32 = 10;
+
+/// Delay between active-schematic fetch attempts.
+const ACTIVE_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+
 #[derive(Resource, Default)]
 pub(crate) struct ActiveSchematicFetch {
     key: Option<String>,
@@ -24,7 +34,20 @@ pub(crate) struct ActiveSchematicFetch {
     /// request for the same key but a *different* mirror means the asset's bytes
     /// changed, so the in-flight fetch is stale and must be superseded.
     content_fallback: Option<String>,
+    /// Attempt number (0-based) of the in-flight fetch, so a transient failure
+    /// can schedule the next bounded retry.
+    attempts: u32,
     task: Option<Task<ActiveSchematicFetched>>,
+    /// Scheduled re-attempt after a transient failure with no usable fallback.
+    retry: Option<PendingRetry>,
+}
+
+/// A bounded re-attempt of an active-schematic fetch whose asset was not yet
+/// available (e.g. a follower still mirroring it, or an in-flight upload).
+struct PendingRetry {
+    request: OpenDocumentFromActiveRequest,
+    attempts: u32,
+    next_at: Instant,
 }
 
 struct ActiveSchematicFetched {
@@ -43,6 +66,31 @@ fn fetch_covers_request(
     request: &OpenDocumentFromActiveRequest,
 ) -> bool {
     fetch_key == Some(request.key.as_str()) && fetch_fallback == request.content_fallback.as_deref()
+}
+
+/// After a fetch failure with no usable fallback, the next attempt count to
+/// retry with, or `None` once attempts are exhausted (surface the failure).
+fn next_fetch_attempt(attempts: u32) -> Option<u32> {
+    (attempts + 1 < MAX_ACTIVE_FETCH_ATTEMPTS).then_some(attempts + 1)
+}
+
+/// Spawn an active-schematic fetch on the IO pool, recording its key, mirror,
+/// and attempt number; clears any scheduled retry it supersedes.
+fn spawn_active_fetch(
+    fetch: &mut ActiveSchematicFetch,
+    request: OpenDocumentFromActiveRequest,
+    attempts: u32,
+    addr: Option<SocketAddr>,
+) {
+    let key = request.key.clone();
+    fetch.key = Some(request.key.clone());
+    fetch.content_fallback = request.content_fallback.clone();
+    fetch.attempts = attempts;
+    fetch.retry = None;
+    fetch.task = Some(IoTaskPool::get().spawn(async move {
+        let result = fetch_active_schematic_kdl(&key, addr);
+        ActiveSchematicFetched { request, result }
+    }));
 }
 
 fn cloned_current_document_asset(
@@ -119,6 +167,8 @@ pub(super) fn handle_open_document_from_active_requests(
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
+    let addr = connection_addr.as_deref().map(|c| c.0);
+
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
     // A repeated request for the same key *and same mirror* is ignored, so an
@@ -132,14 +182,26 @@ pub(super) fn handle_open_document_from_active_requests(
             &request,
         );
         if !already_fetching {
-            let addr = connection_addr.as_deref().map(|c| c.0);
-            let key = request.key.clone();
-            fetch.key = Some(request.key.clone());
-            fetch.content_fallback = request.content_fallback.clone();
-            fetch.task = Some(IoTaskPool::get().spawn(async move {
-                let result = fetch_active_schematic_kdl(&key, addr);
-                ActiveSchematicFetched { request, result }
-            }));
+            spawn_active_fetch(&mut fetch, request, 0, addr);
+        }
+    }
+
+    // A scheduled retry (previous attempt failed with no usable fallback) is
+    // re-spawned once due — unless the user has since pinned a different key.
+    if fetch.task.is_none()
+        && let Some(retry) = fetch.retry.as_ref()
+        && Instant::now() >= retry.next_at
+    {
+        if pending_active
+            .0
+            .as_deref()
+            .is_some_and(|pending| pending != retry.request.key.as_str())
+        {
+            fetch.retry = None;
+        } else {
+            let request = retry.request.clone();
+            let attempts = retry.attempts;
+            spawn_active_fetch(&mut fetch, request, attempts, addr);
         }
     }
 
@@ -151,6 +213,7 @@ pub(super) fn handle_open_document_from_active_requests(
     else {
         return;
     };
+    let attempts = fetch.attempts;
     fetch.task = None;
     fetch.key = None;
     fetch.content_fallback = None;
@@ -188,13 +251,30 @@ pub(super) fn handle_open_document_from_active_requests(
                     );
                     fallback
                 }
-                None => {
-                    failed.write(DocumentCommandFailed {
-                        title: "Failed to Load Active Schematic".to_string(),
-                        message: error,
-                    });
-                    return;
-                }
+                // No fallback: the asset may still be syncing (follower lag, slow
+                // PUT). Retry with a bounded delay rather than failing for the
+                // whole session; only surface the error once attempts run out.
+                None => match next_fetch_attempt(attempts) {
+                    Some(next_attempts) => {
+                        bevy::log::debug!(
+                            "Active schematic fetch failed ({error}); retrying \
+                             ({next_attempts}/{MAX_ACTIVE_FETCH_ATTEMPTS})"
+                        );
+                        fetch.retry = Some(PendingRetry {
+                            request,
+                            attempts: next_attempts,
+                            next_at: Instant::now() + ACTIVE_FETCH_RETRY_DELAY,
+                        });
+                        return;
+                    }
+                    None => {
+                        failed.write(DocumentCommandFailed {
+                            title: "Failed to Load Active Schematic".to_string(),
+                            message: error,
+                        });
+                        return;
+                    }
+                },
             }
         }
     };
@@ -397,5 +477,28 @@ mod tests {
     fn no_in_flight_fetch_never_covers() {
         let req = request("schematics/main.kdl", None);
         assert!(!fetch_covers_request(None, None, &req));
+    }
+
+    #[test]
+    fn fetch_retries_until_attempts_exhausted() {
+        // A transient failure schedules the next attempt; the last attempt
+        // surfaces the failure instead of retrying forever.
+        let mut attempts = 0;
+        let mut spawns = 1; // the initial fetch
+        while let Some(next) = next_fetch_attempt(attempts) {
+            attempts = next;
+            spawns += 1;
+        }
+        assert_eq!(attempts, MAX_ACTIVE_FETCH_ATTEMPTS - 1);
+        assert_eq!(spawns, MAX_ACTIVE_FETCH_ATTEMPTS);
+    }
+
+    #[test]
+    fn fetch_gives_up_on_last_attempt() {
+        assert_eq!(next_fetch_attempt(MAX_ACTIVE_FETCH_ATTEMPTS - 1), None);
+        assert_eq!(
+            next_fetch_attempt(MAX_ACTIVE_FETCH_ATTEMPTS - 2),
+            Some(MAX_ACTIVE_FETCH_ATTEMPTS - 1)
+        );
     }
 }

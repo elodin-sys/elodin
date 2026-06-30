@@ -476,17 +476,13 @@ pub fn sync_document_from_config(
             }
         }
 
-        // Skip the reload only when both the content *and* the active key are
-        // unchanged: opening another stored schematic that happens to have the
-        // same KDL still switches the active key, and the editor must follow it.
-        let key_unchanged = last_synced_content.1.as_deref() == Some(active_key);
-        if key_unchanged
-            && let Some(mirror) = config.schematic_content()
-            && last_synced_content
-                .0
-                .as_deref()
-                .is_some_and(|last| schematic_content_equivalent(last, mirror))
-        {
+        // Reload on a change of the active *key* alone. The active asset is
+        // fetched over HTTP and is authoritative; we no longer compare inline
+        // `schematic.content` (the mirror is going away). Opening another stored
+        // schematic with byte-identical KDL still switches the active key, and
+        // the editor must follow it. A skybox-only config change keeps the same
+        // key, so this correctly skips a redundant document reload.
+        if last_synced_content.1.as_deref() == Some(active_key) {
             return;
         }
         open_document_from_active.write(OpenDocumentFromActiveRequest {
