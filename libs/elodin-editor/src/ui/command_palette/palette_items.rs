@@ -1140,7 +1140,12 @@ fn refresh_schematic_index(
                     cache.keys = keys;
                     cache.error = None;
                 }
-                Err(err) => cache.error = Some(err),
+                // Drop the now-unverified list so "Open Schematic…" surfaces the
+                // error instead of offering stale names that may no longer exist.
+                Err(err) => {
+                    cache.keys.clear();
+                    cache.error = Some(err);
+                }
             }
         }
         return;
