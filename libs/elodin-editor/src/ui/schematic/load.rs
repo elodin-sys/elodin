@@ -155,21 +155,63 @@ struct WindowDescriptors {
     windows: Vec<WindowDescriptor>,
 }
 
+/// True for window sub-schematics served by the DB Asset Server (`db:`) or a
+/// raw HTTP(S) URL, as opposed to a local filesystem path (RFD #724).
+fn is_remote_asset_path(path: &str) -> bool {
+    path.starts_with("db:") || path.starts_with("http://") || path.starts_with("https://")
+}
+
+/// Read a window sub-schematic's KDL. `db:`/HTTP references are fetched from the
+/// DB Asset Server (RFD #724); everything else is read from the local filesystem
+/// (offline `--kdl` dev). The fetch is bounded so an unreachable DB cannot hang
+/// the load.
+fn read_window_schematic_kdl(
+    path: &Path,
+    connection_addr: Option<std::net::SocketAddr>,
+) -> Result<String, String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "non-utf8 window path".to_string())?;
+    if !is_remote_asset_path(path_str) {
+        return std::fs::read_to_string(path).map_err(|err| err.to_string());
+    }
+
+    let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|err| format!("{url}: {err}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|err| format!("{url}: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    response.text().map_err(|err| format!("{url}: {err}"))
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
     theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
-    let mut resolved = PathBuf::from(path_str);
-
-    if resolved.is_relative() {
-        if let Some(base) = base_dir {
-            resolved = base.join(resolved);
-        } else if let Ok(cwd) = std::env::current_dir() {
-            resolved = cwd.join(resolved);
+    // Keep `db:`/HTTP references verbatim; only local paths are anchored to the
+    // schematic's directory. The remote ones are fetched over HTTP at spawn time.
+    let resolved = if is_remote_asset_path(path_str) {
+        PathBuf::from(path_str)
+    } else {
+        let mut resolved = PathBuf::from(path_str);
+        if resolved.is_relative() {
+            if let Some(base) = base_dir {
+                resolved = base.join(resolved);
+            } else if let Ok(cwd) = std::env::current_dir() {
+                resolved = cwd.join(resolved);
+            }
         }
-    }
+        resolved
+    };
 
     Some(WindowDescriptor {
         path: Some(resolved),
@@ -419,7 +461,8 @@ impl LoadSchematicParams<'_, '_> {
             }
 
             if let Some(path) = descriptor.path.clone() {
-                match std::fs::read_to_string(&path) {
+                let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+                match read_window_schematic_kdl(&path, connection_addr) {
                     Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
@@ -442,7 +485,7 @@ impl LoadSchematicParams<'_, '_> {
                     },
                     Err(err) => {
                         warn!(
-                            ?err,
+                            %err,
                             path = ?descriptor.path,
                             "Failed to read window schematic"
                         );
@@ -1520,6 +1563,37 @@ mod tests {
         );
 
         loaded
+    }
+
+    #[test]
+    fn remote_asset_paths_are_detected() {
+        use super::is_remote_asset_path;
+        assert!(is_remote_asset_path("db:schematics/window.kdl"));
+        assert!(is_remote_asset_path(
+            "http://127.0.0.1:2241/schematics/w.kdl"
+        ));
+        assert!(is_remote_asset_path("https://example.com/w.kdl"));
+        assert!(!is_remote_asset_path("schematics/window.kdl"));
+        assert!(!is_remote_asset_path("/abs/path/window.kdl"));
+    }
+
+    #[test]
+    fn read_window_schematic_kdl_reads_local_file() {
+        use super::read_window_schematic_kdl;
+        let dir = std::env::temp_dir().join(format!(
+            "elodin-window-kdl-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("window.kdl");
+        std::fs::write(&path, "viewport name=\"W\"\n").unwrap();
+
+        let kdl = read_window_schematic_kdl(&path, None).expect("read local window kdl");
+        assert!(kdl.contains("viewport"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

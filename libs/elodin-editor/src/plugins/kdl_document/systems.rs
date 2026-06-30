@@ -6,7 +6,10 @@ use std::path::PathBuf;
 
 use super::commands::*;
 use super::messages::*;
-use super::operations::{open_document_from_content, open_document_path, save_current_document};
+use super::operations::{
+    fetch_active_schematic_kdl, open_document_from_content, open_document_path,
+    save_current_document,
+};
 use super::types::*;
 
 fn cloned_current_document_asset(
@@ -65,6 +68,51 @@ pub(super) fn handle_open_document_from_content_requests(
             Err(error) => {
                 failed.write(DocumentCommandFailed {
                     title: "Invalid Schematic".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+}
+
+pub(super) fn handle_open_document_from_active_requests(
+    mut requests: MessageReader<OpenDocumentFromActiveRequest>,
+    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    mut current_document: ResMut<CurrentDocument>,
+    mut loaded: MessageWriter<DocumentLoaded>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    let addr = connection_addr.as_deref().map(|c| c.0);
+    for request in requests.read() {
+        let content = match fetch_active_schematic_kdl(&request.key, addr) {
+            Ok(content) => content,
+            Err(error) => match request.content_fallback.as_deref() {
+                Some(fallback) => {
+                    bevy::log::warn!(
+                        "Active schematic fetch failed ({error}); using content mirror fallback"
+                    );
+                    fallback.to_string()
+                }
+                None => {
+                    failed.write(DocumentCommandFailed {
+                        title: "Failed to Load Active Schematic".to_string(),
+                        message: error,
+                    });
+                    continue;
+                }
+            },
+        };
+        match open_document_from_content(&content, request.save_path.clone(), &mut current_document)
+        {
+            Ok(document) => {
+                loaded.write(DocumentLoaded {
+                    save_path: current_document.save_path.clone(),
+                    document,
+                });
+            }
+            Err(error) => {
+                failed.write(DocumentCommandFailed {
+                    title: "Invalid Active Schematic".to_string(),
                     message: error.to_string(),
                 });
             }

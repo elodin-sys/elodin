@@ -6,7 +6,9 @@ use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
 use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::{DbConfig, Schematic, SkyboxConfig};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::commands::*;
 use super::messages::*;
@@ -117,6 +119,27 @@ pub fn open_document_from_content(
     })
 }
 
+/// Fetch the active schematic's KDL from the DB Asset Server over HTTP. The
+/// request is bounded so an unreachable DB cannot hang the load.
+pub(crate) fn fetch_active_schematic_kdl(
+    key: &str,
+    connection_addr: Option<SocketAddr>,
+) -> Result<String, String> {
+    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), connection_addr);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|err| format!("{url}: {err}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|err| format!("{url}: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    response.text().map_err(|err| format!("{url}: {err}"))
+}
+
 pub fn save_current_document(
     path: Option<PathBuf>,
     root_kdl: &str,
@@ -215,12 +238,14 @@ pub(crate) fn schematic_content_equivalent(left: &str, right: &str) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     last_synced_content: Res<LastSyncedSchematicContent>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
+    mut open_document_from_active: MessageWriter<OpenDocumentFromActiveRequest>,
     mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
     mut cleared: MessageWriter<DocumentCleared>,
 ) {
@@ -228,10 +253,8 @@ pub fn sync_document_from_config(
         return;
     }
 
-    let has_content_fallback = config.schematic_content().is_some();
-    let path_was_overridden = given_path.is_some();
-
-    if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
+    // An explicit path override (user opened a specific file) wins outright.
+    if let Some(path) = given_path {
         let resolved_path = schematic_file(&path);
         if resolved_path.try_exists().unwrap_or(false) {
             if current_document_matches_path(&current_document, &resolved_path) {
@@ -240,8 +263,42 @@ pub fn sync_document_from_config(
             open_document.write(OpenDocumentRequest(path));
             return;
         }
+        // Overridden path is missing: fall through to the DB-backed sources.
+    }
 
-        if has_content_fallback && !path_was_overridden {
+    // DB-centric load (RFD #724): when the DB advertises an active schematic it
+    // is authoritative (its KDL is `db:`-rewritten), so it must take precedence
+    // over any stale local on-disk file that still carries local asset paths.
+    // The mirrored `schematic.content` doubles as the change guard (the shim
+    // keeps it equal to the active asset) and as the offline fallback.
+    if let Some(active_key) = config.schematic_active() {
+        if let Some(mirror) = config.schematic_content()
+            && last_synced_content
+                .0
+                .as_deref()
+                .is_some_and(|last| schematic_content_equivalent(last, mirror))
+        {
+            return;
+        }
+        open_document_from_active.write(OpenDocumentFromActiveRequest {
+            key: active_key.to_string(),
+            content_fallback: config.schematic_content().map(str::to_string),
+            save_path: config.schematic_path().map(Path::new).map(schematic_file),
+        });
+        return;
+    }
+
+    // No active schematic: fall back to the configured local path if present.
+    if let Some(path) = config.schematic_path().map(PathBuf::from) {
+        let resolved_path = schematic_file(&path);
+        if resolved_path.try_exists().unwrap_or(false) {
+            if current_document_matches_path(&current_document, &resolved_path) {
+                return;
+            }
+            open_document.write(OpenDocumentRequest(path));
+            return;
+        }
+        if config.schematic_content().is_some() {
             bevy::log::info!(
                 "Schematic file {:?} not found; using embedded schematic content fallback",
                 resolved_path.display()
