@@ -153,19 +153,13 @@ fn spawn_viewport_grids(mut commands: Commands) {
 fn viewport_grid_settings(
     frame: bevy_geo_frames::GeoFrame,
 ) -> bevy_infinite_grid::InfiniteGridSettings {
-    let (x_axis_color, z_axis_color) = if frame == bevy_geo_frames::GeoFrame::NED {
-        (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
-    } else {
-        (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
-    };
-
     match frame {
         GeoFrame::NED => 
             bevy_infinite_grid::InfiniteGridSettings {
                 minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
                 major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                x_axis_color: crate::ui::colors::bevy::GREEN,
-                z_axis_color: crate::ui::colors::bevy::RED,
+                x_axis_color: crate::ui::colors::bevy::RED,
+                z_axis_color: crate::ui::colors::bevy::GREEN,
                 fadeout_distance: 50_000.0,
                 scale: 0.1,
                 ..Default::default()
@@ -187,7 +181,7 @@ fn viewport_grid_settings(
                 x_axis_color: crate::ui::colors::bevy::RED,
                 z_axis_color: crate::ui::colors::bevy::GREEN,
                 fadeout_distance: 50_000_000.0,
-                scale: 1_000_000.0,
+                scale: 0.000_000_1,
                 ..Default::default()
             },
     }
