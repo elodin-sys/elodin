@@ -82,6 +82,10 @@ pub(crate) struct SchematicSaveInFlight {
     task: Option<Task<Result<(), String>>>,
     active_key: Option<String>,
     active_content: Option<String>,
+    /// The "Save As" name consumed for this save, restored to
+    /// `PendingSchematicSaveKey` if the upload fails so a retry still targets
+    /// the chosen name rather than the previous active schematic.
+    pending_key: Option<String>,
 }
 
 /// Cached listing of the DB's stored schematics (RFD #724). Refreshed off the
@@ -1039,9 +1043,11 @@ fn queue_save_schematic_db_now(
 ) {
     // A "Save As" supplies an explicit key; a plain "Save" overwrites whatever
     // schematic is currently active (falling back to the default main key on a
-    // fresh DB). Always consume the pending key so it can't leak into a later
-    // plain save.
-    let active_key = pending_key.0.take().unwrap_or_else(|| {
+    // fresh DB). Resolve the target without consuming the pending name yet: a
+    // rejected or disconnected save must keep it so a retry still targets the
+    // chosen name rather than silently writing to the previous active schematic.
+    let pending = pending_key.0.clone();
+    let active_key = pending.clone().unwrap_or_else(|| {
         config
             .schematic_active()
             .map(str::to_string)
@@ -1064,6 +1070,10 @@ fn queue_save_schematic_db_now(
         return;
     };
 
+    // Committed to uploading: consume the pending name now. `poll_schematic_save`
+    // restores it if the upload itself fails.
+    pending_key.0 = None;
+
     let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
     let windows = window_document_saves(&window_schematics);
     let plan = plan_db_save(&root, &windows, &active_key);
@@ -1073,6 +1083,7 @@ fn queue_save_schematic_db_now(
     // for an external change (which would reload over HTTP on the saving client).
     save_in_flight.active_content = plan.active_schematic_content();
     save_in_flight.active_key = Some(active_key);
+    save_in_flight.pending_key = pending;
     // Upload off the main thread; `poll_schematic_save` repoints `schematic.active`
     // only after every `PUT` is acknowledged, so the pointer never claims a save
     // that did not land.
@@ -1085,6 +1096,7 @@ fn queue_save_schematic_db_now(
 fn poll_schematic_save(
     mut save_in_flight: ResMut<SchematicSaveInFlight>,
     tx: Option<Res<PacketTx>>,
+    mut pending_key: ResMut<PendingSchematicSaveKey>,
     mut last_synced: ResMut<LastSyncedSchematicContent>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
@@ -1097,6 +1109,7 @@ fn poll_schematic_save(
     save_in_flight.task = None;
     let active_key = save_in_flight.active_key.take();
     let active_content = save_in_flight.active_content.take();
+    let pending = save_in_flight.pending_key.take();
 
     match result {
         Ok(()) => {
@@ -1116,6 +1129,11 @@ fn poll_schematic_save(
             }
         }
         Err(err) => {
+            // Restore the "Save As" name so the next save retries the chosen
+            // target instead of overwriting the previous active schematic.
+            if pending.is_some() {
+                pending_key.0 = pending;
+            }
             failed.write(DocumentCommandFailed {
                 title: "Failed to Save Schematic".to_string(),
                 message: err,
