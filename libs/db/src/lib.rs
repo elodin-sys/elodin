@@ -59,6 +59,8 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 pub mod append_log;
 mod arrow;
 #[cfg(feature = "axum")]
+pub mod assets;
+#[cfg(feature = "axum")]
 pub mod assets_http;
 #[cfg(feature = "axum")]
 pub mod axum;
@@ -357,15 +359,57 @@ impl DB {
 
     /// Apply a `SetDbConfig` patch and persist.
     ///
-    /// Returns whether schematic assets should be re-synced (`schematic.content` or
-    /// `skybox.active` in the patch).
+    /// Returns whether schematic assets should be re-synced (`schematic.active`,
+    /// `schematic.content`, or `skybox.active` in the patch).
     pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
-        let needs_asset_sync = update.metadata.contains_key("schematic.content")
+        let needs_asset_sync = update.metadata.contains_key("schematic.active")
+            || update.metadata.contains_key("schematic.content")
             || update.metadata.contains_key("skybox.active");
         if let Some(recording) = update.recording {
             self.with_state_mut(|s| s.db_config.recording = recording);
             self.recording_cell.set_playing(recording);
         }
+        let active_key = update
+            .metadata
+            .get("schematic.active")
+            .filter(|key| !key.is_empty())
+            .cloned();
+        let has_inline_content = update.metadata.contains_key("schematic.content");
+        // When the patch carries the schematic bytes alongside the active
+        // pointer, persist them as the active asset so the asset file, the HTTP
+        // server, and the mirrored `schematic.content` all agree from this
+        // single (atomic) message — rather than depending on a separate,
+        // droppable `StoreAsset` upload landing first.
+        let stored_active = match (&active_key, has_inline_content) {
+            (Some(key), true) => {
+                match self.store_asset(key, update.metadata["schematic.content"].as_bytes()) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        tracing::warn!(?err, key, "failed to store active schematic from config");
+                        false
+                    }
+                }
+            }
+            _ => false,
+        };
+        // Transition shim: mirror the stored active asset's (already
+        // `db:`-rewritten) bytes into the legacy `schematic.content` so consumers
+        // that still read it inline keep working until they fetch the active
+        // asset over HTTP. Only mirror when there is a consistent file to read:
+        // a pointer-only patch, or a store that just succeeded. On store
+        // failure we keep the patch's fresh inline content rather than clobber
+        // it with the stale on-disk bytes. Reads go through `read_asset_file`,
+        // which rejects `..`/absolute keys.
+        let should_mirror = active_key.is_some() && (!has_inline_content || stored_active);
+        let mirrored_content = match active_key.as_deref() {
+            Some(key) if should_mirror => {
+                let assets_dir = crate::assets_http::assets_dir(&self.path);
+                crate::assets_http::read_asset_file(&assets_dir, key)
+                    .ok()
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+            }
+            _ => None,
+        };
         self.with_state_mut(|s| {
             for (key, value) in update.metadata {
                 if value.is_empty() {
@@ -373,6 +417,9 @@ impl DB {
                 } else {
                     s.db_config.metadata.insert(key, value);
                 }
+            }
+            if let Some(content) = mirrored_content {
+                s.db_config.set_schematic_content(content);
             }
         });
         self.save_db_state()?;
@@ -384,9 +431,47 @@ impl DB {
     /// `key` is sanitized (rejects `..` and absolute paths) by
     /// `assets_http::write_asset_file`, so an out-of-tree key is refused rather
     /// than escaping the assets directory.
+    ///
+    /// A stored `.kdl` schematic has its local asset paths rewritten to `db:`
+    /// (same path as tree ingest), so uploads route their assets through the
+    /// Asset Server too. Unparsable or non-schematic `.kdl` is stored verbatim.
     pub fn store_asset(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
         let assets_dir = crate::assets_http::assets_dir(&self.path);
+        if key.ends_with(".kdl")
+            && let Ok(content) = std::str::from_utf8(bytes)
+            && let Some(rewritten) =
+                crate::assets::rewrite_schematic_kdl_to_db(&assets_dir, content)
+        {
+            return crate::assets_http::write_asset_file(&assets_dir, key, rewritten.as_bytes());
+        }
         crate::assets_http::write_asset_file(&assets_dir, key, bytes)
+    }
+
+    /// Point `schematic.active` at a stored schematic and mirror its (already
+    /// `db:`-rewritten) bytes into the legacy `schematic.content`.
+    ///
+    /// The mirror is a transition shim: consumers that still read inline
+    /// `schematic.content` keep working until they fetch the active asset over
+    /// HTTP, after which the mirror is removed. `key` must already be stored via
+    /// [`store_asset`](Self::store_asset).
+    pub fn set_active_schematic(&self, key: &str) -> Result<(), Error> {
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        let bytes = crate::assets_http::read_asset_file(&assets_dir, key)?;
+        let content = String::from_utf8(bytes)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+        self.with_state_mut(|s| {
+            s.db_config.set_schematic_active(key);
+            s.db_config.set_schematic_content(content);
+        });
+        self.save_db_state()
+    }
+
+    /// Set inline `schematic.content` and persist. Fallback for producers when
+    /// the active-asset path is unavailable, so consumers still receive the
+    /// schematic instead of seeing empty metadata.
+    pub fn set_schematic_content(&self, content: impl Into<String>) -> Result<(), Error> {
+        self.with_state_mut(|s| s.db_config.set_schematic_content(content.into()));
+        self.save_db_state()
     }
 
     pub fn flush_all(&self) -> Result<(), Error> {
@@ -3362,5 +3447,156 @@ mod tests {
         let err = db.store_asset("../escape.bin", b"x").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
         assert!(!dir.path().join("escape.bin").exists());
+    }
+
+    #[test]
+    fn store_asset_rewrites_kdl_to_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // The referenced asset must be present for the path to be rewritten.
+        db.store_asset("meshes/rocket.glb", b"glb").unwrap();
+        db.store_asset(
+            "schematics/main.kdl",
+            b"object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n",
+        )
+        .unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(
+            stored.contains("path=\"db:meshes/rocket.glb\""),
+            "expected db: rewrite, got:\n{stored}"
+        );
+    }
+
+    #[test]
+    fn store_asset_keeps_kdl_local_when_asset_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // No glb stored, so the path must NOT be rewritten (would 404).
+        db.store_asset(
+            "schematics/main.kdl",
+            b"object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n",
+        )
+        .unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(stored.contains("path=\"meshes/rocket.glb\""));
+        assert!(!stored.contains("db:meshes/rocket.glb"));
+    }
+
+    #[test]
+    fn store_asset_stores_unparsable_kdl_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        db.store_asset("schematics/broken.kdl", b"object_3d {\n")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir.join("schematics/broken.kdl")).unwrap(),
+            b"object_3d {\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn apply_set_db_config_mirrors_active_into_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+        let needs_sync = db
+            .apply_set_db_config(SetDbConfig {
+                metadata: [(
+                    "schematic.active".to_string(),
+                    "schematics/main.kdl".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(needs_sync);
+        db.with_state(|s| {
+            assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl"));
+            // Transition shim mirrors the stored (normalized) bytes into the
+            // legacy inline content for consumers that still read it.
+            assert_eq!(s.db_config.schematic_content(), Some("viewport"));
+        });
+    }
+
+    #[test]
+    fn apply_set_db_config_stores_active_from_inline_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // Referenced asset present so the inline schematic's path is rewritten.
+        db.store_asset("meshes/rocket.glb", b"glb").unwrap();
+
+        // A single atomic patch carries both the active pointer and the bytes.
+        db.apply_set_db_config(SetDbConfig {
+            metadata: [
+                (
+                    "schematic.active".to_string(),
+                    "schematics/main.kdl".to_string(),
+                ),
+                (
+                    "schematic.content".to_string(),
+                    "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n"
+                        .to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        // The bytes are persisted as the active asset (with db: rewrite) ...
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(
+            stored.contains("path=\"db:meshes/rocket.glb\""),
+            "expected stored active asset, got:\n{stored}"
+        );
+        // ... and the mirror reflects the stored (rewritten) file.
+        db.with_state(|s| {
+            assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl"));
+            assert_eq!(s.db_config.schematic_content(), Some(stored.as_str()));
+        });
+    }
+
+    #[test]
+    fn apply_set_db_config_keeps_inline_content_when_store_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // An out-of-tree active key makes `store_asset` (and the sanitized
+        // mirror read) fail, so the fresh inline content must survive rather
+        // than being clobbered by stale on-disk bytes.
+        let content = "viewport\n";
+        db.apply_set_db_config(SetDbConfig {
+            metadata: [
+                ("schematic.active".to_string(), "../escape.kdl".to_string()),
+                ("schematic.content".to_string(), content.to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        db.with_state(|s| {
+            assert_eq!(s.db_config.schematic_active(), Some("../escape.kdl"));
+            assert_eq!(s.db_config.schematic_content(), Some(content));
+        });
+        // Nothing escaped the assets root.
+        assert!(!dir.path().join("escape.kdl").exists());
     }
 }

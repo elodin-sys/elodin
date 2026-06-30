@@ -1,7 +1,8 @@
+use axum::Json;
 use axum::Router;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use miette::IntoDiagnostic;
 use std::collections::HashSet;
@@ -178,13 +179,40 @@ async fn sync_one_schematic_asset(
 
 /// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local `assets/` dir.
 pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
-    let (content, db_config) = db.with_state(|s| {
+    let (active_key, content, db_config) = db.with_state(|s| {
         (
+            s.db_config.schematic_active().map(str::to_owned),
             s.db_config.schematic_content().map(str::to_owned),
             s.db_config.clone(),
         )
     });
-    let Some(content) = content else {
+
+    // Fetch the active schematic file itself so this follower's asset server
+    // serves the same `schematics/main.kdl` the source advertises. Replication
+    // forwards the `schematic.active` pointer and the mirrored content, but not
+    // the asset file, so without this an editor following this DB could load a
+    // stale or missing active schematic over HTTP.
+    let mut fetched_active = None;
+    if let Some(key) = active_key.as_deref() {
+        let base = assets_http_base_url(source_tcp);
+        let assets_dir = assets_dir(&db.path);
+        if let Err(err) = std::fs::create_dir_all(&assets_dir) {
+            warn!(
+                ?err,
+                "failed to create assets dir for active schematic sync"
+            );
+        } else if let Ok(client) = sync_http_client()
+            && let Some(bytes) = sync_one_schematic_asset(&client, &base, &assets_dir, key).await
+        {
+            fetched_active = String::from_utf8(bytes).ok();
+        }
+    }
+
+    // Resolve `db:` dependencies (meshes, window sub-schematics, skybox) from
+    // the freshly-fetched active schematic when we have it — it is the source of
+    // truth. The inline `schematic.content` mirror is only a fallback: it may be
+    // absent or lag the active file, which would skip referenced assets.
+    let Some(content) = fetched_active.or(content) else {
         return;
     };
     if let Err(err) =
@@ -269,6 +297,12 @@ pub fn sanitize_asset_path(path: &str) -> Result<PathBuf, SanitizeError> {
 }
 
 pub fn write_asset_file(assets_dir: &Path, name: &str, data: &[u8]) -> io::Result<()> {
+    if is_reserved_asset_key(name) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "reserved asset key",
+        ));
+    }
     let rel = sanitize_asset_path(name)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset path"))?;
     std::fs::create_dir_all(assets_dir)?;
@@ -288,27 +322,71 @@ pub fn read_asset_file(assets_dir: &Path, name: &str) -> io::Result<Vec<u8>> {
     std::fs::read(assets_dir.join(rel))
 }
 
+/// Reserved key prefix for the asset index listing (network replacement for a
+/// filesystem `read_dir`): `GET /__index__` or `GET /__index__/<prefix>`.
+pub(crate) const INDEX_KEY: &str = "__index__";
+
+/// Keys reserved by the DB asset layer that must never be stored as real
+/// assets. Storing them would be unservable: the index namespace (`__index__`,
+/// `__index__/…`) is shadowed by the listing route, and the ingest marker
+/// (`.elodin-ingested`) would forge the copy-once guard. Enforced at every write
+/// path (uploads, skybox sync, ingest) and skipped when copying a source tree.
+pub(crate) fn is_reserved_asset_key(key: &str) -> bool {
+    key == crate::assets::INGEST_MARKER
+        || key == INDEX_KEY
+        || key
+            .strip_prefix(INDEX_KEY)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 async fn get_asset(
     AxumPath(path): AxumPath<String>,
     State(state): State<Arc<AssetsState>>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let rel = sanitize_asset_path(&path).map_err(|_| StatusCode::BAD_REQUEST)?;
+) -> Response {
+    if path == INDEX_KEY || path == "__index__/" {
+        return index_response(state.assets_dir.clone(), None).await;
+    }
+    if let Some(prefix) = path.strip_prefix("__index__/") {
+        return index_response(state.assets_dir.clone(), Some(prefix.to_string())).await;
+    }
+
+    let Ok(rel) = sanitize_asset_path(&path) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
     let full = state.assets_dir.join(rel);
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
-        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Ok(bytes)) => bytes.into_response(),
         Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
             // A 404 is a routine client outcome (e.g. a mirror polling for an
             // asset still being uploaded), not a server fault — log at info.
             tracing::info!(asset = %path, "asset http 404 (not found)");
-            Err(StatusCode::NOT_FOUND)
+            StatusCode::NOT_FOUND.into_response()
         }
         Ok(Err(err)) => {
             tracing::error!(asset = %path, ?err, "asset http 500 (read error)");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
         Err(err) => {
             tracing::error!(asset = %path, ?err, "asset http 500 (read task failed)");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn index_response(assets_dir: PathBuf, prefix: Option<String>) -> Response {
+    let walk = tokio::task::spawn_blocking(move || {
+        crate::assets::index_assets_in(&assets_dir, prefix.as_deref())
+    })
+    .await;
+    match walk {
+        Ok(Ok(entries)) => Json(entries).into_response(),
+        Ok(Err(err)) => {
+            tracing::error!(?err, "asset index 500 (walk error)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Err(err) => {
+            tracing::error!(?err, "asset index 500 (walk task failed)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }
@@ -867,6 +945,73 @@ viewport "main" { }
             std::fs::read(assets_dir(&follower_db).join("skyboxes/alpine.cubemap.ktx2")).unwrap(),
             b"alpine".to_vec()
         );
+    }
+
+    #[tokio::test]
+    async fn index_endpoint_lists_assets_and_filters_prefix() {
+        use crate::assets::AssetEntry;
+
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        write_asset_file(&assets, "meshes/rocket.glb", b"glb").unwrap();
+        write_asset_file(&assets, "schematics/main.kdl", b"kdl").unwrap();
+        // The marker is a reserved key; create it directly to exercise the
+        // index's dotfile exclusion without going through `write_asset_file`.
+        std::fs::write(assets.join(".elodin-ingested"), b"{}").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let state = Arc::new(AssetsState {
+            assets_dir: assets.clone(),
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let client = reqwest::Client::new();
+        let all_bytes = client
+            .get(format!("http://{bound}/__index__"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        let all: Vec<AssetEntry> = serde_json::from_slice(&all_bytes).unwrap();
+        let keys: Vec<_> = all.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["meshes/rocket.glb", "schematics/main.kdl"]);
+
+        let schematics_bytes = client
+            .get(format!("http://{bound}/__index__/schematics/"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        let schematics: Vec<AssetEntry> = serde_json::from_slice(&schematics_bytes).unwrap();
+        assert_eq!(schematics.len(), 1);
+        assert_eq!(schematics[0].key, "schematics/main.kdl");
+    }
+
+    #[test]
+    fn write_asset_file_rejects_reserved_keys() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+
+        for key in ["__index__", "__index__/foo", ".elodin-ingested"] {
+            let err = write_asset_file(&assets, key, b"x").unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "key {key} allowed");
+            assert!(!assets.join(key).exists(), "key {key} was written");
+        }
+
+        // Names that merely share the prefix are normal assets.
+        write_asset_file(&assets, "__index__notreserved.glb", b"x").unwrap();
+        assert!(assets.join("__index__notreserved.glb").is_file());
     }
 
     #[tokio::test]
