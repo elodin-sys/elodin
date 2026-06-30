@@ -605,6 +605,59 @@ mod tests {
     }
 
     #[test]
+    fn config_sync_reloads_on_active_key_change_without_inline_content() {
+        // Phase 3.5: the reload trigger is keyed on `schematic.active` alone, so
+        // a key change fires an active fetch even when no inline
+        // `schematic.content` mirror is present.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromContentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/a.kdl".to_string()],
+            "an active key with no inline content must still fetch over HTTP"
+        );
+
+        // Mark it synced (as `on_document_loaded` would) and switch keys.
+        app.world_mut()
+            .resource_mut::<LastSyncedSchematicContent>()
+            .1 = Some("schematics/a.kdl".to_string());
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/b.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec![
+                "schematics/a.kdl".to_string(),
+                "schematics/b.kdl".to_string()
+            ],
+            "changing the active key must reload even without inline content"
+        );
+    }
+
+    #[test]
     fn schematic_content_equivalent_treats_reserialized_kdl_as_equal() {
         use impeller2_kdl::{FromKdl, ToKdl};
         use impeller2_wkt::Schematic;
