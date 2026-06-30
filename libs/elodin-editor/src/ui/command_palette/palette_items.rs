@@ -1049,6 +1049,7 @@ fn queue_save_schematic_db_now(
     if let Some(content) = plan.active_schematic_content() {
         last_synced.0 = Some(content);
     }
+    last_synced.1 = Some(active_key.clone());
 
     tx.send_msg(SetDbConfig {
         metadata: [("schematic.active".to_string(), active_key)]

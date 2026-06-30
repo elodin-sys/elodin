@@ -534,6 +534,71 @@ mod tests {
         );
     }
 
+    #[derive(Resource, Default)]
+    struct SeenActiveRequests(Vec<String>);
+
+    fn collect_active_requests(
+        mut reader: MessageReader<OpenDocumentFromActiveRequest>,
+        mut seen: ResMut<SeenActiveRequests>,
+    ) {
+        seen.0
+            .extend(reader.read().map(|request| request.key.clone()));
+    }
+
+    #[test]
+    fn config_sync_reloads_when_active_key_changes_with_equal_content() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromContentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        let content = "skybox name=\"seaport\"\n";
+
+        // Schematic A is already loaded and synced.
+        {
+            let mut cfg = app.world_mut().resource_mut::<DbConfig>();
+            cfg.set_schematic_active("schematics/a.kdl");
+            cfg.set_schematic_content(content.to_string());
+        }
+        {
+            let mut last = app.world_mut().resource_mut::<LastSyncedSchematicContent>();
+            last.0 = Some(content.to_string());
+            last.1 = Some("schematics/a.kdl".to_string());
+        }
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "same active key with equivalent content must not reload"
+        );
+
+        // Switch to schematic B that happens to have byte-identical content.
+        {
+            let mut cfg = app.world_mut().resource_mut::<DbConfig>();
+            cfg.set_schematic_active("schematics/b.kdl");
+            cfg.set_schematic_content(content.to_string());
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/b.kdl".to_string()],
+            "changing the active key must reload even when the KDL is identical"
+        );
+    }
+
     #[test]
     fn schematic_content_equivalent_treats_reserialized_kdl_as_equal() {
         use impeller2_kdl::{FromKdl, ToKdl};
