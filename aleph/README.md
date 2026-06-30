@@ -140,7 +140,7 @@ This method installs a minimal base NixOS image on Aleph, returning the device t
 
 1. Compile the SD Image from source using Nix:
    ```bash
-   nix build --accept-flake-config .#packages.aarch64-linux.sdimage
+   nix build --accept-flake-config .#packages.aarch64-linux.ram-installer
    ```
 
 2. Flash the image to a USB drive.
@@ -156,7 +156,7 @@ This method installs a minimal base NixOS image on Aleph, returning the device t
     - Write the image to the USB drive:
       ```bash
       # Replace /dev/sdX with your actual device name
-      sudo dd if=aleph-os.img of=/dev/sdX bs=4M status=progress oflag=sync
+      sudo dd if=result/sd-image/nixos-image-*-aarch64-linux.img of=/dev/sdX bs=4M status=progress oflag=sync
       ```
     - Safely umount and remove the USB drive.
 

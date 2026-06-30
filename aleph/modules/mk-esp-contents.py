@@ -109,6 +109,7 @@ def copy_nixos(esp: str, kernel: str, initrd: str, dtb: str | None = None) -> No
 def write_loader_entry(
     esp: str,
     boot: BootSpec,
+    initrd: str,
     kernel_params: list[str],
     machine_id: str | None,
     random_seed: str | None,
@@ -116,7 +117,7 @@ def write_loader_entry(
 ) -> None:
     entry = BOOT_ENTRY.format(
         kernel=make_efi_name(boot["kernel"]),
-        initrd=make_efi_name(boot["initrd"]),
+        initrd=make_efi_name(initrd),
         init=boot["init"],
         kernel_params=" ".join(kernel_params),
         description=boot["label"],
@@ -155,6 +156,7 @@ def create_esp_contents(
     machine_id: str | None,
     random_seed: str | None,
     device_tree: str | None,
+    initrd: str | None,
 ) -> None:
     mkdir_p(output)
     boot = read_bootspec_file(toplevel)
@@ -167,29 +169,38 @@ def create_esp_contents(
     loader = os.path.join(toplevel, "systemd/lib/systemd/boot/efi", loader)
     ensure_file(loader)
     copy_loader(loader, output, target_loader_filename)
-    copy_nixos(output, boot["kernel"], boot["initrd"], device_tree)
+    # Allow overriding the initrd (e.g. a store-in-initrd ramdisk for a RAM
+    # installer) instead of the one referenced by the toplevel's bootspec.
+    selected_initrd = initrd if initrd else boot["initrd"]
+    copy_nixos(output, boot["kernel"], selected_initrd, device_tree)
     kernel_params = boot["kernelParams"]
     init = boot["init"]
     kernel_params.insert(0, f"init={init}")
     write_loader_entry(
-        output, boot, kernel_params, machine_id, random_seed, device_tree
+        output, boot, selected_initrd, kernel_params, machine_id, random_seed, device_tree
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate contents of ESP partition")
-    parser.add_argument(
-        "--toplevel", help="NixOS toplevel directory, contains boot.json"
-    )
+    parser.add_argument("--toplevel", help="NixOS toplevel directory, contains boot.json")
     parser.add_argument("--output", help="Output directory")
     parser.add_argument("--device-tree", default=None, help="Device tree file")
     parser.add_argument("--random-seed", default=None, help="Random seed file")
+    parser.add_argument("--machine-id", default=None, help="Machine id to add to loader's entry")
     parser.add_argument(
-        "--machine-id", default=None, help="Machine id to add to loader's entry"
+        "--initrd",
+        default=None,
+        help="Override the initrd to boot (defaults to the toplevel bootspec initrd)",
     )
     args = parser.parse_args()
     create_esp_contents(
-        args.toplevel, args.output, args.machine_id, args.random_seed, args.device_tree
+        args.toplevel,
+        args.output,
+        args.machine_id,
+        args.random_seed,
+        args.device_tree,
+        args.initrd,
     )
 
 
