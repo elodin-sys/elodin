@@ -3618,7 +3618,23 @@ mod tests {
             .unwrap();
         db.set_active_schematic("schematics/main.kdl").unwrap();
 
-        assert_eq!(db.read_active_schematic().as_deref(), Some("viewport"));
+        // `read_active_schematic` returns the full stored asset bytes as UTF-8,
+        // not a parsed token. `store_asset` may re-serialize a `.kdl` (path
+        // rewrite / normalization), so compare against what actually landed on
+        // disk rather than the raw input bytes.
+        let stored = String::from_utf8(
+            crate::assets_http::read_asset_file(
+                &crate::assets_http::assets_dir(&db.path),
+                "schematics/main.kdl",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            stored.contains("viewport"),
+            "stored active schematic should carry the full KDL body, got {stored:?}"
+        );
+        assert_eq!(db.read_active_schematic(), Some(stored));
     }
 
     #[test]
