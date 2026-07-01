@@ -414,6 +414,7 @@ pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     last_synced_key: Res<LastSyncedActiveKey>,
+    mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut pending_active: ResMut<PendingActiveSchematic>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
@@ -450,8 +451,35 @@ pub fn sync_document_from_config(
             }
         }
 
+        // Same active key: the pointer didn't move, but the bytes at that key
+        // may have been replaced by another client's write (a headless save or
+        // a raw `PUT`). Reload only when the observed `assets.revision` changed,
+        // so unrelated `DbConfig` churn doesn't trigger spurious reloads
+        // (RFD #724, Bug 1).
         if last_synced_key.0.as_deref() == Some(active_key) {
-            return;
+            let current_revision = config.assets_revision();
+            let mut should_reload = false;
+            if let Some(revision) = last_synced_revision.as_deref_mut() {
+                match revision.revision {
+                    // Key already synced but no revision baseline recorded yet:
+                    // adopt the current one without reloading.
+                    None => revision.revision = Some(current_revision),
+                    Some(prev) if prev != current_revision => {
+                        if revision.suppress_next {
+                            // Our own save bumped the revision; adopt the new
+                            // baseline rather than reloading bytes we just wrote.
+                            revision.suppress_next = false;
+                            revision.revision = Some(current_revision);
+                        } else {
+                            should_reload = true;
+                        }
+                    }
+                    Some(_) => {}
+                }
+            }
+            if !should_reload {
+                return;
+            }
         }
         open_document_from_active.write(OpenDocumentFromActiveRequest {
             key: active_key.to_string(),

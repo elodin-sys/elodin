@@ -243,6 +243,9 @@ pub struct DB {
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: AtomicCell<Timestamp>,
+    /// Bumped whenever `db_config` changes (metadata patch or asset write), so
+    /// subscribers can be woken to re-read the config without polling (RFD #724).
+    pub db_config_gen: AtomicCell<u64>,
     // Wall-clock timestamp at the moment the DB start anchor was set.
     db_start_wall_clock: AtomicCell<Timestamp>,
     /// When true, last_updated advances with playback position instead of
@@ -319,6 +322,7 @@ impl DB {
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
+            db_config_gen: AtomicCell::new(0),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
@@ -364,8 +368,12 @@ impl DB {
     /// as an asset via [`store_asset`](Self::store_asset) (RFD #724), so a patch
     /// only repoints `schematic.active`; this never carries inline content.
     pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
+        // A follower must re-mirror when the pointer moves (`schematic.active`,
+        // `skybox.active`) *or* when asset bytes change under an unchanged
+        // pointer — the latter arrives as an `assets.revision` bump (RFD #724).
         let needs_asset_sync = update.metadata.contains_key("schematic.active")
-            || update.metadata.contains_key("skybox.active");
+            || update.metadata.contains_key("skybox.active")
+            || update.metadata.contains_key(DbConfig::ASSETS_REVISION_KEY);
         if let Some(recording) = update.recording {
             self.with_state_mut(|s| s.db_config.recording = recording);
             self.recording_cell.set_playing(recording);
@@ -384,7 +392,18 @@ impl DB {
             }
         });
         self.save_db_state()?;
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
         Ok(needs_asset_sync)
+    }
+
+    /// Bump `assets.revision` and persist, waking config subscribers. Called on
+    /// every asset write (HTTP `PUT`, `StoreAsset`) so consumers reload/re-mirror
+    /// when bytes change without the `schematic.active` pointer moving.
+    pub fn bump_assets_revision(&self) -> Result<(), Error> {
+        self.with_state_mut(|s| s.db_config.bump_assets_revision());
+        self.save_db_state()?;
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     /// Read the active schematic's KDL from its asset file under `{db}/assets/`,
@@ -413,9 +432,17 @@ impl DB {
             && let Some(rewritten) =
                 crate::assets::rewrite_schematic_kdl_to_db(&assets_dir, content)
         {
-            return crate::assets_http::write_asset_file(&assets_dir, key, rewritten.as_bytes());
+            crate::assets_http::write_asset_file(&assets_dir, key, rewritten.as_bytes())?;
+        } else {
+            crate::assets_http::write_asset_file(&assets_dir, key, bytes)?;
         }
-        crate::assets_http::write_asset_file(&assets_dir, key, bytes)
+        // Bytes changed: bump the revision so followers re-mirror and editors
+        // reload even if `schematic.active` is unchanged. A persistence hiccup
+        // must not fail the (already written) asset, so log rather than error.
+        if let Err(err) = self.bump_assets_revision() {
+            tracing::warn!(asset = %key, ?err, "failed to bump asset revision after store");
+        }
+        Ok(())
     }
 
     /// Point `schematic.active` at a stored schematic asset and persist.
@@ -698,6 +725,7 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
+            db_config_gen: AtomicCell::new(0),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
@@ -2037,8 +2065,25 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let mut tx = tx.clone();
             let db = db.clone();
             stellarator::spawn(async move {
+                let mut last_config_gen = db.db_config_gen.latest();
                 loop {
                     let last_updated = db.last_updated.latest();
+                    // Push a fresh DbConfig whenever it changed (metadata patch
+                    // or asset write) so passive clients reload/re-mirror without
+                    // polling — asset bytes can change under an unchanged
+                    // `schematic.active` (RFD #724).
+                    let config_gen = db.db_config_gen.latest();
+                    if config_gen != last_config_gen {
+                        last_config_gen = config_gen;
+                        match tx.send_msg(&db.db_config()).await {
+                            Err(err) if err.is_stream_closed() => return,
+                            Err(err) => {
+                                warn!(?err, "failed to send db config");
+                                return;
+                            }
+                            _ => (),
+                        }
+                    }
                     {
                         match tx.send_msg(&LastUpdated(last_updated)).await {
                             Err(err) if err.is_stream_closed() => return,
@@ -2050,8 +2095,14 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         }
                     }
                     // Wake on any change (not only increase) so rolling windows
-                    // track correctly.
-                    db.last_updated.wait_for(|time| time != last_updated).await;
+                    // track correctly, or on a config change so the push above
+                    // fires without waiting for the next data tick.
+                    let last_seen_gen = last_config_gen;
+                    futures_lite::future::race(
+                        db.last_updated.wait_for(|time| time != last_updated),
+                        db.db_config_gen.wait_for(move |cur| cur != last_seen_gen),
+                    )
+                    .await;
                 }
             });
         }
@@ -3502,6 +3553,43 @@ mod tests {
 
         assert!(needs_sync);
         db.with_state(|s| assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl")));
+    }
+
+    #[test]
+    fn store_asset_bumps_revision_and_config_gen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        let gen0 = db.db_config_gen.latest();
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 0);
+
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+
+        // A byte write bumps the revision and wakes config subscribers so
+        // followers re-mirror / editors reload without a pointer move (Bug 1/2).
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 1);
+        assert!(db.db_config_gen.latest() > gen0);
+    }
+
+    #[test]
+    fn apply_set_db_config_requests_sync_on_revision_bump_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // A follower receives a bare `assets.revision` bump (a source PUT with no
+        // pointer move) and must still re-mirror its asset tree (Bug 2).
+        let needs_sync = db
+            .apply_set_db_config(SetDbConfig {
+                metadata: [(DbConfig::ASSETS_REVISION_KEY.to_string(), "7".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(needs_sync);
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 7);
     }
 
     #[test]

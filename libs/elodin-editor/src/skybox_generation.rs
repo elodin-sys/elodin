@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
-    PendingActiveSchematic, SchematicDocumentAsset, sync_document_skybox,
+    LastSyncedAssetsRevision, PendingActiveSchematic, SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
@@ -182,6 +182,7 @@ pub(crate) fn on_document_loaded(
     config: Res<DbConfig>,
     mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
     mut last_synced_key: ResMut<LastSyncedActiveKey>,
+    mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut caches: Query<&mut crate::ui::video_stream::VideoFrameCache>,
     tx: Option<Res<PacketTx>>,
 ) {
@@ -222,15 +223,26 @@ pub(crate) fn on_document_loaded(
     }
 
     last_synced_key.0 = config.schematic_active().map(str::to_string);
+    // Record the revision we just loaded so config sync only reloads on a later
+    // byte change at this key (RFD #724, Bug 1).
+    if let Some(revision) = last_synced_revision.as_deref_mut() {
+        revision.revision = Some(config.assets_revision());
+        revision.suppress_next = false;
+    }
 }
 
 pub(crate) fn record_reloaded_schematic_key(
     mut reloaded: MessageReader<DocumentReloaded>,
     config: Res<DbConfig>,
     mut last_synced_key: ResMut<LastSyncedActiveKey>,
+    mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
 ) {
     if reloaded.read().last().is_some() {
         last_synced_key.0 = config.schematic_active().map(str::to_string);
+        if let Some(revision) = last_synced_revision.as_deref_mut() {
+            revision.revision = Some(config.assets_revision());
+            revision.suppress_next = false;
+        }
     }
 }
 

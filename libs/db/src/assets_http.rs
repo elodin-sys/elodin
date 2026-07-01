@@ -62,6 +62,10 @@ struct AssetsState {
     /// When false (e.g. on a follower replica), `PUT` uploads are rejected so
     /// the read-only mirror cannot diverge from its source.
     writable: bool,
+    /// DB handle used to bump `assets.revision` on a successful `PUT`, so
+    /// followers re-mirror and editors reload after a byte-only change (RFD
+    /// #724). `None` when the server runs without a co-located DB.
+    db: Option<Arc<DB>>,
 }
 
 /// Upper bound on a single `PUT` asset upload. Generous enough for large GLB
@@ -433,7 +437,21 @@ async fn put_asset(
     }
     let assets_dir = state.assets_dir.clone();
     let name = path.clone();
-    match tokio::task::spawn_blocking(move || write_asset_file(&assets_dir, &name, &body)).await {
+    let db = state.db.clone();
+    match tokio::task::spawn_blocking(move || {
+        write_asset_file(&assets_dir, &name, &body)?;
+        // Bytes changed: bump the revision so followers re-mirror and editors
+        // reload even under an unchanged `schematic.active`. A persistence
+        // hiccup must not fail the (already written) upload — log and move on.
+        if let Some(db) = db
+            && let Err(err) = db.bump_assets_revision()
+        {
+            tracing::warn!(?err, "failed to bump asset revision after PUT");
+        }
+        Ok::<(), io::Error>(())
+    })
+    .await
+    {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(Err(err)) if err.kind() == io::ErrorKind::InvalidInput => {
             // Reserved key or path escaping the assets root: a client fault.
@@ -474,10 +492,12 @@ async fn serve_assets_with_listener(
     addr: SocketAddr,
     assets_dir: PathBuf,
     writable: bool,
+    db: Option<Arc<DB>>,
 ) -> miette::Result<()> {
     let state = Arc::new(AssetsState {
         assets_dir,
         writable,
+        db,
     });
     let app = Router::new()
         .route("/{*path}", get(get_asset).put(put_asset))
@@ -497,10 +517,15 @@ pub async fn serve_assets(
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .into_diagnostic()?;
-    serve_assets_with_listener(listener, addr, assets_dir, writable).await
+    serve_assets_with_listener(listener, addr, assets_dir, writable, None).await
 }
 
-pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr, writable: bool) -> io::Result<()> {
+pub fn spawn_assets_http(
+    db_path: &Path,
+    tcp_addr: SocketAddr,
+    writable: bool,
+    db: Option<Arc<DB>>,
+) -> io::Result<()> {
     let addr = assets_http_addr(tcp_addr);
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
@@ -512,7 +537,7 @@ pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr, writable: bool) -
             Ok(listener) => {
                 if ready_tx.send(Ok(())).is_ok()
                     && let Err(err) =
-                        serve_assets_with_listener(listener, addr, assets_dir, writable).await
+                        serve_assets_with_listener(listener, addr, assets_dir, writable, db).await
                 {
                     tracing::error!(?err, "assets http server failed");
                 }
@@ -584,7 +609,7 @@ mod tests {
         let assets_addr = assets_http_addr(bound);
         let _conflict = std::net::TcpListener::bind(assets_addr).unwrap();
 
-        let err = spawn_assets_http(dir.path(), bound, true).unwrap_err();
+        let err = spawn_assets_http(dir.path(), bound, true, None).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
     }
 
@@ -598,7 +623,7 @@ mod tests {
         let bound = listener.local_addr().unwrap();
         drop(listener);
 
-        spawn_assets_http(dir.path(), bound, true).unwrap();
+        spawn_assets_http(dir.path(), bound, true, None).unwrap();
 
         let assets_addr = assets_http_addr(bound);
         let response = reqwest::Client::new()
@@ -621,6 +646,7 @@ mod tests {
         let state = Arc::new(AssetsState {
             assets_dir: assets.clone(),
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -656,6 +682,7 @@ mod tests {
         let state = Arc::new(AssetsState {
             assets_dir: assets,
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -683,6 +710,7 @@ mod tests {
         let state = Arc::new(AssetsState {
             assets_dir,
             writable,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset).put(put_asset))
@@ -805,6 +833,7 @@ mod tests {
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -898,6 +927,7 @@ object_3d "rocket.world_pos" {
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -992,6 +1022,7 @@ object_3d "rocket.world_pos" {
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1090,6 +1121,7 @@ object_3d "rocket.world_pos" {
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1135,6 +1167,7 @@ viewport "main" { }
         let state = Arc::new(AssetsState {
             assets_dir: assets.clone(),
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1203,6 +1236,7 @@ viewport "main" { }
         let state = Arc::new(AssetsState {
             assets_dir: source_assets,
             writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))

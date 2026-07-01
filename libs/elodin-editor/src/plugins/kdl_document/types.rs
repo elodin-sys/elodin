@@ -15,6 +15,19 @@ pub struct InitialKdlPath(pub Option<PathBuf>);
 #[derive(Resource, Default)]
 pub struct LastSyncedActiveKey(pub Option<String>);
 
+/// Asset revision (`assets.revision`) observed at the last active-schematic
+/// (re)load. Lets config sync reload when the bytes at an *unchanged*
+/// `schematic.active` key were replaced by another client (RFD #724, Bug 1).
+#[derive(Resource, Default)]
+pub struct LastSyncedAssetsRevision {
+    /// Revision current when the active schematic was last loaded.
+    pub revision: Option<u64>,
+    /// Adopt the next revision change as a new baseline without reloading —
+    /// set after a *local* save so the editor doesn't reload bytes it just
+    /// wrote (its own write bumps the revision too).
+    pub suppress_next: bool,
+}
+
 /// Active-schematic key the editor has optimistically switched to (via "Save
 /// As…" or "Open Schematic…") but the DB has not yet echoed. While set and not
 /// yet matched by `DbConfig.schematic_active`, config sync ignores the stale
