@@ -101,6 +101,8 @@ pub enum SyncAssetsError {
     IndexStatus(reqwest::StatusCode),
     #[error("failed to fetch asset index from source")]
     IndexFetch(#[from] reqwest::Error),
+    #[error("follower asset mirror incomplete: {failed} of {total} assets failed")]
+    PartialMirror { failed: usize, total: usize },
     #[error("IO error")]
     Io(#[from] io::Error),
 }
@@ -241,7 +243,37 @@ async fn mirror_asset_from_source(
         .is_ok()
 }
 
+/// Delete local assets whose keys the source no longer advertises, so a follower
+/// stops serving files removed upstream. Best-effort: individual prune failures
+/// are logged, not fatal. `index_assets_in` already excludes dotfiles (e.g. the
+/// ingest marker); reserved keys are skipped defensively.
+fn prune_stale_local_assets(assets_dir: &Path, source_keys: &HashSet<String>) {
+    let local = match crate::assets::index_assets_in(assets_dir, None) {
+        Ok(local) => local,
+        Err(err) => {
+            warn!(?err, "failed to list local assets for follower prune");
+            return;
+        }
+    };
+    for entry in local {
+        if source_keys.contains(&entry.key) || is_reserved_asset_key(&entry.key) {
+            continue;
+        }
+        match remove_asset_file(assets_dir, &entry.key) {
+            Ok(()) => {
+                tracing::info!(asset = %entry.key, "pruned stale local asset removed upstream")
+            }
+            Err(err) => warn!(asset = %entry.key, ?err, "failed to prune stale local asset"),
+        }
+    }
+}
+
 /// Mirrors the source DB's full asset tree into `db_path/assets/` via `GET /__index__`.
+///
+/// Assets absent from the source index are pruned locally so the follower never
+/// serves files deleted upstream. Returns [`SyncAssetsError::PartialMirror`] when
+/// any advertised asset failed to download, so callers don't treat an incomplete
+/// tree as a completed sync.
 pub async fn sync_all_assets_from_source(
     source_tcp: SocketAddr,
     db_path: &Path,
@@ -252,23 +284,34 @@ pub async fn sync_all_assets_from_source(
     let client = sync_http_client().map_err(io::Error::other)?;
 
     let entries = fetch_source_index(&client, &base).await?;
+    // Remember every key the source advertises so stale local files can be
+    // pruned once the mirror pass completes.
+    let mut source_keys = HashSet::new();
     let mut synced = 0usize;
     let mut failed = 0usize;
     for entry in entries {
         if is_reserved_asset_key(&entry.key) {
             continue;
         }
+        source_keys.insert(entry.key.clone());
         if mirror_asset_from_source(&client, &base, &assets_dir, &entry.key).await {
             synced += 1;
         } else {
             failed += 1;
         }
     }
+
+    prune_stale_local_assets(&assets_dir, &source_keys);
+
     if failed > 0 {
         warn!(
             synced,
             failed, "follower asset mirror finished with missing assets"
         );
+        return Err(SyncAssetsError::PartialMirror {
+            failed,
+            total: synced + failed,
+        });
     }
 
     Ok(())
@@ -369,6 +412,17 @@ pub fn read_asset_file(assets_dir: &Path, name: &str) -> io::Result<Vec<u8>> {
     let rel = sanitize_asset_path(name)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset path"))?;
     std::fs::read(assets_dir.join(rel))
+}
+
+/// Remove a stored asset by key. Sanitized like the read/write paths so a key
+/// can never escape the assets root. A missing file is treated as already gone.
+pub fn remove_asset_file(assets_dir: &Path, name: &str) -> io::Result<()> {
+    let rel = sanitize_asset_path(name)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset path"))?;
+    match std::fs::remove_file(assets_dir.join(rel)) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
 }
 
 /// Reserved key prefix for the asset index listing (network replacement for a
@@ -1263,6 +1317,76 @@ viewport "main" { }
         assert_eq!(
             follower_db.read_active_schematic().as_deref(),
             Some(active_kdl)
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_prunes_assets_removed_from_source() {
+        let dir = tempdir().unwrap();
+        let source_assets = dir.path().join("source_assets");
+        write_asset_file(&source_assets, "models/keep.glb", b"keep").unwrap();
+        let bound = spawn_test_asset_server(source_assets, false).await;
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+
+        // Follower already holds a stale asset the source no longer lists.
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+        write_asset_file(&follower_assets, "models/stale.glb", b"stale").unwrap();
+
+        sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(follower_assets.join("models/keep.glb")).unwrap(),
+            b"keep"
+        );
+        assert!(
+            !follower_assets.join("models/stale.glb").exists(),
+            "asset removed upstream must be pruned locally (Bug 1)"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_errors_on_partial_fetch() {
+        // Source advertises a key in its index but 404s the actual GET, so the
+        // mirror completes with a missing asset and must report failure (Bug 2).
+        async fn index() -> Response {
+            Json(vec![crate::assets::AssetEntry {
+                key: "models/rocket.glb".to_string(),
+                size: 3,
+            }])
+            .into_response()
+        }
+        async fn missing() -> Response {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        let app = Router::new()
+            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route("/{*path}", get(missing));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let err = sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                SyncAssetsError::PartialMirror {
+                    failed: 1,
+                    total: 1
+                }
+            ),
+            "expected PartialMirror, got {err:?}"
         );
     }
 }
