@@ -1330,7 +1330,9 @@ fn open_schematic_item(key: String) -> PaletteItem {
         move |_: In<String>,
               tx: Res<PacketTx>,
               config: Res<DbConfig>,
-              mut pending_active: ResMut<PendingActiveSchematic>| {
+              mut pending_active: ResMut<PendingActiveSchematic>,
+              mut last_synced: ResMut<LastSyncedActiveKey>,
+              mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>| {
             // Repoint the DB's active schematic rather than loading locally:
             // config sync then loads it over HTTP, and `schematic.active` stays
             // authoritative so later DbConfig updates and "Save Schematic" both
@@ -1342,6 +1344,17 @@ fn open_schematic_item(key: String) -> PaletteItem {
             // we're leaving so the pin releases if the pointer moves elsewhere.
             let superseded = config.schematic_active().map(str::to_string);
             pending_active.pin(key.clone(), superseded);
+            // Force a reload even when the chosen key is already `schematic.active`:
+            // the user explicitly asked to open it, and the on-screen document may
+            // no longer match that key (e.g. after "Clear Schematic", which resets
+            // the view locally without moving the pointer). Without this, config
+            // sync sees `last_synced == active` at an unchanged revision and skips
+            // the reload, leaving the cleared/empty view in place.
+            last_synced.0 = None;
+            if let Some(revision) = last_synced_revision.as_deref_mut() {
+                revision.revision = None;
+                revision.suppress_next = false;
+            }
             tx.send_msg(SetDbConfig {
                 metadata: [("schematic.active".to_string(), key.clone())]
                     .into_iter()

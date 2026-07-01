@@ -821,6 +821,66 @@ mod tests {
     }
 
     #[test]
+    fn config_sync_reloads_same_active_key_when_last_synced_reset() {
+        // Reproduces: Save (main) → Clear Schematic (local, empties the view) →
+        // Open main. "Clear Schematic" resets only the local document, so
+        // `last_synced == active` and, at an unchanged revision, sync would skip
+        // the reload and leave the empty view. "Open Schematic" resets
+        // `LastSyncedActiveKey` so re-selecting the already-active key reloads it.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        // main is the active, already-synced key (as after Save + a local Clear).
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/main.kdl".to_string());
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/main.kdl");
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "same key at an unchanged revision must not reload on its own"
+        );
+
+        // "Open Schematic main" pins the key and resets last_synced (what
+        // `open_schematic_item` does), then the DB echoes active=main. Sync must
+        // now reload the same key, restoring the view cleared locally.
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingActiveSchematic>();
+            pending.pin(
+                "schematics/main.kdl".to_string(),
+                Some("schematics/main.kdl".to_string()),
+            );
+        }
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 = None;
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/main.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/main.kdl".to_string()],
+            "opening resets last_synced so the already-active key reloads after a local clear"
+        );
+    }
+
+    #[test]
     fn config_sync_skips_given_path_when_already_loaded() {
         let temp = TempTestDir::new("config-sync-skip-current");
         let path = temp.path().join("drone.kdl");
