@@ -232,12 +232,31 @@ pub(super) fn handle_open_document_from_active_requests(
                 document,
             });
         }
-        Err(error) => {
-            failed.write(DocumentCommandFailed {
-                title: "Invalid Active Schematic".to_string(),
-                message: error.to_string(),
-            });
-        }
+        // A parse failure is often transient: a multi-`PUT` DB-native save bumps
+        // `assets.revision` while its bytes are still landing, so config sync can
+        // fetch a torn, momentarily-invalid schematic. Schedule a backoff retry
+        // like a fetch error (same attempt budget) instead of only reporting and
+        // returning — otherwise `sync_document_from_config` won't reload until
+        // `DbConfig` changes again, stranding the editor on the failure.
+        Err(error) => match next_fetch_attempt(attempts) {
+            Some(next_attempts) => {
+                bevy::log::debug!(
+                    "Active schematic parse failed ({error}); retrying \
+                     ({next_attempts}/{MAX_ACTIVE_FETCH_ATTEMPTS})"
+                );
+                fetch.retry = Some(PendingRetry {
+                    request,
+                    attempts: next_attempts,
+                    next_at: Instant::now() + ACTIVE_FETCH_RETRY_DELAY,
+                });
+            }
+            None => {
+                failed.write(DocumentCommandFailed {
+                    title: "Invalid Active Schematic".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        },
     }
 }
 

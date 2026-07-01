@@ -115,6 +115,12 @@ const ASSET_FETCH_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// retries, but a large yet healthy mesh/cubemap download is never capped
 /// mid-transfer the way a fixed total timeout did (RFD #724, Bug 2).
 const ASSET_FETCH_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// A follower mirror pass that returns an error (e.g. `PartialMirror` from a
+/// slow/missing source asset) is retried a bounded number of times with a
+/// backoff, so the follower converges on its own rather than staying incomplete
+/// until an unrelated `SetDbConfig` triggers another sync (RFD #724, Bug 3).
+const MIRROR_PASS_RETRY_ATTEMPTS: usize = 5;
+const MIRROR_PASS_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn sync_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
@@ -273,11 +279,36 @@ impl AssetMirrorCoordinator {
             if !self.finish_or_continue() {
                 return;
             }
-            if let Err(err) = sync_all_assets_from_source(source_tcp, db_path).await {
+            // Retry a failed pass with backoff so a follower recovers from a
+            // transient `PartialMirror` (slow/large asset) on its own instead of
+            // exiting with an incomplete tree until the next unrelated sync
+            // request (RFD #724, Bug 3).
+            let mut attempt = 0usize;
+            while let Err(err) = sync_all_assets_from_source(source_tcp, db_path).await {
+                // A newer request is already queued: stop burning this pass's
+                // retry budget and let the outer loop start a fresh mirror for
+                // the latest state.
+                if self.inner.lock().unwrap().rerun {
+                    warn!(
+                        ?err,
+                        "asset mirror incomplete; newer sync queued, deferring retry"
+                    );
+                    break;
+                }
+                attempt += 1;
+                if attempt >= MIRROR_PASS_RETRY_ATTEMPTS {
+                    warn!(
+                        ?err,
+                        attempts = attempt,
+                        "follower asset mirror still incomplete after retries; db: paths may not load"
+                    );
+                    break;
+                }
                 warn!(
                     ?err,
-                    "failed to sync assets from source; db: paths may not load"
+                    attempt, "follower asset mirror incomplete; retrying after backoff"
                 );
+                tokio::time::sleep(MIRROR_PASS_RETRY_DELAY).await;
             }
         }
     }
@@ -1566,6 +1597,60 @@ viewport "main" { }
         assert!(
             follower_assets.join("models/stale.glb").exists(),
             "stale asset must survive a partial pass; prune only runs on a full pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn mirror_all_retries_until_source_recovers() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // The source advertises an asset that 404s on the first fetch (a slow /
+        // still-uploading asset) and succeeds afterwards. `mirror_all` must retry
+        // the failed pass on its own and converge, rather than exiting with an
+        // incomplete tree until an unrelated sync request arrives (Bug 3).
+        async fn index() -> Response {
+            Json(vec![crate::assets::AssetEntry {
+                key: "models/rocket.glb".to_string(),
+                size: 3,
+            }])
+            .into_response()
+        }
+        async fn flaky_asset(State(hits): State<Arc<AtomicUsize>>) -> Response {
+            if hits.fetch_add(1, Ordering::SeqCst) == 0 {
+                StatusCode::NOT_FOUND.into_response()
+            } else {
+                b"abc".to_vec().into_response()
+            }
+        }
+        let hits = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route("/{*path}", get(flaky_asset))
+            .with_state(hits.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+
+        AssetMirrorCoordinator::default()
+            .mirror_all(tcp, &follower_db)
+            .await;
+
+        assert!(
+            follower_assets.join("models/rocket.glb").exists(),
+            "retry should recover the asset once the source serves it"
+        );
+        assert!(
+            hits.load(Ordering::SeqCst) >= 2,
+            "the failed pass must be retried at least once"
         );
     }
 }
