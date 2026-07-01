@@ -387,6 +387,7 @@ mod asset_tests {
             eql: "e.world_pos".into(),
             mesh: Object3DMesh::glb(path),
             frame: None,
+            frame_orientation: None,
             orientation: Default::default(),
             icon: None,
             thrusters: Vec::new(),
@@ -754,6 +755,7 @@ object_3d "rocket.world_pos" {
                 eql: "e.world_pos".into(),
                 mesh: Object3DMesh::glb("model.glb"),
                 frame: None,
+                frame_orientation: None,
                 orientation: Default::default(),
                 icon: Some(Object3DIcon {
                     source: Object3DIconSource::Path("icons/marker.png".into()),

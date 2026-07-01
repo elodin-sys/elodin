@@ -1598,6 +1598,37 @@ mod tests {
     }
 
     #[test]
+    fn object_3d_spawns_with_separate_frame_orientation() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            object_3d frame="ECEF" frame_orientation="NED" orientation=absolute "(0,0,0,1, 0,0,0)" {
+                sphere radius=0.2 {
+                    color 0 0 0
+                }
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&crate::object_3d::Object3DState, &GeoPosition, &GeoRotation)>();
+        let (object_3d, geo_pos, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("object_3d should spawn");
+
+        assert_eq!(object_3d.data.frame, Some(GeoFrame::ECEF));
+        assert_eq!(object_3d.data.frame_orientation, Some(GeoFrame::NED));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::NED);
+        assert_eq!(geo_rot.2, RotationKind::Absolute);
+    }
+
+    #[test]
     fn geo_origin_is_applied_and_reset_on_clear() {
         let mut app = test_app();
         let schematic = Schematic::from_kdl("coordinate frame=NED lat=34.72 lon=-86.64 alt=180.0")

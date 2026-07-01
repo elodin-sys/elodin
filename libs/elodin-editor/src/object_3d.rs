@@ -1528,6 +1528,7 @@ pub fn create_object_3d_entity(
     };
 
     let geo_frame = data.frame;
+    let rotation_frame = data.frame_orientation.or(geo_frame);
 
     let entity_id = commands
         .spawn((
@@ -1552,10 +1553,16 @@ pub fn create_object_3d_entity(
         .id();
 
     // Add GeoPosition and GeoRotation components.
-    if let Some(frame) = geo_frame.or_default() {
+    if let Some(pos_frame) = geo_frame.or_default() {
+        let rot_frame = rotation_frame.or_default().unwrap_or(pos_frame);
         commands.entity(entity_id).insert((
-            GeoPosition(frame, DVec3::ZERO),
-            GeoRotation::from_bevy_kind(frame, DQuat::IDENTITY, geo_context, data.orientation),
+            GeoPosition(pos_frame, DVec3::ZERO),
+            GeoRotation::from_bevy_kind(
+                rot_frame,
+                DQuat::IDENTITY,
+                geo_context,
+                data.orientation,
+            ),
         ));
     }
 

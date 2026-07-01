@@ -1012,6 +1012,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .get("frame")
         .and_then(|v| v.as_string())
         .and_then(|s| GeoFrame::from_str(s).ok());
+    let frame_orientation = parse_optional_geo_frame(node, "frame_orientation", "object_3d", src)?;
     let orientation = parse_rotation_kind(node, src)?;
     let mut icon = None;
     let mut mesh_visibility_range = None;
@@ -1103,12 +1104,33 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         eql,
         mesh,
         frame,
+        frame_orientation,
         orientation,
         icon,
         thrusters,
         mesh_visibility_range,
         node_id: NodeId::default(),
     })
+}
+
+fn parse_optional_geo_frame(
+    node: &KdlNode,
+    property: &str,
+    node_name: &str,
+    src: &str,
+) -> Result<Option<GeoFrame>, KdlSchematicError> {
+    match node.get(property).and_then(|v| v.as_string()) {
+        None => Ok(None),
+        Some(value) => GeoFrame::from_str(value)
+            .map(Some)
+            .map_err(|_| KdlSchematicError::InvalidValue {
+                property: property.to_string(),
+                node: node_name.to_string(),
+                expected: "ENU, NED, or ECEF".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            }),
+    }
 }
 
 fn parse_rotation_kind(node: &KdlNode, src: &str) -> Result<RotationKind, KdlSchematicError> {
@@ -2434,6 +2456,55 @@ object_3d frame="NED" orientation=absolute "ball.world_pos" {
         let reparsed = parse_schematic(&serialized).unwrap();
         if let SchematicElem::Object3d(obj) = &reparsed.elems[0] {
             assert_eq!(obj.orientation, RotationKind::Absolute);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_with_frame_orientation() {
+        let kdl = r#"
+object_3d frame="ECEF" frame_orientation="NED" "(0,0,0,1, 0,0,0)" {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.frame, Some(GeoFrame::ECEF));
+            assert_eq!(obj.frame_orientation, Some(GeoFrame::NED));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_invalid_frame_orientation_is_an_error() {
+        let kdl = r#"
+object_3d frame_orientation="ECI" "ball.world_pos" {
+    sphere radius=0.2
+}
+"#;
+        assert!(parse_schematic(kdl).is_err());
+    }
+
+    #[test]
+    fn test_roundtrip_object_3d_frame_orientation() {
+        let original = r#"
+object_3d frame="ECEF" frame_orientation="NED" "ball.world_pos" {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = crate::ser::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Object3d(obj) = &reparsed.elems[0] {
+            assert_eq!(obj.frame, Some(GeoFrame::ECEF));
+            assert_eq!(obj.frame_orientation, Some(GeoFrame::NED));
         } else {
             panic!("Expected object_3d");
         }
