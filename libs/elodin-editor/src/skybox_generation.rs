@@ -131,7 +131,7 @@ pub(crate) fn active_write_key(
     config: &DbConfig,
 ) -> String {
     pending_active
-        .0
+        .target
         .clone()
         .or_else(|| last_synced.0.clone())
         .or_else(|| config.schematic_active().map(str::to_string))

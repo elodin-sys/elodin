@@ -1140,6 +1140,10 @@ fn poll_schematic_save(
                 return;
             };
             if let Some(active_key) = active_key {
+                // The key we're moving away from (currently loaded == DB active)
+                // is the stale pointer the pin should tolerate until our repoint
+                // echoes; capture it before overwriting last_synced.
+                let superseded = last_synced.0.clone();
                 last_synced.0 = Some(active_key.clone());
                 // Our own PUTs bumped `assets.revision`; adopt the echoed bump as
                 // the new baseline instead of reloading the bytes we just wrote
@@ -1150,7 +1154,7 @@ fn poll_schematic_save(
                 // Pin the key we just saved so config sync ignores the DB's still
                 // -stale active pointer until it echoes this repoint, avoiding a
                 // brief revert to the previously active schematic.
-                pending_active.0 = Some(active_key.clone());
+                pending_active.pin(active_key.clone(), superseded);
                 // Push `skybox.active` alongside the repoint so the DB metadata
                 // tracks the saved KDL's skybox (empty = cleared); with no
                 // `schematic.content` mirror this is the only signal. Mark it as
@@ -1291,6 +1295,7 @@ fn open_schematic_item(key: String) -> PaletteItem {
         PRESETS_LABEL,
         move |_: In<String>,
               tx: Res<PacketTx>,
+              config: Res<DbConfig>,
               mut pending_active: ResMut<PendingActiveSchematic>| {
             // Repoint the DB's active schematic rather than loading locally:
             // config sync then loads it over HTTP, and `schematic.active` stays
@@ -1299,8 +1304,10 @@ fn open_schematic_item(key: String) -> PaletteItem {
             //
             // Pin the requested key so config sync ignores the DB's still-stale
             // pointer until it echoes this repoint, instead of momentarily
-            // reloading the schematic we're switching away from.
-            pending_active.0 = Some(key.clone());
+            // reloading the schematic we're switching away from. Record the key
+            // we're leaving so the pin releases if the pointer moves elsewhere.
+            let superseded = config.schematic_active().map(str::to_string);
+            pending_active.pin(key.clone(), superseded);
             tx.send_msg(SetDbConfig {
                 metadata: [("schematic.active".to_string(), key.clone())]
                     .into_iter()
@@ -2042,7 +2049,8 @@ mod tests {
 
         // Pending repoint pin (e.g. right after Save As) wins over the stale
         // echoed config.
-        let pin = PendingActiveSchematic(Some("schematics/orbit.kdl".to_string()));
+        let mut pin = PendingActiveSchematic::default();
+        pin.pin("schematics/orbit.kdl".to_string(), None);
         let last = LastSyncedActiveKey(Some("schematics/other.kdl".to_string()));
         assert_eq!(
             active_write_key(&pin, &last, &config),
@@ -2050,7 +2058,7 @@ mod tests {
         );
 
         // No pin: fall back to the last synced key over config.
-        let no_pin = PendingActiveSchematic(None);
+        let no_pin = PendingActiveSchematic::default();
         assert_eq!(
             active_write_key(&no_pin, &last, &config),
             "schematics/other.kdl"

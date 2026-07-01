@@ -34,7 +34,33 @@ pub struct LastSyncedAssetsRevision {
 /// pointer so it can't briefly reload the schematic being replaced; the pin
 /// clears as soon as the DB confirms the requested key.
 #[derive(Resource, Default)]
-pub struct PendingActiveSchematic(pub Option<String>);
+pub struct PendingActiveSchematic {
+    /// Key the editor optimistically switched to, awaiting the DB echo.
+    pub target: Option<String>,
+    /// `schematic.active` value in effect when the pin was set — the stale
+    /// pointer we expect to keep seeing until the repoint echoes. Lets config
+    /// sync tell "still waiting for our echo" apart from "the pointer moved
+    /// elsewhere" (an external repoint or a failed local one), so a pin can
+    /// never strand sync on a key the DB will never confirm.
+    pub superseding: Option<String>,
+}
+
+impl PendingActiveSchematic {
+    /// Pin `target`, recording the `superseded` active key it replaces.
+    pub fn pin(&mut self, target: String, superseded: Option<String>) {
+        self.target = Some(target);
+        self.superseding = superseded;
+    }
+
+    pub fn clear(&mut self) {
+        self.target = None;
+        self.superseding = None;
+    }
+
+    pub fn target(&self) -> Option<&str> {
+        self.target.as_deref()
+    }
+}
 
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct SchematicDocumentAsset {

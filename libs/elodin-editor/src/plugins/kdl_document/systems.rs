@@ -158,8 +158,7 @@ pub(super) fn handle_open_document_from_active_requests(
         && Instant::now() >= retry.next_at
     {
         if pending_active
-            .0
-            .as_deref()
+            .target()
             .is_some_and(|pending| pending != retry.request.key.as_str())
         {
             fetch.retry = None;
@@ -188,7 +187,7 @@ pub(super) fn handle_open_document_from_active_requests(
     // now want. Drop a completed load for any other key so a late fetch of the
     // previous active schematic can't briefly show — or strand us on — the wrong
     // one before the DB echoes the repoint.
-    if let Some(pending) = pending_active.0.as_deref()
+    if let Some(pending) = pending_active.target()
         && pending != request.key.as_str()
     {
         return;
