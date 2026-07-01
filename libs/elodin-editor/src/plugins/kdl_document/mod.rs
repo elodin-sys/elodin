@@ -644,6 +644,62 @@ mod tests {
     }
 
     #[test]
+    fn config_sync_skips_reload_while_local_save_in_flight() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        // A multi-`PUT` save this client started is still uploading.
+        app.insert_resource(
+            crate::ui::command_palette::palette_items::SchematicSaveInFlight::saving_stub(),
+        );
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
+        app.world_mut()
+            .resource_mut::<LastSyncedAssetsRevision>()
+            .revision = Some(0);
+
+        // Each in-flight PUT bumps the revision; none may reload the tree we are
+        // still writing (RFD #724, Bug 1).
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "in-flight save PUTs must not reload a partially written schematic"
+        );
+        assert_eq!(
+            app.world().resource::<LastSyncedAssetsRevision>().revision,
+            Some(2),
+            "baseline tracks our own bumps so completion leaves no stale delta"
+        );
+    }
+
+    #[test]
     fn config_sync_reloads_on_active_key_change() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

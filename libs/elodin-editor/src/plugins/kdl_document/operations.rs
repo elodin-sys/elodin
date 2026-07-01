@@ -416,6 +416,7 @@ pub fn sync_document_from_config(
     last_synced_key: Res<LastSyncedActiveKey>,
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut pending_active: ResMut<PendingActiveSchematic>,
+    save_in_flight: Option<Res<crate::ui::command_palette::palette_items::SchematicSaveInFlight>>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
     mut open_document_from_active: MessageWriter<OpenDocumentFromActiveRequest>,
@@ -467,6 +468,17 @@ pub fn sync_document_from_config(
         // (RFD #724, Bug 1).
         if last_synced_key.0.as_deref() == Some(active_key) {
             let current_revision = config.assets_revision();
+            // A save this client started is still uploading: every revision bump
+            // in that window is our own multi-`PUT`, not another client's write.
+            // Re-baseline and never reload — otherwise we'd fetch a partially
+            // written schematic tree mid-upload (RFD #724, Bug 1). The final echo
+            // after completion is still covered by `suppress_next`.
+            if save_in_flight.as_deref().is_some_and(|s| s.is_saving()) {
+                if let Some(revision) = last_synced_revision.as_deref_mut() {
+                    revision.revision = Some(current_revision);
+                }
+                return;
+            }
             let mut should_reload = false;
             if let Some(revision) = last_synced_revision.as_deref_mut() {
                 match revision.revision {
