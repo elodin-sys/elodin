@@ -2,7 +2,7 @@ use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
-use impeller2_wkt::SkyboxConfig;
+use impeller2_wkt::{DbConfig, SkyboxConfig};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -298,24 +298,36 @@ pub(super) fn activate_document_skybox(
     mut reloaded: MessageReader<DocumentReloaded>,
     mut skyboxes: MessageWriter<SetActiveSkybox>,
     mut cache: Option<ResMut<SkyboxCache>>,
+    config: Option<Res<DbConfig>>,
 ) {
+    // An explicit clear (`skybox.active=""` → `Some(None)`) is sticky: honor it
+    // even if the loaded/reloaded KDL still carries a `skybox` node, so a stale
+    // asset can't resurrect a skybox the DB says was cleared.
+    let clear_is_sticky = config
+        .as_deref()
+        .is_some_and(|config| matches!(config.skybox_active_desired(), Some(None)));
+
     for event in loaded.read() {
-        activate_skybox_config(
-            event.document.root.skybox.as_ref(),
-            &mut skyboxes,
-            &mut cache,
-        );
+        let skybox = event
+            .document
+            .root
+            .skybox
+            .as_ref()
+            .filter(|_| !clear_is_sticky);
+        activate_skybox_config(skybox, &mut skyboxes, &mut cache);
     }
 
     for event in reloaded.read() {
         if !event.changed_window_indices.is_empty() {
             continue;
         }
-        activate_skybox_config(
-            event.document.root.skybox.as_ref(),
-            &mut skyboxes,
-            &mut cache,
-        );
+        let skybox = event
+            .document
+            .root
+            .skybox
+            .as_ref()
+            .filter(|_| !clear_is_sticky);
+        activate_skybox_config(skybox, &mut skyboxes, &mut cache);
     }
 }
 

@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
-    SchematicDocumentAsset, sync_document_skybox,
+    PendingActiveSchematic, SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
@@ -83,7 +83,11 @@ impl LocallyPushedSkyboxActive {
         else {
             return false;
         };
-        self.pending.remove(index);
+        // Drop the echoed state and every older push it superseded. A coalesced
+        // `DbConfig` echo can skip intermediate states, so removing only the
+        // matched entry could leave a stale older push as the deque tail and
+        // mislead `latest_supersedes`.
+        self.pending.drain(..=index);
         true
     }
 
@@ -96,6 +100,17 @@ impl LocallyPushedSkyboxActive {
             .iter()
             .any(|pending| pending.as_deref() == skybox)
     }
+
+    /// Whether the most recent locally pushed desired state (still awaiting its
+    /// DB echo) differs from `skybox`. When true, a mirror action targeting
+    /// `skybox` is stale: the user has since moved to another skybox (or a
+    /// clear) that the live `DbConfig` hasn't caught up to yet, so applying or
+    /// starting a download for `skybox` would resurrect a superseded state.
+    pub(crate) fn latest_supersedes(&self, skybox: Option<&str>) -> bool {
+        self.pending
+            .back()
+            .is_some_and(|latest| latest.as_deref() != skybox)
+    }
 }
 
 pub(crate) fn sync_cache_active_from_skybox(
@@ -103,6 +118,24 @@ pub(crate) fn sync_cache_active_from_skybox(
     skybox: Option<&SkyboxConfig>,
 ) {
     cache.active = skybox.map(|entry| entry.name.clone());
+}
+
+/// The DB key a skybox edit should write to. Prefers an in-flight repoint pin
+/// (`PendingActiveSchematic`) then the last synced key over the echoed
+/// `DbConfig`, so a skybox edit made right after Save As / Open (before the
+/// repoint echo lands) targets the schematic the user is actually on rather
+/// than the stale/default `schematics/main.kdl`.
+pub(crate) fn active_write_key(
+    pending_active: &PendingActiveSchematic,
+    last_synced: &LastSyncedActiveKey,
+    config: &DbConfig,
+) -> String {
+    pending_active
+        .0
+        .clone()
+        .or_else(|| last_synced.0.clone())
+        .or_else(|| config.schematic_active().map(str::to_string))
+        .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string())
 }
 
 #[derive(SystemParam)]
@@ -113,6 +146,7 @@ pub(crate) struct SyncGeneratedSkyboxParams<'w> {
     last_synced_key: ResMut<'w, LastSyncedActiveKey>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
+    pending_active: Res<'w, PendingActiveSchematic>,
     config: Res<'w, DbConfig>,
     tx: Res<'w, PacketTx>,
 }
@@ -122,6 +156,11 @@ pub(crate) fn sync_generated_skybox_to_schematic(
     mut params: SyncGeneratedSkyboxParams,
 ) {
     for event in reader.read() {
+        let write_key = active_write_key(
+            &params.pending_active,
+            &params.last_synced_key,
+            &params.config,
+        );
         let mut sync = SkyboxDocumentSyncMut {
             schematic: &mut params.schematic,
             current_document: &mut params.current_document,
@@ -130,10 +169,7 @@ pub(crate) fn sync_generated_skybox_to_schematic(
             locally_pushed: &mut params.locally_pushed,
             cache: &mut params.cache,
             tx: &params.tx,
-            active_key: params
-                .config
-                .schematic_active()
-                .unwrap_or(ACTIVE_SCHEMATIC_KEY),
+            active_key: &write_key,
         };
         sync.sync_skybox_to_document_and_db(Some(SkyboxConfig {
             name: event.name.clone(),
@@ -165,7 +201,13 @@ pub(crate) fn on_document_loaded(
         &mut caches,
     );
 
-    if should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active())
+    // An explicit clear (`skybox.active=""` → `Some(None)`) is sticky: don't let
+    // a reloaded asset that still carries a `skybox` node silently re-add it and
+    // undo the clear for other clients / the render server. For an unset or named
+    // skybox, the loaded schematic seeds/updates the DB metadata as before.
+    let clear_is_sticky = matches!(config.skybox_active_desired(), Some(None));
+    if !clear_is_sticky
+        && should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active())
         && let Some(tx) = tx.as_ref()
     {
         let kdl = document.root.to_kdl();
@@ -297,6 +339,7 @@ pub(crate) struct RevertSkyboxParams<'w> {
     last_synced_key: ResMut<'w, LastSyncedActiveKey>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
+    pending_active: Res<'w, PendingActiveSchematic>,
     config: Res<'w, DbConfig>,
     tx: Res<'w, PacketTx>,
     skyboxes: MessageWriter<'w, SetActiveSkybox>,
@@ -307,6 +350,11 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         return;
     };
     let skybox = SkyboxConfig { name: name.clone() };
+    let write_key = active_write_key(
+        &params.pending_active,
+        &params.last_synced_key,
+        &params.config,
+    );
     let mut sync = SkyboxDocumentSyncMut {
         schematic: &mut params.schematic,
         current_document: &mut params.current_document,
@@ -315,10 +363,7 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         locally_pushed: &mut params.locally_pushed,
         cache: &mut params.cache,
         tx: &params.tx,
-        active_key: params
-            .config
-            .schematic_active()
-            .unwrap_or(ACTIVE_SCHEMATIC_KEY),
+        active_key: &write_key,
     };
     sync.sync_skybox_to_document_and_db(Some(skybox));
     params.skyboxes.write(SetActiveSkybox::ByName(name.clone()));
@@ -338,11 +383,13 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn on_document_loaded_updates_last_synced_without_db_push() {
+    fn on_document_loaded_records_active_key() {
         let mut app = App::new();
+        let mut config = DbConfig::default();
+        config.set_schematic_active("schematics/main.kdl");
         app.add_plugins(MinimalPlugins)
             .init_resource::<LastSyncedActiveKey>()
-            .init_resource::<DbConfig>()
+            .insert_resource(config)
             .init_resource::<LocallyPushedSkyboxActive>()
             .add_message::<DocumentLoaded>()
             .add_systems(Update, on_document_loaded);
@@ -361,11 +408,46 @@ mod tests {
         });
         app.update();
 
+        // Phase 4: `last_synced` tracks the active *key*, not inline KDL, so the
+        // DB's echo of our own load isn't mistaken for an external change.
         let last = app.world().resource::<LastSyncedActiveKey>();
-        assert!(
-            last.0.as_ref().is_some_and(|kdl| kdl.contains("seaport")),
-            "expected loaded schematic KDL to be recorded locally"
-        );
+        assert_eq!(last.0.as_deref(), Some("schematics/main.kdl"));
+    }
+
+    #[test]
+    fn latest_supersedes_flags_newer_local_push() {
+        let mut pushed = LocallyPushedSkyboxActive::default();
+        // Nothing pending: never supersedes.
+        assert!(!pushed.latest_supersedes(Some("seaport")));
+        assert!(!pushed.latest_supersedes(None));
+
+        // Latest push is a clear: a download for any named skybox is stale.
+        pushed.mark(Some("seaport"));
+        pushed.mark(None);
+        assert!(pushed.latest_supersedes(Some("seaport")));
+        // ...but a mirror action matching the latest state is not superseded.
+        assert!(!pushed.latest_supersedes(None));
+
+        // Latest push is a name: a different name (or clear) is stale.
+        pushed.mark(Some("machu_picchu"));
+        assert!(pushed.latest_supersedes(Some("seaport")));
+        assert!(pushed.latest_supersedes(None));
+        assert!(!pushed.latest_supersedes(Some("machu_picchu")));
+    }
+
+    #[test]
+    fn consume_matching_drops_superseded_older_pushes() {
+        let mut pushed = LocallyPushedSkyboxActive::default();
+        pushed.mark(Some("a"));
+        pushed.mark(None);
+        pushed.mark(Some("b"));
+
+        // A coalesced echo jumps straight to the latest state; older pushes must
+        // be drained so the tail reflects reality rather than a stale entry.
+        assert!(pushed.consume_matching(Some("b")));
+        assert!(!pushed.latest_supersedes(Some("b")));
+        assert!(!pushed.is_pending(Some("a")));
+        assert!(!pushed.is_pending(None));
     }
 
     #[test]

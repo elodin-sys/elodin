@@ -5,7 +5,9 @@ use crate::plugins::kdl_document::{
     PendingActiveSchematic, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
     schematic_save_key_from_name, upload_db_save_plan,
 };
-use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
+use crate::skybox_generation::{
+    LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
+};
 use bevy::{
     app::Update,
     asset::{AssetServer, Assets},
@@ -81,6 +83,10 @@ pub(crate) struct PendingSchematicSaveKey(pub Option<String>);
 pub(crate) struct SchematicSaveInFlight {
     task: Option<Task<Result<(), String>>>,
     active_key: Option<String>,
+    /// Skybox name embedded in the saved schematic (`None` = cleared), pushed as
+    /// `skybox.active` once the upload lands so the DB metadata tracks the saved
+    /// KDL instead of a stale value (there is no `schematic.content` mirror).
+    skybox: Option<String>,
     /// The "Save As" name consumed for this save, restored to
     /// `PendingSchematicSaveKey` if the upload fails so a retry still targets
     /// the chosen name rather than the previous active schematic.
@@ -1084,6 +1090,7 @@ fn queue_save_schematic_db_now(
     // the DB's echo of our own save for an external change (which would reload
     // over HTTP on the saving client).
     save_in_flight.active_key = Some(active_key);
+    save_in_flight.skybox = root.skybox.as_ref().map(|s| s.name.clone());
     save_in_flight.pending_key = pending;
     // Upload off the main thread; `poll_schematic_save` repoints `schematic.active`
     // only after every `PUT` is acknowledged, so the pointer never claims a save
@@ -1100,6 +1107,7 @@ fn poll_schematic_save(
     mut pending_key: ResMut<PendingSchematicSaveKey>,
     mut pending_active: ResMut<PendingActiveSchematic>,
     mut last_synced: ResMut<LastSyncedActiveKey>,
+    mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     let Some(task) = save_in_flight.task.as_mut() else {
@@ -1110,6 +1118,7 @@ fn poll_schematic_save(
     };
     save_in_flight.task = None;
     let active_key = save_in_flight.active_key.take();
+    let saved_skybox = save_in_flight.skybox.take();
     let pending = save_in_flight.pending_key.take();
 
     match result {
@@ -1134,10 +1143,23 @@ fn poll_schematic_save(
                 // -stale active pointer until it echoes this repoint, avoiding a
                 // brief revert to the previously active schematic.
                 pending_active.0 = Some(active_key.clone());
+                // Push `skybox.active` alongside the repoint so the DB metadata
+                // tracks the saved KDL's skybox (empty = cleared); with no
+                // `schematic.content` mirror this is the only signal. Mark it as
+                // locally pushed so the DB skybox mirror treats it as our own
+                // change (authoritative until the config echo lands) rather than
+                // external drift to re-assert the previous skybox.
+                locally_pushed.mark(saved_skybox.as_deref());
                 tx.send_msg(SetDbConfig {
-                    metadata: [("schematic.active".to_string(), active_key)]
-                        .into_iter()
-                        .collect(),
+                    metadata: [
+                        ("schematic.active".to_string(), active_key),
+                        (
+                            "skybox.active".to_string(),
+                            saved_skybox.unwrap_or_default(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
                     ..Default::default()
                 });
             }
@@ -1379,12 +1401,14 @@ fn clear_skybox() -> PaletteItem {
          mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
          mut last_synced_key: ResMut<LastSyncedActiveKey>,
          mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+         pending_active: Res<PendingActiveSchematic>,
          config: Res<DbConfig>,
          tx: Res<PacketTx>| {
             if cache.active.is_none() && schematic.skybox.is_none() {
                 return PaletteEvent::Error("No skybox is active".into());
             }
             skyboxes.write(SetActiveSkybox::Clear);
+            let write_key = active_write_key(&pending_active, &last_synced_key, &config);
             SkyboxDocumentSyncMut {
                 schematic: &mut schematic,
                 current_document: &mut current_document,
@@ -1393,7 +1417,7 @@ fn clear_skybox() -> PaletteItem {
                 locally_pushed: &mut locally_pushed,
                 cache: &mut cache,
                 tx: &tx,
-                active_key: config.schematic_active().unwrap_or(ACTIVE_SCHEMATIC_KEY),
+                active_key: &write_key,
             }
             .sync_skybox_to_document_and_db(None);
             PaletteEvent::Exit
@@ -1413,9 +1437,11 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
               mut last_synced_key: ResMut<LastSyncedActiveKey>,
               mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+              pending_active: Res<PendingActiveSchematic>,
               config: Res<DbConfig>,
               tx: Res<PacketTx>| {
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+            let write_key = active_write_key(&pending_active, &last_synced_key, &config);
             SkyboxDocumentSyncMut {
                 schematic: &mut schematic,
                 current_document: &mut current_document,
@@ -1424,7 +1450,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
                 locally_pushed: &mut locally_pushed,
                 cache: &mut cache,
                 tx: &tx,
-                active_key: config.schematic_active().unwrap_or(ACTIVE_SCHEMATIC_KEY),
+                active_key: &write_key,
             }
             .sync_skybox_to_document_and_db(Some(SkyboxConfig { name: name.clone() }));
             PaletteEvent::Exit
@@ -2002,6 +2028,42 @@ mod tests {
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {
         Schematic::from_kdl(kdl).expect("saved KDL should parse")
+    }
+
+    #[test]
+    fn active_write_key_prefers_pending_pin_then_last_synced() {
+        let mut config = DbConfig::default();
+        config.set_schematic_active("schematics/main.kdl");
+
+        // Pending repoint pin (e.g. right after Save As) wins over the stale
+        // echoed config.
+        let pin = PendingActiveSchematic(Some("schematics/orbit.kdl".to_string()));
+        let last = LastSyncedActiveKey(Some("schematics/other.kdl".to_string()));
+        assert_eq!(
+            active_write_key(&pin, &last, &config),
+            "schematics/orbit.kdl"
+        );
+
+        // No pin: fall back to the last synced key over config.
+        let no_pin = PendingActiveSchematic(None);
+        assert_eq!(
+            active_write_key(&no_pin, &last, &config),
+            "schematics/other.kdl"
+        );
+
+        // No pin and no last synced: use the config's active key.
+        let no_last = LastSyncedActiveKey(None);
+        assert_eq!(
+            active_write_key(&no_pin, &no_last, &config),
+            "schematics/main.kdl"
+        );
+
+        // Nothing set: default active key.
+        let empty_config = DbConfig::default();
+        assert_eq!(
+            active_write_key(&no_pin, &no_last, &empty_config),
+            ACTIVE_SCHEMATIC_KEY
+        );
     }
 
     #[test]
