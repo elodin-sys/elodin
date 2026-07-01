@@ -136,6 +136,11 @@ pub fn sync_db_skybox_assets_from_config(
             if let (Some(key), Some(settings), Some(cache)) =
                 (started_key, settings.as_ref(), cache.as_mut())
                 && skybox_still_desired(&config, connection_addr.as_deref(), &key)
+                // A newer local push (e.g. a clear) not yet echoed into `config`
+                // supersedes this download; don't re-apply the stale skybox.
+                && !locally_pushed
+                    .as_ref()
+                    .is_some_and(|pushed| pushed.latest_supersedes(Some(&key.skybox)))
             {
                 match result {
                     Ok(payload) => match apply_db_skybox_download(&payload, settings, cache) {
@@ -188,6 +193,15 @@ pub fn sync_db_skybox_assets_from_config(
         }
         Some(Some(skybox)) => skybox,
     };
+    // `config` may be stale relative to a local push still awaiting its echo
+    // (e.g. the user just cleared or switched skybox). Don't start a download
+    // for a skybox the user has already moved away from.
+    if locally_pushed
+        .as_ref()
+        .is_some_and(|pushed| pushed.latest_supersedes(Some(&desired)))
+    {
+        return;
+    }
     let Some(connection_addr) = connection_addr else {
         return;
     };

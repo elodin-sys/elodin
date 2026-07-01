@@ -372,7 +372,11 @@ impl DB {
         }
         self.with_state_mut(|s| {
             for (key, value) in update.metadata {
-                if value.is_empty() {
+                // `skybox.active` uses empty-string as an explicit "cleared"
+                // signal (distinct from an absent key); keep it so consumers can
+                // tell a user clear apart from "never set". Other keys drop on
+                // empty as a delete.
+                if value.is_empty() && key != "skybox.active" {
                     s.db_config.metadata.remove(&key);
                 } else {
                     s.db_config.metadata.insert(key, value);
@@ -3375,6 +3379,26 @@ mod tests {
             db.with_state(|s| s.db_config.metadata.get("ui.theme").cloned()),
             None
         );
+    }
+
+    #[test]
+    fn apply_set_db_config_keeps_empty_skybox_active_as_clear_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // An explicit clear pushes `skybox.active=""`; it must survive so
+        // `skybox_active_desired()` reports `Some(None)` (cleared) rather than
+        // `None` (never set).
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("skybox.active".to_string(), String::new())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        db.with_state(|s| {
+            assert_eq!(s.db_config.skybox_active(), None);
+            assert_eq!(s.db_config.skybox_active_desired(), Some(None));
+        });
     }
 
     #[test]

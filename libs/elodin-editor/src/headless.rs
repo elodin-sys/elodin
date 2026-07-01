@@ -196,10 +196,7 @@ fn load_headless_scene(
     if *loaded {
         return;
     }
-    if pending
-        .next_attempt
-        .is_some_and(|at| Instant::now() < at)
-    {
+    if pending.next_attempt.is_some_and(|at| Instant::now() < at) {
         return;
     }
     // Wait for the EQL context to have component paths registered before
