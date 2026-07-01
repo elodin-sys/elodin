@@ -18,15 +18,14 @@ use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
 
 use super::components::{
-    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRoot,
-    ViewportActionButton,
+    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeFrame, ViewCubeFrameRef,
+    ViewCubeLink, ViewCubeRoot, ViewportActionButton,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use crate::Coordinate;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
-use crate::plugins::render_layer_alloc::RenderLayerLease;
 use bevy_geo_frames::{GeoContext, GeoPosition};
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
@@ -114,11 +113,10 @@ impl ViewCubeArrowTargetCache {
 
 fn main_camera_for_event(
     event: &ViewCubeEvent,
-    view_cube_query: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    overlay_cameras: &Query<&ViewCubeLink, With<ViewCubeCamera>>,
 ) -> Option<Entity> {
-    let source = event_source(event);
-    view_cube_query
-        .get(source)
+    overlay_cameras
+        .get(event_source(event))
         .ok()
         .map(|link| link.main_camera)
 }
@@ -133,25 +131,32 @@ fn event_source(event: &ViewCubeEvent) -> Entity {
     }
 }
 
-pub fn sync_view_cube_rotation(
+pub fn sync_view_cube_camera_orientation(
     config: Res<ViewCubeConfig>,
-    main_camera_query: Query<&GlobalTransform, Without<ViewCubeRoot>>,
-    mut view_cube_query: Query<(&ViewCubeLink, &mut Transform), With<ViewCubeRoot>>,
+    main_camera_query: Query<&GlobalTransform, (Without<ViewCubeRoot>, Without<ViewCubeCamera>)>,
+    mut overlay_camera_query: Query<
+        (&ViewCubeLink, &mut Transform),
+        (With<ViewCubeCamera>, Without<ViewCubeRoot>),
+    >,
 ) {
-    for (link, mut cube_transform) in view_cube_query.iter_mut() {
+    for (link, mut camera_transform) in overlay_camera_query.iter_mut() {
         let Ok(main_camera_transform) = main_camera_query.get(link.main_camera) else {
             continue;
         };
 
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
-        cube_transform.rotation = rotation.conjugate() * config.axis_correction;
+        // Mirror the camera's global rotation.
+        camera_transform.rotation = rotation;
+        // Keep it at its given distance.
+        camera_transform.translation =
+            camera_transform.rotation * Vec3::new(0.0, 0.0, config.camera_distance);
     }
 }
 
 pub fn orient_axis_labels_to_screen_plane(
     mut labels: Query<(&ChildOf, &AxisLabelBillboard, &mut Transform)>,
-    cubes: Query<(&ViewCubeLink, &GlobalTransform), With<ViewCubeRoot>>,
-    cube_cameras: Query<(&ViewCubeLink, &GlobalTransform), With<ViewCubeCamera>>,
+    cubes: Query<(&ViewCubeFrame, &GlobalTransform), With<ViewCubeRoot>>,
+    cube_cameras: Query<(&ViewCubeFrameRef, &GlobalTransform), With<ViewCubeCamera>>,
 ) {
     const AXIS_LABEL_SCREEN_GAP: f32 = 0.035;
 
@@ -159,16 +164,18 @@ pub fn orient_axis_labels_to_screen_plane(
         return;
     }
 
-    let mut camera_rotation_by_main = HashMap::new();
-    for (link, camera_global) in cube_cameras.iter() {
-        camera_rotation_by_main.insert(link.main_camera, camera_global.rotation());
+    let mut camera_rotation_by_frame = HashMap::new();
+    for (frame_ref, camera_global) in cube_cameras.iter() {
+        camera_rotation_by_frame
+            .entry(frame_ref.0)
+            .or_insert(camera_global.rotation());
     }
 
     for (parent, label_meta, mut label_transform) in labels.iter_mut() {
-        let Ok((cube_link, cube_global)) = cubes.get(parent.0) else {
+        let Ok((cube_frame, cube_global)) = cubes.get(parent.0) else {
             continue;
         };
-        let Some(camera_rotation) = camera_rotation_by_main.get(&cube_link.main_camera) else {
+        let Some(camera_rotation) = camera_rotation_by_frame.get(&cube_frame.0) else {
             continue;
         };
 
@@ -187,34 +194,27 @@ pub fn orient_axis_labels_to_screen_plane(
 
         label_transform.translation =
             label_meta.base_position + gap_dir_local * AXIS_LABEL_SCREEN_GAP;
-        // Cancel the cube's local rotation so labels remain parallel to the screen.
         label_transform.rotation = cube_rotation.inverse() * *camera_rotation;
     }
 }
 
 pub fn apply_render_layers_to_scene(
-    view_cube_query: Query<(Entity, &RenderLayerLease, &Visibility), With<ViewCubeRoot>>,
+    view_cube_query: Query<(Entity, &RenderLayers, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
     scene_instances: Query<&SceneInstance>,
     scene_spawner: Res<SceneSpawner>,
     view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
-    for (cube_root, layer, visibility) in view_cube_query.iter() {
-        let render_layers = layer.render_layers();
-
+    for (cube_root, render_layers, visibility) in view_cube_query.iter() {
         apply_layers_recursive(
             cube_root,
             &children_query,
             &view_cube_entities,
-            &render_layers,
+            render_layers,
             &mut commands,
         );
 
-        // The root starts Visibility::Hidden so GLB children never appear on
-        // the default render layer 0. Only reveal once:
-        //   1. The GLB scene instance is ready, AND
-        //   2. The descendants have been moved onto the ViewCube render layer.
         let scene_ready = scene_instances
             .get(cube_root)
             .is_ok_and(|instance| scene_spawner.instance_is_ready(**instance));
@@ -390,8 +390,7 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
 #[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
-    view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
+    overlay_cameras: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     mut camera_query: ViewCubeCameraQuery,
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
@@ -403,7 +402,7 @@ pub fn handle_view_cube_editor(
         let now_secs = lookup.time.elapsed_secs_f64();
         lookup.arrow_cache.prune(now_secs);
 
-        let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
+        let Some(cam) = main_camera_for_event(event, &overlay_cameras) else {
             continue;
         };
         let Ok((entity, mut transform, parent, mut editor_cam)) = camera_query.get_mut(cam) else {
@@ -433,14 +432,10 @@ pub fn handle_view_cube_editor(
 
         let global_rotation = camera_pose.rotation;
         let parent_rotation = camera_pose.parent_rotation;
-        let cube_global = cube_root_query
-            .get(event_source(event))
-            .ok()
-            .map(GlobalTransform::rotation);
         let cube_rotation = if config.sync_with_camera {
             global_rotation.conjugate() * config.axis_correction
         } else {
-            cube_global.unwrap_or(Quat::IDENTITY)
+            Quat::IDENTITY
         };
         let camera_dir_cube = cube_rotation.inverse() * Vec3::Z;
 
@@ -1092,7 +1087,7 @@ fn view_cube_orbit_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use crate::plugins::render_layer_alloc::view_cube_render_layers;
     use bevy::asset::AssetPlugin;
     use bevy::scene::{Scene, ScenePlugin, SceneRoot};
 
@@ -1298,21 +1293,19 @@ mod tests {
     fn view_cube_scene_descendants_are_layered_before_scene_is_revealed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.init_resource::<RenderLayerAllocator>();
         app.init_resource::<SceneSpawner>();
         app.add_systems(Update, apply_render_layers_to_scene);
 
-        let lease = app
-            .world_mut()
-            .resource_mut::<RenderLayerAllocator>()
-            .alloc()
-            .expect("view cube layer");
-        let expected_layers = lease.render_layers();
+        let expected_layers = view_cube_render_layers(bevy_geo_frames::GeoFrame::ENU);
         let default_layers = RenderLayers::layer(0);
 
         let root = app
             .world_mut()
-            .spawn((ViewCubeRoot, Visibility::Hidden, lease))
+            .spawn((
+                ViewCubeRoot,
+                Visibility::Hidden,
+                expected_layers.clone(),
+            ))
             .id();
         let child = app
             .world_mut()
@@ -1350,14 +1343,9 @@ mod tests {
     fn view_cube_scene_root_is_revealed_after_scene_instance_is_ready() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default(), ScenePlugin));
-        app.init_resource::<RenderLayerAllocator>();
         app.add_systems(Update, apply_render_layers_to_scene);
 
-        let lease = app
-            .world_mut()
-            .resource_mut::<RenderLayerAllocator>()
-            .alloc()
-            .expect("view cube layer");
+        let render_layers = view_cube_render_layers(bevy_geo_frames::GeoFrame::ENU);
         let default_layers = RenderLayers::layer(0);
         let scene_handle = app
             .world_mut()
@@ -1370,7 +1358,7 @@ mod tests {
                 SceneRoot(scene_handle),
                 ViewCubeRoot,
                 Visibility::Hidden,
-                lease,
+                render_layers,
             ))
             .id();
         let child = app

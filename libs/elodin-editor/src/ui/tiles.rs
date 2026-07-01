@@ -62,13 +62,13 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
         render_layer_alloc::{
             GRID_RENDER_LAYERS, RenderLayerAllocator, RenderLayerLease, grid_render_layer,
+            view_cube_render_layer,
         },
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
-            spawn::spawn_view_cube,
+            spawn::spawn_view_cube_overlay,
         },
     },
     sensor_camera::SensorCameraConfigs,
@@ -891,11 +891,6 @@ impl TileState {
                     {
                         e.despawn();
                     }
-                    if let Some(nav_gizmo) = viewport.nav_gizmo
-                        && let Ok(mut e) = commands.get_entity(nav_gizmo)
-                    {
-                        e.despawn();
-                    }
                 }
                 Tile::Pane(Pane::Graph(graph)) => {
                     if let Ok(mut e) = commands.get_entity(graph.id) {
@@ -1686,72 +1681,34 @@ impl ViewportPane {
             };
         }
 
-        // Allocate render layer for ViewCube (same approach as navigation_gizmo)
-        let Some(view_cube_lease) = render_layer_alloc.alloc() else {
-            return Self {
-                parent: Some(parent),
-                grid: None,
-                camera: Some(camera),
-                nav_gizmo: None,
-                nav_gizmo_camera: None,
-                rect: None,
-                name,
-                viewport_layer,
-                view_cube_layer: None,
-            };
-        };
-        let view_cube_layer = view_cube_lease.layer();
+        // Allocate render layer for ViewCube overlay camera (shared frame cube layer)
+        let frame = viewport.frame.unwrap_or_default();
+        let view_cube_layer = view_cube_render_layer(frame);
 
-        // Do not insert `view_cube_lease` here: the main camera already carries the viewport
-        // `RenderLayerLease`, and a second lease would replace it (single component), breaking
-        // anything that reads the lease (e.g. vector arrows). The cube root and overlay camera
-        // still own clones of this lease.
         commands
             .entity(camera)
             .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
-        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
+        view_cube_config.system = CoordinateSystem(frame);
+        info!("Setting frame to {:?}", &view_cube_config.system);
 
-        // Set coordinate system based on viewport's geo frame
-        if let Some(frame) = viewport.frame {
-            view_cube_config.system = CoordinateSystem(frame);
-            info!("Setting frame to {:?}", &view_cube_config.system);
-        }
-
-        let spawned = spawn_view_cube(
+        let spawned = spawn_view_cube_overlay(
             commands,
             asset_server,
             meshes,
             materials,
             &view_cube_config,
-            view_cube_lease.clone(),
+            frame,
             camera,
         );
-
-        // Add NavGizmoParent and NavGizmoCamera to the ViewCube camera
-        // so the existing set_camera_viewport system works on it
-        if let Some(view_cube_camera) = spawned.camera {
-            commands.entity(view_cube_camera).insert((
-                NavGizmoParent {
-                    main_camera: camera,
-                },
-                NavGizmoCamera,
-            ));
-        }
-
-        // `cube_root` already received `view_cube_lease` inside `spawn_view_cube`.
-        // Re-inserting it here would silently drop the previous component (Bevy
-        // overwrites same-typed components on insert) — see the `debug_assert!`
-        // in `EntityCommandsExt::insert_render_layer_lease`.
-        let _ = view_cube_lease;
 
         Self {
             parent: Some(parent),
             grid: None,
             camera: Some(camera),
-            nav_gizmo: Some(spawned.cube_root),
-            nav_gizmo_camera: spawned.camera,
+            nav_gizmo: None,
+            nav_gizmo_camera: Some(spawned.camera),
             rect: None,
             name,
             viewport_layer,
@@ -2928,9 +2885,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             }
                             if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
                                 state_mut.commands.entity(nav_gizmo_camera).despawn();
-                            }
-                            if let Some(nav_gizmo) = viewport.nav_gizmo {
-                                state_mut.commands.entity(nav_gizmo).despawn();
                             }
                         };
 
