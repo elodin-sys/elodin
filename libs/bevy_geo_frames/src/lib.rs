@@ -6,6 +6,9 @@ mod geo;
 #[cfg(feature = "bevy")]
 pub use geo::*;
 
+
+
+
 /// Coordinate frames used in the sim.
 ///
 /// Units: meters, seconds.
@@ -49,6 +52,21 @@ pub enum GeoFrame {
     // system like HCI or BCRS / ICRF at some point, which is fine but perhaps
     // breaks the naming for it being a "Geo" or "Earth" frame.
 }
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
+pub enum RotationKind {
+    #[default]
+    /// The rotation is relative. An identity rotation in any frame is an
+    /// identity rotation in Bevy's frame.
+    Relative,
+    /// The rotation is absolute. An identity rotation in ENU will produce a
+    /// rotation that rotates [x,y,z] to [x,z,-y] for instance.
+    Absolute,
+}
+
 
 /// Provide a means of specifying a default possibly. Meant to be used with
 /// `Option<GeoFrame>`.
