@@ -25,6 +25,7 @@ pub(crate) fn plugin(app: &mut App) {
     )
     .init_resource::<InitialKdlPath>()
     .init_resource::<LastSyncedActiveKey>()
+    .init_resource::<LastSyncedAssetsRevision>()
     .init_resource::<PendingActiveSchematic>()
     .init_resource::<systems::ActiveSchematicFetch>()
     .init_resource::<CurrentDocument>()
@@ -62,8 +63,8 @@ pub(crate) fn plugin(app: &mut App) {
 mod tests {
     use super::{
         CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
-        OpenDocumentFromActiveRequest, OpenDocumentRequest, PendingActiveSchematic,
-        SchematicDocumentAsset,
+        LastSyncedAssetsRevision, OpenDocumentFromActiveRequest, OpenDocumentRequest,
+        PendingActiveSchematic, SchematicDocumentAsset,
         operations::{open_document_from_content, sync_document_skybox},
         plugin,
     };
@@ -531,6 +532,114 @@ mod tests {
             app.world().resource::<SeenActiveRequests>().0,
             vec!["schematics/b.kdl".to_string()],
             "changing the active key must reload even when the KDL is identical"
+        );
+    }
+
+    #[test]
+    fn config_sync_reloads_when_asset_revision_bumps_at_same_key() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        // Already loaded schematics/a.kdl at the current revision.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "same key + unchanged revision must not reload"
+        );
+
+        // Another client overwrote the bytes at the same key: revision bumps.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/a.kdl".to_string()],
+            "a byte change under an unchanged active key must reload (Bug 1)"
+        );
+    }
+
+    #[test]
+    fn config_sync_suppresses_reload_for_local_save_revision_bump() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
+        // A local save just landed: we have a revision baseline and want to
+        // adopt the next (our own) bump without reloading.
+        {
+            let mut revision = app.world_mut().resource_mut::<LastSyncedAssetsRevision>();
+            revision.revision = Some(0);
+            revision.suppress_next = true;
+        }
+
+        // Our own save's echoed bump must NOT reload the bytes we just wrote.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "a locally initiated save's revision bump must not reload"
+        );
+        {
+            let revision = app.world().resource::<LastSyncedAssetsRevision>();
+            assert_eq!(revision.revision, Some(1), "baseline adopts the bump");
+            assert!(!revision.suppress_next, "suppression is one-shot");
+        }
+
+        // A later external bump reloads as usual.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/a.kdl".to_string()],
+            "an external bump after the suppressed one must reload"
         );
     }
 

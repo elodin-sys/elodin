@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedActiveKey,
-    PendingActiveSchematic, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
-    schematic_save_key_from_name, upload_db_save_plan,
+    LastSyncedAssetsRevision, PendingActiveSchematic, SchematicDocumentAsset,
+    fetch_schematic_index, plan_db_save, schematic_save_key_from_name, upload_db_save_plan,
 };
 use crate::skybox_generation::{
     LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
@@ -1101,12 +1101,14 @@ fn queue_save_schematic_db_now(
 
 /// Applies the outcome of an in-flight DB-native save: on success, record the
 /// stored content and repoint `schematic.active`; on failure, surface it.
+#[allow(clippy::too_many_arguments)]
 fn poll_schematic_save(
     mut save_in_flight: ResMut<SchematicSaveInFlight>,
     tx: Option<Res<PacketTx>>,
     mut pending_key: ResMut<PendingSchematicSaveKey>,
     mut pending_active: ResMut<PendingActiveSchematic>,
     mut last_synced: ResMut<LastSyncedActiveKey>,
+    mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
@@ -1139,6 +1141,12 @@ fn poll_schematic_save(
             };
             if let Some(active_key) = active_key {
                 last_synced.0 = Some(active_key.clone());
+                // Our own PUTs bumped `assets.revision`; adopt the echoed bump as
+                // the new baseline instead of reloading the bytes we just wrote
+                // (RFD #724, Bug 1).
+                if let Some(revision) = last_synced_revision.as_deref_mut() {
+                    revision.suppress_next = true;
+                }
                 // Pin the key we just saved so config sync ignores the DB's still
                 // -stale active pointer until it echoes this repoint, avoiding a
                 // brief revert to the previously active schematic.

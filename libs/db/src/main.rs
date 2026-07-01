@@ -481,8 +481,13 @@ async fn main() -> miette::Result<()> {
             #[cfg(feature = "axum")]
             // A follower mirrors its source read-only; only a primary DB accepts
             // asset uploads.
-            elodin_db::assets_http::spawn_assets_http(&path, addr, follows.is_none())
-                .into_diagnostic()?;
+            elodin_db::assets_http::spawn_assets_http(
+                &path,
+                addr,
+                follows.is_none(),
+                Some(server.db.clone()),
+            )
+            .into_diagnostic()?;
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db

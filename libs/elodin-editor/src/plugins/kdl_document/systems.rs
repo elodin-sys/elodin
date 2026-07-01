@@ -36,6 +36,11 @@ pub(crate) struct ActiveSchematicFetch {
     task: Option<Task<ActiveSchematicFetched>>,
     /// Scheduled re-attempt after a transient failure.
     retry: Option<PendingRetry>,
+    /// A new request for the *same* key arrived while a fetch was in flight
+    /// (e.g. the asset bytes were replaced under an unchanged `schematic.active`).
+    /// The in-flight result may be stale, so re-fetch fresh bytes on completion
+    /// instead of applying it.
+    refetch_pending: bool,
 }
 
 /// A bounded re-attempt of an active-schematic fetch whose asset was not yet
@@ -77,6 +82,7 @@ fn spawn_active_fetch(
     fetch.key = Some(request.key.clone());
     fetch.attempts = attempts;
     fetch.retry = None;
+    fetch.refetch_pending = false;
     fetch.task = Some(IoTaskPool::get().spawn(async move {
         let result = fetch_active_schematic_kdl(&key, addr);
         ActiveSchematicFetched { request, result }
@@ -132,11 +138,15 @@ pub(super) fn handle_open_document_from_active_requests(
 
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
-    // A repeated request for the same key is ignored, so unrelated DbConfig
-    // churn mid-load can't cancel a nearly-complete fetch.
+    // A repeated request for the *same* key doesn't cancel a nearly-complete
+    // fetch, but it does mark a re-fetch: the asset bytes at that key may have
+    // been replaced (e.g. another client's save under an unchanged
+    // `schematic.active`), so the in-flight result could be stale.
     if let Some(request) = requests.read().last().cloned() {
         let already_fetching = fetch_covers_request(fetch.key.as_deref(), &request);
-        if !already_fetching {
+        if already_fetching {
+            fetch.refetch_pending = true;
+        } else {
             spawn_active_fetch(&mut fetch, request, 0, addr);
         }
     }
@@ -169,6 +179,7 @@ pub(super) fn handle_open_document_from_active_requests(
         return;
     };
     let attempts = fetch.attempts;
+    let refetch_pending = std::mem::take(&mut fetch.refetch_pending);
     fetch.task = None;
     fetch.key = None;
 
@@ -180,6 +191,14 @@ pub(super) fn handle_open_document_from_active_requests(
     if let Some(pending) = pending_active.0.as_deref()
         && pending != request.key.as_str()
     {
+        return;
+    }
+
+    // A newer request for the same key arrived mid-flight: the bytes we just
+    // fetched may already be stale, so re-fetch fresh ones (attempt budget
+    // reset) rather than applying this result.
+    if refetch_pending {
+        spawn_active_fetch(&mut fetch, request, 0, addr);
         return;
     }
 

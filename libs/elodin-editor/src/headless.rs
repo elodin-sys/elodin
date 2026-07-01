@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use bevy::core_pipeline::Skybox;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -196,28 +197,42 @@ fn load_headless_scene(
     if *loaded {
         return;
     }
-    if pending.next_attempt.is_some_and(|at| Instant::now() < at) {
-        return;
-    }
-    // Wait for the EQL context to have component paths registered before
-    // attempting to parse object_3d expressions — otherwise the schematic
-    // loads during warm-up with an empty context and all objects silently fail.
-    if eql.0.component_parts.is_empty() {
-        return;
-    }
-    let Some(key) = config.schematic_active() else {
-        return;
-    };
-    let Some(addr) = connection_addr.as_ref().map(|addr| addr.0) else {
-        return;
-    };
-    let content = match crate::plugins::kdl_document::fetch_active_schematic_kdl(key, Some(addr)) {
-        Ok(content) => content,
-        Err(err) => {
-            tracing::debug!("Headless scene load waiting for active schematic: {err}");
-            pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
+
+    // Poll an in-flight fetch. The blocking HTTP request runs on the IO pool
+    // (RFD #724): a slow/unreachable DB Asset Server never freezes the app.
+    let content = if let Some(task) = pending.task.as_mut() {
+        let Some(result) = future::block_on(future::poll_once(task)) else {
+            return;
+        };
+        pending.task = None;
+        match result {
+            Ok(content) => content,
+            Err(err) => {
+                tracing::debug!("Headless scene load waiting for active schematic: {err}");
+                pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
+                return;
+            }
+        }
+    } else {
+        if pending.next_attempt.is_some_and(|at| Instant::now() < at) {
             return;
         }
+        // Wait for the EQL context to have component paths registered before
+        // attempting to parse object_3d expressions — otherwise the schematic
+        // loads during warm-up with an empty context and all objects silently fail.
+        if eql.0.component_parts.is_empty() {
+            return;
+        }
+        let Some(key) = config.schematic_active().map(str::to_owned) else {
+            return;
+        };
+        let Some(addr) = connection_addr.as_ref().map(|addr| addr.0) else {
+            return;
+        };
+        pending.task = Some(IoTaskPool::get().spawn(async move {
+            crate::plugins::kdl_document::fetch_active_schematic_kdl(&key, Some(addr))
+        }));
+        return;
     };
     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&content).inspect_err(|e| {
         tracing::warn!("Failed to parse schematic KDL: {e}");
@@ -286,6 +301,10 @@ struct HeadlessSchematicSkybox(Option<Option<String>>);
 #[derive(Default)]
 struct HeadlessSchematicLoad {
     next_attempt: Option<Instant>,
+    /// In-flight async fetch of the active schematic's KDL. Keeps the bounded —
+    /// but potentially multi-second — HTTP request off the main thread so a slow
+    /// or unreachable DB Asset Server never stalls the headless app each retry.
+    task: Option<Task<Result<String, String>>>,
 }
 
 const SKYBOX_TRANSITION_WARMUP_FRAMES: u8 = 2;
