@@ -93,6 +93,10 @@ pub fn assets_http_base_url(tcp: SocketAddr) -> String {
 pub enum SyncAssetsError {
     #[error("failed to parse schematic KDL")]
     Parse(#[source] impeller2_kdl::KdlSchematicError),
+    #[error("asset index returned HTTP {0}")]
+    IndexStatus(reqwest::StatusCode),
+    #[error("failed to fetch asset index from source")]
+    IndexFetch(#[from] reqwest::Error),
     #[error("IO error")]
     Io(#[from] io::Error),
 }
@@ -187,80 +191,83 @@ async fn sync_one_schematic_asset(
 
 /// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local `assets/` dir.
 pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
-    let (active_key, content, db_config) = db.with_state(|s| {
-        (
-            s.db_config.schematic_active().map(str::to_owned),
-            s.db_config.schematic_content().map(str::to_owned),
-            s.db_config.clone(),
-        )
-    });
-
-    // Fetch the active schematic file itself so this follower's asset server
-    // serves the same `schematics/main.kdl` the source advertises. Replication
-    // forwards the `schematic.active` pointer and the mirrored content, but not
-    // the asset file, so without this an editor following this DB could load a
-    // stale or missing active schematic over HTTP.
-    let mut fetched_active = None;
-    if let Some(key) = active_key.as_deref() {
-        let base = assets_http_base_url(source_tcp);
-        let assets_dir = assets_dir(&db.path);
-        if let Err(err) = std::fs::create_dir_all(&assets_dir) {
-            warn!(
-                ?err,
-                "failed to create assets dir for active schematic sync"
-            );
-        } else {
-            if let Ok(client) = sync_http_client()
-                && let Some(bytes) =
-                    sync_one_schematic_asset(&client, &base, &assets_dir, key).await
-            {
-                fetched_active = String::from_utf8(bytes).ok();
-            }
-            // The source GET failed but replication mirrored the content into
-            // `schematic.content`: persist that under the active key so this
-            // follower's asset server still serves `schematic.active` instead of
-            // 404ing the key config already points at.
-            if fetched_active.is_none()
-                && let Some(mirror) = content.as_deref()
-                && let Err(err) = write_asset_file(&assets_dir, key, mirror.as_bytes())
-            {
-                warn!(?err, asset = %key, "failed to write fallback active schematic from mirror");
-            }
-        }
-
-        // Replication applies the `schematic.active` repoint before this asset
-        // exists locally; a pointer-only patch then clears the inline
-        // `schematic.content` mirror because the not-yet-synced file can't be
-        // read. Now that the active file is on disk, restore the mirror so the
-        // follower's persisted config is self-consistent: a client reading it
-        // gets a working fallback instead of a stale 404, and the loop that
-        // followed the cleared mirror has something to recover to.
-        if let Some(active) = fetched_active.as_deref() {
-            let stale = db.with_state(|s| s.db_config.schematic_content() != Some(active));
-            if stale {
-                db.with_state_mut(|s| s.db_config.set_schematic_content(active.to_string()));
-                if let Err(err) = db.save_db_state() {
-                    warn!(?err, "failed to persist restored schematic.content mirror");
-                }
-            }
-        }
-    }
-
-    // Resolve `db:` dependencies (meshes, window sub-schematics, skybox) from
-    // the freshly-fetched active schematic when we have it — it is the source of
-    // truth. The inline `schematic.content` mirror is only a fallback: it may be
-    // absent or lag the active file, which would skip referenced assets.
-    let Some(content) = fetched_active.or(content) else {
-        return;
-    };
-    if let Err(err) =
-        sync_schematic_assets_from_source(source_tcp, &db.path, &content, Some(&db_config)).await
-    {
+    if let Err(err) = sync_all_assets_from_source(source_tcp, &db.path).await {
         warn!(
             ?err,
-            "failed to sync schematic assets from source; db: paths may not load"
+            "failed to sync assets from source; db: paths may not load"
         );
     }
+}
+
+async fn fetch_source_index(
+    client: &reqwest::Client,
+    base: &str,
+) -> Result<Vec<crate::assets::AssetEntry>, SyncAssetsError> {
+    let url = format!("{base}/{INDEX_KEY}");
+    let response = client.get(&url).send().await?;
+    if !response.status().is_success() {
+        return Err(SyncAssetsError::IndexStatus(response.status()));
+    }
+    let bytes = response.bytes().await?;
+    serde_json::from_slice(&bytes)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err).into())
+}
+
+fn local_asset_matches(assets_dir: &Path, key: &str, remote: &[u8]) -> bool {
+    read_asset_file(assets_dir, key)
+        .ok()
+        .is_some_and(|local| local == remote)
+}
+
+async fn mirror_asset_from_source(
+    client: &reqwest::Client,
+    base: &str,
+    assets_dir: &Path,
+    key: &str,
+) -> bool {
+    let url = format!("{base}/{key}");
+    let Some(remote) = fetch_source_asset(client, &url, key).await else {
+        return false;
+    };
+    if local_asset_matches(assets_dir, key, &remote) {
+        return true;
+    }
+    write_asset_file(assets_dir, key, &remote)
+        .inspect_err(|err| tracing::warn!(asset = %key, ?err, "failed to write mirrored asset"))
+        .is_ok()
+}
+
+/// Mirrors the source DB's full asset tree into `db_path/assets/` via `GET /__index__`.
+pub async fn sync_all_assets_from_source(
+    source_tcp: SocketAddr,
+    db_path: &Path,
+) -> Result<(), SyncAssetsError> {
+    let base = assets_http_base_url(source_tcp);
+    let assets_dir = assets_dir(db_path);
+    std::fs::create_dir_all(&assets_dir)?;
+    let client = sync_http_client().map_err(io::Error::other)?;
+
+    let entries = fetch_source_index(&client, &base).await?;
+    let mut synced = 0usize;
+    let mut failed = 0usize;
+    for entry in entries {
+        if is_reserved_asset_key(&entry.key) {
+            continue;
+        }
+        if mirror_asset_from_source(&client, &base, &assets_dir, &entry.key).await {
+            synced += 1;
+        } else {
+            failed += 1;
+        }
+    }
+    if failed > 0 {
+        warn!(
+            synced,
+            failed, "follower asset mirror finished with missing assets"
+        );
+    }
+
+    Ok(())
 }
 
 /// Copies `db:` assets referenced in schematic KDL from a source elodin-db assets server.
@@ -1180,7 +1187,7 @@ viewport "main" { }
     }
 
     #[tokio::test]
-    async fn follower_sync_restores_cleared_content_mirror() {
+    async fn follower_sync_fetches_active_schematic_file() {
         use crate::DB;
 
         let dir = tempdir().unwrap();
@@ -1206,30 +1213,22 @@ viewport "main" { }
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Follower state after a pointer-only repoint replicated from the
-        // source: the active pointer is set but the inline mirror was cleared
-        // (the file wasn't on disk to mirror) and is still missing locally.
+        // source: the active pointer is set but the asset file is still missing
+        // locally.
         let follower_db = DB::create(dir.path().join("follower_db")).unwrap();
-        follower_db.with_state_mut(|s| {
-            s.db_config.set_schematic_active(active_key);
-            s.db_config.metadata.remove("schematic.content");
-        });
-        assert!(
-            follower_db
-                .with_state(|s| s.db_config.schematic_content().map(str::to_owned))
-                .is_none()
-        );
+        follower_db.with_state_mut(|s| s.db_config.set_schematic_active(active_key));
 
         sync_schematic_assets_for_db_from_source(tcp, &follower_db).await;
 
-        // The active file landed locally and the mirror was restored from it, so
-        // a client reading this follower's config gets a working fallback.
+        // The active file is fetched from the source so the follower's asset
+        // server can serve the key its config points at.
         assert_eq!(
             std::fs::read(assets_dir(&follower_db.path).join(active_key)).unwrap(),
             active_kdl.as_bytes()
         );
         assert_eq!(
-            follower_db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
-            Some(active_kdl.to_string())
+            follower_db.read_active_schematic().as_deref(),
+            Some(active_kdl)
         );
     }
 }

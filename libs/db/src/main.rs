@@ -465,7 +465,7 @@ async fn main() -> miette::Result<()> {
                 // connected editors auto-load it over HTTP (RFD #724), matching
                 // what the Python SDK primes. If the ingested tree carries the
                 // conventional schematics/main.kdl and no active pointer is set
-                // yet, point at it (mirroring its content into schematic.content).
+                // yet, point at it so clients fetch it over the Asset Server.
                 if !server
                     .db
                     .with_state(|s| s.db_config.schematic_active().is_some())

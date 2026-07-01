@@ -30,15 +30,11 @@ const ACTIVE_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 #[derive(Resource, Default)]
 pub(crate) struct ActiveSchematicFetch {
     key: Option<String>,
-    /// The content mirror captured when the in-flight fetch was spawned. A new
-    /// request for the same key but a *different* mirror means the asset's bytes
-    /// changed, so the in-flight fetch is stale and must be superseded.
-    content_fallback: Option<String>,
     /// Attempt number (0-based) of the in-flight fetch, so a transient failure
     /// can schedule the next bounded retry.
     attempts: u32,
     task: Option<Task<ActiveSchematicFetched>>,
-    /// Scheduled re-attempt after a transient failure with no usable fallback.
+    /// Scheduled re-attempt after a transient failure.
     retry: Option<PendingRetry>,
 }
 
@@ -56,26 +52,21 @@ struct ActiveSchematicFetched {
 }
 
 /// Whether the in-flight fetch already covers `request`, so a new request must
-/// not supersede (and cancel) it. True only when both the key *and* the content
-/// mirror match: a repeated request from unrelated `DbConfig` churn carries the
-/// same mirror and is ignored, but a same-key request whose mirror changed means
-/// the asset's bytes changed, so the in-flight fetch is stale and must restart.
-fn fetch_covers_request(
-    fetch_key: Option<&str>,
-    fetch_fallback: Option<&str>,
-    request: &OpenDocumentFromActiveRequest,
-) -> bool {
-    fetch_key == Some(request.key.as_str()) && fetch_fallback == request.content_fallback.as_deref()
+/// not supersede (and cancel) it. A repeated request for the same key is
+/// ignored, so unrelated `DbConfig` churn mid-load can't cancel a nearly-
+/// complete fetch.
+fn fetch_covers_request(fetch_key: Option<&str>, request: &OpenDocumentFromActiveRequest) -> bool {
+    fetch_key == Some(request.key.as_str())
 }
 
-/// After a fetch failure with no usable fallback, the next attempt count to
-/// retry with, or `None` once attempts are exhausted (surface the failure).
+/// After a fetch failure, the next attempt count to retry with, or `None` once
+/// attempts are exhausted (surface the failure).
 fn next_fetch_attempt(attempts: u32) -> Option<u32> {
     (attempts + 1 < MAX_ACTIVE_FETCH_ATTEMPTS).then_some(attempts + 1)
 }
 
-/// Spawn an active-schematic fetch on the IO pool, recording its key, mirror,
-/// and attempt number; clears any scheduled retry it supersedes.
+/// Spawn an active-schematic fetch on the IO pool; clears any scheduled retry
+/// it supersedes.
 fn spawn_active_fetch(
     fetch: &mut ActiveSchematicFetch,
     request: OpenDocumentFromActiveRequest,
@@ -84,7 +75,6 @@ fn spawn_active_fetch(
 ) {
     let key = request.key.clone();
     fetch.key = Some(request.key.clone());
-    fetch.content_fallback = request.content_fallback.clone();
     fetch.attempts = attempts;
     fetch.retry = None;
     fetch.task = Some(IoTaskPool::get().spawn(async move {
@@ -128,39 +118,10 @@ pub(super) fn handle_open_document_requests(
     }
 }
 
-pub(super) fn handle_open_document_from_content_requests(
-    mut requests: MessageReader<OpenDocumentFromContentRequest>,
-    mut current_document: ResMut<CurrentDocument>,
-    mut loaded: MessageWriter<DocumentLoaded>,
-    mut failed: MessageWriter<DocumentCommandFailed>,
-) {
-    for request in requests.read() {
-        match open_document_from_content(
-            &request.content,
-            request.save_path.clone(),
-            &mut current_document,
-        ) {
-            Ok(document) => {
-                loaded.write(DocumentLoaded {
-                    save_path: current_document.save_path.clone(),
-                    document,
-                });
-            }
-            Err(error) => {
-                failed.write(DocumentCommandFailed {
-                    title: "Invalid Schematic".to_string(),
-                    message: error.to_string(),
-                });
-            }
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_open_document_from_active_requests(
     mut requests: MessageReader<OpenDocumentFromActiveRequest>,
     connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
-    config: Option<Res<impeller2_wkt::DbConfig>>,
     pending_active: Res<PendingActiveSchematic>,
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
@@ -171,23 +132,17 @@ pub(super) fn handle_open_document_from_active_requests(
 
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
-    // A repeated request for the same key *and same mirror* is ignored, so an
-    // unrelated DbConfig change mid-load can't cancel a nearly-complete fetch.
-    // But if the key's bytes changed (the mirror differs), the in-flight fetch
-    // is stale: supersede it so we don't apply the older bytes when it lands.
+    // A repeated request for the same key is ignored, so unrelated DbConfig
+    // churn mid-load can't cancel a nearly-complete fetch.
     if let Some(request) = requests.read().last().cloned() {
-        let already_fetching = fetch_covers_request(
-            fetch.key.as_deref(),
-            fetch.content_fallback.as_deref(),
-            &request,
-        );
+        let already_fetching = fetch_covers_request(fetch.key.as_deref(), &request);
         if !already_fetching {
             spawn_active_fetch(&mut fetch, request, 0, addr);
         }
     }
 
-    // A scheduled retry (previous attempt failed with no usable fallback) is
-    // re-spawned once due — unless the user has since pinned a different key.
+    // A scheduled retry (previous attempt failed) is re-spawned once due — unless
+    // the user has since pinned a different key.
     if fetch.task.is_none()
         && let Some(retry) = fetch.retry.as_ref()
         && Instant::now() >= retry.next_at
@@ -216,7 +171,6 @@ pub(super) fn handle_open_document_from_active_requests(
     let attempts = fetch.attempts;
     fetch.task = None;
     fetch.key = None;
-    fetch.content_fallback = None;
 
     // The user may have switched schematics (via "Save As…"/"Open Schematic…")
     // while this fetch was in flight: `PendingActiveSchematic` pins the key they
@@ -231,52 +185,27 @@ pub(super) fn handle_open_document_from_active_requests(
 
     let content = match result {
         Ok(content) => content,
-        Err(error) => {
-            // Only fall back to the inline mirror when it still describes the key
-            // we fetched: after a switch, `schematic.content` may belong to a
-            // different schematic, and loading it would show the wrong one. When
-            // connected, trust the current config's mirror only if its active key
-            // matches; offline, the request's captured mirror is all we have.
-            let mirror = match config.as_deref() {
-                Some(cfg) if cfg.schematic_active() == Some(request.key.as_str()) => {
-                    cfg.schematic_content().map(str::to_string)
-                }
-                Some(_) => None,
-                None => request.content_fallback.clone(),
-            };
-            match mirror {
-                Some(fallback) => {
-                    bevy::log::warn!(
-                        "Active schematic fetch failed ({error}); using content mirror fallback"
-                    );
-                    fallback
-                }
-                // No fallback: the asset may still be syncing (follower lag, slow
-                // PUT). Retry with a bounded delay rather than failing for the
-                // whole session; only surface the error once attempts run out.
-                None => match next_fetch_attempt(attempts) {
-                    Some(next_attempts) => {
-                        bevy::log::debug!(
-                            "Active schematic fetch failed ({error}); retrying \
-                             ({next_attempts}/{MAX_ACTIVE_FETCH_ATTEMPTS})"
-                        );
-                        fetch.retry = Some(PendingRetry {
-                            request,
-                            attempts: next_attempts,
-                            next_at: Instant::now() + ACTIVE_FETCH_RETRY_DELAY,
-                        });
-                        return;
-                    }
-                    None => {
-                        failed.write(DocumentCommandFailed {
-                            title: "Failed to Load Active Schematic".to_string(),
-                            message: error,
-                        });
-                        return;
-                    }
-                },
+        Err(error) => match next_fetch_attempt(attempts) {
+            Some(next_attempts) => {
+                bevy::log::debug!(
+                    "Active schematic fetch failed ({error}); retrying \
+                     ({next_attempts}/{MAX_ACTIVE_FETCH_ATTEMPTS})"
+                );
+                fetch.retry = Some(PendingRetry {
+                    request,
+                    attempts: next_attempts,
+                    next_at: Instant::now() + ACTIVE_FETCH_RETRY_DELAY,
+                });
+                return;
             }
-        }
+            None => {
+                failed.write(DocumentCommandFailed {
+                    title: "Failed to Load Active Schematic".to_string(),
+                    message: error,
+                });
+                return;
+            }
+        },
     };
     match open_document_from_content(&content, request.save_path.clone(), &mut current_document) {
         Ok(document) => {
@@ -431,60 +360,35 @@ pub(super) fn emit_document_load_failures(
 mod tests {
     use super::*;
 
-    fn request(key: &str, fallback: Option<&str>) -> OpenDocumentFromActiveRequest {
+    fn request(key: &str) -> OpenDocumentFromActiveRequest {
         OpenDocumentFromActiveRequest {
             key: key.to_string(),
-            content_fallback: fallback.map(str::to_string),
             save_path: None,
         }
     }
 
     #[test]
-    fn in_flight_fetch_ignores_same_key_same_mirror() {
-        // Unrelated DbConfig churn re-emits the same key + mirror; the in-flight
-        // fetch must not be cancelled.
-        let req = request("schematics/main.kdl", Some("viewport {}"));
-        assert!(fetch_covers_request(
-            Some("schematics/main.kdl"),
-            Some("viewport {}"),
-            &req,
-        ));
-    }
-
-    #[test]
-    fn in_flight_fetch_superseded_when_bytes_change() {
-        // Same key but a changed mirror means the asset's bytes changed: the
-        // in-flight fetch is stale and must restart.
-        let req = request("schematics/main.kdl", Some("viewport { new }"));
-        assert!(!fetch_covers_request(
-            Some("schematics/main.kdl"),
-            Some("viewport {}"),
-            &req,
-        ));
+    fn in_flight_fetch_ignores_same_key() {
+        let req = request("schematics/main.kdl");
+        assert!(fetch_covers_request(Some("schematics/main.kdl"), &req,));
     }
 
     #[test]
     fn in_flight_fetch_superseded_for_different_key() {
-        let req = request("schematics/other.kdl", Some("viewport {}"));
-        assert!(!fetch_covers_request(
-            Some("schematics/main.kdl"),
-            Some("viewport {}"),
-            &req,
-        ));
+        let req = request("schematics/other.kdl");
+        assert!(!fetch_covers_request(Some("schematics/main.kdl"), &req,));
     }
 
     #[test]
     fn no_in_flight_fetch_never_covers() {
-        let req = request("schematics/main.kdl", None);
-        assert!(!fetch_covers_request(None, None, &req));
+        let req = request("schematics/main.kdl");
+        assert!(!fetch_covers_request(None, &req));
     }
 
     #[test]
     fn fetch_retries_until_attempts_exhausted() {
-        // A transient failure schedules the next attempt; the last attempt
-        // surfaces the failure instead of retrying forever.
         let mut attempts = 0;
-        let mut spawns = 1; // the initial fetch
+        let mut spawns = 1;
         while let Some(next) = next_fetch_attempt(attempts) {
             attempts = next;
             spawns += 1;

@@ -390,7 +390,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 db.with_state_mut(|s| s.set_msg_metadata(meta.id, meta.metadata, &db.path))?;
             }
 
-            // SetDbConfig – live db_config metadata (e.g. schematic.content).
+            // SetDbConfig – live db_config metadata (e.g. schematic.active).
             Packet::Msg(m) if m.id == SetDbConfig::ID => {
                 let update: SetDbConfig = m.parse()?;
                 apply_db_config_update(config, db, update)?;
@@ -540,7 +540,10 @@ mod tests {
         let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
         db.apply_set_db_config(SetDbConfig {
             metadata: HashMap::from([
-                ("schematic.content".to_string(), "old schematic".to_string()),
+                (
+                    "schematic.active".to_string(),
+                    "schematics/old.kdl".to_string(),
+                ),
                 ("skybox.active".to_string(), "old_skybox".to_string()),
                 ("local.only".to_string(), "stale".to_string()),
             ]),
@@ -582,7 +585,7 @@ mod tests {
                     .map(String::as_str),
                 Some("fresh")
             );
-            assert!(!state.db_config.metadata.contains_key("schematic.content"));
+            assert!(!state.db_config.metadata.contains_key("schematic.active"));
             assert!(!state.db_config.metadata.contains_key("skybox.active"));
             assert!(!state.db_config.metadata.contains_key("local.only"));
         });

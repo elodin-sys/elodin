@@ -122,7 +122,7 @@ pub fn open_document_from_content(
 
 /// Fetch the active schematic's KDL from the DB Asset Server over HTTP. The
 /// request is bounded so an unreachable DB cannot hang the load.
-pub(crate) fn fetch_active_schematic_kdl(
+pub fn fetch_active_schematic_kdl(
     key: &str,
     connection_addr: Option<SocketAddr>,
 ) -> Result<String, String> {
@@ -201,19 +201,6 @@ pub(crate) struct DbSavePlan {
     /// `(asset key, local source path)` for meshes/icons still referenced by a
     /// local path; their bytes are read from disk at upload time.
     local_assets: Vec<(String, String)>,
-}
-
-impl DbSavePlan {
-    /// The active schematic's stored bytes as text — the DB mirrors exactly
-    /// these into `schematic.content`. The caller records them as the last
-    /// synced content so the DB's echo of its own save is not mistaken for an
-    /// external change (which would trigger a redundant reload). The active
-    /// schematic is always the final upload.
-    pub(crate) fn active_schematic_content(&self) -> Option<String> {
-        self.schematic_uploads
-            .last()
-            .and_then(|(_, bytes)| String::from_utf8(bytes.clone()).ok())
-    }
 }
 
 /// Rewrites a schematic's local mesh, icon and window references to `db:` keys,
@@ -347,10 +334,9 @@ pub(crate) fn upload_db_save_plan(
 
 /// Resolves a local mesh/icon path referenced by a schematic to a filesystem
 /// path for upload. These paths are loaded by the editor's `AssetServer`, whose
-/// default source is `ELODIN_ASSETS_DIR` (default `assets/`) — *not* the
-/// schematic/`ELODIN_KDL_DIR` root. Resolving them the same way here keeps a DB
-/// save reading the exact bytes the editor displays; using `schematic_file`
-/// would read from the wrong root and store broken local paths in the DB.
+/// default source is `$ELODIN_ASSETS` or `assets/` under cwd — not the schematic
+/// root. Resolving them the same way here keeps a DB save reading the exact
+/// bytes the editor displays.
 fn local_asset_file(src: &str) -> PathBuf {
     let path = Path::new(src);
     if path.is_absolute() {
@@ -418,27 +404,20 @@ fn current_document_matches_path(current_document: &CurrentDocument, path: &Path
             })
 }
 
-/// Returns true when two KDL strings describe the same schematic (exact or semantically).
-pub(crate) fn schematic_content_equivalent(left: &str, right: &str) -> bool {
-    if left == right {
-        return true;
-    }
-    match (Schematic::from_kdl(left), Schematic::from_kdl(right)) {
-        (Ok(left), Ok(right)) => left.to_kdl() == right.to_kdl(),
-        _ => false,
-    }
+/// Display/save path derived from the DB asset key (`schematics/foo.kdl`).
+pub(crate) fn save_path_for_active_key(key: &str) -> PathBuf {
+    PathBuf::from(key)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
-    last_synced_content: Res<LastSyncedSchematicContent>,
+    last_synced_key: Res<LastSyncedActiveKey>,
     mut pending_active: ResMut<PendingActiveSchematic>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
     mut open_document_from_active: MessageWriter<OpenDocumentFromActiveRequest>,
-    mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
     mut cleared: MessageWriter<DocumentCleared>,
 ) {
     if given_path.is_none() && !config.is_changed() {
@@ -458,16 +437,11 @@ pub fn sync_document_from_config(
         // Overridden path is missing: fall through to the DB-backed sources.
     }
 
-    // DB-centric load (RFD #724): when the DB advertises an active schematic it
-    // is authoritative (its KDL is `db:`-rewritten), so it must take precedence
-    // over any stale local on-disk file that still carries local asset paths.
-    // The mirrored `schematic.content` doubles as the change guard (the shim
-    // keeps it equal to the active asset) and as the offline fallback.
+    // DB-centric load (RFD #724): `schematic.active` is authoritative; fetch its
+    // bytes over HTTP. Reload on a change of the active *key* alone — opening
+    // another stored schematic with byte-identical KDL still switches the active
+    // key, and the editor must follow it.
     if let Some(active_key) = config.schematic_active() {
-        // A locally-initiated switch ("Save As…"/"Open Schematic…") may not be
-        // echoed by the DB yet. Until `schematic.active` reports the key we
-        // requested, ignore the still-stale pointer so we don't briefly reload
-        // the schematic being replaced; clear the pin once the DB confirms it.
         if let Some(pending) = pending_active.0.clone() {
             if pending == active_key {
                 pending_active.0 = None;
@@ -476,52 +450,12 @@ pub fn sync_document_from_config(
             }
         }
 
-        // Reload on a change of the active *key* alone. The active asset is
-        // fetched over HTTP and is authoritative; we no longer compare inline
-        // `schematic.content` (the mirror is going away). Opening another stored
-        // schematic with byte-identical KDL still switches the active key, and
-        // the editor must follow it. A skybox-only config change keeps the same
-        // key, so this correctly skips a redundant document reload.
-        if last_synced_content.1.as_deref() == Some(active_key) {
+        if last_synced_key.0.as_deref() == Some(active_key) {
             return;
         }
         open_document_from_active.write(OpenDocumentFromActiveRequest {
             key: active_key.to_string(),
-            content_fallback: config.schematic_content().map(str::to_string),
-            save_path: config.schematic_path().map(Path::new).map(schematic_file),
-        });
-        return;
-    }
-
-    // No active schematic: fall back to the configured local path if present.
-    if let Some(path) = config.schematic_path().map(PathBuf::from) {
-        let resolved_path = schematic_file(&path);
-        if resolved_path.try_exists().unwrap_or(false) {
-            if current_document_matches_path(&current_document, &resolved_path) {
-                return;
-            }
-            open_document.write(OpenDocumentRequest(path));
-            return;
-        }
-        if config.schematic_content().is_some() {
-            bevy::log::info!(
-                "Schematic file {:?} not found; using embedded schematic content fallback",
-                resolved_path.display()
-            );
-        }
-    }
-
-    if let Some(content) = config.schematic_content() {
-        if last_synced_content
-            .0
-            .as_deref()
-            .is_some_and(|last| schematic_content_equivalent(last, content))
-        {
-            return;
-        }
-        open_document_from_content.write(OpenDocumentFromContentRequest {
-            content: content.to_string(),
-            save_path: config.schematic_path().map(Path::new).map(schematic_file),
+            save_path: Some(save_path_for_active_key(active_key)),
         });
         return;
     }

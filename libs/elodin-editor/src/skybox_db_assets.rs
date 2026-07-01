@@ -5,8 +5,7 @@ use bevy_ai_skybox::{
     prelude::{SetActiveSkybox, SkyboxAssetSettings, SkyboxCache},
 };
 use impeller2_bevy::{ConnectionAddr, PacketTx};
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::{DbConfig, Schematic, StoreAsset};
+use impeller2_wkt::{DbConfig, StoreAsset};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -106,15 +105,7 @@ pub fn db_skybox_mirror_pending(
 }
 
 pub fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
-    if let Some(desired) = config.skybox_active_desired() {
-        return Some(desired);
-    }
-
-    let content = config.schematic_content()?;
-    let schematic = Schematic::from_kdl(content)
-        .inspect_err(|e| tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}"))
-        .ok()?;
-    Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
+    config.skybox_active_desired()
 }
 
 /// Whether the DB mirror should re-assert its synced skybox onto the live
@@ -676,9 +667,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desired_skybox_from_config_reads_schematic_content() {
+    fn desired_skybox_from_config_reads_skybox_active() {
         let mut config = DbConfig::default();
-        config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
+        config.set_skybox_active(Some("desert_night"));
 
         assert_eq!(
             desired_skybox_from_config(&config),
@@ -692,7 +683,7 @@ mod tests {
         config
             .metadata
             .insert("skybox.active".to_string(), String::new());
-        config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
+        config.set_schematic_active("schematics/main.kdl");
 
         assert_eq!(desired_skybox_from_config(&config), Some(None));
     }

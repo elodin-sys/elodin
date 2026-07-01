@@ -10,12 +10,10 @@ use thiserror::Error;
 #[derive(Resource, Default)]
 pub struct InitialKdlPath(pub Option<PathBuf>);
 
-/// Last schematic synced from `DbConfig`, to skip redundant full reloads when
-/// only other metadata (e.g. `skybox.active`) changes. `.0` is the applied
-/// `schematic.content`; `.1` is the `schematic.active` key it came from, so a
-/// reload still fires when the active key changes even if the KDL is identical.
+/// Last `schematic.active` key synced from `DbConfig`, to skip redundant full
+/// reloads when only other metadata (e.g. `skybox.active`) changes.
 #[derive(Resource, Default)]
-pub struct LastSyncedSchematicContent(pub Option<String>, pub Option<String>);
+pub struct LastSyncedActiveKey(pub Option<String>);
 
 /// Active-schematic key the editor has optimistically switched to (via "Save
 /// As…" or "Open Schematic…") but the DB has not yet echoed. While set and not

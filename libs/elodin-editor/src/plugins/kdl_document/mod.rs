@@ -7,7 +7,10 @@ mod types;
 
 pub use commands::*;
 pub use messages::*;
-pub use operations::{apply_initial_kdl_path, sync_document_from_config, sync_document_skybox};
+pub use operations::{
+    apply_initial_kdl_path, fetch_active_schematic_kdl, sync_document_from_config,
+    sync_document_skybox,
+};
 pub(crate) use operations::{
     fetch_schematic_index, plan_db_save, schematic_save_key_from_name, upload_db_save_plan,
 };
@@ -21,14 +24,13 @@ pub(crate) fn plugin(app: &mut App) {
         (KdlDocumentSet::Commands, KdlDocumentSet::AssetEvents).chain(),
     )
     .init_resource::<InitialKdlPath>()
-    .init_resource::<LastSyncedSchematicContent>()
+    .init_resource::<LastSyncedActiveKey>()
     .init_resource::<PendingActiveSchematic>()
     .init_resource::<systems::ActiveSchematicFetch>()
     .init_resource::<CurrentDocument>()
     .init_asset::<SchematicDocumentAsset>()
     .init_asset_loader::<SchematicDocumentLoader>()
     .add_message::<OpenDocumentRequest>()
-    .add_message::<OpenDocumentFromContentRequest>()
     .add_message::<OpenDocumentFromActiveRequest>()
     .add_message::<DocumentLoaded>()
     .add_message::<DocumentCommandFailed>()
@@ -39,7 +41,6 @@ pub(crate) fn plugin(app: &mut App) {
         PreUpdate,
         (
             systems::handle_open_document_requests,
-            systems::handle_open_document_from_content_requests,
             systems::handle_open_document_from_active_requests,
         )
             .chain()
@@ -60,9 +61,9 @@ pub(crate) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoaded, DocumentReloaded,
-        LastSyncedSchematicContent, OpenDocumentFromActiveRequest, OpenDocumentFromContentRequest,
-        OpenDocumentRequest, PendingActiveSchematic, SchematicDocumentAsset,
+        CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
+        OpenDocumentFromActiveRequest, OpenDocumentRequest, PendingActiveSchematic,
+        SchematicDocumentAsset,
         operations::{open_document_from_content, sync_document_skybox},
         plugin,
     };
@@ -81,7 +82,6 @@ mod tests {
     };
     use impeller2_wkt::{DbConfig, Schematic, SchematicElem, SkyboxConfig};
     use std::{
-        ffi::OsString,
         fs,
         path::{Path, PathBuf},
         sync::{Mutex, OnceLock},
@@ -118,32 +118,20 @@ mod tests {
         }
     }
 
-    struct EnvVarGuard {
-        previous: Option<OsString>,
+    struct ChdirGuard {
+        previous: PathBuf,
     }
 
-    impl Drop for EnvVarGuard {
+    impl Drop for ChdirGuard {
         fn drop(&mut self) {
-            // SAFETY: These tests serialize all `ELODIN_KDL_DIR` mutations behind `ENV_LOCK`,
-            // so restoring the previous value here cannot race with another test in this module.
-            unsafe {
-                if let Some(value) = self.previous.take() {
-                    std::env::set_var("ELODIN_KDL_DIR", value);
-                } else {
-                    std::env::remove_var("ELODIN_KDL_DIR");
-                }
-            }
+            let _ = std::env::set_current_dir(&self.previous);
         }
     }
 
-    fn set_kdl_dir(path: &Path) -> EnvVarGuard {
-        let previous = std::env::var_os("ELODIN_KDL_DIR");
-        // SAFETY: This helper is only used in tests that hold `ENV_LOCK`, so mutating the
-        // process environment here is serialized and scoped to the test's lifetime.
-        unsafe {
-            std::env::set_var("ELODIN_KDL_DIR", path);
-        }
-        EnvVarGuard { previous }
+    fn chdir_to(path: &Path) -> ChdirGuard {
+        let previous = std::env::current_dir().expect("current dir");
+        std::env::set_current_dir(path).expect("chdir");
+        ChdirGuard { previous }
     }
 
     fn write_test_document(root: &Path, root_title: &str, window_name: &str) {
@@ -259,10 +247,9 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(DbConfig::default())
             .init_resource::<CurrentDocument>()
-            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<LastSyncedActiveKey>()
             .init_resource::<PendingActiveSchematic>()
             .add_message::<OpenDocumentRequest>()
-            .add_message::<OpenDocumentFromContentRequest>()
             .add_message::<OpenDocumentFromActiveRequest>()
             .add_message::<DocumentCleared>()
             .init_resource::<SeenOpenDocumentRequests>()
@@ -453,88 +440,43 @@ mod tests {
         assert!(app.world().resource::<SkyboxCache>().active.is_none());
     }
 
+    #[derive(Resource, Clone)]
+    struct SyncPath(Option<PathBuf>);
+
+    fn sync_path(path: Res<SyncPath>) -> Option<PathBuf> {
+        path.0.clone()
+    }
+
     #[test]
-    fn config_sync_opens_configured_file_path_when_not_loaded() {
+    fn config_sync_opens_given_path_when_not_loaded() {
         let temp = TempTestDir::new("config-sync-open");
         let path = temp.path().join("drone.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
 
-        let mut app = config_sync_test_app();
-        app.world_mut()
-            .resource_mut::<DbConfig>()
-            .set_schematic_path(path.to_string_lossy().to_string());
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .insert_resource(SyncPath(Some(path.clone())))
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenOpenDocumentRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    sync_path.pipe(super::operations::sync_document_from_config),
+                    collect_open_document_requests,
+                )
+                    .chain(),
+            );
         app.update();
 
         assert_eq!(
             app.world().resource::<SeenOpenDocumentRequests>().0,
             vec![path]
-        );
-    }
-
-    #[derive(Resource, Default)]
-    struct SeenDocumentCommandFailures(usize);
-
-    fn count_document_command_failures(
-        mut reader: MessageReader<DocumentCommandFailed>,
-        mut seen: ResMut<SeenDocumentCommandFailures>,
-    ) {
-        seen.0 += reader.read().count();
-    }
-
-    #[test]
-    fn config_sync_does_not_mark_invalid_embedded_content_as_synced() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(AssetPlugin {
-            unapproved_path_mode: UnapprovedPathMode::Allow,
-            ..Default::default()
-        });
-        super::super::kdl_asset_source::plugin(&mut app);
-        app.add_message::<SetActiveSkybox>();
-        app.insert_resource(DbConfig::default())
-            .init_resource::<CurrentDocument>()
-            .init_resource::<LastSyncedSchematicContent>()
-            .init_resource::<PendingActiveSchematic>()
-            .init_resource::<SeenDocumentCommandFailures>()
-            .add_systems(
-                Update,
-                (
-                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
-                    count_document_command_failures,
-                )
-                    .chain(),
-            );
-        plugin(&mut app);
-
-        app.world_mut()
-            .resource_mut::<DbConfig>()
-            .set_schematic_content("not valid kdl".to_string());
-        app.update();
-        app.update();
-
-        assert!(
-            app.world()
-                .resource::<LastSyncedSchematicContent>()
-                .0
-                .is_none(),
-            "invalid embedded content must not be recorded before a successful load"
-        );
-        assert_eq!(
-            app.world().resource::<SeenDocumentCommandFailures>().0,
-            1,
-            "invalid embedded content should surface a document command failure"
-        );
-
-        app.world_mut()
-            .resource_mut::<DbConfig>()
-            .set_schematic_content("not valid kdl".to_string());
-        app.update();
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<SeenDocumentCommandFailures>().0,
-            2,
-            "the same invalid embedded content should be retried after a failed load"
         );
     }
 
@@ -555,11 +497,10 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(DbConfig::default())
             .init_resource::<CurrentDocument>()
-            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<LastSyncedActiveKey>()
             .init_resource::<PendingActiveSchematic>()
             .init_resource::<SeenActiveRequests>()
             .add_message::<OpenDocumentRequest>()
-            .add_message::<OpenDocumentFromContentRequest>()
             .add_message::<OpenDocumentFromActiveRequest>()
             .add_message::<DocumentCleared>()
             .add_systems(
@@ -571,31 +512,20 @@ mod tests {
                     .chain(),
             );
 
-        let content = "skybox name=\"seaport\"\n";
-
-        // Schematic A is already loaded and synced.
-        {
-            let mut cfg = app.world_mut().resource_mut::<DbConfig>();
-            cfg.set_schematic_active("schematics/a.kdl");
-            cfg.set_schematic_content(content.to_string());
-        }
-        {
-            let mut last = app.world_mut().resource_mut::<LastSyncedSchematicContent>();
-            last.0 = Some(content.to_string());
-            last.1 = Some("schematics/a.kdl".to_string());
-        }
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
         app.update();
         assert!(
             app.world().resource::<SeenActiveRequests>().0.is_empty(),
-            "same active key with equivalent content must not reload"
+            "same active key must not reload"
         );
 
-        // Switch to schematic B that happens to have byte-identical content.
-        {
-            let mut cfg = app.world_mut().resource_mut::<DbConfig>();
-            cfg.set_schematic_active("schematics/b.kdl");
-            cfg.set_schematic_content(content.to_string());
-        }
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/b.kdl");
         app.update();
         assert_eq!(
             app.world().resource::<SeenActiveRequests>().0,
@@ -605,19 +535,15 @@ mod tests {
     }
 
     #[test]
-    fn config_sync_reloads_on_active_key_change_without_inline_content() {
-        // Phase 3.5: the reload trigger is keyed on `schematic.active` alone, so
-        // a key change fires an active fetch even when no inline
-        // `schematic.content` mirror is present.
+    fn config_sync_reloads_on_active_key_change() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(DbConfig::default())
             .init_resource::<CurrentDocument>()
-            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<LastSyncedActiveKey>()
             .init_resource::<PendingActiveSchematic>()
             .init_resource::<SeenActiveRequests>()
             .add_message::<OpenDocumentRequest>()
-            .add_message::<OpenDocumentFromContentRequest>()
             .add_message::<OpenDocumentFromActiveRequest>()
             .add_message::<DocumentCleared>()
             .add_systems(
@@ -636,13 +562,11 @@ mod tests {
         assert_eq!(
             app.world().resource::<SeenActiveRequests>().0,
             vec!["schematics/a.kdl".to_string()],
-            "an active key with no inline content must still fetch over HTTP"
+            "an active key must fetch over HTTP"
         );
 
-        // Mark it synced (as `on_document_loaded` would) and switch keys.
-        app.world_mut()
-            .resource_mut::<LastSyncedSchematicContent>()
-            .1 = Some("schematics/a.kdl".to_string());
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
         app.world_mut()
             .resource_mut::<DbConfig>()
             .set_schematic_active("schematics/b.kdl");
@@ -653,34 +577,37 @@ mod tests {
                 "schematics/a.kdl".to_string(),
                 "schematics/b.kdl".to_string()
             ],
-            "changing the active key must reload even without inline content"
+            "changing the active key must reload"
         );
     }
 
     #[test]
-    fn schematic_content_equivalent_treats_reserialized_kdl_as_equal() {
-        use impeller2_kdl::{FromKdl, ToKdl};
-        use impeller2_wkt::Schematic;
-
-        let raw = "skybox name=\"seaport\"\n";
-        let reserialized = Schematic::from_kdl(raw).unwrap().to_kdl();
-        assert!(super::operations::schematic_content_equivalent(
-            &reserialized,
-            raw,
-        ));
-    }
-
-    #[test]
-    fn config_sync_skips_configured_file_path_when_already_loaded() {
+    fn config_sync_skips_given_path_when_already_loaded() {
         let temp = TempTestDir::new("config-sync-skip-current");
         let path = temp.path().join("drone.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
         let resolved_path = impeller2_kdl::env::schematic_file(&path);
 
-        let mut app = config_sync_test_app();
-        app.world_mut()
-            .resource_mut::<DbConfig>()
-            .set_schematic_path(path.to_string_lossy().to_string());
+        let given = path.clone();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .insert_resource(SyncPath(Some(given)))
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenOpenDocumentRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    sync_path.pipe(super::operations::sync_document_from_config),
+                    collect_open_document_requests,
+                )
+                    .chain(),
+            );
         {
             let mut current_document = app.world_mut().resource_mut::<CurrentDocument>();
             current_document.handle = Some(Handle::<SchematicDocumentAsset>::default());
@@ -798,12 +725,7 @@ mod tests {
         name: &str,
         root_title: &str,
         window_name: &str,
-    ) -> (
-        TempTestDir,
-        EnvVarGuard,
-        App,
-        Handle<SchematicDocumentAsset>,
-    ) {
+    ) -> (TempTestDir, ChdirGuard, App, Handle<SchematicDocumentAsset>) {
         use std::os::unix::fs::symlink;
 
         let temp = TempTestDir::new(name);
@@ -814,10 +736,10 @@ mod tests {
 
         write_test_document(&real_root, root_title, window_name);
 
-        let var_guard = set_kdl_dir(&linked_root);
+        let _dir_guard = chdir_to(&linked_root);
         let mut app = test_app();
         let handle = load_document(&mut app);
-        (temp, var_guard, app, handle)
+        (temp, _dir_guard, app, handle)
     }
 
     #[cfg(unix)]

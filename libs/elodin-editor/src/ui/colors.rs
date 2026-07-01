@@ -327,7 +327,7 @@ fn prettify_label(name: &str) -> String {
 
 fn color_scheme_dirs() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if let Some(dir) = std::env::var_os("ELODIN_ASSETS_DIR") {
+    if let Some(dir) = std::env::var_os("ELODIN_ASSETS") {
         roots.push(PathBuf::from(dir));
     } else if let Ok(cwd) = std::env::current_dir() {
         roots.push(cwd.join("assets"));

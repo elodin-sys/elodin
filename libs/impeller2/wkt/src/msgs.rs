@@ -325,25 +325,9 @@ impl DbConfig {
             .map(String::as_str)
     }
 
-    pub fn set_schematic_path(&mut self, path: String) {
-        self.metadata.insert("schematic.path".to_string(), path);
-    }
-
-    pub fn schematic_path(&self) -> Option<&str> {
-        self.metadata.get("schematic.path").map(String::as_str)
-    }
-
-    pub fn set_schematic_content(&mut self, path: String) {
-        self.metadata.insert("schematic.content".to_string(), path);
-    }
-
-    pub fn schematic_content(&self) -> Option<&str> {
-        self.metadata.get("schematic.content").map(String::as_str)
-    }
-
     /// Asset key of the active schematic under `{db}/assets/`
     /// (e.g. `schematics/main.kdl`). Consumers fetch it over the Asset Server
-    /// HTTP rather than reading inline `schematic.content` (RFD #724).
+    /// HTTP (RFD #724).
     pub fn set_schematic_active(&mut self, key: impl Into<String>) {
         self.metadata
             .insert("schematic.active".to_string(), key.into());
@@ -377,7 +361,7 @@ impl DbConfig {
 
     /// Headless/render-server skybox intent from metadata alone.
     ///
-    /// - `None` — key absent (no opinion; fall back to `schematic.content` if present)
+    /// - `None` — key absent (no opinion; derive from the active schematic instead)
     /// - `Some(None)` — key present but empty (explicit clear)
     /// - `Some(Some(name))` — active skybox name
     pub fn skybox_active_desired(&self) -> Option<Option<String>> {
