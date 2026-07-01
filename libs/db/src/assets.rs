@@ -85,24 +85,46 @@ pub fn resolve_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// Copy every file under `source_root` into `{db}/assets/`, preserving relative
-/// paths. Copy-once: if the ingest marker already exists this is a no-op and the
-/// returned report has `skipped = true`. Path traversal is rejected by the
-/// shared `write_asset_file` sanitizer.
+/// paths. Path traversal is rejected by the shared `write_asset_file` sanitizer.
 ///
-/// Until the marker is written no ingest has been committed, so the destination
-/// is wiped first: a previous run that failed (or crashed) part-way through
-/// cannot leave stale files that would otherwise merge with — and be locked in
-/// by — a later ingest from a different source tree.
+/// Ingest is a *one-time bootstrap into an empty DB*, not a per-run sync: it
+/// seeds a brand-new DB from a local `assets/` tree and is then a no-op forever.
+/// It is invoked on every `elodin-db run` / `world.run(...)`, including reopens,
+/// so it must be safe against a DB that already owns assets. Two guards enforce
+/// copy-once and, above all, **never destroy existing data**:
+///
+///   1. The ingest marker is present → a prior ingest committed; skip.
+///   2. The destination already holds real assets (any non-dotfile) → the DB is
+///      already populated by some legitimate path — recorded simulation output,
+///      editor `PUT`/`StoreAsset`, or a legacy DB created before ingest existed
+///      (which have no marker) — so leave it untouched and skip. This is what
+///      keeps `elodin-db run <existing-db>` from wiping recorded assets just
+///      because a stray `./assets` resolves in the cwd.
+///
+/// Only when the destination has no real assets do we (re)create it and copy.
+/// The trade-off: a rare ingest that crashed part-way (files written, marker
+/// not) is treated as "already populated" and left as-is rather than wiped and
+/// retried; recovering a partial seed is a `--reset`, which is far preferable to
+/// silently deleting a user's recorded assets.
 pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<IngestReport> {
     let dest = assets_dir(db_path);
-    let marker = dest.join(INGEST_MARKER);
-    if marker.exists() {
-        return Ok(IngestReport {
+    let skipped = || {
+        Ok(IngestReport {
             source_root: source_root.to_path_buf(),
             file_count: 0,
             byte_count: 0,
             skipped: true,
-        });
+        })
+    };
+
+    if dest.join(INGEST_MARKER).exists() {
+        return skipped();
+    }
+    // `index_assets_in` excludes dotfiles, so a present-but-uncommitted marker
+    // (or other dotfiles) alone does not count as "populated"; any real asset
+    // does, and we must not clobber it.
+    if !index_assets_in(&dest, None)?.is_empty() {
+        return skipped();
     }
 
     if !source_root.is_dir() {
@@ -115,8 +137,10 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
         ));
     }
 
-    // No committed ingest yet: start from a clean slate so partial leftovers
-    // from a prior failed run never survive into this (possibly different) tree.
+    // Destination carries no real assets: safe to start from a clean slate.
+    // Removing here only clears dotfile-only leftovers (e.g. a stray marker) —
+    // the guard above already bailed out on any actual asset — so a partial run
+    // from a prior crash cannot merge into this (possibly different) tree.
     if dest.exists() {
         std::fs::remove_dir_all(&dest)?;
     }
@@ -141,8 +165,8 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
     // Every schematic now lives in the DB, so rewrite the local asset paths
     // inside each stored `.kdl` (window sub-schematics included) to `db:` refs.
     // Done before the marker so a genuine I/O failure aborts without committing
-    // copy-once: the next ingest wipes and retries rather than locking in stale
-    // local paths.
+    // copy-once. The partial tree it leaves behind is then preserved (not wiped)
+    // by the "already populated" guard on the next run; recover with `--reset`.
     rewrite_stored_schematics(&dest)?;
 
     let report = IngestReport {
@@ -151,7 +175,7 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
         byte_count,
         skipped: false,
     };
-    write_ingest_marker(&marker, &report)?;
+    write_ingest_marker(&dest.join(INGEST_MARKER), &report)?;
     Ok(report)
 }
 
@@ -374,27 +398,58 @@ mod tests {
     }
 
     #[test]
-    fn ingest_wipes_uncommitted_leftovers_before_copying() {
+    fn ingest_preserves_existing_assets_without_marker() {
         let dir = tempdir().unwrap();
         let db = dir.path().join("db");
 
-        // Simulate a prior failed/partial run: files under {db}/assets without a
-        // committed marker.
+        // A DB that already owns assets but has no ingest marker: recorded
+        // simulation output, an editor PUT/StoreAsset, or a legacy DB created
+        // before ingest existed. This is the data-loss scenario — a stray
+        // `./assets` resolving must never wipe these.
         let dest = assets_dir(&db);
-        write(&dest.join("meshes/stale.glb"), b"stale");
+        write(&dest.join("meshes/recorded.glb"), b"recorded");
         assert!(!assets_ingested(&db));
 
-        // A fresh ingest from a different source must not merge the leftover.
         let src = dir.path().join("src_assets");
         write(&src.join("meshes/new.glb"), b"new");
         let report = ingest_asset_dir(&db, &src).unwrap();
+
+        // Ingest must be a no-op: existing assets kept, nothing copied over them.
+        assert!(report.skipped, "populated DB must not be re-ingested");
+        assert_eq!(report.file_count, 0);
+        assert_eq!(
+            std::fs::read(dest.join("meshes/recorded.glb")).unwrap(),
+            b"recorded",
+            "recorded asset must survive untouched"
+        );
+        assert!(
+            !dest.join("meshes/new.glb").exists(),
+            "a populated DB must not be seeded from a local tree"
+        );
+    }
+
+    #[test]
+    fn ingest_seeds_when_only_dotfile_leftovers_present() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("db");
+
+        // Dotfile-only leftovers (e.g. a stray marker from a crashed pre-commit
+        // run) are not real assets, so a fresh seed may still proceed and clear
+        // them.
+        let dest = assets_dir(&db);
+        write(&dest.join(".leftover"), b"x");
+        assert!(!assets_ingested(&db));
+
+        let src = dir.path().join("src_assets");
+        write(&src.join("meshes/new.glb"), b"new");
+        let report = ingest_asset_dir(&db, &src).unwrap();
+
         assert!(!report.skipped);
         assert_eq!(report.file_count, 1);
-
         assert!(dest.join("meshes/new.glb").is_file());
         assert!(
-            !dest.join("meshes/stale.glb").exists(),
-            "leftover from an uncommitted run must be wiped, not merged"
+            !dest.join(".leftover").exists(),
+            "dotfile-only leftovers are cleared by a clean seed"
         );
         assert!(assets_ingested(&db));
     }
