@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastSyncedActiveKey,
     LastSyncedAssetsRevision, PendingActiveSchematic, SchematicDocumentAsset,
-    fetch_schematic_index, plan_db_save, schematic_save_key_from_name, upload_db_save_plan,
+    fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,
+    upload_db_save_plan,
 };
 use crate::skybox_generation::{
     LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
@@ -70,8 +71,8 @@ pub(crate) fn plugin(app: &mut bevy::app::App) {
         .add_systems(Update, (poll_schematic_save, refresh_schematic_index));
 }
 
-/// Carries the target asset key from a "Save Schematic As..." prompt into the
-/// shared DB-save system. `None` means a plain "Save" that overwrites whatever
+/// Carries the target asset key chosen in the "Save Schematic" name prompt into
+/// the shared DB-save system. `None` means the save falls back to whatever
 /// schematic is currently active.
 #[derive(Resource, Default)]
 pub(crate) struct PendingSchematicSaveKey(pub Option<String>);
@@ -138,6 +139,9 @@ pub struct PalettePage {
     /// Filter text active on this page when it was left for a sub-page, so it
     /// can be restored when the user navigates back (e.g. a skybox prompt).
     pub remembered_filter: Option<String>,
+    /// Text to pre-fill the search box with when this page opens, so a prompt
+    /// can offer an editable default (e.g. the current schematic name on save).
+    pub initial_filter: Option<String>,
 }
 
 impl PalettePage {
@@ -148,11 +152,19 @@ impl PalettePage {
             label: None,
             prompt: None,
             remembered_filter: None,
+            initial_filter: None,
         }
     }
 
     pub fn label(mut self, label: impl ToString) -> Self {
         self.label = Some(label.to_string());
+        self
+    }
+
+    /// Pre-fill the search box with `filter` when this page opens. The value is
+    /// editable, so it doubles as a default the user can keep or replace.
+    pub fn initial_filter(mut self, filter: impl ToString) -> Self {
+        self.initial_filter = Some(filter.to_string());
         self
     }
 
@@ -1008,35 +1020,30 @@ fn goto_tick() -> PaletteItem {
     })
 }
 
+/// Save the current schematic (RFD #724 Phase 2). Prompts for a name, pre-filled
+/// with the active schematic's name so keeping it overwrites in place and editing
+/// it saves under a new `schematics/<name>.kdl` (which also repoints
+/// `schematic.active` and populates the "Open Schematic..." picker). This single
+/// prompt subsumes the former separate "Save Schematic As...".
 pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
         PRESETS_LABEL,
-        |_name: In<String>, mut commands: Commands| {
-            // Capture descriptors/screens and rebuild the schematic from the live
-            // UI, then write it back to the DB in a dedicated system (RFD #724).
-            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
-            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
-            commands.run_system_cached(queue_save_schematic_db_now);
-            PaletteEvent::Exit
+        |_: In<String>, config: Res<DbConfig>| {
+            let default_name = config
+                .schematic_active()
+                .and_then(schematic_name_from_key)
+                .unwrap_or_default();
+            PalettePage::new(vec![save_schematic_name_prompt()])
+                .label("Save Schematic")
+                .prompt("Enter a schematic name...")
+                .initial_filter(default_name)
+                .into_event()
         },
     )
 }
 
-/// Save the current schematic under a new name (RFD #724 Phase 2). Prompts for
-/// a name, stores it as `schematics/<name>.kdl`, and points `schematic.active`
-/// at it — the named counterpart to "Save Schematic", and what populates the
-/// "Open Schematic..." picker.
-pub fn save_schematic_as() -> PaletteItem {
-    PaletteItem::new("Save Schematic As...", PRESETS_LABEL, |_: In<String>| {
-        PalettePage::new(vec![save_schematic_as_prompt()])
-            .label("Save Schematic As")
-            .prompt("Enter a schematic name...")
-            .into_event()
-    })
-}
-
-fn save_schematic_as_prompt() -> PaletteItem {
+fn save_schematic_name_prompt() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a schematic name..."),
         PRESETS_LABEL,
@@ -1054,6 +1061,10 @@ fn save_schematic_as_prompt() -> PaletteItem {
             PaletteEvent::Exit
         },
     )
+    // Placeholder items have an empty label, so the fuzzy filter drops them as
+    // soon as the user types the name — mark it default so it stays selectable
+    // and the typed name reaches the action (matches every other text prompt).
+    .default()
 }
 
 /// DB-native save (RFD #724 Phase 2): upload the active schematic, its window
@@ -1347,8 +1358,15 @@ fn root_schematic_for_save(
     skybox_cache: Option<&SkyboxCache>,
 ) -> impeller2_wkt::Schematic {
     let mut root = schematic.0.clone();
-    if let Some(cache) = skybox_cache {
-        root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
+    // Prefer the cache's active skybox when it asserts one: it's the live truth
+    // if the user switched skyboxes through a path that didn't touch
+    // `CurrentSchematic`. But when the cache asserts *no* active skybox, don't
+    // wipe the document's own skybox — an empty cache means "loading / not yet
+    // confirmed" (or a cubemap that failed to load), not "cleared". Every genuine
+    // clear also zeroes `CurrentSchematic.skybox`, so a `Some` here is a skybox
+    // the user is looking at and must not be dropped on save (RFD #724).
+    if let Some(active) = skybox_cache.and_then(|cache| cache.active.as_ref()) {
+        root.skybox = Some(SkyboxConfig {
             name: active.clone(),
         });
     }
@@ -2037,7 +2055,6 @@ impl Default for PalettePage {
             create_data_overview(None),
             create_3d_object(),
             save_schematic(),
-            save_schematic_as(),
             open_schematic(),
             clear_schematic(),
             skybox_menu(),
@@ -2141,7 +2158,11 @@ mod tests {
     }
 
     #[test]
-    fn save_kdl_clears_stale_schematic_skybox_when_cache_has_no_active_skybox() {
+    fn save_kdl_preserves_schematic_skybox_when_cache_has_no_active_skybox() {
+        // Cache present but asserting no active skybox happens while a loaded
+        // skybox's cubemap is still resolving (or failed) — not a user clear,
+        // which zeroes `CurrentSchematic.skybox` too. The document's skybox must
+        // survive the save so reopening still shows it (RFD #724).
         let schematic = CurrentSchematic(Schematic {
             skybox: Some(SkyboxConfig {
                 name: "grand_canyon".to_string(),
@@ -2153,7 +2174,10 @@ mod tests {
         let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
-        assert!(parsed.skybox.is_none());
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("grand_canyon")
+        );
     }
 
     #[test]
