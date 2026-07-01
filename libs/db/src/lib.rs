@@ -455,7 +455,12 @@ impl DB {
         // Validate the asset exists and is readable before repointing.
         crate::assets_http::read_asset_file(&assets_dir, key)?;
         self.with_state_mut(|s| s.db_config.set_schematic_active(key));
-        self.save_db_state()
+        self.save_db_state()?;
+        // Wake the subscribe loop's config push so clients observe the new
+        // `schematic.active` promptly, matching `apply_set_db_config` and
+        // `bump_assets_revision` (RFD #724).
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn flush_all(&self) -> Result<(), Error> {
@@ -3604,6 +3609,21 @@ mod tests {
         db.set_active_schematic("schematics/main.kdl").unwrap();
 
         assert_eq!(db.read_active_schematic().as_deref(), Some("viewport"));
+    }
+
+    #[test]
+    fn set_active_schematic_bumps_config_gen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+
+        let gen0 = db.db_config_gen.latest();
+        db.set_active_schematic("schematics/main.kdl").unwrap();
+
+        // Repointing the active schematic must wake the subscribe loop's config
+        // push so clients observe the new pointer promptly (Bug 3).
+        assert!(db.db_config_gen.latest() > gen0);
     }
 
     #[test]

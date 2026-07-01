@@ -212,7 +212,17 @@ pub(crate) fn on_document_loaded(
         && let Some(tx) = tx.as_ref()
     {
         let kdl = document.root.to_kdl();
-        let active_key = config.schematic_active().unwrap_or(ACTIVE_SCHEMATIC_KEY);
+        // Write the skybox back to the *loaded* document's own asset key, not the
+        // DB's current `schematic.active`: an HTTP load can finish before the
+        // repoint echoes, so `config.schematic_active()` may still point at the
+        // previous schematic and we'd stamp these bytes onto the wrong asset
+        // (RFD #724).
+        let active_key = event
+            .save_path
+            .as_deref()
+            .and_then(std::path::Path::to_str)
+            .or_else(|| config.schematic_active())
+            .unwrap_or(ACTIVE_SCHEMATIC_KEY);
         push_skybox_db_sync(
             tx,
             Some(kdl),

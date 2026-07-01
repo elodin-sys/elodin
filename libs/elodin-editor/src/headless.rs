@@ -237,6 +237,10 @@ fn load_headless_scene(
     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&content).inspect_err(|e| {
         tracing::warn!("Failed to parse schematic KDL: {e}");
     }) else {
+        // Bytes fetched but unparsable: back off before retrying so permanently
+        // invalid active schematic bytes don't spin a tight fetch loop each
+        // frame (RFD #724). A later valid byte change still gets picked up.
+        pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
         return;
     };
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
