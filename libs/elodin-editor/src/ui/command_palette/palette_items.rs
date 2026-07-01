@@ -1273,9 +1273,21 @@ pub fn clear_schematic() -> PaletteItem {
     PaletteItem::new(
         "Clear Schematic",
         PRESETS_LABEL,
-        |_: In<String>, mut params: LoadSchematicParams| {
+        |_: In<String>,
+         mut params: LoadSchematicParams,
+         mut skyboxes: MessageWriter<SetActiveSkybox>,
+         mut skybox_cache: ResMut<SkyboxCache>| {
             params.current_document.clear();
             params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
+            // `load_schematic` despawns every schematic entity and zeroes
+            // `CurrentSchematic.skybox`, but the skybox is a global render
+            // resource, not an entity, so it survives unless we clear it too.
+            // Reset it here so a cleared view drops the skybox like every other
+            // asset (RFD #724). Local-only, matching the rest of the clear: it
+            // doesn't touch `skybox.active` in the DB, and "Open Schematic"
+            // re-applies the stored skybox on reload.
+            skyboxes.write(SetActiveSkybox::Clear);
+            skybox_cache.active = None;
             PaletteEvent::Exit
         },
     )
