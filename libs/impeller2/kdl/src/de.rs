@@ -1,5 +1,5 @@
 use crate::color_names::color_from_name;
-use bevy_geo_frames::GeoFrame;
+use bevy_geo_frames::{GeoFrame, RotationKind};
 use impeller2_wkt::{
     ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d, WindowSchematic,
 };
@@ -1012,6 +1012,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .get("frame")
         .and_then(|v| v.as_string())
         .and_then(|s| GeoFrame::from_str(s).ok());
+    let orientation = parse_rotation_kind(node, src)?;
     let mut icon = None;
     let mut mesh_visibility_range = None;
     let mut thrusters = Vec::new();
@@ -1102,11 +1103,29 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         eql,
         mesh,
         frame,
+        orientation,
         icon,
         thrusters,
         mesh_visibility_range,
         node_id: NodeId::default(),
     })
+}
+
+fn parse_rotation_kind(node: &KdlNode, src: &str) -> Result<RotationKind, KdlSchematicError> {
+    match node.get("orientation").and_then(|v| v.as_string()) {
+        None => Ok(RotationKind::default()),
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "relative" => Ok(RotationKind::Relative),
+            "absolute" => Ok(RotationKind::Absolute),
+            _ => Err(KdlSchematicError::InvalidValue {
+                property: "orientation".to_string(),
+                node: "object_3d".to_string(),
+                expected: r#""relative" or "absolute""#.to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            }),
+        },
+    }
 }
 
 fn is_object_3d_mesh_node(name: &str) -> bool {
@@ -2366,6 +2385,55 @@ object_3d frame="NED" "ball.world_pos" {
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             assert_eq!(obj.eql, "ball.world_pos");
             assert!(matches!(obj.frame, Some(GeoFrame::NED)));
+            assert_eq!(obj.orientation, RotationKind::Relative);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_with_absolute_orientation() {
+        let kdl = r#"
+object_3d frame="NED" orientation=absolute "ball.world_pos" {
+    glb path="compass.glb"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "ball.world_pos");
+            assert!(matches!(obj.frame, Some(GeoFrame::NED)));
+            assert_eq!(obj.orientation, RotationKind::Absolute);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_invalid_orientation_is_an_error() {
+        let kdl = r#"
+object_3d frame="NED" orientation=world "ball.world_pos" {
+    sphere radius=0.2
+}
+"#;
+        assert!(parse_schematic(kdl).is_err());
+    }
+
+    #[test]
+    fn test_roundtrip_object_3d_absolute_orientation() {
+        let original = r#"
+object_3d frame="NED" orientation=absolute "ball.world_pos" {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = crate::ser::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Object3d(obj) = &reparsed.elems[0] {
+            assert_eq!(obj.orientation, RotationKind::Absolute);
         } else {
             panic!("Expected object_3d");
         }

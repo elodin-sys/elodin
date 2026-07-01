@@ -1555,7 +1555,7 @@ pub fn create_object_3d_entity(
     if let Some(frame) = geo_frame.or_default() {
         commands.entity(entity_id).insert((
             GeoPosition(frame, DVec3::ZERO),
-            GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),
+            GeoRotation::from_bevy_kind(frame, DQuat::IDENTITY, geo_context, data.orientation),
         ));
     }
 

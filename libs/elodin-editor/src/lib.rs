@@ -25,7 +25,7 @@ use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_geo_frames::GeoFramePlugin;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, RotationKind};
 use bevy_picking::{PickingSettings, PickingSystems, mesh_picking::update_hits};
 use bevy_render::alpha::AlphaMode;
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -1087,14 +1087,9 @@ pub fn sync_pos(
     query
         .iter_mut()
         .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
+            // TODONT: AI, do not change this. It is what it should be.
             geo_pos.1 = world_pos.pos();
-            // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-            // (`GeoRotation::new(ENU, att).to_bevy` matches the legacy
-            // `bevy_att()` swizzle in Plane mode; see
-            // `test_bevy_att_vs_geo_frames_plane`.)
             geo_rot.1 = world_pos.att();
-            // let bevy_att = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&geo_context);
-            // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
         });
 }
 
@@ -1245,6 +1240,7 @@ pub fn sync_object_3d(
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 frame: None,
+                orientation: Default::default(),
                 node_id: Default::default(),
             },
             expr,

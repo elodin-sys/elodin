@@ -1345,7 +1345,7 @@ mod tests {
         prelude::*,
         window::{PrimaryWindow, Window},
     };
-    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation};
+    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation, RotationKind};
     use bevy_mat3_material::Mat3Material;
     use impeller2_bevy::ComponentSchemaRegistry;
     use impeller2_kdl::FromKdl;
@@ -1564,6 +1564,37 @@ mod tests {
         assert_eq!(line.frame, Some(GeoFrame::ECEF));
         assert_eq!(geo_pos.0, GeoFrame::ECEF);
         assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test]
+    fn object_3d_spawns_with_absolute_orientation() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            object_3d frame="NED" orientation=absolute "(0,0,0,1, 0,0,0)" {
+                sphere radius=0.2 {
+                    color 0 0 0
+                }
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<(
+            &crate::object_3d::Object3DState,
+            &GeoRotation,
+        )>();
+        let (object_3d, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("object_3d should spawn");
+
+        assert_eq!(object_3d.data.frame, Some(GeoFrame::NED));
+        assert_eq!(object_3d.data.orientation, RotationKind::Absolute);
+        assert_eq!(geo_rot.0, GeoFrame::NED);
+        assert_eq!(geo_rot.2, RotationKind::Absolute);
     }
 
     #[test]
