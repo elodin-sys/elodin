@@ -392,21 +392,18 @@ fn edge_interaction_context(
     target: Entity,
     parents_query: &Query<&ChildOf>,
     root_query: &Query<Entity, With<ViewCubeRoot>>,
-    root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    main_camera: Entity,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
-    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
 ) -> Option<(Entity, EdgeInteractionContext)> {
     let root = find_root_ancestor(target, parents_query, root_query)?;
-    let link = root_links.get(root).ok()?;
-    let camera_global = camera_globals.get(link.main_camera).ok()?;
-    let cube_global = root_globals.get(root).ok().map(GlobalTransform::rotation);
+    let camera_global = camera_globals.get(main_camera).ok()?;
 
     let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
     let cube_rotation = if config.sync_with_camera {
         cam_rotation.conjugate() * config.axis_correction
     } else {
-        cube_global.unwrap_or(Quat::IDENTITY)
+        Quat::IDENTITY
     };
     let camera_dir_cube = cube_rotation.inverse() * Vec3::Z;
     let (front_face, front_dot) = front_face(camera_dir_cube);
@@ -702,12 +699,11 @@ fn collect_corner_entities_for_root(
 #[allow(clippy::too_many_arguments)]
 fn compute_hover_targets(
     target: Entity,
+    main_camera: Entity,
     cube_elements: &Query<(Entity, &CubeElement)>,
     parents_query: &Query<&ChildOf>,
     root_query: &Query<Entity, With<ViewCubeRoot>>,
-    root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
-    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
 ) -> Vec<Entity> {
     let Ok((_, element)) = cube_elements.get(target) else {
@@ -720,9 +716,8 @@ fn compute_hover_targets(
                 target,
                 parents_query,
                 root_query,
-                root_links,
+                main_camera,
                 camera_globals,
-                root_globals,
                 config,
             ) else {
                 return vec![];
@@ -862,15 +857,15 @@ pub fn on_cube_hover_start(
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
-    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
-    root_globals: Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: Res<ViewCubeConfig>,
     children_query: Query<&Children>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hovered: ResMut<HoveredElement>,
     mut original_materials: ResMut<OriginalMaterials>,
+    windows: Query<&Window>,
+    overlay_cameras: Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
 ) {
     let entity = trigger.entity;
     let colors = ViewCubeColors::default();
@@ -879,14 +874,20 @@ pub fn on_cube_hover_start(
         return;
     };
 
+    let Some((overlay_camera, main_camera)) =
+        overlay_camera_at_pointer(&trigger.pointer_location, &windows, &overlay_cameras)
+    else {
+        return;
+    };
+    let _ = overlay_camera;
+
     let target_entities = compute_hover_targets(
         target,
+        main_camera,
         &cube_elements,
         &parents_query,
         &root_query,
-        &root_links,
         &camera_globals,
-        &root_globals,
         &config,
     );
 
@@ -996,7 +997,6 @@ pub fn on_cube_hover_end(
 #[derive(SystemParam)]
 pub struct OnCubeClickLookup<'w, 's> {
     root_query: Query<'w, 's, Entity, With<ViewCubeRoot>>,
-    root_links: Query<'w, 's, &'static ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: Query<'w, 's, &'static GlobalTransform, With<ViewCubeTargetCamera>>,
     root_globals: Query<'w, 's, &'static GlobalTransform, With<ViewCubeRoot>>,
     globals: Query<'w, 's, &'static GlobalTransform>,
@@ -1010,9 +1010,9 @@ fn frame_hover_swap_target(
     cube_elements: &Query<(Entity, &CubeElement)>,
     parents_query: &Query<&ChildOf>,
     root_query: &Query<Entity, With<ViewCubeRoot>>,
-    root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    main_camera: Entity,
+    overlay_camera: Entity,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
-    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
 ) -> Option<(FaceDirection, Entity)> {
     if !hovered.entities.contains(&target_entity) {
@@ -1029,13 +1029,12 @@ fn frame_hover_swap_target(
         }
     }
 
-    let (root, context) = edge_interaction_context(
+    let (_root, context) = edge_interaction_context(
         target_entity,
         parents_query,
         root_query,
-        root_links,
+        main_camera,
         camera_globals,
-        root_globals,
         config,
     )?;
     if !is_face_on(context) {
@@ -1050,7 +1049,7 @@ fn frame_hover_swap_target(
         return None;
     }
 
-    Some((context.front_face.opposite(), root))
+    Some((context.front_face.opposite(), overlay_camera))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1062,7 +1061,7 @@ pub fn on_cube_click(
     hovered: Res<HoveredElement>,
     input_owners: Res<UiInputOwners>,
     windows: Query<&Window>,
-    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    overlay_cameras: Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     if trigger.event().button != PointerButton::Primary {
@@ -1099,16 +1098,14 @@ pub fn on_cube_click(
         return;
     };
 
-    let Some(source) = find_root_ancestor(selected_entity, &parents_query, &lookup.root_query)
+    let Some((source, main_camera)) =
+        overlay_camera_at_pointer(&trigger.pointer_location, &windows, &overlay_cameras)
     else {
-        return;
-    };
-    let Ok(link) = lookup.root_links.get(source) else {
         return;
     };
     if !permits_view_cube_interaction(
         &input_owners,
-        link.main_camera,
+        main_camera,
         &trigger.pointer_location,
         &windows,
         &overlay_cameras,
@@ -1130,9 +1127,9 @@ pub fn on_cube_click(
                 &cube_elements,
                 &parents_query,
                 &lookup.root_query,
-                &lookup.root_links,
+                main_camera,
+                source,
                 &lookup.camera_globals,
-                &lookup.root_globals,
                 &lookup.config,
             ) {
                 events.write(ViewCubeEvent::FaceClicked { direction, source });
@@ -1143,9 +1140,8 @@ pub fn on_cube_click(
                 selected_entity,
                 &parents_query,
                 &lookup.root_query,
-                &lookup.root_links,
+                main_camera,
                 &lookup.camera_globals,
-                &lookup.root_globals,
                 &lookup.config,
             ) else {
                 return;
@@ -1161,9 +1157,11 @@ pub fn on_cube_click(
             });
         }
         CubeElement::Corner(pos) => {
+            let cube_root = find_root_ancestor(selected_entity, &parents_query, &lookup.root_query)
+                .unwrap_or(source);
             let local_direction = corner_local_direction(
                 selected_entity,
-                source,
+                cube_root,
                 &lookup.globals,
                 &lookup.root_globals,
                 pos.to_look_direction(),
@@ -1183,12 +1181,11 @@ pub fn on_cube_drag(
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
-    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     mut cameras: Query<(&Transform, &mut EditorCam, &Camera), With<ViewCubeTargetCamera>>,
     dragging_roots: Query<(), With<ViewCubeDragging>>,
     input_owners: Res<UiInputOwners>,
     windows: Query<&Window>,
-    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    overlay_cameras: Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
     if drag.button != PointerButton::Secondary {
@@ -1200,18 +1197,20 @@ pub fn on_cube_drag(
     else {
         return;
     };
+    let Some((_, main_camera)) =
+        overlay_camera_at_pointer(&drag.pointer_location, &windows, &overlay_cameras)
+    else {
+        return;
+    };
     let Some(root) = find_root_ancestor(target_entity, &parents_query, &root_query) else {
         return;
     };
-    let Ok(link) = root_links.get(root) else {
-        return;
-    };
-    let Ok((transform, mut editor_cam, camera)) = cameras.get_mut(link.main_camera) else {
+    let Ok((transform, mut editor_cam, camera)) = cameras.get_mut(main_camera) else {
         return;
     };
     if !permits_view_cube_interaction(
         &input_owners,
-        link.main_camera,
+        main_camera,
         &drag.pointer_location,
         &windows,
         &overlay_cameras,
@@ -1242,8 +1241,9 @@ pub fn on_cube_drag_end(
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
-    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     mut cameras: Query<&mut EditorCam, With<ViewCubeTargetCamera>>,
+    windows: Query<&Window>,
+    overlay_cameras: Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
     if drag_end.button != PointerButton::Secondary {
@@ -1258,11 +1258,13 @@ pub fn on_cube_drag_end(
     let Some(root) = find_root_ancestor(target_entity, &parents_query, &root_query) else {
         return;
     };
-    let Ok(link) = root_links.get(root) else {
+    let Some((_, main_camera)) =
+        overlay_camera_at_pointer(&drag_end.pointer_location, &windows, &overlay_cameras)
+    else {
         return;
     };
 
-    if let Ok(mut editor_cam) = cameras.get_mut(link.main_camera) {
+    if let Ok(mut editor_cam) = cameras.get_mut(main_camera) {
         editor_cam.end_move();
     }
     commands.entity(root).remove::<ViewCubeDragging>();
@@ -1357,11 +1359,10 @@ pub fn on_arrow_pressed(
     trigger: On<Pointer<Press>>,
     arrows: Query<&RotationArrow>,
     parents_query: Query<&ChildOf>,
-    camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
-    root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    camera_link_query: Query<(Entity, &ViewCubeLink), With<ViewCubeCamera>>,
     input_owners: Res<UiInputOwners>,
     windows: Query<&Window>,
-    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    overlay_cameras: Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut hold: ResMut<ActiveArrowHold>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
@@ -1378,12 +1379,11 @@ pub fn on_arrow_pressed(
         return;
     };
 
-    let Some(source) =
-        find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
+    let Some(source) = find_overlay_camera_ancestor(entity, &parents_query, &camera_link_query)
     else {
         return;
     };
-    let Ok((_, link)) = root_query.get(source) else {
+    let Ok((_, link)) = camera_link_query.get(source) else {
         return;
     };
     if !permits_view_cube_interaction(
@@ -1414,11 +1414,10 @@ pub fn on_action_button_click(
     trigger: On<Pointer<Click>>,
     action_buttons: Query<&ViewportActionButton>,
     parents_query: Query<&ChildOf>,
-    camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
-    root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    camera_link_query: Query<(Entity, &ViewCubeLink), With<ViewCubeCamera>>,
     input_owners: Res<UiInputOwners>,
     windows: Query<&Window>,
-    overlay_cameras: Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    overlay_cameras: Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     if trigger.event().button != PointerButton::Primary {
@@ -1434,12 +1433,11 @@ pub fn on_action_button_click(
         return;
     };
 
-    let Some(source) =
-        find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
+    let Some(source) = find_overlay_camera_ancestor(entity, &parents_query, &camera_link_query)
     else {
         return;
     };
-    let Ok((_, link)) = root_query.get(source) else {
+    let Ok((_, link)) = camera_link_query.get(source) else {
         return;
     };
     if !permits_view_cube_interaction(
@@ -1590,24 +1588,40 @@ fn find_root_ancestor(
     })
 }
 
-fn find_root_for_camera_child(
+fn find_overlay_camera_ancestor(
     entity: Entity,
     parents_query: &Query<&ChildOf>,
-    camera_link_query: &Query<&ViewCubeLink, With<ViewCubeCamera>>,
-    root_query: &Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    camera_link_query: &Query<(Entity, &ViewCubeLink), With<ViewCubeCamera>>,
 ) -> Option<Entity> {
-    let camera_entity = find_ancestor(entity, parents_query, |current| {
+    find_ancestor(entity, parents_query, |current| {
         camera_link_query.get(current).is_ok()
-    })?;
-    let cam_link = camera_link_query.get(camera_entity).ok()?;
+    })
+}
 
-    for (root_entity, root_link) in root_query.iter() {
-        if root_link.main_camera == cam_link.main_camera {
-            return Some(root_entity);
-        }
-    }
+fn overlay_camera_at_pointer(
+    location: &Location,
+    windows: &Query<&Window>,
+    overlay_cameras: &Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+) -> Option<(Entity, Entity)> {
+    let NormalizedRenderTarget::Window(window_ref) = &location.target else {
+        return None;
+    };
+    let Ok(window) = windows.get(window_ref.entity()) else {
+        return None;
+    };
+    let cursor = location.position * window.scale_factor();
 
-    None
+    overlay_cameras
+        .iter()
+        .filter(|(_, camera, _)| camera.is_active)
+        .find(|(_, camera, _)| {
+            camera.viewport.as_ref().is_some_and(|viewport| {
+                let min = viewport.physical_position.as_vec2();
+                let max = min + viewport.physical_size.as_vec2();
+                cursor.x >= min.x && cursor.x < max.x && cursor.y >= min.y && cursor.y < max.y
+            })
+        })
+        .map(|(entity, _, link)| (entity, link.main_camera))
 }
 
 fn permits_view_cube_interaction(
@@ -1615,7 +1629,7 @@ fn permits_view_cube_interaction(
     main_camera: Entity,
     location: &Location,
     windows: &Query<&Window>,
-    overlay_cameras: &Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    overlay_cameras: &Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
 ) -> bool {
     if input_owners.permits_view_cube_location(main_camera, location) {
         return true;
@@ -1628,7 +1642,7 @@ fn pointer_in_view_cube_overlay_viewport(
     main_camera: Entity,
     location: &Location,
     windows: &Query<&Window>,
-    overlay_cameras: &Query<(&Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    overlay_cameras: &Query<(Entity, &Camera, &ViewCubeLink), With<ViewCubeCamera>>,
 ) -> bool {
     let NormalizedRenderTarget::Window(window_ref) = &location.target else {
         return false;
@@ -1640,8 +1654,8 @@ fn pointer_in_view_cube_overlay_viewport(
 
     overlay_cameras
         .iter()
-        .filter(|(camera, link)| camera.is_active && link.main_camera == main_camera)
-        .any(|(camera, _)| {
+        .filter(|(_, camera, link)| camera.is_active && link.main_camera == main_camera)
+        .any(|(_, camera, _)| {
             camera.viewport.as_ref().is_some_and(|viewport| {
                 let min = viewport.physical_position.as_vec2();
                 let max = min + viewport.physical_size.as_vec2();
@@ -1828,7 +1842,12 @@ mod tests {
 
         let mut system_state: SystemState<(
             Query<'static, 'static, &'static Window>,
-            Query<'static, 'static, (&'static Camera, &'static ViewCubeLink), With<ViewCubeCamera>>,
+            Query<
+                'static,
+                'static,
+                (Entity, &'static Camera, &'static ViewCubeLink),
+                With<ViewCubeCamera>,
+            >,
         )> = SystemState::new(app.world_mut());
         let (windows, overlay_cameras) = system_state.get(app.world());
         let owners = UiInputOwners::default();
