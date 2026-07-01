@@ -691,6 +691,79 @@ mod tests {
     }
 
     #[test]
+    fn config_sync_releases_pin_when_active_moves_elsewhere() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        // Baseline: the editor is on schematics/a.kdl and has optimistically
+        // pinned schematics/pinned.kdl (e.g. Open Schematic…), superseding a.kdl.
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingActiveSchematic>();
+            pending.pin(
+                "schematics/pinned.kdl".to_string(),
+                Some("schematics/a.kdl".to_string()),
+            );
+        }
+
+        // A stale echo still showing the superseded pointer must not reload, and
+        // the pin must remain while we wait for our requested key.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "the superseded pointer must not reload while the pin waits"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<PendingActiveSchematic>()
+                .target
+                .as_deref(),
+            Some("schematics/pinned.kdl"),
+            "the pin must persist while the DB still shows the superseded key"
+        );
+
+        // The active pointer then moves to a third key (external repoint / a
+        // failed local one). The pin must release and sync must follow the DB
+        // rather than stranding until restart.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/external.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/external.kdl".to_string()],
+            "an external move off the superseded key must be followed"
+        );
+        assert!(
+            app.world()
+                .resource::<PendingActiveSchematic>()
+                .target
+                .is_none(),
+            "a pin the DB will never confirm must be released"
+        );
+    }
+
+    #[test]
     fn config_sync_skips_given_path_when_already_loaded() {
         let temp = TempTestDir::new("config-sync-skip-current");
         let path = temp.path().join("drone.kdl");

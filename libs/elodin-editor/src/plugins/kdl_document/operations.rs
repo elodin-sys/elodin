@@ -443,11 +443,20 @@ pub fn sync_document_from_config(
     // another stored schematic with byte-identical KDL still switches the active
     // key, and the editor must follow it.
     if let Some(active_key) = config.schematic_active() {
-        if let Some(pending) = pending_active.0.clone() {
+        if let Some(pending) = pending_active.target.clone() {
             if pending == active_key {
-                pending_active.0 = None;
-            } else {
+                // Our repoint landed: clear the pin and load the confirmed key.
+                pending_active.clear();
+            } else if pending_active.superseding.as_deref() == Some(active_key) {
+                // Still the stale pointer we're superseding; keep waiting for the
+                // DB to echo our requested key.
                 return;
+            } else {
+                // The active pointer moved to a key we didn't pin and isn't the
+                // stale one we were superseding — an external repoint or a failed
+                // local one. Drop the pin and follow the DB so sync can't strand
+                // here until restart.
+                pending_active.clear();
             }
         }
 
