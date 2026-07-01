@@ -72,8 +72,12 @@ fn spawn_frame_view_cubes(
             render_layers.clone(),
         );
         if frame == GeoFrame::ECEF {
-            commands.entity(cube_root).insert(bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY));
-
+            commands
+                .entity(cube_root)
+                .insert(bevy_geo_frames::GeoRotation::absolute(
+                    frame,
+                    bevy::math::DQuat::IDENTITY,
+                ));
         }
         frames.cubes.insert(frame, cube_root);
     }

@@ -6,9 +6,6 @@ mod geo;
 #[cfg(feature = "bevy")]
 pub use geo::*;
 
-
-
-
 /// Coordinate frames used in the sim.
 ///
 /// Units: meters, seconds.
@@ -66,7 +63,6 @@ pub enum RotationKind {
     /// rotation that rotates [x,y,z] to [x,z,-y] for instance.
     Absolute,
 }
-
 
 /// Provide a means of specifying a default possibly. Meant to be used with
 /// `Option<GeoFrame>`.

@@ -1121,15 +1121,17 @@ fn parse_optional_geo_frame(
 ) -> Result<Option<GeoFrame>, KdlSchematicError> {
     match node.get(property).and_then(|v| v.as_string()) {
         None => Ok(None),
-        Some(value) => GeoFrame::from_str(value)
-            .map(Some)
-            .map_err(|_| KdlSchematicError::InvalidValue {
-                property: property.to_string(),
-                node: node_name.to_string(),
-                expected: "ENU, NED, or ECEF".to_string(),
-                src: src.to_string(),
-                span: node.span(),
-            }),
+        Some(value) => {
+            GeoFrame::from_str(value)
+                .map(Some)
+                .map_err(|_| KdlSchematicError::InvalidValue {
+                    property: property.to_string(),
+                    node: node_name.to_string(),
+                    expected: "ENU, NED, or ECEF".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                })
+        }
     }
 }
 

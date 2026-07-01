@@ -1557,12 +1557,7 @@ pub fn create_object_3d_entity(
         let rot_frame = rotation_frame.or_default().unwrap_or(pos_frame);
         commands.entity(entity_id).insert((
             GeoPosition(pos_frame, DVec3::ZERO),
-            GeoRotation::from_bevy_kind(
-                rot_frame,
-                DQuat::IDENTITY,
-                geo_context,
-                data.orientation,
-            ),
+            GeoRotation::from_bevy_kind(rot_frame, DQuat::IDENTITY, geo_context, data.orientation),
         ));
     }
 
