@@ -25,7 +25,7 @@ use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_geo_frames::GeoFramePlugin;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, RotationKind};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::{PickingSettings, PickingSystems, mesh_picking::update_hits};
 use bevy_render::alpha::AlphaMode;
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -1245,6 +1245,7 @@ pub fn sync_object_3d(
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 frame: None,
+                frame_orientation: None,
                 orientation: Default::default(),
                 node_id: Default::default(),
             },
