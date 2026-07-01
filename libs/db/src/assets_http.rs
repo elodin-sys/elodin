@@ -386,18 +386,24 @@ pub async fn sync_all_assets_from_source(
         }
     }
 
-    prune_stale_local_assets(&assets_dir, &source_keys);
-
+    // Prune is destructive, so only run it on a fully successful pass. On a
+    // partial pass the source (or its index) may be transiently unhealthy, and
+    // deleting local assets against that snapshot would compound the incomplete
+    // download with lost files. Skip pruning and return `PartialMirror`; the
+    // coordinator reruns and the next complete pass prunes on a trustworthy view
+    // (RFD #724).
     if failed > 0 {
         warn!(
             synced,
-            failed, "follower asset mirror finished with missing assets"
+            failed, "follower asset mirror finished with missing assets; skipping prune"
         );
         return Err(SyncAssetsError::PartialMirror {
             failed,
             total: synced + failed,
         });
     }
+
+    prune_stale_local_assets(&assets_dir, &source_keys);
 
     Ok(())
 }
@@ -1514,6 +1520,52 @@ viewport "main" { }
                 }
             ),
             "expected PartialMirror, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_skips_prune_on_partial_fetch() {
+        // Source advertises a key it then 404s, so the pass is partial. A stale
+        // local asset absent from the index must NOT be pruned during that
+        // incomplete, possibly-unhealthy pass — pruning waits for a full pass so
+        // the follower never loses files against an untrustworthy snapshot.
+        async fn index() -> Response {
+            Json(vec![crate::assets::AssetEntry {
+                key: "models/rocket.glb".to_string(),
+                size: 3,
+            }])
+            .into_response()
+        }
+        async fn missing() -> Response {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        let app = Router::new()
+            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route("/{*path}", get(missing));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+        write_asset_file(&follower_assets, "models/stale.glb", b"stale").unwrap();
+
+        let err = sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, SyncAssetsError::PartialMirror { failed: 1, .. }),
+            "expected PartialMirror, got {err:?}"
+        );
+        assert!(
+            follower_assets.join("models/stale.glb").exists(),
+            "stale asset must survive a partial pass; prune only runs on a full pass"
         );
     }
 }
