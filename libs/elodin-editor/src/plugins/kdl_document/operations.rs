@@ -192,6 +192,18 @@ pub(crate) fn schematic_save_key_from_name(name: &str) -> Result<String, String>
     Ok(format!("schematics/{stem}.kdl"))
 }
 
+/// Inverse of [`schematic_save_key_from_name`]: the editable name to show for a
+/// stored schematic key, dropping the `schematics/` prefix and `.kdl` suffix.
+/// Returns `None` when the key has no usable stem to pre-fill.
+pub(crate) fn schematic_name_from_key(key: &str) -> Option<String> {
+    let stem = key
+        .strip_prefix("schematics/")
+        .unwrap_or(key)
+        .strip_suffix(".kdl")
+        .unwrap_or(key);
+    (!stem.is_empty()).then(|| stem.to_string())
+}
+
 /// What to `PUT` to the DB Asset Server before pointing `schematic.active` at a
 /// freshly authored schematic (RFD #724 Phase 2).
 pub(crate) struct DbSavePlan {

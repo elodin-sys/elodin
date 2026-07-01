@@ -12,7 +12,8 @@ pub use operations::{
     sync_document_skybox,
 };
 pub(crate) use operations::{
-    fetch_schematic_index, plan_db_save, schematic_save_key_from_name, upload_db_save_plan,
+    fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,
+    upload_db_save_plan,
 };
 pub use types::*;
 
