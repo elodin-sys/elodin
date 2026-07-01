@@ -257,6 +257,12 @@ pub struct DB {
     /// Fast-path flag: true when `followed_components` is non-empty.
     /// Avoids acquiring the read lock on every `apply_value` call.
     has_followed_components: std::sync::atomic::AtomicBool,
+    /// Serializes follower full-tree asset mirrors so overlapping
+    /// `SetDbConfig`-driven syncs can't prune/download against each other
+    /// (RFD #724, Bug 1). Idle on a non-follower DB. Only present with the asset
+    /// server (`axum`), which is the sole producer of mirror requests.
+    #[cfg(feature = "axum")]
+    pub asset_mirror: crate::assets_http::AssetMirrorCoordinator,
 }
 
 #[derive(Default)]
@@ -326,6 +332,8 @@ impl DB {
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "axum")]
+            asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
         db.save_db_state()?;
         Ok(db)
@@ -734,6 +742,8 @@ impl DB {
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "axum")]
+            asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
         // Save updated version info
         db.save_db_state()?;

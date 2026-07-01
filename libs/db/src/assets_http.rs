@@ -110,12 +110,16 @@ pub enum SyncAssetsError {
 const ASSET_FETCH_ATTEMPTS: usize = 8;
 const ASSET_FETCH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 const ASSET_FETCH_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
-const ASSET_FETCH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+/// Per-read timeout (reqwest resets it after each successful chunk), **not** a
+/// total-request timeout. A stalled or dead connection still fails fast and
+/// retries, but a large yet healthy mesh/cubemap download is never capped
+/// mid-transfer the way a fixed total timeout did (RFD #724, Bug 2).
+const ASSET_FETCH_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn sync_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .connect_timeout(ASSET_FETCH_CONNECT_TIMEOUT)
-        .timeout(ASSET_FETCH_REQUEST_TIMEOUT)
+        .read_timeout(ASSET_FETCH_READ_TIMEOUT)
         .build()
 }
 
@@ -195,14 +199,95 @@ async fn sync_one_schematic_asset(
     Some(bytes)
 }
 
-/// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local `assets/` dir.
-pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
-    if let Err(err) = sync_all_assets_from_source(source_tcp, &db.path).await {
-        warn!(
-            ?err,
-            "failed to sync assets from source; db: paths may not load"
-        );
+/// Serializes follower full-tree asset mirrors. Each `SetDbConfig` that requests
+/// an asset sync would otherwise spawn an independent mirror; overlapping passes
+/// can run `prune_stale_local_assets` from different index snapshots — deleting
+/// keys another in-flight pass still needs, or leaving a mixed, inconsistent
+/// follower asset tree (RFD #724, Bug 1).
+///
+/// Single-flight with coalescing: at most one mirror runs at a time. Requests
+/// arriving while a pass runs set a `rerun` flag so exactly one more pass runs
+/// afterwards, capturing the latest source state without unbounded stacking.
+#[derive(Default)]
+pub struct AssetMirrorCoordinator {
+    inner: std::sync::Mutex<MirrorRunState>,
+}
+
+#[derive(Default)]
+struct MirrorRunState {
+    running: bool,
+    rerun: bool,
+}
+
+impl AssetMirrorCoordinator {
+    /// Record a mirror request and try to claim the runner slot. Returns `true`
+    /// if this caller must run the mirror loop, `false` if a pass is already in
+    /// flight (it will observe the `rerun` we set and do one more pass).
+    fn try_begin(&self) -> bool {
+        let mut st = self.inner.lock().unwrap();
+        st.rerun = true;
+        if st.running {
+            return false;
+        }
+        st.running = true;
+        true
     }
+
+    /// Decide, atomically, whether the runner should do another pass. Clears
+    /// `rerun` and returns `true` when a request arrived during the last pass;
+    /// otherwise releases the runner slot and returns `false`. Doing both under
+    /// one lock avoids a lost wakeup (a request setting `rerun` between an
+    /// unlocked check and a separate clear).
+    fn finish_or_continue(&self) -> bool {
+        let mut st = self.inner.lock().unwrap();
+        if st.rerun {
+            st.rerun = false;
+            true
+        } else {
+            st.running = false;
+            false
+        }
+    }
+
+    /// Run a full-tree mirror, coalescing concurrent requests. Either performs
+    /// the pass(es) itself as the sole runner, or hands off to the pass already
+    /// in flight (which will do one more pass on this request's behalf).
+    pub async fn mirror_all(&self, source_tcp: SocketAddr, db_path: &Path) {
+        if !self.try_begin() {
+            return;
+        }
+        // Clear `running` even if a pass panics, so a crashed mirror never wedges
+        // every future sync. Fires only on unwind; the normal path releases the
+        // slot via `finish_or_continue`.
+        struct PanicGuard<'a>(&'a AssetMirrorCoordinator);
+        impl Drop for PanicGuard<'_> {
+            fn drop(&mut self) {
+                if std::thread::panicking() {
+                    self.0.inner.lock().unwrap().running = false;
+                }
+            }
+        }
+        let _panic_guard = PanicGuard(self);
+
+        loop {
+            if !self.finish_or_continue() {
+                return;
+            }
+            if let Err(err) = sync_all_assets_from_source(source_tcp, db_path).await {
+                warn!(
+                    ?err,
+                    "failed to sync assets from source; db: paths may not load"
+                );
+            }
+        }
+    }
+}
+
+/// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local
+/// `assets/` dir, serialized through the DB's mirror coordinator so concurrent
+/// syncs never overlap (RFD #724, Bug 1).
+pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
+    db.asset_mirror.mirror_all(source_tcp, &db.path).await;
 }
 
 async fn fetch_source_index(
@@ -615,6 +700,48 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn mirror_coordinator_coalesces_overlapping_requests() {
+        let coord = AssetMirrorCoordinator::default();
+
+        // First request claims the runner slot.
+        assert!(coord.try_begin(), "first request becomes the runner");
+        // Any number of requests arriving while a pass runs are absorbed, not
+        // started — this is what prevents overlapping prune/download passes.
+        assert!(
+            !coord.try_begin(),
+            "concurrent request must not start a pass"
+        );
+        assert!(
+            !coord.try_begin(),
+            "further concurrent requests also absorbed"
+        );
+
+        // After the pass, exactly one more pass runs to capture the latest
+        // source state, regardless of how many requests were absorbed.
+        assert!(
+            coord.finish_or_continue(),
+            "absorbed requests trigger one rerun"
+        );
+        // No new request during that rerun: the runner releases the slot.
+        assert!(
+            !coord.finish_or_continue(),
+            "no pending request must release the runner slot"
+        );
+
+        // Slot is free again: a later request starts a fresh runner, which runs
+        // one pass for that request and then releases the slot when idle.
+        assert!(coord.try_begin(), "slot released, new runner can claim it");
+        assert!(
+            coord.finish_or_continue(),
+            "runner performs the pass for its initiating request"
+        );
+        assert!(
+            !coord.finish_or_continue(),
+            "and releases cleanly when idle"
+        );
+    }
 
     #[test]
     fn sanitize_rejects_traversal_and_empty() {
