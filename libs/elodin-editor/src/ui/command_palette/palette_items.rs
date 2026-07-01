@@ -80,7 +80,7 @@ pub(crate) struct PendingSchematicSaveKey(pub Option<String>);
 /// main thread on the IO task pool; `poll_schematic_save` repoints
 /// `schematic.active` once they all land, so a slow DB never freezes the UI.
 #[derive(Resource, Default)]
-pub(crate) struct SchematicSaveInFlight {
+pub struct SchematicSaveInFlight {
     task: Option<Task<Result<(), String>>>,
     active_key: Option<String>,
     /// Skybox name embedded in the saved schematic (`None` = cleared), pushed as
@@ -91,6 +91,29 @@ pub(crate) struct SchematicSaveInFlight {
     /// `PendingSchematicSaveKey` if the upload fails so a retry still targets
     /// the chosen name rather than the previous active schematic.
     pending_key: Option<String>,
+}
+
+impl SchematicSaveInFlight {
+    /// True while this client's multi-`PUT` save is still uploading. Config sync
+    /// uses it to ignore its own in-flight `assets.revision` bumps rather than
+    /// reload a partially written schematic tree (RFD #724, Bug 1).
+    pub(crate) fn is_saving(&self) -> bool {
+        self.task.is_some()
+    }
+
+    /// An in-flight instance backed by a never-completing task, for tests that
+    /// exercise the "save still uploading" window. Requires an initialized
+    /// `IoTaskPool` (present under `MinimalPlugins`).
+    #[cfg(test)]
+    pub(crate) fn saving_stub() -> Self {
+        Self {
+            task: Some(
+                IoTaskPool::get()
+                    .spawn(async { std::future::pending::<Result<(), String>>().await }),
+            ),
+            ..Default::default()
+        }
+    }
 }
 
 /// Cached listing of the DB's stored schematics (RFD #724). Refreshed off the
