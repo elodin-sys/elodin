@@ -351,7 +351,7 @@ impl Plugin for EditorPlugin {
                 skybox_generation::sync_generated_skybox_to_schematic,
             )
             .add_systems(Update, skybox_generation::on_document_loaded)
-            .add_systems(Update, skybox_generation::record_reloaded_schematic_content)
+            .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
             .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
             .add_systems(Update, skybox_generation::decay_skybox_status_message)
             .add_systems(
@@ -466,11 +466,7 @@ fn throttle_for_sensor_cameras(
     if *applied {
         return;
     }
-    let detected = !configs.0.is_empty()
-        || db_config.metadata.contains_key("sensor_cameras")
-        || db_config
-            .schematic_content()
-            .is_some_and(|s| s.contains("sensor_view"));
+    let detected = !configs.0.is_empty() || db_config.metadata.contains_key("sensor_cameras");
     if !detected {
         return;
     }
@@ -496,11 +492,7 @@ fn throttle_for_sensor_cameras(
     if *applied {
         return;
     }
-    let detected = !configs.0.is_empty()
-        || db_config.metadata.contains_key("sensor_cameras")
-        || db_config
-            .schematic_content()
-            .is_some_and(|s| s.contains("sensor_view"));
+    let detected = !configs.0.is_empty() || db_config.metadata.contains_key("sensor_cameras");
     if !detected {
         return;
     }

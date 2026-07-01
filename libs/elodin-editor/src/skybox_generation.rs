@@ -5,12 +5,12 @@ use bevy_ai_skybox::prelude::{
 };
 use impeller2_bevy::PacketTx;
 use impeller2_kdl::ToKdl;
-use impeller2_wkt::{DbConfig, SetDbConfig, SkyboxConfig};
+use impeller2_wkt::{DbConfig, SetDbConfig, SkyboxConfig, StoreAsset};
 use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
-    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded,
-    LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
+    SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
@@ -18,7 +18,7 @@ pub(crate) struct SkyboxDocumentSyncMut<'a> {
     pub schematic: &'a mut CurrentSchematic,
     pub current_document: &'a mut CurrentDocument,
     pub document_assets: &'a mut Assets<SchematicDocumentAsset>,
-    pub last_synced_content: &'a mut LastSyncedSchematicContent,
+    pub last_synced_key: &'a mut LastSyncedActiveKey,
     pub locally_pushed: &'a mut LocallyPushedSkyboxActive,
     pub cache: &'a mut SkyboxCache,
     pub tx: &'a PacketTx,
@@ -37,8 +37,7 @@ impl SkyboxDocumentSyncMut<'_> {
             self.schematic,
         );
         sync_cache_active_from_skybox(self.cache, skybox.as_ref());
-        record_synced_schematic_content(self.last_synced_content, &kdl);
-        self.last_synced_content.1 = Some(self.active_key.to_string());
+        self.last_synced_key.0 = Some(self.active_key.to_string());
         let active = self
             .schematic
             .skybox
@@ -111,7 +110,7 @@ pub(crate) struct SyncGeneratedSkyboxParams<'w> {
     schematic: ResMut<'w, CurrentSchematic>,
     current_document: ResMut<'w, CurrentDocument>,
     document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
-    last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
+    last_synced_key: ResMut<'w, LastSyncedActiveKey>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
     config: Res<'w, DbConfig>,
@@ -127,7 +126,7 @@ pub(crate) fn sync_generated_skybox_to_schematic(
             schematic: &mut params.schematic,
             current_document: &mut params.current_document,
             document_assets: &mut params.document_assets,
-            last_synced_content: &mut params.last_synced_content,
+            last_synced_key: &mut params.last_synced_key,
             locally_pushed: &mut params.locally_pushed,
             cache: &mut params.cache,
             tx: &params.tx,
@@ -142,20 +141,11 @@ pub(crate) fn sync_generated_skybox_to_schematic(
     }
 }
 
-pub(crate) fn record_synced_schematic_content(
-    last_synced_content: &mut LastSyncedSchematicContent,
-    kdl: &str,
-) {
-    last_synced_content.0 = Some(kdl.to_string());
-}
-
-/// Push loaded document skybox metadata to the DB when it differs from the current config.
-/// Editor viewports update locally on load; the render-server (sensor_view) reads `skybox.active`.
 pub(crate) fn on_document_loaded(
     mut loaded: MessageReader<DocumentLoaded>,
     config: Res<DbConfig>,
     mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
-    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+    mut last_synced_key: ResMut<LastSyncedActiveKey>,
     mut caches: Query<&mut crate::ui::video_stream::VideoFrameCache>,
     tx: Option<Res<PacketTx>>,
 ) {
@@ -189,21 +179,17 @@ pub(crate) fn on_document_loaded(
         );
     }
 
-    record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
-    // Track which active key this content came from so a later switch to a
-    // different key reloads even when the KDL is byte-identical.
-    last_synced_content.1 = config.schematic_active().map(str::to_string);
+    last_synced_key.0 = config.schematic_active().map(str::to_string);
 }
 
-pub(crate) fn record_reloaded_schematic_content(
+pub(crate) fn record_reloaded_schematic_key(
     mut reloaded: MessageReader<DocumentReloaded>,
-    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+    config: Res<DbConfig>,
+    mut last_synced_key: ResMut<LastSyncedActiveKey>,
 ) {
-    let Some(document) = reloaded.read().last().map(|event| &event.document) else {
-        return;
-    };
-
-    record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
+    if reloaded.read().last().is_some() {
+        last_synced_key.0 = config.schematic_active().map(str::to_string);
+    }
 }
 
 /// Push skybox metadata to the DB. When `kdl` is `None`, only `skybox.active` is updated
@@ -226,14 +212,15 @@ pub(crate) fn push_schematic_metadata(
     active_key: &str,
 ) {
     let mut metadata = std::collections::HashMap::new();
-    // DB-centric write-back (RFD #724): carry the schematic bytes and the active
-    // pointer in the same atomic SetDbConfig; the DB persists them as the active
-    // asset and mirrors them into `schematic.content`. The pointer targets the
-    // *current* active key, so editing a named schematic's skybox doesn't
-    // silently repoint the active schematic back to `schematics/main.kdl`.
+    // DB-centric write-back (RFD #724): store schematic bytes as an asset, then
+    // repoint `schematic.active` at the current key so a named schematic's
+    // skybox edit doesn't silently revert to `schematics/main.kdl`.
     if let Some(kdl) = kdl {
+        tx.send_msg(StoreAsset {
+            key: active_key.to_string(),
+            bytes: kdl.into_bytes(),
+        });
         metadata.insert("schematic.active".to_string(), active_key.to_string());
-        metadata.insert("schematic.content".to_string(), kdl);
     }
     metadata.insert(
         "skybox.active".to_string(),
@@ -307,7 +294,7 @@ pub(crate) struct RevertSkyboxParams<'w> {
     schematic: ResMut<'w, CurrentSchematic>,
     current_document: ResMut<'w, CurrentDocument>,
     document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
-    last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
+    last_synced_key: ResMut<'w, LastSyncedActiveKey>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
     config: Res<'w, DbConfig>,
@@ -324,7 +311,7 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         schematic: &mut params.schematic,
         current_document: &mut params.current_document,
         document_assets: &mut params.document_assets,
-        last_synced_content: &mut params.last_synced_content,
+        last_synced_key: &mut params.last_synced_key,
         locally_pushed: &mut params.locally_pushed,
         cache: &mut params.cache,
         tx: &params.tx,
@@ -346,7 +333,7 @@ fn should_push_loaded_skybox_to_db(loaded: Option<&str>, db: Option<&str>) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::kdl_document::{LastSyncedSchematicContent, SchematicDocumentAsset};
+    use crate::plugins::kdl_document::{LastSyncedActiveKey, SchematicDocumentAsset};
     use impeller2_wkt::Schematic;
     use std::path::PathBuf;
 
@@ -354,7 +341,7 @@ mod tests {
     fn on_document_loaded_updates_last_synced_without_db_push() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<LastSyncedActiveKey>()
             .init_resource::<DbConfig>()
             .init_resource::<LocallyPushedSkyboxActive>()
             .add_message::<DocumentLoaded>()
@@ -374,7 +361,7 @@ mod tests {
         });
         app.update();
 
-        let last = app.world().resource::<LastSyncedSchematicContent>();
+        let last = app.world().resource::<LastSyncedActiveKey>();
         assert!(
             last.0.as_ref().is_some_and(|kdl| kdl.contains("seaport")),
             "expected loaded schematic KDL to be recorded locally"

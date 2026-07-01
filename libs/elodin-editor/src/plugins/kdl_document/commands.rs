@@ -4,19 +4,11 @@ use std::path::PathBuf;
 #[derive(Message, Clone, Debug)]
 pub struct OpenDocumentRequest(pub PathBuf);
 
-#[derive(Message, Clone, Debug)]
-pub struct OpenDocumentFromContentRequest {
-    pub content: String,
-    pub save_path: Option<PathBuf>,
-}
-
 /// Load the main schematic from `schematic.active` by fetching its asset bytes
-/// from the DB Asset Server over HTTP (RFD #724). `content_fallback` is the
-/// legacy inline `schematic.content` mirror, used only if the fetch fails.
+/// from the DB Asset Server over HTTP (RFD #724).
 #[derive(Message, Clone, Debug)]
 pub struct OpenDocumentFromActiveRequest {
     pub key: String,
-    pub content_fallback: Option<String>,
     pub save_path: Option<PathBuf>,
 }
 

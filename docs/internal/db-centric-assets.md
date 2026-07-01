@@ -30,7 +30,7 @@ DB's HTTP asset server.
 - [ ] **Phase 3 — Terrain over HTTP**: ingest `assets/terrains/`; convert the
   `bevy_world_mesh` loader to lazy per-tile HTTP fetch; delete terrain
   filesystem reads.
-- [ ] **Phase 4 — Consolidation & cleanup**: remove `ELODIN_ASSETS_DIR`,
+- [x] **Phase 4 — Consolidation & cleanup**: remove `ELODIN_ASSETS_DIR`,
   `ELODIN_KDL_DIR`, `schematic.content`/`schematic.path`; generalize follow-mode
   to a full-tree mirror via `__index__`. A single asset code path everywhere.
 - [ ] **Phase 5 — Aleph & deploy story**: wire `ELODIN_ASSETS` into Aleph's
@@ -43,5 +43,5 @@ DB's HTTP asset server.
 
 ## Status
 
-Phases 0–2 are landed on `feat/db-centric-assets`. Phases 3–6 remain, to be
+Phases 0–2 and 4 are landed on `feat/db-centric-assets`. Phases 3, 5–6 remain, to be
 added as further commits on the same branch (single PR for the whole change).

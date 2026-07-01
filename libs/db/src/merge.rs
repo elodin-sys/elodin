@@ -446,7 +446,7 @@ fn analyze_database(db_path: &Path, prefix: Option<String>) -> Result<DatabaseIn
     let db_state_path = db_path.join("db_state");
     let has_schematic = if db_state_path.exists() {
         let config = DbConfig::read(&db_state_path)?;
-        config.schematic_path().is_some() || config.schematic_content().is_some()
+        config.schematic_active().is_some()
     } else {
         false
     };
@@ -828,16 +828,18 @@ fn merge_db_state(
     // Start with config1 as base
     let mut merged_config = config1.clone();
 
-    // Merge metadata, excluding schematic keys
+    // Merge metadata, excluding schematic keys. The schematic is a per-DB asset
+    // (pointed at by `schematic.active`); a merged DB has no single schematic, so
+    // its asset files aren't copied and the pointer would dangle.
     for (key, value) in &config2.metadata {
-        if key != "schematic.path" && key != "schematic.content" {
+        if key != "schematic.path" && key != "schematic.active" {
             merged_config.metadata.insert(key.clone(), value.clone());
         }
     }
 
     // Remove schematic keys from merged config
     merged_config.metadata.remove("schematic.path");
-    merged_config.metadata.remove("schematic.content");
+    merged_config.metadata.remove("schematic.active");
 
     // Use earliest time.start_timestamp from both (after applying offsets)
     let ts1 = config1.time_start_timestamp_micros().map(|t1| {
@@ -1246,7 +1248,7 @@ mod tests {
             default_stream_time_step: std::time::Duration::from_millis(10),
             metadata: HashMap::new(),
         };
-        config1.set_schematic_content("graph \"test\"".to_string());
+        config1.set_schematic_active("schematics/main.kdl");
         config1.write(db1_path.join("db_state")).unwrap();
 
         // Create db2 without schematic
@@ -1268,8 +1270,7 @@ mod tests {
 
         // Verify schematic was pruned
         let merged_config = DbConfig::read(output_path.join("db_state")).unwrap();
-        assert!(merged_config.schematic_content().is_none());
-        assert!(merged_config.schematic_path().is_none());
+        assert!(merged_config.schematic_active().is_none());
     }
 
     #[test]

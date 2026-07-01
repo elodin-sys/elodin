@@ -5,7 +5,7 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use std::{
     collections::HashSet,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{self, AtomicU64, Ordering},
@@ -99,7 +99,7 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 /// never mutates `world.metadata.schematic`. Call once before starting the DB
 /// Asset Server so early HTTP requests do not 404.
 pub fn prime_schematic_assets(db: &elodin_db::DB, world: &World) -> Result<(), elodin_db::Error> {
-    if let Some(source) = resolve_source_assets_root(world.metadata.schematic_path.as_deref()) {
+    if let Some(source) = resolve_source_assets_root() {
         match elodin_db::assets::ingest_asset_dir(&db.path, &source) {
             Ok(report) if report.skipped => {
                 tracing::info!(source = %source.display(), "assets already ingested; skipping")
@@ -123,24 +123,18 @@ pub fn prime_schematic_assets(db: &elodin_db::DB, world: &World) -> Result<(), e
     let Some(content) = world.metadata.schematic.as_deref() else {
         return Ok(());
     };
-    // Store the schematic as the active asset and point at it. If either step
-    // fails, fall back to inline `schematic.content` so consumers still receive
-    // the generated schematic instead of empty metadata.
-    let active_set = match db.store_asset(ACTIVE_SCHEMATIC_KEY, content.as_bytes()) {
-        Ok(()) => match db.set_active_schematic(ACTIVE_SCHEMATIC_KEY) {
-            Ok(()) => true,
-            Err(err) => {
+    // Store the schematic as the active asset and point at it (RFD #724): the
+    // bytes travel only as an asset, fetched over the Asset Server HTTP. If
+    // either step fails, warn — there is no inline fallback.
+    match db.store_asset(ACTIVE_SCHEMATIC_KEY, content.as_bytes()) {
+        Ok(()) => {
+            if let Err(err) = db.set_active_schematic(ACTIVE_SCHEMATIC_KEY) {
                 tracing::warn!(?err, "failed to set active schematic pointer");
-                false
             }
-        },
+        }
         Err(err) => {
             tracing::warn!(?err, "failed to store active schematic into db assets");
-            false
         }
-    };
-    if !active_set && let Err(err) = db.set_schematic_content(content) {
-        tracing::warn!(?err, "failed to set fallback schematic content");
     }
     Ok(())
 }
@@ -188,11 +182,6 @@ pub fn init_db(
                 component.time_series.push_buf(start_timestamp, buf)?;
             }
         }
-        if let Some(path) = &world.metadata.schematic_path {
-            state
-                .db_config
-                .set_schematic_path(path.to_string_lossy().to_string());
-        }
         if !world.metadata.sensor_cameras.is_empty() {
             match serde_json::to_string(&world.metadata.sensor_cameras) {
                 Ok(json) => {
@@ -234,22 +223,9 @@ pub fn init_db(
     Ok(())
 }
 
-/// Resolve the source `assets/` tree to ingest. Defers to the shared
-/// [`elodin_db::assets::resolve_assets_root`] (which honors `$ELODIN_ASSETS`,
-/// the entry directory, cwd, and ancestors), then falls back to the legacy
-/// `$ELODIN_ASSETS_DIR` so existing projects keep working until it is removed
-/// (RFD #724, Phase 4).
-fn resolve_source_assets_root(schematic_path: Option<&Path>) -> Option<PathBuf> {
-    if let Some(root) = elodin_db::assets::resolve_assets_root(schematic_path) {
-        return Some(root);
-    }
-    let legacy = std::env::var_os("ELODIN_ASSETS_DIR").map(PathBuf::from)?;
-    let legacy = if legacy.is_absolute() {
-        legacy
-    } else {
-        std::env::current_dir().unwrap_or_default().join(legacy)
-    };
-    legacy.is_dir().then_some(legacy)
+/// Resolve the source `assets/` tree to ingest via [`elodin_db::assets::resolve_assets_root`].
+fn resolve_source_assets_root() -> Option<PathBuf> {
+    elodin_db::assets::resolve_assets_root(None)
 }
 
 #[cfg(test)]
@@ -334,9 +310,11 @@ mod asset_tests {
         let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
         assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
 
-        // Transition shim: schematic.content mirrors the rewritten active asset.
-        let content = db.with_state(|s| s.db_config.schematic_content().map(str::to_owned));
-        assert_eq!(content.as_deref(), Some(active_kdl.as_str()));
+        // The active schematic is read back from its asset file (single source).
+        assert_eq!(
+            db.read_active_schematic().as_deref(),
+            Some(active_kdl.as_str())
+        );
     }
 
     #[test]
@@ -371,7 +349,6 @@ mod asset_tests {
         // No source assets resolved, so nothing is ingested into the DB.
         let _no_assets =
             EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
-        let _no_legacy = EnvVarGuard::unset("ELODIN_ASSETS_DIR");
 
         let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
         let mut world = World::default();
@@ -390,18 +367,6 @@ mod asset_tests {
         assert!(!active_kdl.contains("db:meshes/rocket.glb"));
         let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
         assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
-    }
-
-    #[test]
-    fn resolve_source_assets_root_falls_back_to_legacy_env() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = tempdir().unwrap();
-        let legacy = dir.path().join("legacy_assets");
-        std::fs::create_dir_all(&legacy).unwrap();
-
-        let _no_assets = EnvVarGuard::unset("ELODIN_ASSETS");
-        let _guard = EnvVarGuard::set("ELODIN_ASSETS_DIR", legacy.to_str().unwrap());
-        assert_eq!(resolve_source_assets_root(None), Some(legacy));
     }
 }
 
