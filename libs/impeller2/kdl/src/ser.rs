@@ -1687,6 +1687,7 @@ object_3d lander.world_pos {
                 material: Material::with_color(Color::WHITE),
             },
             frame: None, // Default (no frame)
+            frame_orientation: None, // Default (no frame)
             orientation: Default::default(),
             icon: None,
             thrusters: Vec::new(),
