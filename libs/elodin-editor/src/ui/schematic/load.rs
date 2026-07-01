@@ -1582,10 +1582,9 @@ mod tests {
 
         load_schematic(&mut app, &schematic);
 
-        let mut query = app.world_mut().query::<(
-            &crate::object_3d::Object3DState,
-            &GeoRotation,
-        )>();
+        let mut query = app
+            .world_mut()
+            .query::<(&crate::object_3d::Object3DState, &GeoRotation)>();
         let (object_3d, geo_rot) = query
             .iter(app.world())
             .next()
@@ -1613,9 +1612,9 @@ mod tests {
 
         load_schematic(&mut app, &schematic);
 
-        let mut query = app
-            .world_mut()
-            .query::<(&crate::object_3d::Object3DState, &GeoPosition, &GeoRotation)>();
+        let mut query =
+            app.world_mut()
+                .query::<(&crate::object_3d::Object3DState, &GeoPosition, &GeoRotation)>();
         let (object_3d, geo_pos, geo_rot) = query
             .iter(app.world())
             .next()

@@ -145,7 +145,10 @@ fn spawn_viewport_grids(mut commands: Commands) {
             crate::spatial::GridCell::default(),
             Name::new(format!("infinite grid {frame:?}")),
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
-            bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2)),
+            bevy_geo_frames::GeoRotation::absolute(
+                frame,
+                bevy::math::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+            ),
         ));
     }
 }
@@ -154,36 +157,33 @@ fn viewport_grid_settings(
     frame: bevy_geo_frames::GeoFrame,
 ) -> bevy_infinite_grid::InfiniteGridSettings {
     match frame {
-        GeoFrame::NED => 
-            bevy_infinite_grid::InfiniteGridSettings {
-                minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                x_axis_color: crate::ui::colors::bevy::RED,
-                z_axis_color: crate::ui::colors::bevy::GREEN,
-                fadeout_distance: 50_000.0,
-                scale: 0.1,
-                ..Default::default()
-            },
-        GeoFrame::ENU => 
-            bevy_infinite_grid::InfiniteGridSettings {
-                minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                x_axis_color: crate::ui::colors::bevy::RED,
-                z_axis_color: crate::ui::colors::bevy::GREEN,
-                fadeout_distance: 50_000.0,
-                scale: 0.1,
-                ..Default::default()
-            },
-        GeoFrame::ECEF =>
-            bevy_infinite_grid::InfiniteGridSettings {
-                minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                x_axis_color: crate::ui::colors::bevy::RED,
-                z_axis_color: crate::ui::colors::bevy::GREEN,
-                fadeout_distance: 50_000_000.0,
-                scale: 0.000_000_1,
-                ..Default::default()
-            },
+        GeoFrame::NED => bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            x_axis_color: crate::ui::colors::bevy::RED,
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            fadeout_distance: 50_000.0,
+            scale: 0.1,
+            ..Default::default()
+        },
+        GeoFrame::ENU => bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            x_axis_color: crate::ui::colors::bevy::RED,
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            fadeout_distance: 50_000.0,
+            scale: 0.1,
+            ..Default::default()
+        },
+        GeoFrame::ECEF => bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            x_axis_color: crate::ui::colors::bevy::RED,
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            fadeout_distance: 50_000_000.0,
+            scale: 0.000_000_1,
+            ..Default::default()
+        },
     }
 }
 

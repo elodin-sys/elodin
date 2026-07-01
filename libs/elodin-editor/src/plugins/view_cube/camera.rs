@@ -1301,11 +1301,7 @@ mod tests {
 
         let root = app
             .world_mut()
-            .spawn((
-                ViewCubeRoot,
-                Visibility::Hidden,
-                expected_layers.clone(),
-            ))
+            .spawn((ViewCubeRoot, Visibility::Hidden, expected_layers.clone()))
             .id();
         let child = app
             .world_mut()
