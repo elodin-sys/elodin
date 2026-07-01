@@ -5,7 +5,7 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use std::{
     collections::HashSet,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{self, AtomicU64, Ordering},
@@ -98,8 +98,17 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 /// schematic the same way. This producer does no KDL parsing or rewriting and
 /// never mutates `world.metadata.schematic`. Call once before starting the DB
 /// Asset Server so early HTTP requests do not 404.
-pub fn prime_schematic_assets(db: &elodin_db::DB, world: &World) -> Result<(), elodin_db::Error> {
-    if let Some(source) = resolve_source_assets_root() {
+///
+/// `entry` is the simulation entrypoint (e.g. the `main.py` path), used to
+/// resolve the source `assets/` tree relative to the sim folder and its
+/// ancestors when `ELODIN_ASSETS` is unset — so a run whose cwd is not the sim
+/// directory still ingests the right tree instead of the wrong one or none.
+pub fn prime_schematic_assets(
+    db: &elodin_db::DB,
+    world: &World,
+    entry: Option<&Path>,
+) -> Result<(), elodin_db::Error> {
+    if let Some(source) = resolve_source_assets_root(entry) {
         match elodin_db::assets::ingest_asset_dir(&db.path, &source) {
             Ok(report) if report.skipped => {
                 tracing::info!(source = %source.display(), "assets already ingested; skipping")
@@ -223,9 +232,11 @@ pub fn init_db(
     Ok(())
 }
 
-/// Resolve the source `assets/` tree to ingest via [`elodin_db::assets::resolve_assets_root`].
-fn resolve_source_assets_root() -> Option<PathBuf> {
-    elodin_db::assets::resolve_assets_root(None)
+/// Resolve the source `assets/` tree to ingest via [`elodin_db::assets::resolve_assets_root`],
+/// passing the simulation `entry` so ingest can find `assets/` next to the sim
+/// (or an ancestor) rather than only `$ELODIN_ASSETS` / cwd.
+fn resolve_source_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
+    elodin_db::assets::resolve_assets_root(entry)
 }
 
 #[cfg(test)]
@@ -289,7 +300,7 @@ mod asset_tests {
         );
 
         let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
-        prime_schematic_assets(&db, &world).unwrap();
+        prime_schematic_assets(&db, &world, None).unwrap();
 
         // The whole source tree is copied into the DB once.
         let stored = elodin_db::assets_http::assets_dir(&db.path);
@@ -329,11 +340,11 @@ mod asset_tests {
         let world = World::default();
 
         let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
-        prime_schematic_assets(&db, &world).unwrap();
+        prime_schematic_assets(&db, &world, None).unwrap();
 
         // A source change after ingest must not leak into the frozen DB record.
         std::fs::write(assets.join("rocket.glb"), b"v2").unwrap();
-        prime_schematic_assets(&db, &world).unwrap();
+        prime_schematic_assets(&db, &world, None).unwrap();
 
         let stored = elodin_db::assets_http::assets_dir(&db.path);
         assert_eq!(
@@ -356,7 +367,7 @@ mod asset_tests {
             "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
         );
 
-        prime_schematic_assets(&db, &world).unwrap();
+        prime_schematic_assets(&db, &world, None).unwrap();
 
         // The glb never reached the DB, so store_asset must NOT rewrite the path
         // to db: (which would make the editor chase a 404). The active pointer is
@@ -367,6 +378,34 @@ mod asset_tests {
         assert!(!active_kdl.contains("db:meshes/rocket.glb"));
         let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
         assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
+    }
+
+    #[test]
+    fn prime_resolves_assets_relative_to_sim_entry() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // With `ELODIN_ASSETS` unset, ingest must find `assets/` next to the sim
+        // entry even when the process cwd is elsewhere (Bugbot: the entry was
+        // ignored, so a run outside the sim folder ingested the wrong tree/none).
+        let _no_env = EnvVarGuard::unset("ELODIN_ASSETS");
+
+        let dir = tempdir().unwrap();
+        let sim = dir.path().join("sim");
+        std::fs::create_dir_all(sim.join("assets/meshes")).unwrap();
+        std::fs::write(sim.join("assets/meshes/rocket.glb"), b"glb-bytes").unwrap();
+        let entry = sim.join("main.py");
+        std::fs::write(&entry, b"# sim").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let world = World::default();
+        prime_schematic_assets(&db, &world, Some(&entry)).unwrap();
+
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
+            b"glb-bytes".to_vec(),
+            "ingest should copy assets found next to the sim entry"
+        );
+        assert!(elodin_db::assets::assets_ingested(&db.path));
     }
 }
 

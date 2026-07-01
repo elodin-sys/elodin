@@ -664,8 +664,12 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
-                crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
-                    .map_err(crate::Error::DB)?;
+                crate::impeller2_server::prime_schematic_assets(
+                    &db_server.db,
+                    exec.world_mut(),
+                    simulation_source_entrypoint.as_deref().map(Path::new),
+                )
+                .map_err(crate::Error::DB)?;
                 elodin_db::assets_http::spawn_assets_http(
                     &db_path,
                     addr,
@@ -1369,8 +1373,12 @@ impl WorldBuilder {
                         None => tempfile::tempdir()?.keep().join("db"),
                     };
                     let db = elodin_db::DB::create(db_path)?;
-                    crate::impeller2_server::prime_schematic_assets(&db, compiled_exec.world_mut())
-                        .map_err(Error::DB)?;
+                    crate::impeller2_server::prime_schematic_assets(
+                        &db,
+                        compiled_exec.world_mut(),
+                        simulation_source_entrypoint.as_deref().map(Path::new),
+                    )
+                    .map_err(Error::DB)?;
                     crate::impeller2_server::init_db(
                         &db,
                         compiled_exec.world_mut(),
@@ -1460,7 +1468,9 @@ impl WorldBuilder {
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
-        crate::impeller2_server::prime_schematic_assets(&db, exec.world_mut())
+        // No sim entrypoint is threaded into `build`; ingest falls back to
+        // `$ELODIN_ASSETS` / cwd like before.
+        crate::impeller2_server::prime_schematic_assets(&db, exec.world_mut(), None)
             .map_err(Error::DB)?;
         crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
         Ok(PyExec {
