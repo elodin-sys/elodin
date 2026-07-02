@@ -215,6 +215,16 @@ pub(crate) struct DbSavePlan {
     local_assets: Vec<(String, String)>,
 }
 
+impl DbSavePlan {
+    /// The exact bytes the active schematic will be stored under, so the saver
+    /// can record them as the known stored content once the upload lands.
+    pub(crate) fn active_schematic_kdl(&self) -> Option<&str> {
+        self.schematic_uploads
+            .last()
+            .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+    }
+}
+
 /// DB asset key a window sub-schematic is stored under. A bare file name (the
 /// generated `<stem>.kdl` of a freshly created window) is keyed under
 /// `schematics/`; a name that already carries a directory is a preserved stored
@@ -492,6 +502,7 @@ pub fn sync_document_from_config(
         // a raw `PUT`). Reload only when the observed `assets.revision` changed,
         // so unrelated `DbConfig` churn doesn't trigger spurious reloads
         // (RFD #724, Bug 1).
+        let mut only_if_changed = false;
         if last_synced_key.0.as_deref() == Some(active_key) {
             let current_revision = config.assets_revision();
             // A save this client started is still uploading: every revision bump
@@ -519,6 +530,12 @@ pub fn sync_document_from_config(
                             revision.revision = Some(current_revision);
                         } else {
                             should_reload = true;
+                            // Adopt the baseline now: the fetch may skip the
+                            // reload when the schematic bytes are unchanged
+                            // (only_if_changed), and nothing else would
+                            // re-baseline in that case — leaving this system
+                            // re-requesting the same fetch every frame.
+                            revision.revision = Some(current_revision);
                         }
                     }
                     Some(_) => {}
@@ -527,10 +544,16 @@ pub fn sync_document_from_config(
             if !should_reload {
                 return;
             }
+            // The revision may have been bumped by an unrelated asset write
+            // (skybox cubemap/manifest upload, mesh `PUT`…): let the fetch
+            // handler compare bytes and skip the disruptive reload when the
+            // schematic itself did not change (Bug 1/2).
+            only_if_changed = true;
         }
         open_document_from_active.write(OpenDocumentFromActiveRequest {
             key: active_key.to_string(),
             save_path: Some(save_path_for_active_key(active_key)),
+            only_if_changed,
         });
         return;
     }

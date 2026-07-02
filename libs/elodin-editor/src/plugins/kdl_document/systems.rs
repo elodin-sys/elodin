@@ -38,9 +38,9 @@ pub(crate) struct ActiveSchematicFetch {
     retry: Option<PendingRetry>,
     /// A new request for the *same* key arrived while a fetch was in flight
     /// (e.g. the asset bytes were replaced under an unchanged `schematic.active`).
-    /// The in-flight result may be stale, so re-fetch fresh bytes on completion
-    /// instead of applying it.
-    refetch_pending: bool,
+    /// The in-flight result may be stale, so re-fetch fresh bytes (with this
+    /// newer request) on completion instead of applying it.
+    refetch_pending: Option<OpenDocumentFromActiveRequest>,
 }
 
 /// A bounded re-attempt of an active-schematic fetch whose asset was not yet
@@ -82,7 +82,7 @@ fn spawn_active_fetch(
     fetch.key = Some(request.key.clone());
     fetch.attempts = attempts;
     fetch.retry = None;
-    fetch.refetch_pending = false;
+    fetch.refetch_pending = None;
     fetch.task = Some(IoTaskPool::get().spawn(async move {
         let result = fetch_active_schematic_kdl(&key, addr);
         ActiveSchematicFetched { request, result }
@@ -131,6 +131,7 @@ pub(super) fn handle_open_document_from_active_requests(
     pending_active: Res<PendingActiveSchematic>,
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
+    mut last_content: ResMut<LastActiveSchematicContent>,
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
@@ -141,11 +142,13 @@ pub(super) fn handle_open_document_from_active_requests(
     // A repeated request for the *same* key doesn't cancel a nearly-complete
     // fetch, but it does mark a re-fetch: the asset bytes at that key may have
     // been replaced (e.g. another client's save under an unchanged
-    // `schematic.active`), so the in-flight result could be stale.
+    // `schematic.active`), so the in-flight result could be stale. The newer
+    // request is kept for that re-fetch so its intent (e.g. an explicit open
+    // that must not be skipped as "unchanged") wins over the in-flight one.
     if let Some(request) = requests.read().last().cloned() {
         let already_fetching = fetch_covers_request(fetch.key.as_deref(), &request);
         if already_fetching {
-            fetch.refetch_pending = true;
+            fetch.refetch_pending = Some(request);
         } else {
             spawn_active_fetch(&mut fetch, request, 0, addr);
         }
@@ -196,8 +199,8 @@ pub(super) fn handle_open_document_from_active_requests(
     // A newer request for the same key arrived mid-flight: the bytes we just
     // fetched may already be stale, so re-fetch fresh ones (attempt budget
     // reset) rather than applying this result.
-    if refetch_pending {
-        spawn_active_fetch(&mut fetch, request, 0, addr);
+    if let Some(newer) = refetch_pending {
+        spawn_active_fetch(&mut fetch, newer, 0, addr);
         return;
     }
 
@@ -225,8 +228,20 @@ pub(super) fn handle_open_document_from_active_requests(
             }
         },
     };
+    // A revision-triggered refetch whose schematic bytes are unchanged: the
+    // bump came from an unrelated asset write (skybox cubemap, mesh…), so keep
+    // the current document instead of tearing it down and respawning it — a
+    // full reload resets the viewport and window layout (Bug 1/2).
+    if request.only_if_changed && last_content.matches(&request.key, &content) {
+        bevy::log::debug!(
+            key = %request.key,
+            "active schematic bytes unchanged after revision bump; skipping reload"
+        );
+        return;
+    }
     match open_document_from_content(&content, request.save_path.clone(), &mut current_document) {
         Ok(document) => {
+            last_content.record(&request.key, &content);
             loaded.write(DocumentLoaded {
                 save_path: current_document.save_path.clone(),
                 document,
@@ -413,6 +428,7 @@ mod tests {
         OpenDocumentFromActiveRequest {
             key: key.to_string(),
             save_path: None,
+            only_if_changed: false,
         }
     }
 

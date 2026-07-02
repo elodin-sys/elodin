@@ -27,6 +27,7 @@ pub(crate) fn plugin(app: &mut App) {
     .init_resource::<InitialKdlPath>()
     .init_resource::<LastSyncedActiveKey>()
     .init_resource::<LastSyncedAssetsRevision>()
+    .init_resource::<LastActiveSchematicContent>()
     .init_resource::<PendingActiveSchematic>()
     .init_resource::<systems::ActiveSchematicFetch>()
     .init_resource::<CurrentDocument>()
@@ -63,9 +64,10 @@ pub(crate) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
-        LastSyncedAssetsRevision, OpenDocumentFromActiveRequest, OpenDocumentRequest,
-        PendingActiveSchematic, SchematicDocumentAsset,
+        CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded,
+        LastActiveSchematicContent, LastSyncedActiveKey, LastSyncedAssetsRevision,
+        OpenDocumentFromActiveRequest, OpenDocumentRequest, PendingActiveSchematic,
+        SchematicDocumentAsset,
         operations::{open_document_from_content, sync_document_skybox},
         plugin,
     };
@@ -238,28 +240,6 @@ mod tests {
                 (
                     super::systems::activate_document_skybox,
                     collect_skybox_messages,
-                )
-                    .chain(),
-            );
-        app
-    }
-
-    fn config_sync_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(DbConfig::default())
-            .init_resource::<CurrentDocument>()
-            .init_resource::<LastSyncedActiveKey>()
-            .init_resource::<PendingActiveSchematic>()
-            .add_message::<OpenDocumentRequest>()
-            .add_message::<OpenDocumentFromActiveRequest>()
-            .add_message::<DocumentCleared>()
-            .init_resource::<SeenOpenDocumentRequests>()
-            .add_systems(
-                Update,
-                (
-                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
-                    collect_open_document_requests,
                 )
                     .chain(),
             );
@@ -493,6 +473,20 @@ mod tests {
             .extend(reader.read().map(|request| request.key.clone()));
     }
 
+    #[derive(Resource, Default)]
+    struct SeenActiveRequestFlags(Vec<(String, bool)>);
+
+    fn collect_active_request_flags(
+        mut reader: MessageReader<OpenDocumentFromActiveRequest>,
+        mut seen: ResMut<SeenActiveRequestFlags>,
+    ) {
+        seen.0.extend(
+            reader
+                .read()
+                .map(|request| (request.key.clone(), request.only_if_changed)),
+        );
+    }
+
     #[test]
     fn config_sync_reloads_when_active_key_changes_with_equal_content() {
         let mut app = App::new();
@@ -580,6 +574,100 @@ mod tests {
             vec!["schematics/a.kdl".to_string()],
             "a byte change under an unchanged active key must reload (Bug 1)"
         );
+    }
+
+    #[test]
+    fn revision_bump_refetch_is_content_gated_and_rebaselined() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequestFlags>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_request_flags,
+                )
+                    .chain(),
+            );
+
+        // A first load through a key change is a plain (unconditional) reload.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequestFlags>().0,
+            vec![("schematics/a.kdl".to_string(), false)],
+            "a key change must reload unconditionally"
+        );
+
+        // Loaded: key synced, revision baseline adopted.
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
+        app.world_mut()
+            .resource_mut::<LastSyncedAssetsRevision>()
+            .revision = Some(0);
+
+        // A revision bump at the unchanged key (e.g. a skybox cubemap upload)
+        // requests a content-gated refetch, so the fetch handler can skip the
+        // disruptive reload when the schematic bytes are unchanged (Bug 1/2).
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequestFlags>().0[1..],
+            [("schematics/a.kdl".to_string(), true)],
+            "a revision-only bump must request a content-gated refetch"
+        );
+        // The baseline is adopted at request time: if the fetch skips the
+        // reload, nothing else re-baselines, and without this the same fetch
+        // would be re-requested every frame.
+        assert_eq!(
+            app.world().resource::<LastSyncedAssetsRevision>().revision,
+            Some(1),
+        );
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequestFlags>().0.len(),
+            2,
+            "the adopted baseline must not re-request the same fetch"
+        );
+    }
+
+    #[test]
+    fn last_active_content_matches_ignores_formatting_only_changes() {
+        let mut content = LastActiveSchematicContent::default();
+        // Hand-written formatting (as ingested from a source tree)...
+        content.record("schematics/main.kdl", "viewport   {\n\n}\n");
+
+        // ...matches the normalized serialization of the same schematic.
+        let normalized = {
+            use impeller2_kdl::{FromKdl, ToKdl};
+            Schematic::from_kdl("viewport {\n}\n").unwrap().to_kdl()
+        };
+        assert!(content.matches("schematics/main.kdl", &normalized));
+        assert!(content.matches("schematics/main.kdl", "viewport {\n}\n"));
+
+        // A different key or genuinely different content must not match.
+        assert!(!content.matches("schematics/other.kdl", "viewport {\n}\n"));
+        assert!(!content.matches(
+            "schematics/main.kdl",
+            "viewport {\n}\nskybox name=\"desert_night\"\n"
+        ));
+
+        // Unparseable content never matches, so the caller falls back to a
+        // full reload (which surfaces the parse error through its own path).
+        content.record("schematics/main.kdl", "not-a-schematic {{{");
+        assert!(!content.matches("schematics/main.kdl", "not-a-schematic {{{"));
     }
 
     #[test]

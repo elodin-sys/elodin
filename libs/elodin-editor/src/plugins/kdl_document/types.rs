@@ -28,6 +28,42 @@ pub struct LastSyncedAssetsRevision {
     pub suppress_next: bool,
 }
 
+/// Normalized KDL the editor last knows to be stored at the active schematic
+/// key — recorded on every DB-active load and on every local write-back
+/// (skybox edit, save). Lets a revision-triggered refetch tell "the schematic
+/// bytes actually changed" apart from "an unrelated asset (e.g. a skybox
+/// cubemap) bumped `assets.revision`", so the latter doesn't tear down and
+/// respawn the whole document (Bug 1/2).
+#[derive(Resource, Default)]
+pub struct LastActiveSchematicContent {
+    key: Option<String>,
+    normalized: Option<String>,
+}
+
+/// Formatting-insensitive form of a schematic KDL document (hand-written
+/// ingested files vs. `to_kdl` output differ only in layout). `None` when the
+/// content does not parse.
+pub(crate) fn normalized_schematic_kdl(content: &str) -> Option<String> {
+    use impeller2_kdl::{FromKdl, ToKdl};
+    Schematic::from_kdl(content).ok().map(|s| s.to_kdl())
+}
+
+impl LastActiveSchematicContent {
+    pub fn record(&mut self, key: &str, content: &str) {
+        self.key = Some(key.to_string());
+        self.normalized = normalized_schematic_kdl(content);
+    }
+
+    /// Whether `content` matches the last known stored bytes for `key`.
+    /// Unparseable or unknown content never matches, so the caller falls back
+    /// to a full reload.
+    pub fn matches(&self, key: &str, content: &str) -> bool {
+        self.key.as_deref() == Some(key)
+            && self.normalized.is_some()
+            && self.normalized == normalized_schematic_kdl(content)
+    }
+}
+
 /// Active-schematic key the editor has optimistically switched to (via "Save
 /// As…" or "Open Schematic…") but the DB has not yet echoed. While set and not
 /// yet matched by `DbConfig.schematic_active`, config sync ignores the stale

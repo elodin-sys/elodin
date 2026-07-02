@@ -9,8 +9,9 @@ use impeller2_wkt::{DbConfig, SetDbConfig, SkyboxConfig, StoreAsset};
 use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
-    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedActiveKey,
-    LastSyncedAssetsRevision, PendingActiveSchematic, SchematicDocumentAsset, sync_document_skybox,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentLoaded, DocumentReloaded,
+    LastActiveSchematicContent, LastSyncedActiveKey, LastSyncedAssetsRevision,
+    PendingActiveSchematic, SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
@@ -19,6 +20,7 @@ pub(crate) struct SkyboxDocumentSyncMut<'a> {
     pub current_document: &'a mut CurrentDocument,
     pub document_assets: &'a mut Assets<SchematicDocumentAsset>,
     pub last_synced_key: &'a mut LastSyncedActiveKey,
+    pub last_content: &'a mut LastActiveSchematicContent,
     pub locally_pushed: &'a mut LocallyPushedSkyboxActive,
     pub cache: &'a mut SkyboxCache,
     pub tx: &'a PacketTx,
@@ -38,6 +40,9 @@ impl SkyboxDocumentSyncMut<'_> {
         );
         sync_cache_active_from_skybox(self.cache, skybox.as_ref());
         self.last_synced_key.0 = Some(self.active_key.to_string());
+        // These are the bytes now stored at the key: the revision bump this
+        // `StoreAsset` causes must not reload the document we just wrote.
+        self.last_content.record(self.active_key, &kdl);
         let active = self
             .schematic
             .skybox
@@ -151,6 +156,7 @@ pub(crate) struct SyncGeneratedSkyboxParams<'w> {
     current_document: ResMut<'w, CurrentDocument>,
     document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
     last_synced_key: ResMut<'w, LastSyncedActiveKey>,
+    last_content: ResMut<'w, LastActiveSchematicContent>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
     pending_active: Res<'w, PendingActiveSchematic>,
@@ -173,6 +179,7 @@ pub(crate) fn sync_generated_skybox_to_schematic(
             current_document: &mut params.current_document,
             document_assets: &mut params.document_assets,
             last_synced_key: &mut params.last_synced_key,
+            last_content: &mut params.last_content,
             locally_pushed: &mut params.locally_pushed,
             cache: &mut params.cache,
             tx: &params.tx,
@@ -184,12 +191,14 @@ pub(crate) fn sync_generated_skybox_to_schematic(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn on_document_loaded(
     mut loaded: MessageReader<DocumentLoaded>,
     config: Res<DbConfig>,
     mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
     mut last_synced_key: ResMut<LastSyncedActiveKey>,
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
+    mut last_content: Option<ResMut<LastActiveSchematicContent>>,
     mut caches: Query<&mut crate::ui::video_stream::VideoFrameCache>,
     tx: Option<Res<PacketTx>>,
 ) {
@@ -232,6 +241,13 @@ pub(crate) fn on_document_loaded(
             .and_then(std::path::Path::to_str)
             .filter(|path| is_db_schematic_key(path));
         let kdl = db_key.is_some().then(|| document.root.to_kdl());
+        // These bytes become the stored content at the key: record them so the
+        // revision bump from this write-back doesn't reload the document.
+        if let (Some(db_key), Some(kdl), Some(last_content)) =
+            (db_key, kdl.as_deref(), last_content.as_deref_mut())
+        {
+            last_content.record(db_key, kdl);
+        }
         push_skybox_db_sync(
             tx,
             kdl,
@@ -368,6 +384,7 @@ pub(crate) struct RevertSkyboxParams<'w> {
     current_document: ResMut<'w, CurrentDocument>,
     document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
     last_synced_key: ResMut<'w, LastSyncedActiveKey>,
+    last_content: ResMut<'w, LastActiveSchematicContent>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
     cache: ResMut<'w, SkyboxCache>,
     pending_active: Res<'w, PendingActiveSchematic>,
@@ -391,6 +408,7 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         current_document: &mut params.current_document,
         document_assets: &mut params.document_assets,
         last_synced_key: &mut params.last_synced_key,
+        last_content: &mut params.last_content,
         locally_pushed: &mut params.locally_pushed,
         cache: &mut params.cache,
         tx: &params.tx,
