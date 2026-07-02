@@ -1686,7 +1686,7 @@ object_3d lander.world_pos {
                 mesh: Mesh::Sphere { radius: 0.5 },
                 material: Material::with_color(Color::WHITE),
             },
-            frame: None, // Default (no frame)
+            frame: None,             // Default (no frame)
             frame_orientation: None, // Default (no frame)
             orientation: Default::default(),
             icon: None,
