@@ -1236,6 +1236,7 @@ pub fn on_cube_drag(
     editor_cam.send_screenspace_input(delta);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn on_cube_drag_end(
     drag_end: On<Pointer<DragEnd>>,
     cube_elements: Query<(Entity, &CubeElement)>,

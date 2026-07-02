@@ -131,13 +131,17 @@ fn event_source(event: &ViewCubeEvent) -> Entity {
     }
 }
 
+type ViewCubeOverlayCameraTransformQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ViewCubeLink, &'static mut Transform),
+    (With<ViewCubeCamera>, Without<ViewCubeRoot>),
+>;
+
 pub fn sync_view_cube_camera_orientation(
     config: Res<ViewCubeConfig>,
     main_camera_query: Query<&GlobalTransform, (Without<ViewCubeRoot>, Without<ViewCubeCamera>)>,
-    mut overlay_camera_query: Query<
-        (&ViewCubeLink, &mut Transform),
-        (With<ViewCubeCamera>, Without<ViewCubeRoot>),
-    >,
+    mut overlay_camera_query: ViewCubeOverlayCameraTransformQuery<'_, '_>,
 ) {
     for (link, mut camera_transform) in overlay_camera_query.iter_mut() {
         let Ok(main_camera_transform) = main_camera_query.get(link.main_camera) else {
