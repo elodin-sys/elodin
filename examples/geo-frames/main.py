@@ -114,12 +114,13 @@ def world() -> el.World:
         hsplit {{
             tabs {{
                 viewport name=Frames frame="NED" pos="(0,0,0,1, 4000000,4000000,-3000000)" look_at="(0,0,0,1, 0,0,0)" far=15000000.0 hdr=#true show_grid=#false active=#true
+                viewport name=Frames frame="ECEF" pos="(0,0,0,1, 8000000,8000000,-8000000)" look_at="(0,0,0,1, 0,0,0)" far=15000000.0 hdr=#true show_grid=#true active=#true 
                 inspector
                 hierarchy
             }}
         }}
 
-        object_3d frame="ECEF" earth.world_pos {{
+        object_3d frame="ECEF" orientation=absolute earth.world_pos {{
             glb path="earth.glb"
             icon builtin="public" size=64 {{
                 color 255 255 255
