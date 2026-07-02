@@ -6,6 +6,12 @@ use std::path::PathBuf;
 pub struct DocumentLoaded {
     pub save_path: Option<PathBuf>,
     pub document: SchematicDocumentAsset,
+    /// The load was user-initiated ("Open Schematic…", opening a file) rather
+    /// than a background sync (connect-time load, external repoint, byte
+    /// change). An explicit open re-applies the document's skybox even when
+    /// the DB carries a sticky clear (`skybox.active=""`): the user asked for
+    /// this schematic, skybox included.
+    pub explicit: bool,
 }
 
 #[derive(Message, Clone, Debug)]

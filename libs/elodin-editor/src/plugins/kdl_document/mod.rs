@@ -325,6 +325,7 @@ mod tests {
                 },
                 windows: Vec::new(),
             },
+            explicit: false,
         });
         app.update();
     }
@@ -344,6 +345,7 @@ mod tests {
                 },
                 windows: Vec::new(),
             },
+            explicit: false,
         });
         app.update();
 
@@ -365,12 +367,60 @@ mod tests {
                 root: impeller2_wkt::Schematic::default(),
                 windows: Vec::new(),
             },
+            explicit: false,
         });
         app.update();
 
         let messages = &app.world().resource::<SeenSkyboxMessages>().0;
         assert!(matches!(messages.as_slice(), [SetActiveSkybox::Clear]));
         assert!(app.world().resource::<SkyboxCache>().active.is_none());
+    }
+
+    #[test]
+    fn sticky_clear_filters_loaded_skybox_unless_open_is_explicit() {
+        // The DB carries an explicit clear (`skybox.active=""`).
+        let mut sticky_clear = DbConfig::default();
+        sticky_clear
+            .metadata
+            .insert("skybox.active".to_string(), String::new());
+
+        let document = SchematicDocumentAsset {
+            root: impeller2_wkt::Schematic {
+                skybox: Some(SkyboxConfig {
+                    name: "grand_canyon".to_string(),
+                }),
+                ..default()
+            },
+            windows: Vec::new(),
+        };
+
+        // A background (re)load must not resurrect the cleared skybox...
+        let mut app = skybox_message_test_app();
+        app.insert_resource(sticky_clear.clone());
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: None,
+            document: document.clone(),
+            explicit: false,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().resource::<SeenSkyboxMessages>().0.as_slice(),
+            [SetActiveSkybox::Clear]
+        ));
+
+        // ...but a user-initiated open re-applies the document's skybox.
+        let mut app = skybox_message_test_app();
+        app.insert_resource(sticky_clear);
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: None,
+            document,
+            explicit: true,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().resource::<SeenSkyboxMessages>().0.as_slice(),
+            [SetActiveSkybox::ByName(name)] if name == "grand_canyon"
+        ));
     }
 
     #[test]
@@ -473,18 +523,21 @@ mod tests {
             .extend(reader.read().map(|request| request.key.clone()));
     }
 
+    /// `(key, only_if_changed, explicit)` of each emitted active-open request.
     #[derive(Resource, Default)]
-    struct SeenActiveRequestFlags(Vec<(String, bool)>);
+    struct SeenActiveRequestFlags(Vec<(String, bool, bool)>);
 
     fn collect_active_request_flags(
         mut reader: MessageReader<OpenDocumentFromActiveRequest>,
         mut seen: ResMut<SeenActiveRequestFlags>,
     ) {
-        seen.0.extend(
-            reader
-                .read()
-                .map(|request| (request.key.clone(), request.only_if_changed)),
-        );
+        seen.0.extend(reader.read().map(|request| {
+            (
+                request.key.clone(),
+                request.only_if_changed,
+                request.explicit,
+            )
+        }));
     }
 
     #[test]
@@ -605,7 +658,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().resource::<SeenActiveRequestFlags>().0,
-            vec![("schematics/a.kdl".to_string(), false)],
+            vec![("schematics/a.kdl".to_string(), false, false)],
             "a key change must reload unconditionally"
         );
 
@@ -625,7 +678,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().resource::<SeenActiveRequestFlags>().0[1..],
-            [("schematics/a.kdl".to_string(), true)],
+            [("schematics/a.kdl".to_string(), true, false)],
             "a revision-only bump must request a content-gated refetch"
         );
         // The baseline is adopted at request time: if the fetch skips the
@@ -640,6 +693,47 @@ mod tests {
             app.world().resource::<SeenActiveRequestFlags>().0.len(),
             2,
             "the adopted baseline must not re-request the same fetch"
+        );
+    }
+
+    #[test]
+    fn pin_confirmed_open_is_marked_explicit() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequestFlags>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_request_flags,
+                )
+                    .chain(),
+            );
+
+        // "Open Schematic main" while main is already active: pin + reset
+        // last_synced (what `open_schematic_item` does), then the DB echoes.
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingActiveSchematic>();
+            pending.pin(
+                "schematics/main.kdl".to_string(),
+                Some("schematics/main.kdl".to_string()),
+            );
+        }
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/main.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequestFlags>().0,
+            vec![("schematics/main.kdl".to_string(), false, true)],
+            "a pin-confirmed load is a user-initiated (explicit) open"
         );
     }
 

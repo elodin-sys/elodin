@@ -1530,29 +1530,31 @@ fn clear_skybox() -> PaletteItem {
          mut schematic: ResMut<CurrentSchematic>,
          mut current_document: ResMut<CurrentDocument>,
          mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
-         mut last_synced_key: ResMut<LastSyncedActiveKey>,
-         mut last_content: ResMut<LastActiveSchematicContent>,
          mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
-         pending_active: Res<PendingActiveSchematic>,
-         config: Res<DbConfig>,
          tx: Res<PacketTx>| {
             if cache.active.is_none() && schematic.skybox.is_none() {
                 return PaletteEvent::Error("No skybox is active".into());
             }
             skyboxes.write(SetActiveSkybox::Clear);
-            let write_key = active_write_key(&pending_active, &last_synced_key, &config);
-            SkyboxDocumentSyncMut {
-                schematic: &mut schematic,
-                current_document: &mut current_document,
-                document_assets: &mut document_assets,
-                last_synced_key: &mut last_synced_key,
-                last_content: &mut last_content,
-                locally_pushed: &mut locally_pushed,
-                cache: &mut cache,
-                tx: &tx,
-                active_key: &write_key,
-            }
-            .sync_skybox_to_document_and_db(None);
+            // Live-view clear: update the in-memory document and
+            // `CurrentSchematic` (so a later "Save Schematic" persists the
+            // clear) and push `skybox.active=""` for followers — but do NOT
+            // rewrite the stored schematic. The saved bytes keep their skybox,
+            // so re-opening the schematic restores it.
+            crate::plugins::kdl_document::sync_document_skybox(
+                None,
+                &mut current_document,
+                &mut document_assets,
+                &mut schematic,
+            );
+            crate::skybox_generation::sync_cache_active_from_skybox(&mut cache, None);
+            crate::skybox_generation::push_skybox_db_sync(
+                &tx,
+                None,
+                None,
+                ACTIVE_SCHEMATIC_KEY,
+                &mut locally_pushed,
+            );
             PaletteEvent::Exit
         },
     )

@@ -16,6 +16,10 @@ pub struct OpenDocumentFromActiveRequest {
     /// the disruptive full reload when the schematic bytes are semantically
     /// unchanged (Bug 1/2). Explicit opens/key changes always reload.
     pub only_if_changed: bool,
+    /// The load was user-initiated ("Open Schematic…", "Save As…" repoint)
+    /// rather than a background sync; forwarded into [`DocumentLoaded`] so an
+    /// explicit open can re-apply the document's skybox over a sticky clear.
+    pub explicit: bool,
 }
 
 /// Asset key under the DB Asset Server that holds the editor's active schematic.

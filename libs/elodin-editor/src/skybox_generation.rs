@@ -222,7 +222,9 @@ pub(crate) fn on_document_loaded(
     // a reloaded asset that still carries a `skybox` node silently re-add it and
     // undo the clear for other clients / the render server. For an unset or named
     // skybox, the loaded schematic seeds/updates the DB metadata as before.
-    let clear_is_sticky = matches!(config.skybox_active_desired(), Some(None));
+    // A user-initiated open overrides the clear: the user asked for this
+    // schematic, skybox included, so its skybox becomes `skybox.active` again.
+    let clear_is_sticky = matches!(config.skybox_active_desired(), Some(None)) && !event.explicit;
     if !clear_is_sticky
         && should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active())
         && let Some(tx) = tx.as_ref()
@@ -454,6 +456,7 @@ mod tests {
                 },
                 windows: Vec::new(),
             },
+            explicit: false,
         });
         app.update();
 

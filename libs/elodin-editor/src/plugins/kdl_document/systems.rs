@@ -112,6 +112,8 @@ pub(super) fn handle_open_document_requests(
                 loaded.write(DocumentLoaded {
                     save_path: current_document.save_path.clone(),
                     document,
+                    // A file open (`--kdl`, path request) is always deliberate.
+                    explicit: true,
                 });
             }
             Err(error) => {
@@ -245,6 +247,7 @@ pub(super) fn handle_open_document_from_active_requests(
             loaded.write(DocumentLoaded {
                 save_path: current_document.save_path.clone(),
                 document,
+                explicit: request.explicit,
             });
         }
         // A parse failure is often transient: a multi-`PUT` DB-native save bumps
@@ -354,7 +357,9 @@ pub(super) fn activate_document_skybox(
 ) {
     // An explicit clear (`skybox.active=""` → `Some(None)`) is sticky: honor it
     // even if the loaded/reloaded KDL still carries a `skybox` node, so a stale
-    // asset can't resurrect a skybox the DB says was cleared.
+    // asset can't resurrect a skybox the DB says was cleared. A user-initiated
+    // open is the exception: the user asked for this schematic, skybox
+    // included, so the document wins over the earlier clear.
     let clear_is_sticky = config
         .as_deref()
         .is_some_and(|config| matches!(config.skybox_active_desired(), Some(None)));
@@ -365,7 +370,7 @@ pub(super) fn activate_document_skybox(
             .root
             .skybox
             .as_ref()
-            .filter(|_| !clear_is_sticky);
+            .filter(|_| !clear_is_sticky || event.explicit);
         activate_skybox_config(skybox, &mut skyboxes, &mut cache);
     }
 
@@ -429,6 +434,7 @@ mod tests {
             key: key.to_string(),
             save_path: None,
             only_if_changed: false,
+            explicit: false,
         }
     }
 

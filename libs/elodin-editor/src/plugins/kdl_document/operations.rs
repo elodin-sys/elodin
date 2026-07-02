@@ -480,10 +480,14 @@ pub fn sync_document_from_config(
     // another stored schematic with byte-identical KDL still switches the active
     // key, and the editor must follow it.
     if let Some(active_key) = config.schematic_active() {
+        // A confirmed pin means this load fulfils a user-initiated repoint
+        // ("Open Schematic…"/"Save As…"), not a background sync.
+        let mut explicit = false;
         if let Some(pending) = pending_active.target.clone() {
             if pending == active_key {
                 // Our repoint landed: clear the pin and load the confirmed key.
                 pending_active.clear();
+                explicit = true;
             } else if pending_active.superseding.as_deref() == Some(active_key) {
                 // Still the stale pointer we're superseding; keep waiting for the
                 // DB to echo our requested key.
@@ -554,6 +558,7 @@ pub fn sync_document_from_config(
             key: active_key.to_string(),
             save_path: Some(save_path_for_active_key(active_key)),
             only_if_changed,
+            explicit,
         });
         return;
     }
