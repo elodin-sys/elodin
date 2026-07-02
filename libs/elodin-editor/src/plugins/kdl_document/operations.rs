@@ -215,6 +215,20 @@ pub(crate) struct DbSavePlan {
     local_assets: Vec<(String, String)>,
 }
 
+/// DB asset key a window sub-schematic is stored under. A bare file name (the
+/// generated `<stem>.kdl` of a freshly created window) is keyed under
+/// `schematics/`; a name that already carries a directory is a preserved stored
+/// key (ingest keeps window files at their original keys, e.g.
+/// `windows/detail.kdl`) and is used verbatim, so the uploaded bytes always
+/// land exactly where the rewritten reference points.
+fn window_schematic_key(file_name: &str) -> String {
+    if file_name.contains('/') {
+        file_name.to_string()
+    } else {
+        format!("schematics/{file_name}")
+    }
+}
+
 /// Rewrites a schematic's local mesh, icon and window references to `db:` keys,
 /// recording mesh/icon uploads in `local_assets` and the file names of any
 /// referenced window sub-schematics in `referenced_windows`. Shared by the root
@@ -230,11 +244,11 @@ fn rewrite_schematic_for_db(
         if !impeller2_kdl::is_local_asset_path(path) {
             return None;
         }
-        // A detached-window sub-schematic: store it under `schematics/<file>`
-        // and reference it there. Its rewritten bytes are uploaded separately.
+        // A detached-window sub-schematic: store it under its window key and
+        // reference it there. Its rewritten bytes are uploaded separately.
         if window_kdl.contains_key(path) {
             referenced_windows.push(path.to_string());
-            return Some(format!("db:schematics/{path}"));
+            return Some(format!("db:{}", window_schematic_key(path)));
         }
         // A local mesh/icon: key by its component path and upload its bytes from
         // disk at PUT time.
@@ -276,13 +290,13 @@ pub(crate) fn plan_db_save(
     // Rewrite each referenced window the same way and upload the rewritten KDL,
     // so meshes/icons referenced only inside a window are also `db:`-keyed and
     // queued for upload. Windows may reference further windows, so follow them
-    // transitively, keying each by `schematics/<file>` and uploading once.
+    // transitively, keying each by its window key and uploading once.
     let mut uploaded = HashSet::new();
     let mut next = 0;
     while next < referenced_windows.len() {
         let file_name = referenced_windows[next].clone();
         next += 1;
-        let key = format!("schematics/{file_name}");
+        let key = window_schematic_key(&file_name);
         if !uploaded.insert(key.clone()) {
             continue;
         }
@@ -634,6 +648,53 @@ mod db_save_tests {
         assert!(
             window_upload.contains("db:models/window_only.glb"),
             "{window_upload}"
+        );
+    }
+
+    #[test]
+    fn plan_db_save_preserves_directory_qualified_window_keys() {
+        // A window loaded from an ingest-keyed asset (`db:windows/detail.kdl`)
+        // keeps its stored key: uploaded bytes and the rewritten reference must
+        // both target `windows/detail.kdl`, not a re-keyed `schematics/…` copy.
+        let root = Schematic {
+            elems: vec![SchematicElem::Window(WindowSchematic {
+                title: Some("detail".into()),
+                path: Some("windows/detail.kdl".into()),
+                screen: None,
+                screen_rect: None,
+            })],
+            ..Default::default()
+        };
+        let windows = vec![WindowDocumentSave {
+            window_id: WindowId(3),
+            file_name: "windows/detail.kdl".into(),
+            kdl: "viewport {\n}\n".into(),
+        }];
+
+        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY);
+
+        let keys: Vec<&str> = plan
+            .schematic_uploads
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect();
+        assert_eq!(keys, vec!["windows/detail.kdl", ACTIVE_SCHEMATIC_KEY]);
+
+        let active = String::from_utf8(plan.schematic_uploads.last().unwrap().1.clone()).unwrap();
+        assert!(active.contains("db:windows/detail.kdl"), "{active}");
+        assert!(!active.contains("db:schematics/windows"), "{active}");
+    }
+
+    #[test]
+    fn window_schematic_key_prefixes_only_bare_names() {
+        assert_eq!(window_schematic_key("detail.kdl"), "schematics/detail.kdl");
+        assert_eq!(
+            window_schematic_key("windows/detail.kdl"),
+            "windows/detail.kdl"
+        );
+        assert_eq!(
+            window_schematic_key("schematics/detail.kdl"),
+            "schematics/detail.kdl"
         );
     }
 
