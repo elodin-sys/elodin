@@ -1029,11 +1029,17 @@ pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
         PRESETS_LABEL,
-        |_: In<String>, config: Res<DbConfig>| {
-            let default_name = config
-                .schematic_active()
-                .and_then(schematic_name_from_key)
-                .unwrap_or_default();
+        |_: In<String>,
+         config: Res<DbConfig>,
+         pending_active: Res<PendingActiveSchematic>,
+         last_synced: Res<LastSyncedActiveKey>| {
+            // Resolve the name like skybox edits do: an in-flight repoint pin or
+            // the last synced key wins over a stale `DbConfig` echo, so a Save
+            // right after "Open Schematic…"/"Save As…" pre-fills the schematic
+            // the user is actually on.
+            let default_name =
+                schematic_name_from_key(&active_write_key(&pending_active, &last_synced, &config))
+                    .unwrap_or_default();
             PalettePage::new(vec![save_schematic_name_prompt()])
                 .label("Save Schematic")
                 .prompt("Enter a schematic name...")
@@ -1276,7 +1282,9 @@ pub fn clear_schematic() -> PaletteItem {
         |_: In<String>,
          mut params: LoadSchematicParams,
          mut skyboxes: MessageWriter<SetActiveSkybox>,
-         mut skybox_cache: ResMut<SkyboxCache>| {
+         mut skybox_cache: ResMut<SkyboxCache>,
+         mut skybox_mirror: ResMut<crate::skybox_db_assets::DbSkyboxAssetMirror>,
+         config: Res<DbConfig>| {
             params.current_document.clear();
             params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
             // `load_schematic` despawns every schematic entity and zeroes
@@ -1288,6 +1296,10 @@ pub fn clear_schematic() -> PaletteItem {
             // re-applies the stored skybox on reload.
             skyboxes.write(SetActiveSkybox::Clear);
             skybox_cache.active = None;
+            // The DB's `skybox.active` still names the cleared skybox; tell the
+            // mirror this drift is intentional so it doesn't re-assert it one
+            // frame later and undo the clear.
+            skybox_mirror.note_local_clear(config.skybox_active().map(str::to_string));
             PaletteEvent::Exit
         },
     )
