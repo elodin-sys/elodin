@@ -155,6 +155,22 @@ pub fn prime_schematic_assets(
     // `set_active_schematic` points `schematic.active` at it. Failures are
     // logged, not fatal: a missing schematic asset must not abort the sim.
     let Some(content) = world.metadata.schematic.as_deref() else {
+        // No in-memory schematic: if ingest just seeded the conventional
+        // `schematics/main.kdl` and no pointer is set yet, point at it —
+        // matching the CLI fallback in `elodin-db run` — so connected editors
+        // still auto-load a schematic over HTTP.
+        if !db.with_state(|s| s.db_config.schematic_active().is_some()) {
+            match db.set_active_schematic(ACTIVE_SCHEMATIC_KEY) {
+                Ok(()) => tracing::info!(
+                    key = ACTIVE_SCHEMATIC_KEY,
+                    "set active schematic from ingested assets"
+                ),
+                Err(err) => tracing::debug!(
+                    ?err,
+                    "no ingested {ACTIVE_SCHEMATIC_KEY} to set active; skipping"
+                ),
+            }
+        }
         return Ok(());
     };
     // Store the schematic as the active asset and point at it (RFD #724): the
@@ -262,219 +278,6 @@ pub fn init_db(
 /// (or an ancestor) rather than only `$ELODIN_ASSETS` / cwd.
 fn resolve_source_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
     elodin_db::assets::resolve_assets_root(entry)
-}
-
-#[cfg(test)]
-mod asset_tests {
-    use super::*;
-    use std::sync::Mutex;
-    use tempfile::tempdir;
-
-    /// Serializes tests that mutate `ELODIN_ASSETS*` env vars (process-global).
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let previous = std::env::var_os(key);
-            // SAFETY: env mutations are serialized by `ENV_LOCK` and restored on drop.
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, previous }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            // SAFETY: env mutations are serialized by `ENV_LOCK` and restored on drop.
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            // SAFETY: restoring the previous value is scoped to this test's `_guard`.
-            unsafe {
-                match self.previous.take() {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn prime_stores_active_schematic_and_sets_pointer() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = tempdir().unwrap();
-        let assets = dir.path().join("assets");
-        std::fs::create_dir_all(assets.join("meshes")).unwrap();
-        std::fs::write(assets.join("meshes/rocket.glb"), b"glb-bytes").unwrap();
-
-        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let mut world = World::default();
-        world.metadata.schematic = Some(
-            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
-        );
-
-        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
-        prime_schematic_assets(&db, &world, None).unwrap();
-
-        // The whole source tree is copied into the DB once.
-        let stored = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
-            b"glb-bytes".to_vec()
-        );
-        assert!(elodin_db::assets::assets_ingested(&db.path));
-
-        // The DB stores the active schematic with its path rewritten to db: and
-        // points schematic.active at it. The producer never touches
-        // world.metadata.schematic.
-        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
-        assert!(
-            active_kdl.contains("path=\"db:meshes/rocket.glb\""),
-            "expected db: path in stored schematic, got:\n{active_kdl}"
-        );
-        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
-        assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
-
-        // The active schematic is read back from its asset file (single source).
-        assert_eq!(
-            db.read_active_schematic().as_deref(),
-            Some(active_kdl.as_str())
-        );
-    }
-
-    #[test]
-    fn prime_ingest_is_copy_once() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = tempdir().unwrap();
-        let assets = dir.path().join("assets");
-        std::fs::create_dir_all(&assets).unwrap();
-        std::fs::write(assets.join("rocket.glb"), b"v1").unwrap();
-
-        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let world = World::default();
-
-        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
-        prime_schematic_assets(&db, &world, None).unwrap();
-
-        // A source change after ingest must not leak into the frozen DB record.
-        std::fs::write(assets.join("rocket.glb"), b"v2").unwrap();
-        prime_schematic_assets(&db, &world, None).unwrap();
-
-        let stored = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(stored.join("rocket.glb")).unwrap(),
-            b"v1".to_vec()
-        );
-    }
-
-    #[test]
-    fn prime_preserves_edited_active_schematic_on_reopen() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = tempdir().unwrap();
-        // No source tree: isolate the active-schematic path from tree ingest.
-        let _no_assets =
-            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
-
-        let db_path = dir.path().join("db");
-        let db = elodin_db::DB::create(db_path.clone()).unwrap();
-        let mut world = World::default();
-        world.metadata.schematic = Some("viewport {\n}\n".to_string());
-
-        // First run seeds the active schematic from in-memory metadata.
-        prime_schematic_assets(&db, &world, None).unwrap();
-        let stored = elodin_db::assets_http::assets_dir(&db.path);
-        let seeded = std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
-
-        // The editor writes new active-schematic bytes into the DB. Capture the
-        // stored form (store_asset re-serializes KDL) to compare against later.
-        db.store_asset(ACTIVE_SCHEMATIC_KEY, b"graph {\n}\n")
-            .unwrap();
-        let edited = std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
-        assert_ne!(edited, seeded, "editor edit should differ from the seed");
-
-        // Re-running the sim (in-memory metadata still the old schematic) against
-        // the existing DB must NOT clobber the editor's bytes — copy-once, like
-        // the asset tree. Simulate a `DB::open` reopen so the flow matches
-        // `Server::from_listener`.
-        let reopened = elodin_db::DB::open(db_path).unwrap();
-        prime_schematic_assets(&reopened, &world, None).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap(),
-            edited,
-            "editor-written active schematic must survive a sim re-run"
-        );
-        // The pointer still targets the (preserved) active schematic.
-        let active =
-            reopened.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
-        assert_eq!(active.as_deref(), Some(ACTIVE_SCHEMATIC_KEY));
-    }
-
-    #[test]
-    fn prime_keeps_active_local_when_asset_absent() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = tempdir().unwrap();
-        // No source assets resolved, so nothing is ingested into the DB.
-        let _no_assets =
-            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
-
-        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let mut world = World::default();
-        world.metadata.schematic = Some(
-            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
-        );
-
-        prime_schematic_assets(&db, &world, None).unwrap();
-
-        // The glb never reached the DB, so store_asset must NOT rewrite the path
-        // to db: (which would make the editor chase a 404). The active pointer is
-        // still set so the editor can load the (local-path) schematic.
-        let stored = elodin_db::assets_http::assets_dir(&db.path);
-        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
-        assert!(active_kdl.contains("path=\"meshes/rocket.glb\""));
-        assert!(!active_kdl.contains("db:meshes/rocket.glb"));
-        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
-        assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
-    }
-
-    #[test]
-    fn prime_resolves_assets_relative_to_sim_entry() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // With `ELODIN_ASSETS` unset, ingest must find `assets/` next to the sim
-        // entry even when the process cwd is elsewhere (Bugbot: the entry was
-        // ignored, so a run outside the sim folder ingested the wrong tree/none).
-        let _no_env = EnvVarGuard::unset("ELODIN_ASSETS");
-
-        let dir = tempdir().unwrap();
-        let sim = dir.path().join("sim");
-        std::fs::create_dir_all(sim.join("assets/meshes")).unwrap();
-        std::fs::write(sim.join("assets/meshes/rocket.glb"), b"glb-bytes").unwrap();
-        let entry = sim.join("main.py");
-        std::fs::write(&entry, b"# sim").unwrap();
-
-        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let world = World::default();
-        prime_schematic_assets(&db, &world, Some(&entry)).unwrap();
-
-        let stored = elodin_db::assets_http::assets_dir(&db.path);
-        assert_eq!(
-            std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
-            b"glb-bytes".to_vec(),
-            "ingest should copy assets found next to the sim entry"
-        );
-        assert!(elodin_db::assets::assets_ingested(&db.path));
-    }
 }
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
@@ -1031,4 +834,256 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
         }
         changed
     })
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    /// Serializes tests that mutate `ELODIN_ASSETS*` env vars (process-global).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: env mutations are serialized by `ENV_LOCK` and restored on drop.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: env mutations are serialized by `ENV_LOCK` and restored on drop.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: restoring the previous value is scoped to this test's `_guard`.
+            unsafe {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prime_stores_active_schematic_and_sets_pointer() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(assets.join("meshes")).unwrap();
+        std::fs::write(assets.join("meshes/rocket.glb"), b"glb-bytes").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
+        );
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // The whole source tree is copied into the DB once.
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
+            b"glb-bytes".to_vec()
+        );
+        assert!(elodin_db::assets::assets_ingested(&db.path));
+
+        // The DB stores the active schematic with its path rewritten to db: and
+        // points schematic.active at it. The producer never touches
+        // world.metadata.schematic.
+        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
+        assert!(
+            active_kdl.contains("path=\"db:meshes/rocket.glb\""),
+            "expected db: path in stored schematic, got:\n{active_kdl}"
+        );
+        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
+
+        // The active schematic is read back from its asset file (single source).
+        assert_eq!(
+            db.read_active_schematic().as_deref(),
+            Some(active_kdl.as_str())
+        );
+    }
+
+    #[test]
+    fn prime_ingest_is_copy_once() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("rocket.glb"), b"v1").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let world = World::default();
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // A source change after ingest must not leak into the frozen DB record.
+        std::fs::write(assets.join("rocket.glb"), b"v2").unwrap();
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored.join("rocket.glb")).unwrap(),
+            b"v1".to_vec()
+        );
+    }
+
+    #[test]
+    fn prime_preserves_edited_active_schematic_on_reopen() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        // No source tree: isolate the active-schematic path from tree ingest.
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db_path = dir.path().join("db");
+        let db = elodin_db::DB::create(db_path.clone()).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some("viewport {\n}\n".to_string());
+
+        // First run seeds the active schematic from in-memory metadata.
+        prime_schematic_assets(&db, &world, None).unwrap();
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        let seeded = std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
+
+        // The editor writes new active-schematic bytes into the DB. Capture the
+        // stored form (store_asset re-serializes KDL) to compare against later.
+        db.store_asset(ACTIVE_SCHEMATIC_KEY, b"graph {\n}\n")
+            .unwrap();
+        let edited = std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
+        assert_ne!(edited, seeded, "editor edit should differ from the seed");
+
+        // Re-running the sim (in-memory metadata still the old schematic) against
+        // the existing DB must NOT clobber the editor's bytes — copy-once, like
+        // the asset tree. Simulate a `DB::open` reopen so the flow matches
+        // `Server::from_listener`.
+        let reopened = elodin_db::DB::open(db_path).unwrap();
+        prime_schematic_assets(&reopened, &world, None).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap(),
+            edited,
+            "editor-written active schematic must survive a sim re-run"
+        );
+        // The pointer still targets the (preserved) active schematic.
+        let active =
+            reopened.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some(ACTIVE_SCHEMATIC_KEY));
+    }
+
+    #[test]
+    fn prime_keeps_active_local_when_asset_absent() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        // No source assets resolved, so nothing is ingested into the DB.
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
+        );
+
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // The glb never reached the DB, so store_asset must NOT rewrite the path
+        // to db: (which would make the editor chase a 404). The active pointer is
+        // still set so the editor can load the (local-path) schematic.
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
+        assert!(active_kdl.contains("path=\"meshes/rocket.glb\""));
+        assert!(!active_kdl.contains("db:meshes/rocket.glb"));
+        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some("schematics/main.kdl"));
+    }
+
+    #[test]
+    fn prime_falls_back_to_ingested_main_kdl_without_sim_schematic() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        // The source tree ships the conventional active schematic, but the sim
+        // itself carries no in-memory schematic metadata.
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(assets.join("schematics")).unwrap();
+        std::fs::write(assets.join("schematics/main.kdl"), b"viewport {\n}\n").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let world = World::default();
+        assert!(world.metadata.schematic.is_none());
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // The ingested schematics/main.kdl becomes the active schematic, same
+        // as the CLI fallback in `elodin-db run`, so editors auto-load it.
+        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some(ACTIVE_SCHEMATIC_KEY));
+    }
+
+    #[test]
+    fn prime_leaves_pointer_unset_without_schematic_or_ingest() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let world = World::default();
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // Nothing to point at: the fallback must not set a dangling pointer.
+        let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active, None);
+    }
+
+    #[test]
+    fn prime_resolves_assets_relative_to_sim_entry() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // With `ELODIN_ASSETS` unset, ingest must find `assets/` next to the sim
+        // entry even when the process cwd is elsewhere (Bugbot: the entry was
+        // ignored, so a run outside the sim folder ingested the wrong tree/none).
+        let _no_env = EnvVarGuard::unset("ELODIN_ASSETS");
+
+        let dir = tempdir().unwrap();
+        let sim = dir.path().join("sim");
+        std::fs::create_dir_all(sim.join("assets/meshes")).unwrap();
+        std::fs::write(sim.join("assets/meshes/rocket.glb"), b"glb-bytes").unwrap();
+        let entry = sim.join("main.py");
+        std::fs::write(&entry, b"# sim").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let world = World::default();
+        prime_schematic_assets(&db, &world, Some(&entry)).unwrap();
+
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
+            b"glb-bytes".to_vec(),
+            "ingest should copy assets found next to the sim entry"
+        );
+        assert!(elodin_db::assets::assets_ingested(&db.path));
+    }
 }
