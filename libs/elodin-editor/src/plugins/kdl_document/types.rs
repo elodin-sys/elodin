@@ -55,7 +55,7 @@ impl LastActiveSchematicContent {
     }
 
     /// Whether `content` matches the last known stored bytes for `key`.
-    /// Unparseable or unknown content never matches, so the caller falls back
+    /// Unparsable or unknown content never matches, so the caller falls back
     /// to a full reload.
     pub fn matches(&self, key: &str, content: &str) -> bool {
         self.key.as_deref() == Some(key)

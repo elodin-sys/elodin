@@ -664,7 +664,7 @@ mod tests {
             "viewport {\n}\nskybox name=\"desert_night\"\n"
         ));
 
-        // Unparseable content never matches, so the caller falls back to a
+        // Unparsable content never matches, so the caller falls back to a
         // full reload (which surfaces the parse error through its own path).
         content.record("schematics/main.kdl", "not-a-schematic {{{");
         assert!(!content.matches("schematics/main.kdl", "not-a-schematic {{{"));
