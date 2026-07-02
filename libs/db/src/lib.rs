@@ -59,6 +59,8 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 pub mod append_log;
 mod arrow;
 #[cfg(feature = "axum")]
+pub mod assets;
+#[cfg(feature = "axum")]
 pub mod assets_http;
 #[cfg(feature = "axum")]
 pub mod axum;
@@ -241,6 +243,9 @@ pub struct DB {
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: AtomicCell<Timestamp>,
+    /// Bumped whenever `db_config` changes (metadata patch or asset write), so
+    /// subscribers can be woken to re-read the config without polling (RFD #724).
+    pub db_config_gen: AtomicCell<u64>,
     // Wall-clock timestamp at the moment the DB start anchor was set.
     db_start_wall_clock: AtomicCell<Timestamp>,
     /// When true, last_updated advances with playback position instead of
@@ -252,6 +257,12 @@ pub struct DB {
     /// Fast-path flag: true when `followed_components` is non-empty.
     /// Avoids acquiring the read lock on every `apply_value` call.
     has_followed_components: std::sync::atomic::AtomicBool,
+    /// Serializes follower full-tree asset mirrors so overlapping
+    /// `SetDbConfig`-driven syncs can't prune/download against each other
+    /// (RFD #724, Bug 1). Idle on a non-follower DB. Only present with the asset
+    /// server (`axum`), which is the sole producer of mirror requests.
+    #[cfg(feature = "axum")]
+    pub asset_mirror: crate::assets_http::AssetMirrorCoordinator,
 }
 
 #[derive(Default)]
@@ -317,9 +328,12 @@ impl DB {
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
+            db_config_gen: AtomicCell::new(0),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "axum")]
+            asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
         db.save_db_state()?;
         Ok(db)
@@ -357,18 +371,28 @@ impl DB {
 
     /// Apply a `SetDbConfig` patch and persist.
     ///
-    /// Returns whether schematic assets should be re-synced (`schematic.content` or
-    /// `skybox.active` in the patch).
+    /// Returns whether schematic assets should be re-synced (`schematic.active`
+    /// or `skybox.active` in the patch). The schematic bytes themselves travel
+    /// as an asset via [`store_asset`](Self::store_asset) (RFD #724), so a patch
+    /// only repoints `schematic.active`; this never carries inline content.
     pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
-        let needs_asset_sync = update.metadata.contains_key("schematic.content")
-            || update.metadata.contains_key("skybox.active");
+        // A follower must re-mirror when the pointer moves (`schematic.active`,
+        // `skybox.active`) *or* when asset bytes change under an unchanged
+        // pointer — the latter arrives as an `assets.revision` bump (RFD #724).
+        let needs_asset_sync = update.metadata.contains_key("schematic.active")
+            || update.metadata.contains_key("skybox.active")
+            || update.metadata.contains_key(DbConfig::ASSETS_REVISION_KEY);
         if let Some(recording) = update.recording {
             self.with_state_mut(|s| s.db_config.recording = recording);
             self.recording_cell.set_playing(recording);
         }
         self.with_state_mut(|s| {
             for (key, value) in update.metadata {
-                if value.is_empty() {
+                // `skybox.active` uses empty-string as an explicit "cleared"
+                // signal (distinct from an absent key); keep it so consumers can
+                // tell a user clear apart from "never set". Other keys drop on
+                // empty as a delete.
+                if value.is_empty() && key != "skybox.active" {
                     s.db_config.metadata.remove(&key);
                 } else {
                     s.db_config.metadata.insert(key, value);
@@ -376,7 +400,71 @@ impl DB {
             }
         });
         self.save_db_state()?;
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
         Ok(needs_asset_sync)
+    }
+
+    /// Bump `assets.revision` and persist, waking config subscribers. Called on
+    /// every asset write (HTTP `PUT`, `StoreAsset`) so consumers reload/re-mirror
+    /// when bytes change without the `schematic.active` pointer moving.
+    pub fn bump_assets_revision(&self) -> Result<(), Error> {
+        self.with_state_mut(|s| s.db_config.bump_assets_revision());
+        self.save_db_state()?;
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Migrate a legacy inline schematic mirror (pre-RFD #724
+    /// `schematic.content` metadata) to the stored-asset model, so databases
+    /// recorded before the migration still open with their schematic intact.
+    ///
+    /// When no `schematic.active` pointer exists yet, the inline KDL seeds
+    /// `schematics/main.kdl` — unless that asset already exists on disk, in
+    /// which case the on-disk bytes are authoritative (copy-once, matching the
+    /// rest of the asset pipeline) and only the pointer is set. The legacy key
+    /// is dropped once the pointer is in place; on failure it is kept so a
+    /// later open can retry.
+    fn migrate_legacy_schematic_content(&self) {
+        const LEGACY_KEY: &str = "schematic.content";
+        const ACTIVE_KEY: &str = "schematics/main.kdl";
+
+        let content = self.with_state(|s| s.db_config.metadata.get(LEGACY_KEY).cloned());
+        let Some(content) = content else { return };
+
+        if self.with_state(|s| s.db_config.schematic_active().is_none()) {
+            let assets_dir = crate::assets_http::assets_dir(&self.path);
+            if !assets_dir.join(ACTIVE_KEY).is_file()
+                && let Err(err) = self.store_asset(ACTIVE_KEY, content.as_bytes())
+            {
+                warn!(
+                    ?err,
+                    "failed to migrate legacy schematic.content to an asset"
+                );
+                return;
+            }
+            if let Err(err) = self.set_active_schematic(ACTIVE_KEY) {
+                warn!(
+                    ?err,
+                    "failed to point schematic.active at migrated schematic"
+                );
+                return;
+            }
+        }
+        // The pointer (pre-existing or just set) is authoritative; drop the
+        // inline mirror. Persisted by the caller's `save_db_state`.
+        self.with_state_mut(|s| {
+            s.db_config.metadata.remove(LEGACY_KEY);
+        });
+    }
+
+    /// Read the active schematic's KDL from its asset file under `{db}/assets/`,
+    /// if `schematic.active` is set and the file is valid UTF-8. This is the
+    /// single source consumers use instead of any inline mirror (RFD #724).
+    pub fn read_active_schematic(&self) -> Option<String> {
+        let key = self.with_state(|s| s.db_config.schematic_active().map(str::to_owned))?;
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        let bytes = crate::assets_http::read_asset_file(&assets_dir, &key).ok()?;
+        String::from_utf8(bytes).ok()
     }
 
     /// Store an uploaded asset at `{db}/assets/<key>`.
@@ -384,9 +472,46 @@ impl DB {
     /// `key` is sanitized (rejects `..` and absolute paths) by
     /// `assets_http::write_asset_file`, so an out-of-tree key is refused rather
     /// than escaping the assets directory.
+    ///
+    /// A stored `.kdl` schematic has its local asset paths rewritten to `db:`
+    /// (same path as tree ingest), so uploads route their assets through the
+    /// Asset Server too. Unparsable or non-schematic `.kdl` is stored verbatim.
     pub fn store_asset(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
         let assets_dir = crate::assets_http::assets_dir(&self.path);
-        crate::assets_http::write_asset_file(&assets_dir, key, bytes)
+        if key.ends_with(".kdl")
+            && let Ok(content) = std::str::from_utf8(bytes)
+            && let Some(rewritten) =
+                crate::assets::rewrite_schematic_kdl_to_db(&assets_dir, content)
+        {
+            crate::assets_http::write_asset_file(&assets_dir, key, rewritten.as_bytes())?;
+        } else {
+            crate::assets_http::write_asset_file(&assets_dir, key, bytes)?;
+        }
+        // Bytes changed: bump the revision so followers re-mirror and editors
+        // reload even if `schematic.active` is unchanged. A persistence hiccup
+        // must not fail the (already written) asset, so log rather than error.
+        if let Err(err) = self.bump_assets_revision() {
+            tracing::warn!(asset = %key, ?err, "failed to bump asset revision after store");
+        }
+        Ok(())
+    }
+
+    /// Point `schematic.active` at a stored schematic asset and persist.
+    ///
+    /// `key` must already be stored via [`store_asset`](Self::store_asset); it is
+    /// validated as a readable in-tree asset so the pointer never dangles.
+    /// Consumers fetch the bytes over the Asset Server HTTP (RFD #724).
+    pub fn set_active_schematic(&self, key: &str) -> Result<(), Error> {
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        // Validate the asset exists and is readable before repointing.
+        crate::assets_http::read_asset_file(&assets_dir, key)?;
+        self.with_state_mut(|s| s.db_config.set_schematic_active(key));
+        self.save_db_state()?;
+        // Wake the subscribe loop's config push so clients observe the new
+        // `schematic.active` promptly, matching `apply_set_db_config` and
+        // `bump_assets_revision` (RFD #724).
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn flush_all(&self) -> Result<(), Error> {
@@ -656,10 +781,16 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
+            db_config_gen: AtomicCell::new(0),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "axum")]
+            asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
+        // Promote a legacy inline `schematic.content` mirror to a stored asset
+        // + `schematic.active` pointer so pre-RFD #724 recordings still load.
+        db.migrate_legacy_schematic_content();
         // Save updated version info
         db.save_db_state()?;
         Ok(db)
@@ -1995,8 +2126,25 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let mut tx = tx.clone();
             let db = db.clone();
             stellarator::spawn(async move {
+                let mut last_config_gen = db.db_config_gen.latest();
                 loop {
                     let last_updated = db.last_updated.latest();
+                    // Push a fresh DbConfig whenever it changed (metadata patch
+                    // or asset write) so passive clients reload/re-mirror without
+                    // polling — asset bytes can change under an unchanged
+                    // `schematic.active` (RFD #724).
+                    let config_gen = db.db_config_gen.latest();
+                    if config_gen != last_config_gen {
+                        last_config_gen = config_gen;
+                        match tx.send_msg(&db.db_config()).await {
+                            Err(err) if err.is_stream_closed() => return,
+                            Err(err) => {
+                                warn!(?err, "failed to send db config");
+                                return;
+                            }
+                            _ => (),
+                        }
+                    }
                     {
                         match tx.send_msg(&LastUpdated(last_updated)).await {
                             Err(err) if err.is_stream_closed() => return,
@@ -2008,8 +2156,14 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         }
                     }
                     // Wake on any change (not only increase) so rolling windows
-                    // track correctly.
-                    db.last_updated.wait_for(|time| time != last_updated).await;
+                    // track correctly, or on a config change so the push above
+                    // fires without waiting for the next data tick.
+                    let last_seen_gen = last_config_gen;
+                    futures_lite::future::race(
+                        db.last_updated.wait_for(|time| time != last_updated),
+                        db.db_config_gen.wait_for(move |cur| cur != last_seen_gen),
+                    )
+                    .await;
                 }
             });
         }
@@ -3318,25 +3472,45 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = DB::create(dir.path().join("db")).unwrap();
         db.apply_set_db_config(SetDbConfig {
-            metadata: HashMap::from([("schematic.content".to_string(), "graph {}".to_string())]),
+            metadata: HashMap::from([("ui.theme".to_string(), "dark".to_string())]),
             ..Default::default()
         })
         .unwrap();
         assert_eq!(
-            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
-            Some("graph {}".to_string())
+            db.with_state(|s| s.db_config.metadata.get("ui.theme").cloned()),
+            Some("dark".to_string())
         );
 
         db.apply_set_db_config(SetDbConfig {
-            metadata: HashMap::from([("schematic.content".to_string(), String::new())]),
+            metadata: HashMap::from([("ui.theme".to_string(), String::new())]),
             ..Default::default()
         })
         .unwrap();
 
         assert_eq!(
-            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            db.with_state(|s| s.db_config.metadata.get("ui.theme").cloned()),
             None
         );
+    }
+
+    #[test]
+    fn apply_set_db_config_keeps_empty_skybox_active_as_clear_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // An explicit clear pushes `skybox.active=""`; it must survive so
+        // `skybox_active_desired()` reports `Some(None)` (cleared) rather than
+        // `None` (never set).
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("skybox.active".to_string(), String::new())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        db.with_state(|s| {
+            assert_eq!(s.db_config.skybox_active(), None);
+            assert_eq!(s.db_config.skybox_active_desired(), Some(None));
+        });
     }
 
     #[test]
@@ -3362,5 +3536,268 @@ mod tests {
         let err = db.store_asset("../escape.bin", b"x").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
         assert!(!dir.path().join("escape.bin").exists());
+    }
+
+    #[test]
+    fn store_asset_rewrites_kdl_to_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // The referenced asset must be present for the path to be rewritten.
+        db.store_asset("meshes/rocket.glb", b"glb").unwrap();
+        db.store_asset(
+            "schematics/main.kdl",
+            b"object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n",
+        )
+        .unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(
+            stored.contains("path=\"db:meshes/rocket.glb\""),
+            "expected db: rewrite, got:\n{stored}"
+        );
+    }
+
+    #[test]
+    fn store_asset_keeps_kdl_local_when_asset_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // No glb stored, so the path must NOT be rewritten (would 404).
+        db.store_asset(
+            "schematics/main.kdl",
+            b"object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n",
+        )
+        .unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(stored.contains("path=\"meshes/rocket.glb\""));
+        assert!(!stored.contains("db:meshes/rocket.glb"));
+    }
+
+    #[test]
+    fn store_asset_stores_unparsable_kdl_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        db.store_asset("schematics/broken.kdl", b"object_3d {\n")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir.join("schematics/broken.kdl")).unwrap(),
+            b"object_3d {\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn apply_set_db_config_repoints_active_and_requests_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // The schematic bytes travel as an asset; the patch only repoints.
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+        let needs_sync = db
+            .apply_set_db_config(SetDbConfig {
+                metadata: [(
+                    "schematic.active".to_string(),
+                    "schematics/main.kdl".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(needs_sync);
+        db.with_state(|s| assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl")));
+    }
+
+    #[test]
+    fn store_asset_bumps_revision_and_config_gen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        let gen0 = db.db_config_gen.latest();
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 0);
+
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+
+        // A byte write bumps the revision and wakes config subscribers so
+        // followers re-mirror / editors reload without a pointer move (Bug 1/2).
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 1);
+        assert!(db.db_config_gen.latest() > gen0);
+    }
+
+    #[test]
+    fn apply_set_db_config_requests_sync_on_revision_bump_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // A follower receives a bare `assets.revision` bump (a source PUT with no
+        // pointer move) and must still re-mirror its asset tree (Bug 2).
+        let needs_sync = db
+            .apply_set_db_config(SetDbConfig {
+                metadata: [(DbConfig::ASSETS_REVISION_KEY.to_string(), "7".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(needs_sync);
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 7);
+    }
+
+    #[test]
+    fn read_active_schematic_returns_stored_asset_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        assert_eq!(db.read_active_schematic(), None);
+
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+        db.set_active_schematic("schematics/main.kdl").unwrap();
+
+        // `read_active_schematic` returns the full stored asset bytes as UTF-8,
+        // not a parsed token. `store_asset` may re-serialize a `.kdl` (path
+        // rewrite / normalization), so compare against what actually landed on
+        // disk rather than the raw input bytes.
+        let stored = String::from_utf8(
+            crate::assets_http::read_asset_file(
+                &crate::assets_http::assets_dir(&db.path),
+                "schematics/main.kdl",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            stored.contains("viewport"),
+            "stored active schematic should carry the full KDL body, got {stored:?}"
+        );
+        assert_eq!(db.read_active_schematic(), Some(stored));
+    }
+
+    #[test]
+    fn set_active_schematic_bumps_config_gen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+
+        let gen0 = db.db_config_gen.latest();
+        db.set_active_schematic("schematics/main.kdl").unwrap();
+
+        // Repointing the active schematic must wake the subscribe loop's config
+        // push so clients observe the new pointer promptly (Bug 3).
+        assert!(db.db_config_gen.latest() > gen0);
+    }
+
+    #[test]
+    fn set_active_schematic_rejects_missing_asset() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        assert!(db.set_active_schematic("schematics/missing.kdl").is_err());
+        db.with_state(|s| assert_eq!(s.db_config.schematic_active(), None));
+    }
+
+    /// Build a DB on disk whose db_state carries a legacy inline
+    /// `schematic.content` mirror (pre-RFD #724 recording), then drop it.
+    fn write_legacy_db(path: PathBuf, content: &str) {
+        let db = DB::create(path).unwrap();
+        db.with_state_mut(|s| {
+            s.db_config
+                .metadata
+                .insert("schematic.content".to_string(), content.to_string());
+        });
+        db.save_db_state().unwrap();
+    }
+
+    #[test]
+    fn open_migrates_legacy_schematic_content_to_asset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        write_legacy_db(path.clone(), "viewport {\n}\n");
+
+        let db = DB::open(path).unwrap();
+
+        // The inline mirror became the active stored asset.
+        db.with_state(|s| {
+            assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl"));
+            assert!(!s.db_config.metadata.contains_key("schematic.content"));
+        });
+        let migrated = db.read_active_schematic().expect("active schematic loads");
+        assert!(migrated.contains("viewport"), "got {migrated:?}");
+
+        // The migration persisted: a re-open needs no legacy key.
+        let persisted = DbConfig::read(db.path.join("db_state")).unwrap();
+        assert_eq!(persisted.schematic_active(), Some("schematics/main.kdl"));
+        assert!(!persisted.metadata.contains_key("schematic.content"));
+    }
+
+    #[test]
+    fn open_migration_keeps_existing_active_asset_authoritative() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        write_legacy_db(path.clone(), "viewport {\n}\n");
+        // The asset already exists on disk (e.g. written by a newer editor);
+        // copy-once means the stale inline mirror must not clobber it.
+        crate::assets_http::write_asset_file(
+            &crate::assets_http::assets_dir(&path),
+            "schematics/main.kdl",
+            b"tiles {\n}\n",
+        )
+        .unwrap();
+
+        let db = DB::open(path).unwrap();
+
+        db.with_state(|s| {
+            assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl"));
+            assert!(!s.db_config.metadata.contains_key("schematic.content"));
+        });
+        let kept = db.read_active_schematic().expect("active schematic loads");
+        assert!(
+            kept.contains("tiles"),
+            "on-disk bytes must win, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn open_migration_drops_stale_content_when_pointer_already_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        {
+            let db = DB::create(path.clone()).unwrap();
+            db.store_asset("schematics/other.kdl", b"tiles {\n}\n")
+                .unwrap();
+            db.set_active_schematic("schematics/other.kdl").unwrap();
+            db.with_state_mut(|s| {
+                s.db_config.metadata.insert(
+                    "schematic.content".to_string(),
+                    "viewport {\n}\n".to_string(),
+                );
+            });
+            db.save_db_state().unwrap();
+        }
+
+        let db = DB::open(path).unwrap();
+
+        // The existing pointer is authoritative; the stale mirror is dropped
+        // without seeding schematics/main.kdl.
+        db.with_state(|s| {
+            assert_eq!(s.db_config.schematic_active(), Some("schematics/other.kdl"));
+            assert!(!s.db_config.metadata.contains_key("schematic.content"));
+        });
+        assert!(
+            !crate::assets_http::assets_dir(&db.path)
+                .join("schematics/main.kdl")
+                .exists()
+        );
     }
 }

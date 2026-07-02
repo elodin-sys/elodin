@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use bevy::core_pipeline::Skybox;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -36,9 +37,7 @@ use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
 use impeller2_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{
-    CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schematic, SchematicElem,
-};
+use impeller2_wkt::{CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, SchematicElem};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
@@ -137,6 +136,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
+            .init_resource::<HeadlessSchematicSkybox>()
             .init_resource::<HeadlessSkyboxRenderGate>()
             .init_resource::<crate::skybox_db_assets::DbSkyboxAssetMirror>()
             .init_resource::<crate::skybox_db_assets::DbSkyboxSyncInFlight>()
@@ -182,6 +182,8 @@ fn setup_headless_lighting(mut commands: Commands) {
 fn load_headless_scene(
     config: Res<DbConfig>,
     mut loaded: Local<bool>,
+    mut pending: Local<HeadlessSchematicLoad>,
+    mut schematic_skybox: ResMut<HeadlessSchematicSkybox>,
     mut commands: Commands,
     eql: Res<EqlContext>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -195,21 +197,54 @@ fn load_headless_scene(
     if *loaded {
         return;
     }
-    // Wait for the EQL context to have component paths registered before
-    // attempting to parse object_3d expressions — otherwise the schematic
-    // loads during warm-up with an empty context and all objects silently fail.
-    if eql.0.component_parts.is_empty() {
-        return;
-    }
-    let Some(content) = config.schematic_content() else {
+
+    // Poll an in-flight fetch. The blocking HTTP request runs on the IO pool
+    // (RFD #724): a slow/unreachable DB Asset Server never freezes the app.
+    let content = if let Some(task) = pending.task.as_mut() {
+        let Some(result) = future::block_on(future::poll_once(task)) else {
+            return;
+        };
+        pending.task = None;
+        match result {
+            Ok(content) => content,
+            Err(err) => {
+                tracing::debug!("Headless scene load waiting for active schematic: {err}");
+                pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
+                return;
+            }
+        }
+    } else {
+        if pending.next_attempt.is_some_and(|at| Instant::now() < at) {
+            return;
+        }
+        // Wait for the EQL context to have component paths registered before
+        // attempting to parse object_3d expressions — otherwise the schematic
+        // loads during warm-up with an empty context and all objects silently fail.
+        if eql.0.component_parts.is_empty() {
+            return;
+        }
+        let Some(key) = config.schematic_active().map(str::to_owned) else {
+            return;
+        };
+        let Some(addr) = connection_addr.as_ref().map(|addr| addr.0) else {
+            return;
+        };
+        pending.task = Some(IoTaskPool::get().spawn(async move {
+            crate::plugins::kdl_document::fetch_active_schematic_kdl(&key, Some(addr))
+        }));
         return;
     };
-    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
+    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&content).inspect_err(|e| {
         tracing::warn!("Failed to parse schematic KDL: {e}");
     }) else {
+        // Bytes fetched but unparsable: back off before retrying so permanently
+        // invalid active schematic bytes don't spin a tight fetch loop each
+        // frame (RFD #724). A later valid byte change still gets picked up.
+        pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
         return;
     };
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
 
     if let Some(o) = schematic.origin {
@@ -264,16 +299,16 @@ fn load_headless_scene(
     *loaded = true;
 }
 
-fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
-    if let Some(desired) = config.skybox_active_desired() {
-        return Some(desired);
-    }
+#[derive(Resource, Default, Debug, Clone)]
+struct HeadlessSchematicSkybox(Option<Option<String>>);
 
-    let content = config.schematic_content()?;
-    let schematic = Schematic::from_kdl(content)
-        .inspect_err(|e| tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}"))
-        .ok()?;
-    Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
+#[derive(Default)]
+struct HeadlessSchematicLoad {
+    next_attempt: Option<Instant>,
+    /// In-flight async fetch of the active schematic's KDL. Keeps the bounded —
+    /// but potentially multi-second — HTTP request off the main thread so a slow
+    /// or unreachable DB Asset Server never stalls the headless app each retry.
+    task: Option<Task<Result<String, String>>>,
 }
 
 const SKYBOX_TRANSITION_WARMUP_FRAMES: u8 = 2;
@@ -348,6 +383,7 @@ struct SyncHeadlessSkyboxParams<'w, 's> {
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     mirror: Res<'w, crate::skybox_db_assets::DbSkyboxAssetMirror>,
     in_flight: Res<'w, crate::skybox_db_assets::DbSkyboxSyncInFlight>,
+    schematic_skybox: Res<'w, HeadlessSchematicSkybox>,
 }
 
 fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
@@ -362,7 +398,12 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
         connection_addr,
         mirror,
         in_flight,
+        schematic_skybox,
     } = params;
+
+    let desired = config
+        .skybox_active_desired()
+        .or_else(|| schematic_skybox.0.clone());
 
     for event in failed.read() {
         if !skybox_failure_matches_gate(&render_gate.desired, &event.name) {
@@ -379,7 +420,7 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
         render_gate.skipped_desired = render_gate.desired.clone();
     }
 
-    let Some(desired) = desired_skybox_from_config(&config) else {
+    let Some(desired) = desired else {
         render_gate.desired = None;
         render_gate.applied = true;
         render_gate.warmup_remaining = 0;

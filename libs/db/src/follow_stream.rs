@@ -174,7 +174,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             known_msg_ids.insert(msg_id);
         }
 
-        // ── 2b. DbConfig updates (schematic.content, skybox, etc.) ───────
+        // ── 2b. DbConfig updates (schematic.active, skybox, etc.) ───────
         let (current_metadata, current_recording) =
             db.with_state(|state| (state.db_config.metadata.clone(), state.db_config.recording));
         let metadata_delta = db_config_metadata_delta(&last_db_metadata, &current_metadata);

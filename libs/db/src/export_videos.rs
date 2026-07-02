@@ -413,14 +413,14 @@ pub fn run(
     }
     println!();
 
-    let exported = db.with_state(|state| {
-        // Build a fallback name map from the schematic's video_stream entries
-        let schematic_names = state
-            .db_config
-            .schematic_content()
-            .map(video_name_map_from_schematic)
-            .unwrap_or_default();
+    // Build a fallback name map from the active schematic's video_stream entries
+    // (read outside `with_state` to avoid re-entrant locking on the asset read).
+    let schematic_names = db
+        .read_active_schematic()
+        .map(|content| video_name_map_from_schematic(&content))
+        .unwrap_or_default();
 
+    let exported = db.with_state(|state| {
         let sensor_cameras: Vec<SensorCameraConfig> =
             match state.db_config.metadata.get("sensor_cameras") {
                 Some(json) => match serde_json::from_str(json) {

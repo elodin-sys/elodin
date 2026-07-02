@@ -10,10 +10,57 @@ use thiserror::Error;
 #[derive(Resource, Default)]
 pub struct InitialKdlPath(pub Option<PathBuf>);
 
-/// Last `schematic.content` applied from `DbConfig`; skips redundant full reloads when only
-/// other metadata (e.g. `skybox.active`) changes.
+/// Last `schematic.active` key synced from `DbConfig`, to skip redundant full
+/// reloads when only other metadata (e.g. `skybox.active`) changes.
 #[derive(Resource, Default)]
-pub struct LastSyncedSchematicContent(pub Option<String>);
+pub struct LastSyncedActiveKey(pub Option<String>);
+
+/// Asset revision (`assets.revision`) observed at the last active-schematic
+/// (re)load. Lets config sync reload when the bytes at an *unchanged*
+/// `schematic.active` key were replaced by another client (RFD #724, Bug 1).
+#[derive(Resource, Default)]
+pub struct LastSyncedAssetsRevision {
+    /// Revision current when the active schematic was last loaded.
+    pub revision: Option<u64>,
+    /// Adopt the next revision change as a new baseline without reloading —
+    /// set after a *local* save so the editor doesn't reload bytes it just
+    /// wrote (its own write bumps the revision too).
+    pub suppress_next: bool,
+}
+
+/// Active-schematic key the editor has optimistically switched to (via "Save
+/// As…" or "Open Schematic…") but the DB has not yet echoed. While set and not
+/// yet matched by `DbConfig.schematic_active`, config sync ignores the stale
+/// pointer so it can't briefly reload the schematic being replaced; the pin
+/// clears as soon as the DB confirms the requested key.
+#[derive(Resource, Default)]
+pub struct PendingActiveSchematic {
+    /// Key the editor optimistically switched to, awaiting the DB echo.
+    pub target: Option<String>,
+    /// `schematic.active` value in effect when the pin was set — the stale
+    /// pointer we expect to keep seeing until the repoint echoes. Lets config
+    /// sync tell "still waiting for our echo" apart from "the pointer moved
+    /// elsewhere" (an external repoint or a failed local one), so a pin can
+    /// never strand sync on a key the DB will never confirm.
+    pub superseding: Option<String>,
+}
+
+impl PendingActiveSchematic {
+    /// Pin `target`, recording the `superseded` active key it replaces.
+    pub fn pin(&mut self, target: String, superseded: Option<String>) {
+        self.target = Some(target);
+        self.superseding = superseded;
+    }
+
+    pub fn clear(&mut self) {
+        self.target = None;
+        self.superseding = None;
+    }
+
+    pub fn target(&self) -> Option<&str> {
+        self.target.as_deref()
+    }
+}
 
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct SchematicDocumentAsset {
@@ -109,28 +156,4 @@ pub enum SchematicDocumentLoaderError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)]
     RootKdl(#[from] KdlSchematicError),
-}
-
-#[derive(Debug, Error)]
-pub enum SaveCurrentDocumentError {
-    #[error("No save path is available for the current document")]
-    MissingSavePath,
-    #[error("Could not save schematic to {path}: {source}")]
-    WriteRoot {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("Could not create directory for window schematic {path}: {source}")]
-    CreateWindowDir {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("Could not save window schematic to {path}: {source}")]
-    WriteWindow {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 }
