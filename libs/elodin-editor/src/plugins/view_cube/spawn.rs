@@ -15,7 +15,7 @@ use super::config::*;
 use super::theme::ViewCubeColors;
 use crate::plugins::navigation_gizmo::{NavGizmoCamera, NavGizmoParent};
 use crate::plugins::render_layer_alloc::{
-    VIEW_CUBE_RENDER_LAYERS, view_cube_render_layer, view_cube_render_layers,
+    RenderLayerLease, VIEW_CUBE_RENDER_LAYERS, view_cube_render_layer, view_cube_render_layers,
 };
 
 pub(crate) fn plugin(app: &mut App) {
@@ -44,7 +44,10 @@ impl ViewCubeFrames {
 pub struct SpawnedViewCubeOverlay {
     pub camera: Entity,
     pub frame: GeoFrame,
-    pub layer: usize,
+    /// Shared frame layer used by the global cube mesh.
+    pub frame_layer: usize,
+    /// Per-viewport layer for rotation arrows and action buttons.
+    pub ui_layer: usize,
 }
 
 fn spawn_frame_view_cubes(
@@ -130,6 +133,7 @@ fn spawn_frame_view_cube_mesh(
 }
 
 /// Spawn a per-viewport overlay camera that renders the shared frame cube.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_view_cube_overlay(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
@@ -138,16 +142,21 @@ pub fn spawn_view_cube_overlay(
     config: &ViewCubeConfig,
     frame: GeoFrame,
     main_camera_entity: Entity,
+    ui_lease: RenderLayerLease,
 ) -> SpawnedViewCubeOverlay {
-    let render_layers = view_cube_render_layers(frame);
-    let layer = view_cube_render_layer(frame);
+    let frame_layers = view_cube_render_layers(frame);
+    let frame_layer = view_cube_render_layer(frame);
+    let ui_layers = ui_lease.render_layers();
+    let ui_layer = ui_lease.layer();
+    let camera_layers = frame_layers.union(&ui_layers);
 
     let gizmo_camera = spawn_overlay_camera(
         commands,
         config,
         frame,
         main_camera_entity,
-        render_layers.clone(),
+        camera_layers,
+        ui_lease,
     );
     spawn_rotation_arrows(
         commands,
@@ -155,7 +164,7 @@ pub fn spawn_view_cube_overlay(
         meshes,
         materials,
         gizmo_camera,
-        Some(&render_layers),
+        Some(&ui_layers),
     );
     spawn_viewport_action_buttons(
         commands,
@@ -163,7 +172,7 @@ pub fn spawn_view_cube_overlay(
         meshes,
         materials,
         gizmo_camera,
-        Some(&render_layers),
+        Some(&ui_layers),
     );
 
     commands.entity(gizmo_camera).insert((
@@ -176,7 +185,8 @@ pub fn spawn_view_cube_overlay(
     SpawnedViewCubeOverlay {
         camera: gizmo_camera,
         frame,
-        layer,
+        frame_layer,
+        ui_layer,
     }
 }
 
@@ -187,6 +197,7 @@ fn spawn_overlay_camera(
     frame: GeoFrame,
     main_camera: Entity,
     render_layers: RenderLayers,
+    ui_lease: RenderLayerLease,
 ) -> Entity {
     commands
         .spawn((
@@ -203,6 +214,7 @@ fn spawn_overlay_camera(
             ViewCubeLink { main_camera },
             Name::new(format!("view_cube_camera_{frame:?}")),
             render_layers,
+            ui_lease,
         ))
         .id()
 }
@@ -320,6 +332,27 @@ fn spawn_axes(
 mod tests {
     use super::*;
     use bevy_geo_frames::GeoFrame;
+
+    #[test]
+    fn overlay_camera_layer_mask_includes_frame_and_own_ui_only() {
+        use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+
+        let frame_layers = view_cube_render_layers(GeoFrame::ENU);
+        let frame_layer = view_cube_render_layer(GeoFrame::ENU);
+        let mut alloc = RenderLayerAllocator::default();
+        let lease_a = alloc.alloc().expect("ui a");
+        let lease_b = alloc.alloc().expect("ui b");
+        let camera_a = frame_layers.union(&lease_a.render_layers());
+        let camera_b = frame_layers.union(&lease_b.render_layers());
+
+        assert!(camera_a.intersects(&RenderLayers::layer(frame_layer)));
+        assert!(camera_a.intersects(&lease_a.render_layers()));
+        assert!(!camera_a.intersects(&lease_b.render_layers()));
+
+        assert!(camera_b.intersects(&RenderLayers::layer(frame_layer)));
+        assert!(camera_b.intersects(&lease_b.render_layers()));
+        assert!(!camera_b.intersects(&lease_a.render_layers()));
+    }
 
     #[test]
     fn enu_axis_visual_configs_match_requested_xyz_rbg_mapping() {

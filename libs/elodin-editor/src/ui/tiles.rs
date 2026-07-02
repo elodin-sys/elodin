@@ -1681,9 +1681,22 @@ impl ViewportPane {
             };
         }
 
-        // Allocate render layer for ViewCube overlay camera (shared frame cube layer)
+        // Shared frame cube layer plus a per-viewport layer for overlay UI.
         let frame = viewport.frame.unwrap_or_default();
         let view_cube_layer = view_cube_render_layer(frame);
+        let Some(ui_lease) = render_layer_alloc.alloc() else {
+            return Self {
+                parent: Some(parent),
+                grid: None,
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                viewport_layer,
+                view_cube_layer: None,
+            };
+        };
 
         commands
             .entity(camera)
@@ -1701,6 +1714,7 @@ impl ViewportPane {
             &view_cube_config,
             frame,
             camera,
+            ui_lease,
         );
 
         Self {

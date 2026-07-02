@@ -998,6 +998,7 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                ..default()
             },
         }
     }
