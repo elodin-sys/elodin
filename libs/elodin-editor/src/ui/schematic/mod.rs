@@ -490,6 +490,24 @@ pub fn tiles_to_schematic(
     window_schematics.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
+    // A window loaded from the DB keeps its stored asset key on save, so
+    // ingest-keyed sub-schematics (e.g. `windows/detail.kdl`, kept at their
+    // original keys by `resolve_stored_asset_key`) are overwritten in place
+    // instead of being re-keyed under `schematics/<stem>.kdl` — which would
+    // strand the stored reference for other consumers. Seed the generated-name
+    // counter with the stems of preserved `schematics/<stem>.kdl` keys so a
+    // freshly created window can never claim the same key.
+    for (state, window_id) in &param.windows_state {
+        if window_id.is_primary() {
+            continue;
+        }
+        if let Some(stem) = preserved_window_key(state)
+            .as_deref()
+            .and_then(schematics_key_stem)
+        {
+            name_counts.entry(stem.to_string()).or_insert(1);
+        }
+    }
     for (state, window_id) in &param.windows_state {
         let mut file_name: Option<String> = None;
         let mut window_title: Option<String> = None;
@@ -499,9 +517,12 @@ pub fn tiles_to_schematic(
             if computed_title != "Panel" {
                 window_title = Some(computed_title);
             }
-            let base_stem = preferred_window_stem(state);
-            let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
-            file_name = Some(format!("{unique_stem}.kdl"));
+            let name = preserved_window_key(state).unwrap_or_else(|| {
+                let base_stem = preferred_window_stem(state);
+                let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
+                format!("{unique_stem}.kdl")
+            });
+            file_name = Some(name);
 
             let mut win_schematic = Schematic::default();
             win_schematic.elems.extend(
@@ -569,6 +590,21 @@ impl Plugin for SchematicPlugin {
                     .after(KdlDocumentSet::AssetEvents),
             );
     }
+}
+
+/// The DB asset key a window was loaded from (a `db:<key>` descriptor path),
+/// if any. Preserved on save so the window overwrites its stored asset instead
+/// of forking to a newly generated `schematics/<stem>.kdl` key.
+fn preserved_window_key(state: &tiles::WindowState) -> Option<String> {
+    let path = state.descriptor.path.as_ref()?.to_str()?;
+    impeller2_kdl::db_asset_name(path)
+}
+
+/// The stem of a single-level `schematics/<stem>.kdl` key, i.e. the namespace
+/// generated window names are keyed into.
+fn schematics_key_stem(key: &str) -> Option<&str> {
+    let stem = key.strip_prefix("schematics/")?.strip_suffix(".kdl")?;
+    (!stem.is_empty() && !stem.contains('/')).then_some(stem)
 }
 
 fn preferred_window_stem(state: &tiles::WindowState) -> String {
@@ -694,5 +730,50 @@ impl EqlExt for eql::Expr {
             }
             _ => vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod window_key_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn window_state(path: Option<&str>) -> tiles::WindowState {
+        tiles::WindowState {
+            descriptor: tiles::WindowDescriptor {
+                path: path.map(PathBuf::from),
+                ..Default::default()
+            },
+            graph_entities: Vec::new(),
+            tile_state: tiles::TileState::default(),
+            ui_state: Default::default(),
+        }
+    }
+
+    #[test]
+    fn preserved_window_key_keeps_db_keys_only() {
+        // Ingest-keyed and editor-keyed stored windows keep their exact key.
+        assert_eq!(
+            preserved_window_key(&window_state(Some("db:windows/detail.kdl"))).as_deref(),
+            Some("windows/detail.kdl")
+        );
+        assert_eq!(
+            preserved_window_key(&window_state(Some("db:schematics/detail.kdl"))).as_deref(),
+            Some("schematics/detail.kdl")
+        );
+        // Local file paths and pathless (new) windows get generated names.
+        assert_eq!(
+            preserved_window_key(&window_state(Some("/abs/detail.kdl"))),
+            None
+        );
+        assert_eq!(preserved_window_key(&window_state(None)), None);
+    }
+
+    #[test]
+    fn schematics_key_stem_extracts_single_level_stems() {
+        assert_eq!(schematics_key_stem("schematics/detail.kdl"), Some("detail"));
+        assert_eq!(schematics_key_stem("schematics/sub/detail.kdl"), None);
+        assert_eq!(schematics_key_stem("windows/detail.kdl"), None);
+        assert_eq!(schematics_key_stem("schematics/.kdl"), None);
     }
 }
