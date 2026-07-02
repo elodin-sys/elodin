@@ -1,10 +1,12 @@
 //! Spawning functions for the ViewCube widget
 
-use bevy::camera::ClearColorConfig;
 use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{CameraOutputMode, ClearColorConfig};
+use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy::render::render_resource::BlendState;
 use bevy_fontmesh::prelude::*;
 use bevy_geo_frames::GeoFrame;
 use std::collections::HashMap;
@@ -204,10 +206,17 @@ fn spawn_overlay_camera(
             Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
             Camera {
                 order: 3,
-                clear_color: ClearColorConfig::None,
+                // Steps 1–3 + DebandDither::Disabled (Msaa::Off and Hdr exclusion break visibility).
+                clear_color: ClearColorConfig::Custom(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                output_mode: CameraOutputMode::Write {
+                    blend_state: Some(BlendState::ALPHA_BLENDING),
+                    clear_color: ClearColorConfig::None,
+                },
                 ..default()
             },
             Camera3d::default(),
+            Tonemapping::None,
+            DebandDither::Disabled,
             MeshPickingCamera,
             ViewCubeCamera,
             ViewCubeFrameRef(frame),
