@@ -257,6 +257,11 @@ pub struct DB {
     /// Fast-path flag: true when `followed_components` is non-empty.
     /// Avoids acquiring the read lock on every `apply_value` call.
     has_followed_components: std::sync::atomic::AtomicBool,
+    /// True on a follower replica: the asset tree is a read-only mirror of the
+    /// source, so client-originated asset writes (Impeller `StoreAsset`) are
+    /// rejected, matching the HTTP `PUT` 405 gate. Otherwise a TCP client could
+    /// diverge the mirror until the next full mirror pass (RFD #724).
+    pub assets_read_only: std::sync::atomic::AtomicBool,
     /// Serializes follower full-tree asset mirrors so overlapping
     /// `SetDbConfig`-driven syncs can't prune/download against each other
     /// (RFD #724, Bug 1). Idle on a non-follower DB. Only present with the asset
@@ -332,6 +337,7 @@ impl DB {
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            assets_read_only: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "axum")]
             asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
@@ -494,6 +500,22 @@ impl DB {
             tracing::warn!(asset = %key, ?err, "failed to bump asset revision after store");
         }
         Ok(())
+    }
+
+    /// [`store_asset`](Self::store_asset) entry point for client connections
+    /// (Impeller `StoreAsset`). On a follower the asset tree is a read-only
+    /// mirror of the source, so the write is rejected — the TCP counterpart of
+    /// the asset HTTP server's `PUT` 405 gate (RFD #724). Internal writers
+    /// (follow mirror, legacy migration) call `store_asset` directly and are
+    /// unaffected.
+    pub fn store_asset_from_client(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+        if self.assets_read_only.load(atomic::Ordering::Acquire) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "asset writes are disabled on a read-only follower mirror",
+            ));
+        }
+        self.store_asset(key, bytes)
     }
 
     /// Point `schematic.active` at a stored schematic asset and persist.
@@ -785,6 +807,7 @@ impl DB {
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            assets_read_only: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "axum")]
             asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
@@ -2174,8 +2197,9 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         }
         Packet::Msg(m) if m.id == StoreAsset::ID => {
             let StoreAsset { key, bytes } = m.parse::<StoreAsset>()?;
-            // A bad/unwritable asset is logged but must not drop the connection.
-            match db.store_asset(&key, &bytes) {
+            // A bad/unwritable asset (or a read-only follower rejecting the
+            // write) is logged but must not drop the connection.
+            match db.store_asset_from_client(&key, &bytes) {
                 Ok(()) => {
                     tracing::info!(asset = %key, len = bytes.len(), "stored uploaded asset")
                 }
@@ -3590,6 +3614,25 @@ mod tests {
             std::fs::read(assets_dir.join("schematics/broken.kdl")).unwrap(),
             b"object_3d {\n".to_vec()
         );
+    }
+
+    #[test]
+    fn store_asset_from_client_rejected_on_read_only_follower() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.assets_read_only.store(true, atomic::Ordering::Release);
+
+        let gen0 = db.db_config_gen.latest();
+        let err = db
+            .store_asset_from_client("meshes/injected.glb", b"tampered")
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+
+        // Nothing written, no revision bump advertised to subscribers.
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+        assert!(!assets_dir.join("meshes/injected.glb").exists());
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 0);
+        assert_eq!(db.db_config_gen.latest(), gen0);
     }
 
     #[test]

@@ -55,6 +55,7 @@ impl Default for FollowConfig {
 /// Fetch metadata/schemas from the source, sync `db:` assets, and apply local state
 /// before the follower accepts clients.
 pub async fn prime_follower_state(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
+    mark_assets_read_only(db);
     let (_, metadata_resp, schema_resp) = request_source_snapshot(config, false).await?;
     apply_source_snapshot(
         config,
@@ -70,6 +71,7 @@ pub async fn prime_follower_state(config: &FollowConfig, db: &Arc<DB>) -> Result
 ///
 /// This function reconnects on failure and should be spawned as a background task.
 pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error> {
+    mark_assets_read_only(&db);
     loop {
         info!(source = %config.source_addr, "connecting to source database");
         match run_follower_inner(&config, &db).await {
@@ -92,6 +94,15 @@ pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error
         }
         stellarator::sleep(config.reconnect_delay).await;
     }
+}
+
+/// A follower's asset tree is a read-only mirror of its source. Setting this
+/// makes the Impeller `StoreAsset` handler reject client writes, matching the
+/// asset HTTP server's `PUT` 405 gate; otherwise a TCP client could diverge the
+/// mirror (and bump `assets.revision`) until the next full mirror pass.
+fn mark_assets_read_only(db: &Arc<DB>) {
+    db.assets_read_only
+        .store(true, std::sync::atomic::Ordering::Release);
 }
 
 struct FollowStreamSession {
