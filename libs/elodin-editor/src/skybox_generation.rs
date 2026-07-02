@@ -120,6 +120,13 @@ pub(crate) fn sync_cache_active_from_skybox(
     cache.active = skybox.map(|entry| entry.name.clone());
 }
 
+/// Whether a loaded document's save path is a stored DB schematic key
+/// (`schematics/<name>.kdl`, as produced by `save_path_for_active_key`) rather
+/// than a local filesystem path from an `--kdl` open.
+pub(crate) fn is_db_schematic_key(path: &str) -> bool {
+    path.starts_with("schematics/") && path.ends_with(".kdl")
+}
+
 /// The DB key a skybox edit should write to. Prefers an in-flight repoint pin
 /// (`PendingActiveSchematic`) then the last synced key over the echoed
 /// `DbConfig`, so a skybox edit made right after Save As / Open (before the
@@ -211,23 +218,25 @@ pub(crate) fn on_document_loaded(
         && should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active())
         && let Some(tx) = tx.as_ref()
     {
-        let kdl = document.root.to_kdl();
         // Write the skybox back to the *loaded* document's own asset key, not the
         // DB's current `schematic.active`: an HTTP load can finish before the
         // repoint echoes, so `config.schematic_active()` may still point at the
         // previous schematic and we'd stamp these bytes onto the wrong asset
-        // (RFD #724).
-        let active_key = event
+        // (RFD #724). A document opened from a local file (`--kdl`) has a
+        // filesystem save path, which is not a valid asset key — and storing its
+        // bytes would clobber the DB's stored schematic — so a non-DB document
+        // only updates `skybox.active`.
+        let db_key = event
             .save_path
             .as_deref()
             .and_then(std::path::Path::to_str)
-            .or_else(|| config.schematic_active())
-            .unwrap_or(ACTIVE_SCHEMATIC_KEY);
+            .filter(|path| is_db_schematic_key(path));
+        let kdl = db_key.is_some().then(|| document.root.to_kdl());
         push_skybox_db_sync(
             tx,
-            Some(kdl),
+            kdl,
             loaded_skybox,
-            active_key,
+            db_key.unwrap_or(ACTIVE_SCHEMATIC_KEY),
             &mut locally_pushed,
         );
     }
