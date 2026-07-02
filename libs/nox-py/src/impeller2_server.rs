@@ -99,6 +99,12 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 /// never mutates `world.metadata.schematic`. Call once before starting the DB
 /// Asset Server so early HTTP requests do not 404.
 ///
+/// The active schematic follows the same copy-once contract as the asset tree:
+/// on a *fresh* DB the in-memory sim schematic seeds `schematics/main.kdl`, but
+/// on a *reopen* the on-disk bytes are authoritative and left untouched — an
+/// editor edit (or follower mirror) must not be clobbered by stale in-memory
+/// metadata just because the sim was re-run against an existing DB (RFD #724).
+///
 /// `entry` is the simulation entrypoint (e.g. the `main.py` path), used to
 /// resolve the source `assets/` tree relative to the sim folder and its
 /// ancestors when `ELODIN_ASSETS` is unset — so a run whose cwd is not the sim
@@ -108,6 +114,14 @@ pub fn prime_schematic_assets(
     world: &World,
     entry: Option<&Path>,
 ) -> Result<(), elodin_db::Error> {
+    // Whether the DB already holds an active schematic asset *before* this call.
+    // Captured pre-ingest so a fresh DB whose source tree happens to ship a
+    // `schematics/main.kdl` still gets its freshly generated in-memory schematic,
+    // while a reopen preserves whatever bytes are already there.
+    let active_existed = elodin_db::assets_http::assets_dir(&db.path)
+        .join(ACTIVE_SCHEMATIC_KEY)
+        .is_file();
+
     if let Some(source) = resolve_source_assets_root(entry) {
         match elodin_db::assets::ingest_asset_dir(&db.path, &source) {
             Ok(report) if report.skipped => {
@@ -125,8 +139,19 @@ pub fn prime_schematic_assets(
         }
     }
 
-    // Register the generated schematic as a stored asset. `store_asset` rewrites
-    // its asset paths to `db:` (unparsable KDL is stored verbatim), then
+    // Reopen: the on-disk active schematic is authoritative (copy-once, same as
+    // the asset tree). Never overwrite editor-written bytes from stale in-memory
+    // sim metadata — only re-assert the pointer, since a `DB::create` reopen
+    // resets db_config and drops it while the bytes survive on disk.
+    if active_existed {
+        if let Err(err) = db.set_active_schematic(ACTIVE_SCHEMATIC_KEY) {
+            tracing::warn!(?err, "failed to set active schematic pointer");
+        }
+        return Ok(());
+    }
+
+    // Fresh DB: register the generated schematic as a stored asset. `store_asset`
+    // rewrites its asset paths to `db:` (unparsable KDL is stored verbatim), then
     // `set_active_schematic` points `schematic.active` at it. Failures are
     // logged, not fatal: a missing schematic asset must not abort the sim.
     let Some(content) = world.metadata.schematic.as_deref() else {
@@ -351,6 +376,49 @@ mod asset_tests {
             std::fs::read(stored.join("rocket.glb")).unwrap(),
             b"v1".to_vec()
         );
+    }
+
+    #[test]
+    fn prime_preserves_edited_active_schematic_on_reopen() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        // No source tree: isolate the active-schematic path from tree ingest.
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db_path = dir.path().join("db");
+        let db = elodin_db::DB::create(db_path.clone()).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some("viewport {\n}\n".to_string());
+
+        // First run seeds the active schematic from in-memory metadata.
+        prime_schematic_assets(&db, &world, None).unwrap();
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        let seeded = std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
+
+        // The editor writes new active-schematic bytes into the DB. Capture the
+        // stored form (store_asset re-serializes KDL) to compare against later.
+        db.store_asset(ACTIVE_SCHEMATIC_KEY, b"graph {\n}\n")
+            .unwrap();
+        let edited = std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
+        assert_ne!(edited, seeded, "editor edit should differ from the seed");
+
+        // Re-running the sim (in-memory metadata still the old schematic) against
+        // the existing DB must NOT clobber the editor's bytes — copy-once, like
+        // the asset tree. Simulate a `DB::open` reopen so the flow matches
+        // `Server::from_listener`.
+        let reopened = elodin_db::DB::open(db_path).unwrap();
+        prime_schematic_assets(&reopened, &world, None).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap(),
+            edited,
+            "editor-written active schematic must survive a sim re-run"
+        );
+        // The pointer still targets the (preserved) active schematic.
+        let active =
+            reopened.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(active.as_deref(), Some(ACTIVE_SCHEMATIC_KEY));
     }
 
     #[test]
