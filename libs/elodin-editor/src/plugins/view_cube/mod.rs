@@ -13,7 +13,7 @@ pub use camera::{NeedsInitialSnap, ViewCubeTargetCamera};
 pub use components::*;
 pub use config::*;
 pub use events::*;
-pub use spawn::SpawnedViewCube;
+pub use spawn::{SpawnedViewCubeOverlay, ViewCubeFrames, spawn_view_cube_overlay};
 pub use theme::ViewCubeColors;
 
 use bevy::picking::prelude::*;
@@ -82,7 +82,7 @@ impl Plugin for ViewCubePlugin {
             app.add_systems(
                 PostUpdate,
                 (
-                    camera::sync_view_cube_rotation,
+                    camera::sync_view_cube_camera_orientation,
                     camera::orient_axis_labels_to_screen_plane,
                 )
                     .chain(),

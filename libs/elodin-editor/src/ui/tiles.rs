@@ -62,11 +62,13 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
-        render_layer_alloc::{GRID_RENDER_LAYER, RenderLayerAllocator, RenderLayerLease},
+        render_layer_alloc::{
+            GRID_RENDER_LAYERS, RenderLayerAllocator, RenderLayerLease, grid_render_layer,
+            view_cube_render_layer,
+        },
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
-            spawn::spawn_view_cube,
+            spawn::spawn_view_cube_overlay,
         },
     },
     sensor_camera::SensorCameraConfigs,
@@ -125,8 +127,64 @@ fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
+        .add_systems(Startup, spawn_viewport_grids)
         .add_systems(Startup, setup_primary_window_state)
         .add_systems(Update, sync_editor_cam_zoom_limits);
+}
+
+fn spawn_viewport_grids(mut commands: Commands) {
+    for (frame, layer) in GRID_RENDER_LAYERS {
+        commands.spawn((
+            bevy_infinite_grid::InfiniteGridBundle {
+                settings: viewport_grid_settings(frame),
+                visibility: Visibility::Visible,
+                ..Default::default()
+            },
+            RenderLayers::layer(layer),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+            Name::new(format!("infinite grid {frame:?}")),
+            bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(
+                frame,
+                bevy::math::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+            ),
+        ));
+    }
+}
+
+fn viewport_grid_settings(
+    frame: bevy_geo_frames::GeoFrame,
+) -> bevy_infinite_grid::InfiniteGridSettings {
+    match frame {
+        GeoFrame::NED => bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            x_axis_color: crate::ui::colors::bevy::RED,
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            fadeout_distance: 50_000.0,
+            scale: 0.1,
+            ..Default::default()
+        },
+        GeoFrame::ENU => bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            x_axis_color: crate::ui::colors::bevy::RED,
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            fadeout_distance: 50_000.0,
+            scale: 0.1,
+            ..Default::default()
+        },
+        GeoFrame::ECEF => bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            x_axis_color: crate::ui::colors::bevy::RED,
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            fadeout_distance: 50_000_000.0,
+            scale: 0.000_000_1,
+            ..Default::default()
+        },
+    }
 }
 
 type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
@@ -833,11 +891,6 @@ impl TileState {
                     {
                         e.despawn();
                     }
-                    if let Some(nav_gizmo) = viewport.nav_gizmo
-                        && let Ok(mut e) = commands.get_entity(nav_gizmo)
-                    {
-                        e.despawn();
-                    }
                 }
                 Tile::Pane(Pane::Graph(graph)) => {
                     if let Ok(mut e) = commands.get_entity(graph.id) {
@@ -1420,51 +1473,18 @@ impl ViewportPane {
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        // The grid render layer is reserved and shared by every viewport, so we
-        // never allocate one per viewport. See `RenderLayerAllocator::default`.
         let mut main_camera_layers = RenderLayers::default()
             .with(ELLIPSOID_RENDER_LAYER)
-            .with(GIZMO_RENDER_LAYER)
-            .with(GRID_RENDER_LAYER);
-        let grid_layers = RenderLayers::layer(GRID_RENDER_LAYER);
+            .with(GIZMO_RENDER_LAYER);
+        let grid_layer = grid_render_layer(viewport.frame);
+        if viewport.show_grid {
+            main_camera_layers = main_camera_layers.with(grid_layer);
+        }
 
         let viewport_lease: Option<RenderLayerLease> =
             render_layer_alloc.alloc().inspect(|lease| {
                 main_camera_layers = main_camera_layers.union(&lease.render_layers());
             });
-
-        let grid_visibility = if viewport.show_grid {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-
-        // Swap axis colors for NED frame (X=North=Green, Z axis shows East=Red)
-        let (x_axis_color, z_axis_color) = if viewport.frame == Some(bevy_geo_frames::GeoFrame::NED)
-        {
-            (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
-        } else {
-            (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
-        };
-
-        let grid_id = commands
-            .spawn((
-                bevy_infinite_grid::InfiniteGridBundle {
-                    settings: bevy_infinite_grid::InfiniteGridSettings {
-                        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                        z_axis_color,
-                        x_axis_color,
-                        fadeout_distance: 50_000.0,
-                        scale: 0.1,
-                        ..Default::default()
-                    },
-                    visibility: grid_visibility,
-                    ..Default::default()
-                },
-                grid_layers,
-            ))
-            .id();
 
         let transform =
             Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
@@ -1610,7 +1630,7 @@ impl ViewportPane {
                 last_anchor_depth: -2.0,
                 ..Default::default()
             },
-            GridHandle { grid: grid_id },
+            GridHandle { layer: grid_layer },
             ViewportConfig {
                 aspect: viewport.aspect,
                 configured_near: viewport.near,
@@ -1650,7 +1670,7 @@ impl ViewportPane {
         if !viewport.show_view_cube {
             return Self {
                 parent: Some(parent),
-                grid: Some(grid_id),
+                grid: None,
                 camera: Some(camera),
                 nav_gizmo: None,
                 nav_gizmo_camera: None,
@@ -1661,72 +1681,34 @@ impl ViewportPane {
             };
         }
 
-        // Allocate render layer for ViewCube (same approach as navigation_gizmo)
-        let Some(view_cube_lease) = render_layer_alloc.alloc() else {
-            return Self {
-                parent: Some(parent),
-                grid: Some(grid_id),
-                camera: Some(camera),
-                nav_gizmo: None,
-                nav_gizmo_camera: None,
-                rect: None,
-                name,
-                viewport_layer,
-                view_cube_layer: None,
-            };
-        };
-        let view_cube_layer = view_cube_lease.layer();
+        // Allocate render layer for ViewCube overlay camera (shared frame cube layer)
+        let frame = viewport.frame.unwrap_or_default();
+        let view_cube_layer = view_cube_render_layer(frame);
 
-        // Do not insert `view_cube_lease` here: the main camera already carries the viewport
-        // `RenderLayerLease`, and a second lease would replace it (single component), breaking
-        // anything that reads the lease (e.g. vector arrows). The cube root and overlay camera
-        // still own clones of this lease.
         commands
             .entity(camera)
             .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
-        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
+        view_cube_config.system = CoordinateSystem(frame);
+        info!("Setting frame to {:?}", &view_cube_config.system);
 
-        // Set coordinate system based on viewport's geo frame
-        if let Some(frame) = viewport.frame {
-            view_cube_config.system = CoordinateSystem(frame);
-            info!("Setting frame to {:?}", &view_cube_config.system);
-        }
-
-        let spawned = spawn_view_cube(
+        let spawned = spawn_view_cube_overlay(
             commands,
             asset_server,
             meshes,
             materials,
             &view_cube_config,
-            view_cube_lease.clone(),
+            frame,
             camera,
         );
 
-        // Add NavGizmoParent and NavGizmoCamera to the ViewCube camera
-        // so the existing set_camera_viewport system works on it
-        if let Some(view_cube_camera) = spawned.camera {
-            commands.entity(view_cube_camera).insert((
-                NavGizmoParent {
-                    main_camera: camera,
-                },
-                NavGizmoCamera,
-            ));
-        }
-
-        // `cube_root` already received `view_cube_lease` inside `spawn_view_cube`.
-        // Re-inserting it here would silently drop the previous component (Bevy
-        // overwrites same-typed components on insert) — see the `debug_assert!`
-        // in `EntityCommandsExt::insert_render_layer_lease`.
-        let _ = view_cube_lease;
-
         Self {
             parent: Some(parent),
-            grid: Some(grid_id),
+            grid: None,
             camera: Some(camera),
-            nav_gizmo: Some(spawned.cube_root),
-            nav_gizmo_camera: spawned.camera,
+            nav_gizmo: None,
+            nav_gizmo_camera: Some(spawned.camera),
             rect: None,
             name,
             viewport_layer,
@@ -2903,9 +2885,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             }
                             if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
                                 state_mut.commands.entity(nav_gizmo_camera).despawn();
-                            }
-                            if let Some(nav_gizmo) = viewport.nav_gizmo {
-                                state_mut.commands.entity(nav_gizmo).despawn();
                             }
                         };
 

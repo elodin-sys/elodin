@@ -1,6 +1,7 @@
 //! Components for the ViewCube widget
 
 use bevy::prelude::*;
+use bevy_geo_frames::GeoFrame;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -23,11 +24,19 @@ pub struct ViewCubeSetup;
 #[derive(Component)]
 pub struct ViewCubeDragging;
 
-/// Links a ViewCube to the main camera it should follow/control
+/// Links a ViewCube overlay camera to the viewport main camera it controls.
 #[derive(Component)]
 pub struct ViewCubeLink {
     pub main_camera: Entity,
 }
+
+/// Identifies which geo frame a shared ViewCube root belongs to.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewCubeFrame(pub GeoFrame);
+
+/// Which shared frame cube a viewport overlay camera renders.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewCubeFrameRef(pub GeoFrame);
 
 /// Marker for the ViewCube's dedicated camera (used in overlay mode)
 #[derive(Component)]

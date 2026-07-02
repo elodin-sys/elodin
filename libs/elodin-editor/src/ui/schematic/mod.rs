@@ -13,7 +13,9 @@ use crate::{
     },
     vector_arrow::ViewportArrow,
 };
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    camera::visibility::RenderLayers, ecs::system::SystemParam, prelude::*, window::PrimaryWindow,
+};
 use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
@@ -60,7 +62,7 @@ pub struct SchematicParam<'w, 's> {
     pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
-    pub grid_visibility: Query<'w, 's, &'static Visibility>,
+    pub camera_layers: Query<'w, 's, &'static RenderLayers>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub world_meshes: Query<'w, 's, (Entity, &'static WorldMesh)>,
@@ -182,9 +184,10 @@ impl SchematicParam<'_, '_> {
 
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
-                            && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
+                            && let Ok(render_layers) = self.camera_layers.get(cam_entity)
                         {
-                            show_grid = matches!(*visibility, Visibility::Visible);
+                            show_grid =
+                                render_layers.intersects(&RenderLayers::layer(grid_handle.layer));
                         }
 
                         let show_arrows = vp_config.map(|c| c.show_arrows).unwrap_or(true);

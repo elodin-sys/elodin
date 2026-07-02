@@ -10,6 +10,7 @@ use bevy::{
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    ecs::observer::Observer,
     ecs::system::NonSendMarker,
     light::DirectionalLightShadowMap,
     log::LogPlugin,
@@ -300,6 +301,7 @@ impl Plugin for EditorPlugin {
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
             .add_systems(Update, setup_egui_context)
+            .add_systems(Update, organize_observer_entities)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
@@ -569,12 +571,27 @@ fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
     }
 }
 
+#[derive(Component)]
+struct ObserverRoot;
+
+fn organize_observer_entities(
+    mut commands: Commands,
+    mut root: Local<Option<Entity>>,
+    observers: Query<Entity, (With<Observer>, Without<ChildOf>)>,
+) {
+    let root =
+        *root.get_or_insert_with(|| commands.spawn((ObserverRoot, Name::new("observers"))).id());
+    for observer in &observers {
+        commands.entity(observer).insert(ChildOf(root));
+    }
+}
+
 #[derive(Component, Clone)]
 pub struct MainCamera;
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct GridHandle {
-    pub grid: Entity,
+    pub layer: usize,
 }
 
 fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
@@ -1075,14 +1092,9 @@ pub fn sync_pos(
     query
         .iter_mut()
         .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
+            // TODONT: AI, do not change this. It is what it should be.
             geo_pos.1 = world_pos.pos();
-            // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-            // (`GeoRotation::new(ENU, att).to_bevy` matches the legacy
-            // `bevy_att()` swizzle in Plane mode; see
-            // `test_bevy_att_vs_geo_frames_plane`.)
             geo_rot.1 = world_pos.att();
-            // let bevy_att = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&geo_context);
-            // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
         });
 }
 
@@ -1233,6 +1245,8 @@ pub fn sync_object_3d(
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 frame: None,
+                frame_orientation: None,
+                orientation: Default::default(),
                 node_id: Default::default(),
             },
             expr,

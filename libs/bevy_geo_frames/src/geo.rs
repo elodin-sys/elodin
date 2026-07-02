@@ -5,7 +5,7 @@
 //! a right-multiplication as $v_{bevy} = {bevy}_R_{enu} * v_{enu}$. This
 //! convention was chosen so that frames can be easily checked by adjacency.
 #![allow(non_snake_case)]
-use crate::GeoFrame;
+use crate::{GeoFrame, RotationKind};
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
 use map_3d::Ellipsoid;
@@ -480,17 +480,6 @@ impl GeoVelocity {
         let w = GeoFrame::bevy_R_(frame, context).transpose() * v;
         GeoVelocity(*frame, w)
     }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum RotationKind {
-    #[default]
-    /// The rotation is relative. An identity rotation in any frame is an
-    /// identity rotation in Bevy's frame.
-    Relative,
-    /// The rotation is absolute. An identity rotation in ENU will produce a
-    /// rotation that rotates [x,y,z] to [x,z,-y] for instance.
-    Absolute,
 }
 
 /// Per-entity geo orientation:
