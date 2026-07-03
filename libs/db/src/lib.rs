@@ -484,15 +484,7 @@ impl DB {
     /// Asset Server too. Unparsable or non-schematic `.kdl` is stored verbatim.
     pub fn store_asset(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
         let assets_dir = crate::assets_http::assets_dir(&self.path);
-        if key.ends_with(".kdl")
-            && let Ok(content) = std::str::from_utf8(bytes)
-            && let Some(rewritten) =
-                crate::assets::rewrite_schematic_kdl_to_db(&assets_dir, content)
-        {
-            crate::assets_http::write_asset_file(&assets_dir, key, rewritten.as_bytes())?;
-        } else {
-            crate::assets_http::write_asset_file(&assets_dir, key, bytes)?;
-        }
+        crate::assets::write_uploaded_asset(&assets_dir, key, bytes)?;
         // Bytes changed: bump the revision so followers re-mirror and editors
         // reload even if `schematic.active` is unchanged. A persistence hiccup
         // must not fail the (already written) asset, so log rather than error.

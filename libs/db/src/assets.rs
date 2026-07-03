@@ -198,6 +198,22 @@ pub fn rewrite_schematic_kdl_to_db(assets_dir: &Path, content: &str) -> Option<S
     (serialized != content).then_some(serialized)
 }
 
+/// Write an uploaded asset under `assets_dir`, routing `.kdl` content through
+/// [`rewrite_schematic_kdl_to_db`] first. This is the shared write path for
+/// network uploads (Impeller `StoreAsset` and asset HTTP `PUT`), so a schematic
+/// gets its local asset paths rewritten to `db:` no matter which transport
+/// delivered it. Unparsable or non-schematic `.kdl` is stored verbatim.
+pub fn write_uploaded_asset(assets_dir: &Path, key: &str, bytes: &[u8]) -> io::Result<()> {
+    if key.ends_with(".kdl")
+        && let Ok(content) = std::str::from_utf8(bytes)
+        && let Some(rewritten) = rewrite_schematic_kdl_to_db(assets_dir, content)
+    {
+        write_asset_file(assets_dir, key, rewritten.as_bytes())
+    } else {
+        write_asset_file(assets_dir, key, bytes)
+    }
+}
+
 /// Resolve the stored asset key for a local path referenced by a schematic to
 /// the key actually present under `assets_dir`, or `None` to leave it local.
 ///

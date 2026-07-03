@@ -601,7 +601,9 @@ async fn get_asset(
 /// `PUT /<key>` writes an asset, the network replacement for a filesystem
 /// write. Path sanitization and reserved-key rejection live in
 /// `write_asset_file`; here we add the write gate (`writable`) so a follower
-/// replica returns `405` instead of diverging from its source.
+/// replica returns `405` instead of diverging from its source. Uploads go
+/// through `write_uploaded_asset` so a `.kdl` schematic gets the same local →
+/// `db:` path rewrite as Impeller `StoreAsset` and tree ingest.
 async fn put_asset(
     AxumPath(path): AxumPath<String>,
     State(state): State<Arc<AssetsState>>,
@@ -615,7 +617,7 @@ async fn put_asset(
     let name = path.clone();
     let db = state.db.clone();
     match tokio::task::spawn_blocking(move || {
-        write_asset_file(&assets_dir, &name, &body)?;
+        crate::assets::write_uploaded_asset(&assets_dir, &name, &body)?;
         // Bytes changed: bump the revision so followers re-mirror and editors
         // reload even under an unchanged `schematic.active`. A persistence
         // hiccup must not fail the (already written) upload — log and move on.
@@ -963,6 +965,41 @@ mod tests {
             .unwrap();
         assert_eq!(get.status(), StatusCode::OK);
         assert_eq!(get.bytes().await.unwrap().as_ref(), b"glb-bytes");
+    }
+
+    #[tokio::test]
+    async fn put_rewrites_schematic_paths_to_db() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        write_asset_file(&assets, "meshes/drone.glb", b"glb").unwrap();
+        let bound = spawn_test_asset_server(assets, true).await;
+
+        // A schematic uploaded over HTTP must get the same local → db: path
+        // rewrite as Impeller StoreAsset and tree ingest, or the editor and
+        // followers resolve `meshes/drone.glb` as a relative URL and fail.
+        let client = reqwest::Client::new();
+        let put = client
+            .put(format!("http://{bound}/schematics/main.kdl"))
+            .body(
+                b"object_3d \"drone.world_pos\" {\n    glb path=\"meshes/drone.glb\"\n}\n".to_vec(),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::NO_CONTENT);
+
+        let stored = client
+            .get(format!("http://{bound}/schematics/main.kdl"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(
+            stored.contains("path=\"db:meshes/drone.glb\""),
+            "PUT schematic should be rewritten to db: paths, got:\n{stored}"
+        );
     }
 
     #[tokio::test]

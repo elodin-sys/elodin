@@ -227,6 +227,12 @@ async fn apply_source_snapshot(
         let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
     }
     db.save_db_state()?;
+    // The wholesale replace above bypasses `apply_set_db_config`, so bump the
+    // config generation here too; otherwise `SubscribeLastUpdated` clients keep
+    // a stale `schematic.active`/`assets.revision` until unrelated telemetry
+    // moves `last_updated` (RFD #724).
+    db.db_config_gen
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     for metadata in &metadata_resp.component_metadata {
         db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
@@ -577,6 +583,7 @@ mod tests {
         };
         let config = FollowConfig::default();
 
+        let gen0 = db.db_config_gen.latest();
         apply_source_snapshot(
             &config,
             &db,
@@ -586,6 +593,10 @@ mod tests {
         )
         .await
         .unwrap();
+
+        // The snapshot must wake `SubscribeLastUpdated` config pushes; without
+        // the bump clients keep the stale config until telemetry moves.
+        assert!(db.db_config_gen.latest() > gen0);
 
         db.with_state(|state| {
             assert_eq!(
