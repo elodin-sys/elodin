@@ -21,6 +21,7 @@ use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -32,7 +33,8 @@ use crate::{
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
-            DocumentLoaded, DocumentReloaded, SchematicDocumentAsset, SchematicWindow,
+            DocumentLoaded, DocumentReloaded, LastActiveSchematicContent, SchematicDocumentAsset,
+            SchematicWindow,
         },
         render_layer_alloc::RenderLayerAllocator,
     },
@@ -114,6 +116,15 @@ pub struct SyncedViewport;
 #[derive(Component)]
 pub struct SchematicSpawned;
 
+/// Number of fetch/parse attempts for one window sub-schematic before it is
+/// dropped with a warning. A window's asset can 404 or parse torn bytes
+/// transiently — a follower still mirroring it, or a save's `PUT`s mid-flight —
+/// and a single silent failure would make the window vanish for the session.
+const MAX_WINDOW_FETCH_ATTEMPTS: u32 = 10;
+
+/// Delay between window sub-schematic fetch attempts.
+const WINDOW_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+
 /// A window sub-schematic whose `db:`/HTTP KDL is being fetched off the main
 /// thread. Spawned by `load_schematic` and drained by
 /// `apply_pending_window_schematics` once the fetch lands, so a slow or
@@ -123,7 +134,12 @@ struct PendingWindowLoad {
     theme_mode: Option<String>,
     theme_scheme: String,
     path: PathBuf,
-    task: Task<Result<String, String>>,
+    /// `None` while waiting for a scheduled retry slot.
+    task: Option<Task<Result<String, String>>>,
+    /// Failed attempts so far; transient errors retry bounded instead of
+    /// silently dropping the window.
+    attempts: u32,
+    retry_at: Option<Instant>,
 }
 
 /// Queue of in-flight remote window sub-schematic fetches (RFD #724). Cleared at
@@ -162,6 +178,10 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
     pending_windows: ResMut<'w, PendingWindowSchematics>,
+    /// Records each spawned `db:` window's stored KDL so a revision-gated
+    /// refetch can tell a window-only remote save apart from an unrelated
+    /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
+    last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -504,7 +524,9 @@ impl LoadSchematicParams<'_, '_> {
                         theme_mode: theme_mode.clone(),
                         theme_scheme: theme_selection.scheme.clone(),
                         path,
-                        task,
+                        task: Some(task),
+                        attempts: 0,
+                        retry_at: None,
                     });
                     continue;
                 }
@@ -546,48 +568,91 @@ impl LoadSchematicParams<'_, '_> {
     /// Spawns windows whose remote sub-schematic fetch (queued by
     /// `load_schematic`) has completed, draining the in-flight queue. Cheap when
     /// nothing is pending; called every frame by `apply_pending_window_schematics`.
+    ///
+    /// Fetch and parse failures are retried bounded (Bug 4): a window's asset
+    /// can 404 or hold torn bytes transiently — a follower still mirroring it,
+    /// or a save's `PUT`s mid-flight — and a single silent failure would make
+    /// the window vanish for the rest of the session.
     fn poll_pending_window_schematics(&mut self) {
         if self.pending_windows.loads.is_empty() {
             return;
         }
+        let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let now = Instant::now();
         let mut ready = Vec::new();
         self.pending_windows.loads.retain_mut(|load| {
-            match future::block_on(future::poll_once(&mut load.task)) {
-                Some(result) => {
+            if load.task.is_none() {
+                if load.retry_at.is_some_and(|at| now < at) {
+                    return true;
+                }
+                let fetch_path = load.path.clone();
+                load.retry_at = None;
+                load.task =
+                    Some(IoTaskPool::get().spawn(async move {
+                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                    }));
+            }
+            let task = load.task.as_mut().expect("window fetch task just spawned");
+            let Some(result) = future::block_on(future::poll_once(task)) else {
+                return true;
+            };
+            load.task = None;
+            // Parse here so torn bytes share the retry path with fetch errors.
+            let parsed = result.and_then(|kdl| {
+                impeller2_wkt::Schematic::from_kdl(&kdl)
+                    .map(|schematic| (kdl, schematic))
+                    .map_err(|err| render_diag(&err))
+            });
+            match parsed {
+                Ok((kdl, schematic)) => {
                     ready.push((
                         std::mem::take(&mut load.descriptor),
                         load.theme_mode.take(),
                         std::mem::take(&mut load.theme_scheme),
                         std::mem::take(&mut load.path),
-                        result,
+                        kdl,
+                        schematic,
                     ));
                     false
                 }
-                None => true,
-            }
-        });
-        for (descriptor, theme_mode, theme_scheme, path, result) in ready {
-            match result {
-                Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
-                    Ok(window_schematic) => {
-                        self.spawn_window(
-                            &window_schematic,
-                            descriptor,
-                            theme_mode.as_deref(),
-                            &theme_scheme,
-                            Some(path.as_path()),
-                        );
-                    }
-                    Err(err) => {
-                        let diag = render_diag(&err);
-                        let report = miette!(err.clone());
-                        warn!(?report, ?path, "Failed to parse window schematic: \n{diag}");
-                    }
-                },
                 Err(err) => {
-                    warn!(%err, ?path, "Failed to read window schematic");
+                    load.attempts += 1;
+                    if load.attempts >= MAX_WINDOW_FETCH_ATTEMPTS {
+                        warn!(
+                            %err,
+                            path = ?load.path,
+                            "Failed to load window schematic; giving up"
+                        );
+                        false
+                    } else {
+                        debug!(
+                            %err,
+                            path = ?load.path,
+                            attempts = load.attempts,
+                            "Window schematic fetch failed; retrying"
+                        );
+                        load.retry_at = Some(now + WINDOW_FETCH_RETRY_DELAY);
+                        true
+                    }
                 }
             }
+        });
+        for (descriptor, theme_mode, theme_scheme, path, kdl, window_schematic) in ready {
+            // Record the stored content so a revision-gated refetch can detect
+            // a later remote save that only touched this window (Bug 2).
+            if let (Some(key), Some(last_content)) = (
+                path.to_str().and_then(|p| p.strip_prefix("db:")),
+                self.last_content.as_deref_mut(),
+            ) {
+                last_content.record_window(key, &kdl);
+            }
+            self.spawn_window(
+                &window_schematic,
+                descriptor,
+                theme_mode.as_deref(),
+                &theme_scheme,
+                Some(path.as_path()),
+            );
         }
     }
 

@@ -223,6 +223,21 @@ impl DbSavePlan {
             .last()
             .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
     }
+
+    /// `(key, KDL)` of each window sub-schematic upload (every entry before the
+    /// final active-schematic one), recorded as known stored content once the
+    /// upload lands so a revision-gated refetch can compare windows too.
+    pub(crate) fn window_schematic_kdls(&self) -> Vec<(String, String)> {
+        let window_count = self.schematic_uploads.len().saturating_sub(1);
+        self.schematic_uploads[..window_count]
+            .iter()
+            .filter_map(|(key, bytes)| {
+                std::str::from_utf8(bytes)
+                    .ok()
+                    .map(|kdl| (key.clone(), kdl.to_string()))
+            })
+            .collect()
+    }
 }
 
 /// DB asset key a window sub-schematic is stored under. A bare file name (the
@@ -532,14 +547,17 @@ pub fn sync_document_from_config(
                             // baseline rather than reloading bytes we just wrote.
                             revision.suppress_next = false;
                             revision.revision = Some(current_revision);
-                        } else {
+                        } else if revision.requested != Some(current_revision) {
                             should_reload = true;
-                            // Adopt the baseline now: the fetch may skip the
-                            // reload when the schematic bytes are unchanged
-                            // (only_if_changed), and nothing else would
-                            // re-baseline in that case — leaving this system
-                            // re-requesting the same fetch every frame.
-                            revision.revision = Some(current_revision);
+                            // The baseline is deliberately NOT adopted here: it
+                            // is only consumed once the refetch concludes —
+                            // applied, or confirmed unchanged after its bounded
+                            // retries. A fetch that reads stale bytes (e.g. a
+                            // follower still mirroring this revision) must stay
+                            // reloadable rather than be masked forever (Bug 1/3).
+                            // `requested` keeps this system from re-dispatching
+                            // the same fetch every frame in the meantime.
+                            revision.requested = Some(current_revision);
                         }
                     }
                     Some(_) => {}
@@ -559,6 +577,7 @@ pub fn sync_document_from_config(
             save_path: Some(save_path_for_active_key(active_key)),
             only_if_changed,
             explicit,
+            revision: only_if_changed.then(|| config.assets_revision()),
         });
         return;
     }

@@ -20,6 +20,12 @@ pub struct OpenDocumentFromActiveRequest {
     /// rather than a background sync; forwarded into [`DocumentLoaded`] so an
     /// explicit open can re-apply the document's skybox over a sticky clear.
     pub explicit: bool,
+    /// `assets.revision` that triggered this gated refetch (`Some` only when
+    /// `only_if_changed`). Adopted as the sync baseline once the refetch
+    /// concludes the bump did not change the schematic — never at request
+    /// time, so a fetch that read stale bytes (a follower still mirroring)
+    /// cannot permanently mask a real change.
+    pub revision: Option<u64>,
 }
 
 /// Asset key under the DB Asset Server that holds the editor's active schematic.

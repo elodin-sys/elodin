@@ -19,19 +19,33 @@ use super::types::*;
 /// `OpenDocumentFromActiveRequest` spawns the fetch here and the same system
 /// applies the result once it lands, so a slow or unreachable DB never freezes
 /// the UI mid-frame.
-/// Maximum number of fetch attempts for one active-schematic key before the
-/// load is surfaced as a failure. Covers the transition window where the asset
-/// is still being synced/uploaded (follower lag, slow `PUT`).
+/// Number of fast fetch attempts for one active-schematic key before the
+/// failure is surfaced. Covers the transition window where the asset is still
+/// being synced/uploaded (follower lag, slow `PUT`).
 const MAX_ACTIVE_FETCH_ATTEMPTS: u32 = 10;
 
-/// Delay between active-schematic fetch attempts.
+/// Delay between fast active-schematic fetch attempts.
 const ACTIVE_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+
+/// Retry cadence once the fast attempts are exhausted. The failure is surfaced
+/// once and retries then continue at this slower pace instead of stranding the
+/// editor: `schematic.active` still names this key, so it must eventually load
+/// (e.g. a follower whose mirror outlasts the fast budget) (Bug 3).
+const ACTIVE_FETCH_SLOW_RETRY_DELAY: Duration = Duration::from_secs(5);
+
+/// Total attempt budget for a *gated* refetch whose bytes keep coming back
+/// unchanged. On a follower the fetched bytes can predate the mirror of the
+/// revision that triggered the refetch, so "unchanged" is retried (fast, then
+/// slow) before the bump is finally deemed unrelated and the revision baseline
+/// adopted (Bug 1). Bounded — unlike failure retries — so an unrelated bump
+/// (skybox cubemap, mesh `PUT`) doesn't refetch the schematic forever.
+const MAX_GATED_UNCHANGED_ATTEMPTS: u32 = 2 * MAX_ACTIVE_FETCH_ATTEMPTS;
 
 #[derive(Resource, Default)]
 pub(crate) struct ActiveSchematicFetch {
     key: Option<String>,
     /// Attempt number (0-based) of the in-flight fetch, so a transient failure
-    /// can schedule the next bounded retry.
+    /// can schedule the next retry.
     attempts: u32,
     task: Option<Task<ActiveSchematicFetched>>,
     /// Scheduled re-attempt after a transient failure.
@@ -43,7 +57,7 @@ pub(crate) struct ActiveSchematicFetch {
     refetch_pending: Option<OpenDocumentFromActiveRequest>,
 }
 
-/// A bounded re-attempt of an active-schematic fetch whose asset was not yet
+/// A scheduled re-attempt of an active-schematic fetch whose asset was not yet
 /// available (e.g. a follower still mirroring it, or an in-flight upload).
 struct PendingRetry {
     request: OpenDocumentFromActiveRequest,
@@ -51,9 +65,20 @@ struct PendingRetry {
     next_at: Instant,
 }
 
+/// Result of one active-schematic fetch pass.
+struct FetchedActiveSchematic {
+    content: String,
+    /// Whether any `db:` window sub-schematic referenced by the fetched root
+    /// differs from the recorded stored contents. Computed only for gated
+    /// refetches whose root bytes are unchanged: a remote save that touched
+    /// only a window leaves the root identical, so gating on the root alone
+    /// would make that change invisible (Bug 2).
+    windows_changed: bool,
+}
+
 struct ActiveSchematicFetched {
     request: OpenDocumentFromActiveRequest,
-    result: Result<String, String>,
+    result: Result<FetchedActiveSchematic, String>,
 }
 
 /// Whether the in-flight fetch already covers `request`, so a new request must
@@ -64,27 +89,95 @@ fn fetch_covers_request(fetch_key: Option<&str>, request: &OpenDocumentFromActiv
     fetch_key == Some(request.key.as_str())
 }
 
-/// After a fetch failure, the next attempt count to retry with, or `None` once
-/// attempts are exhausted (surface the failure).
-fn next_fetch_attempt(attempts: u32) -> Option<u32> {
-    (attempts + 1 < MAX_ACTIVE_FETCH_ATTEMPTS).then_some(attempts + 1)
+/// After a gated refetch returned unchanged bytes, the next attempt count to
+/// retry with, or `None` once the bounded budget is spent (the bump is then
+/// deemed unrelated and the revision baseline adopted).
+fn next_gated_unchanged_attempt(attempts: u32) -> Option<u32> {
+    (attempts + 1 < MAX_GATED_UNCHANGED_ATTEMPTS).then_some(attempts + 1)
+}
+
+/// Delay before the retry carrying `attempts`: fast within the initial budget,
+/// slow afterwards.
+fn fetch_retry_delay(attempts: u32) -> Duration {
+    if attempts >= MAX_ACTIVE_FETCH_ATTEMPTS {
+        ACTIVE_FETCH_SLOW_RETRY_DELAY
+    } else {
+        ACTIVE_FETCH_RETRY_DELAY
+    }
+}
+
+/// Failures are surfaced to the user exactly once per request cycle — when the
+/// fast attempts run out — while retries keep going at the slow cadence.
+fn should_surface_fetch_failure(attempts: u32) -> bool {
+    attempts == MAX_ACTIVE_FETCH_ATTEMPTS
+}
+
+/// For a gated refetch, decide on the IO pool whether any `db:` window
+/// sub-schematic referenced by the fetched root changed relative to the
+/// recorded stored contents.
+///
+/// Skipped (`false`) when the root itself differs from the snapshot: the gate
+/// fails on the root alone and a full reload follows regardless, so the window
+/// fetches would be wasted. A window that cannot be fetched or was never
+/// recorded counts as changed — the reload path (with its own retries) then
+/// re-establishes ground truth rather than this gate silently keeping a stale
+/// document.
+fn gated_windows_changed(
+    key: &str,
+    root_kdl: &str,
+    snapshot: &StoredSchematicSnapshot,
+    addr: Option<SocketAddr>,
+) -> bool {
+    use impeller2_kdl::FromKdl;
+    if !snapshot.root_matches(key, root_kdl) {
+        return false;
+    }
+    let Ok(root) = impeller2_wkt::Schematic::from_kdl(root_kdl) else {
+        return false;
+    };
+    for elem in &root.elems {
+        let impeller2_wkt::SchematicElem::Window(window) = elem else {
+            continue;
+        };
+        let Some(window_key) = window.path.as_deref().and_then(|p| p.strip_prefix("db:")) else {
+            continue;
+        };
+        let Ok(content) = fetch_active_schematic_kdl(window_key, addr) else {
+            return true;
+        };
+        if !snapshot.window_matches(window_key, &content) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Spawn an active-schematic fetch on the IO pool; clears any scheduled retry
-/// it supersedes.
+/// it supersedes. Gated refetches carry a snapshot of the recorded stored
+/// contents so the task can also compare window sub-schematics (Bug 2).
 fn spawn_active_fetch(
     fetch: &mut ActiveSchematicFetch,
     request: OpenDocumentFromActiveRequest,
     attempts: u32,
     addr: Option<SocketAddr>,
+    last_content: &LastActiveSchematicContent,
 ) {
     let key = request.key.clone();
+    let snapshot = request.only_if_changed.then(|| last_content.snapshot());
     fetch.key = Some(request.key.clone());
     fetch.attempts = attempts;
     fetch.retry = None;
     fetch.refetch_pending = None;
     fetch.task = Some(IoTaskPool::get().spawn(async move {
-        let result = fetch_active_schematic_kdl(&key, addr);
+        let result = fetch_active_schematic_kdl(&key, addr).map(|content| {
+            let windows_changed = snapshot
+                .as_ref()
+                .is_some_and(|snapshot| gated_windows_changed(&key, &content, snapshot, addr));
+            FetchedActiveSchematic {
+                content,
+                windows_changed,
+            }
+        });
         ActiveSchematicFetched { request, result }
     }));
 }
@@ -134,6 +227,7 @@ pub(super) fn handle_open_document_from_active_requests(
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
     mut last_content: ResMut<LastActiveSchematicContent>,
+    mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
@@ -152,7 +246,7 @@ pub(super) fn handle_open_document_from_active_requests(
         if already_fetching {
             fetch.refetch_pending = Some(request);
         } else {
-            spawn_active_fetch(&mut fetch, request, 0, addr);
+            spawn_active_fetch(&mut fetch, request, 0, addr, &last_content);
         }
     }
 
@@ -170,7 +264,7 @@ pub(super) fn handle_open_document_from_active_requests(
         } else {
             let request = retry.request.clone();
             let attempts = retry.attempts;
-            spawn_active_fetch(&mut fetch, request, attempts, addr);
+            spawn_active_fetch(&mut fetch, request, attempts, addr, &last_content);
         }
     }
 
@@ -202,48 +296,84 @@ pub(super) fn handle_open_document_from_active_requests(
     // fetched may already be stale, so re-fetch fresh ones (attempt budget
     // reset) rather than applying this result.
     if let Some(newer) = refetch_pending {
-        spawn_active_fetch(&mut fetch, newer, 0, addr);
+        spawn_active_fetch(&mut fetch, newer, 0, addr, &last_content);
         return;
     }
 
-    let content = match result {
-        Ok(content) => content,
-        Err(error) => match next_fetch_attempt(attempts) {
+    let fetched = match result {
+        Ok(fetched) => fetched,
+        // Fetch failures retry without ever giving up: `schematic.active` still
+        // names this key, so it must eventually load. The failure is surfaced
+        // once when the fast budget runs out, then retries continue at the slow
+        // cadence rather than stranding the editor on a stale document until an
+        // unrelated `DbConfig` change (Bug 3).
+        Err(error) => {
+            let next_attempts = attempts.saturating_add(1);
+            if should_surface_fetch_failure(next_attempts) {
+                failed.write(DocumentCommandFailed {
+                    title: "Failed to Load Active Schematic".to_string(),
+                    message: format!("{error} — still retrying in the background"),
+                });
+            } else {
+                bevy::log::debug!(
+                    "Active schematic fetch failed ({error}); retrying ({next_attempts})"
+                );
+            }
+            fetch.retry = Some(PendingRetry {
+                request,
+                attempts: next_attempts,
+                next_at: Instant::now() + fetch_retry_delay(next_attempts),
+            });
+            return;
+        }
+    };
+    // A revision-triggered refetch whose schematic bytes (root and window
+    // sub-schematics) are unchanged. On a follower the fetched bytes can
+    // predate the mirror of the revision that triggered this refetch, so
+    // "unchanged" is not yet proof the bump was unrelated: retry within the
+    // bounded budget, and only once it is spent conclude the bump came from an
+    // unrelated asset write (skybox cubemap, mesh…) and adopt the revision
+    // baseline — never before (Bug 1). Keeping the current document instead of
+    // tearing it down matters because a full reload resets the viewport and
+    // window layout (Bug 1/2).
+    if request.only_if_changed
+        && last_content.matches(&request.key, &fetched.content)
+        && !fetched.windows_changed
+    {
+        match next_gated_unchanged_attempt(attempts) {
             Some(next_attempts) => {
                 bevy::log::debug!(
-                    "Active schematic fetch failed ({error}); retrying \
-                     ({next_attempts}/{MAX_ACTIVE_FETCH_ATTEMPTS})"
+                    key = %request.key,
+                    "active schematic unchanged after revision bump; re-checking \
+                     ({next_attempts}/{MAX_GATED_UNCHANGED_ATTEMPTS})"
                 );
                 fetch.retry = Some(PendingRetry {
                     request,
                     attempts: next_attempts,
-                    next_at: Instant::now() + ACTIVE_FETCH_RETRY_DELAY,
+                    next_at: Instant::now() + fetch_retry_delay(next_attempts),
                 });
-                return;
             }
             None => {
-                failed.write(DocumentCommandFailed {
-                    title: "Failed to Load Active Schematic".to_string(),
-                    message: error,
-                });
-                return;
+                bevy::log::debug!(
+                    key = %request.key,
+                    "active schematic still unchanged; adopting revision baseline"
+                );
+                if let (Some(target), Some(revision)) =
+                    (request.revision, last_synced_revision.as_deref_mut())
+                {
+                    revision.revision = Some(target);
+                }
             }
-        },
-    };
-    // A revision-triggered refetch whose schematic bytes are unchanged: the
-    // bump came from an unrelated asset write (skybox cubemap, mesh…), so keep
-    // the current document instead of tearing it down and respawning it — a
-    // full reload resets the viewport and window layout (Bug 1/2).
-    if request.only_if_changed && last_content.matches(&request.key, &content) {
-        bevy::log::debug!(
-            key = %request.key,
-            "active schematic bytes unchanged after revision bump; skipping reload"
-        );
+        }
         return;
     }
-    match open_document_from_content(&content, request.save_path.clone(), &mut current_document) {
+    match open_document_from_content(
+        &fetched.content,
+        request.save_path.clone(),
+        &mut current_document,
+    ) {
         Ok(document) => {
-            last_content.record(&request.key, &content);
+            last_content.record(&request.key, &fetched.content);
             loaded.write(DocumentLoaded {
                 save_path: current_document.save_path.clone(),
                 document,
@@ -252,29 +382,28 @@ pub(super) fn handle_open_document_from_active_requests(
         }
         // A parse failure is often transient: a multi-`PUT` DB-native save bumps
         // `assets.revision` while its bytes are still landing, so config sync can
-        // fetch a torn, momentarily-invalid schematic. Schedule a backoff retry
-        // like a fetch error (same attempt budget) instead of only reporting and
+        // fetch a torn, momentarily-invalid schematic. Retry like a fetch error
+        // (surface once, then keep retrying slowly) instead of only reporting and
         // returning — otherwise `sync_document_from_config` won't reload until
         // `DbConfig` changes again, stranding the editor on the failure.
-        Err(error) => match next_fetch_attempt(attempts) {
-            Some(next_attempts) => {
-                bevy::log::debug!(
-                    "Active schematic parse failed ({error}); retrying \
-                     ({next_attempts}/{MAX_ACTIVE_FETCH_ATTEMPTS})"
-                );
-                fetch.retry = Some(PendingRetry {
-                    request,
-                    attempts: next_attempts,
-                    next_at: Instant::now() + ACTIVE_FETCH_RETRY_DELAY,
-                });
-            }
-            None => {
+        Err(error) => {
+            let next_attempts = attempts.saturating_add(1);
+            if should_surface_fetch_failure(next_attempts) {
                 failed.write(DocumentCommandFailed {
                     title: "Invalid Active Schematic".to_string(),
-                    message: error.to_string(),
+                    message: format!("{error} — still retrying in the background"),
                 });
+            } else {
+                bevy::log::debug!(
+                    "Active schematic parse failed ({error}); retrying ({next_attempts})"
+                );
             }
-        },
+            fetch.retry = Some(PendingRetry {
+                request,
+                attempts: next_attempts,
+                next_at: Instant::now() + fetch_retry_delay(next_attempts),
+            });
+        }
     }
 }
 
@@ -435,6 +564,7 @@ mod tests {
             save_path: None,
             only_if_changed: false,
             explicit: false,
+            revision: None,
         }
     }
 
@@ -457,23 +587,39 @@ mod tests {
     }
 
     #[test]
-    fn fetch_retries_until_attempts_exhausted() {
-        let mut attempts = 0;
-        let mut spawns = 1;
-        while let Some(next) = next_fetch_attempt(attempts) {
-            attempts = next;
-            spawns += 1;
-        }
-        assert_eq!(attempts, MAX_ACTIVE_FETCH_ATTEMPTS - 1);
-        assert_eq!(spawns, MAX_ACTIVE_FETCH_ATTEMPTS);
+    fn fetch_failure_retries_never_give_up() {
+        // Fast cadence within the initial budget, slow afterwards — but the
+        // retry chain itself is unbounded (Bug 3: the editor must not strand
+        // on a stale document because a follower mirror outlasted the budget).
+        assert_eq!(fetch_retry_delay(1), ACTIVE_FETCH_RETRY_DELAY);
+        assert_eq!(
+            fetch_retry_delay(MAX_ACTIVE_FETCH_ATTEMPTS - 1),
+            ACTIVE_FETCH_RETRY_DELAY
+        );
+        assert_eq!(
+            fetch_retry_delay(MAX_ACTIVE_FETCH_ATTEMPTS),
+            ACTIVE_FETCH_SLOW_RETRY_DELAY
+        );
+        assert_eq!(fetch_retry_delay(u32::MAX), ACTIVE_FETCH_SLOW_RETRY_DELAY);
     }
 
     #[test]
-    fn fetch_gives_up_on_last_attempt() {
-        assert_eq!(next_fetch_attempt(MAX_ACTIVE_FETCH_ATTEMPTS - 1), None);
-        assert_eq!(
-            next_fetch_attempt(MAX_ACTIVE_FETCH_ATTEMPTS - 2),
-            Some(MAX_ACTIVE_FETCH_ATTEMPTS - 1)
-        );
+    fn fetch_failure_is_surfaced_exactly_once() {
+        let surfaced: Vec<u32> = (1..=3 * MAX_ACTIVE_FETCH_ATTEMPTS)
+            .filter(|attempts| should_surface_fetch_failure(*attempts))
+            .collect();
+        assert_eq!(surfaced, vec![MAX_ACTIVE_FETCH_ATTEMPTS]);
+    }
+
+    #[test]
+    fn gated_unchanged_retries_are_bounded() {
+        let mut attempts = 0;
+        let mut checks = 1;
+        while let Some(next) = next_gated_unchanged_attempt(attempts) {
+            attempts = next;
+            checks += 1;
+        }
+        assert_eq!(attempts, MAX_GATED_UNCHANGED_ATTEMPTS - 1);
+        assert_eq!(checks, MAX_GATED_UNCHANGED_ATTEMPTS);
     }
 }

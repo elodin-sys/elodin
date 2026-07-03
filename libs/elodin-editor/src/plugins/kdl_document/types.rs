@@ -20,12 +20,20 @@ pub struct LastSyncedActiveKey(pub Option<String>);
 /// `schematic.active` key were replaced by another client (RFD #724, Bug 1).
 #[derive(Resource, Default)]
 pub struct LastSyncedAssetsRevision {
-    /// Revision current when the active schematic was last loaded.
+    /// Revision current when the active schematic was last loaded. Only
+    /// consumed (adopted) once a refetch concludes — applied, or confirmed
+    /// unchanged after its bounded retries — never at request time: a refetch
+    /// can read stale bytes (a follower mid-mirror), and pre-adopting the
+    /// baseline would mask the real change forever.
     pub revision: Option<u64>,
     /// Adopt the next revision change as a new baseline without reloading —
     /// set after a *local* save so the editor doesn't reload bytes it just
     /// wrote (its own write bumps the revision too).
     pub suppress_next: bool,
+    /// Revision a gated refetch has already been dispatched for, so config
+    /// sync doesn't re-request the same fetch every frame while it runs
+    /// (the baseline above stays un-adopted until the fetch concludes).
+    pub requested: Option<u64>,
 }
 
 /// Normalized KDL the editor last knows to be stored at the active schematic
@@ -34,10 +42,46 @@ pub struct LastSyncedAssetsRevision {
 /// bytes actually changed" apart from "an unrelated asset (e.g. a skybox
 /// cubemap) bumped `assets.revision`", so the latter doesn't tear down and
 /// respawn the whole document (Bug 1/2).
+///
+/// Window sub-schematics are tracked alongside the root: a remote save that
+/// only touched a window leaves the root bytes identical, so gating on the
+/// root alone would make that change invisible.
 #[derive(Resource, Default)]
 pub struct LastActiveSchematicContent {
     key: Option<String>,
     normalized: Option<String>,
+    /// Normalized KDL last known stored per window sub-schematic asset key
+    /// (`schematics/foo.kdl` → content). Recorded when a `db:` window spawns
+    /// and when a local save uploads it.
+    windows: std::collections::HashMap<String, String>,
+}
+
+/// Immutable copy of [`LastActiveSchematicContent`] handed to the async gated
+/// refetch, which runs on the IO pool and cannot read ECS resources.
+#[derive(Clone, Default)]
+pub(crate) struct StoredSchematicSnapshot {
+    key: Option<String>,
+    normalized: Option<String>,
+    windows: std::collections::HashMap<String, String>,
+}
+
+impl StoredSchematicSnapshot {
+    /// Whether the fetched root `content` matches the recorded bytes for `key`.
+    pub(crate) fn root_matches(&self, key: &str, content: &str) -> bool {
+        self.key.as_deref() == Some(key)
+            && self.normalized.is_some()
+            && self.normalized == normalized_schematic_kdl(content)
+    }
+
+    /// Whether a fetched window sub-schematic matches its recorded content.
+    /// An unrecorded key or unparsable content never matches, so the caller
+    /// falls back to a full reload rather than silently keeping a stale view.
+    pub(crate) fn window_matches(&self, key: &str, content: &str) -> bool {
+        let Some(recorded) = self.windows.get(key) else {
+            return false;
+        };
+        normalized_schematic_kdl(content).as_deref() == Some(recorded.as_str())
+    }
 }
 
 /// Formatting-insensitive form of a schematic KDL document (hand-written
@@ -54,6 +98,19 @@ impl LastActiveSchematicContent {
         self.normalized = normalized_schematic_kdl(content);
     }
 
+    /// Record the stored content of a window sub-schematic asset. Unparsable
+    /// content clears the entry so the gate can't match against stale bytes.
+    pub fn record_window(&mut self, key: &str, content: &str) {
+        match normalized_schematic_kdl(content) {
+            Some(normalized) => {
+                self.windows.insert(key.to_string(), normalized);
+            }
+            None => {
+                self.windows.remove(key);
+            }
+        }
+    }
+
     /// Whether `content` matches the last known stored bytes for `key`.
     /// Unparsable or unknown content never matches, so the caller falls back
     /// to a full reload.
@@ -61,6 +118,14 @@ impl LastActiveSchematicContent {
         self.key.as_deref() == Some(key)
             && self.normalized.is_some()
             && self.normalized == normalized_schematic_kdl(content)
+    }
+
+    pub(crate) fn snapshot(&self) -> StoredSchematicSnapshot {
+        StoredSchematicSnapshot {
+            key: self.key.clone(),
+            normalized: self.normalized.clone(),
+            windows: self.windows.clone(),
+        }
     }
 }
 

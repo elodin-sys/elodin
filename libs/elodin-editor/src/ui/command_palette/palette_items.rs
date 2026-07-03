@@ -96,6 +96,10 @@ pub struct SchematicSaveInFlight {
     /// content once the save lands so later `assets.revision` bumps from
     /// unrelated asset writes don't reload the document (Bug 1/2).
     content: Option<String>,
+    /// `(key, KDL)` of each uploaded window sub-schematic, recorded alongside
+    /// the root so the revision-gate's window comparison doesn't mistake our
+    /// own save for an external window change (Bug 2).
+    window_contents: Vec<(String, String)>,
 }
 
 impl SchematicSaveInFlight {
@@ -1161,6 +1165,7 @@ fn queue_save_schematic_db_now(
     save_in_flight.skybox = root.skybox.as_ref().map(|s| s.name.clone());
     save_in_flight.pending_key = pending;
     save_in_flight.content = plan.active_schematic_kdl().map(str::to_string);
+    save_in_flight.window_contents = plan.window_schematic_kdls();
     // Upload off the main thread; `poll_schematic_save` repoints `schematic.active`
     // only after every `PUT` is acknowledged, so the pointer never claims a save
     // that did not land.
@@ -1193,6 +1198,7 @@ fn poll_schematic_save(
     let saved_skybox = save_in_flight.skybox.take();
     let pending = save_in_flight.pending_key.take();
     let saved_content = save_in_flight.content.take();
+    let saved_windows = std::mem::take(&mut save_in_flight.window_contents);
 
     match result {
         Ok(()) => {
@@ -1222,12 +1228,16 @@ fn poll_schematic_save(
                 if let Some(revision) = last_synced_revision.as_deref_mut() {
                     revision.suppress_next = true;
                 }
-                // These bytes are now the stored content at the key: a later
-                // revision bump from an unrelated asset write must not reload.
-                if let (Some(content), Some(last_content)) =
-                    (saved_content.as_deref(), last_content.as_deref_mut())
-                {
-                    last_content.record(&active_key, content);
+                // These bytes are now the stored content at the key (root and
+                // window sub-schematics): a later revision bump from an
+                // unrelated asset write must not reload.
+                if let Some(last_content) = last_content.as_deref_mut() {
+                    if let Some(content) = saved_content.as_deref() {
+                        last_content.record(&active_key, content);
+                    }
+                    for (key, kdl) in &saved_windows {
+                        last_content.record_window(key, kdl);
+                    }
                 }
                 // Pin the key we just saved so config sync ignores the DB's still
                 // -stale active pointer until it echoes this repoint, avoiding a
@@ -1416,6 +1426,7 @@ fn open_schematic_item(key: String) -> PaletteItem {
             if let Some(revision) = last_synced_revision.as_deref_mut() {
                 revision.revision = None;
                 revision.suppress_next = false;
+                revision.requested = None;
             }
             tx.send_msg(SetDbConfig {
                 metadata: [("schematic.active".to_string(), key.clone())]

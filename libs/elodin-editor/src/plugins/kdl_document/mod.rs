@@ -630,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn revision_bump_refetch_is_content_gated_and_rebaselined() {
+    fn revision_bump_refetch_is_content_gated_and_tracked() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(DbConfig::default())
@@ -681,18 +681,25 @@ mod tests {
             [("schematics/a.kdl".to_string(), true, false)],
             "a revision-only bump must request a content-gated refetch"
         );
-        // The baseline is adopted at request time: if the fetch skips the
-        // reload, nothing else re-baselines, and without this the same fetch
-        // would be re-requested every frame.
-        assert_eq!(
-            app.world().resource::<LastSyncedAssetsRevision>().revision,
-            Some(1),
-        );
+        // The baseline is NOT adopted at request time: a refetch that reads
+        // stale bytes (a follower mid-mirror) must stay reloadable. Only the
+        // fetch handler consumes it once the refetch concludes. `requested`
+        // tracks the dispatched target so the same fetch isn't re-requested
+        // every frame in the meantime.
+        {
+            let revision = app.world().resource::<LastSyncedAssetsRevision>();
+            assert_eq!(
+                revision.revision,
+                Some(0),
+                "the baseline must stay un-adopted until the refetch concludes"
+            );
+            assert_eq!(revision.requested, Some(1));
+        }
         app.update();
         assert_eq!(
             app.world().resource::<SeenActiveRequestFlags>().0.len(),
             2,
-            "the adopted baseline must not re-request the same fetch"
+            "the tracked in-flight target must not re-request the same fetch"
         );
     }
 
