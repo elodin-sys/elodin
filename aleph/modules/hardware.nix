@@ -42,6 +42,19 @@
     "pcie_tegra194"
     # Tegra-specific modules required for usb/sdimage boot
     "xhci-tegra"
+    # USB mass-storage boot path
+    "xhci-hcd"
+    "usb_storage"
+    "uas"
+    "sd_mod"
+    "scsi_mod"
+    "ext4"
+  ];
+  boot.initrd.kernelModules = [
+    "xhci-tegra"
+    "usb_storage"
+    "uas"
+    "sd_mod"
   ];
 
   # Avoids a bunch of extra modules we don't have in the tegra_defconfig, like "ata_piix",
