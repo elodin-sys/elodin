@@ -206,6 +206,7 @@ pub(crate) fn schematic_name_from_key(key: &str) -> Option<String> {
 
 /// What to `PUT` to the DB Asset Server before pointing `schematic.active` at a
 /// freshly authored schematic (RFD #724 Phase 2).
+#[derive(Debug)]
 pub(crate) struct DbSavePlan {
     /// `(asset key, bytes)` for window sub-schematics and, last, the active
     /// schematic itself.
@@ -289,11 +290,15 @@ fn rewrite_schematic_for_db(
 /// schematic is stored under `active_key` (e.g. `schematics/main.kdl`, or a
 /// user-named `schematics/<name>.kdl` for "Save As"). Pure (no I/O) so the
 /// rewrite and keying stay unit-testable.
+///
+/// Errors when `active_key` collides with the key of a window sub-schematic:
+/// the root is uploaded last, so it would silently overwrite the window's bytes
+/// and the stored root would reference itself as its own window.
 pub(crate) fn plan_db_save(
     root: &Schematic,
     windows: &[WindowDocumentSave],
     active_key: &str,
-) -> DbSavePlan {
+) -> Result<DbSavePlan, String> {
     let window_kdl: HashMap<&str, &str> = windows
         .iter()
         .map(|w| (w.file_name.as_str(), w.kdl.as_str()))
@@ -350,14 +355,24 @@ pub(crate) fn plan_db_save(
     let mut seen_assets = HashSet::new();
     local_assets.retain(|(key, _)| seen_assets.insert(key.clone()));
 
+    // "Save As" under a name that collides with a window's generated key would
+    // have the root (uploaded last) overwrite the window's bytes on the same
+    // key. Reject instead of corrupting the stored tree.
+    if let Some((key, _)) = schematic_uploads.iter().find(|(key, _)| key == active_key) {
+        let name = schematic_name_from_key(key).unwrap_or_else(|| key.clone());
+        return Err(format!(
+            "The name '{name}' is already used by a window of this schematic; choose another name"
+        ));
+    }
+
     // The active schematic is uploaded last so its dependencies are present
     // before `schematic.active` is repointed at it.
     schematic_uploads.push((active_key.to_string(), root.to_kdl().into_bytes()));
 
-    DbSavePlan {
+    Ok(DbSavePlan {
         schematic_uploads,
         local_assets,
-    }
+    })
 }
 
 /// Uploads a [`DbSavePlan`] to the DB Asset Server over HTTP `PUT`. Returns `Ok`
@@ -627,7 +642,7 @@ mod db_save_tests {
             kdl: "viewport {\n}\n".into(),
         }];
 
-        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY);
+        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY).unwrap();
 
         // The local mesh is queued for upload; the `db:` mesh is left untouched.
         assert_eq!(
@@ -676,7 +691,7 @@ mod db_save_tests {
             kdl: window.to_kdl(),
         }];
 
-        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY);
+        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY).unwrap();
 
         // The window's local mesh must be queued for upload...
         assert!(
@@ -720,7 +735,7 @@ mod db_save_tests {
             kdl: "viewport {\n}\n".into(),
         }];
 
-        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY);
+        let plan = plan_db_save(&root, &windows, ACTIVE_SCHEMATIC_KEY).unwrap();
 
         let keys: Vec<&str> = plan
             .schematic_uploads
@@ -749,15 +764,41 @@ mod db_save_tests {
 
     #[test]
     fn plan_db_save_without_deps_uploads_only_active() {
-        let plan = plan_db_save(&Schematic::default(), &[], ACTIVE_SCHEMATIC_KEY);
+        let plan = plan_db_save(&Schematic::default(), &[], ACTIVE_SCHEMATIC_KEY).unwrap();
         assert!(plan.local_assets.is_empty());
         assert_eq!(plan.schematic_uploads.len(), 1);
         assert_eq!(plan.schematic_uploads[0].0, ACTIVE_SCHEMATIC_KEY);
     }
 
     #[test]
+    fn plan_db_save_rejects_active_key_colliding_with_window() {
+        // "Save As" under the name of a window sub-schematic: the root, uploaded
+        // last on the same key, would silently overwrite the window's bytes.
+        let root = Schematic {
+            elems: vec![SchematicElem::Window(WindowSchematic {
+                title: Some("detail".into()),
+                path: Some("detail.kdl".into()),
+                screen: None,
+                screen_rect: None,
+            })],
+            ..Default::default()
+        };
+        let windows = vec![WindowDocumentSave {
+            window_id: WindowId(4),
+            file_name: "detail.kdl".into(),
+            kdl: "viewport {\n}\n".into(),
+        }];
+
+        let err = plan_db_save(&root, &windows, "schematics/detail.kdl").unwrap_err();
+        assert!(err.contains("detail"), "{err}");
+
+        // Any non-colliding name is still fine.
+        assert!(plan_db_save(&root, &windows, "schematics/other.kdl").is_ok());
+    }
+
+    #[test]
     fn plan_db_save_stores_active_under_named_key() {
-        let plan = plan_db_save(&Schematic::default(), &[], "schematics/orbit.kdl");
+        let plan = plan_db_save(&Schematic::default(), &[], "schematics/orbit.kdl").unwrap();
         assert_eq!(
             plan.schematic_uploads.last().unwrap().0,
             "schematics/orbit.kdl"

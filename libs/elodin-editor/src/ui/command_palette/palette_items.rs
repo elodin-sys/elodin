@@ -1150,13 +1150,24 @@ fn queue_save_schematic_db_now(
         return;
     };
 
+    let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
+    let windows = window_document_saves(&window_schematics);
+    // A rejected plan (e.g. "Save As" name colliding with a window's key) keeps
+    // the pending name so a retry re-prompts with the same target.
+    let plan = match plan_db_save(&root, &windows, &active_key) {
+        Ok(plan) => plan,
+        Err(err) => {
+            failed.write(DocumentCommandFailed {
+                title: "Failed to Save Schematic".to_string(),
+                message: err,
+            });
+            return;
+        }
+    };
+
     // Committed to uploading: consume the pending name now. `poll_schematic_save`
     // restores it if the upload itself fails.
     pending_key.0 = None;
-
-    let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
-    let windows = window_document_saves(&window_schematics);
-    let plan = plan_db_save(&root, &windows, &active_key);
 
     // Record the active key once the upload lands so config sync doesn't mistake
     // the DB's echo of our own save for an external change (which would reload
