@@ -18,7 +18,7 @@ This simulation implements the complete flight dynamics of a BDX RC jet followin
 
 Follow the [main README](../../README.md) for Elodin installation.
 
-This example expects a single Elodin asset root (`ELODIN_ASSETS_DIR`, defaulting to `./assets`) containing both the normal model assets and the Death Valley terrain atlas:
+This example expects a single Elodin asset root (`ELODIN_ASSETS`, defaulting to `./assets`) containing both the normal model assets and the Death Valley terrain atlas:
 
 ```text
 assets/

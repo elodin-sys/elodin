@@ -92,7 +92,7 @@
       # };
       #
       # Any user can run sims. Shared, writable asset root:
-      #   ELODIN_ASSETS_DIR=/var/lib/elodin/assets   (drop your own meshes/skyboxes here)
+      #   ELODIN_ASSETS=/var/lib/elodin/assets   (drop your own meshes/skyboxes here)
       # Packaged examples: /var/lib/elodin/examples
       # To deploy your own assets/sims declaratively, override
       #   services.elodin.assetsPackage / services.elodin.examplesPackage

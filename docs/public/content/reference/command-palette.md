@@ -50,7 +50,7 @@ order = 8
 ## Skybox
 
 - `Skybox...`: submenu for skybox actions against `assets/skyboxes/manifest.ron` or
-  `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron`.
+  `$ELODIN_ASSETS/skyboxes/manifest.ron`.
   - `Generate Skybox...`: prompt for a description, then choose a Blockade style and local cubemap
     resolution before generating the skybox, adding it to the manifest, and activating it.
   - `Clear Skybox`: shown when a skybox is active; removes it from viewports and sensor cameras and

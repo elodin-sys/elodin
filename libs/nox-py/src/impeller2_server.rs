@@ -1104,6 +1104,7 @@ mod asset_tests {
         // entry even when the process cwd is elsewhere (Bugbot: the entry was
         // ignored, so a run outside the sim folder ingested the wrong tree/none).
         let _no_env = EnvVarGuard::unset("ELODIN_ASSETS");
+        let _no_legacy_env = EnvVarGuard::unset("ELODIN_ASSETS_DIR");
 
         let dir = tempdir().unwrap();
         let sim = dir.path().join("sim");

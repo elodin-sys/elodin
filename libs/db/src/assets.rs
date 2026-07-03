@@ -35,8 +35,24 @@ pub struct AssetEntry {
     pub size: u64,
 }
 
+/// Read the asset-root override, honoring the deprecated `ELODIN_ASSETS_DIR`
+/// name (pre-rename deployments, e.g. AlephOS session vars) with a one-time
+/// deprecation warning.
+fn assets_env_override() -> Option<std::ffi::OsString> {
+    if let Some(val) = std::env::var_os("ELODIN_ASSETS") {
+        return Some(val);
+    }
+    let legacy = std::env::var_os("ELODIN_ASSETS_DIR")?;
+    static WARN_ONCE: std::sync::Once = std::sync::Once::new();
+    WARN_ONCE.call_once(|| {
+        tracing::warn!("ELODIN_ASSETS_DIR is deprecated; rename it to ELODIN_ASSETS");
+    });
+    Some(legacy)
+}
+
 /// Resolve the source assets root to ingest, in priority order:
-///   1. `$ELODIN_ASSETS` (explicit; absolute or cwd-relative)
+///   1. `$ELODIN_ASSETS` (explicit; absolute or cwd-relative; the deprecated
+///      `$ELODIN_ASSETS_DIR` name is honored as a fallback)
 ///   2. `<entry_dir>/assets` (next to the sim entry / `main.py`, when known)
 ///   3. `<cwd>/assets`
 ///   4. nearest ancestor of `entry_dir` containing an `assets/` directory
@@ -45,7 +61,7 @@ pub struct AssetEntry {
 /// `$ELODIN_ASSETS` is trusted and returned even if it does not exist yet; the
 /// other candidates are only returned when they exist.
 pub fn resolve_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("ELODIN_ASSETS") {
+    if let Some(explicit) = assets_env_override() {
         let path = PathBuf::from(explicit);
         return Some(if path.is_absolute() {
             path
@@ -658,20 +674,66 @@ mod tests {
         });
     }
 
-    /// Serialize env access for the two tests that read `ELODIN_ASSETS`.
+    #[test]
+    fn resolve_honors_deprecated_env_name() {
+        // A pre-rename deployment (e.g. AlephOS session vars) only sets
+        // ELODIN_ASSETS_DIR; it must still win over the path-based candidates.
+        temp_env(
+            &[
+                ("ELODIN_ASSETS", None),
+                ("ELODIN_ASSETS_DIR", Some("/tmp/legacy-assets")),
+            ],
+            || {
+                assert_eq!(
+                    resolve_assets_root(None),
+                    Some(PathBuf::from("/tmp/legacy-assets"))
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_prefers_new_env_name_over_deprecated() {
+        temp_env(
+            &[
+                ("ELODIN_ASSETS", Some("/tmp/new-assets")),
+                ("ELODIN_ASSETS_DIR", Some("/tmp/legacy-assets")),
+            ],
+            || {
+                assert_eq!(
+                    resolve_assets_root(None),
+                    Some(PathBuf::from("/tmp/new-assets"))
+                );
+            },
+        );
+    }
+
+    /// Serialize env access for the tests that read `ELODIN_ASSETS*`.
     fn temp_env_assets(value: Option<&str>, f: impl FnOnce()) {
+        temp_env(&[("ELODIN_ASSETS", value), ("ELODIN_ASSETS_DIR", None)], f);
+    }
+
+    fn temp_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
         use std::sync::Mutex;
         static LOCK: Mutex<()> = Mutex::new(());
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prev = std::env::var_os("ELODIN_ASSETS");
-        match value {
-            Some(value) => unsafe { std::env::set_var("ELODIN_ASSETS", value) },
-            None => unsafe { std::env::remove_var("ELODIN_ASSETS") },
-        }
+        let prev: Vec<_> = vars
+            .iter()
+            .map(|(name, value)| {
+                let prev = std::env::var_os(name);
+                match value {
+                    Some(value) => unsafe { std::env::set_var(name, value) },
+                    None => unsafe { std::env::remove_var(name) },
+                }
+                (*name, prev)
+            })
+            .collect();
         f();
-        match prev {
-            Some(prev) => unsafe { std::env::set_var("ELODIN_ASSETS", prev) },
-            None => unsafe { std::env::remove_var("ELODIN_ASSETS") },
+        for (name, prev) in prev {
+            match prev {
+                Some(prev) => unsafe { std::env::set_var(name, prev) },
+                None => unsafe { std::env::remove_var(name) },
+            }
         }
     }
 }

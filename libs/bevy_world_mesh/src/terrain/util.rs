@@ -12,11 +12,20 @@ use std::{
 
 /// Resolve the single asset root used by the renderer.
 ///
-/// This mirrors Elodin Editor's asset source convention: `ELODIN_ASSETS_DIR`
-/// when set, otherwise `assets`, with relative paths resolved against the
-/// current working directory.
+/// This mirrors Elodin Editor's asset source convention: `ELODIN_ASSETS` when
+/// set (the deprecated `ELODIN_ASSETS_DIR` name is honored as a fallback),
+/// otherwise `assets`, with relative paths resolved against the current
+/// working directory.
 pub fn assets_root() -> PathBuf {
-    let mut root = std::env::var_os("ELODIN_ASSETS_DIR")
+    let env_root = std::env::var_os("ELODIN_ASSETS").or_else(|| {
+        let legacy = std::env::var_os("ELODIN_ASSETS_DIR")?;
+        static WARN_ONCE: std::sync::Once = std::sync::Once::new();
+        WARN_ONCE.call_once(|| {
+            bevy::log::warn!("ELODIN_ASSETS_DIR is deprecated; rename it to ELODIN_ASSETS");
+        });
+        Some(legacy)
+    });
+    let mut root = env_root
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("assets"));
 

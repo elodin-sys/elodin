@@ -29,29 +29,31 @@ cargo watch --watch libs/elodin-editor \
     -x 'run --bin elodin editor examples/three-body/main.py'
 ```
 
-### `ELODIN_ASSETS_DIR`
+### `ELODIN_ASSETS`
 
-The `ELODIN_ASSETS_DIR` environment variable specifies an "assets" directory,
+The `ELODIN_ASSETS` environment variable specifies an "assets" directory,
 used to store external files like meshes or images. If no environment variable
 is set, it looks for an "assets" directory in the current directory.
+The deprecated `ELODIN_ASSETS_DIR` name is still honored as a fallback, with a
+deprecation warning.
 
 ### No variable
 This is probably the most typical usage.
 ```sh
 $ elodin; # Will look for "assets" directory.
-INFO ELODIN_ASSETS_DIR defaulted to "assets"
+INFO Assets directory defaulted to "assets"
 ```
 ### Set variable for one run
 ```sh
-$ ELODIN_ASSETS_DIR=my-assets elodin
-INFO ELODIN_ASSETS_DIR set to "my-assets"
-WARN ELODIN_ASSETS_DIR "/Users/shane/Projects/elodin_sim/my-assets" does not exist.
+$ ELODIN_ASSETS=my-assets elodin
+INFO ELODIN_ASSETS set to "my-assets"
+WARN Assets directory "/Users/shane/Projects/elodin_sim/my-assets" does not exist.
 ```
 ### Set variable for session
 ```sh
-$ export ELODIN_ASSETS_DIR=/path/to/my-assets; # Or place this in your shell's rc file.
+$ export ELODIN_ASSETS=/path/to/my-assets; # Or place this in your shell's rc file.
 $ elodin
-INFO ELODIN_ASSETS_DIR set to "/path/to/my-assets"
+INFO ELODIN_ASSETS set to "/path/to/my-assets"
 ```
 
 ### `ELODIN_KDL_DIR`
