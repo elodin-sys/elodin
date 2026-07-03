@@ -39,23 +39,40 @@ impl SkyboxDocumentSyncMut<'_> {
             self.schematic,
         );
         sync_cache_active_from_skybox(self.cache, skybox.as_ref());
-        self.last_synced_key.0 = Some(self.active_key.to_string());
-        // These are the bytes now stored at the key: the revision bump this
-        // `StoreAsset` causes must not reload the document we just wrote.
-        self.last_content.record(self.active_key, &kdl);
+        // Only store the serialized view back when the on-screen document *is*
+        // the stored schematic at the write key. Otherwise this write would
+        // clobber the stored asset with unrelated bytes: an empty document
+        // right after "Clear Schematic" (the view is cleared but the last
+        // synced key still resolves), or a local `--kdl` file whose layout
+        // must never overwrite the DB's schematic. Those cases still update
+        // `skybox.active` metadata, matching `on_document_loaded`'s handling
+        // of non-DB documents.
+        let kdl =
+            document_stored_at_key(self.current_document.save_path.as_deref(), self.active_key)
+                .then_some(kdl);
+        if let Some(kdl) = kdl.as_deref() {
+            self.last_synced_key.0 = Some(self.active_key.to_string());
+            // These are the bytes now stored at the key: the revision bump this
+            // `StoreAsset` causes must not reload the document we just wrote.
+            self.last_content.record(self.active_key, kdl);
+        }
         let active = self
             .schematic
             .skybox
             .as_ref()
             .map(|entry| entry.name.as_str());
-        push_skybox_db_sync(
-            self.tx,
-            Some(kdl),
-            active,
-            self.active_key,
-            self.locally_pushed,
-        );
+        push_skybox_db_sync(self.tx, kdl, active, self.active_key, self.locally_pushed);
     }
+}
+
+/// Whether the on-screen document is the stored DB schematic at `key`, i.e. its
+/// serialized bytes may be written back there. A cleared view (no document) or
+/// a document opened from a local file (`--kdl`) has no claim on the stored
+/// asset and must not overwrite it.
+pub(crate) fn document_stored_at_key(save_path: Option<&std::path::Path>, key: &str) -> bool {
+    save_path
+        .and_then(std::path::Path::to_str)
+        .is_some_and(|path| is_db_schematic_key(path) && path == key)
 }
 
 #[derive(Resource, Default)]
@@ -514,6 +531,31 @@ mod tests {
         ));
         assert!(should_push_loaded_skybox_to_db(None, Some("seaport")));
         assert!(!should_push_loaded_skybox_to_db(None, None));
+    }
+
+    #[test]
+    fn document_stored_at_key_gates_non_db_documents() {
+        let key = "schematics/main.kdl";
+        // The healthy case: the on-screen document was loaded from the active
+        // DB schematic key, so its bytes may be written back there.
+        assert!(document_stored_at_key(
+            Some(std::path::Path::new("schematics/main.kdl")),
+            key
+        ));
+        // Cleared view ("Clear Schematic"): no document, no write-back — the
+        // stored schematic must survive a subsequent skybox activation.
+        assert!(!document_stored_at_key(None, key));
+        // Local `--kdl` file: its layout must never overwrite the DB asset.
+        assert!(!document_stored_at_key(
+            Some(std::path::Path::new("/home/user/drone.kdl")),
+            key
+        ));
+        // A DB document displayed under a *different* key (e.g. mid-repoint)
+        // must not stamp its bytes onto the new key.
+        assert!(!document_stored_at_key(
+            Some(std::path::Path::new("schematics/other.kdl")),
+            key
+        ));
     }
 
     #[test]
