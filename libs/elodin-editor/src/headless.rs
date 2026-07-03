@@ -178,10 +178,16 @@ fn setup_headless_lighting(mut commands: Commands) {
     ));
 }
 
+/// Loads the active schematic's scene and keeps it in sync with the DB.
+///
+/// Mirrors the interactive editor's config sync (`sync_document_from_config`):
+/// the scene reloads when `schematic.active` repoints to another key, and
+/// refetches when `assets.revision` bumps under the same key — comparing bytes
+/// so a bump from an unrelated asset write (mesh/skybox `PUT`) doesn't tear the
+/// scene down for nothing (RFD #724).
 #[allow(clippy::too_many_arguments)]
 fn load_headless_scene(
     config: Res<DbConfig>,
-    mut loaded: Local<bool>,
     mut pending: Local<HeadlessSchematicLoad>,
     mut schematic_skybox: ResMut<HeadlessSchematicSkybox>,
     mut commands: Commands,
@@ -194,19 +200,18 @@ fn load_headless_scene(
     connection_addr: Option<Res<ConnectionAddr>>,
     mut geo_context: ResMut<GeoContext>,
 ) {
-    if *loaded {
-        return;
-    }
-
     // Poll an in-flight fetch. The blocking HTTP request runs on the IO pool
     // (RFD #724): a slow/unreachable DB Asset Server never freezes the app.
-    let content = if let Some(task) = pending.task.as_mut() {
+    let (content, key, revision) = if let Some(task) = pending.task.as_mut() {
         let Some(result) = future::block_on(future::poll_once(task)) else {
             return;
         };
         pending.task = None;
+        let Some((key, revision)) = pending.fetch_target.take() else {
+            return;
+        };
         match result {
-            Ok(content) => content,
+            Ok(content) => (content, key, revision),
             Err(err) => {
                 tracing::debug!("Headless scene load waiting for active schematic: {err}");
                 pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
@@ -224,25 +229,54 @@ fn load_headless_scene(
             return;
         }
         let Some(key) = config.schematic_active().map(str::to_owned) else {
+            // The active pointer was cleared: tear down the loaded scene so the
+            // renderer doesn't keep a schematic the DB no longer designates.
+            if let Some(previous) = pending.loaded.take() {
+                despawn_headless_scene(&mut commands, &previous);
+                schematic_skybox.0 = None;
+            }
             return;
         };
+        let revision = config.assets_revision();
+        if pending
+            .loaded
+            .as_ref()
+            .is_some_and(|loaded| loaded.key == key && loaded.revision == revision)
+        {
+            return;
+        }
         let Some(addr) = connection_addr.as_ref().map(|addr| addr.0) else {
             return;
         };
+        pending.fetch_target = Some((key.clone(), revision));
         pending.task = Some(IoTaskPool::get().spawn(async move {
             crate::plugins::kdl_document::fetch_active_schematic_kdl(&key, Some(addr))
         }));
         return;
     };
+    // Unchanged bytes under the same key: the revision bump came from an
+    // unrelated asset write. Adopt the new baseline without a respawn.
+    if let Some(loaded) = pending.loaded.as_mut()
+        && loaded.key == key
+        && loaded.content == content
+    {
+        loaded.revision = revision;
+        return;
+    }
     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&content).inspect_err(|e| {
         tracing::warn!("Failed to parse schematic KDL: {e}");
     }) else {
         // Bytes fetched but unparsable: back off before retrying so permanently
         // invalid active schematic bytes don't spin a tight fetch loop each
         // frame (RFD #724). A later valid byte change still gets picked up.
+        // The previously loaded scene (if any) stays up in the meantime.
         pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
         return;
     };
+    // Parse succeeded: replace the previous scene with the new one.
+    if let Some(previous) = pending.loaded.take() {
+        despawn_headless_scene(&mut commands, &previous);
+    }
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
@@ -252,6 +286,7 @@ fn load_headless_scene(
             bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude);
     }
 
+    let mut entities = Vec::new();
     for elem in &schematic.elems {
         match elem {
             SchematicElem::Object3d(obj) => {
@@ -263,7 +298,7 @@ fn load_headless_scene(
                     tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
                     continue;
                 };
-                let _ = create_object_3d_entity(
+                if let Ok(entity) = create_object_3d_entity(
                     &mut commands,
                     obj,
                     expr,
@@ -274,29 +309,42 @@ fn load_headless_scene(
                     &asset_server,
                     &geo_context,
                     connection_addr,
-                );
+                ) {
+                    entities.push(entity);
+                }
             }
             SchematicElem::WorldMesh(world_mesh) => {
                 let mut world_mesh = world_mesh.clone();
                 if world_mesh.frame.is_none() {
                     world_mesh.frame = fallback_frame;
                 }
-                crate::plugins::world_mesh::spawn_world_mesh_terrain(
+                entities.push(crate::plugins::world_mesh::spawn_world_mesh_terrain(
                     &mut commands,
                     &mut meshes,
                     &mut materials,
                     &mut world_mesh_materials,
                     &world_mesh,
-                );
+                ));
             }
             _ => {}
         }
     }
     tracing::debug!(
-        "Headless scene loaded: {} elements from schematic",
+        "Headless scene loaded: {} elements from schematic {key} (revision {revision})",
         schematic.elems.len()
     );
-    *loaded = true;
+    pending.loaded = Some(LoadedHeadlessScene {
+        key,
+        revision,
+        content,
+        entities,
+    });
+}
+
+fn despawn_headless_scene(commands: &mut Commands, scene: &LoadedHeadlessScene) {
+    for entity in &scene.entities {
+        commands.entity(*entity).despawn();
+    }
 }
 
 #[derive(Resource, Default, Debug, Clone)]
@@ -309,6 +357,22 @@ struct HeadlessSchematicLoad {
     /// but potentially multi-second — HTTP request off the main thread so a slow
     /// or unreachable DB Asset Server never stalls the headless app each retry.
     task: Option<Task<Result<String, String>>>,
+    /// `(schematic.active, assets.revision)` captured when `task` was spawned,
+    /// adopted as the new baseline once the fetch result is applied.
+    fetch_target: Option<(String, u64)>,
+    /// The scene currently applied, or `None` before the first load.
+    loaded: Option<LoadedHeadlessScene>,
+}
+
+/// Baseline of the last applied scene, used to decide when to reload: a change
+/// of active key always reloads; a revision bump under the same key refetches
+/// and reloads only when the schematic bytes actually differ.
+struct LoadedHeadlessScene {
+    key: String,
+    revision: u64,
+    content: String,
+    /// Root entities spawned from the schematic, despawned on reload.
+    entities: Vec<Entity>,
 }
 
 const SKYBOX_TRANSITION_WARMUP_FRAMES: u8 = 2;
