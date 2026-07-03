@@ -34,8 +34,6 @@ cargo watch --watch libs/elodin-editor \
 The `ELODIN_ASSETS` environment variable specifies an "assets" directory,
 used to store external files like meshes or images. If no environment variable
 is set, it looks for an "assets" directory in the current directory.
-The deprecated `ELODIN_ASSETS_DIR` name is still honored as a fallback, with a
-deprecation warning.
 
 ### No variable
 This is probably the most typical usage.

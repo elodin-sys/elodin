@@ -79,8 +79,6 @@ Launch the Elodin editor (default)
   activation do not require this key.
 * `ELODIN_ASSETS` — Optional. Overrides the asset root. Skybox assets are read from and
   generated into `$ELODIN_ASSETS/skyboxes`; otherwise `./assets/skyboxes` is used.
-  The deprecated `ELODIN_ASSETS_DIR` name is still honored as a fallback, with a
-  deprecation warning.
 
 ## `elodin run`
 

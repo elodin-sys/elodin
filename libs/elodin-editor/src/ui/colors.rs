@@ -327,8 +327,8 @@ fn prettify_label(name: &str) -> String {
 
 fn color_scheme_dirs() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    // Same resolution as the Bevy asset source ($ELODIN_ASSETS, legacy
-    // $ELODIN_ASSETS_DIR, then ./assets) so schemes live beside other assets.
+    // Same resolution as the Bevy asset source ($ELODIN_ASSETS, then ./assets)
+    // so schemes live beside other assets.
     if let Some(root) = crate::plugins::env_asset_source::resolve_assets_dir() {
         roots.push(root);
     }

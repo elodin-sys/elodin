@@ -25,7 +25,7 @@ cargo run --bin elodin editor 127.0.0.1:2240
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ELODIN_ASSETS` | `./assets` | Directory for meshes, images, GLB files (deprecated `ELODIN_ASSETS_DIR` still honored) |
+| `ELODIN_ASSETS` | `./assets` | Directory for meshes, images, GLB files |
 | `ELODIN_KDL_DIR` | `.` (cwd) | Directory for `.kdl` schematic files |
 
 ## Cargo features
