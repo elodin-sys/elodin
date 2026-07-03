@@ -141,10 +141,15 @@ pub fn prime_schematic_assets(
 
     // Reopen: the on-disk active schematic is authoritative (copy-once, same as
     // the asset tree). Never overwrite editor-written bytes from stale in-memory
-    // sim metadata — only re-assert the pointer, since a `DB::create` reopen
-    // resets db_config and drops it while the bytes survive on disk.
+    // sim metadata. The pointer is equally authoritative: a `DB::open` reopen
+    // (the sim serve path) preserves db_config, so an editor's "Save As"/"Open"
+    // repoint to another schematic must survive a sim re-run. Only re-assert
+    // the default when the pointer is missing — a `DB::create` reopen resets
+    // db_config and drops it while the bytes survive on disk.
     if active_existed {
-        if let Err(err) = db.set_active_schematic(ACTIVE_SCHEMATIC_KEY) {
+        if !db.with_state(|s| s.db_config.schematic_active().is_some())
+            && let Err(err) = db.set_active_schematic(ACTIVE_SCHEMATIC_KEY)
+        {
             tracing::warn!(?err, "failed to set active schematic pointer");
         }
         return Ok(());
@@ -991,6 +996,39 @@ mod asset_tests {
         let active =
             reopened.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
         assert_eq!(active.as_deref(), Some(ACTIVE_SCHEMATIC_KEY));
+    }
+
+    #[test]
+    fn prime_preserves_repointed_active_schematic_on_reopen() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db_path = dir.path().join("db");
+        let db = elodin_db::DB::create(db_path.clone()).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some("viewport {\n}\n".to_string());
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // The editor does a "Save As": stores another schematic and repoints
+        // `schematic.active` at it.
+        db.store_asset("schematics/essai.kdl", b"graph {\n}\n")
+            .unwrap();
+        db.set_active_schematic("schematics/essai.kdl").unwrap();
+
+        // Re-running the sim against the existing DB (`DB::open` preserves
+        // db_config) must not clobber the user's pointer back to main.kdl.
+        let reopened = elodin_db::DB::open(db_path).unwrap();
+        prime_schematic_assets(&reopened, &world, None).unwrap();
+
+        let active =
+            reopened.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(
+            active.as_deref(),
+            Some("schematics/essai.kdl"),
+            "a sim re-run must not repoint schematic.active away from the user's choice"
+        );
     }
 
     #[test]
