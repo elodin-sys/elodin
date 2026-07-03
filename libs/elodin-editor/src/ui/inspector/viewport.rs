@@ -994,11 +994,12 @@ mod tests {
                 eql: eql.to_string(),
                 mesh: Object3DMesh::glb("model.glb"),
                 frame: None,
+                frame_orientation: None,
+                orientation: Default::default(),
                 icon: None,
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
-                ..default()
             },
         }
     }
