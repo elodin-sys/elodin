@@ -31,8 +31,12 @@ from typing import Optional, List
 
 import netifaces
 
-# Import the Rust-based impeller client
-from impeller_py import ImpellerClient, ComponentData
+# Prefer the first-class elodin.db client (via the local compat adapter);
+# fall back to the legacy impeller_py module for older wheels.
+try:
+    from impeller_compat import ImpellerClient, ComponentData
+except ImportError:
+    from impeller_py import ImpellerClient, ComponentData
 
 # Import protobuf messages
 import component_broadcast_pb2 as pb

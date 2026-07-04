@@ -116,6 +116,7 @@
           polars
           pytest
           matplotlib
+          pyarrow
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libcxx

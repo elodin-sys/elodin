@@ -32,14 +32,23 @@ import component_broadcast_pb2 as pb
 # Global flag for clean shutdown
 _shutdown_requested = False
 
-# Import the Rust-based impeller client
+# Prefer the first-class elodin.db client (via the local compat adapter);
+# fall back to the legacy impeller_py module for older wheels.
 try:
-    from impeller_py import ImpellerClient
+    from impeller_compat import ImpellerClient
 
     IMPELLER_AVAILABLE = True
 except ImportError:
-    IMPELLER_AVAILABLE = False
-    logging.warning("impeller_py not available. Run 'maturin develop' in impeller_py/ first.")
+    try:
+        from impeller_py import ImpellerClient
+
+        IMPELLER_AVAILABLE = True
+    except ImportError:
+        IMPELLER_AVAILABLE = False
+        logging.warning(
+            "Neither elodin.db nor impeller_py available. Install the elodin wheel "
+            "or run 'maturin develop' in impeller_py/."
+        )
 
 
 # Configure logging
