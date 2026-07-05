@@ -55,7 +55,10 @@ fn batched_vtable_registers_and_sinks() {
             schema(
                 PrimType::F64,
                 &[3],
-                timestamp(time_field.clone(), component(ComponentId::new("test.accel"))),
+                timestamp(
+                    time_field.clone(),
+                    component(ComponentId::new("test.accel")),
+                ),
             ),
         ),
         raw_field(

@@ -58,6 +58,7 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 
 pub mod append_log;
 mod arrow;
+pub use arrow::sanitize_sql_table_name;
 #[cfg(feature = "axum")]
 pub mod assets_http;
 #[cfg(feature = "axum")]

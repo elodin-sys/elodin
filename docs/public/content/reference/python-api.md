@@ -980,6 +980,189 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
     Get the inertia tensor diagonal of the spatial inertia with shape (3,).
 
 <br></br>
+## Elodin DB Client
+
+The `elodin.db` module is a standalone Elodin DB client for plain Python processes — ones that are *not* an Elodin simulation. It can start or connect to a database, write telemetry (batched, typed, and shaped), and read it back (latest value, historical ranges, live streams, fixed-rate replay, SQL, and message logs). See the [Python Client guide](/home/db/python-client) for a walkthrough; inside simulation callbacks use [elodin.StepContext] instead.
+
+All timestamps in the public API are **microseconds** (`int`), the database's native resolution.
+
+```python
+import elodin.db as edb
+```
+
+### _class_ `elodin.db.Client`
+
+Client for a running Elodin DB (external `elodin-db run` or an embedded [elodin.db.Server]). Usable as a context manager.
+
+- `connect(addr)` -> [elodin.db.Client] _(classmethod)_
+
+    Connect to a database. Writers and the latest-value subscription reconnect automatically with exponential backoff.
+    - `addr` : `string`, e.g. `"127.0.0.1:2240"`.
+
+- `table_writer(schema, queue="drop-oldest", maxlen=1024, timestamp="us")` -> [elodin.db.TableWriter]
+
+    Create a batched writer for a fixed set of components sharing one timestamp.
+    - `schema` : `dict[str, Field]`, component name → field spec (e.g. `{"drone.imu.accel": edb.f64[3].labeled("x", "y", "z")}`).
+    - `queue` : `string`, overflow policy for `write_nowait`: `"drop-oldest"` (default; evicts the oldest queued row so fresh telemetry wins) or `"drop-newest"` (discards the incoming row).
+    - `maxlen` : `int`, bounded queue depth, defaults to `1024`.
+    - `timestamp` : `string`, shared timestamp unit: `"us"` (default) or `"ns"` for nanosecond sources (the database stores microseconds).
+
+- `send(name, values, timestamp_us)` -> None
+
+    Convenience single-component `f64` write (one writer cached per name). Prefer `table_writer` for hot loops.
+
+- `components()` -> `dict[str, ComponentInfo]`
+
+    All components registered in the database (name → [elodin.db.ComponentInfo]).
+
+- `earliest_timestamp()` -> `int`
+
+    Earliest data timestamp in the database (microseconds).
+
+- `latest(name)` -> [elodin.db.Sample] | None
+
+    Latest sample seen on the real-time stream. Starts a background subscription on first call, so it may return `None` until data flows. Values keep their true dtype and shape (an `i64` counter comes back as `int64`, a 3×3 tensor as shape `(3, 3)`).
+
+- `time_series(name, start_us, stop_us, limit=None)` -> `(numpy.ndarray, numpy.ndarray)`
+
+    Historical samples of `name` in `[start_us, stop_us)`, paginated internally for large ranges. Returns `(timestamps, values)`: `timestamps` is `int64` microseconds of shape `(N,)`; `values` has shape `(N, *component_shape)` and the component's dtype.
+
+- `stream(names, rate_hz=None, start=None, maxlen=1024)` -> [elodin.db.ComponentStream]
+
+    Iterate rows of the named components.
+    - `names` : `string | list[str]`, components to include.
+    - `rate_hz` : `float`, optional. `None` (default) streams new data live; a value replays recorded data at a fixed rate.
+    - `start` : replay start (requires `rate_hz`): `"earliest"` (default), `"latest"`, or an `int` microsecond timestamp.
+    - `maxlen` : `int`, bounded row-queue depth. Replay streams backpressure instead of dropping rows.
+
+- `sql(query)` -> `pyarrow.Table`
+
+    Run a DataFusion SQL query over the same socket. Component time series are exposed as tables named by [elodin.db.sql_table_name] (e.g. `drone.imu.accel` → `drone_imu_accel`), each with a `time` column plus one column per element.
+
+- `send_msg(name, payload, timestamp_us)` -> None
+
+    Append one message to the log named `name`. Payload encoding is a v1 convenience: `bytes` pass through untouched, `str` is UTF-8, anything else is JSON.
+
+- `get_msgs(name, start_us, stop_us, limit=None, raw=False)` -> `list[(int, payload)]`
+
+    Historical messages as `[(timestamp_us, payload)]`. Bounds follow the database's message-log semantics: the range is inclusive of `stop_us`, and `start_us` snaps to the message at or before it. Payloads are JSON-decoded when they parse as JSON; pass `raw=True` for bytes.
+
+- `msg_stream(name, maxlen=1024, raw=False)` -> [elodin.db.MessageStream]
+
+    Live stream of new messages on `name` as `(timestamp_us, payload)` tuples.
+
+- `state()` -> `string`
+
+    Connection state of the latest-value subscription: `"Disconnected"`, `"Connecting"`, `"Connected"`, or `"Reconnecting"`.
+
+- `close()` -> None
+
+    Stop the client's background threads and cached writers.
+
+### _class_ `elodin.db.Server`
+
+Embedded Elodin DB server — the same engine as `elodin-db run` — for tests, notebooks, and single-process setups. Usable as a context manager.
+
+- `start(path, addr="127.0.0.1:2240")` -> [elodin.db.Server] _(static)_
+
+    Bind `addr` (errors such as port-in-use raise immediately) and serve the database at `path` on a background thread until `stop()` or process exit.
+
+- `addr` -> `string`, `path` -> `string`
+
+    The bound address and data directory.
+
+- `stop()` -> None
+
+    Stop the server; existing data stays on disk.
+
+### _class_ `elodin.db.TableWriter`
+
+Batched telemetry writer: every `write` emits exactly one Impeller2 `Table` packet — a shared `i64` timestamp followed by each field's values — one packet per tick, not one per component. All declared fields are required on every write; use one writer per rate group. Reconnects automatically, replaying the metadata + vtable handshake. Usable as a context manager.
+
+- `write(timestamp_us=None, values=None, *, timestamp_ns=None)` -> None
+
+    Blocking write; raises if the row cannot be handed to the socket. Pass the kwarg matching the writer's timestamp unit.
+    - `values` : `dict[str, array-like]`, one entry per declared field.
+
+- `write_nowait(timestamp_us=None, values=None, *, timestamp_ns=None)` -> None
+
+    Non-blocking write for control loops: costs microseconds, never blocks, and never raises for transport reasons. On overflow or an unreachable database, rows are shed per the queue policy and counted in `dropped`.
+
+- `dropped` -> `int`
+
+    Rows shed so far (queue overflow or connection loss).
+
+- `last_error` -> `string | None`
+
+    Most recent transport error or database rejection — e.g. re-registering an existing component with a different shape surfaces here asynchronously.
+
+- `state()` -> `string`
+
+    `"Connected"` or `"Disconnected"`.
+
+- `row_size` -> `int`
+
+    Packed row size in bytes (timestamp + all fields).
+
+- `close()` -> None
+
+    Close the writer and join its thread.
+
+{% alert(kind="warning") %}
+Timestamps must be monotonically increasing per component; the database rejects out-of-order writes.
+{% end %}
+
+### Schema fields (`elodin.db.Field`)
+
+Field specs declare a component's dtype, shape, and optional element labels. The module exposes one instance per primitive type — `f64`, `f32`, `i8`…`i64`, `u8`…`u64`, `bool_` — which you index and label:
+
+```python
+edb.f64                            # scalar
+edb.f32[3]                         # vector of 3
+edb.f64[3, 3]                      # rank-2 tensor (up to rank 3)
+edb.f64[3].labeled("x", "y", "z")  # editor axis labels (element_names)
+```
+
+- `__getitem__(dims)` -> [elodin.db.Field] — set the shape (int or tuple, up to rank 3).
+- `labeled(*names)` -> [elodin.db.Field] — one label per element; drives Editor axis labels.
+- `dtype` -> `numpy.dtype`, `count` -> `int`, `nbytes` -> `int`.
+
+### _class_ `elodin.db.Sample`
+
+One component sample from `Client.latest`.
+
+- `name` : `string` — component name.
+- `timestamp_us` : `int`.
+- `values` : `numpy.ndarray` — true dtype and shape.
+
+### _class_ `elodin.db.StreamRow`
+
+One row from `Client.stream`: a shared timestamp plus the requested components present in that tick.
+
+- `timestamp_us` : `int`.
+- `values` : `dict[str, numpy.ndarray]`; also indexable directly (`row["drone.imu.accel"]`).
+
+### _class_ `elodin.db.ComponentStream` / `elodin.db.MessageStream`
+
+Iterators returned by `Client.stream` and `Client.msg_stream`. Iteration ends when the stream is closed or its connection fails. Both are context managers; call `close()` to stop the underlying subscription.
+
+### _class_ `elodin.db.ComponentInfo`
+
+Component schema + metadata from `Client.components()`.
+
+- `name` : `string`, `prim_type` : `string` (e.g. `"f64"`), `shape` : `list[int]`, `element_names` : `list[str]`, `metadata` : `dict[str, str]`.
+
+### _function_ `elodin.db.sql_table_name`
+
+- `sql_table_name(component_name)` -> `string`
+
+    The DataFusion table name the database derives from a component name (e.g. `drone.imu.accel` → `drone_imu_accel`). Delegates to the exact conversion the server uses, so it can never drift.
+
+{% alert(kind="notice") %}
+Set `ELODIN_DB_LOG=debug` (any `tracing` filter works) to surface the embedded server's and client's diagnostics from an `elodin.db`-using process.
+{% end %}
+
+<br></br>
 ## Schematic Syntax for 3D Objects
 
 When visualizing entities in the Elodin editor, you can define 3D objects using KDL schematic syntax. The `object_3d` declaration connects a visual representation to an entity's `world_pos` component.
@@ -1240,3 +1423,14 @@ viewport pos="aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)"
 [elodin.SpatialInertia]: #class-elodin-spatialinertia
 [jax.Array]: https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array
 [jax.typing.ArrayLike]: https://jax.readthedocs.io/en/latest/_autosummary/jax.typing.ArrayLike.html#jax.typing.ArrayLike
+
+[elodin.db.Client]: #class-elodin-db-client
+[elodin.db.Server]: #class-elodin-db-server
+[elodin.db.TableWriter]: #class-elodin-db-tablewriter
+[elodin.db.Field]: #schema-fields-elodin-db-field
+[elodin.db.Sample]: #class-elodin-db-sample
+[elodin.db.StreamRow]: #class-elodin-db-streamrow
+[elodin.db.ComponentStream]: #class-elodin-db-componentstream-elodin-db-messagestream
+[elodin.db.MessageStream]: #class-elodin-db-componentstream-elodin-db-messagestream
+[elodin.db.ComponentInfo]: #class-elodin-db-componentinfo
+[elodin.db.sql_table_name]: #function-elodin-db-sql-table-name

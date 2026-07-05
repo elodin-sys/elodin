@@ -465,6 +465,10 @@ impl Msg for GetEarliestTimestamp {
     const ID: PacketId = [224, 22];
 }
 
+impl Request for GetEarliestTimestamp {
+    type Reply<B: IoBuf + Clone> = EarliestTimestamp;
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct EarliestTimestamp(pub Timestamp);

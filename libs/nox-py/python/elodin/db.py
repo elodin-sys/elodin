@@ -17,17 +17,26 @@ Quick start::
     })
 
     ts, accel = client.time_series("drone.imu.accel", t0_us, t1_us)
-    table = client.sql("SELECT * FROM 'drone.imu.accel'")   # pyarrow.Table
+    table = client.sql(f"SELECT * FROM {edb.sql_table_name('drone.imu.accel')}")
+
+    for row in client.stream(["drone.imu.accel"]):          # live rows
+        ...
+    client.send_msg("race.collision", {"id": 1}, timestamp_us=t_us)  # events
 
 Design notes:
 
 * Every ``TableWriter.write`` emits exactly one Impeller2 ``Table`` packet:
-  a shared little-endian ``i64`` microsecond timestamp followed by each
-  field's values at a fixed, naturally-aligned offset.
-* ``write_nowait`` never blocks and never raises for transport reasons; rows
-  are dropped (counted in ``writer.dropped``) when the queue is full or the
-  database is unreachable.
+  a shared little-endian ``i64`` timestamp (microseconds by default,
+  nanoseconds with ``timestamp="ns"``) followed by each field's values at a
+  fixed, naturally-aligned offset.
+* ``write_nowait`` never blocks and never raises for transport reasons; on
+  overflow or an unreachable database rows are shed per the queue policy
+  (``drop-oldest`` by default, counted in ``writer.dropped``).
 * All fields declared in a writer's schema are required on every write.
+* Message payloads are opaque bytes on the wire; ``send_msg``/``get_msgs``
+  offer a v1 convenience encoding (bytes pass-through, str as UTF-8,
+  everything else JSON) — postcard-schema payload inference is deferred.
+* Set ``ELODIN_DB_LOG=debug`` to surface native client/server diagnostics.
 """
 
 from __future__ import annotations
@@ -41,7 +50,6 @@ import numpy as np
 from .elodin import db as _native
 
 ComponentInfo = _native.ComponentInfo
-ComponentData = _native.ComponentData
 
 _PRIM_NP = {
     "f64": np.dtype("<f8"),
@@ -131,17 +139,30 @@ class _PackedField:
 
 
 class TableWriter:
-    """Batched writer: one Table packet per row, shared microsecond timestamp."""
+    """Batched writer: one Table packet per row, shared timestamp.
+
+    ``queue`` controls what ``write_nowait`` sheds when the bounded queue is
+    full: ``"drop-oldest"`` (default) evicts the oldest queued row so fresh
+    telemetry wins; ``"drop-newest"`` discards the incoming row.
+
+    ``timestamp`` selects the shared timestamp unit: ``"us"`` (default,
+    ``write(timestamp_us=...)``) or ``"ns"`` for nanosecond sources
+    (``write(timestamp_ns=...)``; the database stores microseconds).
+    """
 
     def __init__(
         self,
         addr: str,
         schema: Dict[str, Field],
-        queue: str = "drop",
+        queue: str = "drop-oldest",
         maxlen: int = 1024,
+        timestamp: str = "us",
     ):
-        if queue not in ("drop", "drop-oldest", "drop-newest"):
+        if queue not in ("drop-oldest", "drop-newest"):
             raise ValueError(f"unknown queue policy {queue!r}")
+        if timestamp not in ("us", "ns"):
+            raise ValueError(f"unknown timestamp unit {timestamp!r}")
+        self._ts_unit = timestamp
         if not schema:
             raise ValueError("schema must contain at least one component")
         self._fields: list[_PackedField] = []
@@ -164,9 +185,12 @@ class TableWriter:
                 )
             )
             offset += spec.nbytes
-        self._row_size = offset
         self._ts_struct = struct.Struct("<q")
-        self._w = _native.TableWriter(addr, native_fields, maxlen=maxlen)
+        self._w = _native.TableWriter(
+            addr, native_fields, maxlen=maxlen, queue=queue, timestamp_unit=timestamp
+        )
+        # Single source of truth for the packed row size is the native writer.
+        self._row_size = self._w.row_size
 
     @property
     def dropped(self) -> int:
@@ -174,12 +198,35 @@ class TableWriter:
         return self._w.dropped
 
     @property
+    def last_error(self) -> Optional[str]:
+        """Most recent transport error or database rejection (e.g. a schema
+        mismatch for an already-registered component), or None."""
+        return self._w.last_error
+
+    def state(self) -> str:
+        """Writer connection state: "Connected" | "Disconnected"."""
+        return self._w.state()
+
+    @property
     def row_size(self) -> int:
         return self._w.row_size
 
-    def _pack(self, timestamp_us: int, values: Dict[str, Any]) -> bytes:
+    def _timestamp(self, timestamp_us: Optional[int], timestamp_ns: Optional[int]) -> int:
+        if (timestamp_us is None) == (timestamp_ns is None):
+            raise TypeError("pass exactly one of timestamp_us / timestamp_ns")
+        if self._ts_unit == "us":
+            if timestamp_us is None:
+                raise TypeError(
+                    'writer uses microseconds; pass timestamp_us (or use timestamp="ns")'
+                )
+            return int(timestamp_us)
+        if timestamp_ns is None:
+            raise TypeError('writer uses nanoseconds; pass timestamp_ns (or use timestamp="us")')
+        return int(timestamp_ns)
+
+    def _pack(self, timestamp: int, values: Dict[str, Any]) -> bytes:
         buf = bytearray(self._row_size)
-        self._ts_struct.pack_into(buf, 0, timestamp_us)
+        self._ts_struct.pack_into(buf, 0, timestamp)
         for f in self._fields:
             try:
                 v = values[f.name]
@@ -192,14 +239,30 @@ class TableWriter:
             buf[f.offset : f.offset + f.nbytes] = arr.tobytes()
         return bytes(buf)
 
-    def write(self, timestamp_us: int, values: Dict[str, Any]) -> None:
+    def write(
+        self,
+        timestamp_us: Optional[int] = None,
+        values: Optional[Dict[str, Any]] = None,
+        *,
+        timestamp_ns: Optional[int] = None,
+    ) -> None:
         """Blocking write; raises if the row cannot be handed to the socket."""
-        self._w.write_row(self._pack(timestamp_us, values))
+        if values is None:
+            raise TypeError("write requires values")
+        self._w.write_row(self._pack(self._timestamp(timestamp_us, timestamp_ns), values))
 
-    def write_nowait(self, timestamp_us: int, values: Dict[str, Any]) -> None:
+    def write_nowait(
+        self,
+        timestamp_us: Optional[int] = None,
+        values: Optional[Dict[str, Any]] = None,
+        *,
+        timestamp_ns: Optional[int] = None,
+    ) -> None:
         """Non-blocking write; drops (never raises) when the queue is full or
         the database is down. See ``dropped``."""
-        self._w.write_row_nowait(self._pack(timestamp_us, values))
+        if values is None:
+            raise TypeError("write_nowait requires values")
+        self._w.write_row_nowait(self._pack(self._timestamp(timestamp_us, timestamp_ns), values))
 
     def close(self) -> None:
         self._w.close()
@@ -214,14 +277,9 @@ class TableWriter:
 
 def sql_table_name(component_name: str) -> str:
     """The DataFusion table name elodin-db derives from a component name
-    (snake_case with non-alphanumeric characters replaced by underscores)."""
-    import re
-
-    s = component_name
-    # camelCase / PascalCase boundaries -> underscore (mirrors convert_case)
-    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", s)
-    s = re.sub(r"[^0-9a-zA-Z_]", "_", s)
-    return s.lower()
+    (e.g. ``drone.imu.accel`` -> ``drone_imu_accel``). Delegates to the exact
+    conversion the database server uses."""
+    return _native.sql_table_name(component_name)
 
 
 @dataclass(frozen=True)
@@ -233,6 +291,120 @@ class Sample:
     values: np.ndarray
 
 
+def _to_array(data: bytes, prim: str, shape) -> np.ndarray:
+    values = np.frombuffer(data, dtype=_PRIM_NP[prim])
+    if shape:
+        return values.reshape(*[int(d) for d in shape])
+    return values.reshape(())
+
+
+@dataclass(frozen=True)
+class StreamRow:
+    """One row from ``Client.stream``: a shared timestamp plus the requested
+    components present in that tick's Table packet."""
+
+    timestamp_us: int
+    values: Dict[str, np.ndarray]
+
+    def __getitem__(self, name: str) -> np.ndarray:
+        return self.values[name]
+
+    def __contains__(self, name: str) -> bool:
+        return name in self.values
+
+
+class ComponentStream:
+    """Iterator over stream rows; ends when the stream is closed or its
+    connection fails. Use as a context manager (or call ``close()``) to stop
+    the underlying subscription."""
+
+    _POLL_MS = 200
+
+    def __init__(self, native):
+        self._s = native
+
+    def __iter__(self) -> "ComponentStream":
+        return self
+
+    def __next__(self) -> StreamRow:
+        while True:
+            row = self._s.next_row(self._POLL_MS)
+            if row is not None:
+                timestamp_us, parts = row
+                values = {name: _to_array(data, prim, shape) for name, data, prim, shape in parts}
+                return StreamRow(timestamp_us=timestamp_us, values=values)
+            if self._s.is_closed():
+                raise StopIteration
+
+    def close(self) -> None:
+        self._s.close()
+
+    def __enter__(self) -> "ComponentStream":
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.close()
+        return False
+
+
+def _encode_msg_payload(payload: Any) -> bytes:
+    """bytes pass through untouched; str is UTF-8; everything else is JSON."""
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, str):
+        return payload.encode()
+    import json
+
+    return json.dumps(payload).encode()
+
+
+def _decode_msg_payload(data: bytes) -> Any:
+    """Inverse convenience: JSON if it parses, raw bytes otherwise."""
+    import json
+
+    try:
+        return json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        return data
+
+
+class MessageStream:
+    """Iterator over ``(timestamp_us, payload)`` from ``Client.msg_stream``;
+    delivers new messages only. Use as a context manager (or call ``close()``)
+    to stop the underlying subscription."""
+
+    _POLL_MS = 200
+
+    def __init__(self, native, raw: bool):
+        self._s = native
+        self._raw = raw
+
+    def __iter__(self) -> "MessageStream":
+        return self
+
+    def __next__(self):
+        while True:
+            item = self._s.next_msg(self._POLL_MS)
+            if item is not None:
+                timestamp_us, payload = item
+                return (
+                    timestamp_us,
+                    payload if self._raw else _decode_msg_payload(payload),
+                )
+            if self._s.is_closed():
+                raise StopIteration
+
+    def close(self) -> None:
+        self._s.close()
+
+    def __enter__(self) -> "MessageStream":
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.close()
+        return False
+
+
 class Client:
     """Client for a running Elodin-DB (external or ``Server.start``-ed)."""
 
@@ -240,13 +412,12 @@ class Client:
         self._addr = addr
         self._c = _native.Client(addr)
         self._send_writers: Dict[str, TableWriter] = {}
+        self._registered_msgs: set[str] = set()
 
     @classmethod
-    def connect(cls, addr: str, reconnect: str = "backoff") -> "Client":
-        """``reconnect`` is accepted for forward compatibility; writers and the
-        latest-value subscription always reconnect with exponential backoff."""
-        if reconnect not in ("backoff", "none"):
-            raise ValueError(f"unknown reconnect policy {reconnect!r}")
+    def connect(cls, addr: str) -> "Client":
+        """Writers and the latest-value subscription always reconnect with
+        exponential backoff."""
         return cls(addr)
 
     @property
@@ -257,10 +428,11 @@ class Client:
     def table_writer(
         self,
         schema: Dict[str, Field],
-        queue: str = "drop",
+        queue: str = "drop-oldest",
         maxlen: int = 1024,
+        timestamp: str = "us",
     ) -> TableWriter:
-        return TableWriter(self._addr, schema, queue=queue, maxlen=maxlen)
+        return TableWriter(self._addr, schema, queue=queue, maxlen=maxlen, timestamp=timestamp)
 
     def send(self, name: str, values: Any, timestamp_us: int) -> None:
         """Convenience single-component F64 write (one writer cached per name).
@@ -273,22 +445,99 @@ class Client:
             self._send_writers[name] = w
         w.write(timestamp_us, {name: arr})
 
+    # ── message logs ─────────────────────────────────────────────────────
+    def send_msg(self, name: str, payload: Any, timestamp_us: int) -> None:
+        """Append one message to the log named ``name``.
+
+        Payload encoding is a v1 convenience, not a schema system: ``bytes``
+        pass through untouched, ``str`` is UTF-8, and anything else is JSON
+        (postcard-schema payload inference is deliberately deferred).
+        """
+        if name not in self._registered_msgs:
+            self._c.register_msg(name)
+            self._registered_msgs.add(name)
+        self._c.send_msg(name, _encode_msg_payload(payload), int(timestamp_us))
+
+    def get_msgs(
+        self,
+        name: str,
+        start_us: int,
+        stop_us: int,
+        limit: Optional[int] = None,
+        raw: bool = False,
+    ) -> list:
+        """Historical messages of ``name`` as ``[(timestamp_us, payload)]``.
+
+        Bounds follow the database's message-log semantics: the range is
+        inclusive of ``stop_us``, and ``start_us`` snaps to the message at or
+        before it. Payloads are JSON-decoded when they parse as JSON (pass
+        ``raw=True`` for bytes)."""
+        msgs = self._c.get_msgs(name, int(start_us), int(stop_us), limit)
+        if raw:
+            return list(msgs)
+        return [(t, _decode_msg_payload(b)) for t, b in msgs]
+
+    def msg_stream(self, name: str, maxlen: int = 1024, raw: bool = False) -> MessageStream:
+        """Live stream of new messages on ``name`` as
+        ``(timestamp_us, payload)`` (see ``get_msgs`` for payload decoding)."""
+        native = _native.MsgStreamSub(self._addr, name, maxlen=maxlen)
+        return MessageStream(native, raw)
+
     # ── read ─────────────────────────────────────────────────────────────
     def components(self) -> Dict[str, ComponentInfo]:
         """All components registered in the database (name → ComponentInfo)."""
         return self._c.components()
 
+    def earliest_timestamp(self) -> int:
+        """Earliest data timestamp in the database (microseconds)."""
+        return self._c.earliest_timestamp()
+
+    def stream(
+        self,
+        names,
+        rate_hz: Optional[float] = None,
+        start=None,
+        maxlen: int = 1024,
+    ) -> ComponentStream:
+        """Iterate rows of the named components.
+
+        * ``rate_hz=None`` (default): live real-time stream of new data.
+        * ``rate_hz=<hz>``: fixed-rate replay from ``start`` — ``"earliest"``
+          (default), ``"latest"``, or an ``int`` microsecond timestamp.
+
+        Rows carry only the components present in each tick; iteration ends
+        when the stream is closed or its connection fails.
+        """
+        if isinstance(names, str):
+            names = [names]
+        if start is not None and rate_hz is None:
+            raise ValueError("start= requires rate_hz= (fixed-rate replay)")
+        initial, initial_us = "earliest", None
+        if isinstance(start, (int, np.integer)):
+            initial, initial_us = "manual", int(start)
+        elif isinstance(start, str):
+            initial = start
+        native = _native.StreamSub(
+            self._addr,
+            list(names),
+            rate_hz=rate_hz,
+            initial=initial,
+            initial_us=initial_us,
+            maxlen=maxlen,
+        )
+        return ComponentStream(native)
+
     def latest(self, name: str) -> Optional[Sample]:
         """Latest sample seen on the real-time stream (starts a background
-        subscription on first call; may return None until data flows)."""
-        data = self._c.latest(name)
-        if data is None:
+        subscription on first call; may return None until data flows).
+
+        Values keep their true dtype and shape (an i64 counter comes back as
+        int64, a 3x3 tensor as shape (3, 3))."""
+        parts = self._c.latest(name)
+        if parts is None:
             return None
-        return Sample(
-            name=data.name,
-            timestamp_us=data.timestamp,
-            values=np.asarray(data.values),
-        )
+        timestamp_us, data, prim, shape = parts
+        return Sample(name=name, timestamp_us=timestamp_us, values=_to_array(data, prim, shape))
 
     def time_series(
         self,
@@ -389,8 +638,10 @@ __all__ = [
     "TableWriter",
     "Field",
     "Sample",
+    "StreamRow",
+    "ComponentStream",
+    "MessageStream",
     "ComponentInfo",
-    "ComponentData",
     "sql_table_name",
     "f64",
     "f32",

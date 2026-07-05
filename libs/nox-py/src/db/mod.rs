@@ -8,20 +8,23 @@
 //!   * `TableWriter` — batched telemetry writer: one vtable with a shared
 //!     timestamp, one `Table` packet per row, bounded-queue non-blocking mode
 //!
-//! Threading model (proven by `fsw/udp_component_broadcast/impeller_py` and
-//! `world_builder.rs`): every long-lived connection lives on its own OS thread
-//! running a stellarator executor; Python-facing calls communicate over
-//! bounded std channels and release the GIL while blocking.
+//! Threading model (as proven in `world_builder.rs`): every long-lived
+//! connection lives on its own OS thread running a stellarator executor;
+//! Python-facing calls communicate over bounded std channels and release the
+//! GIL while blocking.
 
+use convert_case::Casing;
 use impeller2::types::PrimType;
 use pyo3::prelude::*;
 
 mod client;
 mod server;
+mod stream;
 mod writer;
 
-pub use client::{Client, ComponentData, ComponentInfo};
+pub use client::{Client, ComponentInfo};
 pub use server::Server;
+pub use stream::{MsgStreamSub, StreamSub};
 pub use writer::TableWriter;
 
 /// Run a future to completion on a fresh OS thread with its own stellarator
@@ -81,6 +84,13 @@ pub(crate) fn format_prim_type(prim_type: PrimType) -> String {
     .to_string()
 }
 
+/// The DataFusion table name elodin-db derives from a component name — the
+/// exact conversion the server uses, so it can never drift.
+#[pyfunction]
+fn sql_table_name(component_name: &str) -> String {
+    elodin_db::sanitize_sql_table_name(&component_name.to_case(convert_case::Case::Snake))
+}
+
 pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     // Opt-in diagnostics: ELODIN_DB_LOG=debug surfaces the embedded server's
     // and client's `tracing` events (the module otherwise stays quiet).
@@ -94,6 +104,8 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<Client>()?;
     child.add_class::<TableWriter>()?;
     child.add_class::<ComponentInfo>()?;
-    child.add_class::<ComponentData>()?;
+    child.add_class::<StreamSub>()?;
+    child.add_class::<MsgStreamSub>()?;
+    child.add_function(wrap_pyfunction!(sql_table_name, &child)?)?;
     parent_module.add_submodule(&child)
 }

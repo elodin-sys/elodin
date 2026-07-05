@@ -35,6 +35,10 @@ features = ["publish"]
 pythonpath = [
   "python",
 ]
+markers = [
+  "perf: wall-clock performance assertions; may flake on loaded machines (deselect with '-m \"not perf\"')",
+  "slow: long-running acceptance tests",
+]
 
 [project.entry-points.pytest11]
 elodin = "elodin"
