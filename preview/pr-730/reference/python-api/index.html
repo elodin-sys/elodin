@@ -1924,10 +1924,11 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <li><code>values</code> : <code>numpy.ndarray</code> — true dtype and shape.</li>
 </ul>
 <h3 id="class-elodin-db-streamrow"><em>class</em> <code>elodin.db.StreamRow</code></h3>
-<p>One row from <code>Client.stream</code>: a shared timestamp plus the requested components present in that tick.</p>
+<p>One row from <code>Client.stream</code>: the requested components present in that tick.</p>
 <ul>
-<li><code>timestamp_us</code> : <code>int</code>.</li>
+<li><code>timestamp_us</code> : <code>int</code> — the newest sample timestamp in the row.</li>
 <li><code>values</code> : <code>dict[str, numpy.ndarray]</code>; also indexable directly (<code>row["drone.imu.accel"]</code>).</li>
+<li><code>timestamps</code> : <code>dict[str, int]</code> — each component's own sample timestamp. A batched stream carries each component's <em>latest</em> value, so when mixing rates a slow component's sample can be older than <code>timestamp_us</code>.</li>
 </ul>
 <h3 id="class-elodin-db-componentstream-elodin-db-messagestream"><em>class</em> <code>elodin.db.ComponentStream</code> / <code>elodin.db.MessageStream</code></h3>
 <p>Iterators returned by <code>Client.stream</code> and <code>Client.msg_stream</code>. Iteration ends when the stream is closed or its connection fails. Both are context managers; call <code>close()</code> to stop the underlying subscription.</p>
