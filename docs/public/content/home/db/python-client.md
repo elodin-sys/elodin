@@ -18,7 +18,9 @@ It lets any Python process — a hardware-in-the-loop rig, a third-party
 simulator bridge, a flight-test logger, a notebook — start or connect to
 Elodin DB, write telemetry, and read it back. No Elodin simulation required.
 This page is a guided tour; the full API surface is documented in the
-[Python API reference](/reference/python-api#elodin-db-client).
+[Python API reference](/reference/python-api#elodin-db-client), and a runnable
+end-to-end demo lives at `examples/db-client` in the repository
+(`uv run python examples/db-client/main.py`).
 
 ```sh
 pip install elodin      # or use the repo's nix devshell + `just install`
