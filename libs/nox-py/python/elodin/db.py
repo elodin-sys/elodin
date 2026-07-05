@@ -300,11 +300,18 @@ def _to_array(data: bytes, prim: str, shape) -> np.ndarray:
 
 @dataclass(frozen=True)
 class StreamRow:
-    """One row from ``Client.stream``: a shared timestamp plus the requested
-    components present in that tick's Table packet."""
+    """One row from ``Client.stream``: the requested components present in
+    that tick's Table packet.
+
+    ``timestamp_us`` is the newest sample timestamp in the row. A batched
+    stream carries each component's *latest* value, so when mixing rates a
+    slow component's sample can be older than the row — its own time is in
+    ``timestamps[name]``.
+    """
 
     timestamp_us: int
     values: Dict[str, np.ndarray]
+    timestamps: Dict[str, int]
 
     def __getitem__(self, name: str) -> np.ndarray:
         return self.values[name]
@@ -331,8 +338,12 @@ class ComponentStream:
             row = self._s.next_row(self._POLL_MS)
             if row is not None:
                 timestamp_us, parts = row
-                values = {name: _to_array(data, prim, shape) for name, data, prim, shape in parts}
-                return StreamRow(timestamp_us=timestamp_us, values=values)
+                values = {}
+                timestamps = {}
+                for name, data, prim, shape, ts in parts:
+                    values[name] = _to_array(data, prim, shape)
+                    timestamps[name] = ts
+                return StreamRow(timestamp_us=timestamp_us, values=values, timestamps=timestamps)
             if self._s.is_closed():
                 raise StopIteration
 

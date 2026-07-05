@@ -33,17 +33,24 @@ struct RowValue {
     prim: PrimType,
     shape: Vec<usize>,
     data: Vec<u8>,
+    /// This component's own sample timestamp (a batched stream carries each
+    /// component's latest value, which may be older than the row's newest).
+    timestamp: i64,
 }
 
-/// One stream row: shared timestamp + the requested components present in
-/// the underlying Table packet.
+/// One stream row: the newest timestamp in the packet + the requested
+/// components present in it.
 struct RowData {
     timestamp: i64,
     values: Vec<RowValue>,
 }
 
-/// `(timestamp_us, [(name, bytes, prim, shape)])` handed to Python.
-type PyRow<'py> = (i64, Vec<(String, Bound<'py, PyBytes>, String, Vec<usize>)>);
+/// `(row_timestamp_us, [(name, bytes, prim, shape, timestamp_us)])` handed
+/// to Python.
+type PyRow<'py> = (
+    i64,
+    Vec<(String, Bound<'py, PyBytes>, String, Vec<usize>, i64)>,
+);
 
 /// Bounded item queue: async producer with backpressure, sync (Python-thread)
 /// consumer.
@@ -239,6 +246,7 @@ impl StreamSub {
                         PyBytes::new(py, &v.data),
                         format_prim_type(v.prim),
                         v.shape,
+                        v.timestamp,
                     )
                 })
                 .collect(),
@@ -467,14 +475,14 @@ impl Decomponentize for RowExtractor<'_> {
         let Some(name) = self.wanted.get(&component_id) else {
             return Ok(());
         };
-        if let Some(ts) = timestamp {
-            self.row.timestamp = self.row.timestamp.max(ts.0);
-        }
+        let ts = timestamp.map(|t| t.0).unwrap_or(0);
+        self.row.timestamp = self.row.timestamp.max(ts);
         self.row.values.push(RowValue {
             name: name.clone(),
             prim: value.prim_type(),
             shape: value.shape().to_vec(),
             data: value.as_bytes().to_vec(),
+            timestamp: ts,
         });
         Ok(())
     }

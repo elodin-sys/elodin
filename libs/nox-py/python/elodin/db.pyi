@@ -45,6 +45,7 @@ class Sample:
 class StreamRow:
     timestamp_us: int
     values: Dict[str, np.ndarray]
+    timestamps: Dict[str, int]
     def __getitem__(self, name: str) -> np.ndarray: ...
     def __contains__(self, name: str) -> bool: ...
 

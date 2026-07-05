@@ -275,6 +275,17 @@ impl TableWriter {
                     "field {name:?} offset {offset} overlaps the timestamp (bytes 0..8)"
                 )));
             }
+            // VTable field offsets/lengths are u16 on the wire; anything
+            // larger would silently wrap into a corrupt vtable.
+            if offset + size > u16::MAX as usize {
+                return Err(PyValueError::new_err(format!(
+                    "field {name:?} ends at byte {} but a table row is limited to {} bytes \
+                     (vtable offsets/lengths are u16); split the schema across writers or \
+                     shrink the field",
+                    offset + size,
+                    u16::MAX
+                )));
+            }
             row_size = row_size.max(offset + size);
             specs.push(FieldSpec {
                 name,

@@ -269,19 +269,24 @@ class ComponentReceiver:
         else:  # "sender" (default)
             timestamp_us = msg.timestamp_us
 
+        def make_writer():
+            spec = edb.f64[flat.size] if flat.size > 1 else edb.f64
+            writer = self.client.table_writer({component_name: spec})
+            self._writers[component_name] = writer
+            return writer
+
         try:
-            writer = self._writers.get(component_name)
-            if writer is None:
-                spec = edb.f64[flat.size] if flat.size > 1 else edb.f64
-                writer = self.client.table_writer({component_name: spec})
-                self._writers[component_name] = writer
-            writer.write_nowait(timestamp_us, {component_name: flat})
+            writer = self._writers.get(component_name) or make_writer()
+            try:
+                writer.write_nowait(timestamp_us, {component_name: flat})
+            except ValueError:
+                # Component size changed mid-stream: rebuild the writer with
+                # the new shape and retry once. (A DB that already registered
+                # the old shape rejects the new one asynchronously — visible
+                # via the writer's last_error.)
+                self._writers.pop(component_name).close()
+                make_writer().write_nowait(timestamp_us, {component_name: flat})
             self.writes_sent += 1
-        except ValueError:
-            # Component size changed mid-stream: rebuild the writer with the
-            # new shape and retry once.
-            self._writers.pop(component_name).close()
-            self.write_errors += 1
         except Exception as e:
             self.write_errors += 1
             # Only log occasionally to avoid spam

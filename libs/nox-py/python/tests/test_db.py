@@ -132,7 +132,11 @@ def test_missing_field_raises(client):
 @pytest.mark.perf
 @pytest.mark.slow
 def test_time_series_1m_read(client):
-    writer = client.table_writer({"perf.v": edb.f64}, maxlen=65536)
+    # drop-newest: on a full queue the *incoming* row is shed, so retrying the
+    # same row until `dropped` stops moving is lossless. (With the default
+    # drop-oldest policy a full queue would permanently shed an old row and
+    # the retry would enqueue a duplicate instead.)
+    writer = client.table_writer({"perf.v": edb.f64}, maxlen=65536, queue="drop-newest")
     n = 1_000_000
     # write_nowait for throughput; retry any row shed by the bounded queue so
     # all n rows land (the server is alive, so drops can only mean queue-full).
@@ -480,6 +484,37 @@ def test_stream_fixed_rate_replay(client):
     assert values[0] <= 1.0, f"replay should start near the earliest sample, got {values[0]}"
 
 
+def test_stream_row_per_component_timestamps(client):
+    """Multi-rate rows expose each component's own sample time; the row
+    timestamp is the newest of them."""
+    fast_w = client.table_writer({"mr.fast": edb.f64})
+    slow_w = client.table_writer({"mr.slow": edb.f64})
+    slow_w.write(timestamp_us=1_000, values={"mr.slow": 0.0})
+    fast_w.write(timestamp_us=1_500, values={"mr.fast": 0.0})
+
+    with client.stream(["mr.fast", "mr.slow"]) as stream:
+        time.sleep(0.5)  # let the subscription settle
+        # Only the fast component advances; the slow sample stays at t=1000.
+        for i in range(1, 21):
+            fast_w.write_nowait(timestamp_us=1_500 + i * 1_000, values={"mr.fast": float(i)})
+            time.sleep(0.01)
+        deadline = time.time() + 5.0
+        row = None
+        for candidate in stream:
+            if "mr.fast" in candidate and "mr.slow" in candidate:
+                row = candidate
+                if candidate.timestamps["mr.fast"] > candidate.timestamps["mr.slow"]:
+                    break
+            if time.time() > deadline:
+                break
+    assert row is not None, "stream should deliver rows with both components"
+    assert row.timestamp_us == max(row.timestamps.values())
+    assert row.timestamps["mr.slow"] == 1_000
+    assert row.timestamps["mr.fast"] > row.timestamps["mr.slow"]
+    fast_w.close()
+    slow_w.close()
+
+
 def test_stream_close_ends_iteration(client):
     writer = client.table_writer({"stc.v": edb.f64})
     writer.write(timestamp_us=1, values={"stc.v": 0.0})
@@ -494,6 +529,15 @@ def test_stream_close_ends_iteration(client):
 def test_queue_policy_validation(client):
     with pytest.raises(ValueError, match="queue policy"):
         client.table_writer({"qp.v": edb.f64}, queue="drop")
+
+
+def test_oversized_field_rejected_at_construction(client):
+    # 8192 f64s = 65536 bytes; vtable offsets/lengths are u16 and would wrap.
+    with pytest.raises(ValueError, match="limited to"):
+        client.table_writer({"big.v": edb.f64[8192]})
+    # Just under the limit (with the 8-byte timestamp) still works.
+    writer = client.table_writer({"big.ok": edb.f64[8190]})
+    writer.close()
 
 
 def test_drop_oldest_policy_sheds_on_overflow():

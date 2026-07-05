@@ -1137,10 +1137,11 @@ One component sample from `Client.latest`.
 
 ### _class_ `elodin.db.StreamRow`
 
-One row from `Client.stream`: a shared timestamp plus the requested components present in that tick.
+One row from `Client.stream`: the requested components present in that tick.
 
-- `timestamp_us` : `int`.
+- `timestamp_us` : `int` — the newest sample timestamp in the row.
 - `values` : `dict[str, numpy.ndarray]`; also indexable directly (`row["drone.imu.accel"]`).
+- `timestamps` : `dict[str, int]` — each component's own sample timestamp. A batched stream carries each component's *latest* value, so when mixing rates a slow component's sample can be older than `timestamp_us`.
 
 ### _class_ `elodin.db.ComponentStream` / `elodin.db.MessageStream`
 
