@@ -65,7 +65,8 @@ pub fn sync_line_plot_3d(
                 // TODO: Consider changing this to a warn once per error value.
                 warn_once!(
                     "Failed to parse Line3D EQL expression '{}': {}",
-                    line_plot.eql, e
+                    line_plot.eql,
+                    e
                 );
                 continue;
             }

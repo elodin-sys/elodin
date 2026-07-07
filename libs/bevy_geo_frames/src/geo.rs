@@ -847,7 +847,7 @@ mod tests {
     fn relative_identity_is_identity_in_bevy() {
         let ctx = dummy_ctx();
         for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
-            let r = GeoRotation::new(frame, DQuat::IDENTITY);
+            let r = GeoRotation::relative(frame, DQuat::IDENTITY);
             assert_eq!(r.2, RotationKind::Relative);
             assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?}");
         }
