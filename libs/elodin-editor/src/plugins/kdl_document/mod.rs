@@ -630,6 +630,79 @@ mod tests {
     }
 
     #[test]
+    fn config_sync_reloads_same_key_after_active_cleared() {
+        // Reproduces the DB-driven clear: `schematic.active` disappears from
+        // DbConfig (e.g. a follower snapshot from a source without a pointer),
+        // then the *same* key is re-set at an unchanged `assets.revision`. The
+        // clear must drop the sync baselines, otherwise sync sees
+        // `last_synced == active` + unchanged revision, skips the fetch, and
+        // strands the editor on the emptied view.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+
+        // schematics/a.kdl is loaded and baselined at the current revision.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/a.kdl".to_string());
+        {
+            let revision = app.world().resource::<DbConfig>().assets_revision();
+            app.world_mut()
+                .resource_mut::<LastSyncedAssetsRevision>()
+                .revision = Some(revision);
+        }
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "same key + unchanged revision must not reload"
+        );
+
+        // The active pointer disappears: the document is cleared.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .metadata
+            .remove("schematic.active");
+        app.update();
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "clearing the pointer must not emit a load"
+        );
+        assert!(
+            app.world().resource::<LastSyncedActiveKey>().0.is_none(),
+            "the clear must drop the last-synced key baseline"
+        );
+
+        // The same key comes back at the same revision: it must reload.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/a.kdl");
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenActiveRequests>().0,
+            vec!["schematics/a.kdl".to_string()],
+            "re-setting the same key after a clear must reload the schematic"
+        );
+    }
+
+    #[test]
     fn revision_bump_refetch_is_content_gated_and_tracked() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

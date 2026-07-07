@@ -479,7 +479,7 @@ pub(crate) fn save_path_for_active_key(key: &str) -> PathBuf {
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
-    last_synced_key: Res<LastSyncedActiveKey>,
+    mut last_synced_key: ResMut<LastSyncedActiveKey>,
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut pending_active: ResMut<PendingActiveSchematic>,
     save_in_flight: Option<Res<crate::ui::command_palette::palette_items::SchematicSaveInFlight>>,
@@ -598,6 +598,15 @@ pub fn sync_document_from_config(
     }
 
     current_document.clear();
+    // The active pointer is gone: drop the sync baselines so a later re-set of
+    // the same key (even at an unchanged `assets.revision`) reloads instead of
+    // being mistaken for "already synced" against the now-empty view. Resetting
+    // the whole revision state also discards a leftover `suppress_next` from an
+    // aborted save, which would otherwise swallow the first legitimate reload.
+    last_synced_key.0 = None;
+    if let Some(revision) = last_synced_revision.as_deref_mut() {
+        *revision = Default::default();
+    }
     cleared.write(DocumentCleared);
 }
 
