@@ -178,6 +178,27 @@ pub fn prime_schematic_assets(
         }
         return Ok(());
     };
+    // Pull window sub-schematics referenced outside the ingested tree (e.g.
+    // `window path="examples/drone/panel.kdl"`) into `{db}/assets/schematics/`
+    // and rewrite the references to `db:` keys, so the stored schematic is
+    // self-contained on followers and other machines (RFD #724). Failures fall
+    // back to storing the content as-is: a missing window file must not abort
+    // the sim, it just stays a machine-local reference.
+    let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+    let search_dirs = elodin_db::assets::schematic_window_search_dirs(entry);
+    let content =
+        match elodin_db::assets::ingest_window_schematics(&assets_dir, content, &search_dirs) {
+            Ok(Some(rewritten)) => std::borrow::Cow::Owned(rewritten),
+            Ok(None) => std::borrow::Cow::Borrowed(content),
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "failed to ingest window sub-schematics; storing as-is"
+                );
+                std::borrow::Cow::Borrowed(content)
+            }
+        };
+
     // Store the schematic as the active asset and point at it (RFD #724): the
     // bytes travel only as an asset, fetched over the Asset Server HTTP. If
     // either step fails, warn — there is no inline fallback.
@@ -1095,6 +1116,57 @@ mod asset_tests {
         // Nothing to point at: the fallback must not set a dangling pointer.
         let active = db.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
         assert_eq!(active, None);
+    }
+
+    #[test]
+    fn prime_ingests_window_schematics_outside_assets_tree() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _no_env = EnvVarGuard::unset("ELODIN_ASSETS");
+
+        // The drone layout: the sim entry lives in `examples/drone/`, the
+        // window KDL sits next to it (outside `assets/`), and the schematic
+        // references it repo-root-relative.
+        let dir = tempdir().unwrap();
+        let sim = dir.path().join("examples/drone");
+        std::fs::create_dir_all(sim.join("assets")).unwrap();
+        std::fs::write(sim.join("assets/talon.glb"), b"glb-bytes").unwrap();
+        std::fs::write(
+            sim.join("motor-panel.kdl"),
+            b"tabs {\n    graph \"drone.motor_input\"\n}\n",
+        )
+        .unwrap();
+        let entry = sim.join("main.py");
+        std::fs::write(&entry, b"# sim").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"drone.world_pos\" {\n    glb path=\"talon.glb\"\n}\nwindow title=\"motors\" path=\"examples/drone/motor-panel.kdl\"\n"
+                .to_string(),
+        );
+
+        prime_schematic_assets(&db, &world, Some(&entry)).unwrap();
+
+        // The window file was pulled into the DB under schematics/ and the
+        // stored active schematic references it as a db: key — no machine-local
+        // path survives, so a follower or another machine loads it over HTTP.
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        let window = std::fs::read_to_string(stored.join("schematics/motor-panel.kdl")).unwrap();
+        assert!(window.contains("drone.motor_input"));
+
+        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
+        assert!(
+            active_kdl.contains("db:schematics/motor-panel.kdl"),
+            "window reference should be a db: key, got:\n{active_kdl}"
+        );
+        assert!(
+            !active_kdl.contains("examples/drone/motor-panel.kdl"),
+            "no machine-local window path should survive, got:\n{active_kdl}"
+        );
+        assert!(
+            active_kdl.contains("db:talon.glb"),
+            "the glb rewrite must still apply after window ingest, got:\n{active_kdl}"
+        );
     }
 
     #[test]
