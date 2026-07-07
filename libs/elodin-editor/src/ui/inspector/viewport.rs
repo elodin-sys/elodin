@@ -888,7 +888,8 @@ mod tests {
             };
 
             let elodin_bevy = world_pos.bevy_att();
-            let geo_frames_bevy = GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let geo_frames_bevy =
+                GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
             assert_eq_quat!(
                 elodin_bevy.as_quat(),
                 geo_frames_bevy.as_quat(),
