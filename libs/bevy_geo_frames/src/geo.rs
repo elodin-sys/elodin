@@ -360,7 +360,7 @@ impl GeoPosition {
 
 impl GeoRotation {
     /// A [RotationKind::Relative] rotation expressed in `frame`.
-    pub fn new(frame: GeoFrame, q: impl Into<DQuat>) -> Self {
+    pub fn relative(frame: GeoFrame, q: impl Into<DQuat>) -> Self {
         GeoRotation(frame, q.into(), RotationKind::default())
     }
 

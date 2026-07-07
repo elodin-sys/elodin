@@ -971,7 +971,7 @@ pub fn register_world_pos_components(app: &mut App) {
         GeoPosition(GeoFrame::default(), DVec3::ZERO)
     });
     app.register_required_components_with::<WorldPos, GeoRotation>(|| {
-        GeoRotation::new(GeoFrame::default(), DQuat::IDENTITY)
+        GeoRotation::relative(GeoFrame::default(), DQuat::IDENTITY)
     });
     app.register_required_components::<WorldPos, Transform>();
     #[cfg(feature = "big_space")]

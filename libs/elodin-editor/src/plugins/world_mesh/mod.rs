@@ -148,7 +148,7 @@ fn insert_geo_components(
     let (x, y, z) = world_mesh.translate.unwrap_or_default();
     commands.entity(entity).insert((
         GeoPosition(frame, DVec3::new(x, y, z)),
-        GeoRotation::new(frame, DQuat::IDENTITY),
+        GeoRotation::relative(frame, DQuat::IDENTITY),
     ));
 }
 

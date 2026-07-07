@@ -358,7 +358,7 @@ impl KdlThrusterJet {
 
 fn body_rotation(world_pos: &WorldPos, frame: Option<GeoFrame>, geo_context: &GeoContext) -> Quat {
     if let Some(frame) = frame {
-        GeoRotation::new(frame, world_pos.att())
+        GeoRotation::relative(frame, world_pos.att())
             .to_bevy(geo_context)
             .as_quat()
     } else {
