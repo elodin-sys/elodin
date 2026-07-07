@@ -683,7 +683,7 @@ mod tests {
                 .spawn((
                     super::WorldPos::default(),
                     GeoPosition(frame, DVec3::ZERO),
-                    GeoRotation::new(frame, DQuat::IDENTITY),
+                    GeoRotation::relative(frame, DQuat::IDENTITY),
                 ))
                 .id();
             // Values from the failing ball.kdl viewport.
@@ -888,7 +888,7 @@ mod tests {
             };
 
             let elodin_bevy = world_pos.bevy_att();
-            let geo_frames_bevy = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let geo_frames_bevy = GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
             assert_eq_quat!(
                 elodin_bevy.as_quat(),
                 geo_frames_bevy.as_quat(),

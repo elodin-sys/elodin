@@ -157,16 +157,7 @@ fn viewport_grid_settings(
     frame: bevy_geo_frames::GeoFrame,
 ) -> bevy_infinite_grid::InfiniteGridSettings {
     match frame {
-        GeoFrame::NED => bevy_infinite_grid::InfiniteGridSettings {
-            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-            x_axis_color: crate::ui::colors::bevy::RED,
-            z_axis_color: crate::ui::colors::bevy::GREEN,
-            fadeout_distance: 50_000.0,
-            scale: 0.1,
-            ..Default::default()
-        },
-        GeoFrame::ENU => bevy_infinite_grid::InfiniteGridSettings {
+        GeoFrame::NED | GeoFrame::ENU => bevy_infinite_grid::InfiniteGridSettings {
             minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
             major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
             x_axis_color: crate::ui::colors::bevy::RED,
