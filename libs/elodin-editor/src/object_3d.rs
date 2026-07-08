@@ -2,11 +2,12 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
 use bevy::material::AlphaMode;
-use bevy::math::{DQuat, DVec3};
+use bevy::math::{DMat3, DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
-use bevy_geo_frames::{GeoPosition, GeoRotation};
+use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bitvec::prelude::*;
 use eql::Expr;
@@ -20,7 +21,7 @@ use crate::iter::JoinDisplayExt;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::rim_glow_material::{RimGlowExt, RimGlowMaterial, RimGlowParams};
 use crate::ui::tiles::ViewportConfig;
-use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use crate::{BevyExt, Coordinate, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use bevy::platform::hash::FixedHasher;
 use bevy_geo_frames::prelude::*;
 use std::borrow::Cow;
@@ -77,6 +78,8 @@ pub struct Object3DState {
     pub scale_error: Option<CompileError>,
     /// When set, ellipsoid shape is driven by error covariance (Mat3 path); evaluated each frame.
     pub error_covariance_cholesky_expr: Option<CompiledExpr>,
+    /// When set, ellipsoid shape is driven by symmetric error covariance P; Cholesky-decomposed each frame.
+    pub error_covariance_expr: Option<CompiledExpr>,
     pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
     pub data: Object3D,
 }
@@ -859,9 +862,22 @@ pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr
 
 /// Compiles an EQL expression that must yield at least 6 floats (lower-triangular Cholesky L).
 pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, CompileError> {
+    compile_6float_eql(expr, "error_covariance_cholesky", ctx)
+}
+
+/// Compiles an EQL expression that must yield at least 6 floats (symmetric covariance P).
+pub fn compile_covariance_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, CompileError> {
+    compile_6float_eql(expr, "error_covariance", ctx)
+}
+
+fn compile_6float_eql(
+    expr: &str,
+    field: &'static str,
+    ctx: &eql::Context,
+) -> Result<CompiledExpr, CompileError> {
     let trimmed = expr.trim();
     if trimmed.is_empty() {
-        return Err(ComponentError::InvalidEmptyIn("error_covariance_cholesky expression").into());
+        return Err(ComponentError::InvalidEmptyIn(field).into());
     }
     ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
@@ -960,7 +976,7 @@ pub fn on_scene_ready(
 }
 
 /// System that updates 3D object entities based on their EQL expressions
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn update_object_3d_system(
     mut commands: Commands,
     mut objects_query: Query<(
@@ -976,6 +992,8 @@ pub fn update_object_3d_system(
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
+    geo_context: Res<GeoContext>,
+    coordinate: Res<Coordinate>,
 ) {
     for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
@@ -994,12 +1012,16 @@ pub fn update_object_3d_system(
             continue;
         };
 
-        if !matches!(
-            object_3d.data.mesh,
-            impeller2_wkt::Object3DMesh::Ellipsoid { .. }
-        ) {
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_confidence_interval,
+            ..
+        } = &object_3d.data.mesh
+        else {
             continue;
-        }
+        };
+
+        let covariance_frame =
+            resolve_covariance_frame(&object_3d.data, &coordinate);
 
         let mesh_child = children_maybe.and_then(|children| {
             let mut mesh_children = children
@@ -1023,22 +1045,48 @@ pub fn update_object_3d_system(
         });
 
         if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr {
-            if let impeller2_wkt::Object3DMesh::Ellipsoid {
-                error_confidence_interval,
-                ..
-            } = &object_3d.data.mesh
-                && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
+            if let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
                 && let Ok(l) = component_value_to_6floats(&cv)
             {
-                let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
+                let linear = covariance_linear_from_l(
+                    &l,
+                    *error_confidence_interval,
+                    covariance_frame,
+                    &geo_context,
+                );
                 if let Some(child) = mesh_child
                     && let Ok(mut params) = mat3_params.get_mut(child)
                 {
                     params.set_if_neq(Mat3Params { linear });
                 }
-                let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
-                ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
+                ellipse.max_extent = max_linear_extent(&linear);
                 ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+            }
+        } else if let Some(ref covariance_expr) = object_3d.error_covariance_expr {
+            if let Ok(cv) = covariance_expr.execute(&entity_map, &component_value_maps)
+                && let Ok(p) = component_value_to_6floats(&cv)
+            {
+                let p_mat = symmetric_6_to_mat3(&p);
+                if let Some(l) = cholesky_3x3_spd(&p_mat) {
+                    let linear = covariance_linear_from_l(
+                        &l,
+                        *error_confidence_interval,
+                        covariance_frame,
+                        &geo_context,
+                    );
+                    if let Some(child) = mesh_child
+                        && let Ok(mut params) = mat3_params.get_mut(child)
+                    {
+                        params.linear = linear;
+                    }
+                    ellipse.max_extent = max_linear_extent(&linear);
+                    ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                } else {
+                    warn_once!(
+                        entity = ?entity,
+                        "ellipsoid error_covariance is not positive-definite; skipping update"
+                    );
+                }
             }
         } else {
             match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
@@ -1430,27 +1478,96 @@ fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
     Vec3::new(enu.x, enu.z, enu.y)
 }
 
-/// ENU (East-North-Up) to Bevy (East-Up-South) basis change.
-/// ENU: X=East, Y=North, Z=Up. Bevy: X=East, Y=Up, Z=South.
-/// So Bevy = (ENU.x, ENU.z, -ENU.y).
-const ENU_TO_BEVY: Mat3 = Mat3::from_cols(
-    Vec3::new(1.0, 0.0, 0.0),  // ENU East  -> Bevy X
-    Vec3::new(0.0, 0.0, -1.0), // ENU North -> Bevy -Z
-    Vec3::new(0.0, 1.0, 0.0),  // ENU Up    -> Bevy Y
-);
+fn resolve_covariance_frame(object: &Object3D, coordinate: &Coordinate) -> GeoFrame {
+    object
+        .frame_orientation
+        .or(object.frame)
+        .or(coordinate.0)
+        .unwrap_or(GeoFrame::ENU)
+}
 
-/// Build Mat3 from lower-triangular Cholesky L in **ENU** (row-major: a,b,c,d,e,f -> L00,L10,L11,L20,L21,L22),
-/// scaled by sqrt(chi2_3(confidence)), then converted to Bevy (East-Up-South) so the ellipsoid displays correctly.
-fn cholesky_6_to_mat3(l: &[f32; 6], confidence_percent: f32) -> Mat3 {
+/// Build symmetric covariance P from 6-pack (a,b,c,d,e,f) -> [[a,b,c],[b,d,e],[c,e,f]].
+fn symmetric_6_to_mat3(p: &[f32; 6]) -> Mat3 {
+    Mat3::from_cols(
+        Vec3::new(p[0], p[1], p[2]),
+        Vec3::new(p[1], p[3], p[4]),
+        Vec3::new(p[2], p[4], p[5]),
+    )
+}
+
+/// Build lower-triangular Cholesky L from 6-pack (a,b,c,d,e,f).
+fn lower_cholesky_pack_to_mat3(l: &[f32; 6]) -> Mat3 {
+    Mat3::from_cols(
+        Vec3::new(l[0], l[1], l[3]),
+        Vec3::new(0.0, l[2], l[4]),
+        Vec3::new(0.0, 0.0, l[5]),
+    )
+}
+
+fn cholesky_3x3_spd(p: &Mat3) -> Option<[f32; 6]> {
+    let cols = p.to_cols_array();
+    let p00 = cols[0];
+    let p10 = cols[3];
+    let p20 = cols[6];
+    let p11 = cols[4];
+    let p21 = cols[7];
+    let p22 = cols[8];
+
+    if !(p00 > 0.0 && p00.is_finite()) {
+        return None;
+    }
+    let l00 = p00.sqrt();
+
+    let l10 = p10 / l00;
+    let l20 = p20 / l00;
+
+    let d11 = p11 - l10 * l10;
+    if !(d11 > 0.0 && d11.is_finite()) {
+        return None;
+    }
+    let l11 = d11.sqrt();
+
+    let l21 = (p21 - l20 * l10) / l11;
+
+    let d22 = p22 - l20 * l20 - l21 * l21;
+    if !(d22 > 0.0 && d22.is_finite()) {
+        return None;
+    }
+    let l22 = d22.sqrt();
+
+    Some([l00, l10, l11, l20, l21, l22])
+}
+
+fn dmat3_to_mat3(m: DMat3) -> Mat3 {
+    Mat3::from_cols(
+        m.x_axis.as_vec3(),
+        m.y_axis.as_vec3(),
+        m.z_axis.as_vec3(),
+    )
+}
+
+fn frame_rotation_to_bevy(frame: GeoFrame, geo_context: &GeoContext) -> Mat3 {
+    dmat3_to_mat3(GeoFrame::bevy_R_(&frame, geo_context))
+}
+
+fn covariance_linear_from_l(
+    l: &[f32; 6],
+    confidence_percent: f32,
+    frame: GeoFrame,
+    geo_context: &GeoContext,
+) -> Mat3 {
     let confidence_fraction = (confidence_percent / 100.0).clamp(0.01, 0.999);
     let scale = chi2_3_quantile(confidence_fraction).sqrt();
-    #[rustfmt::skip]
-    let l_enu = Mat3::from_cols_array(&[
-        l[0] * scale, 0.0,          0.0,
-        l[1] * scale, l[2] * scale, 0.0,
-        l[3] * scale, l[4] * scale, l[5] * scale,
-    ]);
-    ENU_TO_BEVY * l_enu
+    let l_mat = lower_cholesky_pack_to_mat3(l) * scale;
+    frame_rotation_to_bevy(frame, geo_context) * l_mat
+}
+
+fn max_linear_extent(linear: &Mat3) -> f32 {
+    let cols = linear.to_cols_array();
+    let c0 = Vec3::new(cols[0], cols[1], cols[2]).length();
+    let c1 = Vec3::new(cols[3], cols[4], cols[5]).length();
+    let c2 = Vec3::new(cols[6], cols[7], cols[8]).length();
+    c0.max(c1).max(c2)
 }
 
 pub trait ComponentArrayExt {
@@ -1490,6 +1607,7 @@ pub fn create_object_3d_entity(
         impeller2_wkt::Object3DMesh::Ellipsoid {
             scale,
             error_covariance_cholesky: None,
+            error_covariance: None,
             ..
         } => match compile_scale_eql(scale, ctx) {
             Ok(compiled) => (Some(compiled), None),
@@ -1502,6 +1620,13 @@ pub fn create_object_3d_entity(
             error_covariance_cholesky: Some(cholesky),
             ..
         } => compile_cholesky_eql(cholesky, ctx).ok(),
+        _ => None,
+    };
+    let error_covariance_expr = match &data.mesh {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance: Some(covariance),
+            ..
+        } => compile_covariance_eql(covariance, ctx).ok(),
         _ => None,
     };
 
@@ -1537,6 +1662,7 @@ pub fn create_object_3d_entity(
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
+                error_covariance_expr,
                 joint_animations,
                 data: data.clone(),
             },
@@ -1718,6 +1844,7 @@ pub fn spawn_mesh(
         impeller2_wkt::Object3DMesh::Ellipsoid {
             color,
             error_covariance_cholesky,
+            error_covariance,
             error_confidence_interval: _error_confidence_interval,
             show_grid,
             grid_color,
@@ -1731,7 +1858,7 @@ pub fn spawn_mesh(
                 AlphaMode::Opaque
             };
 
-            if error_covariance_cholesky.is_some() {
+            if error_covariance_cholesky.is_some() || error_covariance.is_some() {
                 let initial_linear = Mat3::IDENTITY;
                 let mat3_material = mat3_material_assets.add(Mat3Material {
                     base: StandardMaterial {
@@ -2343,6 +2470,76 @@ mod ellipsoid_scale_eql_tests {
 
             assert_vec3_close(scale, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod ellipsoid_covariance_tests {
+    use bevy::prelude::Mat3;
+    use bevy_geo_frames::{GeoContext, GeoFrame, Present};
+
+    use crate::Coordinate;
+
+    use super::{
+        cholesky_3x3_spd, covariance_linear_from_l, lower_cholesky_pack_to_mat3,
+        resolve_covariance_frame, symmetric_6_to_mat3,
+    };
+    use impeller2_wkt::{Object3D, Object3DMesh};
+
+    fn assert_mat3_close(actual: Mat3, expected: Mat3) {
+        let delta = (actual - expected).to_cols_array();
+        let max = delta.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
+        assert!(max < 1e-4, "expected {expected:?}, got {actual:?}");
+    }
+
+    #[test]
+    fn symmetric_cholesky_recovers_llt() {
+        let l_in = [2.0, 0.5, 3.0, 1.0, 0.25, 4.0];
+        let l = lower_cholesky_pack_to_mat3(&l_in);
+        let p = l * l.transpose();
+        let recovered = cholesky_3x3_spd(&p).expect("SPD matrix should factorize");
+        let l_out = lower_cholesky_pack_to_mat3(&recovered);
+        assert_mat3_close(l_out * l_out.transpose(), p);
+    }
+
+    #[test]
+    fn identity_symmetric_covariance_factors_to_identity_cholesky() {
+        let p = symmetric_6_to_mat3(&[1.0, 0.0, 0.0, 1.0, 0.0, 1.0]);
+        let l = cholesky_3x3_spd(&p).expect("identity covariance");
+        assert!((l[0] - 1.0).abs() < 1e-5);
+        assert!(l[1].abs() < 1e-5);
+        assert!((l[2] - 1.0).abs() < 1e-5);
+        assert!(l[3].abs() < 1e-5);
+        assert!(l[4].abs() < 1e-5);
+        assert!((l[5] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn world_frame_enu_differs_from_ned() {
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let l = [1.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let enu = covariance_linear_from_l(&l, 70.0, GeoFrame::ENU, &ctx);
+        let ned = covariance_linear_from_l(&l, 70.0, GeoFrame::NED, &ctx);
+        assert!(!enu.abs_diff_eq(ned, 1e-5));
+    }
+
+    #[test]
+    fn resolve_covariance_frame_inherits_object_frame() {
+        let object = Object3D {
+            eql: "x".to_string(),
+            mesh: Object3DMesh::glb("m.glb"),
+            frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: Default::default(),
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            node_id: Default::default(),
+        };
+        assert_eq!(
+            resolve_covariance_frame(&object, &Coordinate(None)),
+            GeoFrame::NED
+        );
     }
 }
 

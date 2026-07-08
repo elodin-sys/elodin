@@ -1552,6 +1552,11 @@ fn parse_object_3d_mesh(
                 .and_then(|v| v.as_string())
                 .map(str::to_string);
 
+            let error_covariance = node
+                .get("error_covariance")
+                .and_then(|v| v.as_string())
+                .map(str::to_string);
+
             let error_confidence_interval = node
                 .get("error_confidence_interval")
                 .and_then(|v| v.as_float())
@@ -1573,6 +1578,7 @@ fn parse_object_3d_mesh(
                 scale,
                 color,
                 error_covariance_cholesky,
+                error_covariance,
                 error_confidence_interval,
                 show_grid,
                 grid_color,
@@ -3007,6 +3013,7 @@ object_3d "rocket.world_pos" {
                     scale,
                     color,
                     error_covariance_cholesky,
+                    error_covariance: _,
                     error_confidence_interval,
                     show_grid,
                     grid_color: _,
@@ -3047,6 +3054,7 @@ object_3d "satellite.world_pos" {
                     scale: _,
                     color,
                     error_covariance_cholesky,
+                    error_covariance: _,
                     error_confidence_interval,
                     show_grid,
                     grid_color: _,
@@ -3059,6 +3067,38 @@ object_3d "satellite.world_pos" {
                     assert!(*show_grid);
                     assert!((color.r - 200.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.a - 120.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_ellipsoid_symmetric_error_covariance() {
+        let kdl = r#"
+object_3d "satellite.world_pos" {
+    ellipsoid error_covariance="(1, 0, 0, 1, 0, 1)" error_confidence_interval=90.0 {
+        color white
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid {
+                    error_covariance_cholesky,
+                    error_covariance,
+                    error_confidence_interval,
+                    ..
+                } => {
+                    assert!(error_covariance_cholesky.is_none());
+                    assert_eq!(error_covariance.as_deref(), Some("(1, 0, 0, 1, 0, 1)"));
+                    assert!((*error_confidence_interval - 90.0).abs() < f32::EPSILON);
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }

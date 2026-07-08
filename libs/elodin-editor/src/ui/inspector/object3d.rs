@@ -16,7 +16,7 @@ use smallvec::SmallVec;
 
 use crate::object_3d::{
     CompileError, ComponentError, EllipsoidVisual, Object3DMeshChild, compile_cholesky_eql,
-    compile_scale_eql, spawn_mesh,
+    compile_covariance_eql, compile_scale_eql, spawn_mesh,
 };
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
@@ -226,11 +226,13 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             scale: default_scale.clone(),
                             color: impeller2_wkt::Color::WHITE,
                             error_covariance_cholesky: None,
+                            error_covariance: None,
                             error_confidence_interval: default_ellipsoid_confidence_interval(),
                             show_grid: default_ellipsoid_show_grid(),
                             grid_color: default_ellipsoid_grid_color(),
                         };
                         object_3d_state.error_covariance_cholesky_expr = None;
+                        object_3d_state.error_covariance_expr = None;
                         match compile_scale_eql(&default_scale, &eql_context.0) {
                             Ok(expr) => {
                                 object_3d_state.scale_expr = Some(expr);
@@ -252,6 +254,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 Result<crate::object_3d::CompiledExpr, CompileError>,
             > = None;
             let mut cholesky_expr_update: Option<Option<crate::object_3d::CompiledExpr>> = None;
+            let mut covariance_expr_update: Option<Option<crate::object_3d::CompiledExpr>> = None;
             let scale_error_display = object_3d_state.scale_error.clone();
 
             match &mut object_3d_state.data.mesh {
@@ -450,6 +453,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     scale,
                     color,
                     error_covariance_cholesky,
+                    error_covariance,
                     error_confidence_interval,
                     show_grid,
                     grid_color,
@@ -460,7 +464,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         changed |= node_color_picker(ui, "Grid color", grid_color);
                     }
                     ui.separator();
-                    if error_covariance_cholesky.is_some() {
+                    let uses_cholesky = error_covariance_cholesky.is_some();
+                    let uses_covariance = !uses_cholesky && error_covariance.is_some();
+                    if uses_cholesky {
                         ui.label(
                             egui::RichText::new("Error covariance Cholesky (EQL, 6 values)")
                                 .color(get_scheme().text_secondary),
@@ -478,15 +484,24 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             );
                             changed = true;
                         }
-                        changed |= ui
-                            .add(
-                                egui::DragValue::new(error_confidence_interval)
-                                    .range(1.0..=99.0)
-                                    .speed(1.0)
-                                    .suffix("%")
-                                    .prefix("Confidence: "),
-                            )
-                            .changed();
+                    } else if uses_covariance {
+                        ui.label(
+                            egui::RichText::new("Error covariance (EQL, symmetric 6 values)")
+                                .color(get_scheme().text_secondary),
+                        );
+                        let covariance_str = error_covariance.as_deref().unwrap_or("");
+                        let mut s = covariance_str.to_string();
+                        let response = eql_textfield(ui, true, &eql_context.0, &mut s);
+                        if response.changed() {
+                            *error_covariance =
+                                if s.trim().is_empty() { None } else { Some(s) };
+                            covariance_expr_update = Some(
+                                error_covariance
+                                    .as_ref()
+                                    .and_then(|e| compile_covariance_eql(e, &eql_context.0).ok()),
+                            );
+                            changed = true;
+                        }
                     } else {
                         ui.label(
                             egui::RichText::new("Scale (EQL)").color(get_scheme().text_secondary),
@@ -506,29 +521,95 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         if let Some(err) = &scale_error_display {
                             ui.colored_label(get_scheme().error, format!("{}", err));
                         }
-                        if ui
-                            .button("Use error covariance (Cholesky) instead")
-                            .clicked()
-                        {
-                            *error_covariance_cholesky = Some("(1, 0, 1, 0, 0, 1)".to_string());
-                            *error_confidence_interval = default_ellipsoid_confidence_interval();
-                            scale_expr_update = None;
-                            cholesky_expr_update = Some(
-                                compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0).ok(),
-                            );
-                            changed = true;
-                        }
                     }
-                    if error_covariance_cholesky.is_some()
-                        && ui.button("Use scale instead").clicked()
-                    {
-                        *error_covariance_cholesky = None;
-                        *error_confidence_interval = default_ellipsoid_confidence_interval();
-                        cholesky_expr_update = Some(None);
-                        let default_scale = default_ellipsoid_scale_expr();
-                        *scale = default_scale.clone();
-                        scale_expr_update = Some(compile_scale_eql(&default_scale, &eql_context.0));
-                        changed = true;
+
+                    if uses_cholesky || uses_covariance {
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(error_confidence_interval)
+                                    .range(1.0..=99.0)
+                                    .speed(1.0)
+                                    .suffix("%")
+                                    .prefix("Confidence: "),
+                            )
+                            .changed();
+                    }
+
+                    if !uses_cholesky && !uses_covariance {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button("Use error covariance (Cholesky)")
+                                .clicked()
+                            {
+                                *error_covariance_cholesky =
+                                    Some("(1, 0, 1, 0, 0, 1)".to_string());
+                                *error_covariance = None;
+                                *error_confidence_interval = default_ellipsoid_confidence_interval();
+                                scale_expr_update = None;
+                                covariance_expr_update = Some(None);
+                                cholesky_expr_update = Some(
+                                    compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0)
+                                        .ok(),
+                                );
+                                changed = true;
+                            }
+                            if ui.button("Use error covariance").clicked() {
+                                *error_covariance =
+                                    Some("(1, 0, 0, 1, 0, 1)".to_string());
+                                *error_covariance_cholesky = None;
+                                *error_confidence_interval = default_ellipsoid_confidence_interval();
+                                scale_expr_update = None;
+                                cholesky_expr_update = Some(None);
+                                covariance_expr_update = Some(
+                                    compile_covariance_eql("(1, 0, 0, 1, 0, 1)", &eql_context.0)
+                                        .ok(),
+                                );
+                                changed = true;
+                            }
+                        });
+                    }
+
+                    if uses_cholesky || uses_covariance {
+                        ui.horizontal(|ui| {
+                            if ui.button("Use scale instead").clicked() {
+                                *error_covariance_cholesky = None;
+                                *error_covariance = None;
+                                *error_confidence_interval = default_ellipsoid_confidence_interval();
+                                cholesky_expr_update = Some(None);
+                                covariance_expr_update = Some(None);
+                                let default_scale = default_ellipsoid_scale_expr();
+                                *scale = default_scale.clone();
+                                scale_expr_update =
+                                    Some(compile_scale_eql(&default_scale, &eql_context.0));
+                                changed = true;
+                            }
+                            if uses_cholesky
+                                && ui.button("Use symmetric covariance").clicked()
+                            {
+                                *error_covariance =
+                                    Some("(1, 0, 0, 1, 0, 1)".to_string());
+                                *error_covariance_cholesky = None;
+                                cholesky_expr_update = Some(None);
+                                covariance_expr_update = Some(
+                                    compile_covariance_eql("(1, 0, 0, 1, 0, 1)", &eql_context.0)
+                                        .ok(),
+                                );
+                                changed = true;
+                            }
+                            if uses_covariance
+                                && ui.button("Use Cholesky instead").clicked()
+                            {
+                                *error_covariance_cholesky =
+                                    Some("(1, 0, 1, 0, 0, 1)".to_string());
+                                *error_covariance = None;
+                                covariance_expr_update = Some(None);
+                                cholesky_expr_update = Some(
+                                    compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0)
+                                        .ok(),
+                                );
+                                changed = true;
+                            }
+                        });
                     }
                 }
             }
@@ -547,6 +628,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             }
             if let Some(update) = cholesky_expr_update {
                 object_3d_state.error_covariance_cholesky_expr = update;
+            }
+            if let Some(update) = covariance_expr_update {
+                object_3d_state.error_covariance_expr = update;
             }
 
             if changed {

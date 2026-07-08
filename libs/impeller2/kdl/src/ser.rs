@@ -892,16 +892,26 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             scale,
             color,
             error_covariance_cholesky,
+            error_covariance,
             error_confidence_interval,
             show_grid,
             grid_color,
         } => {
             let mut node = KdlNode::new("ellipsoid");
+            let uses_covariance = error_covariance_cholesky.is_some() || error_covariance.is_some();
             if let Some(cholesky) = error_covariance_cholesky {
                 node.entries_mut().push(KdlEntry::new_prop(
                     "error_covariance_cholesky",
                     cholesky.clone(),
                 ));
+            } else if let Some(covariance) = error_covariance {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("error_covariance", covariance.clone()));
+            } else {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("scale", scale.clone()));
+            }
+            if uses_covariance {
                 if *error_confidence_interval
                     != impeller2_wkt::default_ellipsoid_confidence_interval()
                 {
@@ -910,9 +920,6 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
                         *error_confidence_interval as f64,
                     ));
                 }
-            } else {
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("scale", scale.clone()));
             }
             if *show_grid {
                 node.entries_mut()
@@ -1554,6 +1561,7 @@ object_3d lander.world_pos {
                 scale: "rocket.scale".to_string(),
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
                 error_covariance_cholesky: None,
+                error_covariance: None,
                 error_confidence_interval: impeller2_wkt::default_ellipsoid_confidence_interval(),
                 show_grid: impeller2_wkt::default_ellipsoid_show_grid(),
                 grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
@@ -1578,6 +1586,7 @@ object_3d lander.world_pos {
                     scale,
                     color,
                     error_covariance_cholesky,
+                    error_covariance: _,
                     error_confidence_interval: _,
                     show_grid: _,
                     grid_color: _,
