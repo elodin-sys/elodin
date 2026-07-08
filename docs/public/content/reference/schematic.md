@@ -90,7 +90,9 @@ viewport hdr=#true {
 
 ### object_3d
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
-- `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position and orientation. Inherits from global `coordinate` if omitted.
+- `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position. Inherits from global `coordinate` if omitted.
+- `frame_orientation`: optional; `ENU`, `NED`, or `ECEF`. Coordinate frame used for orientation (`GeoRotation`). Falls back to `frame`, then the global default, when omitted.
+- `orientation`: optional; `relative` (default) or `absolute`. With `relative`, an identity rotation in any frame maps to identity in the editor's Bevy view (legacy ENU-compatible behavior). With `absolute`, mesh geometry is oriented to the declared orientation frame's axes — use this for frame-aligned visuals such as compasses in multi-frame scenes.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server). Material overrides (both open-ended strengths, default 0.0 = use the GLB's own materials):
     - `emissivity`: brightens the surface — boosts the model's emissive by `4 × emissivity`, modulated by its base-color texture so the pattern still shows.
@@ -330,6 +332,8 @@ dashboard      = "dashboard" { dashboard_node }+
 object_3d = "object_3d"
           <eql>
           [frame=ENU|NED|ECEF]
+          [frame_orientation=ENU|NED|ECEF]
+          [orientation=relative|absolute]
           { glb { animate }*
           | sphere
           | box

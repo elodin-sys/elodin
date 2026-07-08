@@ -5,7 +5,7 @@
 //! a right-multiplication as $v_{bevy} = {bevy}_R_{enu} * v_{enu}$. This
 //! convention was chosen so that frames can be easily checked by adjacency.
 #![allow(non_snake_case)]
-use crate::GeoFrame;
+use crate::{GeoFrame, RotationKind};
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
 use map_3d::Ellipsoid;
@@ -360,7 +360,7 @@ impl GeoPosition {
 
 impl GeoRotation {
     /// A [RotationKind::Relative] rotation expressed in `frame`.
-    pub fn new(frame: GeoFrame, q: impl Into<DQuat>) -> Self {
+    pub fn relative(frame: GeoFrame, q: impl Into<DQuat>) -> Self {
         GeoRotation(frame, q.into(), RotationKind::default())
     }
 
@@ -480,17 +480,6 @@ impl GeoVelocity {
         let w = GeoFrame::bevy_R_(frame, context).transpose() * v;
         GeoVelocity(*frame, w)
     }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum RotationKind {
-    #[default]
-    /// The rotation is relative. An identity rotation in any frame is an
-    /// identity rotation in Bevy's frame.
-    Relative,
-    /// The rotation is absolute. An identity rotation in ENU will produce a
-    /// rotation that rotates [x,y,z] to [x,z,-y] for instance.
-    Absolute,
 }
 
 /// Per-entity geo orientation:
@@ -858,7 +847,7 @@ mod tests {
     fn relative_identity_is_identity_in_bevy() {
         let ctx = dummy_ctx();
         for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
-            let r = GeoRotation::new(frame, DQuat::IDENTITY);
+            let r = GeoRotation::relative(frame, DQuat::IDENTITY);
             assert_eq!(r.2, RotationKind::Relative);
             assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?}");
         }

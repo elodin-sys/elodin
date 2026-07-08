@@ -8,7 +8,7 @@ use bevy::{
         system::{Commands, Query, Res, ResMut},
     },
     math::{DQuat, Mat4, Vec4},
-    prelude::Color,
+    prelude::{Color, warn_once},
 };
 use bevy_geo_frames::GeoRotation;
 use impeller2_bevy::ComponentMetadataRegistry;
@@ -62,9 +62,11 @@ pub fn sync_line_plot_3d(
         let parsed = match eql_ctx.0.parse_str(&line_plot.eql) {
             Ok(expr) => expr,
             Err(e) => {
-                println!(
+                // TODO: Consider changing this to a warn once per error value.
+                warn_once!(
                     "Failed to parse Line3D EQL expression '{}': {}",
-                    line_plot.eql, e
+                    line_plot.eql,
+                    e
                 );
                 continue;
             }

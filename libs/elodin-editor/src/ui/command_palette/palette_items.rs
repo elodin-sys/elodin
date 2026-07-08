@@ -10,7 +10,7 @@ use crate::plugins::kdl_document::{
 use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
     asset::{AssetServer, Assets},
-    camera::visibility::Visibility,
+    camera::visibility::RenderLayers,
     ecs::{
         query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
@@ -27,7 +27,6 @@ use bevy_ai_skybox::prelude::{
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
-use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
@@ -43,7 +42,8 @@ use impeller2_wkt::{
 use nox::ArrayBuf;
 
 use crate::{
-    EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
+    EqlContext, GridHandle, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior,
+    TimeRangeError,
     plugins::render_layer_alloc::RenderLayerAllocator,
     ui::{
         FocusedWindow, HdrEnabled, Paused, colors,
@@ -1448,6 +1448,8 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         thrusters: Vec::new(),
                         mesh_visibility_range: None,
                         frame: None,
+                        frame_orientation: None,
+                        orientation: Default::default(),
                         node_id: Default::default(),
                     },
                     expr.clone(),
@@ -1531,7 +1533,7 @@ pub fn create_3d_object() -> PaletteItem {
 
                                                 let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, thrusters: Vec::new(), mesh_visibility_range: None, frame: None, node_id: Default::default() },
+                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, thrusters: Vec::new(), mesh_visibility_range: None, frame: None, frame_orientation: None, orientation: Default::default(), node_id: Default::default() },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,
@@ -1744,16 +1746,17 @@ impl Default for PalettePage {
             PaletteItem::new(
                 "Toggle Grid",
                 VIEWPORT_LABEL,
-                |_: In<String>, mut grid_visibility: Query<&mut Visibility, With<InfiniteGrid>>| {
-                    let all_hidden = grid_visibility
+                |_: In<String>,
+                 mut cameras: Query<(&GridHandle, &mut RenderLayers), With<MainCamera>>| {
+                    let all_hidden = cameras
                         .iter()
-                        .all(|grid_visibility| grid_visibility == Visibility::Hidden);
+                        .all(|(grid, layers)| !layers.intersects(&RenderLayers::layer(grid.layer)));
 
-                    for mut grid_visibility in grid_visibility.iter_mut() {
-                        *grid_visibility = if all_hidden {
-                            Visibility::Visible
+                    for (grid, mut layers) in cameras.iter_mut() {
+                        *layers = if all_hidden {
+                            layers.clone().with(grid.layer)
                         } else {
-                            Visibility::Hidden
+                            layers.clone().without(grid.layer)
                         };
                     }
 
