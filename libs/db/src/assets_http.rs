@@ -103,6 +103,8 @@ pub enum SyncAssetsError {
     IndexFetch(#[from] reqwest::Error),
     #[error("follower asset mirror incomplete: {failed} of {total} assets failed")]
     PartialMirror { failed: usize, total: usize },
+    #[error("source asset index empty while follower holds {local} local assets")]
+    EmptySourceIndex { local: usize },
     #[error("IO error")]
     Io(#[from] io::Error),
 }
@@ -400,6 +402,27 @@ pub async fn sync_all_assets_from_source(
     let client = sync_http_client().map_err(io::Error::other)?;
 
     let entries = fetch_source_index(&client, &base).await?;
+
+    // An empty index is never a trustworthy basis for pruning: the source may be
+    // up before its assets exist, or briefly serving an empty listing. Pruning
+    // against it deletes every locally mirrored asset, leaving the follower with
+    // an empty tree while metadata still advertises `schematic.active`. When the
+    // follower already holds assets, treat the empty index as an incomplete pass
+    // so the coordinator retries and converges once the source publishes its
+    // tree. A genuinely empty follower has nothing to lose, so accept it as a
+    // completed no-op (RFD #724).
+    if entries.is_empty() {
+        let local = crate::assets::index_assets_in(&assets_dir, None).unwrap_or_default();
+        if local.is_empty() {
+            return Ok(());
+        }
+        warn!(
+            local = local.len(),
+            "source asset index empty while follower holds assets; skipping prune to avoid wiping mirror"
+        );
+        return Err(SyncAssetsError::EmptySourceIndex { local: local.len() });
+    }
+
     // Remember every key the source advertises so stale local files can be
     // pruned once the mirror pass completes.
     let mut source_keys = HashSet::new();
@@ -1635,6 +1658,67 @@ viewport "main" { }
             follower_assets.join("models/stale.glb").exists(),
             "stale asset must survive a partial pass; prune only runs on a full pass"
         );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_skips_prune_on_empty_index() {
+        // Source returns an empty index (up before assets exist, or a transient
+        // empty listing). A follower that already mirrors assets must NOT prune
+        // them to nothing against that snapshot; it reports an incomplete pass so
+        // the coordinator retries and converges once the source publishes assets.
+        async fn index() -> Response {
+            Json(Vec::<crate::assets::AssetEntry>::new()).into_response()
+        }
+        let app = Router::new().route(&format!("/{INDEX_KEY}"), get(index));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+        write_asset_file(&follower_assets, "models/rocket.glb", b"keep").unwrap();
+
+        let err = sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, SyncAssetsError::EmptySourceIndex { local: 1 }),
+            "expected EmptySourceIndex, got {err:?}"
+        );
+        assert!(
+            follower_assets.join("models/rocket.glb").exists(),
+            "an empty source index must not wipe the locally mirrored tree"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_accepts_empty_index_for_empty_follower() {
+        // An empty source index paired with an empty follower is a legitimate
+        // no-op, not an error: nothing to mirror and nothing to lose.
+        async fn index() -> Response {
+            Json(Vec::<crate::assets::AssetEntry>::new()).into_response()
+        }
+        let app = Router::new().route(&format!("/{INDEX_KEY}"), get(index));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .expect("empty index with empty follower is a no-op");
     }
 
     #[tokio::test]
