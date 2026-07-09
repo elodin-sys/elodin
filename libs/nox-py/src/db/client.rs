@@ -95,6 +95,30 @@ type TimeSeriesParts<'py> = (Bound<'py, PyBytes>, Bound<'py, PyBytes>, String, V
 /// wrapper by [`Client::latest`].
 type LatestParts<'py> = (i64, Bound<'py, PyBytes>, String, Vec<usize>);
 
+fn is_time_range_out_of_bounds_response(err: &impeller2_wkt::ErrorResponse) -> bool {
+    err.description.starts_with("time range out of bounds ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_time_range_out_of_bounds_finishes_pagination() {
+        let empty_tail = impeller2_wkt::ErrorResponse {
+            description:
+                "time range out of bounds 10..20 for component c with latest timestamp Some(9)"
+                    .to_string(),
+        };
+        let component_missing = impeller2_wkt::ErrorResponse {
+            description: "component not found c".to_string(),
+        };
+
+        assert!(is_time_range_out_of_bounds_response(&empty_tail));
+        assert!(!is_time_range_out_of_bounds_response(&component_missing));
+    }
+}
+
 // ── request worker ───────────────────────────────────────────────────────────
 
 enum DbRequest {
@@ -417,8 +441,10 @@ async fn paginated_time_series(
             // The first request's errors (unknown component, empty range)
             // propagate; on later pages a server-side "out of bounds" just
             // means the remaining range is empty.
-            Err(e @ impeller2_stellar::Error::Response(_)) if !first_request => {
-                tracing::trace!("time series pagination finished: {e}");
+            Err(impeller2_stellar::Error::Response(err))
+                if !first_request && is_time_range_out_of_bounds_response(&err) =>
+            {
+                tracing::trace!("time series pagination finished: {err}");
                 break;
             }
             Err(e) => return Err(e),
