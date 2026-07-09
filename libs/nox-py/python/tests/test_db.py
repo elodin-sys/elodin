@@ -137,7 +137,10 @@ def test_time_series_1m_read(client):
     # same row until `dropped` stops moving is lossless. (With the default
     # drop-oldest policy a full queue would permanently shed an old row and
     # the retry would enqueue a duplicate instead.)
-    writer = client.table_writer({"perf.v": edb.f64}, maxlen=65536, queue="drop-newest")
+    # A modest maxlen bounds how far the producer outruns the socket, so at
+    # most 8192 rows remain in flight after the loop — little enough for the
+    # DB-side wait below to cover even a heavily loaded CI machine.
+    writer = client.table_writer({"perf.v": edb.f64}, maxlen=8192, queue="drop-newest")
     n = 1_000_000
     # Establish the connection and component registration before the large
     # fire-and-forget burst so CI does not race writer startup.
@@ -152,10 +155,12 @@ def test_time_series_1m_read(client):
             if writer.dropped == before:
                 break
             time.sleep(0.001)
-    # Wait until all prior fire-and-forget rows have reached the socket before
-    # querying; slow CI can otherwise still have the tail buffered locally.
-    writer.write(timestamp_us=n, values={"perf.v": float(n)})
-    assert _wait_for(lambda: len(client.time_series("perf.v", n - 10, n)[0]) == 10, timeout_s=180)
+    # Poll the DB until the tail lands. (A blocking sentinel write is *less*
+    # robust here: it queues behind the whole nowait backlog and gives up
+    # after the writer's internal 10s timeout on a slow CI machine.)
+    assert _wait_for(
+        lambda: len(client.time_series("perf.v", n - 10, n)[0]) == 10, timeout_s=180
+    ), f"tail not ingested; dropped={writer.dropped} last_error={writer.last_error}"
     start = time.perf_counter()
     ts, vals = client.time_series("perf.v", 0, n)
     elapsed = time.perf_counter() - start
