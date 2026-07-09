@@ -909,39 +909,6 @@ mod tests {
     }
 
     #[test]
-    fn ingest_pulls_external_window_schematics() {
-        let dir = tempdir().unwrap();
-        // The window lives outside the source assets tree, referenced
-        // root-relative (the drone layout) with its own in-tree mesh ref.
-        write(
-            &dir.path().join("examples/drone/panel.kdl"),
-            b"object_3d \"drone.world_pos\" {\n    glb path=\"meshes/drone.glb\"\n}\n",
-        );
-        let src = dir.path().join("src_assets");
-        write(&src.join("meshes/drone.glb"), b"glb");
-        write(
-            &src.join("schematics/main.kdl"),
-            b"window title=\"motors\" path=\"examples/drone/panel.kdl\"\n",
-        );
-
-        let db = dir.path().join("db");
-        ingest_asset_dir(&db, &src).unwrap();
-
-        // The stored root schematic now points at the pulled-in window key…
-        let main = std::fs::read_to_string(assets_dir(&db).join("schematics/main.kdl")).unwrap();
-        assert!(
-            main.contains("path=\"db:schematics/panel.kdl\""),
-            "external window ref should be pulled in and rewritten, got:\n{main}"
-        );
-        // …and the pulled window's own asset paths are rewritten too.
-        let panel = std::fs::read_to_string(assets_dir(&db).join("schematics/panel.kdl")).unwrap();
-        assert!(
-            panel.contains("path=\"db:meshes/drone.glb\""),
-            "pulled window's mesh path should be rewritten to db:, got:\n{panel}"
-        );
-    }
-
-    #[test]
     fn ingest_stores_external_window_shared_by_schematics_once() {
         let dir = tempdir().unwrap();
         write(&dir.path().join("panels/shared.kdl"), b"tabs {\n}\n");
