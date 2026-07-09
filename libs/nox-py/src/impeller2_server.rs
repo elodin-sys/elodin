@@ -143,11 +143,22 @@ pub fn prime_schematic_assets(
     // the asset tree). Never overwrite editor-written bytes from stale in-memory
     // sim metadata. The pointer is equally authoritative: a `DB::open` reopen
     // (the sim serve path) preserves db_config, so an editor's "Save As"/"Open"
-    // repoint to another schematic must survive a sim re-run. Only re-assert
-    // the default when the pointer is missing — a `DB::create` reopen resets
-    // db_config and drops it while the bytes survive on disk.
-    if active_existed {
-        if !db.with_state(|s| s.db_config.schematic_active().is_some())
+    // repoint to another schematic must survive a sim re-run.
+    //
+    // Detect a reopen from *either* signal, never just the default bytes on
+    // disk: an editor "Save As" to a non-default key (e.g. `schematics/foo.kdl`)
+    // repoints `schematic.active` and may leave no `schematics/main.kdl` at all.
+    // Keying reopen detection on `main.kdl` alone would then miss it, take the
+    // fresh-DB path, and clobber the saved pointer with a regenerated default.
+    // So a set active pointer marks a reopen regardless of what it points at.
+    let active_pointer_set = db.with_state(|s| s.db_config.schematic_active().is_some());
+    if active_existed || active_pointer_set {
+        // Only re-assert the default pointer when it is missing *and* the
+        // default bytes exist on disk — a `DB::create` reopen resets db_config
+        // and drops the pointer while the bytes survive. Never point at a
+        // missing `main.kdl`, and never override an existing pointer.
+        if !active_pointer_set
+            && active_existed
             && let Err(err) = db.set_active_schematic(ACTIVE_SCHEMATIC_KEY)
         {
             tracing::warn!(?err, "failed to set active schematic pointer");
@@ -1049,6 +1060,46 @@ mod asset_tests {
             active.as_deref(),
             Some("schematics/essai.kdl"),
             "a sim re-run must not repoint schematic.active away from the user's choice"
+        );
+    }
+
+    #[test]
+    fn prime_preserves_repointed_active_when_main_kdl_removed() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db_path = dir.path().join("db");
+        let db = elodin_db::DB::create(db_path.clone()).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some("viewport {\n}\n".to_string());
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        // The editor does a "Save As" to another key, repoints `schematic.active`
+        // at it, and drops the default `main.kdl` from the tree entirely.
+        db.store_asset("schematics/essai.kdl", b"graph {\n}\n")
+            .unwrap();
+        db.set_active_schematic("schematics/essai.kdl").unwrap();
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        std::fs::remove_file(stored.join(ACTIVE_SCHEMATIC_KEY)).unwrap();
+
+        // Re-running the sim must not treat the absent `main.kdl` as a fresh DB:
+        // the surviving `schematic.active` pointer marks a reopen, so the saved
+        // pointer stays put and no regenerated default is stored.
+        let reopened = elodin_db::DB::open(db_path).unwrap();
+        prime_schematic_assets(&reopened, &world, None).unwrap();
+
+        let active =
+            reopened.with_state(|state| state.db_config.schematic_active().map(str::to_owned));
+        assert_eq!(
+            active.as_deref(),
+            Some("schematics/essai.kdl"),
+            "a missing main.kdl must not repoint schematic.active away from the user's choice"
+        );
+        assert!(
+            !stored.join(ACTIVE_SCHEMATIC_KEY).is_file(),
+            "the deleted default schematic must not be regenerated on reopen"
         );
     }
 
