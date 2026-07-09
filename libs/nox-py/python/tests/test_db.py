@@ -258,6 +258,47 @@ def test_time_series_pagination_equivalence(client):
     writer.close()
 
 
+def test_time_series_pagination_duplicate_timestamps(client):
+    writer = client.table_writer({"page.dup": edb.f64})
+    timestamps = [1000] * 5 + [1001] * 7 + [1002] * 5 + [1003] * 6
+    for i, timestamp_us in enumerate(timestamps):
+        writer.write(timestamp_us=timestamp_us, values={"page.dup": float(i)})
+    assert _wait_for(lambda: len(client.time_series("page.dup", 0, 10**6)[0]) == len(timestamps))
+
+    one_shot = client._c.time_series("page.dup", 0, 10**6, None, None)
+    paged = client._c.time_series("page.dup", 0, 10**6, None, 4)
+    assert one_shot == paged
+
+    ts_bytes, data_bytes, prim, dims = paged
+    assert prim == "f64" and dims == []
+    np.testing.assert_array_equal(np.frombuffer(ts_bytes, dtype=np.int64), timestamps)
+    np.testing.assert_array_equal(
+        np.frombuffer(data_bytes, dtype=np.float64), np.arange(len(timestamps))
+    )
+    writer.close()
+
+
+def test_time_series_stop_is_half_open(client):
+    writer = client.table_writer({"page.stop": edb.f64})
+    rows = [(10, 1.0), (20, 2.0), (20, 3.0), (30, 4.0)]
+    for timestamp_us, value in rows:
+        writer.write(timestamp_us=timestamp_us, values={"page.stop": value})
+    assert _wait_for(lambda: len(client.time_series("page.stop", 0, 40)[0]) == len(rows))
+
+    ts_left, vals_left = client.time_series("page.stop", 0, 20)
+    ts_right, vals_right = client.time_series("page.stop", 20, 40)
+    np.testing.assert_array_equal(ts_left, [10])
+    np.testing.assert_array_equal(vals_left, [1.0])
+    np.testing.assert_array_equal(ts_right, [20, 20, 30])
+    np.testing.assert_array_equal(vals_right, [2.0, 3.0, 4.0])
+
+    ts_exact_stop, _ = client.time_series("page.stop", 0, 30)
+    np.testing.assert_array_equal(ts_exact_stop, [10, 20, 20])
+    ts_empty, vals_empty = client.time_series("page.stop", 30, 30)
+    assert len(ts_empty) == 0 and len(vals_empty) == 0
+    writer.close()
+
+
 def test_earliest_timestamp(client):
     writer = client.table_writer({"early.v": edb.f64})
     writer.write(timestamp_us=123, values={"early.v": 1.0})

@@ -387,6 +387,10 @@ async fn paginated_time_series(
 ) -> Result<(Vec<u8>, Vec<u8>), impeller2_stellar::Error> {
     let mut ts_out: Vec<u8> = Vec::new();
     let mut data_out: Vec<u8> = Vec::new();
+    if start >= stop {
+        return Ok((ts_out, data_out));
+    }
+    let inclusive_stop = stop.saturating_sub(1);
     let mut cursor = start;
     let mut skip = 0usize; // samples at `cursor` already consumed
     let mut total = 0usize;
@@ -403,7 +407,7 @@ async fn paginated_time_series(
         let series = match c
             .request(&GetTimeSeries {
                 id: TIME_SERIES_PACKET_ID,
-                range: Timestamp(cursor)..Timestamp(stop),
+                range: Timestamp(cursor)..Timestamp(inclusive_stop),
                 component_id,
                 limit: Some(chunk_limit + skip),
             })

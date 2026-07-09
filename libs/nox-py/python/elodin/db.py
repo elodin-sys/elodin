@@ -381,8 +381,9 @@ def _decode_msg_payload(data: bytes) -> Any:
 
 class MessageStream:
     """Iterator over ``(timestamp_us, payload)`` from ``Client.msg_stream``;
-    delivers new messages only. Use as a context manager (or call ``close()``)
-    to stop the underlying subscription."""
+    delivers new messages only, coalescing bursts to the latest message per
+    server wake. Use ``get_msgs`` for lossless history. Use as a context
+    manager (or call ``close()``) to stop the underlying subscription."""
 
     _POLL_MS = 200
 
@@ -490,7 +491,8 @@ class Client:
 
     def msg_stream(self, name: str, maxlen: int = 1024, raw: bool = False) -> MessageStream:
         """Live stream of new messages on ``name`` as
-        ``(timestamp_us, payload)`` (see ``get_msgs`` for payload decoding)."""
+        ``(timestamp_us, payload)``. Bursts may coalesce to the latest message;
+        use ``get_msgs`` for lossless history and payload decoding details."""
         native = _native.MsgStreamSub(self._addr, name, maxlen=maxlen)
         return MessageStream(native, raw)
 

@@ -22,7 +22,7 @@ import sys
 import time
 import threading
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Set
+from typing import Optional, Dict, List, Set, Tuple
 
 import numpy as np
 
@@ -95,6 +95,8 @@ class ComponentReceiver:
         # DB never stalls the UDP receive loop (rows are dropped instead).
         self.client: Optional[edb.Client] = None
         self._writers: Dict[str, edb.TableWriter] = {}
+        self._writer_shapes: Dict[str, Tuple[int, ...]] = {}
+        self._writer_last_errors: Dict[str, str] = {}
 
         # Received components: renamed_name -> ReceivedComponent
         self.components: Dict[str, ReceivedComponent] = {}
@@ -148,16 +150,20 @@ class ComponentReceiver:
         if self.recv_socket:
             self.recv_socket.close()
 
+        dropped = sum(writer.dropped for writer in self._writers.values())
         for writer in self._writers.values():
             writer.close()
         self._writers.clear()
+        self._writer_shapes.clear()
+        self._writer_last_errors.clear()
         if self.client:
             self.client.close()
 
         logger.info(
             f"Stopped. Received {self.packets_received} packets "
             f"({self.bytes_received} bytes, {self.sequence_gaps} gaps, "
-            f"{self.writes_sent} writes, {self.write_errors} write errors)"
+            f"{self.writes_sent} writes enqueued, {dropped} dropped, "
+            f"{self.write_errors} write errors)"
         )
 
     def run(self):
@@ -259,7 +265,12 @@ class ComponentReceiver:
         if not self.client:
             return
 
-        flat = values.reshape(-1)
+        db_shape = (
+            tuple(int(dim) for dim in msg.shape)
+            if msg.shape
+            else ((int(values.size),) if values.size > 1 else ())
+        )
+        db_values = values.reshape(db_shape) if db_shape else values.reshape(())
 
         # Determine timestamp based on mode
         if self.timestamp_mode == "local":
@@ -270,22 +281,21 @@ class ComponentReceiver:
             timestamp_us = msg.timestamp_us
 
         def make_writer():
-            spec = edb.f64[flat.size] if flat.size > 1 else edb.f64
+            spec = edb.f64[db_shape] if db_shape else edb.f64
             writer = self.client.table_writer({component_name: spec})
             self._writers[component_name] = writer
+            self._writer_shapes[component_name] = db_shape
             return writer
 
         try:
-            writer = self._writers.get(component_name) or make_writer()
-            try:
-                writer.write_nowait(timestamp_us, {component_name: flat})
-            except ValueError:
-                # Component size changed mid-stream: rebuild the writer with
-                # the new shape and retry once. (A DB that already registered
-                # the old shape rejects the new one asynchronously — visible
-                # via the writer's last_error.)
+            writer = self._writers.get(component_name)
+            if writer is not None and self._writer_shapes.get(component_name) != db_shape:
                 self._writers.pop(component_name).close()
-                make_writer().write_nowait(timestamp_us, {component_name: flat})
+                self._writer_shapes.pop(component_name, None)
+                self._writer_last_errors.pop(component_name, None)
+                writer = None
+            writer = writer or make_writer()
+            writer.write_nowait(timestamp_us, {component_name: db_values})
             self.writes_sent += 1
         except Exception as e:
             self.write_errors += 1
@@ -413,11 +423,19 @@ def _print_status(receiver: ComponentReceiver):
 
         if sources:
             error_str = f", Errors: {receiver.write_errors}" if receiver.write_errors > 0 else ""
+            dropped = sum(writer.dropped for writer in receiver._writers.values())
+            drop_str = f", Dropped: {dropped}" if dropped > 0 else ""
             logger.info(
                 f"Sources: {len(sources)}, Components: {len(components)}, "
                 f"Packets: {receiver.packets_received}, Gaps: {receiver.sequence_gaps}, "
-                f"Writes: {receiver.writes_sent}{error_str}"
+                f"Writes enqueued: {receiver.writes_sent}{drop_str}{error_str}"
             )
+
+            for name, writer in receiver._writers.items():
+                last_error = writer.last_error
+                if last_error and receiver._writer_last_errors.get(name) != last_error:
+                    receiver._writer_last_errors[name] = last_error
+                    logger.warning(f"Writer {name} last_error: {last_error}")
 
             for name in components:
                 comp = receiver.get_component(name)

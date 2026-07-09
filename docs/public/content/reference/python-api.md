@@ -1049,7 +1049,7 @@ Client for a running Elodin DB (external `elodin-db run` or an embedded [elodin.
 
 - `msg_stream(name, maxlen=1024, raw=False)` -> [elodin.db.MessageStream]
 
-    Live stream of new messages on `name` as `(timestamp_us, payload)` tuples.
+    Live stream of new messages on `name` as `(timestamp_us, payload)` tuples. Bursts may coalesce to the latest message per server wake; use `get_msgs` for lossless history.
 
 - `state()` -> `string`
 

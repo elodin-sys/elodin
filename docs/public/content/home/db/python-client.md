@@ -152,6 +152,9 @@ with client.msg_stream("race.collision") as stream:      # live, new messages on
         ...
 ```
 
+Live message streams wake on new data and may coalesce bursts to the latest
+message per wake. Use `get_msgs` for lossless historical reads.
+
 ## Example: drive a 3D viewport from a flight controller
 
 Anything that writes a `world_pos`-shaped component — 7 `f64`s holding a

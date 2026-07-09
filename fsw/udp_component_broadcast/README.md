@@ -29,7 +29,7 @@ This enables distributed simulation scenarios like having a target drone chase a
 ## Installation
 
 The scripts use the first-class `elodin.db` client from the `elodin` Python
-wheel (see `libs/nox-py`).
+wheel (requires `elodin>=0.17.4`; see `libs/nox-py`).
 
 ```bash
 cd fsw/udp_component_broadcast
