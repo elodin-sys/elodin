@@ -1995,6 +1995,7 @@ async fn run_one(
             run_dir: &run_dir,
             config: ctx.config,
             worker_count: ctx.worker_count,
+            recipe_weight: s10::admission::recipe_weight(&ctx.base_recipe),
             assets_http_on: ctx.assets_http_on,
         },
     )?;
@@ -2512,8 +2513,11 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
     }
     // Machine-sympathy defaults, only when the user set them nowhere (shell,
     // campaign [env]): cap per-process thread pools so N concurrent sims do
-    // not each size their pools to every core on the box.
-    let threads = (available_cpus() / ctx.worker_count.max(1)).max(1);
+    // not each size their pools to every core on the box. The box runs
+    // `workers x recipe_weight` processes, so that is the divisor — at full
+    // packing every process gets one thread.
+    let processes = ctx.worker_count.max(1) * ctx.recipe_weight.max(1);
+    let threads = (available_cpus() / processes).max(1);
     for key in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"] {
         if std::env::var_os(key).is_none() && !env.contains_key(key) {
             env.insert(key.to_string(), threads.to_string());
@@ -2650,6 +2654,7 @@ struct PatchContext<'a> {
     run_dir: &'a Path,
     config: &'a CampaignConfig,
     worker_count: usize,
+    recipe_weight: usize,
     assets_http_on: bool,
 }
 
