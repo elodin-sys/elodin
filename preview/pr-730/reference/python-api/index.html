@@ -1833,7 +1833,7 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 </li>
 <li>
 <p><code>msg_stream(name, maxlen=1024, raw=False)</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-730/reference/python-api/#class-elodin-db-componentstream-elodin-db-messagestream">elodin.db.MessageStream</a></p>
-<p>Live stream of new messages on <code>name</code> as <code>(timestamp_us, payload)</code> tuples.</p>
+<p>Live stream of new messages on <code>name</code> as <code>(timestamp_us, payload)</code> tuples. Bursts may coalesce to the latest message per server wake; use <code>get_msgs</code> for lossless history.</p>
 </li>
 <li>
 <p><code>state()</code> -&gt; <code>string</code></p>

@@ -644,6 +644,8 @@ is UTF-8, anything else is JSON.</p>
 </span></span><span class="z-source z-python">    <span class="z-meta z-statement z-loop z-for z-python"><span class="z-keyword z-control z-loop z-for z-python">for</span> <span class="z-meta z-generic-name z-python">t_us</span><span class="z-punctuation z-separator z-target-list z-python">,</span> <span class="z-meta z-generic-name z-python">payload</span> <span class="z-keyword z-control z-loop z-for z-in z-python">in</span></span><span class="z-meta z-statement z-loop z-for z-python"> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream</span></span></span><span class="z-meta z-statement z-loop z-for z-python"><span class="z-punctuation z-section z-block z-loop z-for z-python">:</span></span>
 </span><span class="z-source z-python">        <span class="z-constant z-language z-python">...</span>
 </span></code></pre>
+<p>Live message streams wake on new data and may coalesce bursts to the latest
+message per wake. Use <code>get_msgs</code> for lossless historical reads.</p>
 <h2 id="example-drive-a-3d-viewport-from-a-flight-controller">Example: drive a 3D viewport from a flight controller</h2>
 <p>Anything that writes a <code>world_pos</code>-shaped component — 7 <code>f64</code>s holding a
 scalar-last quaternion <code>(q0, q1, q2, q3)</code> followed by an <code>(x, y, z)</code> position
