@@ -456,6 +456,13 @@ pub struct ProcessArgs {
     pub ready: Option<ReadyProbe>,
     #[serde(default)]
     pub ready_timeout: Option<String>,
+    /// Spawn the child in its own process group and tear the whole group down
+    /// (SIGTERM, then SIGKILL) on cancel and after the leader exits. This is
+    /// the fallback kill path for orchestrated runs (monte-carlo) on hosts
+    /// without a delegated cgroup, where daemonizing grandchildren would
+    /// otherwise outlive the recipe and keep its ports bound.
+    #[serde(default)]
+    pub own_process_group: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Default, Clone)]
@@ -504,11 +511,23 @@ impl ProcessArgs {
             if let Some(cwd) = &cwd {
                 child.current_dir(cwd);
             }
+            #[cfg(unix)]
+            if self.own_process_group {
+                // Own group + no terminal stdin: stdin(null) prevents SIGTTIN
+                // stops when the child is in a background process group.
+                child.process_group(0);
+                child.stdin(Stdio::null());
+            }
             let mut child = child.spawn().map_err(|source| ProcessError::Spawn {
                 source,
                 cmd: cmd.clone(),
                 recipe: name.clone(),
             })?;
+            #[cfg(unix)]
+            let child_pgid = self
+                .own_process_group
+                .then(|| child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32)))
+                .flatten();
             if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
                 scope.add_pid(pid)?;
             }
@@ -538,6 +557,9 @@ impl ProcessArgs {
                     // Graceful shutdown: send SIGTERM, wait up to 2 seconds, then force kill
                     #[cfg(unix)]
                     {
+                        if let Some(pgid) = child_pgid {
+                            let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGTERM);
+                        }
                         if let Some(pid) = child.id() {
                             let _ = nix::sys::signal::kill(
                                 nix::unistd::Pid::from_raw(pid as i32),
@@ -570,9 +592,16 @@ impl ProcessArgs {
                                         name
                                     );
                                 }
+                                if let Some(pgid) = child_pgid {
+                                    let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
+                                }
                                 let _ = child.start_kill();
                                 let _ = child.wait().await;
                             }
+                        }
+                        // Reap any group members that survived the leader.
+                        if let Some(pgid) = child_pgid {
+                            let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
                         }
                     }
                     #[cfg(not(unix))]
@@ -583,6 +612,12 @@ impl ProcessArgs {
                 }
                 res = child.wait() => {
                     let status = res?;
+                    // The leader is gone; sweep daemonized group members so they
+                    // cannot outlive the recipe and squat on its ports.
+                    #[cfg(unix)]
+                    if let Some(pgid) = child_pgid {
+                        let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
+                    }
                     emit_process_status(&self.log_path, &name, &status).await?;
                     match self.restart_policy {
                         RestartPolicy::Never => {
@@ -855,9 +890,54 @@ mod tests {
                 depends_on,
                 ready,
                 ready_timeout: None,
+                own_process_group: false,
             },
             no_watch: false,
         })
+    }
+
+    /// A leaf with `own_process_group` must not leak grandchildren after the
+    /// leader exits: the group sweep reaps the backgrounded sleeper.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn own_process_group_reaps_grandchildren_on_exit() {
+        // Unique sleep duration so pgrep can identify this test's grandchild.
+        let secs = 200_000 + (std::process::id() % 100_000);
+        let recipe = Recipe::Process(ProcessRecipe {
+            cmd: "sh".to_string(),
+            process_args: ProcessArgs {
+                args: vec!["-c".to_string(), format!("sleep {secs} & true")],
+                cwd: None,
+                env: HashMap::new(),
+                restart_policy: RestartPolicy::Never,
+                fail_on_error: false,
+                log_path: None,
+                silence: true,
+                depends_on: vec![],
+                ready: None,
+                ready_timeout: None,
+                own_process_group: true,
+            },
+            no_watch: false,
+        });
+        recipe
+            .run("pg-test".to_string(), false, CancelToken::new(), None)
+            .await
+            .expect("recipe run");
+        // The backgrounded sleeper was in the leader's process group and must
+        // have been swept when the leader exited.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let pattern = format!("^sleep {secs}$");
+        let leaked = std::process::Command::new("pgrep")
+            .args(["-f", &pattern])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if leaked {
+            let _ = std::process::Command::new("pkill")
+                .args(["-f", &pattern])
+                .status();
+        }
+        assert!(!leaked, "grandchild survived own_process_group sweep");
     }
 
     /// A dependency that exits before its readiness probe fires must close its

@@ -156,6 +156,19 @@ impl CgroupScope {
     }
 }
 
+/// Whether this process can create (and therefore kill) cgroup scopes: a
+/// writable cgroup-v2 base was found. Orchestrators use this to decide whether
+/// to self-scope under `systemd-run --user --scope` for reliable teardown.
+#[cfg(target_os = "linux")]
+pub fn cgroups_available() -> bool {
+    matches!(writable_base(), Ok(Some(_)))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn cgroups_available() -> bool {
+    false
+}
+
 /// Whether s10 should prioritize the simulation stack (via cgroup `cpu.weight`).
 /// On by default; set `ELODIN_S10_PRIORITY=off` to disable (for A/B comparison
 /// or debugging).

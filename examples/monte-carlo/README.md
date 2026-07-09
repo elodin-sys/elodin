@@ -31,14 +31,20 @@ elodin monte-carlo run examples/monte-carlo/main.py \
   --out dbs/monte-carlo-demo
 ```
 
+Add `--workers N` to pin concurrency (exactly N runs execute at once); the
+default sizes itself from CPU cores.
+
 The terminal shows campaign progress, success/failure counts, and a final
 campaign summary. Individual simulation stdout/stderr is written to per-run log
 files under `runs/<run_id>/logs/` instead of being interleaved in the terminal.
-At startup, `elodin monte-carlo run` reaps prior campaign-scoped cgroups so
-stale sidecars from interrupted runs cannot occupy worker ports. Pass
-`--keep-existing` only if you intentionally want to manage those processes
-yourself. Per-worker UDP ports are declared in `[resources.ports]` and consumed
-with `el.monte_carlo.port("state")` / `ELODIN_MC_PORT_STATE`.
+At startup, `elodin monte-carlo run` validates the whole static port plan,
+reaps prior campaign-scoped cgroups and any process still bound to a campaign
+port, and raises its own fd limit, so stale sidecars from interrupted runs
+cannot occupy worker ports. Pass `--keep-existing` only if you intentionally
+want to manage those processes yourself. Ports are declared in
+`[resources.ports]` — `"auto"` (this example) allocates them dynamically per
+run; a numeric base gives a deterministic per-worker plan — and consumed with
+`el.monte_carlo.port("state")` / `ELODIN_MC_PORT_STATE` either way.
 
 The campaign output includes per-run databases, `sim_summary.json`, `results.csv`,
 `perf.csv`, `resources.csv`, `campaign_summary.txt`, and `summary.json`.
@@ -64,11 +70,12 @@ The example has two useful modes:
   compilation, and SITL overhead without intentionally saturating memory
   bandwidth.
 
-  Concurrency is controlled by `S10_MAX_INFLIGHT` (default: logical cores): the
-  runner executes `floor(S10_MAX_INFLIGHT / per-run recipe weight)` runs at once,
-  capped by the plan size, and sizes its I/O thread pool from the same budget.
-  Raise it to oversubscribe I/O-bound SITL recipes, or set it to `off` to
-  disable admission limiting.
+  Concurrency is controlled by `--workers N` (or `workers = N` in
+  `campaign.toml`): exactly N runs execute at once, capped by the plan size.
+  The default sizes itself from logical cores. `S10_MAX_INFLIGHT` remains a
+  low-level escape hatch that budgets by *process* count instead of run count
+  (`floor(S10_MAX_INFLIGHT / per-run recipe weight)` runs); set it to `off` to
+  disable admission limiting entirely.
 
   ```sh
   elodin monte-carlo run examples/monte-carlo/main.py \

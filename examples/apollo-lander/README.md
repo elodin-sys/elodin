@@ -108,13 +108,13 @@ elodin editor examples/apollo-lander/main.py
 
 Single editor/headless runs launch the Rust LGC controller in
 `examples/apollo-lander/controller` via an `s10` cargo recipe. Monte Carlo runs
-build the controller once using the campaign `[build]` step, then each run
+build the controller once using the campaign `[[build]]` step, then each run
 launches the prebuilt release binary.
 
 The Apollo campaign demonstrates the `elodin monte-carlo` build hook:
 
 ```toml
-[build]
+[[build]]
 command = "cargo"
 args = ["build", "--release", "--manifest-path", "examples/apollo-lander/controller/Cargo.toml"]
 ```

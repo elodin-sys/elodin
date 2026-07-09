@@ -215,6 +215,7 @@ mod tests {
             depends_on: Vec::new(),
             ready: None,
             ready_timeout: None,
+            own_process_group: false,
         }
     }
 }

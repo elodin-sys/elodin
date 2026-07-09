@@ -1,4 +1,4 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, OnceLock};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -6,12 +6,28 @@ use crate::Recipe;
 
 pub type AdmissionPermit = OwnedSemaphorePermit;
 
-static MAX_INFLIGHT: LazyLock<Option<usize>> = LazyLock::new(resolve_max_inflight);
-static SEMAPHORE: LazyLock<Option<Arc<Semaphore>>> =
-    LazyLock::new(|| MAX_INFLIGHT.map(|max| Arc::new(Semaphore::new(max))));
+/// Programmatic override of the admission budget (e.g. the monte-carlo
+/// `workers` knob). Takes precedence over `S10_MAX_INFLIGHT` when set.
+static OVERRIDE: OnceLock<Option<usize>> = OnceLock::new();
+/// Built lazily on first acquire so `configure` can still change the budget
+/// any time before the first run is admitted.
+static SEMAPHORE: OnceLock<Option<Arc<Semaphore>>> = OnceLock::new();
 
 pub fn max_inflight() -> Option<usize> {
-    *MAX_INFLIGHT
+    match OVERRIDE.get() {
+        Some(value) => *value,
+        None => resolve_max_inflight(),
+    }
+}
+
+/// Set the admission budget programmatically. Wins over `S10_MAX_INFLIGHT`.
+/// Returns `false` when the budget is already locked in (a permit was
+/// acquired, or a previous `configure` call happened first).
+pub fn configure(max: Option<usize>) -> bool {
+    if SEMAPHORE.get().is_some() {
+        return false;
+    }
+    OVERRIDE.set(max).is_ok()
 }
 
 pub fn recipe_weight(recipe: &Recipe) -> usize {
@@ -29,8 +45,10 @@ pub fn recipe_weight(recipe: &Recipe) -> usize {
 }
 
 pub async fn acquire_run_slot(weight: usize) -> Option<AdmissionPermit> {
-    let max = max_inflight()?;
-    let semaphore = SEMAPHORE.as_ref()?.clone();
+    let semaphore = SEMAPHORE
+        .get_or_init(|| max_inflight().map(|max| Arc::new(Semaphore::new(max))))
+        .clone()?;
+    let max = max_inflight().unwrap_or(usize::MAX);
     Some(acquire_run_slot_with(semaphore, max, weight).await)
 }
 
@@ -85,6 +103,7 @@ mod tests {
                 depends_on: Vec::new(),
                 ready: None,
                 ready_timeout: None,
+                own_process_group: false,
             },
             no_watch: false,
         })

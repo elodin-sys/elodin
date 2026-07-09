@@ -18,8 +18,16 @@ use serde_json::{Value, json};
 use stellarator::util::CancelToken;
 use tokio::task::JoinSet;
 
+mod fs_util;
+pub mod ports;
+
 pub const CONTEXT_ENV: &str = "ELODIN_MONTE_CARLO_CONTEXT";
 pub const CACHE_ENV: &str = "ELODIN_CACHE_DIR";
+/// Env consumed by `world.run` / `elodin-db` to skip the implicit assets HTTP
+/// server on `db_port + 1`. Campaign runs set it to `off` by default: the
+/// server only feeds an attached editor, and its implicit extra listener
+/// otherwise collides with user port plans.
+pub const ASSETS_HTTP_ENV: &str = "ELODIN_ASSETS_HTTP";
 
 /// Hook scalar keys that have dedicated, typed columns elsewhere (`pass` is the
 /// raw scoring verdict surfaced as `scored_pass`/`passed`; `valid` as
@@ -30,14 +38,29 @@ const RESERVED_HOOK_KEYS: &[&str] = &["pass", "valid"];
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CampaignConfig {
+    /// Concurrent worker slots. The runner sizes the s10 admission budget to
+    /// `workers * recipe_weight` so exactly this many runs execute at once.
+    /// Precedence: `--workers` flag > `S10_MAX_INFLIGHT` env (escape hatch) >
+    /// this key > logical-core default.
+    pub workers: Option<usize>,
     pub timeout: Option<String>,
     pub retries: usize,
     pub cache_dir: Option<PathBuf>,
-    pub build: Option<BuildConfig>,
+    /// Run per-run IO on a fast scratch filesystem, moving each run's
+    /// surviving artifacts to `--out` as it finishes. `"auto"` picks
+    /// `/dev/shm` when present; any other value is used as the scratch root;
+    /// unset/`"off"` runs directly in `--out`.
+    pub scratch_dir: Option<String>,
+    /// Build steps executed once before workers start (`[[build]]` tables).
+    pub build: Vec<BuildConfig>,
+    /// Extra environment for every run's processes. Runner-managed variables
+    /// (ports, context paths, seeds) always win over these.
+    pub env: BTreeMap<String, String>,
     pub resources: ResourceConfig,
     pub hooks: HookConfig,
     pub params_delivery: Option<ParamsDeliveryConfig>,
     pub retention: RetentionConfig,
+    pub quality: QualityConfig,
     pub continue_on_error: bool,
     /// When true, the campaign process exits non-zero if any run failed scoring,
     /// crashed, or was marked invalid/no-data. Defaults to false so exploratory
@@ -48,14 +71,18 @@ pub struct CampaignConfig {
 impl Default for CampaignConfig {
     fn default() -> Self {
         Self {
+            workers: None,
             timeout: None,
             retries: 0,
             cache_dir: None,
-            build: None,
+            scratch_dir: None,
+            build: Vec::new(),
+            env: BTreeMap::new(),
             resources: ResourceConfig::default(),
             hooks: HookConfig::default(),
             params_delivery: None,
             retention: RetentionConfig::default(),
+            quality: QualityConfig::default(),
             continue_on_error: true,
             fail_on_run_errors: false,
         }
@@ -71,13 +98,48 @@ pub struct BuildConfig {
     pub env: HashMap<String, String>,
 }
 
+/// Pacing-integrity gate: real-time-paced sims degrade physics (not exit
+/// codes) under oversubscription, so violating runs are marked `degraded` —
+/// distinct from `invalid` — and excluded from passes.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QualityConfig {
+    /// Maximum fraction of paced cycles allowed behind deadline (e.g. 0.05).
+    pub max_behind_deadline_frac: Option<f64>,
+    /// Maximum wall/sim-time ratio for the sim loop (e.g. 1.05).
+    pub max_real_time_factor: Option<f64>,
+    /// Count degraded runs toward `fail_on_run_errors`. Off by default.
+    pub fail_on_degraded: bool,
+}
+
+/// A port base: a static u16 (shifted by `worker_id * port_stride`) or
+/// `"auto"` (allocated fresh for every run, collision-free by construction).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PortSpec {
+    Static(u16),
+    Auto(AutoTag),
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AutoTag {
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+impl PortSpec {
+    pub fn is_auto(&self) -> bool {
+        matches!(self, PortSpec::Auto(_))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResourceConfig {
     pub bind_ip: IpAddr,
     pub port_stride: u16,
-    pub db_port: u16,
-    pub ports: BTreeMap<String, u16>,
+    pub db_port: PortSpec,
+    pub ports: BTreeMap<String, PortSpec>,
 }
 
 impl Default for ResourceConfig {
@@ -85,8 +147,14 @@ impl Default for ResourceConfig {
         Self {
             bind_ip: IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             port_stride: 20,
-            db_port: 2240,
-            ports: BTreeMap::from([("state".to_string(), 9003), ("command".to_string(), 9002)]),
+            db_port: PortSpec::Static(2240),
+            // Named sidecar ports default to dynamic allocation: an empty
+            // `[resources]` block never collides or overflows at any worker
+            // count. Sims read them via `el.monte_carlo.port(name)`.
+            ports: BTreeMap::from([
+                ("state".to_string(), PortSpec::Auto(AutoTag::Auto)),
+                ("command".to_string(), PortSpec::Auto(AutoTag::Auto)),
+            ]),
         }
     }
 }
@@ -119,10 +187,29 @@ pub enum ParamsDeliveryFormat {
     Toml,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RetentionConfig {
     pub keep_run_db: RunDbRetention,
+    /// Glob patterns (relative to the run dir) removed after the post-run
+    /// hook when the run passed, so hooks don't carry bespoke cleanup code.
+    pub prune_on_pass: Vec<String>,
+    /// Same, for runs that failed or were invalid.
+    pub prune_on_fail: Vec<String>,
+    /// Truncate kept run DBs' preallocated (sparse) files to their real size
+    /// once the run's processes have exited. See `elodin-db compact`.
+    pub compact_run_db: bool,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            keep_run_db: RunDbRetention::default(),
+            prune_on_pass: Vec::new(),
+            prune_on_fail: Vec::new(),
+            compact_run_db: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
@@ -148,6 +235,9 @@ pub struct RunOptions {
     pub campaign_path: Option<PathBuf>,
     pub out_dir: PathBuf,
     pub cache_dir: Option<PathBuf>,
+    /// `--workers` flag; wins over `S10_MAX_INFLIGHT` and `campaign.toml`.
+    pub workers: Option<usize>,
+    pub scratch_dir: Option<String>,
     pub retries: Option<usize>,
     pub timeout: Option<String>,
     pub post_run: Option<PathBuf>,
@@ -158,6 +248,8 @@ pub struct RunOptions {
     pub memory_probe: bool,
     pub keep_existing: bool,
     pub clean: bool,
+    /// Escalate ephemeral-range port warnings to errors.
+    pub strict_ports: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -197,6 +289,24 @@ pub struct RunMetric {
     pub scored_pass: Option<bool>,
     #[serde(default)]
     pub scored_valid: Option<bool>,
+    /// One-line machine-readable reason for a failed/invalid run: the recipe
+    /// error chain, a timeout, a preflight port conflict, or a setup error.
+    #[serde(default)]
+    pub failure_reason: Option<String>,
+    /// The run completed but violated the `[quality]` pacing gate: its
+    /// physics ran under degraded real-time pacing and the sample should be
+    /// re-run or excluded rather than silently ingested.
+    #[serde(default)]
+    pub degraded: bool,
+    /// Fraction of paced cycles that missed their real-time deadline.
+    #[serde(default)]
+    pub behind_deadline_frac: Option<f64>,
+    /// Sim-loop wall time divided by simulated time (1.0 = exact real time).
+    #[serde(default)]
+    pub real_time_factor: Option<f64>,
+    /// Times the real-time pacer hit its drift cap and re-anchored.
+    #[serde(default)]
+    pub drift_resets: Option<u64>,
     #[serde(default)]
     pub hook_scalars: BTreeMap<String, String>,
     pub wall_ms: u128,
@@ -219,11 +329,12 @@ pub struct RunMetric {
 }
 
 impl RunMetric {
-    /// Whether the run counts as a pass: it must exit cleanly *and*, if a
-    /// `post_run` hook scored it, the hook's `pass` outcome must be true. A
-    /// run can exit successfully yet fail its scoring criteria.
+    /// Whether the run counts as a pass: it must exit cleanly, not be
+    /// quality-degraded, *and*, if a `post_run` hook scored it, the hook's
+    /// `pass` outcome must be true. A run can exit successfully yet fail its
+    /// scoring criteria.
     pub fn passed(&self) -> bool {
-        self.valid() && self.exit_ok && self.scored_pass.unwrap_or(true)
+        self.valid() && !self.degraded && self.exit_ok && self.scored_pass.unwrap_or(true)
     }
 
     pub fn valid(&self) -> bool {
@@ -240,6 +351,8 @@ pub struct CampaignSummary {
     pub failed: usize,
     #[serde(default)]
     pub invalid: usize,
+    #[serde(default)]
+    pub degraded: usize,
     pub skipped: usize,
     pub workers: usize,
     pub wall_ms: u128,
@@ -254,6 +367,19 @@ pub struct CampaignSummary {
     pub concurrency_summary: ConcurrencySummary,
     #[serde(default)]
     pub hook_metrics: BTreeMap<String, ScalarMetricSummary>,
+    /// Real-time pacing rollup across paced runs (worst offenders called out
+    /// so load-skewed samples are visible without opening results.csv).
+    #[serde(default)]
+    pub pacing: Option<PacingSummary>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PacingSummary {
+    pub paced_runs: usize,
+    pub max_behind_deadline_frac: f64,
+    pub max_behind_run: String,
+    pub max_real_time_factor: f64,
+    pub max_real_time_factor_run: String,
 }
 
 impl CampaignSummary {
@@ -375,6 +501,18 @@ pub struct SimRunSummary {
     pub post_step: SimPhaseSummary,
     pub real_time_pacing: SimPhaseSummary,
     pub total_cycle: SimPhaseSummary,
+    // Pacing-integrity fields written by the sim's tick metrics
+    // (libs/nox-py/src/tick_metrics.rs `TickSummaryJson`).
+    #[serde(default)]
+    pub real_time_oversleep: Option<SimPhaseSummary>,
+    #[serde(default)]
+    pub real_time_behind: Option<SimPhaseSummary>,
+    #[serde(default)]
+    pub pacing_behind_events: u64,
+    #[serde(default)]
+    pub pacing_resets: u64,
+    #[serde(default)]
+    pub pacing_no_sleep: u64,
     pub cycles: u64,
     pub steps: u64,
     pub simulation_rate_hz: f64,
@@ -431,6 +569,7 @@ struct CampaignReporter {
     ok: Arc<AtomicUsize>,
     failed: Arc<AtomicUsize>,
     invalid: Arc<AtomicUsize>,
+    degraded: Arc<AtomicUsize>,
     skipped: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
     workers: usize,
@@ -488,6 +627,7 @@ impl CampaignReporter {
             ok: Arc::new(AtomicUsize::new(0)),
             failed: Arc::new(AtomicUsize::new(0)),
             invalid: Arc::new(AtomicUsize::new(0)),
+            degraded: Arc::new(AtomicUsize::new(0)),
             skipped: Arc::new(AtomicUsize::new(0)),
             active: Arc::new(AtomicUsize::new(0)),
             workers,
@@ -514,8 +654,14 @@ impl CampaignReporter {
     }
 
     fn main_message(&self) -> String {
+        let degraded = self.degraded.load(Ordering::SeqCst);
+        let degraded = if degraded > 0 {
+            format!(" degraded={degraded}")
+        } else {
+            String::new()
+        };
         format!(
-            "ok={} fail={} invalid={} skip={} active={}/{}",
+            "ok={} fail={} invalid={}{degraded} skip={} active={}/{}",
             self.ok.load(Ordering::SeqCst),
             self.failed.load(Ordering::SeqCst),
             self.invalid.load(Ordering::SeqCst),
@@ -559,6 +705,8 @@ impl CampaignReporter {
             self.skipped.fetch_add(1, Ordering::SeqCst);
         } else if !metric.valid() {
             self.invalid.fetch_add(1, Ordering::SeqCst);
+        } else if metric.degraded {
+            self.degraded.fetch_add(1, Ordering::SeqCst);
         } else if metric.passed() {
             self.ok.fetch_add(1, Ordering::SeqCst);
         } else {
@@ -567,8 +715,13 @@ impl CampaignReporter {
         let worker = worker_label(metric.worker_id);
         self.progress.inc(1);
         self.progress.set_message(self.main_message());
+        let reason = metric
+            .failure_reason
+            .as_deref()
+            .map(|reason| format!(" reason={reason:?}"))
+            .unwrap_or_default();
         let line = format!(
-            "[{}] {} worker={} wall_ms={} log={}",
+            "[{}] {} worker={} wall_ms={}{reason} log={}",
             metric.status,
             metric.run_id,
             worker,
@@ -638,10 +791,11 @@ impl CampaignReporter {
     fn finish(&self) {
         self.clear_progress();
         self.line(format!(
-            "finished monte-carlo campaign: ok={} failed={} invalid={} skipped={}",
+            "finished monte-carlo campaign: ok={} failed={} invalid={} degraded={} skipped={}",
             self.ok.load(Ordering::SeqCst),
             self.failed.load(Ordering::SeqCst),
             self.invalid.load(Ordering::SeqCst),
+            self.degraded.load(Ordering::SeqCst),
             self.skipped.load(Ordering::SeqCst)
         ));
     }
@@ -675,32 +829,31 @@ fn log_campaign_line(out_dir: &Path, line: &str) -> Result<()> {
     writeln!(file, "{line}").into_diagnostic()
 }
 
-fn run_build_step(build: Option<&BuildConfig>, out_dir: &Path) -> Result<()> {
-    let Some(build) = build else {
-        return Ok(());
-    };
-    let Some(program) = build.command.as_ref().filter(|command| !command.is_empty()) else {
-        return Ok(());
-    };
-    let display_args = build.args.join(" ");
-    log_campaign_line(
-        out_dir,
-        &format!("building campaign artifacts: {program} {display_args}"),
-    )?;
-    let mut command = Command::new(program);
-    command.args(&build.args);
-    if let Some(cwd) = &build.cwd {
-        command.current_dir(cwd);
-    }
-    command.envs(&build.env);
-    let status = command
-        .status()
-        .into_diagnostic()
-        .with_context(|| format!("run campaign build step `{program} {display_args}`"))?;
-    if !status.success() {
-        return Err(miette!(
-            "campaign build step failed with status {status}: {program} {display_args}"
-        ));
+fn run_build_steps(builds: &[BuildConfig], out_dir: &Path) -> Result<()> {
+    for build in builds {
+        let Some(program) = build.command.as_ref().filter(|command| !command.is_empty()) else {
+            continue;
+        };
+        let display_args = build.args.join(" ");
+        log_campaign_line(
+            out_dir,
+            &format!("building campaign artifacts: {program} {display_args}"),
+        )?;
+        let mut command = Command::new(program);
+        command.args(&build.args);
+        if let Some(cwd) = &build.cwd {
+            command.current_dir(cwd);
+        }
+        command.envs(&build.env);
+        let status = command
+            .status()
+            .into_diagnostic()
+            .with_context(|| format!("run campaign build step `{program} {display_args}`"))?;
+        if !status.success() {
+            return Err(miette!(
+                "campaign build step failed with status {status}: {program} {display_args}"
+            ));
+        }
     }
     Ok(())
 }
@@ -714,18 +867,22 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     if plan.is_empty() {
         return Err(Error::EmptyPlan).into_diagnostic();
     }
+    warn_stale_plan(&options.plan_path);
 
     if options.dry_run {
-        // Worker count is `S10_MAX_INFLIGHT / recipe_weight`, but the recipe is
-        // not planned during a dry run, so report the admission budget itself.
-        let inflight = match s10::admission::max_inflight() {
-            Some(max) => max.to_string(),
-            None => "off".to_string(),
+        let workers = match requested_workers(options.workers, &config) {
+            Some(workers) => workers.to_string(),
+            None => match s10::admission::max_inflight() {
+                // The recipe is not planned during a dry run, so report the
+                // admission budget itself.
+                Some(max) => format!("(S10_MAX_INFLIGHT={max}/recipe_weight)"),
+                None => "off".to_string(),
+            },
         };
         println!(
-            "monte-carlo dry run: runs={} S10_MAX_INFLIGHT={} out_dir={}",
+            "monte-carlo dry run: runs={} workers={} out_dir={}",
             plan.len(),
-            inflight,
+            workers,
             options.out_dir.display()
         );
         for row in &plan {
@@ -743,10 +900,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     fs::create_dir_all(&options.out_dir)
         .into_diagnostic()
         .with_context(|| format!("create campaign output {}", options.out_dir.display()))?;
-    let cache_dir = config
-        .cache_dir
-        .clone()
-        .unwrap_or_else(|| options.out_dir.join("const-cache"));
+    let cache_dir = resolve_cache_dir(&config, &options.out_dir);
     fs::create_dir_all(&cache_dir)
         .into_diagnostic()
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
@@ -768,6 +922,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     )?;
 
     execute_campaign(ExecuteParams {
+        workers_flag: options.workers,
         config,
         sim_path: options.sim_path,
         out_dir: options.out_dir,
@@ -777,8 +932,68 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         started_at,
         memory_probe: options.memory_probe,
         keep_existing: options.keep_existing,
+        strict_ports: options.strict_ports,
     })
     .await
+}
+
+/// The default compile cache lives in the user cache home — outside the
+/// campaign out dir — so `--clean` and fresh out dirs never trigger an
+/// N-worker JIT compile storm. Entries are content-addressed, making
+/// cross-campaign sharing safe by construction.
+fn resolve_cache_dir(config: &CampaignConfig, out_dir: &Path) -> PathBuf {
+    if let Some(cache_dir) = &config.cache_dir {
+        return cache_dir.clone();
+    }
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+        && !xdg.is_empty()
+    {
+        return PathBuf::from(xdg).join("elodin/monte-carlo/const-cache");
+    }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return PathBuf::from(home).join(".cache/elodin/monte-carlo/const-cache");
+    }
+    out_dir.join("const-cache")
+}
+
+/// Warn when the plan CSV predates a sibling `spec.toml`: the user probably
+/// edited the spec and forgot to re-run `elodin monte-carlo sample`.
+fn warn_stale_plan(plan_path: &Path) {
+    let Some(spec_path) = plan_path.parent().map(|dir| dir.join("spec.toml")) else {
+        return;
+    };
+    let (Ok(spec_meta), Ok(plan_meta)) = (fs::metadata(&spec_path), fs::metadata(plan_path)) else {
+        return;
+    };
+    // Tolerance absorbs same-checkout mtimes (git writes both within seconds).
+    if let (Ok(spec_mtime), Ok(plan_mtime)) = (spec_meta.modified(), plan_meta.modified())
+        && spec_mtime
+            .duration_since(plan_mtime)
+            .is_ok_and(|delta| delta > Duration::from_secs(5))
+    {
+        eprintln!(
+            "warning: {} is newer than {}; regenerate the plan with `elodin monte-carlo sample {} --output {}` (or pass --spec instead of --plan)",
+            spec_path.display(),
+            plan_path.display(),
+            spec_path.display(),
+            plan_path.display(),
+        );
+    }
+}
+
+/// The worker count explicitly requested by the user, honoring precedence:
+/// `--workers` flag > `S10_MAX_INFLIGHT` env > `campaign.toml workers`.
+/// `None` falls through to the admission budget (env or logical cores).
+fn requested_workers(flag: Option<usize>, config: &CampaignConfig) -> Option<usize> {
+    if let Some(workers) = flag {
+        return Some(workers.max(1));
+    }
+    if std::env::var_os("S10_MAX_INFLIGHT").is_some() {
+        return None;
+    }
+    config.workers.map(|workers| workers.max(1))
 }
 
 fn prune_stale_run_dirs(out_dir: &Path, plan: &[PlanRow]) -> Result<()> {
@@ -821,6 +1036,8 @@ struct ResumeManifest {
 }
 
 struct ExecuteParams {
+    /// `--workers` from the CLI (resume passes `None`).
+    workers_flag: Option<usize>,
     config: CampaignConfig,
     sim_path: PathBuf,
     out_dir: PathBuf,
@@ -832,6 +1049,7 @@ struct ExecuteParams {
     started_at: DateTime<Utc>,
     memory_probe: bool,
     keep_existing: bool,
+    strict_ports: bool,
 }
 
 /// Schedules `params.plan` across workers, merges in any `params.preserved`
@@ -839,6 +1057,7 @@ struct ExecuteParams {
 /// `resume_campaign`.
 async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     let ExecuteParams {
+        workers_flag,
         config,
         sim_path,
         out_dir,
@@ -848,6 +1067,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         started_at,
         memory_probe,
         keep_existing,
+        strict_ports,
     } = params;
     fs::create_dir_all(&out_dir)
         .into_diagnostic()
@@ -855,7 +1075,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     let wall_start = Instant::now();
     let total_runs = preserved.len() + plan.len();
 
-    run_build_step(config.build.as_ref(), &out_dir)?;
+    run_build_steps(&config.build, &out_dir)?;
     // Only one `elodin monte-carlo` campaign is expected per host: campaigns share
     // the default DB port (2240) and the `elodin-mc-` cgroup namespace, so this
     // prefix reap is intentionally host-wide. It clears scopes (and their
@@ -875,9 +1095,50 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     }
     let base_recipe = plan_recipe(&sim_path, &out_dir).await?;
     let recipe_weight = s10::admission::recipe_weight(&base_recipe);
+    let requested = requested_workers(workers_flag, &config);
+    if let Some(workers) = requested {
+        // Size the s10 admission budget so exactly `workers` runs execute at
+        // once regardless of recipe shape.
+        s10::admission::configure(Some(workers.saturating_mul(recipe_weight)));
+    }
     let admission_max = s10::admission::max_inflight();
     let workers = resolve_auto_workers(total_runs, recipe_weight, admission_max);
-    let worker_resolution = worker_resolution_label(recipe_weight, admission_max);
+    let worker_resolution = match (workers_flag, requested) {
+        (Some(_), _) => "(--workers)".to_string(),
+        (None, Some(_)) => "(campaign.toml workers)".to_string(),
+        (None, None) => worker_resolution_label(recipe_weight, admission_max),
+    };
+
+    // Validate the entire static port plan before anything starts, so a bad
+    // stride/base combination fails fast instead of as a mid-campaign worker
+    // death several hundred runs in.
+    let assets_http_on = campaign_assets_http_enabled(&config);
+    let planned_ports = ports::validate_port_plan(&config.resources, workers, assets_http_on)?;
+    if let Some(warning) = ports::ephemeral_conflicts(&planned_ports) {
+        if strict_ports {
+            return Err(miette!("{warning} (--strict-ports)"));
+        }
+        log_campaign_line(&out_dir, &format!("warning: {warning}"))?;
+    }
+    if !keep_existing {
+        let ports: HashSet<u16> = planned_ports.iter().map(|planned| planned.port).collect();
+        for line in ports::reap_port_squatters(&ports) {
+            log_campaign_line(&out_dir, &line)?;
+        }
+    }
+    raise_fd_limit(&out_dir, workers, recipe_weight)?;
+    let scratch = resolve_scratch_dir(config.scratch_dir.as_deref(), &out_dir)?;
+    if let Some(scratch) = &scratch {
+        log_campaign_line(
+            &out_dir,
+            &format!(
+                "running per-run IO on scratch {} (artifacts move to {} as runs finish)",
+                scratch.display(),
+                out_dir.display()
+            ),
+        )?;
+    }
+
     let reporter = CampaignReporter::new(&out_dir, total_runs, workers, worker_resolution)?;
     // Count already-passed runs toward the report without re-running them.
     for metric in &preserved {
@@ -908,6 +1169,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     let progress_ticker = reporter.spawn_progress_ticker(stop_sampling.clone());
     let mut worker_tasks = JoinSet::new();
 
+    let worker_count = workers;
     for worker_id in 0..workers {
         let rows = rows.clone();
         let metrics = metrics.clone();
@@ -916,10 +1178,11 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         let config = config.clone();
         let out_dir = out_dir.clone();
         let cache_dir = cache_dir.clone();
+        let scratch = scratch.clone();
         let reporter = reporter.clone();
         let campaign_cgroup = campaign_cgroup.clone();
         worker_tasks.spawn(async move {
-            let slot = resource_slot(worker_id, &config.resources)?;
+            let template = ports::slot_template(worker_id, &config.resources, assets_http_on)?;
             loop {
                 if failure.lock().expect("failure mutex poisoned").is_some()
                     && !config.continue_on_error
@@ -934,19 +1197,23 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
                 let metric = match run_with_retries(
                     row,
                     worker_id,
-                    slot.clone(),
+                    &template,
                     base_recipe.clone(),
                     &config,
                     &out_dir,
                     &cache_dir,
+                    scratch.as_deref(),
+                    worker_count,
+                    assets_http_on,
                     campaign_cgroup.as_ref(),
                 )
                 .await
                 {
                     Ok(metric) => metric,
                     Err(err) => {
-                        let metric =
+                        let mut metric =
                             placeholder_metric(&run_id, Some(worker_id), &out_dir, "failed");
+                        metric.failure_reason = Some(error_chain(&err));
                         reporter.run_finished(worker_id, None);
                         reporter.line(format!(
                             "[failed] {run_id} worker={worker_id} setup_error={err}"
@@ -990,6 +1257,10 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     }
     resource_sampler.await.into_diagnostic()?;
     progress_ticker.await.into_diagnostic()?;
+    if let Some(scratch) = &scratch {
+        // All surviving run artifacts were moved out incrementally.
+        let _ = fs::remove_dir_all(scratch);
+    }
 
     let metrics = metrics.lock().expect("metrics mutex poisoned").clone();
     write_perf_csv(&out_dir.join("perf.csv"), &metrics)?;
@@ -1053,15 +1324,105 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         run_hook("post_campaign", hook, &context).await?;
     }
 
-    if config.fail_on_run_errors && summary.error_runs() > 0 {
-        return Err(miette!(
-            "monte-carlo campaign finished with {} failed and {} invalid run(s) (fail_on_run_errors=true)",
-            summary.failed,
-            summary.invalid
-        ));
+    if config.fail_on_run_errors {
+        let mut error_runs = summary.error_runs();
+        if config.quality.fail_on_degraded {
+            error_runs += summary.degraded;
+        }
+        if error_runs > 0 {
+            return Err(miette!(
+                "monte-carlo campaign finished with {} failed, {} invalid, and {} degraded run(s) (fail_on_run_errors=true)",
+                summary.failed,
+                summary.invalid,
+                summary.degraded
+            ));
+        }
     }
 
     Ok(())
+}
+
+/// Whether campaign sims should serve the editor assets HTTP endpoint on
+/// `db_port + 1`. Off by default for headless campaigns; opt back in with
+/// `ELODIN_ASSETS_HTTP=on` in the ambient env or the campaign `[env]` table.
+fn campaign_assets_http_enabled(config: &CampaignConfig) -> bool {
+    let value = config
+        .env
+        .get(ASSETS_HTTP_ENV)
+        .cloned()
+        .or_else(|| std::env::var(ASSETS_HTTP_ENV).ok());
+    matches!(value.as_deref(), Some("on") | Some("1") | Some("true"))
+}
+
+/// Raise the soft fd limit to the hard limit: the runner pipes stdout/stderr
+/// for every child (`workers x recipe_weight` processes), and the stock soft
+/// limit of 1024 starves it below ~48 workers.
+#[cfg(unix)]
+fn raise_fd_limit(out_dir: &Path, workers: usize, recipe_weight: usize) -> Result<()> {
+    use nix::sys::resource::{Resource, getrlimit, setrlimit};
+    let Ok((soft, hard)) = getrlimit(Resource::RLIMIT_NOFILE) else {
+        return Ok(());
+    };
+    if soft < hard {
+        let _ = setrlimit(Resource::RLIMIT_NOFILE, hard, hard);
+    }
+    let needed = (workers as u64)
+        .saturating_mul(recipe_weight as u64)
+        .saturating_mul(4);
+    if hard < needed {
+        log_campaign_line(
+            out_dir,
+            &format!(
+                "warning: fd hard limit {hard} may be too low for {workers} workers \
+                 (~{needed} fds needed); raise it with `ulimit -Hn` or systemd LimitNOFILE"
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn raise_fd_limit(_out_dir: &Path, _workers: usize, _recipe_weight: usize) -> Result<()> {
+    Ok(())
+}
+
+/// Resolve the scratch base for per-run IO. `"auto"` picks `/dev/shm` when it
+/// exists and is writable; any other value is used as the scratch root; unset
+/// or `"off"` disables scratch. The campaign gets a unique subdirectory.
+fn resolve_scratch_dir(scratch: Option<&str>, out_dir: &Path) -> Result<Option<PathBuf>> {
+    let scratch = match scratch {
+        None => return Ok(None),
+        Some(value) if value.is_empty() || value == "off" => return Ok(None),
+        Some("auto") => {
+            let shm = Path::new("/dev/shm");
+            if !shm.is_dir() {
+                return Ok(None);
+            }
+            shm.to_path_buf()
+        }
+        Some(path) => PathBuf::from(path),
+    };
+    let campaign_name = out_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "campaign".to_string());
+    let dir = scratch.join(format!("elodin-mc-{campaign_name}-{}", std::process::id()));
+    fs::create_dir_all(&dir)
+        .into_diagnostic()
+        .with_context(|| format!("create scratch dir {}", dir.display()))?;
+    Ok(Some(dir))
+}
+
+/// Join an error's chain into one line for `failure_reason`.
+fn error_chain(err: &miette::Report) -> String {
+    let mut parts = Vec::new();
+    for cause in err.chain() {
+        let text = cause.to_string();
+        if !text.is_empty() && parts.last() != Some(&text) {
+            parts.push(text);
+        }
+    }
+    parts.join(": ")
 }
 
 /// Resume a previously started campaign: keep the runs that already passed,
@@ -1111,15 +1472,13 @@ pub async fn resume_campaign(campaign_dir: PathBuf) -> Result<()> {
         out_dir.display()
     );
 
-    let cache_dir = config
-        .cache_dir
-        .clone()
-        .unwrap_or_else(|| out_dir.join("const-cache"));
+    let cache_dir = resolve_cache_dir(&config, &out_dir);
     fs::create_dir_all(&cache_dir)
         .into_diagnostic()
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
 
     execute_campaign(ExecuteParams {
+        workers_flag: None,
         config,
         sim_path: manifest.sim_path,
         out_dir,
@@ -1129,6 +1488,7 @@ pub async fn resume_campaign(campaign_dir: PathBuf) -> Result<()> {
         started_at: Utc::now(),
         memory_probe: manifest.memory_probe,
         keep_existing: manifest.keep_existing,
+        strict_ports: false,
     })
     .await
 }
@@ -1236,11 +1596,17 @@ fn summarize_campaign(
         .iter()
         .filter(|metric| metric.status != "skipped" && !metric.valid())
         .count();
+    let degraded = metrics
+        .iter()
+        .filter(|metric| metric.status != "skipped" && metric.valid() && metric.degraded)
+        .count();
     // Invalid runs are infrastructure/no-data samples, so they are reported
     // separately and excluded from the scored pass/fail distribution.
     let failed = metrics
         .iter()
-        .filter(|metric| metric.status != "skipped" && metric.valid() && !metric.passed())
+        .filter(|metric| {
+            metric.status != "skipped" && metric.valid() && !metric.degraded && !metric.passed()
+        })
         .count();
     let sim_phase_summary = aggregate_sim_summaries(metrics);
     let phase_attribution = summarize_phase_attribution(metrics);
@@ -1260,6 +1626,7 @@ fn summarize_campaign(
         passed,
         failed,
         invalid,
+        degraded,
         skipped,
         workers,
         wall_ms,
@@ -1281,7 +1648,33 @@ fn summarize_campaign(
         phase_attribution,
         concurrency_summary: concurrency_summary.clone(),
         hook_metrics: summarize_hook_metrics(metrics),
+        pacing: summarize_pacing(metrics),
     }
+}
+
+fn summarize_pacing(metrics: &[RunMetric]) -> Option<PacingSummary> {
+    let mut pacing = PacingSummary::default();
+    for metric in metrics {
+        let mut paced = false;
+        if let Some(frac) = metric.behind_deadline_frac {
+            paced = true;
+            if frac >= pacing.max_behind_deadline_frac {
+                pacing.max_behind_deadline_frac = frac;
+                pacing.max_behind_run = metric.run_id.clone();
+            }
+        }
+        if let Some(rtf) = metric.real_time_factor {
+            paced = true;
+            if rtf >= pacing.max_real_time_factor {
+                pacing.max_real_time_factor = rtf;
+                pacing.max_real_time_factor_run = metric.run_id.clone();
+            }
+        }
+        if paced {
+            pacing.paced_runs += 1;
+        }
+    }
+    (pacing.paced_runs > 0).then_some(pacing)
 }
 
 fn summarize_hook_metrics(metrics: &[RunMetric]) -> BTreeMap<String, ScalarMetricSummary> {
@@ -1371,11 +1764,14 @@ fn load_existing_metric(out_dir: &Path, run_id: &str) -> Option<RunMetric> {
 async fn run_with_retries(
     row: PlanRow,
     worker_id: usize,
-    slot: ResourceSlot,
+    template: &ports::SlotTemplate,
     base_recipe: s10::Recipe,
     config: &CampaignConfig,
     out_dir: &Path,
     cache_dir: &Path,
+    scratch: Option<&Path>,
+    worker_count: usize,
+    assets_http_on: bool,
     campaign_cgroup: Option<&Arc<s10::CgroupScope>>,
 ) -> Result<RunMetric> {
     let mut last_metric = None;
@@ -1384,10 +1780,13 @@ async fn run_with_retries(
         config,
         out_dir,
         cache_dir,
+        scratch,
+        worker_count,
+        assets_http_on,
         campaign_cgroup,
     };
     for attempt in 0..=config.retries {
-        let metric = run_one(&row, worker_id, &slot, &ctx, attempt).await?;
+        let metric = run_one(&row, worker_id, template, &ctx, attempt).await?;
         let ok = metric.exit_ok;
         last_metric = Some(metric);
         if ok {
@@ -1402,29 +1801,127 @@ struct RunContext<'a> {
     config: &'a CampaignConfig,
     out_dir: &'a Path,
     cache_dir: &'a Path,
+    /// Campaign scratch base; run dirs live here during execution and move to
+    /// `out_dir` when the run finalizes.
+    scratch: Option<&'a Path>,
+    worker_count: usize,
+    assets_http_on: bool,
     campaign_cgroup: Option<&'a Arc<s10::CgroupScope>>,
+}
+
+/// Resolve a worker's slot for one run: static ports come from the template,
+/// `"auto"` ports are freshly allocated and guarded until the recipe spawns.
+fn resolve_run_slot(
+    template: &ports::SlotTemplate,
+    run_id: &str,
+) -> Result<(ResourceSlot, Vec<ports::PortGuard>)> {
+    let mut guards = Vec::new();
+    let mut allocate = || -> Result<u16> {
+        let guard = ports::allocate_port(template.bind_ip)
+            .with_context(|| format!("allocate dynamic port for {run_id}"))?;
+        let port = guard.port;
+        guards.push(guard);
+        Ok(port)
+    };
+    let db_port = match template.db_port {
+        Some(port) => port,
+        None => allocate()?,
+    };
+    let mut ports = BTreeMap::new();
+    for (name, port) in &template.ports {
+        let port = match port {
+            Some(port) => *port,
+            None => allocate()?,
+        };
+        ports.insert(name.clone(), port);
+    }
+    Ok((
+        ResourceSlot {
+            worker_id: template.worker_id,
+            db_addr: SocketAddr::new(template.bind_ip, db_port),
+            db_port,
+            ports,
+        },
+        guards,
+    ))
+}
+
+/// Fail fast (with pid attribution) when another process is squatting on one
+/// of this run's static ports — otherwise the failure surfaces minutes later
+/// as an opaque readiness timeout or, worse, corrupted handshakes. Brief
+/// re-probes absorb the teardown latency of the previous run on this slot.
+async fn preflight_static_ports(template: &ports::SlotTemplate, slot: &ResourceSlot) -> Result<()> {
+    let static_ports: HashSet<u16> = template
+        .db_port
+        .iter()
+        .copied()
+        .chain(
+            template
+                .ports
+                .values()
+                .filter_map(|port| port.as_ref().copied()),
+        )
+        .collect();
+    if static_ports.is_empty() {
+        return Ok(());
+    }
+    let mut owners = Vec::new();
+    for attempt in 0..4 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        owners = ports::find_port_owners(&static_ports);
+        if owners.is_empty() {
+            return Ok(());
+        }
+    }
+    let owner = &owners[0];
+    let name = slot
+        .ports
+        .iter()
+        .find(|(_, port)| **port == owner.port)
+        .map(|(name, _)| name.as_str())
+        .unwrap_or(if slot.db_port == owner.port {
+            "db_port"
+        } else {
+            "port"
+        });
+    Err(miette!("preflight: `{name}` {owner}"))
 }
 
 async fn run_one(
     row: &PlanRow,
     worker_id: usize,
-    slot: &ResourceSlot,
+    template: &ports::SlotTemplate,
     ctx: &RunContext<'_>,
     attempt: usize,
 ) -> Result<RunMetric> {
-    let run_dir = ctx.out_dir.join("runs").join(&row.run_id);
+    // The run executes in `active_run_dir` (scratch when configured) and its
+    // surviving artifacts move to `final_run_dir` when it completes.
+    let final_run_dir = ctx.out_dir.join("runs").join(&row.run_id);
+    let active_run_dir = match ctx.scratch {
+        Some(scratch) => scratch.join("runs").join(&row.run_id),
+        None => final_run_dir.clone(),
+    };
+    let run_dir = active_run_dir.clone();
     let db_path = run_dir.join("db");
-    if run_dir.exists() {
-        fs::remove_dir_all(&run_dir)
-            .into_diagnostic()
-            .with_context(|| format!("remove stale run dir {}", run_dir.display()))?;
+    for dir in [&final_run_dir, &run_dir] {
+        if dir.exists() {
+            fs::remove_dir_all(dir)
+                .into_diagnostic()
+                .with_context(|| format!("remove stale run dir {}", dir.display()))?;
+        }
     }
     fs::create_dir_all(&run_dir).into_diagnostic()?;
+
+    let (slot, port_guards) = resolve_run_slot(template, &row.run_id)?;
+    let mut preflight_failure = preflight_static_ports(template, &slot).await.err();
+
     let context_path = run_dir.join("context.json");
     write_run_context(
         &context_path,
         row,
-        slot,
+        &slot,
         &db_path,
         &run_dir,
         ctx.cache_dir,
@@ -1435,12 +1932,14 @@ async fn run_one(
         ctx.base_recipe.clone(),
         row,
         &PatchContext {
-            slot,
+            slot: &slot,
             context_path: &context_path,
             cache_dir: ctx.cache_dir,
             db_path: &db_path,
             run_dir: &run_dir,
             config: ctx.config,
+            worker_count: ctx.worker_count,
+            assets_http_on: ctx.assets_http_on,
         },
     )?;
     let admission_permit =
@@ -1455,28 +1954,42 @@ async fn run_one(
             .ok()
             .flatten()
     });
-    let fut = s10::cli::run_recipe_with_token_admitted_in_cgroup(
-        row.run_id.clone(),
-        recipe,
-        false,
-        false,
-        token.clone(),
-        admission_permit,
-        run_cgroup.clone(),
-    );
-    let result = if let Some(timeout) = parse_duration(ctx.config.timeout.as_deref())? {
-        match tokio::time::timeout(timeout, fut).await {
-            Ok(result) => result,
-            Err(_) => {
-                token.cancel();
-                if let Some(scope) = &run_cgroup {
-                    let _ = scope.kill();
-                }
-                Err(miette!("run {} timed out after {:?}", row.run_id, timeout))
-            }
-        }
+    // Release dynamic-port guards only now, just before the recipe spawns.
+    drop(port_guards);
+    let mut failure_reason: Option<String> = None;
+    let result = if let Some(reason) = preflight_failure.take() {
+        Err(reason)
     } else {
-        fut.await
+        let fut = s10::cli::run_recipe_with_token_admitted_in_cgroup(
+            row.run_id.clone(),
+            recipe,
+            false,
+            false,
+            token.clone(),
+            admission_permit,
+            run_cgroup.clone(),
+        );
+        if let Some(timeout) = parse_duration(ctx.config.timeout.as_deref())? {
+            let mut fut = Box::pin(fut);
+            match tokio::time::timeout(timeout, &mut fut).await {
+                Ok(result) => result,
+                Err(_) => {
+                    token.cancel();
+                    // Let the recipes' cancel branches run their graceful
+                    // SIGTERM -> SIGKILL process-group teardown (the only
+                    // kill path when no cgroup is available) before dropping
+                    // the future.
+                    let _ = tokio::time::timeout(Duration::from_secs(10), &mut fut).await;
+                    if let Some(scope) = &run_cgroup {
+                        let _ = scope.kill();
+                    }
+                    failure_reason = Some(format!("timed out after {timeout:?}"));
+                    Err(miette!("run {} timed out after {:?}", row.run_id, timeout))
+                }
+            }
+        } else {
+            fut.await
+        }
     };
     if let Some(scope) = &run_cgroup {
         let _ = scope.kill();
@@ -1484,6 +1997,11 @@ async fn run_one(
     }
     let exit_unix_ns = unix_now_ns();
     let exit_ok = result.is_ok();
+    if failure_reason.is_none()
+        && let Err(err) = &result
+    {
+        failure_reason = Some(error_chain(err));
+    }
     let sim_summary = read_sim_run_summary(&run_dir.join("sim_summary.json"));
     let entry_unix_ns = sim_summary
         .as_ref()
@@ -1500,6 +2018,7 @@ async fn run_one(
     let summary_written_unix_ns = sim_summary
         .as_ref()
         .and_then(|summary| summary.summary_written_unix_ns);
+    let pacing = sim_summary.as_ref().map(extract_pacing).unwrap_or_default();
     let mut metric = RunMetric {
         run_id: row.run_id.clone(),
         worker_id: Some(worker_id),
@@ -1508,6 +2027,11 @@ async fn run_one(
         exit_ok,
         scored_pass: None,
         scored_valid: None,
+        failure_reason,
+        degraded: false,
+        behind_deadline_frac: pacing.behind_deadline_frac,
+        real_time_factor: pacing.real_time_factor,
+        drift_resets: pacing.drift_resets,
         hook_scalars: BTreeMap::new(),
         wall_ms: start.elapsed().as_millis(),
         started_at,
@@ -1552,9 +2076,125 @@ async fn run_one(
             metric.status = "invalid".to_string();
         }
     }
+    // Quality gate: a clean, valid run whose pacing degraded answers a
+    // different statistical question — flag it instead of counting a pass.
+    if metric.exit_ok
+        && metric.valid()
+        && let Some(reason) = quality_violation(&ctx.config.quality, &metric)
+    {
+        metric.degraded = true;
+        metric.status = "degraded".to_string();
+        metric.failure_reason.get_or_insert(reason);
+    }
+    // Truncate the (now finalized) DB's preallocated files before retention
+    // decides to keep it, so kept DBs have apparent size ~= real size.
+    let keep_db = match ctx.config.retention.keep_run_db {
+        RunDbRetention::Always => true,
+        RunDbRetention::Never => false,
+        RunDbRetention::OnFail => !metric.passed(),
+    };
+    if keep_db && ctx.config.retention.compact_run_db {
+        let _ = fs_util::compact_run_db(&metric.db_path);
+    }
     apply_retention(ctx.config.retention.keep_run_db, &metric);
+    apply_prune_globs(&ctx.config.retention, &metric);
     write_json(&run_dir.join("metrics.json"), &metric)?;
+    // Scratch finalize: move the surviving artifacts to the real out dir,
+    // sparse-aware, and point the metric at their final home.
+    if run_dir != final_run_dir {
+        fs_util::move_dir_sparse(&run_dir, &final_run_dir)
+            .into_diagnostic()
+            .with_context(|| {
+                format!(
+                    "move run artifacts {} -> {}",
+                    run_dir.display(),
+                    final_run_dir.display()
+                )
+            })?;
+        metric.db_path = final_run_dir.join("db");
+        metric.run_dir = final_run_dir.clone();
+        write_json(&final_run_dir.join("metrics.json"), &metric)?;
+    }
     Ok(metric)
+}
+
+#[derive(Default)]
+struct PacingMetrics {
+    behind_deadline_frac: Option<f64>,
+    real_time_factor: Option<f64>,
+    drift_resets: Option<u64>,
+}
+
+/// Derive pacing-integrity metrics from a sim summary. Only meaningful for
+/// real-time-paced sims (`real_time_pacing` observed at least one cycle).
+fn extract_pacing(summary: &SimRunSummary) -> PacingMetrics {
+    let mut pacing = PacingMetrics::default();
+    if summary.real_time_pacing.count == 0 {
+        return pacing;
+    }
+    if summary.cycles > 0 {
+        pacing.behind_deadline_frac =
+            Some(summary.pacing_behind_events as f64 / summary.cycles as f64);
+    }
+    pacing.drift_resets = Some(summary.pacing_resets);
+    // Wall time of the sim loop vs the simulated time it covered.
+    if summary.steps > 0 && summary.simulation_rate_hz > 0.0 && summary.wall_ns > 0 {
+        let sim_seconds = summary.steps as f64 / summary.simulation_rate_hz;
+        if sim_seconds > 0.0 {
+            pacing.real_time_factor = Some((summary.wall_ns as f64 / 1e9) / sim_seconds);
+        }
+    }
+    pacing
+}
+
+fn quality_violation(quality: &QualityConfig, metric: &RunMetric) -> Option<String> {
+    if let (Some(max), Some(frac)) = (
+        quality.max_behind_deadline_frac,
+        metric.behind_deadline_frac,
+    ) && frac > max
+    {
+        return Some(format!(
+            "pacing degraded: {:.1}% of cycles behind deadline (gate {:.1}%)",
+            frac * 100.0,
+            max * 100.0
+        ));
+    }
+    if let (Some(max), Some(rtf)) = (quality.max_real_time_factor, metric.real_time_factor)
+        && rtf > max
+    {
+        return Some(format!(
+            "pacing degraded: real-time factor {rtf:.3} (gate {max:.3})"
+        ));
+    }
+    None
+}
+
+/// Remove retention-glob matches (relative to the run dir) after scoring, so
+/// hooks don't each carry bespoke cleanup code.
+fn apply_prune_globs(retention: &RetentionConfig, metric: &RunMetric) {
+    let patterns = if metric.passed() {
+        &retention.prune_on_pass
+    } else {
+        &retention.prune_on_fail
+    };
+    for pattern in patterns {
+        let full = metric.run_dir.join(pattern);
+        let Some(full) = full.to_str() else { continue };
+        let Ok(paths) = glob::glob(full) else {
+            continue;
+        };
+        for path in paths.flatten() {
+            // Never delete outside the run dir (e.g. `..` in a pattern).
+            if !path.starts_with(&metric.run_dir) {
+                continue;
+            }
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+        }
+    }
 }
 
 #[derive(Default)]
@@ -1625,21 +2265,21 @@ pub fn resolve_run_shape(
     campaign_path: Option<&Path>,
     plan_path: &Path,
     runtime_threads_override: Option<usize>,
+    workers_flag: Option<usize>,
 ) -> Result<ResolvedRunShape> {
     // Validate the campaign config up front (surfaces errors before the run).
-    // Concurrency is governed entirely by the s10 admission budget now, so the
+    // Concurrency is governed by `workers` / the s10 admission budget, so the
     // only thing left to size here is the orchestrator's I/O thread pool.
-    let _config = load_config(campaign_path)?;
+    let config = load_config(campaign_path)?;
     let plan = read_plan(plan_path)?;
     if plan.is_empty() {
         return Err(Error::EmptyPlan).into_diagnostic();
     }
+    // The recipe is not planned yet, so a requested worker count stands in
+    // for the admission budget when sizing IO threads.
+    let budget = requested_workers(workers_flag, &config).or(s10::admission::max_inflight());
     Ok(ResolvedRunShape {
-        runtime_threads: resolve_runtime_threads(
-            s10::admission::max_inflight(),
-            plan.len(),
-            runtime_threads_override,
-        ),
+        runtime_threads: resolve_runtime_threads(budget, plan.len(), runtime_threads_override),
     })
 }
 
@@ -1696,6 +2336,9 @@ fn available_cpus() -> usize {
 fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     if let Some(cache_dir) = options.cache_dir.take() {
         config.cache_dir = Some(cache_dir);
+    }
+    if let Some(scratch_dir) = options.scratch_dir.take() {
+        config.scratch_dir = Some(scratch_dir);
     }
     if let Some(retries) = options.retries {
         config.retries = retries;
@@ -1806,7 +2449,32 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
         .worker_id
         .checked_mul(ctx.config.resources.port_stride as usize)
         .ok_or_else(|| miette!("worker port offset overflow"))?;
-    let mut env = HashMap::from([
+    let mut env = HashMap::new();
+    // Campaign `[env]` table first: runner-managed variables always win.
+    for (key, value) in &ctx.config.env {
+        env.insert(key.clone(), render_template(value, row, ctx));
+    }
+    // Machine-sympathy defaults, only when the user set them nowhere (shell,
+    // campaign [env]): cap per-process thread pools so N concurrent sims do
+    // not each size their pools to every core on the box.
+    let threads = (available_cpus() / ctx.worker_count.max(1)).max(1);
+    for key in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"] {
+        if std::env::var_os(key).is_none() && !env.contains_key(key) {
+            env.insert(key.to_string(), threads.to_string());
+        }
+    }
+    if std::env::var_os("XLA_FLAGS").is_none() && !env.contains_key("XLA_FLAGS") {
+        env.insert(
+            "XLA_FLAGS".to_string(),
+            format!("--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={threads}"),
+        );
+    }
+    // Headless campaign sims skip the editor assets HTTP server (db_port + 1)
+    // unless explicitly re-enabled; see `campaign_assets_http_enabled`.
+    if !ctx.assets_http_on && std::env::var_os(ASSETS_HTTP_ENV).is_none() {
+        env.insert(ASSETS_HTTP_ENV.to_string(), "off".to_string());
+    }
+    env.extend([
         (
             CONTEXT_ENV.to_string(),
             ctx.context_path.to_string_lossy().to_string(),
@@ -1925,6 +2593,8 @@ struct PatchContext<'a> {
     db_path: &'a Path,
     run_dir: &'a Path,
     config: &'a CampaignConfig,
+    worker_count: usize,
+    assets_http_on: bool,
 }
 
 fn patch_recipe_env(
@@ -1950,12 +2620,16 @@ fn patch_recipe_env(
             process.process_args.env.extend(env.clone());
             process.process_args.fail_on_error = true;
             process.process_args.log_path = Some(log_path_for(run_dir, name));
+            // Group-kill fallback: without a delegated cgroup, this is what
+            // keeps a timed-out run's daemons from squatting on worker ports.
+            process.process_args.own_process_group = true;
             s10::Recipe::Process(process)
         }
         s10::Recipe::Cargo(mut cargo) => {
             cargo.process_args.env.extend(env.clone());
             cargo.process_args.fail_on_error = true;
             cargo.process_args.log_path = Some(log_path_for(run_dir, name));
+            cargo.process_args.own_process_group = true;
             s10::Recipe::Cargo(cargo)
         }
         #[cfg(not(target_os = "windows"))]
@@ -1963,6 +2637,7 @@ fn patch_recipe_env(
             sim.addr = db_addr;
             sim.env.extend(env.clone());
             sim.log_path = Some(log_path_for(run_dir, name));
+            sim.own_process_group = true;
             s10::Recipe::Sim(sim)
         }
     }
@@ -1980,34 +2655,6 @@ fn log_path_for(run_dir: &Path, name: &str) -> PathBuf {
         })
         .collect::<String>();
     run_dir.join("logs").join(format!("{sanitized}.log"))
-}
-
-fn resource_slot(worker_id: usize, resources: &ResourceConfig) -> Result<ResourceSlot> {
-    let offset = worker_id
-        .checked_mul(resources.port_stride as usize)
-        .ok_or_else(|| miette!("worker port offset overflow"))?;
-    let shift = |base: u16| -> Result<u16> {
-        let port = base as usize + offset;
-        u16::try_from(port).into_diagnostic()
-    };
-    let db_port = shift(resources.db_port)?;
-    let ports = resources
-        .ports
-        .iter()
-        .map(|(name, port)| Ok((name.clone(), shift(*port)?)))
-        .collect::<Result<BTreeMap<_, _>>>()?;
-    let mut all_ports = HashSet::from([db_port]);
-    for (name, port) in &ports {
-        if !all_ports.insert(*port) {
-            return Err(miette!("resource port collision for `{name}` at {port}"));
-        }
-    }
-    Ok(ResourceSlot {
-        worker_id,
-        db_port,
-        db_addr: SocketAddr::new(resources.bind_ip, db_port),
-        ports,
-    })
 }
 
 fn write_run_context(
@@ -2083,6 +2730,11 @@ fn write_perf_csv(path: &Path, metrics: &[RunMetric]) -> Result<()> {
             "exit_ok",
             "scored_pass",
             "scored_valid",
+            "failure_reason",
+            "degraded",
+            "behind_deadline_frac",
+            "real_time_factor",
+            "drift_resets",
             "wall_ms",
             "started_at",
             "finished_at",
@@ -2119,6 +2771,20 @@ fn write_perf_csv(path: &Path, metrics: &[RunMetric]) -> Result<()> {
                     .unwrap_or_default(),
                 metric
                     .scored_valid
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric.failure_reason.clone().unwrap_or_default(),
+                metric.degraded.to_string(),
+                metric
+                    .behind_deadline_frac
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .real_time_factor
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                metric
+                    .drift_resets
                     .map(|value| value.to_string())
                     .unwrap_or_default(),
                 metric.wall_ms.to_string(),
@@ -2210,8 +2876,13 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
         "status".to_string(),
         "passed".to_string(),
         "valid".to_string(),
+        "degraded".to_string(),
         "scored_pass".to_string(),
         "scored_valid".to_string(),
+        "failure_reason".to_string(),
+        "behind_deadline_frac".to_string(),
+        "real_time_factor".to_string(),
+        "drift_resets".to_string(),
         "worker_id".to_string(),
         "wall_ms".to_string(),
         "db_path".to_string(),
@@ -2234,8 +2905,22 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
             metric.status.clone(),
             metric.passed().to_string(),
             metric.valid().to_string(),
+            metric.degraded.to_string(),
             scored_pass,
             scored_valid,
+            metric.failure_reason.clone().unwrap_or_default(),
+            metric
+                .behind_deadline_frac
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            metric
+                .real_time_factor
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            metric
+                .drift_resets
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
             metric
                 .worker_id
                 .map(|id| id.to_string())
@@ -2307,6 +2992,11 @@ fn placeholder_metric(
         exit_ok: false,
         scored_pass: None,
         scored_valid: None,
+        failure_reason: None,
+        degraded: false,
+        behind_deadline_frac: None,
+        real_time_factor: None,
+        drift_resets: None,
         hook_scalars: BTreeMap::new(),
         wall_ms: 0,
         started_at: now,
@@ -2431,10 +3121,25 @@ fn write_campaign_summary(
     let mut rendered = String::new();
     rendered.push_str("──── elodin monte-carlo campaign summary ────\n");
     rendered.push_str(&format!(
-        "  runs:              {} ok / {} failed / {} invalid / {} skipped / {} total\n",
-        summary.passed, summary.failed, summary.invalid, summary.skipped, summary.total_runs
+        "  runs:              {} ok / {} failed / {} invalid / {} degraded / {} skipped / {} total\n",
+        summary.passed,
+        summary.failed,
+        summary.invalid,
+        summary.degraded,
+        summary.skipped,
+        summary.total_runs
     ));
     rendered.push_str(&format!("  workers:           {}\n", summary.workers));
+    if let Some(pacing) = &summary.pacing {
+        rendered.push_str(&format!(
+            "  pacing:            worst behind-deadline {:.1}% ({}), worst real-time factor {:.3} ({}) over {} paced run(s)\n",
+            pacing.max_behind_deadline_frac * 100.0,
+            pacing.max_behind_run,
+            pacing.max_real_time_factor,
+            pacing.max_real_time_factor_run,
+            pacing.paced_runs
+        ));
+    }
     rendered.push_str(&format!(
         "  wall time:         {:.3} s\n",
         summary.wall_ms as f64 / 1000.0
@@ -3654,20 +4359,197 @@ mod tests {
     fn build_config_parses_from_toml() {
         let config: CampaignConfig = toml::from_str(
             r#"
-            [build]
+            [[build]]
             command = "cargo"
             args = ["build", "--release"]
             cwd = "."
             [build.env]
             FOO = "bar"
+
+            [[build]]
+            command = "make"
             "#,
         )
         .expect("parse campaign config");
-        let build = config.build.expect("build config");
+        assert_eq!(config.build.len(), 2);
+        let build = &config.build[0];
         assert_eq!(build.command.as_deref(), Some("cargo"));
         assert_eq!(build.args, ["build", "--release"]);
         assert_eq!(build.cwd.as_deref(), Some(Path::new(".")));
         assert_eq!(build.env.get("FOO").map(String::as_str), Some("bar"));
+        assert_eq!(config.build[1].command.as_deref(), Some("make"));
+    }
+
+    #[test]
+    fn campaign_config_parses_new_keys() {
+        let config: CampaignConfig = toml::from_str(
+            r#"
+            workers = 96
+            scratch_dir = "auto"
+
+            [env]
+            SITL = "1"
+
+            [resources]
+            db_port = 20000
+            port_stride = 32
+            [resources.ports]
+            sitl_socket = 20002
+            weaver = "auto"
+
+            [retention]
+            keep_run_db = "on-fail"
+            prune_on_pass = ["postprocess/merged"]
+
+            [quality]
+            max_behind_deadline_frac = 0.05
+            "#,
+        )
+        .expect("parse campaign config");
+        assert_eq!(config.workers, Some(96));
+        assert_eq!(config.scratch_dir.as_deref(), Some("auto"));
+        assert_eq!(config.env.get("SITL").map(String::as_str), Some("1"));
+        assert_eq!(config.resources.db_port, PortSpec::Static(20000));
+        assert_eq!(
+            config.resources.ports.get("sitl_socket"),
+            Some(&PortSpec::Static(20002))
+        );
+        assert_eq!(
+            config.resources.ports.get("weaver"),
+            Some(&PortSpec::Auto(AutoTag::Auto))
+        );
+        assert_eq!(config.retention.prune_on_pass, ["postprocess/merged"]);
+        assert!(config.retention.compact_run_db);
+        assert_eq!(config.quality.max_behind_deadline_frac, Some(0.05));
+        assert!(!config.quality.fail_on_degraded);
+    }
+
+    #[test]
+    fn degraded_runs_are_counted_separately() {
+        let out_dir = std::env::temp_dir().join(format!("mc-degraded-{}", unix_now_ns()));
+        fs::create_dir_all(&out_dir).unwrap();
+
+        let mut degraded = placeholder_metric("run_0000000", Some(0), &out_dir, "degraded");
+        degraded.exit_ok = true;
+        degraded.degraded = true;
+        degraded.behind_deadline_frac = Some(0.4);
+        assert!(!degraded.passed());
+        assert!(degraded.valid());
+
+        let metrics = vec![degraded];
+        let (_, concurrency) = build_timeline(&metrics);
+        let now = Utc::now();
+        let summary = summarize_campaign(&out_dir, &metrics, &[], now, now, 0, 1, &concurrency);
+        assert_eq!(summary.degraded, 1);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.passed, 0);
+        // Degraded runs don't trip fail_on_run_errors by default.
+        assert_eq!(summary.error_runs(), 0);
+        let pacing = summary.pacing.expect("pacing summary");
+        assert_eq!(pacing.max_behind_run, "run_0000000");
+
+        let _ = fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn quality_gate_flags_violations() {
+        let quality = QualityConfig {
+            max_behind_deadline_frac: Some(0.05),
+            max_real_time_factor: None,
+            fail_on_degraded: false,
+        };
+        let out = std::env::temp_dir();
+        let mut metric = placeholder_metric("run_0000000", Some(0), &out, "ok");
+        metric.behind_deadline_frac = Some(0.2);
+        let reason = quality_violation(&quality, &metric).expect("violation");
+        assert!(reason.contains("behind deadline"), "got: {reason}");
+        metric.behind_deadline_frac = Some(0.01);
+        assert!(quality_violation(&quality, &metric).is_none());
+    }
+
+    #[test]
+    fn extract_pacing_computes_rtf_and_frac() {
+        let mut summary = SimRunSummary {
+            pre_step: phase(&[]),
+            copy_db_to_world: phase(&[]),
+            world_run: phase(&[]),
+            commit: phase(&[]),
+            wait_for_write: phase(&[]),
+            post_step: phase(&[]),
+            real_time_pacing: phase(&[1_000; 10]),
+            total_cycle: phase(&[1_000; 10]),
+            real_time_oversleep: None,
+            real_time_behind: None,
+            pacing_behind_events: 5,
+            pacing_resets: 2,
+            pacing_no_sleep: 0,
+            cycles: 100,
+            steps: 1_000,
+            simulation_rate_hz: 100.0,
+            telemetry_rate_hz: 100.0,
+            // 20 s wall for 10 s of sim time -> rtf 2.0.
+            wall_ns: 20_000_000_000,
+            entry_unix_ns: None,
+            compile_done_unix_ns: None,
+            loop_start_unix_ns: None,
+            loop_end_unix_ns: None,
+            summary_written_unix_ns: None,
+        };
+        let pacing = extract_pacing(&summary);
+        assert_eq!(pacing.behind_deadline_frac, Some(0.05));
+        assert_eq!(pacing.drift_resets, Some(2));
+        assert!((pacing.real_time_factor.unwrap() - 2.0).abs() < 1e-9);
+
+        // Unpaced sims produce no pacing metrics.
+        summary.real_time_pacing = phase(&[]);
+        let pacing = extract_pacing(&summary);
+        assert!(pacing.behind_deadline_frac.is_none());
+        assert!(pacing.real_time_factor.is_none());
+    }
+
+    #[test]
+    fn prune_globs_remove_only_within_run_dir() {
+        let run_dir = std::env::temp_dir().join(format!("mc-prune-{}", unix_now_ns()));
+        fs::create_dir_all(run_dir.join("postprocess/merged")).unwrap();
+        fs::write(run_dir.join("postprocess/merged/big.csv"), b"x").unwrap();
+        fs::write(run_dir.join("keep.txt"), b"x").unwrap();
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &run_dir, "ok");
+        metric.exit_ok = true;
+        metric.run_dir = run_dir.clone();
+        let retention = RetentionConfig {
+            prune_on_pass: vec!["postprocess/merged".to_string()],
+            ..RetentionConfig::default()
+        };
+        apply_prune_globs(&retention, &metric);
+        assert!(!run_dir.join("postprocess/merged").exists());
+        assert!(run_dir.join("keep.txt").exists());
+
+        let _ = fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn requested_workers_precedence() {
+        // Flag always wins.
+        let config = CampaignConfig {
+            workers: Some(8),
+            ..CampaignConfig::default()
+        };
+        assert_eq!(requested_workers(Some(96), &config), Some(96));
+        // Without flag or env, campaign.toml applies. (The env branch is
+        // process-global, so it is not exercised here.)
+        if std::env::var_os("S10_MAX_INFLIGHT").is_none() {
+            assert_eq!(requested_workers(None, &config), Some(8));
+        }
+    }
+
+    #[test]
+    fn error_chain_joins_contexts() {
+        let err = miette::Report::msg("io error")
+            .wrap_err("spawn fsw")
+            .wrap_err("run_0000012");
+        let chain = error_chain(&err);
+        assert_eq!(chain, "run_0000012: spawn fsw: io error");
     }
 
     #[test]
@@ -3717,22 +4599,32 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn build_step_runs_command_once() {
+    fn build_steps_run_in_order() {
         let out_dir = std::env::temp_dir().join(format!(
             "mc-build-step-{}-{}",
             std::process::id(),
             unix_now_ns()
         ));
         fs::create_dir_all(&out_dir).expect("create temp dir");
-        let marker = out_dir.join("marker");
-        let config = BuildConfig {
-            command: Some("touch".to_string()),
-            args: vec![marker.to_string_lossy().to_string()],
-            cwd: None,
-            env: HashMap::new(),
-        };
-        run_build_step(Some(&config), &out_dir).expect("build step");
-        assert!(marker.exists());
+        let first = out_dir.join("first");
+        let second = out_dir.join("second");
+        let steps = vec![
+            BuildConfig {
+                command: Some("touch".to_string()),
+                args: vec![first.to_string_lossy().to_string()],
+                cwd: None,
+                env: HashMap::new(),
+            },
+            BuildConfig {
+                command: Some("touch".to_string()),
+                args: vec![second.to_string_lossy().to_string()],
+                cwd: None,
+                env: HashMap::new(),
+            },
+        ];
+        run_build_steps(&steps, &out_dir).expect("build steps");
+        assert!(first.exists());
+        assert!(second.exists());
         let _ = fs::remove_dir_all(out_dir);
     }
 
@@ -3745,13 +4637,13 @@ mod tests {
             unix_now_ns()
         ));
         fs::create_dir_all(&out_dir).expect("create temp dir");
-        let config = BuildConfig {
+        let steps = vec![BuildConfig {
             command: Some("false".to_string()),
             args: Vec::new(),
             cwd: None,
             env: HashMap::new(),
-        };
-        assert!(run_build_step(Some(&config), &out_dir).is_err());
+        }];
+        assert!(run_build_steps(&steps, &out_dir).is_err());
         let _ = fs::remove_dir_all(out_dir);
     }
 }

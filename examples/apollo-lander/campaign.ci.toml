@@ -2,7 +2,7 @@ timeout = "180s"
 retries = 0
 continue_on_error = true
 
-[build]
+[[build]]
 command = "cargo"
 args = ["build", "--release", "--manifest-path", "examples/apollo-lander/controller/Cargo.toml"]
 

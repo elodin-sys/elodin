@@ -136,6 +136,7 @@ impl WorldBuilder {
             depends_on: Vec::new(),
             ready: None,
             ready_timeout: None,
+            own_process_group: false,
         };
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
@@ -167,6 +168,7 @@ impl WorldBuilder {
                         depends_on: Vec::new(),
                         ready: None,
                         ready_timeout: None,
+                        own_process_group: false,
                     },
                     no_watch: true,
                 }),
@@ -666,7 +668,9 @@ impl WorldBuilder {
                     })?;
                 crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
                     .map_err(crate::Error::DB)?;
-                elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
+                if elodin_db::assets_http::assets_http_enabled() {
+                    elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
+                }
                 capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
                 let run_result = py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a

@@ -40,6 +40,12 @@ pub struct SimRecipe {
     pub ready: Option<ReadyProbe>,
     #[serde(default)]
     pub ready_timeout: Option<String>,
+    /// Spawn the sim in its own process group and include a `killpg` sweep in
+    /// teardown (macOS always does this; on Linux it is opt-in for
+    /// orchestrated monte-carlo runs where daemonizing grandchildren escape
+    /// process-tree signalling).
+    #[serde(default)]
+    pub own_process_group: bool,
 }
 
 fn default_addr() -> SocketAddr {
@@ -102,20 +108,22 @@ fn signal_process_tree(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Sig
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
-fn configure_sim_command(cmd: &mut Command) {
+fn configure_sim_command(cmd: &mut Command, _own_process_group: bool) {
     cmd.process_group(0);
 }
 
 #[cfg(target_os = "linux")]
-fn configure_sim_command(_cmd: &mut Command) {}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
-    let _ = nix::sys::signal::killpg(root_pid, signal);
+fn configure_sim_command(cmd: &mut Command, own_process_group: bool) {
+    if own_process_group {
+        cmd.process_group(0);
+    }
 }
 
-#[cfg(target_os = "linux")]
-fn signal_process_group(_root_pid: nix::unistd::Pid, _signal: nix::sys::signal::Signal) {}
+#[cfg(unix)]
+fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
+    // ESRCH when the child shares our group (Linux default): harmless no-op.
+    let _ = nix::sys::signal::killpg(root_pid, signal);
+}
 
 impl SimRecipe {
     pub async fn run(
@@ -126,7 +134,7 @@ impl SimRecipe {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        configure_sim_command(&mut cmd);
+        configure_sim_command(&mut cmd, self.own_process_group);
         // Close stdin to prevent SIGTTIN when child is in background process group.
         // Pipe stdout/stderr so the child (in its own process group via
         // process_group(0)) writes to pipes instead of the terminal, preventing
@@ -203,10 +211,21 @@ impl SimRecipe {
                         let _ = child.wait().await;
                     }
                 }
+                // Reap any group members that survived the leader.
+                if let Some(pid) = child_pid
+                    && self.own_process_group
+                {
+                    signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+                }
                 Ok(())
             }
             res = child.wait() => {
                 let status = res?;
+                if let Some(pid) = child_pid
+                    && self.own_process_group
+                {
+                    signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+                }
                 if let Some(log_path) = &self.log_path {
                     let line = if let Some(code) = status.code() {
                         format!("killed with code {code}")
