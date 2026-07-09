@@ -6,6 +6,7 @@
 }: let
   elodin-db = pkgs.elodin-db;
   cfg = config.services.elodin-db;
+  assetsFlag = lib.optionalString (cfg.assetsDir != null) " --assets ${cfg.assetsDir}";
 in {
   options.services.elodin-db = {
     enable = lib.mkOption {
@@ -43,31 +44,44 @@ in {
         The parent path for the elodin-db output directory.
       '';
     };
+    assetsDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = "/var/lib/elodin/assets";
+      description = ''
+        Source assets/ tree ingested into each fresh database on creation
+        (passed to `elodin-db run --assets`). Defaults to the shared asset
+        root seeded by the elodin module, so every recorded database carries
+        its schematic assets and is a complete, portable record. Set to null
+        to disable ingest.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
     systemd.services."elodin-db@" = {
-      after = ["network.target"];
+      # Order after the asset seed (from the elodin module, when imported) so a
+      # fresh boot ingests a fully populated tree, not a partial one.
+      after = ["network.target" "elodin-assets-seed.service"];
       stopIfChanged = false;
       restartIfChanged = false;
       description = "Start elodin-db under the folder '%i'";
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 ${cfg.dbFolderName}/%i";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248${assetsFlag} ${cfg.dbFolderName}/%i";
         KillSignal = "SIGINT";
         Environment = "RUST_LOG=info";
       };
     };
 
     systemd.services.elodin-db = lib.mkIf (cfg.autostart && !cfg.dbUniqueOnBoot) {
-      after = ["network.target"];
+      after = ["network.target" "elodin-assets-seed.service"];
       wantedBy = ["multi-user.target"];
       description = "Elodin-DB telemetry database";
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 ${cfg.dbFolderName}/default";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248${assetsFlag} ${cfg.dbFolderName}/default";
         KillSignal = "SIGINT";
         Restart = "on-failure";
         RestartSec = "5s";
@@ -76,7 +90,7 @@ in {
     };
 
     systemd.services."elodin-db-default" = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
-      after = ["network.target"];
+      after = ["network.target" "elodin-assets-seed.service"];
       wantedBy = ["multi-user.target"];
       stopIfChanged = false;
       restartIfChanged = false;

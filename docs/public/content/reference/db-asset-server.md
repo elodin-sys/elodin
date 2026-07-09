@@ -122,6 +122,15 @@ Visual assets remain separate under `{db}/assets/`.
 
 See [Elodin CLI](/reference/elodin-cli) for `editor --replay` and `elodin-db --follows`.
 
+### Aleph / HITL
+
+On the Aleph flight computer, the `elodin-db` NixOS service passes
+`--assets /var/lib/elodin/assets` (the shared `ELODIN_ASSETS` root,
+configurable via `services.elodin-db.assetsDir`) so each fresh boot database
+ingests the asset tree on creation. A HITL recording copied off the vehicle is
+therefore a complete, portable record: serve it anywhere with `elodin-db run`
+and the editor loads schematic and meshes from the DB itself.
+
 ### Follow mode and assets
 
 When a follower connects to a source `elodin-db` on port `N`, it replicates telemetry over Impeller TCP. Schematic assets are **not** streamed on that socket — they are fetched separately from the source **DB Asset Server** on port `N+1`.

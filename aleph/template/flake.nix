@@ -82,6 +82,7 @@
       #   autostart = true;                 # Set to false to configure but not auto-start
       #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
       #   openFirewall = true;              # Open TCP & UDP ports for external access
+      #   assetsDir = "/var/lib/elodin/assets"; # Assets ingested into each fresh db (null to disable)
       # };
 
       # Elodin simulation CLI, examples, and assets
