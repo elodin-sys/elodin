@@ -40,11 +40,7 @@ pub struct PortGuard {
 
 /// Compute a worker's static port template, failing on u16 overflow with the
 /// exact worker/name/port. Auto ports come back as `None`.
-pub fn slot_template(
-    worker_id: usize,
-    resources: &ResourceConfig,
-    reserve_assets_port: bool,
-) -> Result<SlotTemplate> {
+pub fn slot_template(worker_id: usize, resources: &ResourceConfig) -> Result<SlotTemplate> {
     let offset = worker_id
         .checked_mul(resources.port_stride as usize)
         .ok_or_else(|| miette!("worker {worker_id}: port offset overflows"))?;
@@ -68,7 +64,11 @@ pub fn slot_template(
         };
         ports.insert(name.clone(), port);
     }
-    if reserve_assets_port && let Some(db) = db_port {
+    // elodin-db always serves editor/render-server assets on `db_port + 1`
+    // (the headless sensor-camera renderer fetches scene assets from it), so
+    // the assets port is part of every slot: validated, preflight-probed, and
+    // exported as ELODIN_MC_PORT_DB_ASSETS.
+    if let Some(db) = db_port {
         let assets = db
             .checked_add(1)
             .ok_or_else(|| miette!("worker {worker_id}: assets port (db_port + 1) overflows"))?;
@@ -98,14 +98,10 @@ pub fn slot_template(
 /// Validate the whole static port plan for `workers` workers before the
 /// campaign starts, so a bad stride/base combination fails fast instead of as
 /// an opaque mid-campaign worker death. Returns every planned static port.
-pub fn validate_port_plan(
-    resources: &ResourceConfig,
-    workers: usize,
-    reserve_assets_port: bool,
-) -> Result<Vec<PlannedPort>> {
+pub fn validate_port_plan(resources: &ResourceConfig, workers: usize) -> Result<Vec<PlannedPort>> {
     let mut planned = Vec::new();
     for worker_id in 0..workers {
-        let template = slot_template(worker_id, resources, reserve_assets_port)?;
+        let template = slot_template(worker_id, resources)?;
         if let Some(port) = template.db_port {
             planned.push(PlannedPort {
                 worker_id,
@@ -183,6 +179,48 @@ pub fn allocate_port(bind_ip: IpAddr) -> Result<PortGuard> {
     }
     Err(miette!(
         "failed to allocate a dynamic port on {bind_ip} (64 attempts)"
+    ))
+}
+
+/// Allocate a consecutive port pair `(P, P + 1)`, both free for TCP and UDP.
+/// Used for `db_port = "auto"`: elodin-db implicitly serves assets on
+/// `db_port + 1`, so a dynamically allocated DB port must bring its assets
+/// port with it.
+pub fn allocate_port_pair(bind_ip: IpAddr) -> Result<(PortGuard, PortGuard)> {
+    for _ in 0..64 {
+        let Ok(udp) = UdpSocket::bind((bind_ip, 0)) else {
+            break;
+        };
+        let Ok(port) = udp.local_addr().map(|addr| addr.port()) else {
+            continue;
+        };
+        let Some(assets_port) = port.checked_add(1) else {
+            continue;
+        };
+        let Ok(tcp) = TcpListener::bind((bind_ip, port)) else {
+            continue;
+        };
+        let Ok(assets_udp) = UdpSocket::bind((bind_ip, assets_port)) else {
+            continue;
+        };
+        let Ok(assets_tcp) = TcpListener::bind((bind_ip, assets_port)) else {
+            continue;
+        };
+        return Ok((
+            PortGuard {
+                port,
+                _tcp: tcp,
+                _udp: udp,
+            },
+            PortGuard {
+                port: assets_port,
+                _tcp: assets_tcp,
+                _udp: assets_udp,
+            },
+        ));
+    }
+    Err(miette!(
+        "failed to allocate a dynamic db/assets port pair on {bind_ip} (64 attempts)"
     ))
 }
 
@@ -411,7 +449,7 @@ mod tests {
     #[test]
     fn plan_validation_names_overflowing_worker() {
         let resources = resources(100, 2240, &[("ardupilot", PortSpec::Static(63333))]);
-        let err = validate_port_plan(&resources, 96, false).unwrap_err();
+        let err = validate_port_plan(&resources, 96).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("worker 23"), "got: {message}");
         assert!(message.contains("ardupilot"), "got: {message}");
@@ -424,20 +462,35 @@ mod tests {
             2000,
             &[("a", PortSpec::Static(3000)), ("b", PortSpec::Static(3000))],
         );
-        let err = validate_port_plan(&resources, 4, false).unwrap_err();
+        let err = validate_port_plan(&resources, 4).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("collision"), "got: {message}");
         assert!(message.contains("3000"), "got: {message}");
     }
 
+    /// elodin-db always serves assets on `db_port + 1`, so a named port
+    /// placed there — the customer's original silent-corruption failure — is
+    /// rejected up front.
     #[test]
-    fn assets_port_is_reserved_when_enabled() {
-        // sitl_socket sits exactly on db_port + 1 — the silent-corruption
-        // failure the customer hit. Reserving the assets port surfaces it.
-        let resources = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20001))]);
-        assert!(validate_port_plan(&resources, 4, false).is_ok());
-        let err = validate_port_plan(&resources, 4, true).unwrap_err();
+    fn assets_port_is_always_reserved() {
+        let colliding = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20001))]);
+        let err = validate_port_plan(&colliding, 4).unwrap_err();
         assert!(err.to_string().contains("collision"), "got: {err}");
+
+        // The customer's real plan leaves db_port + 1 free: valid, and the
+        // assets port shows up as a planned (probed/reaped) port per worker.
+        let valid = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20002))]);
+        let planned = validate_port_plan(&valid, 2).unwrap();
+        assert!(
+            planned
+                .iter()
+                .any(|planned| planned.name == "db_assets" && planned.port == 20001)
+        );
+        assert!(
+            planned
+                .iter()
+                .any(|planned| planned.name == "db_assets" && planned.port == 20033)
+        );
     }
 
     #[test]
@@ -447,8 +500,12 @@ mod tests {
             2240,
             &[("ardupilot", PortSpec::Auto(crate::AutoTag::Auto))],
         );
-        let planned = validate_port_plan(&resources, 96, false).unwrap();
-        assert!(planned.iter().all(|planned| planned.name == "db_port"));
+        let planned = validate_port_plan(&resources, 96).unwrap();
+        assert!(
+            planned
+                .iter()
+                .all(|planned| planned.name == "db_port" || planned.name == "db_assets")
+        );
     }
 
     #[test]
@@ -457,6 +514,19 @@ mod tests {
         assert!(guard.port > 0);
         // While the guard lives, the port cannot be taken.
         assert!(UdpSocket::bind((IpAddr::V6(Ipv6Addr::UNSPECIFIED), guard.port)).is_err());
+    }
+
+    #[test]
+    fn allocate_port_pair_is_consecutive_and_guarded() {
+        let ip = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+        let (db, assets) = allocate_port_pair(ip).unwrap();
+        assert_eq!(assets.port, db.port + 1);
+        // Both ports are held on both protocols while the guards live.
+        assert!(UdpSocket::bind((ip, db.port)).is_err());
+        assert!(TcpListener::bind((ip, db.port)).is_err());
+        assert!(UdpSocket::bind((ip, assets.port)).is_err());
+        assert!(TcpListener::bind((ip, assets.port)).is_err());
+        drop((db, assets));
     }
 
     #[cfg(target_os = "linux")]

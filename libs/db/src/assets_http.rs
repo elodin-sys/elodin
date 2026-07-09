@@ -335,18 +335,6 @@ pub async fn serve_assets(addr: SocketAddr, assets_dir: PathBuf) -> miette::Resu
     serve_assets_with_listener(listener, addr, assets_dir).await
 }
 
-/// Whether the embedded assets HTTP server should be started. Disabled with
-/// `ELODIN_ASSETS_HTTP=off|0|false` — monte-carlo campaign runs set this by
-/// default since the server only feeds the editor, which is never attached to
-/// a headless worker, and its implicit `db_port + 1` listener otherwise
-/// collides with user port plans.
-pub fn assets_http_enabled() -> bool {
-    !matches!(
-        std::env::var("ELODIN_ASSETS_HTTP").as_deref(),
-        Ok("off") | Ok("0") | Ok("false")
-    )
-}
-
 pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()> {
     let addr = assets_http_addr(tcp_addr);
     let assets_dir = assets_dir(db_path);

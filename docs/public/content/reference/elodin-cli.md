@@ -121,9 +121,11 @@ per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
 (e.g. a plain ssh session) the campaign transparently re-executes itself under
 `systemd-run --user --scope` (opt out with `--no-self-scope`).
 
-Campaign sims run headless: the implicit elodin-db assets HTTP server on
-`db_port + 1` is disabled during campaign runs unless re-enabled with
-`ELODIN_ASSETS_HTTP=on`.
+Every worker slot also reserves `db_port + 1` for elodin-db's always-on asset
+server (the headless sensor-camera renderer fetches scene assets from it):
+the assets port is validated, preflight-probed, and exported as
+`ELODIN_MC_PORT_DB_ASSETS`, and a `db_port = "auto"` allocation always yields
+a consecutive db/assets port pair.
 
 **Usage:** `elodin monte-carlo <COMMAND>`
 
@@ -233,7 +235,9 @@ Key options:
   `worker_id * port_stride`, validated up front for every worker) or `"auto"`
   (allocated dynamically per run, collision-free by construction). Sims read
   them via `el.monte_carlo.port("name")` / `ELODIN_MC_PORT_<NAME>` either way.
-  `db_port` also accepts `"auto"`.
+  `db_port` also accepts `"auto"` (allocated together with its `db_port + 1`
+  assets port). Placing a named port on `db_port + 1` is rejected — that port
+  always belongs to the asset server.
 - `[env]`: extra environment variables for every run's processes.
 - `[[build]]`: any number of one-time build steps run before workers start.
 - `[retention]`: `keep_run_db = "always" | "never" | "on-fail"`, plus

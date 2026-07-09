@@ -23,11 +23,6 @@ pub mod ports;
 
 pub const CONTEXT_ENV: &str = "ELODIN_MONTE_CARLO_CONTEXT";
 pub const CACHE_ENV: &str = "ELODIN_CACHE_DIR";
-/// Env consumed by `world.run` / `elodin-db` to skip the implicit assets HTTP
-/// server on `db_port + 1`. Campaign runs set it to `off` by default: the
-/// server only feeds an attached editor, and its implicit extra listener
-/// otherwise collides with user port plans.
-pub const ASSETS_HTTP_ENV: &str = "ELODIN_ASSETS_HTTP";
 
 /// Hook scalar keys that have dedicated, typed columns elsewhere (`pass` is the
 /// raw scoring verdict surfaced as `scored_pass`/`passed`; `valid` as
@@ -1120,8 +1115,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     // Validate the entire static port plan before anything starts, so a bad
     // stride/base combination fails fast instead of as a mid-campaign worker
     // death several hundred runs in.
-    let assets_http_on = campaign_assets_http_enabled(&config);
-    let planned_ports = ports::validate_port_plan(&config.resources, workers, assets_http_on)?;
+    let planned_ports = ports::validate_port_plan(&config.resources, workers)?;
     if let Some(warning) = ports::ephemeral_conflicts(&planned_ports) {
         if strict_ports {
             return Err(miette!("{warning} (--strict-ports)"));
@@ -1190,7 +1184,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         let reporter = reporter.clone();
         let campaign_cgroup = campaign_cgroup.clone();
         worker_tasks.spawn(async move {
-            let template = ports::slot_template(worker_id, &config.resources, assets_http_on)?;
+            let template = ports::slot_template(worker_id, &config.resources)?;
             if let Some(delay) = rampup_delay(&config.rampup, worker_id, worker_count) {
                 tokio::time::sleep(delay).await;
             }
@@ -1215,7 +1209,6 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
                     &cache_dir,
                     scratch.as_deref(),
                     worker_count,
-                    assets_http_on,
                     campaign_cgroup.as_ref(),
                 )
                 .await
@@ -1406,18 +1399,6 @@ fn acquire_campaign_lock(out_dir: &Path) -> Result<CampaignLock> {
 #[cfg(not(unix))]
 fn acquire_campaign_lock(_out_dir: &Path) -> Result<CampaignLock> {
     Ok(CampaignLock {})
-}
-
-/// Whether campaign sims should serve the editor assets HTTP endpoint on
-/// `db_port + 1`. Off by default for headless campaigns; opt back in with
-/// `ELODIN_ASSETS_HTTP=on` in the ambient env or the campaign `[env]` table.
-fn campaign_assets_http_enabled(config: &CampaignConfig) -> bool {
-    let value = config
-        .env
-        .get(ASSETS_HTTP_ENV)
-        .cloned()
-        .or_else(|| std::env::var(ASSETS_HTTP_ENV).ok());
-    matches!(value.as_deref(), Some("on") | Some("1") | Some("true"))
 }
 
 /// Raise the soft fd limit to the hard limit: the runner pipes stdout/stderr
@@ -1852,7 +1833,6 @@ async fn run_with_retries(
     cache_dir: &Path,
     scratch: Option<&Path>,
     worker_count: usize,
-    assets_http_on: bool,
     campaign_cgroup: Option<&Arc<s10::CgroupScope>>,
 ) -> Result<RunMetric> {
     let mut last_metric = None;
@@ -1863,7 +1843,6 @@ async fn run_with_retries(
         cache_dir,
         scratch,
         worker_count,
-        assets_http_on,
         campaign_cgroup,
     };
     for attempt in 0..=config.retries {
@@ -1886,17 +1865,31 @@ struct RunContext<'a> {
     /// `out_dir` when the run finalizes.
     scratch: Option<&'a Path>,
     worker_count: usize,
-    assets_http_on: bool,
     campaign_cgroup: Option<&'a Arc<s10::CgroupScope>>,
 }
 
 /// Resolve a worker's slot for one run: static ports come from the template,
 /// `"auto"` ports are freshly allocated and guarded until the recipe spawns.
+/// An auto DB port is allocated as a consecutive pair with its `db_port + 1`
+/// assets port (a static DB port already carries `db_assets` in the template).
 fn resolve_run_slot(
     template: &ports::SlotTemplate,
     run_id: &str,
 ) -> Result<(ResourceSlot, Vec<ports::PortGuard>)> {
     let mut guards = Vec::new();
+    let mut ports = BTreeMap::new();
+    let db_port = match template.db_port {
+        Some(port) => port,
+        None => {
+            let (db_guard, assets_guard) = ports::allocate_port_pair(template.bind_ip)
+                .with_context(|| format!("allocate dynamic db/assets ports for {run_id}"))?;
+            let port = db_guard.port;
+            ports.insert("db_assets".to_string(), assets_guard.port);
+            guards.push(db_guard);
+            guards.push(assets_guard);
+            port
+        }
+    };
     let mut allocate = || -> Result<u16> {
         let guard = ports::allocate_port(template.bind_ip)
             .with_context(|| format!("allocate dynamic port for {run_id}"))?;
@@ -1904,11 +1897,6 @@ fn resolve_run_slot(
         guards.push(guard);
         Ok(port)
     };
-    let db_port = match template.db_port {
-        Some(port) => port,
-        None => allocate()?,
-    };
-    let mut ports = BTreeMap::new();
     for (name, port) in &template.ports {
         let port = match port {
             Some(port) => *port,
@@ -2021,7 +2009,6 @@ async fn run_one(
             config: ctx.config,
             worker_count: ctx.worker_count,
             recipe_weight: s10::admission::recipe_weight(&ctx.base_recipe),
-            assets_http_on: ctx.assets_http_on,
         },
     )?;
     let admission_permit =
@@ -2554,11 +2541,6 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
             format!("--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads={threads}"),
         );
     }
-    // Headless campaign sims skip the editor assets HTTP server (db_port + 1)
-    // unless explicitly re-enabled; see `campaign_assets_http_enabled`.
-    if !ctx.assets_http_on && std::env::var_os(ASSETS_HTTP_ENV).is_none() {
-        env.insert(ASSETS_HTTP_ENV.to_string(), "off".to_string());
-    }
     env.extend([
         (
             CONTEXT_ENV.to_string(),
@@ -2680,7 +2662,6 @@ struct PatchContext<'a> {
     config: &'a CampaignConfig,
     worker_count: usize,
     recipe_weight: usize,
-    assets_http_on: bool,
 }
 
 fn patch_recipe_env(

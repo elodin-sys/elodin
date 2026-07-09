@@ -446,9 +446,7 @@ async fn main() -> miette::Result<()> {
                     .into_diagnostic()?;
             }
             #[cfg(feature = "axum")]
-            if elodin_db::assets_http::assets_http_enabled() {
-                elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;
-            }
+            elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
