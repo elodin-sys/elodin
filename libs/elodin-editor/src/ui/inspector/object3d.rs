@@ -493,8 +493,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         let mut s = covariance_str.to_string();
                         let response = eql_textfield(ui, true, &eql_context.0, &mut s);
                         if response.changed() {
-                            *error_covariance =
-                                if s.trim().is_empty() { None } else { Some(s) };
+                            *error_covariance = if s.trim().is_empty() { None } else { Some(s) };
                             covariance_expr_update = Some(
                                 error_covariance
                                     .as_ref()
@@ -537,27 +536,23 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
                     if !uses_cholesky && !uses_covariance {
                         ui.horizontal(|ui| {
-                            if ui
-                                .button("Use error covariance (Cholesky)")
-                                .clicked()
-                            {
-                                *error_covariance_cholesky =
-                                    Some("(1, 0, 1, 0, 0, 1)".to_string());
+                            if ui.button("Use error covariance (Cholesky)").clicked() {
+                                *error_covariance_cholesky = Some("(1, 0, 1, 0, 0, 1)".to_string());
                                 *error_covariance = None;
-                                *error_confidence_interval = default_ellipsoid_confidence_interval();
+                                *error_confidence_interval =
+                                    default_ellipsoid_confidence_interval();
                                 scale_expr_update = None;
                                 covariance_expr_update = Some(None);
                                 cholesky_expr_update = Some(
-                                    compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0)
-                                        .ok(),
+                                    compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0).ok(),
                                 );
                                 changed = true;
                             }
                             if ui.button("Use error covariance").clicked() {
-                                *error_covariance =
-                                    Some("(1, 0, 0, 1, 0, 1)".to_string());
+                                *error_covariance = Some("(1, 0, 0, 1, 0, 1)".to_string());
                                 *error_covariance_cholesky = None;
-                                *error_confidence_interval = default_ellipsoid_confidence_interval();
+                                *error_confidence_interval =
+                                    default_ellipsoid_confidence_interval();
                                 scale_expr_update = None;
                                 cholesky_expr_update = Some(None);
                                 covariance_expr_update = Some(
@@ -574,7 +569,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             if ui.button("Use scale instead").clicked() {
                                 *error_covariance_cholesky = None;
                                 *error_covariance = None;
-                                *error_confidence_interval = default_ellipsoid_confidence_interval();
+                                *error_confidence_interval =
+                                    default_ellipsoid_confidence_interval();
                                 cholesky_expr_update = Some(None);
                                 covariance_expr_update = Some(None);
                                 let default_scale = default_ellipsoid_scale_expr();
@@ -583,11 +579,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                     Some(compile_scale_eql(&default_scale, &eql_context.0));
                                 changed = true;
                             }
-                            if uses_cholesky
-                                && ui.button("Use symmetric covariance").clicked()
-                            {
-                                *error_covariance =
-                                    Some("(1, 0, 0, 1, 0, 1)".to_string());
+                            if uses_cholesky && ui.button("Use symmetric covariance").clicked() {
+                                *error_covariance = Some("(1, 0, 0, 1, 0, 1)".to_string());
                                 *error_covariance_cholesky = None;
                                 cholesky_expr_update = Some(None);
                                 covariance_expr_update = Some(
@@ -596,16 +589,12 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 );
                                 changed = true;
                             }
-                            if uses_covariance
-                                && ui.button("Use Cholesky instead").clicked()
-                            {
-                                *error_covariance_cholesky =
-                                    Some("(1, 0, 1, 0, 0, 1)".to_string());
+                            if uses_covariance && ui.button("Use Cholesky instead").clicked() {
+                                *error_covariance_cholesky = Some("(1, 0, 1, 0, 0, 1)".to_string());
                                 *error_covariance = None;
                                 covariance_expr_update = Some(None);
                                 cholesky_expr_update = Some(
-                                    compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0)
-                                        .ok(),
+                                    compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0).ok(),
                                 );
                                 changed = true;
                             }
