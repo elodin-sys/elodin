@@ -9,7 +9,7 @@ use bevy::{
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
     ecs::system::SystemState,
-    prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
+    prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource, debug},
 };
 use impeller2::types::IntoLenPacket;
 use impeller2::types::RequestId;
@@ -1218,6 +1218,7 @@ where
 
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
+        debug!("registered req handler {system_id:?}");
         let mut handlers = world
             .get_resource_mut::<PacketIdHandlers>()
             .expect("missing packet handlers");
@@ -1254,6 +1255,7 @@ where
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
 
+        debug!("registered reply handler {system_id:?}");
         let req_id = {
             let handlers = world.resource::<RequestIdHandlers>();
             let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
@@ -1316,6 +1318,9 @@ where
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
 
+        // TODO: This runs fairly often, and it registers a system each time. We
+        // should look for a different way to do this.
+        debug!("registered msg reply handler {system_id:?}");
         let req_id = {
             let handlers = world.resource::<MsgRequestIdHandlers>();
             let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();

@@ -3156,9 +3156,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                         let entity = state_mut
                             .commands
-                            .spawn(super::monitor::MonitorData {
-                                component_name: eql.clone(),
-                            })
+                            .spawn((
+                                super::monitor::MonitorData {
+                                    component_name: eql.clone(),
+                                },
+                                Name::new(eql.clone()),
+                            ))
                             .id();
                         let monitor = MonitorPane::new(entity, eql.clone());
 
