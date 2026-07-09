@@ -276,15 +276,16 @@ class ComponentBroadcaster:
 
     def _broadcast_component(self, sample: edb.Sample):
         """Broadcast a component data message."""
-        values = np.asarray(sample.values, dtype=np.float64).reshape(-1)
+        values = np.asarray(sample.values, dtype=np.float64)
+        flat_values = values.reshape(-1)
         msg = pb.ComponentBroadcast()
         msg.source_id = self.source_id
         msg.component_name = self.component_name
         msg.renamed_component = self.renamed_component
         msg.timestamp_us = sample.timestamp_us
         msg.data_type = pb.PRIM_TYPE_F64  # broadcast normalizes all values to f64
-        msg.shape.extend([values.size])
-        msg.data = values.astype("<f8").tobytes()
+        msg.shape.extend(int(dim) for dim in values.shape)
+        msg.data = flat_values.astype("<f8").tobytes()
         msg.sequence = self.sequence
 
         self.sequence += 1
