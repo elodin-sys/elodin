@@ -24,7 +24,8 @@ pub struct IngestReport {
     pub file_count: usize,
     /// Total bytes copied (0 when skipped).
     pub byte_count: u64,
-    /// True when the copy-once guard tripped and nothing was copied.
+    /// True when nothing was copied: the copy-once guard tripped, or the
+    /// source tree carried no real assets to seed from.
     #[serde(default)]
     pub skipped: bool,
 }
@@ -103,6 +104,9 @@ pub fn resolve_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
 ///      because a stray `./assets` resolves in the cwd.
 ///
 /// Only when the destination has no real assets do we (re)create it and copy.
+/// An empty source tree commits nothing — in particular not the marker — so a
+/// DB first opened against a not-yet-populated assets root (e.g. Aleph before
+/// the seed lands) still ingests once the host tree gains content.
 /// The trade-off: a rare ingest that crashed part-way (files written, marker
 /// not) is treated as "already populated" and left as-is rather than wiped and
 /// retried; recovering a partial seed is a `--reset`, which is far preferable to
@@ -138,15 +142,6 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
         ));
     }
 
-    // Destination carries no real assets: safe to start from a clean slate.
-    // Removing here only clears dotfile-only leftovers (e.g. a stray marker) —
-    // the guard above already bailed out on any actual asset — so a partial run
-    // from a prior crash cannot merge into this (possibly different) tree.
-    if dest.exists() {
-        std::fs::remove_dir_all(&dest)?;
-    }
-    std::fs::create_dir_all(&dest)?;
-
     let mut keys = Vec::new();
     collect_relative_keys(source_root, source_root, &mut keys)?;
     // Skip keys reserved by the asset layer (the `.elodin-ingested` marker and
@@ -155,6 +150,22 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
     // index route; `write_asset_file` rejects them anyway, so they must be
     // filtered here to avoid aborting the whole ingest.
     keys.retain(|key| !crate::assets_http::is_reserved_asset_key(key));
+
+    // Nothing to seed from: do NOT commit the marker. An initially empty source
+    // (e.g. Aleph's shared asset root before it is populated) must leave the DB
+    // eligible for ingest on a later run, once the host tree has content.
+    if keys.is_empty() {
+        return skipped();
+    }
+
+    // Destination carries no real assets: safe to start from a clean slate.
+    // Removing here only clears dotfile-only leftovers (e.g. a stray marker) —
+    // the guard above already bailed out on any actual asset — so a partial run
+    // from a prior crash cannot merge into this (possibly different) tree.
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest)?;
+    }
+    std::fs::create_dir_all(&dest)?;
 
     let mut byte_count = 0u64;
     for key in &keys {
@@ -680,6 +691,49 @@ mod tests {
             "dotfile-only leftovers are cleared by a clean seed"
         );
         assert!(assets_ingested(&db));
+    }
+
+    #[test]
+    fn ingest_empty_source_does_not_commit_marker() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src_assets");
+        std::fs::create_dir_all(&src).unwrap();
+        let db = dir.path().join("db");
+
+        // First run against a not-yet-populated source tree: nothing to copy,
+        // and crucially no marker — the DB must stay eligible for ingest.
+        let first = ingest_asset_dir(&db, &src).unwrap();
+        assert!(first.skipped);
+        assert_eq!(first.file_count, 0);
+        assert!(
+            !assets_ingested(&db),
+            "an empty source must not commit the copy-once marker"
+        );
+
+        // The host tree is populated later (e.g. Aleph seed): the next run
+        // must ingest for real.
+        write(&src.join("meshes/rocket.glb"), b"glb");
+        let second = ingest_asset_dir(&db, &src).unwrap();
+        assert!(!second.skipped, "populated source must now be ingested");
+        assert_eq!(second.file_count, 1);
+        assert!(assets_ingested(&db));
+        assert_eq!(
+            std::fs::read(assets_dir(&db).join("meshes/rocket.glb")).unwrap(),
+            b"glb"
+        );
+    }
+
+    #[test]
+    fn ingest_source_with_only_reserved_keys_does_not_commit_marker() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src_assets");
+        // Only reserved keys: effectively empty after filtering.
+        write(&src.join(INGEST_MARKER), b"not-our-marker");
+        let db = dir.path().join("db");
+
+        let report = ingest_asset_dir(&db, &src).unwrap();
+        assert!(report.skipped);
+        assert!(!assets_ingested(&db));
     }
 
     #[test]
