@@ -1,4 +1,5 @@
 use crate::color_names::{color_to_ints, name_from_color};
+use bevy_geo_frames::RotationKind;
 use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
@@ -644,6 +645,18 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
     }
+    if let Some(frame_orientation) = obj.frame_orientation
+        && obj.frame != Some(frame_orientation)
+    {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "frame_orientation",
+            <&str>::from(frame_orientation),
+        ));
+    }
+    if obj.orientation == RotationKind::Absolute {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("orientation", "absolute"));
+    }
 
     let mut children = KdlDocument::new();
     let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
@@ -1045,7 +1058,7 @@ mod tests {
 
     use super::*;
     use crate::parse_schematic;
-    use bevy_geo_frames::GeoFrame;
+    use bevy_geo_frames::{GeoFrame, RotationKind};
 
     const COLOR_EPSILON: f32 = 1.0 / 255.0 + 1e-6;
 
@@ -1331,6 +1344,8 @@ graph "value" {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
             node_id: NodeId::default(),
         }));
 
@@ -1373,6 +1388,8 @@ graph "value" {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
             node_id: NodeId::default(),
         }));
 
@@ -1463,6 +1480,8 @@ object_3d lander.world_pos {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
             node_id: NodeId::default(),
         }));
 
@@ -1499,6 +1518,8 @@ object_3d lander.world_pos {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
             node_id: NodeId::default(),
         }));
 
@@ -1541,6 +1562,8 @@ object_3d lander.world_pos {
                 material: Material::with_color(Color::ORANGE),
             },
             frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: Default::default(),
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -1564,6 +1587,97 @@ object_3d lander.world_pos {
     }
 
     #[test]
+    fn test_serialize_object_3d_with_absolute_orientation() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: RotationKind::Absolute,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("orientation=absolute"),
+            "serialized output should contain orientation=absolute, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.orientation, RotationKind::Absolute);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_default_orientation_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: RotationKind::Relative,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("orientation="),
+            "default relative orientation should not be serialized, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_object_3d_with_frame_orientation() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::ECEF),
+            frame_orientation: Some(GeoFrame::NED),
+            orientation: RotationKind::Absolute,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame_orientation=NED")
+                || serialized.contains(r#"frame_orientation="NED""#),
+            "serialized output should contain frame_orientation=NED, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.frame, Some(GeoFrame::ECEF));
+            assert_eq!(obj.frame_orientation, Some(GeoFrame::NED));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
     fn test_serialize_object_3d_default_frame_not_serialized() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Object3d(Object3D {
@@ -1572,7 +1686,9 @@ object_3d lander.world_pos {
                 mesh: Mesh::Sphere { radius: 0.5 },
                 material: Material::with_color(Color::WHITE),
             },
-            frame: None, // Default (no frame)
+            frame: None,             // Default (no frame)
+            frame_orientation: None, // Default (no frame)
+            orientation: Default::default(),
             icon: None,
             thrusters: Vec::new(),
             mesh_visibility_range: None,
