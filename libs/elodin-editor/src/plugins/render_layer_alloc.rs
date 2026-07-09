@@ -13,12 +13,46 @@ use crate::object_3d::ELLIPSOID_RENDER_LAYER;
 use crate::plugins::gizmos::GIZMO_RENDER_LAYER;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy_geo_frames::GeoFrame;
 use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
-/// Render layer shared by every viewport's infinite grid. Reserved so it is
-/// never handed out by [`RenderLayerAllocator::alloc`].
-pub const GRID_RENDER_LAYER: usize = 31;
+pub const ENU_GRID_RENDER_LAYER: usize = 31;
+pub const NED_GRID_RENDER_LAYER: usize = 32;
+pub const ECEF_GRID_RENDER_LAYER: usize = 33;
+pub const ENU_VIEW_CUBE_RENDER_LAYER: usize = 34;
+pub const NED_VIEW_CUBE_RENDER_LAYER: usize = 35;
+pub const ECEF_VIEW_CUBE_RENDER_LAYER: usize = 36;
+pub const GRID_RENDER_LAYERS: [(GeoFrame, usize); 3] = [
+    (GeoFrame::ENU, ENU_GRID_RENDER_LAYER),
+    (GeoFrame::NED, NED_GRID_RENDER_LAYER),
+    (GeoFrame::ECEF, ECEF_GRID_RENDER_LAYER),
+];
+pub const VIEW_CUBE_RENDER_LAYERS: [(GeoFrame, usize); 3] = [
+    (GeoFrame::ENU, ENU_VIEW_CUBE_RENDER_LAYER),
+    (GeoFrame::NED, NED_VIEW_CUBE_RENDER_LAYER),
+    (GeoFrame::ECEF, ECEF_VIEW_CUBE_RENDER_LAYER),
+];
+
+pub fn grid_render_layer(frame: Option<GeoFrame>) -> usize {
+    match frame.unwrap_or_default() {
+        GeoFrame::NED => NED_GRID_RENDER_LAYER,
+        GeoFrame::ECEF => ECEF_GRID_RENDER_LAYER,
+        GeoFrame::ENU => ENU_GRID_RENDER_LAYER,
+    }
+}
+
+pub fn view_cube_render_layer(frame: GeoFrame) -> usize {
+    match frame {
+        GeoFrame::NED => NED_VIEW_CUBE_RENDER_LAYER,
+        GeoFrame::ECEF => ECEF_VIEW_CUBE_RENDER_LAYER,
+        GeoFrame::ENU => ENU_VIEW_CUBE_RENDER_LAYER,
+    }
+}
+
+pub fn view_cube_render_layers(frame: GeoFrame) -> RenderLayers {
+    render_layer_mask(view_cube_render_layer(frame))
+}
 
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<RenderLayerAllocator>()
@@ -140,7 +174,12 @@ impl Default for RenderLayerAllocator {
         let reserved = RenderLayers::layer(0)
             .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
-            .with(GRID_RENDER_LAYER);
+            .with(ENU_GRID_RENDER_LAYER)
+            .with(NED_GRID_RENDER_LAYER)
+            .with(ECEF_GRID_RENDER_LAYER)
+            .with(ENU_VIEW_CUBE_RENDER_LAYER)
+            .with(NED_VIEW_CUBE_RENDER_LAYER)
+            .with(ECEF_VIEW_CUBE_RENDER_LAYER);
         Self {
             in_use: reserved.clone(),
             reserved,

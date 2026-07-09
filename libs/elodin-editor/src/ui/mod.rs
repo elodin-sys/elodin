@@ -1,4 +1,5 @@
 use bevy::{
+    camera::visibility::RenderLayers,
     camera::{RenderTarget, Viewport},
     ecs::{
         query::QueryData,
@@ -279,6 +280,7 @@ pub struct CameraQuery {
     entity: Entity,
     camera: &'static mut Camera,
     projection: &'static mut Projection,
+    render_layers: &'static mut RenderLayers,
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
     parent: Option<&'static ChildOf>,
