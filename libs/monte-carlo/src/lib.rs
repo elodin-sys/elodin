@@ -1124,7 +1124,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     }
     if !keep_existing {
         let ports: HashSet<u16> = planned_ports.iter().map(|planned| planned.port).collect();
-        for line in ports::reap_port_squatters(&ports) {
+        for line in ports::reap_port_squatters(&ports)? {
             log_campaign_line(&out_dir, &line)?;
         }
     }
@@ -2011,8 +2011,11 @@ async fn run_one(
             recipe_weight: s10::admission::recipe_weight(&ctx.base_recipe),
         },
     )?;
-    let admission_permit =
-        s10::admission::acquire_run_slot(s10::admission::recipe_weight(&recipe)).await;
+    let admission_permit = if preflight_failure.is_none() {
+        s10::admission::acquire_run_slot(s10::admission::recipe_weight(&recipe)).await
+    } else {
+        None
+    };
 
     let started_at = Utc::now();
     let spawn_unix_ns = unix_now_ns();
@@ -2246,21 +2249,33 @@ fn apply_prune_globs(retention: &RetentionConfig, metric: &RunMetric) {
     } else {
         &retention.prune_on_fail
     };
+    let Ok(run_dir) = fs::canonicalize(&metric.run_dir) else {
+        return;
+    };
     for pattern in patterns {
+        if Path::new(pattern)
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            continue;
+        }
         let full = metric.run_dir.join(pattern);
         let Some(full) = full.to_str() else { continue };
         let Ok(paths) = glob::glob(full) else {
             continue;
         };
         for path in paths.flatten() {
-            // Never delete outside the run dir (e.g. `..` in a pattern).
-            if !path.starts_with(&metric.run_dir) {
+            // Never delete outside the run dir, including symlink escapes.
+            let Ok(canonical) = fs::canonicalize(&path) else {
+                continue;
+            };
+            if !canonical.starts_with(&run_dir) {
                 continue;
             }
-            let _ = if path.is_dir() {
-                fs::remove_dir_all(&path)
+            let _ = if canonical.is_dir() {
+                fs::remove_dir_all(&canonical)
             } else {
-                fs::remove_file(&path)
+                fs::remove_file(&canonical)
             };
         }
     }
@@ -2408,6 +2423,9 @@ fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     }
     if let Some(scratch_dir) = options.scratch_dir.take() {
         config.scratch_dir = Some(scratch_dir);
+    }
+    if let Some(workers) = options.workers {
+        config.workers = Some(workers.max(1));
     }
     if let Some(retries) = options.retries {
         config.retries = retries;
@@ -4593,6 +4611,59 @@ mod tests {
         assert!(run_dir.join("keep.txt").exists());
 
         let _ = fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn prune_globs_reject_parent_dir_patterns() {
+        let root = std::env::temp_dir().join(format!("mc-prune-traversal-{}", unix_now_ns()));
+        let run_dir = root.join("run");
+        let sibling = root.join("sibling");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::create_dir_all(&sibling).unwrap();
+        fs::write(sibling.join("keep.txt"), b"x").unwrap();
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &run_dir, "ok");
+        metric.exit_ok = true;
+        metric.run_dir = run_dir.clone();
+        let retention = RetentionConfig {
+            prune_on_pass: vec!["../sibling".to_string()],
+            ..RetentionConfig::default()
+        };
+        apply_prune_globs(&retention, &metric);
+        assert!(sibling.join("keep.txt").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apply_overrides_persists_explicit_workers_for_resume() {
+        let mut config = CampaignConfig {
+            workers: Some(8),
+            ..CampaignConfig::default()
+        };
+        let mut options = RunOptions {
+            sim_path: PathBuf::from("sim.py"),
+            plan_path: PathBuf::from("plan.csv"),
+            campaign_path: None,
+            out_dir: PathBuf::from("out"),
+            cache_dir: None,
+            workers: Some(96),
+            scratch_dir: None,
+            retries: None,
+            timeout: None,
+            post_run: None,
+            post_campaign: None,
+            fail_fast: false,
+            fail_on_run_errors: false,
+            dry_run: false,
+            memory_probe: false,
+            keep_existing: false,
+            clean: false,
+            strict_ports: false,
+        };
+
+        apply_overrides(&mut config, &mut options);
+        assert_eq!(config.workers, Some(96));
     }
 
     #[test]

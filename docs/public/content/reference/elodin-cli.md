@@ -112,10 +112,11 @@ Before anything launches, the runner takes an exclusive lock on the out dir
 (`campaign.lock`) so two campaigns cannot interleave in the same output,
 validates the entire static port plan for every worker (u16 overflow,
 cross-name collisions), warns when planned ports fall inside the kernel
-ephemeral range, raises its own file-descriptor limit, and reaps both prior
-campaign-scoped cgroups and any process still bound to a campaign port, so
-stale sidecars from an interrupted run cannot poison worker slots. Each run preflight-probes its static ports and reports squatters by
-pid/name (`port 20034 already bound by pid 320389 (weaverd)`). On timeout the
+ephemeral range, raises its own file-descriptor limit, and reaps prior
+campaign-scoped cgroups plus campaign-marked processes still bound to a
+campaign port. Foreign port owners block startup with pid/name details instead
+of being killed. Each run preflight-probes its static ports and reports
+squatters by pid/name (`port 20034 already bound by pid 320389 (weaverd)`). On timeout the
 runner tears the run down via its cgroup when one is available and via
 per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
 (e.g. a plain ssh session) the campaign transparently re-executes itself under
@@ -217,8 +218,8 @@ Key options:
   (or `0`) it is auto-sized from the worker budget, capped at logical cores.
 - `--memory-probe`: enable expensive shared-constant PSS sampling and
   `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
-- `--keep-existing`: do not reap prior campaign cgroups or processes bound to
-  campaign ports at startup.
+- `--keep-existing`: do not reap prior campaign cgroups or campaign-marked
+  processes bound to campaign ports at startup.
 - `--fail-on-errors`: exit non-zero when any run failed or missed scoring.
   Off by default so exploratory campaigns can finish with partial failures.
   Also configurable as `fail_on_run_errors = true` in `campaign.toml`. For CI

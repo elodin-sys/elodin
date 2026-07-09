@@ -38,10 +38,11 @@ The terminal shows campaign progress, success/failure counts, and a final
 campaign summary. Individual simulation stdout/stderr is written to per-run log
 files under `runs/<run_id>/logs/` instead of being interleaved in the terminal.
 At startup, `elodin monte-carlo run` validates the whole static port plan,
-reaps prior campaign-scoped cgroups and any process still bound to a campaign
-port, and raises its own fd limit, so stale sidecars from interrupted runs
-cannot occupy worker ports. Pass `--keep-existing` only if you intentionally
-want to manage those processes yourself. Ports are declared in
+reaps prior campaign-scoped cgroups and campaign-marked processes still bound
+to campaign ports, and raises its own fd limit, so stale sidecars from
+interrupted runs cannot occupy worker ports. Foreign port owners block startup
+with pid/name details. Pass `--keep-existing` only if you intentionally want to
+manage those processes yourself. Ports are declared in
 `[resources.ports]` — `"auto"` (this example) allocates them dynamically per
 run; a numeric base gives a deterministic per-worker plan — and consumed with
 `el.monte_carlo.port("state")` / `ELODIN_MC_PORT_STATE` either way.

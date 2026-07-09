@@ -8,7 +8,7 @@ use std::net::{IpAddr, TcpListener, UdpSocket};
 
 use miette::{Result, miette};
 
-use crate::{PortSpec, ResourceConfig};
+use crate::{CONTEXT_ENV, PortSpec, ResourceConfig};
 
 /// One statically planned port across the campaign, used for validation,
 /// ephemeral-range warnings, and startup reaping.
@@ -100,9 +100,11 @@ pub fn slot_template(worker_id: usize, resources: &ResourceConfig) -> Result<Slo
 /// an opaque mid-campaign worker death. Returns every planned static port.
 pub fn validate_port_plan(resources: &ResourceConfig, workers: usize) -> Result<Vec<PlannedPort>> {
     let mut planned = Vec::new();
+    let mut seen: HashMap<u16, (usize, String)> = HashMap::new();
     for worker_id in 0..workers {
         let template = slot_template(worker_id, resources)?;
         if let Some(port) = template.db_port {
+            check_global_collision(&mut seen, worker_id, "db_port", port)?;
             planned.push(PlannedPort {
                 worker_id,
                 name: "db_port".to_string(),
@@ -111,6 +113,7 @@ pub fn validate_port_plan(resources: &ResourceConfig, workers: usize) -> Result<
         }
         for (name, port) in template.ports {
             if let Some(port) = port {
+                check_global_collision(&mut seen, worker_id, &name, port)?;
                 planned.push(PlannedPort {
                     worker_id,
                     name,
@@ -120,6 +123,21 @@ pub fn validate_port_plan(resources: &ResourceConfig, workers: usize) -> Result<
         }
     }
     Ok(planned)
+}
+
+fn check_global_collision(
+    seen: &mut HashMap<u16, (usize, String)>,
+    worker_id: usize,
+    name: &str,
+    port: u16,
+) -> Result<()> {
+    if let Some((other_worker, other_name)) = seen.insert(port, (worker_id, name.to_string())) {
+        return Err(miette!(
+            "port collision at {port}: worker {other_worker} `{other_name}` and worker {worker_id} `{name}` both plan this port; \
+             adjust [resources] bases or port_stride"
+        ));
+    }
+    Ok(())
 }
 
 /// The kernel's local (ephemeral) port range: any outbound connection may be
@@ -379,17 +397,42 @@ pub fn find_port_owners(ports: &HashSet<u16>) -> Vec<PortOwner> {
 /// stragglers from a previous campaign whose cgroup could not be reaped.
 /// Returns a description of what was reaped.
 #[cfg(unix)]
-pub fn reap_port_squatters(ports: &HashSet<u16>) -> Vec<String> {
+pub fn reap_port_squatters(ports: &HashSet<u16>) -> Result<Vec<String>> {
     let owners = find_port_owners(ports);
-    let pids: HashSet<u32> = owners.iter().filter_map(|owner| owner.pid).collect();
-    if pids.is_empty() {
-        return Vec::new();
+    if owners.is_empty() {
+        return Ok(Vec::new());
     }
     let me = std::process::id();
+    let mut pids = HashSet::new();
+    let mut foreign = Vec::new();
+    for owner in &owners {
+        let Some(pid) = owner.pid else {
+            foreign.push(owner.to_string());
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        if process_has_campaign_context(pid) {
+            pids.insert(pid);
+        } else {
+            foreign.push(owner.to_string());
+        }
+    }
+    if !foreign.is_empty() {
+        return Err(miette!(
+            "planned campaign ports are already in use by non-campaign process(es): {}; \
+             stop them or change [resources] bases",
+            foreign.join("; ")
+        ));
+    }
+    if pids.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut reaped = Vec::new();
     for owner in &owners {
         let Some(pid) = owner.pid else { continue };
-        if pid == me {
+        if !pids.contains(&pid) {
             continue;
         }
         reaped.push(format!(
@@ -418,12 +461,33 @@ pub fn reap_port_squatters(ports: &HashSet<u16>) -> Vec<String> {
             nix::sys::signal::Signal::SIGKILL,
         );
     }
-    reaped
+    Ok(reaped)
 }
 
 #[cfg(not(unix))]
-pub fn reap_port_squatters(_ports: &HashSet<u16>) -> Vec<String> {
-    Vec::new()
+pub fn reap_port_squatters(_ports: &HashSet<u16>) -> Result<Vec<String>> {
+    Ok(Vec::new())
+}
+
+#[cfg(target_os = "linux")]
+fn process_has_campaign_context(pid: u32) -> bool {
+    let Ok(environ) = std::fs::read(format!("/proc/{pid}/environ")) else {
+        return false;
+    };
+    environ_contains_campaign_context(&environ)
+}
+
+#[cfg(target_os = "linux")]
+fn environ_contains_campaign_context(environ: &[u8]) -> bool {
+    let prefix = format!("{CONTEXT_ENV}=").into_bytes();
+    environ
+        .split(|byte| *byte == 0)
+        .any(|entry| entry.starts_with(&prefix))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_has_campaign_context(_pid: u32) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -466,6 +530,18 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("collision"), "got: {message}");
         assert!(message.contains("3000"), "got: {message}");
+    }
+
+    #[test]
+    fn plan_validation_rejects_cross_worker_port_collisions() {
+        let resources = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20032))]);
+        let err = validate_port_plan(&resources, 4).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("worker 0"), "got: {message}");
+        assert!(message.contains("sitl_socket"), "got: {message}");
+        assert!(message.contains("worker 1"), "got: {message}");
+        assert!(message.contains("db_port"), "got: {message}");
+        assert!(message.contains("20032"), "got: {message}");
     }
 
     /// elodin-db always serves assets on `db_port + 1`, so a named port
@@ -540,5 +616,17 @@ mod tests {
             .find(|owner| owner.port == port && owner.protocol == "tcp")
             .expect("listener visible in /proc/net");
         assert_eq!(owner.pid, Some(std::process::id()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn campaign_context_marker_is_required_for_reaping() {
+        assert!(environ_contains_campaign_context(
+            b"PATH=/bin\0ELODIN_MONTE_CARLO_CONTEXT=/tmp/run/context.json\0"
+        ));
+        assert!(!environ_contains_campaign_context(
+            b"PATH=/bin\0ELODIN_MONTE_CARLO_CONTEXTUAL=yes\0"
+        ));
+        assert!(!environ_contains_campaign_context(b"PATH=/bin\0"));
     }
 }
