@@ -148,6 +148,9 @@ def test_time_series_1m_read(client):
             if writer.dropped == before:
                 break
             time.sleep(0.001)
+    # Wait until all prior fire-and-forget rows have reached the socket before
+    # querying; slow CI can otherwise still have the tail buffered locally.
+    writer.write(timestamp_us=n, values={"perf.v": float(n)})
     assert _wait_for(lambda: len(client.time_series("perf.v", n - 10, n)[0]) == 10, timeout_s=60)
     start = time.perf_counter()
     ts, vals = client.time_series("perf.v", 0, n)
