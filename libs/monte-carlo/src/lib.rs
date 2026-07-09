@@ -51,6 +51,12 @@ pub struct CampaignConfig {
     /// `/dev/shm` when present; any other value is used as the scratch root;
     /// unset/`"off"` runs directly in `--out`.
     pub scratch_dir: Option<String>,
+    /// Stagger first-wave worker starts (`"auto"`, default) so N simultaneous
+    /// cold interpreter starts and JIT compiles don't distort the real-time
+    /// pacing of the runs that start first. Steady state staggers naturally
+    /// through slot turnover; only the first wave needs help. `"off"` starts
+    /// every worker at once.
+    pub rampup: String,
     /// Build steps executed once before workers start (`[[build]]` tables).
     pub build: Vec<BuildConfig>,
     /// Extra environment for every run's processes. Runner-managed variables
@@ -76,6 +82,7 @@ impl Default for CampaignConfig {
             retries: 0,
             cache_dir: None,
             scratch_dir: None,
+            rampup: "auto".to_string(),
             build: Vec::new(),
             env: BTreeMap::new(),
             resources: ResourceConfig::default(),
@@ -1184,6 +1191,9 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         let campaign_cgroup = campaign_cgroup.clone();
         worker_tasks.spawn(async move {
             let template = ports::slot_template(worker_id, &config.resources, assets_http_on)?;
+            if let Some(delay) = rampup_delay(&config.rampup, worker_id, worker_count) {
+                tokio::time::sleep(delay).await;
+            }
             loop {
                 if failure.lock().expect("failure mutex poisoned").is_some()
                     && !config.continue_on_error
@@ -1440,6 +1450,21 @@ fn raise_fd_limit(out_dir: &Path, workers: usize, recipe_weight: usize) -> Resul
 #[cfg(not(unix))]
 fn raise_fd_limit(_out_dir: &Path, _workers: usize, _recipe_weight: usize) -> Result<()> {
     Ok(())
+}
+
+/// First-wave stagger: without it, every worker starts a cold interpreter +
+/// JIT compile at t=0 and the earliest runs' real-time-paced loops execute
+/// under peak transient load, biasing wave-1 pacing (and occasionally
+/// physics) relative to steady state. 500 ms per worker, capped at one
+/// minute, halves the concurrent-startup peak for ~1 run of added wall time.
+/// Small pools skip it entirely; steady state staggers itself via slot
+/// turnover.
+fn rampup_delay(rampup: &str, worker_id: usize, workers: usize) -> Option<Duration> {
+    if rampup == "off" || workers < 8 || worker_id == 0 {
+        return None;
+    }
+    let delay = Duration::from_millis(500).saturating_mul(worker_id as u32);
+    Some(delay.min(Duration::from_secs(60)))
 }
 
 /// Resolve the scratch base for per-run IO. `"auto"` picks `/dev/shm` when it
@@ -4602,6 +4627,27 @@ mod tests {
         if std::env::var_os("S10_MAX_INFLIGHT").is_none() {
             assert_eq!(requested_workers(None, &config), Some(8));
         }
+    }
+
+    #[test]
+    fn rampup_staggers_first_wave_only() {
+        // Small pools and worker 0 start immediately.
+        assert_eq!(rampup_delay("auto", 3, 4), None);
+        assert_eq!(rampup_delay("auto", 0, 96), None);
+        // Later workers stagger, capped at one minute.
+        assert_eq!(
+            rampup_delay("auto", 10, 96),
+            Some(Duration::from_millis(5000))
+        );
+        assert_eq!(
+            rampup_delay("auto", 95, 200),
+            Some(Duration::from_millis(47_500))
+        );
+        assert_eq!(
+            rampup_delay("auto", 150, 200),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(rampup_delay("off", 50, 96), None);
     }
 
     #[cfg(unix)]
