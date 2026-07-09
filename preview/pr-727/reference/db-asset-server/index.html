@@ -445,6 +445,11 @@
                     <ul>
                         
                         <li>
+                            <a href="https://docs.elodin.systems/preview/pr-727/reference/db-asset-server/#aleph-hitl">Aleph &#x2F; HITL</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="https://docs.elodin.systems/preview/pr-727/reference/db-asset-server/#follow-mode-and-assets">Follow mode and assets</a>
                             
                         </li>
@@ -619,6 +624,13 @@
 <tr><td><strong>Follow</strong></td><td><code>elodin-db run … --follows SOURCE:2240</code></td><td>Follower copies <code>db:</code> assets from source HTTP into its own <code>{db}/assets/</code></td></tr>
 </tbody></table>
 <p>See <a href="/reference/elodin-cli">Elodin CLI</a> for <code>editor --replay</code> and <code>elodin-db --follows</code>.</p>
+<h3 id="aleph-hitl">Aleph / HITL</h3>
+<p>On the Aleph flight computer, the <code>elodin-db</code> NixOS service passes
+<code>--assets /var/lib/elodin/assets</code> (the shared <code>ELODIN_ASSETS</code> root,
+configurable via <code>services.elodin-db.assetsDir</code>) so each fresh boot database
+ingests the asset tree on creation. A HITL recording copied off the vehicle is
+therefore a complete, portable record: serve it anywhere with <code>elodin-db run</code>
+and the editor loads schematic and meshes from the DB itself.</p>
 <h3 id="follow-mode-and-assets">Follow mode and assets</h3>
 <p>When a follower connects to a source <code>elodin-db</code> on port <code>N</code>, it replicates telemetry over Impeller TCP. Schematic assets are <strong>not</strong> streamed on that socket — they are fetched separately from the source <strong>DB Asset Server</strong> on port <code>N+1</code>.</p>
 <p>On connect (and when DB config updates), the follower:</p>
