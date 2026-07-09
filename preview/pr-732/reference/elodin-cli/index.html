@@ -957,10 +957,11 @@ budgeting by process count instead of run count.</p>
 (<code>campaign.lock</code>) so two campaigns cannot interleave in the same output,
 validates the entire static port plan for every worker (u16 overflow,
 cross-name collisions), warns when planned ports fall inside the kernel
-ephemeral range, raises its own file-descriptor limit, and reaps both prior
-campaign-scoped cgroups and any process still bound to a campaign port, so
-stale sidecars from an interrupted run cannot poison worker slots. Each run preflight-probes its static ports and reports squatters by
-pid/name (<code>port 20034 already bound by pid 320389 (weaverd)</code>). On timeout the
+ephemeral range, raises its own file-descriptor limit, and reaps prior
+campaign-scoped cgroups plus campaign-marked processes still bound to a
+campaign port. Foreign port owners block startup with pid/name details instead
+of being killed. Each run preflight-probes its static ports and reports
+squatters by pid/name (<code>port 20034 already bound by pid 320389 (weaverd)</code>). On timeout the
 runner tears the run down via its cgroup when one is available and via
 per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
 (e.g. a plain ssh session) the campaign transparently re-executes itself under
@@ -1045,8 +1046,8 @@ delegated cgroup is available.</li>
 (or <code>0</code>) it is auto-sized from the worker budget, capped at logical cores.</li>
 <li><code>--memory-probe</code>: enable expensive shared-constant PSS sampling and
 <code>memory.json</code>/<code>processes.csv</code> output. Leave this off for scaling benchmarks.</li>
-<li><code>--keep-existing</code>: do not reap prior campaign cgroups or processes bound to
-campaign ports at startup.</li>
+<li><code>--keep-existing</code>: do not reap prior campaign cgroups or campaign-marked
+processes bound to campaign ports at startup.</li>
 <li><code>--fail-on-errors</code>: exit non-zero when any run failed or missed scoring.
 Off by default so exploratory campaigns can finish with partial failures.
 Also configurable as <code>fail_on_run_errors = true</code> in <code>campaign.toml</code>. For CI
