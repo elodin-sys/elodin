@@ -1072,6 +1072,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     fs::create_dir_all(&out_dir)
         .into_diagnostic()
         .with_context(|| format!("create campaign output {}", out_dir.display()))?;
+    let _campaign_lock = acquire_campaign_lock(&out_dir)?;
     let wall_start = Instant::now();
     let total_runs = preserved.len() + plan.len();
 
@@ -1340,6 +1341,61 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Exclusive lock on a campaign out dir, held for the campaign's lifetime.
+/// A second campaign pointed at the same `--out` fails fast with the holder's
+/// pid instead of silently interleaving with it (dueling port plans, run-dir
+/// races). The kernel releases the lock when the holder dies, however it
+/// died, so reruns after a kill never block.
+#[cfg(unix)]
+struct CampaignLock {
+    _lock: nix::fcntl::Flock<fs::File>,
+}
+
+#[cfg(not(unix))]
+struct CampaignLock {}
+
+#[cfg(unix)]
+fn acquire_campaign_lock(out_dir: &Path) -> Result<CampaignLock> {
+    let path = out_dir.join("campaign.lock");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .into_diagnostic()
+        .with_context(|| format!("open {}", path.display()))?;
+    match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+        Ok(lock) => {
+            use std::io::Write;
+            let mut lock = lock;
+            let _ = lock.set_len(0);
+            let _ = write!(&mut *lock, "{}", std::process::id());
+            let _ = lock.flush();
+            Ok(CampaignLock { _lock: lock })
+        }
+        Err((_, _)) => {
+            let holder = fs::read_to_string(&path).unwrap_or_default();
+            let holder = holder.trim();
+            let holder = if holder.is_empty() {
+                "unknown pid".to_string()
+            } else {
+                format!("pid {holder}")
+            };
+            Err(miette!(
+                "campaign out dir {} is in use by another `elodin monte-carlo` run ({holder}); \
+                 kill it or choose a different --out",
+                out_dir.display()
+            ))
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn acquire_campaign_lock(_out_dir: &Path) -> Result<CampaignLock> {
+    Ok(CampaignLock {})
 }
 
 /// Whether campaign sims should serve the editor assets HTTP endpoint on
@@ -4541,6 +4597,21 @@ mod tests {
         if std::env::var_os("S10_MAX_INFLIGHT").is_none() {
             assert_eq!(requested_workers(None, &config), Some(8));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn campaign_lock_is_exclusive_per_out_dir() {
+        let out_dir = std::env::temp_dir().join(format!("mc-lock-{}", unix_now_ns()));
+        fs::create_dir_all(&out_dir).unwrap();
+        let lock = acquire_campaign_lock(&out_dir).expect("first lock");
+        let Err(err) = acquire_campaign_lock(&out_dir) else {
+            panic!("second lock must fail");
+        };
+        assert!(err.to_string().contains("in use"), "got: {err}");
+        drop(lock);
+        acquire_campaign_lock(&out_dir).expect("lock re-acquirable after release");
+        let _ = fs::remove_dir_all(&out_dir);
     }
 
     #[test]
