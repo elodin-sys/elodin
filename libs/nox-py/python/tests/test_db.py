@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 import numpy as np
@@ -138,6 +139,9 @@ def test_time_series_1m_read(client):
     # the retry would enqueue a duplicate instead.)
     writer = client.table_writer({"perf.v": edb.f64}, maxlen=65536, queue="drop-newest")
     n = 1_000_000
+    # Establish the connection and component registration before the large
+    # fire-and-forget burst so CI does not race writer startup.
+    writer.write(timestamp_us=-1, values={"perf.v": -1.0})
     # write_nowait for throughput; retry any row shed by the bounded queue so
     # all n rows land (the server is alive, so drops can only mean queue-full).
     for i in range(n):
@@ -151,7 +155,7 @@ def test_time_series_1m_read(client):
     # Wait until all prior fire-and-forget rows have reached the socket before
     # querying; slow CI can otherwise still have the tail buffered locally.
     writer.write(timestamp_us=n, values={"perf.v": float(n)})
-    assert _wait_for(lambda: len(client.time_series("perf.v", n - 10, n)[0]) == 10, timeout_s=60)
+    assert _wait_for(lambda: len(client.time_series("perf.v", n - 10, n)[0]) == 10, timeout_s=180)
     start = time.perf_counter()
     ts, vals = client.time_series("perf.v", 0, n)
     elapsed = time.perf_counter() - start
@@ -241,6 +245,41 @@ def test_single_component_send(client):
     assert _wait_for(lambda: len(client.time_series("conv.v", 0, 1000)[0]) == 1)
     _, vals = client.time_series("conv.v", 0, 1000)
     np.testing.assert_array_equal(vals[0], [7.0, 8.0])
+
+
+def test_single_component_send_creates_one_writer_under_threads(client):
+    original_table_writer = client.table_writer
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def slow_table_writer(*args, **kwargs):
+        nonlocal calls
+        time.sleep(0.05)
+        with calls_lock:
+            calls += 1
+        return original_table_writer(*args, **kwargs)
+
+    client.table_writer = slow_table_writer
+    start = threading.Barrier(8)
+    errors = []
+
+    def send_once():
+        try:
+            start.wait(timeout=5)
+            client.send("conv.racy", 1.0, timestamp_us=101)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=send_once) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    assert calls == 1
+    assert _wait_for(lambda: len(client.time_series("conv.racy", 0, 1000)[0]) >= 1)
 
 
 # ── read API: pagination, earliest_timestamp, ns timestamps, sql_table_name ──
@@ -463,8 +502,6 @@ def test_msg_stream_live(client):
             for i in range(10):
                 client.send_msg("evt.live", {"seq": i}, timestamp_us=1000 + i)
                 time.sleep(0.02)
-
-        import threading
 
         t = threading.Thread(target=pump)
         t.start()

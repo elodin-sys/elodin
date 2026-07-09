@@ -42,6 +42,7 @@ Design notes:
 from __future__ import annotations
 
 import struct
+import threading
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Optional, Tuple
 
@@ -424,6 +425,7 @@ class Client:
         self._addr = addr
         self._c = _native.Client(addr)
         self._send_writers: Dict[str, TableWriter] = {}
+        self._send_lock = threading.Lock()
         self._registered_msgs: set[str] = set()
 
     @classmethod
@@ -449,12 +451,13 @@ class Client:
     def send(self, name: str, values: Any, timestamp_us: int) -> None:
         """Convenience single-component F64 write (one writer cached per name).
         Prefer ``table_writer`` for hot loops."""
-        w = self._send_writers.get(name)
         arr = np.asarray(values, dtype=np.float64).reshape(-1)
-        if w is None:
-            spec = f64[len(arr)] if arr.size > 1 else f64
-            w = self.table_writer({name: spec})
-            self._send_writers[name] = w
+        with self._send_lock:
+            w = self._send_writers.get(name)
+            if w is None:
+                spec = f64[len(arr)] if arr.size > 1 else f64
+                w = self.table_writer({name: spec})
+                self._send_writers[name] = w
         w.write(timestamp_us, {name: arr})
 
     # ── message logs ─────────────────────────────────────────────────────
