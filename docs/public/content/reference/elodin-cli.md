@@ -108,12 +108,13 @@ processes each run spawns. When neither is set, the runner sizes itself from
 logical cores; `S10_MAX_INFLIGHT` remains a low-level escape hatch for
 budgeting by process count instead of run count.
 
-Before anything launches, the runner validates the entire static port plan for
-every worker (u16 overflow, cross-name collisions), warns when planned ports
-fall inside the kernel ephemeral range, raises its own file-descriptor limit,
-and reaps both prior campaign-scoped cgroups and any process still bound to a
-campaign port, so stale sidecars from an interrupted run cannot poison worker
-slots. Each run preflight-probes its static ports and reports squatters by
+Before anything launches, the runner takes an exclusive lock on the out dir
+(`campaign.lock`) so two campaigns cannot interleave in the same output,
+validates the entire static port plan for every worker (u16 overflow,
+cross-name collisions), warns when planned ports fall inside the kernel
+ephemeral range, raises its own file-descriptor limit, and reaps both prior
+campaign-scoped cgroups and any process still bound to a campaign port, so
+stale sidecars from an interrupted run cannot poison worker slots. Each run preflight-probes its static ports and reports squatters by
 pid/name (`port 20034 already bound by pid 320389 (weaverd)`). On timeout the
 runner tears the run down via its cgroup when one is available and via
 per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
