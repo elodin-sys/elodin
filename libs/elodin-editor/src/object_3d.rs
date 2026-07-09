@@ -21,7 +21,9 @@ use crate::iter::JoinDisplayExt;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::rim_glow_material::{RimGlowExt, RimGlowMaterial, RimGlowParams};
 use crate::ui::tiles::ViewportConfig;
-use crate::{BevyExt, Coordinate, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use crate::{
+    BevyExt, Coordinate, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera,
+};
 use bevy::platform::hash::FixedHasher;
 use bevy_geo_frames::prelude::*;
 use std::borrow::Cow;
@@ -866,7 +868,10 @@ pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledEx
 }
 
 /// Compiles an EQL expression that must yield at least 6 floats (symmetric covariance P).
-pub fn compile_covariance_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, CompileError> {
+pub fn compile_covariance_eql(
+    expr: &str,
+    ctx: &eql::Context,
+) -> Result<CompiledExpr, CompileError> {
     compile_6float_eql(expr, "error_covariance", ctx)
 }
 
@@ -1020,8 +1025,7 @@ pub fn update_object_3d_system(
             continue;
         };
 
-        let covariance_frame =
-            resolve_covariance_frame(&object_3d.data, &coordinate);
+        let covariance_frame = resolve_covariance_frame(&object_3d.data, &coordinate);
 
         let mesh_child = children_maybe.and_then(|children| {
             let mut mesh_children = children
@@ -1539,11 +1543,7 @@ fn cholesky_3x3_spd(p: &Mat3) -> Option<[f32; 6]> {
 }
 
 fn dmat3_to_mat3(m: DMat3) -> Mat3 {
-    Mat3::from_cols(
-        m.x_axis.as_vec3(),
-        m.y_axis.as_vec3(),
-        m.z_axis.as_vec3(),
-    )
+    Mat3::from_cols(m.x_axis.as_vec3(), m.y_axis.as_vec3(), m.z_axis.as_vec3())
 }
 
 fn frame_rotation_to_bevy(frame: GeoFrame, geo_context: &GeoContext) -> Mat3 {

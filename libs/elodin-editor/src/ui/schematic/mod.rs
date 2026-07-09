@@ -576,6 +576,7 @@ impl Plugin for SchematicPlugin {
             .init_resource::<SchematicBindings>()
             .init_resource::<load::PendingWindowSchematics>()
             .init_resource::<load::PendingDataOverview>()
+            .add_plugins(load::plugin)
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,

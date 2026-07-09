@@ -4,12 +4,12 @@ use bevy::{
         hierarchy::ChildOf,
         system::{EntityCommands, SystemId},
     },
-    prelude::{Command, In, InRef, IntoSystem, Message, Mut, System},
+    prelude::{Command, In, InRef, IntoSystem, Message, Mut, Single, System, With},
 };
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
     ecs::system::SystemState,
-    prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource, debug},
+    prelude::{Commands, Component, Deref, DerefMut, Entity, Name, Query, ResMut, Resource, debug},
 };
 use impeller2::types::IntoLenPacket;
 use impeller2::types::RequestId;
@@ -904,6 +904,13 @@ pub struct ComponentSchemaRegistry(pub HashMap<ComponentId, Schema<Vec<u64>>>);
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
 
+#[derive(Component)]
+pub struct DbComponentsRoot;
+
+fn ensure_db_components_root(mut commands: Commands) {
+    commands.spawn((DbComponentsRoot, Name::new("db components")));
+}
+
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
     commands: Commands<'w, 's>,
@@ -916,6 +923,7 @@ pub struct WorldSink<'w, 's> {
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
     db_config: ResMut<'w, DbConfig>,
+    db_components_root: Single<'w, 's, Entity, With<DbComponentsRoot>>,
 }
 
 #[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
@@ -932,7 +940,6 @@ fn try_insert_entity<'a, 'w, 's>(
         };
         Some((e, false))
     } else {
-        let mut e = commands.spawn((component_id, ComponentValueMap::default()));
         let metadata = metadata_reg
             .entry(component_id)
             .or_insert_with(|| ComponentMetadata {
@@ -941,8 +948,12 @@ fn try_insert_entity<'a, 'w, 's>(
                 metadata: Default::default(),
             })
             .clone();
-        e.insert(metadata.clone());
-
+        let e = commands.spawn((
+            component_id,
+            ComponentValueMap::default(),
+            metadata.clone(),
+            Name::new(metadata.name.clone()),
+        ));
         entity_map.insert(component_id, e.id());
         Some((e, true))
     }
@@ -987,6 +998,8 @@ impl Decomponentize for WorldSink<'_, '_> {
             };
             if newly_created && let Some(last_entity) = last_entity {
                 e.insert(ChildOf(last_entity));
+            } else {
+                e.insert(ChildOf(*self.db_components_root));
             }
             last_entity = Some(e.id());
         }
@@ -1178,6 +1191,7 @@ impl Plugin for Impeller2Plugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<DbMessage>()
             .add_plugins(DefaultAdaptersPlugin)
+            .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(bevy::prelude::Update, flush_msg_request_queue)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))

@@ -198,6 +198,13 @@ struct PendingWindowLoad {
 #[derive(Resource, Default)]
 pub struct PendingWindowSchematics {
     loads: Vec<PendingWindowLoad>,
+#[derive(Component)]
+pub struct MonitorsRoot;
+
+pub(crate) fn plugin(app: &mut App) {
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn((MonitorsRoot, Name::new("monitors")));
+    });
 }
 
 #[derive(SystemParam)]
@@ -236,6 +243,7 @@ pub struct LoadSchematicParams<'w, 's> {
     last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
     #[cfg(feature = "big_space")]
     big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
+    monitor_root: Single<'w, 's, Entity, With<MonitorsRoot>>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -1231,6 +1239,7 @@ impl LoadSchematicParams<'_, '_> {
                             component_name: monitor.component_name.clone(),
                         },
                         Name::new(label.clone()),
+                        ChildOf(*self.monitor_root),
                     ))
                     .id();
                 let pane = MonitorPane::new(entity, label);
