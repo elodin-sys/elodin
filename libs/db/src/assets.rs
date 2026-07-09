@@ -175,11 +175,12 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
     }
 
     // Every schematic now lives in the DB, so rewrite the local asset paths
-    // inside each stored `.kdl` (window sub-schematics included) to `db:` refs.
+    // inside each stored `.kdl` (window sub-schematics included) to `db:` refs,
+    // pulling in windows that live outside the source tree along the way.
     // Done before the marker so a genuine I/O failure aborts without committing
     // copy-once. The partial tree it leaves behind is then preserved (not wiped)
     // by the "already populated" guard on the next run; recover with `--reset`.
-    rewrite_stored_schematics(&dest)?;
+    rewrite_stored_schematics(&dest, source_root)?;
 
     let report = IngestReport {
         source_root: source_root.to_path_buf(),
@@ -252,20 +253,53 @@ fn resolve_stored_asset_key(assets_dir: &Path, name: &str) -> Option<String> {
 /// resolve through the DB Asset Server. Only paths whose bytes are actually
 /// present in the tree are rewritten (mirrors the active-schematic rewrite).
 ///
+/// Window sub-schematics referenced *outside* the ingested tree (e.g.
+/// `window path="examples/drone/panel.kdl"`) are pulled in under `schematics/`
+/// via [`ingest_window_schematics`] first — the same treatment the Python SDK
+/// gives the active schematic in `prime_schematic_assets` — so a CLI-ingested
+/// DB (`elodin-db run --assets`, including Aleph's service) is an equally
+/// portable record instead of keeping machine-local paths that 404 elsewhere.
+/// References are resolved against the schematic's original directory in the
+/// source tree, then the source root and its ancestors (covering
+/// repo-root-relative references).
+///
 /// A `.kdl` that is not a valid schematic is intentionally left untouched (a
 /// non-schematic file is not an error). Genuine I/O failures (read/write) are
 /// propagated so the caller does not commit the copy-once marker over a tree
 /// whose schematics were only partially rewritten.
-fn rewrite_stored_schematics(dir: &Path) -> io::Result<()> {
+fn rewrite_stored_schematics(dir: &Path, source_root: &Path) -> io::Result<()> {
     let mut keys = Vec::new();
     collect_relative_keys(dir, dir, &mut keys)?;
+    // Repo-root-relative references like `examples/drone/panel.kdl` resolve
+    // against the source root and its ancestors (the repo root is an ancestor
+    // of the `assets/` tree).
+    let search_dirs: Vec<PathBuf> = source_root.ancestors().map(Path::to_path_buf).collect();
+    // One ingest state across the whole tree, so an external window referenced
+    // by several stored schematics is pulled in once under a single key.
+    let mut ingest = WindowIngest {
+        assets_dir: dir,
+        search_dirs: &search_dirs,
+        file_keys: HashMap::new(),
+    };
     for key in keys {
         if !key.ends_with(".kdl") {
             continue;
         }
-        let content = std::fs::read_to_string(dir.join(&key))?;
+        // Sibling references resolve against the schematic's original
+        // directory in the source tree first.
+        let base_dir = source_root.join(&key).parent().map(Path::to_path_buf);
+        let mut content = std::fs::read_to_string(dir.join(&key))?;
+        let mut changed = false;
+        if let Some(pulled) = ingest.rewrite_content(&content, base_dir.as_deref())? {
+            content = pulled;
+            changed = true;
+        }
         if let Some(serialized) = rewrite_schematic_kdl_to_db(dir, &content) {
-            write_asset_file(dir, &key, serialized.as_bytes())?;
+            content = serialized;
+            changed = true;
+        }
+        if changed {
+            write_asset_file(dir, &key, content.as_bytes())?;
         }
     }
     Ok(())
@@ -327,25 +361,12 @@ pub fn ingest_window_schematics(
     content: &str,
     search_dirs: &[PathBuf],
 ) -> io::Result<Option<String>> {
-    let Ok(mut root) = impeller2_kdl::parse_schematic(content) else {
-        return Ok(None);
-    };
-
     let mut ingest = WindowIngest {
         assets_dir,
         search_dirs,
         file_keys: HashMap::new(),
     };
-    let map = ingest.ingest_referenced_windows(&root, None)?;
-    if map.is_empty() {
-        return Ok(None);
-    }
-
-    impeller2_kdl::rewrite_asset_paths(&mut root, |path| {
-        map.get(path).map(|key| format!("db:{key}"))
-    });
-    let serialized = impeller2_kdl::serialize_schematic(&root);
-    Ok((serialized != content).then_some(serialized))
+    ingest.rewrite_content(content, None)
 }
 
 struct WindowIngest<'a> {
@@ -358,6 +379,29 @@ struct WindowIngest<'a> {
 }
 
 impl WindowIngest<'_> {
+    /// Ingest the outside-tree windows referenced by `content` and return it
+    /// with those references rewritten to `db:` keys (`None` when nothing
+    /// changed or the content is not a valid schematic). `base_dir` is where
+    /// the content was originally loaded from, for resolving relative refs.
+    fn rewrite_content(
+        &mut self,
+        content: &str,
+        base_dir: Option<&Path>,
+    ) -> io::Result<Option<String>> {
+        let Ok(mut root) = impeller2_kdl::parse_schematic(content) else {
+            return Ok(None);
+        };
+        let map = self.ingest_referenced_windows(&root, base_dir)?;
+        if map.is_empty() {
+            return Ok(None);
+        }
+        impeller2_kdl::rewrite_asset_paths(&mut root, |path| {
+            map.get(path).map(|key| format!("db:{key}"))
+        });
+        let serialized = impeller2_kdl::serialize_schematic(&root);
+        Ok((serialized != content).then_some(serialized))
+    }
+
     /// Resolve, ingest and key every local window reference of `schematic`
     /// (itself loaded from `base_dir`, `None` for the root content). Returns
     /// the reference-string → key map to rewrite that schematic with.
@@ -820,6 +864,132 @@ mod tests {
         assert!(
             stored.contains("path=\"db:schematics/telemetry.kdl\""),
             "bare window path should resolve under schematics/, got:\n{stored}"
+        );
+    }
+
+    #[test]
+    fn ingest_pulls_out_of_tree_window_schematics() {
+        let dir = tempdir().unwrap();
+        // Repo layout: the window lives outside the assets tree, referenced
+        // repo-root-relative (the drone layout). The repo root is an ancestor
+        // of the source assets root.
+        let repo = dir.path().join("repo");
+        write(&repo.join("assets/meshes/drone.glb"), b"glb");
+        write(
+            &repo.join("assets/schematics/main.kdl"),
+            b"window title=\"motors\" path=\"examples/drone/panel.kdl\"\n",
+        );
+        write(
+            &repo.join("examples/drone/panel.kdl"),
+            b"object_3d \"drone.world_pos\" {\n    glb path=\"meshes/drone.glb\"\n}\n",
+        );
+
+        let db = dir.path().join("db");
+        let report = ingest_asset_dir(&db, &repo.join("assets")).unwrap();
+        assert!(!report.skipped);
+
+        // The stored schematic points at the pulled-in window key, not the
+        // machine-local path that would 404 when the DB is served elsewhere.
+        let main = std::fs::read_to_string(assets_dir(&db).join("schematics/main.kdl")).unwrap();
+        assert!(
+            main.contains("path=\"db:schematics/panel.kdl\""),
+            "out-of-tree window should be pulled in and rewritten, got:\n{main}"
+        );
+        // The pulled window itself is stored, with its own asset paths routed
+        // through the DB.
+        let panel = std::fs::read_to_string(assets_dir(&db).join("schematics/panel.kdl")).unwrap();
+        assert!(
+            panel.contains("path=\"db:meshes/drone.glb\""),
+            "pulled window's mesh path should be rewritten to db:, got:\n{panel}"
+        );
+
+        // Copy-once still holds.
+        let second = ingest_asset_dir(&db, &repo.join("assets")).unwrap();
+        assert!(second.skipped);
+    }
+
+    #[test]
+    fn ingest_pulls_external_window_schematics() {
+        let dir = tempdir().unwrap();
+        // The window lives outside the source assets tree, referenced
+        // root-relative (the drone layout) with its own in-tree mesh ref.
+        write(
+            &dir.path().join("examples/drone/panel.kdl"),
+            b"object_3d \"drone.world_pos\" {\n    glb path=\"meshes/drone.glb\"\n}\n",
+        );
+        let src = dir.path().join("src_assets");
+        write(&src.join("meshes/drone.glb"), b"glb");
+        write(
+            &src.join("schematics/main.kdl"),
+            b"window title=\"motors\" path=\"examples/drone/panel.kdl\"\n",
+        );
+
+        let db = dir.path().join("db");
+        ingest_asset_dir(&db, &src).unwrap();
+
+        // The stored root schematic now points at the pulled-in window key…
+        let main = std::fs::read_to_string(assets_dir(&db).join("schematics/main.kdl")).unwrap();
+        assert!(
+            main.contains("path=\"db:schematics/panel.kdl\""),
+            "external window ref should be pulled in and rewritten, got:\n{main}"
+        );
+        // …and the pulled window's own asset paths are rewritten too.
+        let panel = std::fs::read_to_string(assets_dir(&db).join("schematics/panel.kdl")).unwrap();
+        assert!(
+            panel.contains("path=\"db:meshes/drone.glb\""),
+            "pulled window's mesh path should be rewritten to db:, got:\n{panel}"
+        );
+    }
+
+    #[test]
+    fn ingest_stores_external_window_shared_by_schematics_once() {
+        let dir = tempdir().unwrap();
+        write(&dir.path().join("panels/shared.kdl"), b"tabs {\n}\n");
+        let src = dir.path().join("src_assets");
+        write(
+            &src.join("schematics/main.kdl"),
+            b"window path=\"panels/shared.kdl\"\n",
+        );
+        write(
+            &src.join("schematics/alt.kdl"),
+            b"window path=\"panels/shared.kdl\"\n",
+        );
+
+        let db = dir.path().join("db");
+        ingest_asset_dir(&db, &src).unwrap();
+
+        let assets = assets_dir(&db);
+        for key in ["schematics/main.kdl", "schematics/alt.kdl"] {
+            let stored = std::fs::read_to_string(assets.join(key)).unwrap();
+            assert!(
+                stored.contains("db:schematics/shared.kdl"),
+                "{key} should reference the single shared key, got:\n{stored}"
+            );
+        }
+        assert!(!assets.join("schematics/shared-2.kdl").exists());
+    }
+
+    #[test]
+    fn ingest_resolves_window_relative_to_schematic_source_dir() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src_assets");
+        // The reference is relative to the schematic's own source directory
+        // (`src_assets/schematics/`), escaping the tree with `..` — only the
+        // file's original location can resolve it, not the source root or its
+        // ancestors.
+        write(
+            &src.join("schematics/main.kdl"),
+            b"window path=\"../../panels/detail.kdl\"\n",
+        );
+        write(&dir.path().join("panels/detail.kdl"), b"tabs {\n}\n");
+
+        let db = dir.path().join("db");
+        ingest_asset_dir(&db, &src).unwrap();
+
+        let main = std::fs::read_to_string(assets_dir(&db).join("schematics/main.kdl")).unwrap();
+        assert!(
+            main.contains("db:schematics/detail.kdl"),
+            "schematic-dir-relative window ref should be pulled in, got:\n{main}"
         );
     }
 
