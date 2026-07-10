@@ -445,6 +445,11 @@
                     <ul>
                         
                         <li>
+                            <a href="/reference/db-asset-server/#aleph-hitl">Aleph &#x2F; HITL</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/reference/db-asset-server/#follow-mode-and-assets">Follow mode and assets</a>
                             
                         </li>
@@ -544,7 +549,7 @@
 </span><span class="z-text z-plain">    Parse[&quot;Parse schematic KDL&quot;]
 </span><span class="z-text z-plain">    Copy[&quot;Copy bytes to db/assets&quot;]
 </span><span class="z-text z-plain">    Rewrite[&quot;Rewrite paths to db scheme&quot;]
-</span><span class="z-text z-plain">    Meta[&quot;Store schematic.content&quot;]
+</span><span class="z-text z-plain">    Meta[&quot;Set schematic.active&quot;]
 </span><span class="z-text z-plain">  end
 </span><span class="z-text z-plain">  subgraph serve_phase [&quot;Serve&quot;]
 </span><span class="z-text z-plain">    TCP[&quot;Impeller TCP port N&quot;]
@@ -564,8 +569,8 @@
 <table><thead><tr><th>Layer</th><th>Role</th></tr></thead><tbody>
 <tr><td><strong>Blob store</strong></td><td><code>{db_path}/assets/{relative_key}</code> — opaque bytes, any file type</td></tr>
 <tr><td><strong>DB Asset Server</strong></td><td><code>GET http://host:(tcp_port+1)/{relative_key}</code> while <code>elodin-db run</code> is active</td></tr>
-<tr><td><strong>KDL rewrite</strong></td><td>Local paths at record time become <code>db:{relative_key}</code> in <code>schematic.content</code></td></tr>
-<tr><td><strong>Consumers</strong></td><td>Editor resolves <code>db:</code> to HTTP (or mirrors to a local cache for skyboxes)</td></tr>
+<tr><td><strong>KDL rewrite</strong></td><td>Local paths at record time become <code>db:{relative_key}</code> in the stored active schematic asset</td></tr>
+<tr><td><strong>Consumers</strong></td><td>Editor loads the active schematic and all assets over HTTP</td></tr>
 </tbody></table>
 <h3 id="ports">Ports</h3>
 <ul>
@@ -588,7 +593,7 @@
 <li><strong><code>db_path</code></strong> argument to <code>world.run(…, db_path=…)</code>, or</li>
 <li><strong><code>ELODIN_DB_PATH</code></strong> environment variable (Python SDK)</li>
 </ul>
-<p>The schematic body is stored in DB metadata as <code>schematic.content</code> (with <code>db:</code> paths). The original <code>schematic.path</code> string is informational only; replay uses <code>schematic.content</code> from the DB when the file is missing.</p>
+<p>The active schematic is stored as an asset (default <code>schematics/main.kdl</code>) and pointed to by <code>schematic.active</code> metadata. Consumers fetch it over the DB Asset Server; there is no inline KDL mirror in DB metadata.</p>
 <h2 id="simulation-source-snapshot">Simulation source snapshot</h2>
 <p>When a Python simulation records to an explicit database path, Elodin also writes a source snapshot to <code>{db}/simulation_source/</code>:</p>
 <pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">{db}/simulation_source/manifest.json
@@ -619,14 +624,20 @@
 <tr><td><strong>Follow</strong></td><td><code>elodin-db run … --follows SOURCE:2240</code></td><td>Follower copies <code>db:</code> assets from source HTTP into its own <code>{db}/assets/</code></td></tr>
 </tbody></table>
 <p>See <a href="/reference/elodin-cli">Elodin CLI</a> for <code>editor --replay</code> and <code>elodin-db --follows</code>.</p>
+<h3 id="aleph-hitl">Aleph / HITL</h3>
+<p>On the Aleph flight computer, the <code>elodin-db</code> NixOS service passes
+<code>--assets /var/lib/elodin/assets</code> (the shared <code>ELODIN_ASSETS</code> root,
+configurable via <code>services.elodin-db.assetsDir</code>) so each fresh boot database
+ingests the asset tree on creation. A HITL recording copied off the vehicle is
+therefore a complete, portable record: serve it anywhere with <code>elodin-db run</code>
+and the editor loads schematic and meshes from the DB itself.</p>
 <h3 id="follow-mode-and-assets">Follow mode and assets</h3>
 <p>When a follower connects to a source <code>elodin-db</code> on port <code>N</code>, it replicates telemetry over Impeller TCP. Schematic assets are <strong>not</strong> streamed on that socket — they are fetched separately from the source <strong>DB Asset Server</strong> on port <code>N+1</code>.</p>
-<p>On connect (and when schematic KDL updates), the follower:</p>
+<p>On connect (and when DB config updates), the follower:</p>
 <ol>
-<li>Reads <code>schematic.content</code> from replicated DB metadata</li>
-<li>Collects every <code>db:…</code> path referenced in the KDL (including skybox manifest sidecars)</li>
-<li><code>GET</code>s each file from <code>http://source:(N+1)/{key}</code> with retries</li>
-<li>Writes bytes into its own <code>{follower_db}/assets/</code></li>
+<li><code>GET</code>s <code>http://source:(N+1)/__index__</code> to list the source asset tree</li>
+<li>Copies each key that is missing or size-different into <code>{follower_db}/assets/</code></li>
+<li>Serves the mirrored tree from its own DB Asset Server on <code>(follower_port + 1)</code></li>
 </ol>
 <p>The follower can then serve those files from its own DB Asset Server on <code>(follower_port + 1)</code> to local editors, without copying the full source database directory.</p>
 <pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Source (sim or recorded DB)</span><span class="z-comment z-line z-number-sign z-shell">
@@ -642,7 +653,7 @@
 <h2 id="supported-asset-types">Supported asset types</h2>
 <h3 id="glb-meshes-object-3d-glb-path">GLB meshes (<code>object_3d</code> → <code>glb path=…</code>)</h3>
 <table><thead><tr><th>Stage</th><th>Behavior</th></tr></thead><tbody>
-<tr><td><strong>Local path</strong></td><td>Resolved via schematic directory, <code>ELODIN_ASSETS_DIR</code> (default <code>./assets</code>), or cwd</td></tr>
+<tr><td><strong>Local path</strong></td><td>Resolved via <code>$ELODIN_ASSETS</code> (default <code>./assets</code>), simulation entry directory, or cwd</td></tr>
 <tr><td><strong>On disk in DB</strong></td><td><code>assets/{key}.glb</code> (key preserves subdirectories, e.g. <code>models/rocket.glb</code>)</td></tr>
 <tr><td><strong>Stored KDL</strong></td><td><code>path="db:models/rocket.glb"</code></td></tr>
 <tr><td><strong>Editor</strong></td><td><code>db:…</code> → <code>http://127.0.0.1:2241/…</code> via Bevy <code>AssetServer</code> + <code>WebAssetPlugin</code> (non-blocking)</td></tr>
@@ -662,7 +673,7 @@
 <p>The skybox plugin today reads from a <strong>local cache directory</strong>; the editor mirrors DB assets there before activation. GLB meshes and <code>.png</code> icons use HTTP directly through Bevy.</p>
 <h3 id="carried-in-the-db-without-extra-asset-files">Carried in the DB without extra asset files</h3>
 <ul>
-<li>Full schematic KDL in <code>schematic.content</code></li>
+<li>Active schematic KDL at <code>schematics/*.kdl</code> (see <code>schematic.active</code>)</li>
 <li>Procedural meshes (<code>sphere</code>, <code>box</code>, <code>cylinder</code>, …)</li>
 <li>Built-in <a href="/reference/color-schemes">color scheme</a> names in <code>theme scheme=…</code></li>
 <li>Telemetry components (separate from this asset pipeline)</li>
@@ -670,14 +681,14 @@
 <h3 id="not-supported-today">Not supported today</h3>
 <table><thead><tr><th>Item</th><th>Why</th></tr></thead><tbody>
 <tr><td>Custom <code>color_schemes/*.json</code> on disk</td><td>Only the scheme <strong>name</strong> is in KDL; JSON must exist locally</td></tr>
-<tr><td><code>window path="other.kdl"</code></td><td>Secondary schematic path is stored, not the file contents</td></tr>
+<tr><td><code>window path="other.kdl"</code></td><td>Window sub-schematics are stored as separate assets under <code>schematics/</code></td></tr>
 <tr><td><code>video_stream</code> panels</td><td>H.264 lives in message logs, not <code>assets/</code></td></tr>
 <tr><td>Arbitrary external URLs in KDL</td><td>Not copied into the DB by design</td></tr>
 </tbody></table>
 <h2 id="environment-variables">Environment variables</h2>
 <table><thead><tr><th>Variable</th><th>Purpose</th></tr></thead><tbody>
 <tr><td><code>ELODIN_DB_PATH</code></td><td>Directory for the simulation database (record)</td></tr>
-<tr><td><code>ELODIN_ASSETS_DIR</code></td><td>Root for resolving local asset paths at record (default <code>./assets</code>)</td></tr>
+<tr><td><code>ELODIN_ASSETS</code></td><td>Root for resolving local asset paths at record (default <code>./assets</code>)</td></tr>
 </tbody></table>
 <h2 id="verification">Verification</h2>
 <p>With <code>elodin-db run</code> listening on <code>2240</code>:</p>
@@ -707,7 +718,7 @@
 </ul>
 </li>
 <li><strong>Persist</strong> — no change if the path appears in collect; <code>persist_schematic_assets</code> in <code>libs/nox-py/src/impeller2_server.rs</code> is generic.</li>
-<li><strong>Follow</strong> — no change if the path appears in <code>collect_db_asset_names</code>; <code>sync_schematic_assets_from_source</code> copies all listed keys.</li>
+<li><strong>Follow</strong> — no change if the path appears in <code>collect_db_asset_names</code>; full-tree mirror via <code>GET /__index__</code> copies all assets.</li>
 <li><strong>Editor</strong> — if Bevy can load the format: resolve with <code>resolve_db_asset_url</code> and <code>AssetServer.load(url)</code>. No blocking HTTP in Bevy systems.</li>
 <li><strong>Tests</strong> — unit tests in <code>impeller2-kdl</code> (collect/rewrite) and <code>nox-py</code> (persist).</li>
 </ol>
