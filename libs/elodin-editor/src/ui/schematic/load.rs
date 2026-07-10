@@ -198,6 +198,8 @@ struct PendingWindowLoad {
 #[derive(Resource, Default)]
 pub struct PendingWindowSchematics {
     loads: Vec<PendingWindowLoad>,
+}
+
 #[derive(Component)]
 pub struct MonitorsRoot;
 
