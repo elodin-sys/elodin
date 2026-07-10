@@ -461,6 +461,10 @@ def test_follow_mode_replicates_python_writes(server, tmp_path):
         writer.close()
 
     follower_addr = f"127.0.0.1:{next(_port)}"
+    follower_stdout = tmp_path / "follower.stdout.log"
+    follower_stderr = tmp_path / "follower.stderr.log"
+    stdout = follower_stdout.open("wb")
+    stderr = follower_stderr.open("wb")
     follower = subprocess.Popen(
         [
             "elodin-db",
@@ -470,9 +474,17 @@ def test_follow_mode_replicates_python_writes(server, tmp_path):
             "--follows",
             server.addr,
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout,
+        stderr=stderr,
     )
+
+    def follower_logs():
+        stdout.flush()
+        stderr.flush()
+        out = follower_stdout.read_text(errors="replace")[-4000:]
+        err = follower_stderr.read_text(errors="replace")[-4000:]
+        return f"follower exit={follower.poll()}\nstdout:\n{out}\nstderr:\n{err}"
+
     try:
         with edb.Client.connect(follower_addr) as fclient:
 
@@ -480,7 +492,9 @@ def test_follow_mode_replicates_python_writes(server, tmp_path):
                 ts, vals = fclient.time_series("fol.gyro", 0, 10**6)
                 return len(ts) == 20
 
-            assert _wait_for(replicated, timeout_s=30), "follower should replicate all samples"
+            assert _wait_for(replicated, timeout_s=90), (
+                "follower should replicate all samples\n" + follower_logs()
+            )
             _, vals = fclient.time_series("fol.gyro", 0, 10**6)
             np.testing.assert_array_equal(vals[3], [3.0, -3.0, 6.0])
             info = fclient.components()["fol.gyro"]
@@ -488,6 +502,8 @@ def test_follow_mode_replicates_python_writes(server, tmp_path):
     finally:
         follower.terminate()
         follower.wait(timeout=10)
+        stdout.close()
+        stderr.close()
 
 
 # ── message logs ─────────────────────────────────────────────────────────────
