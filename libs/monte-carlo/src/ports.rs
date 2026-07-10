@@ -8,7 +8,9 @@ use std::net::{IpAddr, TcpListener, UdpSocket};
 
 use miette::{Result, miette};
 
-use crate::{CONTEXT_ENV, PortSpec, ResourceConfig};
+#[cfg(target_os = "linux")]
+use crate::CONTEXT_ENV;
+use crate::{PortSpec, ResourceConfig};
 
 /// One statically planned port across the campaign, used for validation,
 /// ephemeral-range warnings, and startup reaping.

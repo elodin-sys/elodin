@@ -158,7 +158,7 @@ impl SimRecipe {
         let mut child = child.spawn()?;
         let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
         if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
-            scope.add_pid(pid)?;
+            scope.add_pid(pid);
         }
 
         if let Some(stdout) = child.stdout.take() {

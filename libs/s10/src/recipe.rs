@@ -529,7 +529,7 @@ impl ProcessArgs {
                 .then(|| child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32)))
                 .flatten();
             if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
-                scope.add_pid(pid)?;
+                scope.add_pid(pid);
             }
             if !self.silence {
                 let stdout = child
