@@ -106,7 +106,10 @@ workers. Concurrency comes from `--workers N` (or `workers = N` in
 `campaign.toml`): exactly N runs execute at once regardless of how many
 processes each run spawns. When neither is set, the runner sizes itself from
 logical cores; `S10_MAX_INFLIGHT` remains a low-level escape hatch for
-budgeting by process count instead of run count.
+budgeting by process count instead of run count. Only a numeric
+`S10_MAX_INFLIGHT` overrides `campaign.toml`'s `workers`; `off` (or an
+unparseable value) disables admission limiting without overriding the
+configured worker count.
 
 Before anything launches, the runner takes an exclusive lock on the out dir
 (`campaign.lock`) so two campaigns cannot interleave in the same output,
@@ -207,10 +210,14 @@ Key options:
   fast scratch filesystem; each run's surviving artifacts move to `--out`
   (sparse-aware) as it finishes. `auto` picks `/dev/shm` when present. Use
   this when the artifact volume cannot sustain `workers x` DB write IOPS
-  (network/EBS-class disks). If a run's final move fails (e.g. the artifact
-  volume fills up), the run is marked failed with the destination error and
-  its scratch copy is preserved — the campaign never deletes a scratch tree
-  that still holds run artifacts, and logs the path to recover them from.
+  (network/EBS-class disks). When `auto` finds no `/dev/shm`, the campaign
+  logs that per-run IO is staying on the artifact volume. If a run's final
+  move fails (e.g. the artifact volume fills up), the run is marked failed
+  with the destination error and its scratch copy is preserved — the campaign
+  never deletes a scratch tree that still holds run artifacts, and logs the
+  path to recover them from. The scratch location is deterministic per out
+  dir, so `resume` finds preserved passed runs and finishes the move instead
+  of re-running them (a fresh `run` clears the campaign's scratch tree first).
 - `--cache-dir <DIR>`: override the compile cache. The default lives in
   `~/.cache/elodin/monte-carlo/const-cache` (content-addressed, shared across
   campaigns) so `--clean` and fresh out dirs never cause a compile storm.

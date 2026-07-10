@@ -935,6 +935,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         memory_probe: options.memory_probe,
         keep_existing: options.keep_existing,
         strict_ports: options.strict_ports,
+        resume: false,
     })
     .await
 }
@@ -986,13 +987,15 @@ fn warn_stale_plan(plan_path: &Path) {
 }
 
 /// The worker count explicitly requested by the user, honoring precedence:
-/// `--workers` flag > `S10_MAX_INFLIGHT` env > `campaign.toml workers`.
+/// `--workers` flag > numeric `S10_MAX_INFLIGHT` env > `campaign.toml workers`.
 /// `None` falls through to the admission budget (env or logical cores).
+/// `S10_MAX_INFLIGHT` values that carry no budget (`off`, garbage) do not
+/// override the campaign's configured workers.
 fn requested_workers(flag: Option<usize>, config: &CampaignConfig) -> Option<usize> {
     if let Some(workers) = flag {
         return Some(workers.max(1));
     }
-    if std::env::var_os("S10_MAX_INFLIGHT").is_some() {
+    if s10::admission::env_budget().is_some() {
         return None;
     }
     config.workers.map(|workers| workers.max(1))
@@ -1052,6 +1055,9 @@ struct ExecuteParams {
     memory_probe: bool,
     keep_existing: bool,
     strict_ports: bool,
+    /// Resuming an existing campaign (keeps its scratch tree so runs whose
+    /// finalize move failed can be recovered instead of re-run).
+    resume: bool,
 }
 
 /// Schedules `params.plan` across workers, merges in any `params.preserved`
@@ -1070,6 +1076,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         memory_probe,
         keep_existing,
         strict_ports,
+        resume,
     } = params;
     fs::create_dir_all(&out_dir)
         .into_diagnostic()
@@ -1129,7 +1136,7 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
         }
     }
     raise_fd_limit(&out_dir, workers, recipe_weight)?;
-    let scratch = resolve_scratch_dir(config.scratch_dir.as_deref(), &out_dir)?;
+    let scratch = resolve_scratch_dir(config.scratch_dir.as_deref(), &out_dir, !resume)?;
     if let Some(scratch) = &scratch {
         log_campaign_line(
             &out_dir,
@@ -1463,14 +1470,25 @@ fn rampup_delay(rampup: &str, worker_id: usize, workers: usize) -> Option<Durati
 
 /// Resolve the scratch base for per-run IO. `"auto"` picks `/dev/shm` when it
 /// exists and is writable; any other value is used as the scratch root; unset
-/// or `"off"` disables scratch. The campaign gets a unique subdirectory.
-fn resolve_scratch_dir(scratch: Option<&str>, out_dir: &Path) -> Result<Option<PathBuf>> {
+/// or `"off"` disables scratch. The campaign's subdirectory is deterministic
+/// (derived from the out dir, which the campaign lock makes exclusive), so a
+/// `resume` finds runs a finalize failure preserved there; `fresh` campaigns
+/// wipe any such leftovers instead of resurrecting a previous campaign's runs.
+fn resolve_scratch_dir(
+    scratch: Option<&str>,
+    out_dir: &Path,
+    fresh: bool,
+) -> Result<Option<PathBuf>> {
     let scratch = match scratch {
         None => return Ok(None),
         Some(value) if value.is_empty() || value == "off" => return Ok(None),
         Some("auto") => {
             let shm = Path::new("/dev/shm");
             if !shm.is_dir() {
+                log_campaign_line(
+                    out_dir,
+                    "warning: scratch_dir = \"auto\" requested but /dev/shm is unavailable; per-run IO stays on the artifact volume",
+                )?;
                 return Ok(None);
             }
             shm.to_path_buf()
@@ -1481,11 +1499,32 @@ fn resolve_scratch_dir(scratch: Option<&str>, out_dir: &Path) -> Result<Option<P
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "campaign".to_string());
-    let dir = scratch.join(format!("elodin-mc-{campaign_name}-{}", std::process::id()));
+    let dir = scratch.join(format!(
+        "elodin-mc-{campaign_name}-{:016x}",
+        stable_path_hash(out_dir)
+    ));
+    if fresh && dir.exists() {
+        fs::remove_dir_all(&dir)
+            .into_diagnostic()
+            .with_context(|| format!("clear stale scratch dir {}", dir.display()))?;
+    }
     fs::create_dir_all(&dir)
         .into_diagnostic()
         .with_context(|| format!("create scratch dir {}", dir.display()))?;
     Ok(Some(dir))
+}
+
+/// FNV-1a over the canonical out-dir path: stable across processes and
+/// binaries (unlike `DefaultHasher`), so `resume` maps to the same scratch
+/// tree the original campaign used.
+fn stable_path_hash(path: &Path) -> u64 {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in canonical.to_string_lossy().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// Whether `dir` recursively contains anything other than empty directories.
@@ -1584,6 +1623,7 @@ pub async fn resume_campaign(campaign_dir: PathBuf) -> Result<()> {
         memory_probe: manifest.memory_probe,
         keep_existing: manifest.keep_existing,
         strict_ports: false,
+        resume: true,
     })
     .await
 }
@@ -1855,6 +1895,23 @@ fn load_existing_metric(out_dir: &Path, run_id: &str) -> Option<RunMetric> {
     Some(metric)
 }
 
+/// A run that completed on scratch but failed its finalize move leaves its
+/// fully scored tree (including a truthful `metrics.json`) behind. When the
+/// preserved run passed, recover it by finishing the move; failed runs return
+/// `None` so resume/retry re-simulates them as usual.
+fn recover_preserved_run(run_dir: &Path, final_run_dir: &Path) -> Option<RunMetric> {
+    let text = fs::read_to_string(run_dir.join("metrics.json")).ok()?;
+    let mut metric: RunMetric = serde_json::from_str(&text).ok()?;
+    if !metric.passed() {
+        return None;
+    }
+    fs_util::move_dir_sparse(run_dir, final_run_dir).ok()?;
+    metric.db_path = final_run_dir.join("db");
+    metric.run_dir = final_run_dir.to_path_buf();
+    let _ = write_json(&final_run_dir.join("metrics.json"), &metric);
+    Some(metric)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_with_retries(
     row: PlanRow,
@@ -2007,6 +2064,14 @@ async fn run_one(
     };
     let run_dir = active_run_dir.clone();
     let db_path = run_dir.join("db");
+    // A prior attempt (or the campaign being resumed) completed this run on
+    // scratch but failed to move it out: finish the move instead of wiping
+    // the only copy and re-simulating.
+    if run_dir != final_run_dir
+        && let Some(metric) = recover_preserved_run(&run_dir, &final_run_dir)
+    {
+        return Ok(metric);
+    }
     for dir in [&final_run_dir, &run_dir] {
         if dir.exists() {
             fs::remove_dir_all(dir)
@@ -2226,7 +2291,9 @@ async fn run_one(
                 // keep the metric pointed at the surviving scratch artifacts
                 // (teardown preserves non-empty scratch trees), and drop any
                 // partial destination so a later resume cannot mistake it for
-                // a completed run.
+                // a completed run. The scratch metrics.json keeps the run's
+                // truthful verdict so `resume` can recover it by retrying the
+                // move instead of re-simulating.
                 if run_dir.join("metrics.json").exists() {
                     let _ = fs::remove_dir_all(&final_run_dir);
                 }
@@ -2241,7 +2308,6 @@ async fn run_one(
                     Some(existing) => format!("{existing}; {reason}"),
                     None => reason,
                 });
-                write_json(&run_dir.join("metrics.json"), &metric)?;
             }
         }
     }
@@ -4702,6 +4768,85 @@ mod tests {
         // A stranded artifact anywhere in the tree preserves it.
         fs::write(root.join("runs/run_0000000/metrics.json"), b"{}").unwrap();
         assert!(dir_has_files(&root));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn recover_preserved_run_finishes_the_move_for_passed_runs() {
+        let root = std::env::temp_dir().join(format!("mc-recover-{}", unix_now_ns()));
+        let scratch_run = root.join("scratch/runs/run_0000000");
+        let final_run = root.join("out/runs/run_0000000");
+        fs::create_dir_all(scratch_run.join("db")).unwrap();
+        fs::write(scratch_run.join("db/data"), b"telemetry").unwrap();
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &root.join("scratch"), "ok");
+        metric.exit_ok = true;
+        metric.run_dir = scratch_run.clone();
+        metric.db_path = scratch_run.join("db");
+        write_json(&scratch_run.join("metrics.json"), &metric).unwrap();
+
+        let recovered = recover_preserved_run(&scratch_run, &final_run).expect("recovered");
+        assert!(recovered.passed());
+        assert_eq!(recovered.run_dir, final_run);
+        assert_eq!(recovered.db_path, final_run.join("db"));
+        assert!(!scratch_run.exists());
+        assert_eq!(fs::read(final_run.join("db/data")).unwrap(), b"telemetry");
+        // The rewritten metrics.json points at the final home.
+        let stored: RunMetric =
+            serde_json::from_str(&fs::read_to_string(final_run.join("metrics.json")).unwrap())
+                .unwrap();
+        assert_eq!(stored.run_dir, final_run);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn recover_preserved_run_leaves_failed_runs_for_re_run() {
+        let root = std::env::temp_dir().join(format!("mc-recover-fail-{}", unix_now_ns()));
+        let scratch_run = root.join("scratch/runs/run_0000000");
+        let final_run = root.join("out/runs/run_0000000");
+        fs::create_dir_all(&scratch_run).unwrap();
+
+        let mut metric = placeholder_metric("run_0000000", Some(0), &root.join("scratch"), "ok");
+        metric.exit_ok = true;
+        metric.scored_pass = Some(false);
+        write_json(&scratch_run.join("metrics.json"), &metric).unwrap();
+
+        // Scored misses are re-run by resume, not resurrected.
+        assert!(recover_preserved_run(&scratch_run, &final_run).is_none());
+        assert!(scratch_run.exists());
+        assert!(!final_run.exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scratch_dir_is_deterministic_and_fresh_wipes_leftovers() {
+        let root = std::env::temp_dir().join(format!("mc-scratchroot-{}", unix_now_ns()));
+        let out_dir = root.join("campaign-out");
+        fs::create_dir_all(&out_dir).unwrap();
+        let scratch_root = root.join("scratch");
+        fs::create_dir_all(&scratch_root).unwrap();
+        let scratch_str = scratch_root.to_string_lossy().to_string();
+
+        let first = resolve_scratch_dir(Some(&scratch_str), &out_dir, false)
+            .unwrap()
+            .expect("scratch resolved");
+        let second = resolve_scratch_dir(Some(&scratch_str), &out_dir, false)
+            .unwrap()
+            .expect("scratch resolved");
+        // Same out dir -> same scratch tree across invocations (resume relies
+        // on this to find preserved runs).
+        assert_eq!(first, second);
+
+        // A fresh campaign wipes leftovers instead of resurrecting them.
+        fs::write(first.join("stale.txt"), b"x").unwrap();
+        let wiped = resolve_scratch_dir(Some(&scratch_str), &out_dir, true)
+            .unwrap()
+            .expect("scratch resolved");
+        assert_eq!(wiped, first);
+        assert!(!wiped.join("stale.txt").exists());
 
         let _ = fs::remove_dir_all(&root);
     }

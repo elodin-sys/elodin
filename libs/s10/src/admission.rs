@@ -75,10 +75,22 @@ fn resolve_max_inflight() -> Option<usize> {
             {
                 return None;
             }
-            raw.parse::<usize>().ok().filter(|max| *max > 0)
+            parse_env_budget(raw)
         }
         Err(_) => std::thread::available_parallelism().ok().map(usize::from),
     }
+}
+
+/// The explicit numeric budget carried by `S10_MAX_INFLIGHT`, if any.
+/// `"off"`-style and unparseable values yield `None`: they disable admission
+/// limiting but express no budget, so callers deciding precedence (e.g. the
+/// monte-carlo `workers` knob) must not treat them as an override.
+pub fn env_budget() -> Option<usize> {
+    parse_env_budget(&std::env::var("S10_MAX_INFLIGHT").ok()?)
+}
+
+fn parse_env_budget(raw: &str) -> Option<usize> {
+    raw.trim().parse::<usize>().ok().filter(|max| *max > 0)
 }
 
 #[cfg(test)]
@@ -107,6 +119,16 @@ mod tests {
             },
             no_watch: false,
         })
+    }
+
+    #[test]
+    fn env_budget_only_accepts_positive_integers() {
+        assert_eq!(parse_env_budget("96"), Some(96));
+        assert_eq!(parse_env_budget(" 4 "), Some(4));
+        assert_eq!(parse_env_budget("0"), None);
+        assert_eq!(parse_env_budget("off"), None);
+        assert_eq!(parse_env_budget("ninety-six"), None);
+        assert_eq!(parse_env_budget(""), None);
     }
 
     #[test]
