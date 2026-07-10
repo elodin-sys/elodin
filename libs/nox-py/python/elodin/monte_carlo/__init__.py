@@ -28,10 +28,15 @@ def export_db(
     join: bool = True,
     mono_ns: bool = True,
     csv_fast_floats: bool = True,
+    pattern: str | None = None,
     timeout: float | None = None,
     elodin_db: str | None = None,
 ) -> Path:
-    """Export an Elodin DB into files and return the output directory."""
+    """Export an Elodin DB into files and return the output directory.
+
+    ``pattern`` filters components by glob (e.g. ``"rocket.*"``) so scoring
+    hooks export only what they read instead of the whole database.
+    """
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     binary = elodin_db or os.environ.get("ELODIN_DB_BIN") or shutil.which("elodin-db")
@@ -46,6 +51,8 @@ def export_db(
         args.append("--join")
     if mono_ns:
         args.append("--mono-ns")
+    if pattern is not None:
+        args.extend(["--pattern", pattern])
     subprocess.run(args, check=True, timeout=timeout)
     return output
 

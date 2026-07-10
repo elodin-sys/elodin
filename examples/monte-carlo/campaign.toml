@@ -1,14 +1,18 @@
+# workers = 8            # concurrent runs; default is sized from CPU cores
 timeout = "90s"
 retries = 0
 continue_on_error = true
 
+# Named ports are allocated dynamically per run ("auto", the default) and
+# exported as ELODIN_MC_PORT_<NAME> / read via el.monte_carlo.port(name).
+# Pin numeric bases + port_stride for a predictable static plan instead.
 [resources]
-port_stride = 40
 db_port = 2240
+port_stride = 40
 
 [resources.ports]
-state = 9003
-command = 9002
+state = "auto"
+command = "auto"
 
 [retention]
 keep_run_db = "on-fail"

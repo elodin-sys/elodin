@@ -2,10 +2,12 @@ timeout = "120s"
 retries = 0
 continue_on_error = true
 
-[build]
+[[build]]
 command = "cargo"
 args = ["build", "--release", "--manifest-path", "examples/apollo-lander/controller/Cargo.toml"]
 
+# Static port plan (validated for every worker before the campaign starts).
+# Use "auto" per port for dynamic allocation instead.
 [resources]
 port_stride = 40
 db_port = 2240

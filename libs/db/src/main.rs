@@ -38,6 +38,10 @@ enum Commands {
     Merge(MergeArgs),
     #[command(about = "Remove empty components from a database")]
     Prune(PruneArgs),
+    #[command(
+        about = "Truncate preallocated (sparse) database files to their real size for archival"
+    )]
+    Compact(CompactArgs),
     #[command(about = "Trim a database to a time range, removing data outside the window")]
     Trim(TrimArgs),
     #[command(about = "Clear all data from a database, preserving schemas")]
@@ -90,6 +94,11 @@ struct RunArgs {
     http_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
+    #[clap(
+        long,
+        help = "Source assets/ tree to ingest into the DB on creation (overrides ELODIN_ASSETS)"
+    )]
+    assets: Option<PathBuf>,
     #[clap(long, help = "Follow another elodin-db instance, replicating all data")]
     follows: Option<SocketAddr>,
     #[clap(
@@ -125,6 +134,14 @@ struct PruneArgs {
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct CompactArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be reclaimed without modifying")]
+    dry_run: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -394,6 +411,7 @@ async fn main() -> miette::Result<()> {
             path,
             config,
             reset,
+            assets,
             start_timestamp,
             follows,
             follow_packet_size,
@@ -434,7 +452,54 @@ async fn main() -> miette::Result<()> {
                     .into_diagnostic()?;
             }
             #[cfg(feature = "axum")]
-            elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;
+            if follow_config.is_none() {
+                let source = assets
+                    .clone()
+                    .or_else(|| elodin_db::assets::resolve_assets_root(None));
+                if let Some(source) = source {
+                    match elodin_db::assets::ingest_asset_dir(&path, &source) {
+                        Ok(report) if report.skipped => {
+                            info!(source = %source.display(), "assets already ingested; skipping")
+                        }
+                        Ok(report) => info!(
+                            source = %source.display(),
+                            files = report.file_count,
+                            bytes = report.byte_count,
+                            "ingested assets into db"
+                        ),
+                        Err(err) => {
+                            tracing::warn!(?err, source = %source.display(), "failed to ingest assets")
+                        }
+                    }
+                }
+
+                // A CLI-started DB should also advertise an active schematic so
+                // connected editors auto-load it over HTTP (RFD #724), matching
+                // what the Python SDK primes. If the ingested tree carries the
+                // conventional schematics/main.kdl and no active pointer is set
+                // yet, point at it so clients fetch it over the Asset Server.
+                if !server
+                    .db
+                    .with_state(|s| s.db_config.schematic_active().is_some())
+                {
+                    match server.db.set_active_schematic("schematics/main.kdl") {
+                        Ok(()) => info!("set active schematic to schematics/main.kdl"),
+                        Err(err) => {
+                            tracing::debug!(?err, "no schematics/main.kdl to set active; skipping")
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "axum")]
+            // A follower mirrors its source read-only; only a primary DB accepts
+            // asset uploads.
+            elodin_db::assets_http::spawn_assets_http(
+                &path,
+                addr,
+                follows.is_none(),
+                Some(server.db.clone()),
+            )
+            .into_diagnostic()?;
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
@@ -517,6 +582,9 @@ async fn main() -> miette::Result<()> {
         }
         Commands::Prune(PruneArgs { path, dry_run, yes }) => {
             elodin_db::prune::run(path, dry_run, yes).into_diagnostic()
+        }
+        Commands::Compact(CompactArgs { path, dry_run }) => {
+            elodin_db::compact::run(path, dry_run).into_diagnostic()
         }
         Commands::Merge(MergeArgs {
             db1,

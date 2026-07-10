@@ -16,6 +16,48 @@ except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
 
+KNOWN_DISTS = ("fixed", "choice", "uniform", "loguniform", "normal")
+# Accepted spellings for range bounds, in precedence order.
+_MIN_ALIASES = ("min", "lo", "low")
+_MAX_ALIASES = ("max", "hi", "high")
+
+
+def _bound(spec: dict, aliases: tuple[str, ...]):
+    for alias in aliases:
+        if alias in spec:
+            return spec[alias]
+    return None
+
+
+def _spec_error(name: str, dist: str, needs: str, spec: dict) -> ValueError:
+    got = ", ".join(sorted(key for key in spec if key != "dist")) or "nothing"
+    return ValueError(f'{dist} for "{name}" needs {needs} (got: {got})')
+
+
+def _validate_variable(name: str, spec) -> None:
+    """Fail up front with the variable name and what's missing, instead of a
+    bare TypeError from deep inside sampling."""
+    if not isinstance(spec, dict):
+        raise ValueError(f'variable "{name}" must be a table like {{ dist = "normal", ... }}')
+    dist = str(spec.get("dist", "fixed")).lower()
+    if dist not in KNOWN_DISTS:
+        known = ", ".join(KNOWN_DISTS)
+        raise ValueError(f'unknown dist "{dist}" for "{name}" (known: {known})')
+    if dist == "fixed" and "value" not in spec:
+        raise _spec_error(name, dist, "value", spec)
+    if dist == "choice" and not spec.get("values"):
+        raise _spec_error(name, dist, "a non-empty values list", spec)
+    if dist in ("uniform", "loguniform"):
+        if _bound(spec, _MIN_ALIASES) is None or _bound(spec, _MAX_ALIASES) is None:
+            raise _spec_error(name, dist, "min/max", spec)
+        if dist == "loguniform" and (
+            float(_bound(spec, _MIN_ALIASES)) <= 0 or float(_bound(spec, _MAX_ALIASES)) <= 0
+        ):
+            raise ValueError(f'loguniform for "{name}" needs positive min/max')
+    if dist == "normal" and ("mean" not in spec or "std" not in spec):
+        raise _spec_error(name, dist, "mean/std", spec)
+
+
 def _sample_dist(spec: dict, u: float):
     dist = str(spec.get("dist", "fixed")).lower()
     if dist == "fixed":
@@ -24,12 +66,12 @@ def _sample_dist(spec: dict, u: float):
         values = spec["values"]
         return values[min(int(u * len(values)), len(values) - 1)]
     if dist == "uniform":
-        lo = float(spec.get("min", spec.get("lo")))
-        hi = float(spec.get("max", spec.get("hi")))
+        lo = float(_bound(spec, _MIN_ALIASES))
+        hi = float(_bound(spec, _MAX_ALIASES))
         return lo + (hi - lo) * u
     if dist == "loguniform":
-        lo = math.log(float(spec.get("min", spec.get("lo"))))
-        hi = math.log(float(spec.get("max", spec.get("hi"))))
+        lo = math.log(float(_bound(spec, _MIN_ALIASES)))
+        hi = math.log(float(_bound(spec, _MAX_ALIASES)))
         return math.exp(lo + (hi - lo) * u)
     if dist == "normal":
         mean = float(spec["mean"])
@@ -54,9 +96,15 @@ def _mc_rows(root: dict) -> list[dict[str, object]]:
     if not mc:
         return [{}]
     n = int(mc.get("n_samples", 1))
+    if n < 1:
+        raise ValueError(f"n_samples must be >= 1 (got {n})")
     method = str(mc.get("method", "lhs")).lower()
+    if method not in ("lhs", "random"):
+        raise ValueError(f'unknown method "{method}" (known: lhs, random)')
     rng = random.Random(mc.get("seed"))
     variables = dict(mc.get("variables", {}))
+    for name, spec in variables.items():
+        _validate_variable(name, spec)
     keys = sorted(variables)
     units = (
         _lhs(n, len(keys), rng)

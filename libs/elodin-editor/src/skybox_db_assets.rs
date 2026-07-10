@@ -5,8 +5,7 @@ use bevy_ai_skybox::{
     prelude::{SetActiveSkybox, SkyboxAssetSettings, SkyboxCache},
 };
 use impeller2_bevy::{ConnectionAddr, PacketTx};
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::{DbConfig, Schematic, StoreAsset};
+use impeller2_wkt::{DbConfig, StoreAsset};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -28,6 +27,33 @@ struct MirrorKey {
 pub struct DbSkyboxAssetMirror {
     synced: Option<MirrorKey>,
     last_failed: Option<(MirrorKey, Instant)>,
+    /// Skybox name the user cleared *locally* (e.g. "Clear Schematic") without
+    /// pushing the clear to the DB. While `skybox.active` still names it, the
+    /// mirror must not re-assert or re-apply it — the drift is intentional.
+    /// Lifted when the DB moves to a different skybox (external change wins),
+    /// or when any skybox becomes live again.
+    locally_cleared: Option<String>,
+}
+
+impl DbSkyboxAssetMirror {
+    /// Record that the user cleared the rendered skybox locally while the DB's
+    /// `skybox.active` (`desired`) still names it, so the mirror won't fight the
+    /// clear by re-asserting that skybox. `None` (no DB skybox) clears any
+    /// stale suppression.
+    pub fn note_local_clear(&mut self, desired: Option<String>) {
+        self.locally_cleared = desired;
+    }
+}
+
+/// Whether a locally cleared skybox suppresses mirror activation of `desired`.
+/// Only while nothing is live and the DB still names the skybox the user
+/// cleared; a different desired name is external news and wins.
+fn local_clear_suppresses(
+    locally_cleared: Option<&str>,
+    desired: &str,
+    live: Option<&str>,
+) -> bool {
+    live.is_none() && locally_cleared == Some(desired)
 }
 
 #[derive(Resource, Default)]
@@ -106,17 +132,20 @@ pub fn db_skybox_mirror_pending(
 }
 
 pub fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
-    if let Some(desired) = config.skybox_active_desired() {
-        return Some(desired);
-    }
-
-    let content = config.schematic_content()?;
-    let schematic = Schematic::from_kdl(content)
-        .inspect_err(|e| tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}"))
-        .ok()?;
-    Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
+    config.skybox_active_desired()
 }
 
+/// Whether the DB mirror should re-assert its synced skybox onto the live
+/// cache. It only does so for an *external* drift (`live != desired`). When the
+/// drift matches a state the user just pushed locally (`pushed_locally`) — most
+/// importantly a clear — the live `DbConfig` is simply stale and re-asserting
+/// would resurrect the skybox the user just cleared, so we hold off until the
+/// `SetDbConfig` echo catches up.
+fn should_reassert_db_skybox(live: Option<&str>, desired: &str, pushed_locally: bool) -> bool {
+    live != Some(desired) && !pushed_locally
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn sync_db_skybox_assets_from_config(
     config: Res<DbConfig>,
     connection_addr: Option<Res<ConnectionAddr>>,
@@ -125,6 +154,7 @@ pub fn sync_db_skybox_assets_from_config(
     mut mirror: ResMut<DbSkyboxAssetMirror>,
     mut in_flight: ResMut<DbSkyboxSyncInFlight>,
     mut skyboxes: MessageWriter<SetActiveSkybox>,
+    locally_pushed: Option<Res<crate::skybox_generation::LocallyPushedSkyboxActive>>,
 ) {
     if let Some(task) = in_flight.task.as_mut() {
         if let Some(result) = future::block_on(future::poll_once(task)) {
@@ -133,13 +163,23 @@ pub fn sync_db_skybox_assets_from_config(
             if let (Some(key), Some(settings), Some(cache)) =
                 (started_key, settings.as_ref(), cache.as_mut())
                 && skybox_still_desired(&config, connection_addr.as_deref(), &key)
+                // A newer local push (e.g. a clear) not yet echoed into `config`
+                // supersedes this download; don't re-apply the stale skybox.
+                && !locally_pushed
+                    .as_ref()
+                    .is_some_and(|pushed| pushed.latest_supersedes(Some(&key.skybox)))
             {
                 match result {
                     Ok(payload) => match apply_db_skybox_download(&payload, settings, cache) {
                         Ok(()) => {
                             mirror.synced = Some(key.clone());
                             mirror.last_failed = None;
-                            skyboxes.write(SetActiveSkybox::ByName(key.skybox));
+                            // The user locally cleared this skybox while the
+                            // download was in flight: keep the bytes mirrored
+                            // but don't resurrect it on screen.
+                            if mirror.locally_cleared.as_deref() != Some(key.skybox.as_str()) {
+                                skyboxes.write(SetActiveSkybox::ByName(key.skybox));
+                            }
                         }
                         Err(error) => {
                             tracing::warn!(
@@ -178,6 +218,8 @@ pub fn sync_db_skybox_assets_from_config(
             in_flight.task = None;
             in_flight.key = None;
             mirror.last_failed = None;
+            // The DB agrees the skybox is cleared; no local override needed.
+            mirror.locally_cleared = None;
             if mirror.synced.take().is_some() {
                 skyboxes.write(SetActiveSkybox::Clear);
             }
@@ -185,6 +227,24 @@ pub fn sync_db_skybox_assets_from_config(
         }
         Some(Some(skybox)) => skybox,
     };
+    // The DB moved to a different skybox than the one the user cleared locally:
+    // external news wins, lift the suppression so it applies normally.
+    if mirror
+        .locally_cleared
+        .as_deref()
+        .is_some_and(|cleared| cleared != desired)
+    {
+        mirror.locally_cleared = None;
+    }
+    // `config` may be stale relative to a local push still awaiting its echo
+    // (e.g. the user just cleared or switched skybox). Don't start a download
+    // for a skybox the user has already moved away from.
+    if locally_pushed
+        .as_ref()
+        .is_some_and(|pushed| pushed.latest_supersedes(Some(&desired)))
+    {
+        return;
+    }
     let Some(connection_addr) = connection_addr else {
         return;
     };
@@ -196,10 +256,18 @@ pub fn sync_db_skybox_assets_from_config(
         skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
-        if cache
+        let live = cache.as_ref().and_then(|cache| cache.active.as_deref());
+        if live.is_some() {
+            // A skybox is rendering again (user activated one, or a schematic
+            // load re-applied it): the local clear is over.
+            mirror.locally_cleared = None;
+        }
+        let pushed_locally = locally_pushed
             .as_ref()
-            .is_some_and(|cache| cache.active.as_deref() != Some(desired.as_str()))
-        {
+            .is_some_and(|pushed| pushed.is_pending(live));
+        let locally_cleared =
+            local_clear_suppresses(mirror.locally_cleared.as_deref(), &desired, live);
+        if should_reassert_db_skybox(live, &desired, pushed_locally || locally_cleared) {
             skyboxes.write(SetActiveSkybox::ByName(desired));
         }
         return;
@@ -663,9 +731,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desired_skybox_from_config_reads_schematic_content() {
+    fn desired_skybox_from_config_reads_skybox_active() {
         let mut config = DbConfig::default();
-        config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
+        config.set_skybox_active(Some("desert_night"));
 
         assert_eq!(
             desired_skybox_from_config(&config),
@@ -679,9 +747,49 @@ mod tests {
         config
             .metadata
             .insert("skybox.active".to_string(), String::new());
-        config.set_schematic_content(r#"skybox name="desert_night""#.to_string());
+        config.set_schematic_active("schematics/main.kdl");
 
         assert_eq!(desired_skybox_from_config(&config), Some(None));
+    }
+
+    #[test]
+    fn reasserts_db_skybox_only_for_external_drift() {
+        // Steady state: live matches desired — nothing to do.
+        assert!(!should_reassert_db_skybox(
+            Some("desert_night"),
+            "desert_night",
+            false
+        ));
+        // External drift (e.g. a schematic reload dropped the skybox) — restore.
+        assert!(should_reassert_db_skybox(None, "desert_night", false));
+        // User just cleared locally; the config echo hasn't landed. The drift is
+        // the user's own pending push, so we must not resurrect the skybox.
+        assert!(!should_reassert_db_skybox(None, "desert_night", true));
+    }
+
+    #[test]
+    fn local_clear_suppresses_only_matching_desired_while_nothing_live() {
+        // "Clear Schematic" cleared the skybox locally while the DB still names
+        // it: the mirror must not resurrect it.
+        assert!(local_clear_suppresses(
+            Some("desert_night"),
+            "desert_night",
+            None
+        ));
+        // The DB moved to another skybox: external news wins.
+        assert!(!local_clear_suppresses(
+            Some("desert_night"),
+            "grand_canyon",
+            None
+        ));
+        // A skybox is live again: the local clear is over.
+        assert!(!local_clear_suppresses(
+            Some("desert_night"),
+            "desert_night",
+            Some("desert_night")
+        ));
+        // No local clear recorded.
+        assert!(!local_clear_suppresses(None, "desert_night", None));
     }
 
     #[test]
@@ -722,7 +830,7 @@ mod tests {
                 addr,
                 skybox: "desert_night".to_string(),
             }),
-            last_failed: None,
+            ..Default::default()
         };
         assert!(db_skybox_mirror_synced(addr, "desert_night", &mirror));
         assert!(!db_skybox_mirror_synced(addr, "grand_canyon", &mirror));
@@ -746,7 +854,7 @@ mod tests {
 
         let mirror = DbSkyboxAssetMirror {
             synced: Some(key.clone()),
-            last_failed: None,
+            ..Default::default()
         };
         assert!(!db_skybox_mirror_pending(
             addr,
@@ -756,8 +864,8 @@ mod tests {
         ));
 
         let mirror = DbSkyboxAssetMirror {
-            synced: None,
             last_failed: Some((key, Instant::now())),
+            ..Default::default()
         };
         assert!(!db_skybox_mirror_pending(
             addr,

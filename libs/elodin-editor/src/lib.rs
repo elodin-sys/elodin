@@ -353,7 +353,7 @@ impl Plugin for EditorPlugin {
                 skybox_generation::sync_generated_skybox_to_schematic,
             )
             .add_systems(Update, skybox_generation::on_document_loaded)
-            .add_systems(Update, skybox_generation::record_reloaded_schematic_content)
+            .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
             .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
             .add_systems(Update, skybox_generation::decay_skybox_status_message)
             .add_systems(
@@ -456,6 +456,25 @@ impl Plugin for EditorPlugin {
 ///
 /// On Linux/Windows a discrete GPU is typical, so we apply a lighter
 /// policy: ~30 fps with reduced (but not disabled) shadows.
+/// True when any loaded window has a `sensor_view` panel in its tile tree.
+///
+/// The active schematic is no longer mirrored in DB metadata (RFD #724, Phase 4
+/// dropped `schematic.content`), so scanning the KDL text for `"sensor_view"` is
+/// gone. A `sensor_view` panel becomes a `Pane::SensorView` tile at load time,
+/// so inspecting the live tile trees is the metadata-free equivalent: a
+/// sensor-view schematic is treated as sensor-camera work even when
+/// `SensorCameraConfigs` is empty and the `sensor_cameras` metadata is absent.
+fn has_sensor_view_pane(windows: &Query<&crate::ui::tiles::WindowState>) -> bool {
+    windows.iter().any(|window| {
+        window.tile_state.tree.tiles.iter().any(|(_, tile)| {
+            matches!(
+                tile,
+                egui_tiles::Tile::Pane(crate::ui::tiles::Pane::SensorView(_))
+            )
+        })
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
@@ -463,6 +482,7 @@ fn throttle_for_sensor_cameras(
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut dir_lights: Query<&mut DirectionalLight>,
+    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
     if *applied {
@@ -470,9 +490,7 @@ fn throttle_for_sensor_cameras(
     }
     let detected = !configs.0.is_empty()
         || db_config.metadata.contains_key("sensor_cameras")
-        || db_config
-            .schematic_content()
-            .is_some_and(|s| s.contains("sensor_view"));
+        || has_sensor_view_pane(&windows);
     if !detected {
         return;
     }
@@ -493,6 +511,7 @@ fn throttle_for_sensor_cameras(
     db_config: Res<impeller2_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
+    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
     if *applied {
@@ -500,9 +519,7 @@ fn throttle_for_sensor_cameras(
     }
     let detected = !configs.0.is_empty()
         || db_config.metadata.contains_key("sensor_cameras")
-        || db_config
-            .schematic_content()
-            .is_some_and(|s| s.contains("sensor_view"));
+        || has_sensor_view_pane(&windows);
     if !detected {
         return;
     }

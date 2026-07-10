@@ -25,7 +25,7 @@ cargo run --bin elodin editor 127.0.0.1:2240
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ELODIN_ASSETS_DIR` | `./assets` | Directory for meshes, images, GLB files |
+| `ELODIN_ASSETS` | `./assets` | Directory for meshes, images, GLB files |
 | `ELODIN_KDL_DIR` | `.` (cwd) | Directory for `.kdl` schematic files |
 
 ## Cargo features
@@ -95,7 +95,7 @@ src/
     ├── navigation_gizmo/
     ├── editor_cam_touch/ # Touch input for camera
     ├── asset_cache/    # Asset caching
-    ├── env_asset_source/ # ELODIN_ASSETS_DIR integration
+    ├── env_asset_source/ # ELODIN_ASSETS integration
     ├── web_asset/      # Web asset loading
     └── logical_key/    # Keyboard input handling
 ```
