@@ -1262,8 +1262,21 @@ async fn execute_campaign(params: ExecuteParams) -> Result<()> {
     resource_sampler.await.into_diagnostic()?;
     progress_ticker.await.into_diagnostic()?;
     if let Some(scratch) = &scratch {
-        // All surviving run artifacts were moved out incrementally.
-        let _ = fs::remove_dir_all(scratch);
+        // Run artifacts move out incrementally, leaving only empty skeleton
+        // dirs behind — unless a finalize move failed, in which case the
+        // scratch copy is that run's only data: preserve the tree.
+        if dir_has_files(scratch) {
+            log_campaign_line(
+                &out_dir,
+                &format!(
+                    "warning: preserving scratch {} — it still holds artifacts of run(s) whose move to {} failed",
+                    scratch.display(),
+                    out_dir.display()
+                ),
+            )?;
+        } else {
+            let _ = fs::remove_dir_all(scratch);
+        }
     }
 
     let metrics = metrics.lock().expect("metrics mutex poisoned").clone();
@@ -1473,6 +1486,26 @@ fn resolve_scratch_dir(scratch: Option<&str>, out_dir: &Path) -> Result<Option<P
         .into_diagnostic()
         .with_context(|| format!("create scratch dir {}", dir.display()))?;
     Ok(Some(dir))
+}
+
+/// Whether `dir` recursively contains anything other than empty directories.
+/// Decides if a scratch tree still holds run artifacts worth preserving.
+fn dir_has_files(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() => {
+                if dir_has_files(&entry.path()) {
+                    return true;
+                }
+            }
+            // Files, symlinks, and unreadable entries all count as content.
+            _ => return true,
+        }
+    }
+    false
 }
 
 /// Join an error's chain into one line for `failure_reason`.
@@ -2028,6 +2061,7 @@ async fn run_one(
     });
     // Release dynamic-port guards only now, just before the recipe spawns.
     drop(port_guards);
+    let preflight_failed = preflight_failure.is_some();
     let mut failure_reason: Option<String> = None;
     let result = if let Some(reason) = preflight_failure.take() {
         Err(reason)
@@ -2123,7 +2157,12 @@ async fn run_one(
         db_path,
         run_dir: run_dir.clone(),
     };
-    if let Some(hook) = &ctx.config.hooks.post_run {
+    // Setup-only failures (port preflight) never spawned the recipe, so there
+    // is no run database or telemetry to score: skip the hook instead of
+    // having it error (or emit misleading scores) against a missing DB.
+    if let Some(hook) = &ctx.config.hooks.post_run
+        && !preflight_failed
+    {
         let hook_ctx = run_dir.join("post_run_context.json");
         write_json(
             &hook_ctx,
@@ -2174,18 +2213,37 @@ async fn run_one(
     // Scratch finalize: move the surviving artifacts to the real out dir,
     // sparse-aware, and point the metric at their final home.
     if run_dir != final_run_dir {
-        fs_util::move_dir_sparse(&run_dir, &final_run_dir)
-            .into_diagnostic()
-            .with_context(|| {
-                format!(
-                    "move run artifacts {} -> {}",
-                    run_dir.display(),
-                    final_run_dir.display()
-                )
-            })?;
-        metric.db_path = final_run_dir.join("db");
-        metric.run_dir = final_run_dir.clone();
-        write_json(&final_run_dir.join("metrics.json"), &metric)?;
+        match fs_util::move_dir_sparse(&run_dir, &final_run_dir) {
+            Ok(()) => {
+                metric.db_path = final_run_dir.join("db");
+                metric.run_dir = final_run_dir.clone();
+                write_json(&final_run_dir.join("metrics.json"), &metric)?;
+            }
+            Err(err) => {
+                // The scratch copy is the only complete copy of the run.
+                // Don't error the worker (that would record a placeholder and
+                // let campaign teardown delete scratch): mark the run failed,
+                // keep the metric pointed at the surviving scratch artifacts
+                // (teardown preserves non-empty scratch trees), and drop any
+                // partial destination so a later resume cannot mistake it for
+                // a completed run.
+                if run_dir.join("metrics.json").exists() {
+                    let _ = fs::remove_dir_all(&final_run_dir);
+                }
+                let reason = format!(
+                    "finalize: move run artifacts to {} failed: {err}; artifacts preserved on scratch {}",
+                    final_run_dir.display(),
+                    run_dir.display()
+                );
+                metric.status = "failed".to_string();
+                metric.exit_ok = false;
+                metric.failure_reason = Some(match metric.failure_reason.take() {
+                    Some(existing) => format!("{existing}; {reason}"),
+                    None => reason,
+                });
+                write_json(&run_dir.join("metrics.json"), &metric)?;
+            }
+        }
     }
     Ok(metric)
 }
@@ -4631,6 +4689,19 @@ mod tests {
         };
         apply_prune_globs(&retention, &metric);
         assert!(sibling.join("keep.txt").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dir_has_files_ignores_empty_skeletons() {
+        let root = std::env::temp_dir().join(format!("mc-scratch-{}", unix_now_ns()));
+        fs::create_dir_all(root.join("runs/run_0000000")).unwrap();
+        // Only empty directories left behind -> safe to delete.
+        assert!(!dir_has_files(&root));
+        // A stranded artifact anywhere in the tree preserves it.
+        fs::write(root.join("runs/run_0000000/metrics.json"), b"{}").unwrap();
+        assert!(dir_has_files(&root));
 
         let _ = fs::remove_dir_all(&root);
     }

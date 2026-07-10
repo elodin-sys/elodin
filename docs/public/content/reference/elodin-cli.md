@@ -120,7 +120,8 @@ squatters by pid/name (`port 20034 already bound by pid 320389 (weaverd)`). On t
 runner tears the run down via its cgroup when one is available and via
 per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
 (e.g. a plain ssh session) the campaign transparently re-executes itself under
-`systemd-run --user --scope` (opt out with `--no-self-scope`).
+`systemd-run --user --scope` — for both `run` and `resume` (opt out with
+`--no-self-scope`).
 
 Every worker slot also reserves `db_port + 1` for elodin-db's always-on asset
 server (the headless sensor-camera renderer fetches scene assets from it):
@@ -206,7 +207,10 @@ Key options:
   fast scratch filesystem; each run's surviving artifacts move to `--out`
   (sparse-aware) as it finishes. `auto` picks `/dev/shm` when present. Use
   this when the artifact volume cannot sustain `workers x` DB write IOPS
-  (network/EBS-class disks).
+  (network/EBS-class disks). If a run's final move fails (e.g. the artifact
+  volume fills up), the run is marked failed with the destination error and
+  its scratch copy is preserved — the campaign never deletes a scratch tree
+  that still holds run artifacts, and logs the path to recover them from.
 - `--cache-dir <DIR>`: override the compile cache. The default lives in
   `~/.cache/elodin/monte-carlo/const-cache` (content-addressed, shared across
   campaigns) so `--clean` and fresh out dirs never cause a compile storm.
@@ -271,6 +275,8 @@ for the final campaign rollup. Every failed, invalid, or degraded run carries a
 one-line machine-readable `failure_reason` in `results.csv` / `metrics.json`
 (timeouts, which leaf recipe failed and how, readiness-gate timeouts, port
 conflicts with the owning pid), echoed on the live `[failed]` reporter line.
+Setup-only failures (a run whose port preflight failed, so no process ever
+spawned) skip the `post_run` hook entirely — there is no run database to score.
 Real-time-paced runs also record `behind_deadline_frac`, `real_time_factor`,
 and `drift_resets`, with worst-run callouts in the campaign summary.
 

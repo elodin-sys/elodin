@@ -30,7 +30,13 @@ enum Command {
     /// Run a Monte Carlo campaign
     Run(Box<RunArgs>),
     /// Resume a previous campaign
-    Resume { campaign_dir: PathBuf },
+    Resume {
+        campaign_dir: PathBuf,
+        /// Do not re-exec under `systemd-run --user --scope` when no
+        /// delegated cgroup is available.
+        #[arg(long)]
+        no_self_scope: bool,
+    },
     /// Rebuild a campaign report
     Report { campaign_dir: PathBuf },
 }
@@ -101,7 +107,14 @@ impl Cli {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
             }
             Command::Run(args) => run_with_runtime(*args, rt),
-            Command::Resume { campaign_dir } => {
+            Command::Resume {
+                campaign_dir,
+                no_self_scope,
+            } => {
+                // Resumed runs need the same reliable teardown as fresh ones.
+                if !no_self_scope {
+                    self_scope_reexec();
+                }
                 rt.block_on(monte_carlo::resume_campaign(campaign_dir))
             }
             Command::Report { campaign_dir } => monte_carlo::rebuild_report(&campaign_dir),
