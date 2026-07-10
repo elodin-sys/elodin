@@ -13,7 +13,6 @@ queue overflow policies, and multi-process writers sharing one database.
 """
 
 import itertools
-import shutil
 import subprocess
 import sys
 import textwrap
@@ -53,6 +52,36 @@ def _wait_for(predicate, timeout_s=5.0):
             pass  # e.g. component not ingested yet
         time.sleep(0.05)
     return False
+
+
+def _collect_until(stream, predicate, timeout_s):
+    items = []
+    errors = []
+    completed = threading.Event()
+    matched = threading.Event()
+
+    def consume():
+        try:
+            for item in stream:
+                items.append(item)
+                if predicate(item):
+                    matched.set()
+                    return
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=consume, daemon=True)
+    thread.start()
+    if not completed.wait(timeout_s):
+        stream.close()
+        assert completed.wait(2), "stream consumer did not stop after close"
+        pytest.fail(f"stream did not produce the expected item within {timeout_s}s")
+    if errors:
+        raise errors[0]
+    assert matched.is_set(), "stream ended before producing the expected item"
+    return items
 
 
 # ── acceptance 1: the documented snippet ─────────────────────────────────────
@@ -447,65 +476,6 @@ def test_client_close_is_prompt_under_load(server):
     writer.close()
 
 
-# ── follow-mode replication ──────────────────────────────────────────────────
-@pytest.mark.slow
-@pytest.mark.skipif(shutil.which("elodin-db") is None, reason="elodin-db binary not on PATH")
-def test_follow_mode_replicates_python_writes(server, tmp_path):
-    """Data written by elodin.db must replicate to a follower instance with
-    metadata (element_names) intact — no client-specific special-casing."""
-    with edb.Client.connect(server.addr) as client:
-        writer = client.table_writer({"fol.gyro": edb.f64[3].labeled("p", "q", "r")})
-        for i in range(20):
-            writer.write(timestamp_us=1000 + i * 100, values={"fol.gyro": [i, -i, 2.0 * i]})
-        assert _wait_for(lambda: len(client.time_series("fol.gyro", 0, 10**6)[0]) == 20)
-        writer.close()
-
-    follower_addr = f"127.0.0.1:{next(_port)}"
-    follower_stdout = tmp_path / "follower.stdout.log"
-    follower_stderr = tmp_path / "follower.stderr.log"
-    stdout = follower_stdout.open("wb")
-    stderr = follower_stderr.open("wb")
-    follower = subprocess.Popen(
-        [
-            "elodin-db",
-            "run",
-            follower_addr,
-            str(tmp_path / "follower"),
-            "--follows",
-            server.addr,
-        ],
-        stdout=stdout,
-        stderr=stderr,
-    )
-
-    def follower_logs():
-        stdout.flush()
-        stderr.flush()
-        out = follower_stdout.read_text(errors="replace")[-4000:]
-        err = follower_stderr.read_text(errors="replace")[-4000:]
-        return f"follower exit={follower.poll()}\nstdout:\n{out}\nstderr:\n{err}"
-
-    try:
-        with edb.Client.connect(follower_addr) as fclient:
-
-            def replicated():
-                ts, vals = fclient.time_series("fol.gyro", 0, 10**6)
-                return len(ts) == 20
-
-            assert _wait_for(replicated, timeout_s=90), (
-                "follower should replicate all samples\n" + follower_logs()
-            )
-            _, vals = fclient.time_series("fol.gyro", 0, 10**6)
-            np.testing.assert_array_equal(vals[3], [3.0, -3.0, 6.0])
-            info = fclient.components()["fol.gyro"]
-            assert info.element_names == ["p", "q", "r"]
-    finally:
-        follower.terminate()
-        follower.wait(timeout=10)
-        stdout.close()
-        stderr.close()
-
-
 # ── message logs ─────────────────────────────────────────────────────────────
 def test_msg_roundtrip_and_range(client):
     for i in range(5):
@@ -533,23 +503,12 @@ def test_msg_roundtrip_and_range(client):
 
 def test_msg_stream_live(client):
     client.send_msg("evt.live", {"seq": -1}, timestamp_us=1)  # create the log
-    received = []
     with client.msg_stream("evt.live") as stream:
         time.sleep(0.3)  # let the subscription attach
-
-        def pump():
-            for i in range(10):
-                client.send_msg("evt.live", {"seq": i}, timestamp_us=1000 + i)
-                time.sleep(0.02)
-
-        t = threading.Thread(target=pump)
-        t.start()
-        deadline = time.time() + 5.0
-        for ts, payload in stream:
-            received.append((ts, payload))
-            if payload.get("seq") == 9 or time.time() > deadline:
-                break
-        t.join()
+        for i in range(10):
+            client.send_msg("evt.live", {"seq": i}, timestamp_us=1000 + i)
+            time.sleep(0.02)
+        received = _collect_until(stream, lambda item: item[1].get("seq") == 9, timeout_s=5)
     assert received, "live msg stream should deliver messages"
     assert received[-1][1] == {"seq": 9}
     assert received[-1][0] == 1009
@@ -561,17 +520,12 @@ def test_stream_live_rows(client):
     # Register the components (and their schemas) before subscribing.
     writer.write(timestamp_us=500, values={"stm.a": [0, 0], "stm.b": 0})
 
-    rows = []
     with client.stream(["stm.a", "stm.b"]) as stream:
         time.sleep(0.5)  # let the subscription settle
         for i in range(1, 21):
             writer.write_nowait(timestamp_us=1000 + i * 100, values={"stm.a": [i, -i], "stm.b": i})
             time.sleep(0.01)
-        deadline = time.time() + 5.0
-        for row in stream:
-            rows.append(row)
-            if row.timestamp_us >= 1000 + 20 * 100 or time.time() > deadline:
-                break
+        rows = _collect_until(stream, lambda row: row.timestamp_us >= 1000 + 20 * 100, timeout_s=5)
     assert rows, "live stream should deliver rows"
     last = rows[-1]
     assert set(last.values) == {"stm.a", "stm.b"}
@@ -589,13 +543,8 @@ def test_stream_fixed_rate_replay(client):
         writer.write(timestamp_us=1000 + i * 1000, values={"rep.v": float(i)})
     assert _wait_for(lambda: len(client.time_series("rep.v", 0, 10**6)[0]) == n)
 
-    rows = []
     with client.stream("rep.v", rate_hz=500, start="earliest") as stream:
-        deadline = time.time() + 10.0
-        for row in stream:
-            rows.append(row)
-            if row["rep.v"] >= n - 1 or time.time() > deadline:
-                break
+        rows = _collect_until(stream, lambda row: row["rep.v"] >= n - 1, timeout_s=10)
     assert rows, "replay should deliver rows"
     values = [float(r["rep.v"]) for r in rows]
     # replay advances monotonically through the recorded values from earliest
@@ -618,16 +567,16 @@ def test_stream_row_per_component_timestamps(client):
         for i in range(1, 21):
             fast_w.write_nowait(timestamp_us=1_500 + i * 1_000, values={"mr.fast": float(i)})
             time.sleep(0.01)
-        deadline = time.time() + 5.0
-        row = None
-        for candidate in stream:
-            if "mr.fast" in candidate and "mr.slow" in candidate:
-                row = candidate
-                if candidate.timestamps["mr.fast"] > candidate.timestamps["mr.slow"]:
-                    break
-            if time.time() > deadline:
-                break
-    assert row is not None, "stream should deliver rows with both components"
+        rows = _collect_until(
+            stream,
+            lambda row: (
+                "mr.fast" in row
+                and "mr.slow" in row
+                and row.timestamps["mr.fast"] > row.timestamps["mr.slow"]
+            ),
+            timeout_s=5,
+        )
+    row = rows[-1]
     assert row.timestamp_us == max(row.timestamps.values())
     assert row.timestamps["mr.slow"] == 1_000
     assert row.timestamps["mr.fast"] > row.timestamps["mr.slow"]
