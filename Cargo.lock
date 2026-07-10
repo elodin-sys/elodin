@@ -7829,23 +7829,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller_py"
-version = "0.17.4-alpha.0"
-dependencies = [
- "anyhow",
- "futures-lite",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
- "postcard",
- "pyo3",
- "stellarator",
- "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "indent_write"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9716,6 +9699,7 @@ dependencies = [
  "numpy",
  "paste",
  "postcard",
+ "postcard-schema",
  "pyo3",
  "s10",
  "serde",

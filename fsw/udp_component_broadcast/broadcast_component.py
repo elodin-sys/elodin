@@ -23,16 +23,15 @@ import ipaddress
 import logging
 import signal
 import socket
-import struct
 import sys
 import time
 import threading
 from typing import Optional, List
 
 import netifaces
+import numpy as np
 
-# Import the Rust-based impeller client
-from impeller_py import ImpellerClient, ComponentData
+import elodin.db as edb
 
 # Import protobuf messages
 import component_broadcast_pb2 as pb
@@ -164,8 +163,8 @@ class ComponentBroadcaster:
         self.running = False
         self.sequence = 0
 
-        # Impeller client (Rust-based)
-        self.client: Optional[ImpellerClient] = None
+        # Elodin-DB client
+        self.client: Optional[edb.Client] = None
 
         # UDP broadcast socket
         self.broadcast_socket: Optional[socket.socket] = None
@@ -195,25 +194,17 @@ class ComponentBroadcaster:
 
         # Create Elodin-DB client (does not block on actual connection)
         try:
-            self.client = ImpellerClient(self.db_addr)
-            self.client.connect()
+            self.client = edb.Client.connect(self.db_addr)
             logger.info(f"Initialized Elodin-DB client for {self.db_addr}")
         except Exception as e:
             logger.error(f"Failed to initialize Elodin-DB client: {e}")
             return False
 
-        # Register the component we want to track (works even without discovery)
+        # Prime the latest-value subscription (starts a background thread with
+        # auto-reconnect; retries automatically if the DB is not up yet).
         try:
-            self.client.track_component(self.component_name)
-            logger.info(f"Tracking component: {self.component_name}")
-        except Exception as e:
-            logger.warning(f"Failed to register component: {e}")
-
-        # Subscribe to real-time stream (starts background thread with auto-reconnect)
-        # This will automatically retry if DB is not available yet
-        try:
-            self.client.subscribe_realtime()
-            logger.info("Started real-time subscription (will auto-reconnect if needed)")
+            self.client.latest(self.component_name)
+            logger.info(f"Subscribed to component: {self.component_name}")
         except Exception as e:
             logger.error(f"Failed to start subscription: {e}")
             return False
@@ -239,7 +230,7 @@ class ComponentBroadcaster:
             self.broadcast_thread.join(timeout=2.0)
 
         if self.client:
-            self.client.disconnect()
+            self.client.close()
 
         if self.broadcast_socket:
             self.broadcast_socket.close()
@@ -257,18 +248,18 @@ class ComponentBroadcaster:
 
             # Log connection state changes
             try:
-                conn_state = self.client.get_connection_state()
+                conn_state = self.client.state()
                 if conn_state != last_connection_state:
                     logger.info(f"Connection state: {conn_state}")
                     last_connection_state = conn_state
             except Exception:
                 pass
 
-            # Get latest data from Rust client
+            # Get the latest sample
             try:
-                data = self.client.get_latest(self.component_name)
-                if data:
-                    self._broadcast_component(data)
+                sample = self.client.latest(self.component_name)
+                if sample:
+                    self._broadcast_component(sample)
             except Exception as e:
                 logger.debug(f"Error getting data: {e}")
 
@@ -283,18 +274,18 @@ class ComponentBroadcaster:
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-    def _broadcast_component(self, data: ComponentData):
+    def _broadcast_component(self, sample: edb.Sample):
         """Broadcast a component data message."""
-        # Create protobuf message
+        values = np.asarray(sample.values, dtype=np.float64)
+        flat_values = values.reshape(-1)
         msg = pb.ComponentBroadcast()
         msg.source_id = self.source_id
         msg.component_name = self.component_name
         msg.renamed_component = self.renamed_component
-        msg.timestamp_us = data.timestamp
-        msg.data_type = pb.PRIM_TYPE_F64  # Rust client converts all to f64
-        msg.shape.extend(data.shape)
-        # Pack f64 values as bytes
-        msg.data = struct.pack(f"<{len(data.values)}d", *data.values)
+        msg.timestamp_us = sample.timestamp_us
+        msg.data_type = pb.PRIM_TYPE_F64  # broadcast normalizes all values to f64
+        msg.shape.extend(int(dim) for dim in values.shape)
+        msg.data = flat_values.astype("<f8").tobytes()
         msg.sequence = self.sequence
 
         self.sequence += 1
@@ -329,11 +320,11 @@ class ComponentBroadcaster:
                 # UDP broadcast is fire-and-forget - ignore all errors
                 pass
 
-    def get_latest_data(self) -> Optional[ComponentData]:
+    def get_latest_data(self) -> Optional[edb.Sample]:
         """Get the latest component data."""
         if self.client:
             try:
-                return self.client.get_latest(self.component_name)
+                return self.client.latest(self.component_name)
             except Exception:
                 return None
         return None
@@ -391,10 +382,8 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Signal handler for clean shutdown - set up FIRST before any blocking calls
-    # Note: We use os._exit() because Rust's runtime.block_on() blocks Python's
-    # normal signal handling. The Rust code has 5-second timeouts, but for
-    # immediate response we force exit.
+    # Signal handler for clean shutdown - set up FIRST before any blocking calls.
+    # os._exit() gives immediate response even if a native call is in flight.
     def signal_handler(signum, frame):
         global _shutdown_requested
         print("\nShutting down...")
@@ -431,13 +420,14 @@ Examples:
         if _shutdown_requested:
             break
         # Print stats every second
-        data = broadcaster.get_latest_data()
-        conn_state = broadcaster.client.get_connection_state() if broadcaster.client else "Unknown"
-        if data:
-            values_preview = data.values[:4]
-            suffix = "..." if len(data.values) > 4 else ""
+        sample = broadcaster.get_latest_data()
+        conn_state = broadcaster.client.state() if broadcaster.client else "Unknown"
+        if sample:
+            values = np.asarray(sample.values).reshape(-1)
+            values_preview = values[:4].tolist()
+            suffix = "..." if values.size > 4 else ""
             logger.info(
-                f"Latest: {data.name} = {values_preview}{suffix} "
+                f"Latest: {sample.name} = {values_preview}{suffix} "
                 f"(seq={broadcaster.sequence}, packets={broadcaster.packets_sent})"
             )
         else:

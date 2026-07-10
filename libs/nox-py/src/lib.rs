@@ -11,6 +11,7 @@ pub mod archetype;
 pub mod component;
 pub mod cranelift_compile;
 pub mod cranelift_exec;
+pub mod db;
 pub mod dyn_array;
 pub mod entity;
 pub mod error;
@@ -171,7 +172,10 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     s10::register(m)?;
     monte_carlo::register(m)?;
-    env_logger::init();
+    db::register(m)?;
+    // try_init: the db module may have installed a tracing subscriber (which
+    // claims the global `log` logger) when ELODIN_DB_LOG is set.
+    let _ = env_logger::try_init();
     // Safety: called during single-threaded module init before any threads are spawned
     unsafe { std::env::set_var("JAX_ENABLE_X64", "1") };
     Ok(())

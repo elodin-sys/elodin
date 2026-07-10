@@ -28,23 +28,24 @@ This enables distributed simulation scenarios like having a target drone chase a
 
 ## Installation
 
+The scripts use the first-class `elodin.db` client from the `elodin` Python
+wheel (requires `elodin>=0.17.4`; see `libs/nox-py`).
+
 ```bash
-cd libs/db/examples/udp_component_broadcast
+cd fsw/udp_component_broadcast
 
 # Create virtual environment
 uv venv --python 3.13 && source .venv/bin/activate
 
-# Install dependencies
+# Install dependencies (includes the elodin wheel)
 uv pip install -r requirements.txt
-
-# Build the impeller_py Rust module
-cd impeller_py
-maturin develop --release
-cd ..
 
 # Generate protobuf code (if not already generated)
 protoc --python_out=. component_broadcast.proto
 ```
+
+From the repo's nix devshell, `just install` builds and installs the local
+elodin wheel instead.
 
 ## Quick Start
 
@@ -59,7 +60,7 @@ elodin editor examples/rc-jet/main.py
 
 On Machine A, in a separate terminal:
 ```bash
-cd libs/db/examples/udp_component_broadcast
+cd fsw/udp_component_broadcast
 source .venv/bin/activate
 python3 broadcast_component.py \
     --component bdx.world_pos \
@@ -71,7 +72,7 @@ python3 broadcast_component.py \
 
 On Machine B:
 ```bash
-cd libs/db/examples/udp_component_broadcast
+cd fsw/udp_component_broadcast
 source .venv/bin/activate
 python3 receive_broadcast.py
 ```
@@ -182,12 +183,6 @@ The broadcast uses Protocol Buffers for serialization with two message types:
 2. Check firewall allows UDP on port 41235
 3. Use `-v` flag to enable verbose logging
 
-### Building impeller_py fails
-
-1. Ensure Rust is installed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-2. Activate the virtualenv first: `source .venv/bin/activate`
-3. Make sure you created the venv with Python 3.13
-
 ### Connection to Elodin-DB fails
 
 1. Verify Elodin-DB is running
@@ -202,11 +197,7 @@ udp_component_broadcast/
 ├── component_broadcast.proto    # Protobuf message definitions
 ├── component_broadcast_pb2.py   # Generated protobuf code
 ├── broadcast_component.py       # Sender script
-├── receive_broadcast.py         # Receiver script
-└── impeller_py/                 # Rust PyO3 module for Elodin-DB
-    ├── Cargo.toml
-    ├── pyproject.toml
-    └── src/lib.rs
+└── receive_broadcast.py         # Receiver script
 ```
 
 ## License

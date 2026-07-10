@@ -718,8 +718,9 @@ class World(WorldBuilder):
         )
         locals = frame.f_locals
         if not interactive and addr is not None:
-            impeller_client = Impeller.tcp(addr)
-            locals["client"] = impeller_client
+            from . import db as _db
+
+            locals["client"] = _db.Client.connect(addr)
             readline.set_completer(rlcompleter.Completer(locals).complete)
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()

@@ -22,24 +22,17 @@ import sys
 import time
 import threading
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Set
+from typing import Optional, Dict, List, Set, Tuple
 
 import numpy as np
 
 # Import protobuf messages
 import component_broadcast_pb2 as pb
 
+import elodin.db as edb
+
 # Global flag for clean shutdown
 _shutdown_requested = False
-
-# Import the Rust-based impeller client
-try:
-    from impeller_py import ImpellerClient
-
-    IMPELLER_AVAILABLE = True
-except ImportError:
-    IMPELLER_AVAILABLE = False
-    logging.warning("impeller_py not available. Run 'maturin develop' in impeller_py/ first.")
 
 
 # Configure logging
@@ -98,9 +91,12 @@ class ComponentReceiver:
         # UDP receive socket
         self.recv_socket: Optional[socket.socket] = None
 
-        # Impeller client for writing to DB
-        self.client: Optional[ImpellerClient] = None
-        self._db_available = False
+        # Elodin-DB client + one non-blocking writer per component so a down
+        # DB never stalls the UDP receive loop (rows are dropped instead).
+        self.client: Optional[edb.Client] = None
+        self._writers: Dict[str, edb.TableWriter] = {}
+        self._writer_shapes: Dict[str, Tuple[int, ...]] = {}
+        self._writer_last_errors: Dict[str, str] = {}
 
         # Received components: renamed_name -> ReceivedComponent
         self.components: Dict[str, ReceivedComponent] = {}
@@ -134,20 +130,15 @@ class ComponentReceiver:
             logger.error(f"Failed to bind to port {self.listen_port}: {e}")
             return False
 
-        # Initialize Elodin-DB client if impeller_py is available
-        # (does not block on actual connection - writes will auto-reconnect)
-        if IMPELLER_AVAILABLE:
-            try:
-                self.client = ImpellerClient(self.db_addr)
-                self.client.connect()
-                self._db_available = True
-                logger.info(f"Initialized Elodin-DB client for {self.db_addr}")
-            except Exception as e:
-                logger.warning(f"Could not initialize Elodin-DB client: {e}")
-                logger.info("Running in print-only mode (will retry on writes)")
-                self.client = None
-        else:
-            logger.info("Running in print-only mode (impeller_py not available)")
+        # Initialize the Elodin-DB client (does not block on the actual
+        # connection - writers auto-reconnect).
+        try:
+            self.client = edb.Client.connect(self.db_addr)
+            logger.info(f"Initialized Elodin-DB client for {self.db_addr}")
+        except Exception as e:
+            logger.warning(f"Could not initialize Elodin-DB client: {e}")
+            logger.info("Running in print-only mode")
+            self.client = None
 
         self.running = True
         return True
@@ -159,13 +150,20 @@ class ComponentReceiver:
         if self.recv_socket:
             self.recv_socket.close()
 
+        dropped = sum(writer.dropped for writer in self._writers.values())
+        for writer in self._writers.values():
+            writer.close()
+        self._writers.clear()
+        self._writer_shapes.clear()
+        self._writer_last_errors.clear()
         if self.client:
-            self.client.disconnect()
+            self.client.close()
 
         logger.info(
             f"Stopped. Received {self.packets_received} packets "
             f"({self.bytes_received} bytes, {self.sequence_gaps} gaps, "
-            f"{self.writes_sent} writes, {self.write_errors} write errors)"
+            f"{self.writes_sent} writes enqueued, {dropped} dropped, "
+            f"{self.write_errors} write errors)"
         )
 
     def run(self):
@@ -246,9 +244,8 @@ class ComponentReceiver:
                 last_received=time.time(),
             )
 
-        # Write to Elodin-DB (handles reconnection if client was unavailable at startup)
-        if IMPELLER_AVAILABLE:
-            self._write_to_db(component_name, values.astype(np.float64), msg)
+        # Write to Elodin-DB (writers reconnect automatically)
+        self._write_to_db(component_name, values.astype(np.float64), msg)
 
     def _handle_heartbeat(self, msg: pb.BroadcastHeartbeat, addr: tuple):
         """Handle a BroadcastHeartbeat message."""
@@ -262,50 +259,49 @@ class ComponentReceiver:
     def _write_to_db(self, component_name: str, values: np.ndarray, msg: pb.ComponentBroadcast):
         """Write component data to Elodin-DB.
 
-        Uses persistent connection with automatic reconnection on failure.
-        Silently drops writes if DB is unavailable (acceptable for real-time data).
+        Non-blocking: rows are dropped (counted in the writer's `dropped`)
+        if the DB is unavailable — telemetry must never stall the receive loop.
         """
         if not self.client:
-            # Try to re-initialize client if it was None
-            if IMPELLER_AVAILABLE and not self._db_available:
-                try:
-                    self.client = ImpellerClient(self.db_addr)
-                    self.client.connect()
-                    self._db_available = True
-                    logger.info(f"Re-established Elodin-DB client for {self.db_addr}")
-                except Exception:
-                    return  # Silently skip this write
-            else:
-                return
+            return
+
+        db_shape = (
+            tuple(int(dim) for dim in msg.shape)
+            if msg.shape
+            else ((int(values.size),) if values.size > 1 else ())
+        )
+        db_values = values.reshape(db_shape) if db_shape else values.reshape(())
+
+        # Determine timestamp based on mode
+        if self.timestamp_mode == "local":
+            timestamp_us = int(time.time() * 1_000_000)
+        elif self.timestamp_mode == "monotonic":
+            timestamp_us = int(time.monotonic_ns() / 1000)
+        else:  # "sender" (default)
+            timestamp_us = msg.timestamp_us
+
+        def make_writer():
+            spec = edb.f64[db_shape] if db_shape else edb.f64
+            writer = self.client.table_writer({component_name: spec})
+            self._writers[component_name] = writer
+            self._writer_shapes[component_name] = db_shape
+            return writer
 
         try:
-            # Send component data using impeller_py (uses persistent connection)
-            # Values are already f64, convert to list
-            values_list = values.flatten().tolist()
-
-            # Determine timestamp based on mode
-            if self.timestamp_mode == "sender":
-                timestamp_us = msg.timestamp_us
-            elif self.timestamp_mode == "local":
-                timestamp_us = int(time.time() * 1_000_000)
-            elif self.timestamp_mode == "monotonic":
-                timestamp_us = int(time.monotonic_ns() / 1000)
-            else:
-                timestamp_us = msg.timestamp_us  # Fallback to sender
-
-            self.client.send_component(component_name, values_list, timestamp_us)
+            writer = self._writers.get(component_name)
+            if writer is not None and self._writer_shapes.get(component_name) != db_shape:
+                self._writers.pop(component_name).close()
+                self._writer_shapes.pop(component_name, None)
+                self._writer_last_errors.pop(component_name, None)
+                writer = None
+            writer = writer or make_writer()
+            writer.write_nowait(timestamp_us, {component_name: db_values})
             self.writes_sent += 1
-
         except Exception as e:
             self.write_errors += 1
             # Only log occasionally to avoid spam
             if self.write_errors <= 3 or self.write_errors % 100 == 0:
                 logger.warning(f"Failed to write to DB (error #{self.write_errors}): {e}")
-            # Try to reset the sender connection for next attempt
-            try:
-                self.client.reset_sender()
-            except Exception:
-                pass
 
     def get_component(self, name: str) -> Optional[ReceivedComponent]:
         """Get the latest data for a component."""
@@ -371,10 +367,8 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Signal handler for clean shutdown - set up FIRST before any blocking calls
-    # Note: We use os._exit() because Rust's runtime.block_on() blocks Python's
-    # normal signal handling. The Rust code has 5-second timeouts, but for
-    # immediate response we force exit.
+    # Signal handler for clean shutdown - set up FIRST before any blocking calls.
+    # os._exit() gives immediate response even if a native call is in flight.
     def signal_handler(signum, frame):
         global _shutdown_requested
         print("\nShutting down...")
@@ -429,11 +423,19 @@ def _print_status(receiver: ComponentReceiver):
 
         if sources:
             error_str = f", Errors: {receiver.write_errors}" if receiver.write_errors > 0 else ""
+            dropped = sum(writer.dropped for writer in receiver._writers.values())
+            drop_str = f", Dropped: {dropped}" if dropped > 0 else ""
             logger.info(
                 f"Sources: {len(sources)}, Components: {len(components)}, "
                 f"Packets: {receiver.packets_received}, Gaps: {receiver.sequence_gaps}, "
-                f"Writes: {receiver.writes_sent}{error_str}"
+                f"Writes enqueued: {receiver.writes_sent}{drop_str}{error_str}"
             )
+
+            for name, writer in receiver._writers.items():
+                last_error = writer.last_error
+                if last_error and receiver._writer_last_errors.get(name) != last_error:
+                    receiver._writer_last_errors[name] = last_error
+                    logger.warning(f"Writer {name} last_error: {last_error}")
 
             for name in components:
                 comp = receiver.get_component(name)

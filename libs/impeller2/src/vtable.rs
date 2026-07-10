@@ -685,6 +685,15 @@ pub mod builder {
     pub struct VTableBuilder {
         vtable: BuiltVTable,
         visited: BTreeMap<usize, OpRef>,
+        /// Keeps every visited op alive for the duration of the build.
+        ///
+        /// Deduplication in `visit` is by `Arc` pointer address; if a caller
+        /// builds fields lazily (e.g. an iterator passed to [`vtable`]) the
+        /// ops of already-processed fields would otherwise be dropped mid-
+        /// build, letting the allocator reuse their addresses and aliasing
+        /// unrelated ops to stale `visited` entries (corrupt vtables that
+        /// fail with `InvalidOp` on realize).
+        keepalive: Vec<Arc<OpBuilder>>,
     }
 
     impl VTableBuilder {
@@ -694,6 +703,7 @@ pub mod builder {
             if let Some(r) = self.visited.get(&id) {
                 return *r;
             }
+            self.keepalive.push(op.clone());
             let op = match op.as_ref() {
                 OpBuilder::Data { align, data } => {
                     let len = data.len() as u16;
