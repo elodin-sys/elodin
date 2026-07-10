@@ -346,6 +346,24 @@ def test_time_series_stop_is_half_open(client):
     writer.close()
 
 
+def test_time_series_empty_valid_ranges_return_empty_arrays(client):
+    writer = client.table_writer({"page.empty": edb.f64[2]})
+    writer.write(timestamp_us=100, values={"page.empty": [1.0, 2.0]})
+    assert _wait_for(lambda: len(client.time_series("page.empty", 0, 200)[0]) == 1)
+
+    for start_us, stop_us in [(0, 50), (150, 200)]:
+        ts, vals = client.time_series("page.empty", start_us, stop_us)
+        assert ts.shape == (0,)
+        assert vals.shape == (0, 2)
+        assert vals.dtype == np.float64
+    writer.close()
+
+
+def test_time_series_unknown_component_still_raises(client):
+    with pytest.raises(RuntimeError, match="time_series"):
+        client.time_series("page.missing", 0, 100)
+
+
 def test_earliest_timestamp(client):
     writer = client.table_writer({"early.v": edb.f64})
     writer.write(timestamp_us=123, values={"early.v": 1.0})

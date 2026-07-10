@@ -418,7 +418,6 @@ async fn paginated_time_series(
     let mut cursor = start;
     let mut skip = 0usize; // samples at `cursor` already consumed
     let mut total = 0usize;
-    let mut first_request = true;
 
     loop {
         let chunk_limit = match limit {
@@ -438,18 +437,17 @@ async fn paginated_time_series(
             .await
         {
             Ok(series) => series,
-            // The first request's errors (unknown component, empty range)
-            // propagate; on later pages a server-side "out of bounds" just
-            // means the remaining range is empty.
+            // GetSchema above already proved the component exists. A
+            // server-side "out of bounds" means this page is empty, including
+            // the first page for a valid component with no samples in range.
             Err(impeller2_stellar::Error::Response(err))
-                if !first_request && is_time_range_out_of_bounds_response(&err) =>
+                if is_time_range_out_of_bounds_response(&err) =>
             {
                 tracing::trace!("time series pagination finished: {err}");
                 break;
             }
             Err(e) => return Err(e),
         };
-        first_request = false;
         let timestamps = series
             .timestamps()
             .map_err(impeller2_stellar::Error::from)?;
