@@ -177,6 +177,8 @@ w.spawn(el.Panel.vsplit(cam, graph), name="main_view")
 
 ## SITL/HITL Integration
 
+The reference SITL example is `examples/betaflight-sitl/` (Betaflight flight controller in lockstep over UDP, recorded to a portable DB whose `assets/` tree makes it replayable anywhere).
+
 Use `pre_step`/`post_step` callbacks with `StepContext` for lockstep synchronization:
 
 ```python

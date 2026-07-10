@@ -1,24 +1,28 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 
 use crate::plugins::kdl_document::{
-    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastActiveSchematicContent,
+    LastSyncedActiveKey, LastSyncedAssetsRevision, PendingActiveSchematic, SchematicDocumentAsset,
+    fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,
+    upload_db_save_plan,
 };
-use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
+use crate::skybox_generation::{
+    LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
+};
 use bevy::{
+    app::Update,
     asset::{AssetServer, Assets},
     camera::visibility::RenderLayers,
     ecs::{
+        change_detection::DetectChanges,
         query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
     log::error,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Resource, Transform},
+    prelude::{Entity, In, MessageWriter, Mut, Resource, Transform},
+    tasks::{IoTaskPool, Task, futures_lite::future},
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{
@@ -33,11 +37,11 @@ use impeller2::types::Timestamp;
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
 };
-use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
+use impeller2_kdl::ToKdl;
 use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, CurrentTimestamp, EarliestTimestamp, IsRecording, LastUpdated,
-    Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
+    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
+    LastUpdated, Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
 use nox::ArrayBuf;
 
@@ -50,8 +54,7 @@ use crate::{
         command_palette::CommandPaletteState,
         plot::{GraphBundle, graph_lines_from_component},
         schematic::{
-            CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, OpenDocumentRequest,
-            SaveCurrentDocumentRequest, WindowDocumentSave,
+            CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, WindowDocumentSave,
         },
         tiles::{self, set_mode_all},
         timeline::{
@@ -61,15 +64,79 @@ use crate::{
     },
 };
 
-/// Stores a path to the last directory used in the schematic load dialog.
-///
-/// I would have preferred for this to be a `Local<Option<PathBuf>>`, but the
-/// `BoxedSystem` that PaletteItem stores is regenerated every time.
-#[derive(Debug, Default, Resource, Deref, DerefMut)]
-struct DialogLastPath(Option<PathBuf>);
-
 pub(crate) fn plugin(app: &mut bevy::app::App) {
-    app.init_resource::<DialogLastPath>();
+    app.init_resource::<PendingSchematicSaveKey>()
+        .init_resource::<SchematicSaveInFlight>()
+        .init_resource::<SchematicIndexCache>()
+        .add_systems(Update, (poll_schematic_save, refresh_schematic_index));
+}
+
+/// Carries the target asset key chosen in the "Save Schematic" name prompt into
+/// the shared DB-save system. `None` means the save falls back to whatever
+/// schematic is currently active.
+#[derive(Resource, Default)]
+pub(crate) struct PendingSchematicSaveKey(pub Option<String>);
+
+/// In-flight DB-native schematic save (RFD #724). The HTTP `PUT`s run off the
+/// main thread on the IO task pool; `poll_schematic_save` repoints
+/// `schematic.active` once they all land, so a slow DB never freezes the UI.
+#[derive(Resource, Default)]
+pub struct SchematicSaveInFlight {
+    task: Option<Task<Result<(), String>>>,
+    active_key: Option<String>,
+    /// Skybox name embedded in the saved schematic (`None` = cleared), pushed as
+    /// `skybox.active` once the upload lands so the DB metadata tracks the saved
+    /// KDL instead of a stale value (there is no `schematic.content` mirror).
+    skybox: Option<String>,
+    /// The "Save As" name consumed for this save, restored to
+    /// `PendingSchematicSaveKey` if the upload fails so a retry still targets
+    /// the chosen name rather than the previous active schematic.
+    pending_key: Option<String>,
+    /// Bytes uploaded for the active schematic, recorded as the known stored
+    /// content once the save lands so later `assets.revision` bumps from
+    /// unrelated asset writes don't reload the document (Bug 1/2).
+    content: Option<String>,
+    /// `(key, KDL)` of each uploaded window sub-schematic, recorded alongside
+    /// the root so the revision-gate's window comparison doesn't mistake our
+    /// own save for an external window change (Bug 2).
+    window_contents: Vec<(String, String)>,
+}
+
+impl SchematicSaveInFlight {
+    /// True while this client's multi-`PUT` save is still uploading. Config sync
+    /// uses it to ignore its own in-flight `assets.revision` bumps rather than
+    /// reload a partially written schematic tree (RFD #724, Bug 1).
+    pub(crate) fn is_saving(&self) -> bool {
+        self.task.is_some()
+    }
+
+    /// An in-flight instance backed by a never-completing task, for tests that
+    /// exercise the "save still uploading" window. Requires an initialized
+    /// `IoTaskPool` (present under `MinimalPlugins`).
+    #[cfg(test)]
+    pub(crate) fn saving_stub() -> Self {
+        Self {
+            task: Some(
+                IoTaskPool::get()
+                    .spawn(async { std::future::pending::<Result<(), String>>().await }),
+            ),
+            ..Default::default()
+        }
+    }
+}
+
+/// Cached listing of the DB's stored schematics (RFD #724). Refreshed off the
+/// main thread on connect and whenever `DbConfig` changes, so "Open Schematic…"
+/// presents the list without a blocking HTTP request.
+#[derive(Resource, Default)]
+pub(crate) struct SchematicIndexCache {
+    keys: Vec<String>,
+    error: Option<String>,
+    loaded_once: bool,
+    /// Connection the cached listing came from, so reconnecting or switching to
+    /// a different DB re-lists instead of showing a previous session's assets.
+    addr: Option<SocketAddr>,
+    task: Option<Task<Result<Vec<String>, String>>>,
 }
 
 pub struct PalettePage {
@@ -80,6 +147,9 @@ pub struct PalettePage {
     /// Filter text active on this page when it was left for a sub-page, so it
     /// can be restored when the user navigates back (e.g. a skybox prompt).
     pub remembered_filter: Option<String>,
+    /// Text to pre-fill the search box with when this page opens, so a prompt
+    /// can offer an editable default (e.g. the current schematic name on save).
+    pub initial_filter: Option<String>,
 }
 
 impl PalettePage {
@@ -90,11 +160,19 @@ impl PalettePage {
             label: None,
             prompt: None,
             remembered_filter: None,
+            initial_filter: None,
         }
     }
 
     pub fn label(mut self, label: impl ToString) -> Self {
         self.label = Some(label.to_string());
+        self
+    }
+
+    /// Pre-fill the search box with `filter` when this page opens. The value is
+    /// editable, so it doubles as a default the user can keep or replace.
+    pub fn initial_filter(mut self, filter: impl ToString) -> Self {
+        self.initial_filter = Some(filter.to_string());
         self
     }
 
@@ -268,6 +346,7 @@ const SIMULATION_LABEL: &str = "Simulation";
 const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
+const SCHEMATIC_LABEL: &str = "Schematic";
 const SKYBOX_LABEL: &str = "Skybox";
 
 struct ViewportEntry {
@@ -950,52 +1029,418 @@ fn goto_tick() -> PaletteItem {
     })
 }
 
-pub fn save_schematic_as() -> PaletteItem {
-    PaletteItem::new(
-        "Save Schematic As...",
-        PRESETS_LABEL,
-        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into_event(),
-    )
-}
-
+/// Save the current schematic in place (RFD #724 Phase 2): overwrites the
+/// schematic the user is on — an in-flight repoint pin or the last synced key
+/// wins over a stale `DbConfig` echo, falling back to `schematics/main.kdl` on
+/// a fresh DB — with no name prompt. "Save Schematic As..." is the named
+/// variant.
 pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
-        PRESETS_LABEL,
-        |_name: In<String>, mut commands: Commands| {
-            // Capture descriptors/screens, rebuild schematics, then serialize in a dedicated system.
+        SCHEMATIC_LABEL,
+        |_: In<String>,
+         config: Res<DbConfig>,
+         pending_active: Res<PendingActiveSchematic>,
+         last_synced: Res<LastSyncedActiveKey>,
+         mut pending_key: ResMut<PendingSchematicSaveKey>,
+         mut commands: Commands| {
+            pending_key.0 = Some(active_write_key(&pending_active, &last_synced, &config));
             commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
             commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
-            commands.run_system_cached(queue_save_schematic_now);
+            commands.run_system_cached(queue_save_schematic_db_now);
             PaletteEvent::Exit
         },
     )
 }
 
-fn queue_save_schematic_now(
+/// Save the current schematic under a chosen name (`schematics/<name>.kdl`),
+/// which also repoints `schematic.active` and populates the
+/// "Open Schematic..." picker. Pre-fills the active schematic's name so
+/// keeping it overwrites in place.
+pub fn save_schematic_as() -> PaletteItem {
+    PaletteItem::new(
+        "Save Schematic As...",
+        SCHEMATIC_LABEL,
+        |_: In<String>,
+         config: Res<DbConfig>,
+         pending_active: Res<PendingActiveSchematic>,
+         last_synced: Res<LastSyncedActiveKey>| {
+            // Resolve the name like skybox edits do: an in-flight repoint pin or
+            // the last synced key wins over a stale `DbConfig` echo, so a Save
+            // right after "Open Schematic…"/"Save As…" pre-fills the schematic
+            // the user is actually on.
+            let default_name =
+                schematic_name_from_key(&active_write_key(&pending_active, &last_synced, &config))
+                    .unwrap_or_default();
+            PalettePage::new(vec![save_schematic_name_prompt()])
+                .label("Save Schematic As")
+                .prompt("Enter a schematic name...")
+                .initial_filter(default_name)
+                .into_event()
+        },
+    )
+}
+
+fn save_schematic_name_prompt() -> PaletteItem {
+    PaletteItem::new(
+        LabelSource::placeholder("Enter a schematic name..."),
+        SCHEMATIC_LABEL,
+        |In(name): In<String>,
+         mut pending_key: ResMut<PendingSchematicSaveKey>,
+         mut commands: Commands| {
+            let key = match schematic_save_key_from_name(&name) {
+                Ok(key) => key,
+                Err(err) => return PaletteEvent::Error(err),
+            };
+            pending_key.0 = Some(key);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(queue_save_schematic_db_now);
+            PaletteEvent::Exit
+        },
+    )
+    // Placeholder items have an empty label, so the fuzzy filter drops them as
+    // soon as the user types the name — mark it default so it stays selectable
+    // and the typed name reaches the action (matches every other text prompt).
+    .default()
+}
+
+/// DB-native save (RFD #724 Phase 2): upload the active schematic, its window
+/// sub-schematics and any newly added local assets to the DB Asset Server over
+/// HTTP `PUT`, then point `schematic.active` at the uploaded schematic. The
+/// `PUT`s are acknowledged and complete before `SetDbConfig` is sent, so the
+/// pointer never claims a save that did not land.
+#[allow(clippy::too_many_arguments)]
+fn queue_save_schematic_db_now(
     schematic: Res<CurrentSchematic>,
     window_schematics: Res<CurrentWindowSchematics>,
     skybox_cache: Option<Res<SkyboxCache>>,
-    mut requests: MessageWriter<SaveCurrentDocumentRequest>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    config: Res<DbConfig>,
+    mut pending_key: ResMut<PendingSchematicSaveKey>,
+    mut save_in_flight: ResMut<SchematicSaveInFlight>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
-    requests.write(SaveCurrentDocumentRequest {
-        path: None,
-        root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
-        windows: window_document_saves(&window_schematics),
+    // A "Save As" supplies an explicit key; a plain "Save" overwrites whatever
+    // schematic is currently active (falling back to the default main key on a
+    // fresh DB). Resolve the target without consuming the pending name yet: a
+    // rejected or disconnected save must keep it so a retry still targets the
+    // chosen name rather than silently writing to the previous active schematic.
+    let pending = pending_key.0.clone();
+    let active_key = pending.clone().unwrap_or_else(|| {
+        config
+            .schematic_active()
+            .map(str::to_string)
+            .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string())
     });
+
+    if save_in_flight.task.is_some() {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Schematic".to_string(),
+            message: "A schematic save is already in progress.".to_string(),
+        });
+        return;
+    }
+
+    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Schematic".to_string(),
+            message: "Not connected to a database.".to_string(),
+        });
+        return;
+    };
+
+    let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
+    let windows = window_document_saves(&window_schematics);
+    // A rejected plan (e.g. "Save As" name colliding with a window's key) keeps
+    // the pending name so a retry re-prompts with the same target.
+    let plan = match plan_db_save(&root, &windows, &active_key) {
+        Ok(plan) => plan,
+        Err(err) => {
+            failed.write(DocumentCommandFailed {
+                title: "Failed to Save Schematic".to_string(),
+                message: err,
+            });
+            return;
+        }
+    };
+
+    // Committed to uploading: consume the pending name now. `poll_schematic_save`
+    // restores it if the upload itself fails.
+    pending_key.0 = None;
+
+    // Record the active key once the upload lands so config sync doesn't mistake
+    // the DB's echo of our own save for an external change (which would reload
+    // over HTTP on the saving client).
+    save_in_flight.active_key = Some(active_key);
+    save_in_flight.skybox = root.skybox.as_ref().map(|s| s.name.clone());
+    save_in_flight.pending_key = pending;
+    save_in_flight.content = plan.active_schematic_kdl().map(str::to_string);
+    save_in_flight.window_contents = plan.window_schematic_kdls();
+    // Upload off the main thread; `poll_schematic_save` repoints `schematic.active`
+    // only after every `PUT` is acknowledged, so the pointer never claims a save
+    // that did not land.
+    save_in_flight.task =
+        Some(IoTaskPool::get().spawn(async move { upload_db_save_plan(&plan, Some(addr)) }));
 }
 
-pub fn save_schematic_db() -> PaletteItem {
+/// Applies the outcome of an in-flight DB-native save: on success, record the
+/// stored content and repoint `schematic.active`; on failure, surface it.
+#[allow(clippy::too_many_arguments)]
+fn poll_schematic_save(
+    mut save_in_flight: ResMut<SchematicSaveInFlight>,
+    tx: Option<Res<PacketTx>>,
+    mut pending_key: ResMut<PendingSchematicSaveKey>,
+    mut pending_active: ResMut<PendingActiveSchematic>,
+    mut last_synced: ResMut<LastSyncedActiveKey>,
+    mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
+    mut last_content: Option<ResMut<LastActiveSchematicContent>>,
+    mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    let Some(task) = save_in_flight.task.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(task)) else {
+        return;
+    };
+    save_in_flight.task = None;
+    let active_key = save_in_flight.active_key.take();
+    let saved_skybox = save_in_flight.skybox.take();
+    let pending = save_in_flight.pending_key.take();
+    let saved_content = save_in_flight.content.take();
+    let saved_windows = std::mem::take(&mut save_in_flight.window_contents);
+
+    match result {
+        Ok(()) => {
+            // Repointing `schematic.active` requires the packet channel. Without
+            // it the PUTs landed but the DB would keep the old active key while
+            // we assumed the new one — so don't update sync state or pin a key we
+            // can't announce; report failure and keep the Save-As name for retry.
+            let Some(tx) = tx else {
+                if pending.is_some() {
+                    pending_key.0 = pending;
+                }
+                failed.write(DocumentCommandFailed {
+                    title: "Failed to Save Schematic".to_string(),
+                    message: "Not connected to a database.".to_string(),
+                });
+                return;
+            };
+            if let Some(active_key) = active_key {
+                // The key we're moving away from (currently loaded == DB active)
+                // is the stale pointer the pin should tolerate until our repoint
+                // echoes; capture it before overwriting last_synced.
+                let superseded = last_synced.0.clone();
+                last_synced.0 = Some(active_key.clone());
+                // Our own PUTs bumped `assets.revision`; adopt the echoed bump as
+                // the new baseline instead of reloading the bytes we just wrote
+                // (RFD #724, Bug 1).
+                if let Some(revision) = last_synced_revision.as_deref_mut() {
+                    revision.suppress_next = true;
+                }
+                // These bytes are now the stored content at the key (root and
+                // window sub-schematics): a later revision bump from an
+                // unrelated asset write must not reload.
+                if let Some(last_content) = last_content.as_deref_mut() {
+                    if let Some(content) = saved_content.as_deref() {
+                        last_content.record(&active_key, content);
+                    }
+                    for (key, kdl) in &saved_windows {
+                        last_content.record_window(key, kdl);
+                    }
+                }
+                // Pin the key we just saved so config sync ignores the DB's still
+                // -stale active pointer until it echoes this repoint, avoiding a
+                // brief revert to the previously active schematic.
+                pending_active.pin(active_key.clone(), superseded);
+                // Push `skybox.active` alongside the repoint so the DB metadata
+                // tracks the saved KDL's skybox (empty = cleared); with no
+                // `schematic.content` mirror this is the only signal. Mark it as
+                // locally pushed so the DB skybox mirror treats it as our own
+                // change (authoritative until the config echo lands) rather than
+                // external drift to re-assert the previous skybox.
+                locally_pushed.mark(saved_skybox.as_deref());
+                tx.send_msg(SetDbConfig {
+                    metadata: [
+                        ("schematic.active".to_string(), active_key),
+                        (
+                            "skybox.active".to_string(),
+                            saved_skybox.unwrap_or_default(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    ..Default::default()
+                });
+            }
+        }
+        Err(err) => {
+            // Restore the "Save As" name so the next save retries the chosen
+            // target instead of overwriting the previous active schematic.
+            if pending.is_some() {
+                pending_key.0 = pending;
+            }
+            failed.write(DocumentCommandFailed {
+                title: "Failed to Save Schematic".to_string(),
+                message: err,
+            });
+        }
+    }
+}
+
+/// Refreshes [`SchematicIndexCache`] off the main thread: warms it on connect
+/// and re-lists whenever `DbConfig` changes (e.g. after a save adds a schematic).
+fn refresh_schematic_index(
+    config: Option<Res<DbConfig>>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    mut cache: ResMut<SchematicIndexCache>,
+) {
+    if let Some(task) = cache.task.as_mut() {
+        if let Some(result) = future::block_on(future::poll_once(task)) {
+            cache.task = None;
+            cache.loaded_once = true;
+            match result {
+                Ok(keys) => {
+                    cache.keys = keys;
+                    cache.error = None;
+                }
+                // Drop the now-unverified list so "Open Schematic…" surfaces the
+                // error instead of offering stale names that may no longer exist.
+                Err(err) => {
+                    cache.keys.clear();
+                    cache.error = Some(err);
+                }
+            }
+        }
+        return;
+    }
+
+    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+        // Disconnected: drop the listing so a later connection re-lists and we
+        // never offer assets from a previous session.
+        if cache.loaded_once || !cache.keys.is_empty() || cache.error.is_some() {
+            *cache = SchematicIndexCache::default();
+        }
+        return;
+    };
+    let config_changed = config.as_ref().is_some_and(|c| c.is_changed());
+    let connection_changed =
+        cache.addr != Some(addr) || connection_addr.as_ref().is_some_and(|c| c.is_changed());
+    if cache.loaded_once && !config_changed && !connection_changed {
+        return;
+    }
+    cache.addr = Some(addr);
+    cache.task = Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)) }));
+}
+
+pub fn clear_schematic() -> PaletteItem {
     PaletteItem::new(
-        "Save Schematic To DB",
-        PRESETS_LABEL,
-        |_name: In<String>,
-         tx: Res<PacketTx>,
-         schematic: Res<CurrentSchematic>,
-         skybox_cache: Option<Res<SkyboxCache>>| {
-            let kdl = root_kdl_for_save(&schematic, skybox_cache.as_deref());
+        "Clear Schematic",
+        SCHEMATIC_LABEL,
+        |_: In<String>,
+         mut params: LoadSchematicParams,
+         mut skyboxes: MessageWriter<SetActiveSkybox>,
+         mut skybox_cache: ResMut<SkyboxCache>,
+         mut skybox_mirror: ResMut<crate::skybox_db_assets::DbSkyboxAssetMirror>,
+         config: Res<DbConfig>| {
+            params.current_document.clear();
+            params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
+            // `load_schematic` despawns every schematic entity and zeroes
+            // `CurrentSchematic.skybox`, but the skybox is a global render
+            // resource, not an entity, so it survives unless we clear it too.
+            // Reset it here so a cleared view drops the skybox like every other
+            // asset (RFD #724). Local-only, matching the rest of the clear: it
+            // doesn't touch `skybox.active` in the DB, and "Open Schematic"
+            // re-applies the stored skybox on reload.
+            skyboxes.write(SetActiveSkybox::Clear);
+            skybox_cache.active = None;
+            // The DB's `skybox.active` still names the cleared skybox; tell the
+            // mirror this drift is intentional so it doesn't re-assert it one
+            // frame later and undo the clear.
+            skybox_mirror.note_local_clear(config.skybox_active().map(str::to_string));
+            PaletteEvent::Exit
+        },
+    )
+}
+
+/// DB-native load (RFD #724 Phase 2): present the schematics the DB Asset Server
+/// holds — listed off the main thread into [`SchematicIndexCache`] — and open
+/// the chosen one over HTTP.
+pub fn open_schematic() -> PaletteItem {
+    PaletteItem::new(
+        "Open Schematic...",
+        SCHEMATIC_LABEL,
+        |_: In<String>,
+         index: Res<SchematicIndexCache>,
+         connection_addr: Option<Res<ConnectionAddr>>| {
+            if connection_addr.is_none() {
+                return PaletteEvent::Error("Not connected to a database".into());
+            }
+            if index.keys.is_empty() {
+                if let Some(err) = &index.error {
+                    return PaletteEvent::Error(format!("Failed to list schematics: {err}"));
+                }
+                if !index.loaded_once {
+                    return PaletteEvent::Error("Loading schematics from the database…".into());
+                }
+                return PaletteEvent::Error("No schematics found in the database".into());
+            }
+            let items = index
+                .keys
+                .iter()
+                .cloned()
+                .map(open_schematic_item)
+                .collect();
+            PalettePage::new(items)
+                .label("Open Schematic")
+                .prompt("Select a schematic to open...")
+                .into_event()
+        },
+    )
+}
+
+fn open_schematic_item(key: String) -> PaletteItem {
+    let label = key
+        .strip_prefix("schematics/")
+        .unwrap_or(&key)
+        .strip_suffix(".kdl")
+        .map(str::to_string)
+        .unwrap_or_else(|| key.clone());
+    PaletteItem::new(
+        label,
+        SCHEMATIC_LABEL,
+        move |_: In<String>,
+              tx: Res<PacketTx>,
+              config: Res<DbConfig>,
+              mut pending_active: ResMut<PendingActiveSchematic>,
+              mut last_synced: ResMut<LastSyncedActiveKey>,
+              mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>| {
+            // Repoint the DB's active schematic rather than loading locally:
+            // config sync then loads it over HTTP, and `schematic.active` stays
+            // authoritative so later DbConfig updates and "Save Schematic" both
+            // target the schematic the user just opened.
+            //
+            // Pin the requested key so config sync ignores the DB's still-stale
+            // pointer until it echoes this repoint, instead of momentarily
+            // reloading the schematic we're switching away from. Record the key
+            // we're leaving so the pin releases if the pointer moves elsewhere.
+            let superseded = config.schematic_active().map(str::to_string);
+            pending_active.pin(key.clone(), superseded);
+            // Force a reload even when the chosen key is already `schematic.active`:
+            // the user explicitly asked to open it, and the on-screen document may
+            // no longer match that key (e.g. after "Clear Schematic", which resets
+            // the view locally without moving the pointer). Without this, config
+            // sync sees `last_synced == active` at an unchanged revision and skips
+            // the reload, leaving the cleared/empty view in place.
+            last_synced.0 = None;
+            if let Some(revision) = last_synced_revision.as_deref_mut() {
+                revision.revision = None;
+                revision.suppress_next = false;
+                revision.requested = None;
+            }
             tx.send_msg(SetDbConfig {
-                metadata: [("schematic.content".to_string(), kdl)]
+                metadata: [("schematic.active".to_string(), key.clone())]
                     .into_iter()
                     .collect(),
                 ..Default::default()
@@ -1005,46 +1450,24 @@ pub fn save_schematic_db() -> PaletteItem {
     )
 }
 
-pub fn clear_schematic() -> PaletteItem {
-    PaletteItem::new(
-        "Clear Schematic",
-        PRESETS_LABEL,
-        |_: In<String>, mut params: LoadSchematicParams| {
-            params.current_document.clear();
-            params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn save_schematic_inner() -> PaletteItem {
-    PaletteItem::new(
-        LabelSource::placeholder("Enter a name for the schematic"),
-        "",
-        move |In(name): In<String>,
-              schematic: Res<CurrentSchematic>,
-              window_schematics: Res<CurrentWindowSchematics>,
-              skybox_cache: Option<Res<SkyboxCache>>,
-              mut requests: MessageWriter<SaveCurrentDocumentRequest>| {
-            requests.write(SaveCurrentDocumentRequest {
-                path: Some(PathBuf::from(name)),
-                root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
-                windows: window_document_saves(&window_schematics),
-            });
-            PaletteEvent::Exit
-        },
-    )
-    .default()
-}
-
-fn root_kdl_for_save(schematic: &CurrentSchematic, skybox_cache: Option<&SkyboxCache>) -> String {
+fn root_schematic_for_save(
+    schematic: &CurrentSchematic,
+    skybox_cache: Option<&SkyboxCache>,
+) -> impeller2_wkt::Schematic {
     let mut root = schematic.0.clone();
-    if let Some(cache) = skybox_cache {
-        root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
+    // Prefer the cache's active skybox when it asserts one: it's the live truth
+    // if the user switched skyboxes through a path that didn't touch
+    // `CurrentSchematic`. But when the cache asserts *no* active skybox, don't
+    // wipe the document's own skybox — an empty cache means "loading / not yet
+    // confirmed" (or a cubemap that failed to load), not "cleared". Every genuine
+    // clear also zeroes `CurrentSchematic.skybox`, so a `Some` here is a skybox
+    // the user is looking at and must not be dropped on save (RFD #724).
+    if let Some(active) = skybox_cache.and_then(|cache| cache.active.as_ref()) {
+        root.skybox = Some(SkyboxConfig {
             name: active.clone(),
         });
     }
-    root.to_kdl()
+    root
 }
 
 fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<WindowDocumentSave> {
@@ -1057,78 +1480,6 @@ fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<Win
             kdl: entry.schematic.to_kdl(),
         })
         .collect()
-}
-
-pub fn load_schematic() -> PaletteItem {
-    PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let Ok(dir) = schematic_dir_or_cwd().inspect_err(|e| error!(?e, "getting schematic dir"))
-        else {
-            return PaletteEvent::Exit;
-        };
-        let elems = match std::fs::read_dir(&dir) {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "reading schematic dir {:?}", dir.display());
-                return PaletteEvent::Exit;
-            }
-        };
-
-        let mut items = vec![load_schematic_picker()];
-        let mut file = dir;
-        for elem in elems {
-            let Ok(elem) = elem else { continue };
-            let path = elem.path();
-            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if path.extension().and_then(|e| e.to_str()) != Some("kdl") {
-                continue;
-            }
-            file.push(file_name);
-            if let Some(item) = load_schematic_inner(&file) {
-                items.push(item);
-            }
-            file.pop();
-        }
-        PalettePage::new(items).into()
-    })
-}
-
-pub fn load_schematic_picker() -> PaletteItem {
-    PaletteItem::new(
-        "Use File Dialog",
-        "",
-        |_: In<String>,
-         mut requests: MessageWriter<OpenDocumentRequest>,
-         mut last_dir: ResMut<DialogLastPath>| {
-            let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
-            if let Some(dir) = last_dir.take().or_else(|| schematic_dir_or_cwd().ok()) {
-                dialog = dialog.set_directory(dir);
-            }
-            if let Some(path) = dialog.pick_file() {
-                **last_dir = path.parent().map(PathBuf::from);
-                requests.write(OpenDocumentRequest(path));
-            }
-            PaletteEvent::Exit
-        },
-    )
-}
-
-fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
-    let name = path
-        .file_name()
-        .map(|name_os| name_os.to_string_lossy().into_owned());
-    let path = PathBuf::from(path);
-    name.map(|name| {
-        PaletteItem::new(
-            name,
-            "",
-            move |_: In<String>, mut requests: MessageWriter<OpenDocumentRequest>| {
-                requests.write(OpenDocumentRequest(path.clone()));
-                PaletteEvent::Exit
-            },
-        )
-    })
 }
 
 pub fn set_color_scheme() -> PaletteItem {
@@ -1201,23 +1552,31 @@ fn clear_skybox() -> PaletteItem {
          mut schematic: ResMut<CurrentSchematic>,
          mut current_document: ResMut<CurrentDocument>,
          mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
-         mut last_synced_content: ResMut<LastSyncedSchematicContent>,
          mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
          tx: Res<PacketTx>| {
             if cache.active.is_none() && schematic.skybox.is_none() {
                 return PaletteEvent::Error("No skybox is active".into());
             }
             skyboxes.write(SetActiveSkybox::Clear);
-            SkyboxDocumentSyncMut {
-                schematic: &mut schematic,
-                current_document: &mut current_document,
-                document_assets: &mut document_assets,
-                last_synced_content: &mut last_synced_content,
-                locally_pushed: &mut locally_pushed,
-                cache: &mut cache,
-                tx: &tx,
-            }
-            .sync_skybox_to_document_and_db(None);
+            // Live-view clear: update the in-memory document and
+            // `CurrentSchematic` (so a later "Save Schematic" persists the
+            // clear) and push `skybox.active=""` for followers — but do NOT
+            // rewrite the stored schematic. The saved bytes keep their skybox,
+            // so re-opening the schematic restores it.
+            crate::plugins::kdl_document::sync_document_skybox(
+                None,
+                &mut current_document,
+                &mut document_assets,
+                &mut schematic,
+            );
+            crate::skybox_generation::sync_cache_active_from_skybox(&mut cache, None);
+            crate::skybox_generation::push_skybox_db_sync(
+                &tx,
+                None,
+                None,
+                ACTIVE_SCHEMATIC_KEY,
+                &mut locally_pushed,
+            );
             PaletteEvent::Exit
         },
     )
@@ -1233,18 +1592,24 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut schematic: ResMut<CurrentSchematic>,
               mut current_document: ResMut<CurrentDocument>,
               mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
-              mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+              mut last_synced_key: ResMut<LastSyncedActiveKey>,
+              mut last_content: ResMut<LastActiveSchematicContent>,
               mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+              pending_active: Res<PendingActiveSchematic>,
+              config: Res<DbConfig>,
               tx: Res<PacketTx>| {
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+            let write_key = active_write_key(&pending_active, &last_synced_key, &config);
             SkyboxDocumentSyncMut {
                 schematic: &mut schematic,
                 current_document: &mut current_document,
                 document_assets: &mut document_assets,
-                last_synced_content: &mut last_synced_content,
+                last_synced_key: &mut last_synced_key,
+                last_content: &mut last_content,
                 locally_pushed: &mut locally_pushed,
                 cache: &mut cache,
                 tx: &tx,
+                active_key: &write_key,
             }
             .sync_skybox_to_document_and_db(Some(SkyboxConfig { name: name.clone() }));
             PaletteEvent::Exit
@@ -1794,8 +2159,7 @@ impl Default for PalettePage {
             create_3d_object(),
             save_schematic(),
             save_schematic_as(),
-            save_schematic_db(),
-            load_schematic(),
+            open_schematic(),
             clear_schematic(),
             skybox_menu(),
             set_color_scheme_mode(),
@@ -1819,9 +2183,47 @@ mod tests {
     use super::*;
     use impeller2_kdl::FromKdl;
     use impeller2_wkt::Schematic;
+    use std::path::PathBuf;
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {
         Schematic::from_kdl(kdl).expect("saved KDL should parse")
+    }
+
+    #[test]
+    fn active_write_key_prefers_pending_pin_then_last_synced() {
+        let mut config = DbConfig::default();
+        config.set_schematic_active("schematics/main.kdl");
+
+        // Pending repoint pin (e.g. right after Save As) wins over the stale
+        // echoed config.
+        let mut pin = PendingActiveSchematic::default();
+        pin.pin("schematics/orbit.kdl".to_string(), None);
+        let last = LastSyncedActiveKey(Some("schematics/other.kdl".to_string()));
+        assert_eq!(
+            active_write_key(&pin, &last, &config),
+            "schematics/orbit.kdl"
+        );
+
+        // No pin: fall back to the last synced key over config.
+        let no_pin = PendingActiveSchematic::default();
+        assert_eq!(
+            active_write_key(&no_pin, &last, &config),
+            "schematics/other.kdl"
+        );
+
+        // No pin and no last synced: use the config's active key.
+        let no_last = LastSyncedActiveKey(None);
+        assert_eq!(
+            active_write_key(&no_pin, &no_last, &config),
+            "schematics/main.kdl"
+        );
+
+        // Nothing set: default active key.
+        let empty_config = DbConfig::default();
+        assert_eq!(
+            active_write_key(&no_pin, &no_last, &empty_config),
+            ACTIVE_SCHEMATIC_KEY
+        );
     }
 
     #[test]
@@ -1830,7 +2232,7 @@ mod tests {
         let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
         cache.active = Some("mont_blanc_france".to_string());
 
-        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert_eq!(
@@ -1850,7 +2252,7 @@ mod tests {
         let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
         cache.active = Some("mont_blanc_france".to_string());
 
-        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert_eq!(
@@ -1860,7 +2262,11 @@ mod tests {
     }
 
     #[test]
-    fn save_kdl_clears_stale_schematic_skybox_when_cache_has_no_active_skybox() {
+    fn save_kdl_preserves_schematic_skybox_when_cache_has_no_active_skybox() {
+        // Cache present but asserting no active skybox happens while a loaded
+        // skybox's cubemap is still resolving (or failed) — not a user clear,
+        // which zeroes `CurrentSchematic.skybox` too. The document's skybox must
+        // survive the save so reopening still shows it (RFD #724).
         let schematic = CurrentSchematic(Schematic {
             skybox: Some(SkyboxConfig {
                 name: "grand_canyon".to_string(),
@@ -1869,10 +2275,13 @@ mod tests {
         });
         let cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
 
-        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let kdl = root_schematic_for_save(&schematic, Some(&cache)).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
-        assert!(parsed.skybox.is_none());
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("grand_canyon")
+        );
     }
 
     #[test]
@@ -1884,7 +2293,7 @@ mod tests {
             ..Default::default()
         });
 
-        let kdl = root_kdl_for_save(&schematic, None);
+        let kdl = root_schematic_for_save(&schematic, None).to_kdl();
         let parsed = parse_saved_schematic(&kdl);
 
         assert_eq!(

@@ -132,7 +132,7 @@ The GLB assets are loaded from `assets/` by default. If you run from another
 working directory, set:
 
 ```sh
-ELODIN_ASSETS_DIR=/home/dan/dev/elodin/assets
+ELODIN_ASSETS=/home/dan/dev/elodin/assets
 ```
 
 Set `ELODIN_KDL_DIR=examples/apollo-lander` before launching the editor to
