@@ -662,6 +662,60 @@
                 </li>
                 
                 <li>
+                    <a href="/reference/python-api/#elodin-db-client">Elodin DB Client</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-client">class elodin.db.Client</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-server">class elodin.db.Server</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-tablewriter">class elodin.db.TableWriter</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#schema-fields-elodin-db-field">Schema fields (elodin.db.Field)</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-sample">class elodin.db.Sample</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-streamrow">class elodin.db.StreamRow</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-componentstream-elodin-db-messagestream">class elodin.db.ComponentStream &#x2F; elodin.db.MessageStream</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-db-componentinfo">class elodin.db.ComponentInfo</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#function-elodin-db-sql-table-name">function elodin.db.sql_table_name</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
                     <a href="/reference/python-api/#schematic-syntax-for-3d-objects">Schematic Syntax for 3D Objects</a>
                     
                     <ul>
@@ -1709,6 +1763,196 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <p>Get the inertia tensor diagonal of the spatial inertia with shape (3,).</p>
 </li>
 </ul>
+<p><br></br></p>
+<h2 id="elodin-db-client">Elodin DB Client</h2>
+<p>The <code>elodin.db</code> module is a standalone Elodin DB client for plain Python processes — ones that are <em>not</em> an Elodin simulation. It can start or connect to a database, write telemetry (batched, typed, and shaped), and read it back (latest value, historical ranges, live streams, fixed-rate replay, SQL, and message logs). See the <a href="/home/db/python-client">Python Client guide</a> for a walkthrough; inside simulation callbacks use <a href="/reference/python-api/#class-elodin-stepcontext">elodin.StepContext</a> instead.</p>
+<p>All timestamps in the public API are <strong>microseconds</strong> (<code>int</code>), the database's native resolution.</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">elodin</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">db</span></span> <span class="z-keyword z-control z-import z-as z-python">as</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">edb</span></span></span>
+</span></code></pre>
+<h3 id="class-elodin-db-client"><em>class</em> <code>elodin.db.Client</code></h3>
+<p>Client for a running Elodin DB (external <code>elodin-db run</code> or an embedded <a href="/reference/python-api/#class-elodin-db-server">elodin.db.Server</a>). Usable as a context manager.</p>
+<ul>
+<li>
+<p><code>connect(addr)</code> -&gt; <a href="/reference/python-api/#class-elodin-db-client">elodin.db.Client</a> <em>(classmethod)</em></p>
+<p>Connect to a database. Writers and the latest-value subscription reconnect automatically with exponential backoff.</p>
+<ul>
+<li><code>addr</code> : <code>string</code>, e.g. <code>"127.0.0.1:2240"</code>.</li>
+</ul>
+</li>
+<li>
+<p><code>table_writer(schema, queue="drop-oldest", maxlen=1024, timestamp="us")</code> -&gt; <a href="/reference/python-api/#class-elodin-db-tablewriter">elodin.db.TableWriter</a></p>
+<p>Create a batched writer for a fixed set of components sharing one timestamp.</p>
+<ul>
+<li><code>schema</code> : <code>dict[str, Field]</code>, component name → field spec (e.g. <code>{"drone.imu.accel": edb.f64[3].labeled("x", "y", "z")}</code>).</li>
+<li><code>queue</code> : <code>string</code>, overflow policy for <code>write_nowait</code>: <code>"drop-oldest"</code> (default; evicts the oldest queued row so fresh telemetry wins) or <code>"drop-newest"</code> (discards the incoming row).</li>
+<li><code>maxlen</code> : <code>int</code>, bounded queue depth, defaults to <code>1024</code>.</li>
+<li><code>timestamp</code> : <code>string</code>, shared timestamp unit: <code>"us"</code> (default) or <code>"ns"</code> for nanosecond sources (the database stores microseconds).</li>
+</ul>
+</li>
+<li>
+<p><code>send(name, values, timestamp_us)</code> -&gt; None</p>
+<p>Convenience single-component <code>f64</code> write (one writer cached per name). Prefer <code>table_writer</code> for hot loops.</p>
+</li>
+<li>
+<p><code>components()</code> -&gt; <code>dict[str, ComponentInfo]</code></p>
+<p>All components registered in the database (name → <a href="/reference/python-api/#class-elodin-db-componentinfo">elodin.db.ComponentInfo</a>).</p>
+</li>
+<li>
+<p><code>earliest_timestamp()</code> -&gt; <code>int</code></p>
+<p>Earliest data timestamp in the database (microseconds).</p>
+</li>
+<li>
+<p><code>latest(name)</code> -&gt; <a href="/reference/python-api/#class-elodin-db-sample">elodin.db.Sample</a> | None</p>
+<p>Latest sample seen on the real-time stream. Starts a background subscription on first call, so it may return <code>None</code> until data flows. Values keep their true dtype and shape (an <code>i64</code> counter comes back as <code>int64</code>, a 3×3 tensor as shape <code>(3, 3)</code>).</p>
+</li>
+<li>
+<p><code>time_series(name, start_us, stop_us, limit=None)</code> -&gt; <code>(numpy.ndarray, numpy.ndarray)</code></p>
+<p>Historical samples of <code>name</code> in <code>[start_us, stop_us)</code>, paginated internally for large ranges. Returns <code>(timestamps, values)</code>: <code>timestamps</code> is <code>int64</code> microseconds of shape <code>(N,)</code>; <code>values</code> has shape <code>(N, *component_shape)</code> and the component's dtype.</p>
+</li>
+<li>
+<p><code>stream(names, rate_hz=None, start=None, maxlen=1024)</code> -&gt; <a href="/reference/python-api/#class-elodin-db-componentstream-elodin-db-messagestream">elodin.db.ComponentStream</a></p>
+<p>Iterate rows of the named components.</p>
+<ul>
+<li><code>names</code> : <code>string | list[str]</code>, components to include.</li>
+<li><code>rate_hz</code> : <code>float</code>, optional. <code>None</code> (default) streams new data live; a value replays recorded data at a fixed rate.</li>
+<li><code>start</code> : replay start (requires <code>rate_hz</code>): <code>"earliest"</code> (default), <code>"latest"</code>, or an <code>int</code> microsecond timestamp.</li>
+<li><code>maxlen</code> : <code>int</code>, bounded row-queue depth. Replay streams backpressure instead of dropping rows.</li>
+</ul>
+</li>
+<li>
+<p><code>sql(query)</code> -&gt; <code>pyarrow.Table</code></p>
+<p>Run a DataFusion SQL query over the same socket. Component time series are exposed as tables named by <a href="/reference/python-api/#function-elodin-db-sql-table-name">elodin.db.sql_table_name</a> (e.g. <code>drone.imu.accel</code> → <code>drone_imu_accel</code>), each with a <code>time</code> column plus one column per element.</p>
+</li>
+<li>
+<p><code>send_msg(name, payload, timestamp_us)</code> -&gt; None</p>
+<p>Append one message to the log named <code>name</code>. Payload encoding is a v1 convenience: <code>bytes</code> pass through untouched, <code>str</code> is UTF-8, anything else is JSON.</p>
+</li>
+<li>
+<p><code>get_msgs(name, start_us, stop_us, limit=None, raw=False)</code> -&gt; <code>list[(int, payload)]</code></p>
+<p>Historical messages as <code>[(timestamp_us, payload)]</code>. Bounds follow the database's message-log semantics: the range is inclusive of <code>stop_us</code>, and <code>start_us</code> snaps to the message at or before it. Payloads are JSON-decoded when they parse as JSON; pass <code>raw=True</code> for bytes.</p>
+</li>
+<li>
+<p><code>msg_stream(name, maxlen=1024, raw=False)</code> -&gt; <a href="/reference/python-api/#class-elodin-db-componentstream-elodin-db-messagestream">elodin.db.MessageStream</a></p>
+<p>Live stream of new messages on <code>name</code> as <code>(timestamp_us, payload)</code> tuples. Bursts may coalesce to the latest message per server wake; use <code>get_msgs</code> for lossless history.</p>
+</li>
+<li>
+<p><code>state()</code> -&gt; <code>string</code></p>
+<p>Connection state of the latest-value subscription: <code>"Disconnected"</code>, <code>"Connecting"</code>, <code>"Connected"</code>, or <code>"Reconnecting"</code>.</p>
+</li>
+<li>
+<p><code>close()</code> -&gt; None</p>
+<p>Stop the client's background threads and cached writers.</p>
+</li>
+</ul>
+<h3 id="class-elodin-db-server"><em>class</em> <code>elodin.db.Server</code></h3>
+<p>Embedded Elodin DB server — the same engine as <code>elodin-db run</code> — for tests, notebooks, and single-process setups. Usable as a context manager.</p>
+<ul>
+<li>
+<p><code>start(path, addr="127.0.0.1:2240")</code> -&gt; <a href="/reference/python-api/#class-elodin-db-server">elodin.db.Server</a> <em>(static)</em></p>
+<p>Bind <code>addr</code> (errors such as port-in-use raise immediately) and serve the database at <code>path</code> on a background thread until <code>stop()</code> or process exit.</p>
+</li>
+<li>
+<p><code>addr</code> -&gt; <code>string</code>, <code>path</code> -&gt; <code>string</code></p>
+<p>The bound address and data directory.</p>
+</li>
+<li>
+<p><code>stop()</code> -&gt; None</p>
+<p>Stop the server; existing data stays on disk.</p>
+</li>
+</ul>
+<h3 id="class-elodin-db-tablewriter"><em>class</em> <code>elodin.db.TableWriter</code></h3>
+<p>Batched telemetry writer: every <code>write</code> emits exactly one Impeller2 <code>Table</code> packet — a shared <code>i64</code> timestamp followed by each field's values — one packet per tick, not one per component. All declared fields are required on every write; use one writer per rate group. Reconnects automatically, replaying the metadata + vtable handshake. Usable as a context manager.</p>
+<ul>
+<li>
+<p><code>write(timestamp_us=None, values=None, *, timestamp_ns=None)</code> -&gt; None</p>
+<p>Blocking write; raises if the row cannot be handed to the socket. Pass the kwarg matching the writer's timestamp unit.</p>
+<ul>
+<li><code>values</code> : <code>dict[str, array-like]</code>, one entry per declared field.</li>
+</ul>
+</li>
+<li>
+<p><code>write_nowait(timestamp_us=None, values=None, *, timestamp_ns=None)</code> -&gt; None</p>
+<p>Non-blocking write for control loops: costs microseconds, never blocks, and never raises for transport reasons. On overflow or an unreachable database, rows are shed per the queue policy and counted in <code>dropped</code>.</p>
+</li>
+<li>
+<p><code>dropped</code> -&gt; <code>int</code></p>
+<p>Rows shed so far (queue overflow or connection loss).</p>
+</li>
+<li>
+<p><code>last_error</code> -&gt; <code>string | None</code></p>
+<p>Most recent transport error or database rejection — e.g. re-registering an existing component with a different shape surfaces here asynchronously.</p>
+</li>
+<li>
+<p><code>state()</code> -&gt; <code>string</code></p>
+<p><code>"Connected"</code> or <code>"Disconnected"</code>.</p>
+</li>
+<li>
+<p><code>row_size</code> -&gt; <code>int</code></p>
+<p>Packed row size in bytes (timestamp + all fields).</p>
+</li>
+<li>
+<p><code>close()</code> -&gt; None</p>
+<p>Close the writer and join its thread.</p>
+</li>
+</ul>
+<div class="el-warning warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Timestamps must be monotonically increasing per component; the database rejects out-of-order writes.</p>
+</div>
+    </div>
+</div>
+<h3 id="schema-fields-elodin-db-field">Schema fields (<code>elodin.db.Field</code>)</h3>
+<p>Field specs declare a component's dtype, shape, and optional element labels. The module exposes one instance per primitive type — <code>f64</code>, <code>f32</code>, <code>i8</code>…<code>i64</code>, <code>u8</code>…<code>u64</code>, <code>bool_</code> — which you index and label:</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">edb</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">f64</span></span>                            <span class="z-comment z-line z-number-sign z-python"><span class="z-punctuation z-definition z-comment z-python">#</span> scalar
+</span></span><span class="z-source z-python"><span class="z-meta z-item-access z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">edb</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">f32</span></span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-begin z-python">[</span></span><span class="z-meta z-item-access z-arguments z-python"><span class="z-constant z-numeric z-integer z-decimal z-python">3</span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-end z-python">]</span></span>                         <span class="z-comment z-line z-number-sign z-python"><span class="z-punctuation z-definition z-comment z-python">#</span> vector of 3
+</span></span><span class="z-source z-python"><span class="z-meta z-item-access z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">edb</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">f64</span></span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-begin z-python">[</span></span><span class="z-meta z-item-access z-arguments z-python"><span class="z-constant z-numeric z-integer z-decimal z-python">3</span>, <span class="z-constant z-numeric z-integer z-decimal z-python">3</span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-end z-python">]</span></span>                      <span class="z-comment z-line z-number-sign z-python"><span class="z-punctuation z-definition z-comment z-python">#</span> rank-2 tensor (up to rank 3)
+</span></span><span class="z-source z-python"><span class="z-meta z-item-access z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">edb</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">f64</span></span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-begin z-python">[</span></span><span class="z-meta z-item-access z-arguments z-python"><span class="z-constant z-numeric z-integer z-decimal z-python">3</span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-end z-python">]</span></span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">labeled</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">x<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">y<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">z<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>  <span class="z-comment z-line z-number-sign z-python"><span class="z-punctuation z-definition z-comment z-python">#</span> editor axis labels (element_names)
+</span></span></code></pre>
+<ul>
+<li><code>__getitem__(dims)</code> -&gt; <a href="/reference/python-api/#schema-fields-elodin-db-field">elodin.db.Field</a> — set the shape (int or tuple, up to rank 3).</li>
+<li><code>labeled(*names)</code> -&gt; <a href="/reference/python-api/#schema-fields-elodin-db-field">elodin.db.Field</a> — one label per element; drives Editor axis labels.</li>
+<li><code>dtype</code> -&gt; <code>numpy.dtype</code>, <code>count</code> -&gt; <code>int</code>, <code>nbytes</code> -&gt; <code>int</code>.</li>
+</ul>
+<h3 id="class-elodin-db-sample"><em>class</em> <code>elodin.db.Sample</code></h3>
+<p>One component sample from <code>Client.latest</code>.</p>
+<ul>
+<li><code>name</code> : <code>string</code> — component name.</li>
+<li><code>timestamp_us</code> : <code>int</code>.</li>
+<li><code>values</code> : <code>numpy.ndarray</code> — true dtype and shape.</li>
+</ul>
+<h3 id="class-elodin-db-streamrow"><em>class</em> <code>elodin.db.StreamRow</code></h3>
+<p>One row from <code>Client.stream</code>: the requested components present in that tick.</p>
+<ul>
+<li><code>timestamp_us</code> : <code>int</code> — the newest sample timestamp in the row.</li>
+<li><code>values</code> : <code>dict[str, numpy.ndarray]</code>; also indexable directly (<code>row["drone.imu.accel"]</code>).</li>
+<li><code>timestamps</code> : <code>dict[str, int]</code> — each component's own sample timestamp. A batched stream carries each component's <em>latest</em> value, so when mixing rates a slow component's sample can be older than <code>timestamp_us</code>.</li>
+</ul>
+<h3 id="class-elodin-db-componentstream-elodin-db-messagestream"><em>class</em> <code>elodin.db.ComponentStream</code> / <code>elodin.db.MessageStream</code></h3>
+<p>Iterators returned by <code>Client.stream</code> and <code>Client.msg_stream</code>. Iteration ends when the stream is closed or its connection fails. Both are context managers; call <code>close()</code> to stop the underlying subscription.</p>
+<h3 id="class-elodin-db-componentinfo"><em>class</em> <code>elodin.db.ComponentInfo</code></h3>
+<p>Component schema + metadata from <code>Client.components()</code>.</p>
+<ul>
+<li><code>name</code> : <code>string</code>, <code>prim_type</code> : <code>string</code> (e.g. <code>"f64"</code>), <code>shape</code> : <code>list[int]</code>, <code>element_names</code> : <code>list[str]</code>, <code>metadata</code> : <code>dict[str, str]</code>.</li>
+</ul>
+<h3 id="function-elodin-db-sql-table-name"><em>function</em> <code>elodin.db.sql_table_name</code></h3>
+<ul>
+<li>
+<p><code>sql_table_name(component_name)</code> -&gt; <code>string</code></p>
+<p>The DataFusion table name the database derives from a component name (e.g. <code>drone.imu.accel</code> → <code>drone_imu_accel</code>). Delegates to the exact conversion the server uses, so it can never drift.</p>
+</li>
+</ul>
+<div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Set <code>ELODIN_DB_LOG=debug</code> (any <code>tracing</code> filter works) to surface the embedded server's and client's diagnostics from an <code>elodin.db</code>-using process.</p>
+</div>
+    </div>
+</div>
 <p><br></br></p>
 <h2 id="schematic-syntax-for-3d-objects">Schematic Syntax for 3D Objects</h2>
 <p>When visualizing entities in the Elodin editor, you can define 3D objects using KDL schematic syntax. The <code>object_3d</code> declaration connects a visual representation to an entity's <code>world_pos</code> component.</p>
