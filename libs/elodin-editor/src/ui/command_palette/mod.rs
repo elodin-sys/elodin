@@ -122,7 +122,9 @@ impl CommandPaletteState {
                         prev.label = Some(prev_page_label);
                     }
                 }
-                self.filter = String::new();
+                // A page can seed the search box with an editable default (e.g.
+                // the current schematic name on save); otherwise start empty.
+                self.filter = next_page.initial_filter.clone().unwrap_or_default();
                 self.page_stack.push(next_page);
                 self.input_focus = true;
                 self.selected_index = 0;

@@ -1,7 +1,10 @@
 # Betaflight SITL Drone Simulation
 
-This example demonstrates how to run a Software-In-The-Loop (SITL) drone simulation
-using Elodin's physics engine with Betaflight's flight controller software.
+This is the reference SITL (Software-In-The-Loop) example: an Elodin physics
+simulation driving a real Betaflight flight controller in lockstep, recorded to
+a portable Elodin DB. The same integration pattern (`post_step` + `StepContext`)
+scales to HITL on the Aleph flight computer, where the on-board `elodin-db`
+service produces the same kind of self-contained recording.
 
 ## Overview
 
@@ -108,6 +111,21 @@ elodin run examples/betaflight-sitl/main.py
 ```bash
 python3 examples/betaflight-sitl/main.py run
 ```
+
+### Recorded Database
+
+Each run records to an auto-numbered `betaflight_dbXXX` directory. The schematic
+and its assets (the drone GLB) are ingested under `{db}/assets/`, so the
+directory is a complete, portable record — copy it anywhere and replay it:
+
+```bash
+elodin-db run 127.0.0.1:2240 betaflight_db000
+elodin editor 127.0.0.1:2240          # add --replay for live-style playback
+```
+
+On the Aleph flight computer the on-board `elodin-db` service applies the same
+ingest to each fresh boot database, so a HITL recording pulled off the vehicle
+replays the same way. See [DB Asset Server](https://docs.elodin.systems/reference/db-asset-server/).
 
 ### Quick Arming Test
 

@@ -82,6 +82,7 @@
       #   autostart = true;                 # Set to false to configure but not auto-start
       #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
       #   openFirewall = true;              # Open TCP & UDP ports for external access
+      #   assetsDir = "/var/lib/elodin/assets"; # Assets ingested into each fresh db (null to disable)
       # };
 
       # Elodin simulation CLI, examples, and assets
@@ -92,7 +93,7 @@
       # };
       #
       # Any user can run sims. Shared, writable asset root:
-      #   ELODIN_ASSETS_DIR=/var/lib/elodin/assets   (drop your own meshes/skyboxes here)
+      #   ELODIN_ASSETS=/var/lib/elodin/assets   (drop your own meshes/skyboxes here)
       # Packaged examples: /var/lib/elodin/examples
       # To deploy your own assets/sims declaratively, override
       #   services.elodin.assetsPackage / services.elodin.examplesPackage
