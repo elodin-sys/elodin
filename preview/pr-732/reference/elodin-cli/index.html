@@ -954,7 +954,7 @@ processes each run spawns. When neither is set, the runner sizes itself from
 logical cores; <code>S10_MAX_INFLIGHT</code> remains a low-level escape hatch for
 budgeting by process count instead of run count. Only a numeric
 <code>S10_MAX_INFLIGHT</code> overrides <code>campaign.toml</code>'s <code>workers</code>; <code>off</code> (or an
-unparseable value) disables admission limiting without overriding the
+unparsable value) disables admission limiting without overriding the
 configured worker count.</p>
 <p>Before anything launches, the runner takes an exclusive lock on the out dir
 (<code>campaign.lock</code>) so two campaigns cannot interleave in the same output,
