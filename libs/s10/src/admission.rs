@@ -82,7 +82,7 @@ fn resolve_max_inflight() -> Option<usize> {
 }
 
 /// The explicit numeric budget carried by `S10_MAX_INFLIGHT`, if any.
-/// `"off"`-style and unparseable values yield `None`: they disable admission
+/// `"off"`-style and unparsable values yield `None`: they disable admission
 /// limiting but express no budget, so callers deciding precedence (e.g. the
 /// monte-carlo `workers` knob) must not treat them as an override.
 pub fn env_budget() -> Option<usize> {
