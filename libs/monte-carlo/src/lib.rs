@@ -2048,6 +2048,34 @@ async fn preflight_static_ports(template: &ports::SlotTemplate, slot: &ResourceS
     Err(miette!("preflight: `{name}` {owner}"))
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn release_ports_and_run_recipe(
+    run_id: String,
+    recipe: s10::Recipe,
+    watch: bool,
+    release: bool,
+    token: CancelToken,
+    admission_permit: Option<s10::admission::AdmissionPermit>,
+    run_cgroup: Option<Arc<s10::CgroupScope>>,
+    port_guards: Vec<ports::PortGuard>,
+) -> Result<()> {
+    // Async functions are lazy: dropping guards in the caller releases ports
+    // before this future is polled (and before timeout setup). Own and drop
+    // them here so release and recipe startup happen in the same poll, with no
+    // intervening await or caller-side work.
+    drop(port_guards);
+    s10::cli::run_recipe_with_token_admitted_in_cgroup(
+        run_id,
+        recipe,
+        watch,
+        release,
+        token,
+        admission_permit,
+        run_cgroup,
+    )
+    .await
+}
+
 async fn run_one(
     row: &PlanRow,
     worker_id: usize,
@@ -2082,6 +2110,7 @@ async fn run_one(
     fs::create_dir_all(&run_dir).into_diagnostic()?;
 
     let (slot, port_guards) = resolve_run_slot(template, &row.run_id)?;
+    let mut port_guards = Some(port_guards);
     let mut preflight_failure = preflight_static_ports(template, &slot).await.err();
 
     let context_path = run_dir.join("context.json");
@@ -2124,14 +2153,13 @@ async fn run_one(
             .ok()
             .flatten()
     });
-    // Release dynamic-port guards only now, just before the recipe spawns.
-    drop(port_guards);
     let preflight_failed = preflight_failure.is_some();
     let mut failure_reason: Option<String> = None;
     let result = if let Some(reason) = preflight_failure.take() {
+        drop(port_guards.take());
         Err(reason)
     } else {
-        let fut = s10::cli::run_recipe_with_token_admitted_in_cgroup(
+        let fut = release_ports_and_run_recipe(
             row.run_id.clone(),
             recipe,
             false,
@@ -2139,6 +2167,7 @@ async fn run_one(
             token.clone(),
             admission_permit,
             run_cgroup.clone(),
+            port_guards.take().expect("port guards released once"),
         );
         if let Some(timeout) = parse_duration(ctx.config.timeout.as_deref())? {
             let mut fut = Box::pin(fut);
