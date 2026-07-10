@@ -952,7 +952,10 @@ workers. Concurrency comes from <code>--workers N</code> (or <code>workers = N</
 <code>campaign.toml</code>): exactly N runs execute at once regardless of how many
 processes each run spawns. When neither is set, the runner sizes itself from
 logical cores; <code>S10_MAX_INFLIGHT</code> remains a low-level escape hatch for
-budgeting by process count instead of run count.</p>
+budgeting by process count instead of run count. Only a numeric
+<code>S10_MAX_INFLIGHT</code> overrides <code>campaign.toml</code>'s <code>workers</code>; <code>off</code> (or an
+unparseable value) disables admission limiting without overriding the
+configured worker count.</p>
 <p>Before anything launches, the runner takes an exclusive lock on the out dir
 (<code>campaign.lock</code>) so two campaigns cannot interleave in the same output,
 validates the entire static port plan for every worker (u16 overflow,
@@ -1035,10 +1038,14 @@ campaign-wide <code>[env]</code> table.</li>
 fast scratch filesystem; each run's surviving artifacts move to <code>--out</code>
 (sparse-aware) as it finishes. <code>auto</code> picks <code>/dev/shm</code> when present. Use
 this when the artifact volume cannot sustain <code>workers x</code> DB write IOPS
-(network/EBS-class disks). If a run's final move fails (e.g. the artifact
-volume fills up), the run is marked failed with the destination error and
-its scratch copy is preserved — the campaign never deletes a scratch tree
-that still holds run artifacts, and logs the path to recover them from.</li>
+(network/EBS-class disks). When <code>auto</code> finds no <code>/dev/shm</code>, the campaign
+logs that per-run IO is staying on the artifact volume. If a run's final
+move fails (e.g. the artifact volume fills up), the run is marked failed
+with the destination error and its scratch copy is preserved — the campaign
+never deletes a scratch tree that still holds run artifacts, and logs the
+path to recover them from. The scratch location is deterministic per out
+dir, so <code>resume</code> finds preserved passed runs and finishes the move instead
+of re-running them (a fresh <code>run</code> clears the campaign's scratch tree first).</li>
 <li><code>--cache-dir &lt;DIR&gt;</code>: override the compile cache. The default lives in
 <code>~/.cache/elodin/monte-carlo/const-cache</code> (content-addressed, shared across
 campaigns) so <code>--clean</code> and fresh out dirs never cause a compile storm.</li>
