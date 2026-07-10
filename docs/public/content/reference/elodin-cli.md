@@ -28,6 +28,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin-db fix-timestamps`↴](#elodin-db-fix-timestamps)
 * [`elodin-db merge`↴](#elodin-db-merge)
 * [`elodin-db prune`↴](#elodin-db-prune)
+* [`elodin-db compact`↴](#elodin-db-compact)
 * [`elodin-db truncate`↴](#elodin-db-truncate)
 * [`elodin-db time-align`↴](#elodin-db-time-align)
 * [`elodin-db drop`↴](#elodin-db-drop)
@@ -84,7 +85,7 @@ Launch the Elodin editor (default)
 
 Run an Elodin simulation in headless mode (not available on Windows)
 
-**Usage:** `elodin run [--monte-carlo PLAN.csv] [addr/path]`
+**Usage:** `elodin run [addr/path]`
 
 ###### **Arguments**
 
@@ -93,7 +94,7 @@ Run an Elodin simulation in headless mode (not available on Windows)
   - A TOML file (e.g., `s10.toml`)
   - A directory containing `main.py` or `s10.toml`
 
-* `--monte-carlo <PLAN.csv>` — Sugar for `elodin monte-carlo run <addr/path> --plan PLAN.csv`.
+For campaigns, use `elodin monte-carlo run` (below).
 
 ## `elodin monte-carlo`
 
@@ -101,11 +102,35 @@ Run a simulation campaign with a bounded worker pool. Each worker owns a
 deterministic resource slot (DB port and user-defined SITL ports), and the
 runner recycles those slots across arbitrarily many runs. The campaign pins a
 shared `ELODIN_CACHE_DIR` so large Cranelift constants are mapped once across
-workers. Concurrency is governed by the s10 admission budget `S10_MAX_INFLIGHT`
-(default: logical cores): the runner executes `floor(S10_MAX_INFLIGHT /
-recipe_weight)` runs at once and sizes its orchestrator I/O thread pool from the
-same budget. Campaign startup reaps prior campaign-scoped cgroups by default so
-stale sidecars from an interrupted run cannot collide with worker ports.
+workers. Concurrency comes from `--workers N` (or `workers = N` in
+`campaign.toml`): exactly N runs execute at once regardless of how many
+processes each run spawns. When neither is set, the runner sizes itself from
+logical cores; `S10_MAX_INFLIGHT` remains a low-level escape hatch for
+budgeting by process count instead of run count. Only a numeric
+`S10_MAX_INFLIGHT` overrides `campaign.toml`'s `workers`; `off` (or an
+unparsable value) disables admission limiting without overriding the
+configured worker count.
+
+Before anything launches, the runner takes an exclusive lock on the out dir
+(`campaign.lock`) so two campaigns cannot interleave in the same output,
+validates the entire static port plan for every worker (u16 overflow,
+cross-name collisions), warns when planned ports fall inside the kernel
+ephemeral range, raises its own file-descriptor limit, and reaps prior
+campaign-scoped cgroups plus campaign-marked processes still bound to a
+campaign port. Foreign port owners block startup with pid/name details instead
+of being killed. Each run preflight-probes its static ports and reports
+squatters by pid/name (`port 20034 already bound by pid 320389 (weaverd)`). On timeout the
+runner tears the run down via its cgroup when one is available and via
+per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
+(e.g. a plain ssh session) the campaign transparently re-executes itself under
+`systemd-run --user --scope` — for both `run` and `resume` (opt out with
+`--no-self-scope`).
+
+Every worker slot also reserves `db_port + 1` for elodin-db's always-on asset
+server (the headless sensor-camera renderer fetches scene assets from it):
+the assets port is validated, preflight-probed, and exported as
+`ELODIN_MC_PORT_DB_ASSETS`, and a `db_port = "auto"` allocation always yields
+a consecutive db/assets port pair.
 
 **Usage:** `elodin monte-carlo <COMMAND>`
 
@@ -173,21 +198,39 @@ elodin monte-carlo run examples/monte-carlo/main.py \
 
 Key options:
 
-- `--plan <PLAN.csv>`: materialized one-row-per-run plan.
+- `--workers <N>`: run exactly N runs at once. Wins over `S10_MAX_INFLIGHT`
+  and `campaign.toml`'s `workers`. Default: sized from logical cores.
+- `--plan <PLAN.csv>`: materialized one-row-per-run plan. If a sibling
+  `spec.toml` is newer than the plan, the runner warns that the plan is stale.
 - `--spec <SPEC.toml>`: sampling spec; sampled into a plan before execution.
-- `--campaign <CAMPAIGN.toml>`: resource slots, hooks, retries, timeouts.
-- `S10_MAX_INFLIGHT` (environment variable, not a flag): the single concurrency
-  knob. The runner plans the per-run recipe, counts its processes
-  (`recipe_weight`), and executes `floor(S10_MAX_INFLIGHT / recipe_weight)` runs
-  at once (clamped to the plan size). Defaults to the host's logical core count;
-  set it higher to oversubscribe I/O-bound SITL stacks, or `off` to disable
-  admission limiting entirely.
+- `--campaign <CAMPAIGN.toml>`: workers, resource slots, hooks, retries,
+  timeouts, retention, quality gates, scratch dir, `[[build]]` steps, and a
+  campaign-wide `[env]` table.
+- `--scratch-dir <DIR|auto>`: run per-run IO (including the embedded DB) on a
+  fast scratch filesystem; each run's surviving artifacts move to `--out`
+  (sparse-aware) as it finishes. `auto` picks `/dev/shm` when present. Use
+  this when the artifact volume cannot sustain `workers x` DB write IOPS
+  (network/EBS-class disks). When `auto` finds no `/dev/shm`, the campaign
+  logs that per-run IO is staying on the artifact volume. If a run's final
+  move fails (e.g. the artifact volume fills up), the run is marked failed
+  with the destination error and its scratch copy is preserved — the campaign
+  never deletes a scratch tree that still holds run artifacts, and logs the
+  path to recover them from. The scratch location is deterministic per out
+  dir, so `resume` finds preserved passed runs and finishes the move instead
+  of re-running them (a fresh `run` clears the campaign's scratch tree first).
+- `--cache-dir <DIR>`: override the compile cache. The default lives in
+  `~/.cache/elodin/monte-carlo/const-cache` (content-addressed, shared across
+  campaigns) so `--clean` and fresh out dirs never cause a compile storm.
+- `--strict-ports`: error (instead of warn) when planned ports fall inside the
+  kernel ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`).
+- `--no-self-scope`: do not re-exec under `systemd-run --user --scope` when no
+  delegated cgroup is available.
 - `--runtime-threads <N>`: override the orchestrator I/O thread pool. When unset
-  (or `0`) it is auto-sized from `S10_MAX_INFLIGHT`, capped at logical cores.
+  (or `0`) it is auto-sized from the worker budget, capped at logical cores.
 - `--memory-probe`: enable expensive shared-constant PSS sampling and
   `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
-- `--keep-existing`: do not reap existing `elodin` / `elodin-db` processes at
-  campaign startup.
+- `--keep-existing`: do not reap prior campaign cgroups or campaign-marked
+  processes bound to campaign ports at startup.
 - `--fail-on-errors`: exit non-zero when any run failed or missed scoring.
   Off by default so exploratory campaigns can finish with partial failures.
   Also configurable as `fail_on_run_errors = true` in `campaign.toml`. For CI
@@ -197,6 +240,32 @@ Key options:
 - `--clean`: prune `runs/` directories that are not part of the active plan.
 - Campaigns always display a live progress TUI with aggregate counts and active
   worker progress while they run.
+
+`campaign.toml` additions beyond the flags above:
+
+- `[resources.ports]` values may be a numeric base (shifted by
+  `worker_id * port_stride`, validated up front for every worker) or `"auto"`
+  (allocated dynamically per run, collision-free by construction). Sims read
+  them via `el.monte_carlo.port("name")` / `ELODIN_MC_PORT_<NAME>` either way.
+  `db_port` also accepts `"auto"` (allocated together with its `db_port + 1`
+  assets port). Placing a named port on `db_port + 1` is rejected — that port
+  always belongs to the asset server.
+- `[env]`: extra environment variables for every run's processes.
+- `[[build]]`: any number of one-time build steps run before workers start.
+- `[retention]`: `keep_run_db = "always" | "never" | "on-fail"`, plus
+  `prune_on_pass` / `prune_on_fail` glob lists (relative to the run dir)
+  removed after scoring, and `compact_run_db` (default `true`) which truncates
+  kept DBs' preallocated files to their real size.
+- `[quality]`: `max_behind_deadline_frac` / `max_real_time_factor` mark runs
+  whose real-time pacing degraded as `degraded` (they are excluded from
+  passes; `fail_on_degraded = true` also counts them toward
+  `fail_on_run_errors`). Use this to keep oversubscribed campaigns from
+  silently ingesting load-skewed samples.
+
+The runner also injects machine-sympathy defaults into every run when the user
+has not set them: `OMP_NUM_THREADS` / `OPENBLAS_NUM_THREADS` /
+`MKL_NUM_THREADS` and XLA CPU thread flags sized to `max(1, cores / workers)`,
+so N concurrent sims do not each size their thread pools to every core.
 
 Simulations that ingest parameters from a file (rather than via
 `el.monte_carlo.params(...)`) can configure `[params_delivery]` in
@@ -209,7 +278,14 @@ Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
 `--memory-probe`, the runner also writes `memory.json` and `processes.csv`.
 Each run's child process output is captured in `runs/<run_id>/logs/`, and the
 per-run simulation timing snapshot is written to `runs/<run_id>/sim_summary.json`
-for the final campaign rollup.
+for the final campaign rollup. Every failed, invalid, or degraded run carries a
+one-line machine-readable `failure_reason` in `results.csv` / `metrics.json`
+(timeouts, which leaf recipe failed and how, readiness-gate timeouts, port
+conflicts with the owning pid), echoed on the live `[failed]` reporter line.
+Setup-only failures (a run whose port preflight failed, so no process ever
+spawned) skip the `post_run` hook entirely — there is no run database to score.
+Real-time-paced runs also record `behind_deadline_frac`, `real_time_factor`,
+and `drift_resets`, with worst-run callouts in the campaign summary.
 
 ## Python Simulation Subcommands
 
@@ -252,6 +328,7 @@ python examples/drone/main.py bench --ticks 1000 --profile
 * `fix-timestamps` — Fix monotonic timestamps in a database
 * `merge` — Merge two databases into one with optional prefixes
 * `prune` — Remove empty components from a database
+* `compact` — Truncate preallocated (sparse) database files to their real size
 * `truncate` — Clear all data from a database, preserving schemas
 * `time-align` — Align component timestamps to a target timestamp
 * `drop` — Drop (delete) components from a database
@@ -471,6 +548,33 @@ elodin-db prune --dry-run ./my-database
 
 # Prune empty components
 elodin-db prune -y ./my-database
+```
+
+
+## `elodin-db compact`
+
+Truncate a database's preallocated (sparse) storage files to their committed length. Elodin DB preallocates each component's `data`/`index` files as 8 GB sparse files, so a recorded database's *apparent* size can be hundreds of gigabytes while its real size is under one — and anything that walks it naively (rsync, tar, S3 upload, CI artifact collection) processes the apparent size. After compaction, apparent size matches real size.
+
+Compacted databases stay fully readable (open, export, query, replay, editor playback). Further *writes* need the headroom that compaction removed, so only compact databases that are done recording, and never one that a live server has open. Monte Carlo campaigns compact retained run databases automatically (`[retention] compact_run_db`, on by default).
+
+**Usage:** `elodin-db compact [OPTIONS] <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `--dry-run` — Show how much apparent size would be reclaimed without modifying
+
+###### **Example**
+
+```bash
+# Preview reclaimable space
+elodin-db compact --dry-run ./my-database
+
+# Truncate preallocated files to their real size
+elodin-db compact ./my-database
 ```
 
 

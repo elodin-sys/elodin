@@ -38,6 +38,10 @@ enum Commands {
     Merge(MergeArgs),
     #[command(about = "Remove empty components from a database")]
     Prune(PruneArgs),
+    #[command(
+        about = "Truncate preallocated (sparse) database files to their real size for archival"
+    )]
+    Compact(CompactArgs),
     #[command(about = "Trim a database to a time range, removing data outside the window")]
     Trim(TrimArgs),
     #[command(about = "Clear all data from a database, preserving schemas")]
@@ -130,6 +134,14 @@ struct PruneArgs {
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct CompactArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be reclaimed without modifying")]
+    dry_run: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -570,6 +582,9 @@ async fn main() -> miette::Result<()> {
         }
         Commands::Prune(PruneArgs { path, dry_run, yes }) => {
             elodin_db::prune::run(path, dry_run, yes).into_diagnostic()
+        }
+        Commands::Compact(CompactArgs { path, dry_run }) => {
+            elodin_db::compact::run(path, dry_run).into_diagnostic()
         }
         Commands::Merge(MergeArgs {
             db1,

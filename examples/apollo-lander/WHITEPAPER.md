@@ -127,7 +127,7 @@ world and sensors.
 | [`reference.py`](reference.py) | Turns raw telemetry into the descent reference + braking-profile reconstruction (stdlib only) |
 | [`controller/src/main.rs`](controller/src/main.rs) | The flight software: the guidance law, in Rust |
 | [`spec.toml`](spec.toml) | Monte Carlo parameter distributions |
-| [`campaign.toml`](campaign.toml) | Campaign config: ports, hooks, one-time `[build]` step |
+| [`campaign.toml`](campaign.toml) | Campaign config: ports, hooks, one-time `[[build]]` step |
 | [`hooks/score.py`](hooks/score.py) | Per-run pass/fail scoring |
 | [`hooks/report.py`](hooks/report.py) | Post-campaign aggregate report |
 | [`calibrate.py`](calibrate.py) | Optional automated range-narrowing loop |
@@ -669,7 +669,7 @@ The same Rust program is launched two ways via an `s10` recipe
 
 - **Single run** (editor/headless): `el.s10.PyRecipe.cargo(...)` builds and runs
   the controller straight from source — convenient while iterating.
-- **Monte Carlo**: the campaign's one-time `[build]` step compiles the release
+- **Monte Carlo**: the campaign's one-time `[[build]]` step compiles the release
   binary once, and each worker launches the prebuilt binary with
   `el.s10.PyRecipe.process(...)`. Per-run ports are passed through the
   environment so parallel workers never collide.
@@ -818,7 +818,7 @@ report aggregates into a **landing-dispersion (ellipse) statistic**.
 and report hooks, and a **one-time build step**:
 
 ```toml
-[build]
+[[build]]
 command = "cargo"
 args = ["build", "--release", "--manifest-path", "examples/apollo-lander/controller/Cargo.toml"]
 ```
@@ -873,7 +873,7 @@ python examples/apollo-lander/calibrate.py \
 | `ctx.component_batch_operation` | Batched component reads/writes per tick | [`main.py#L161-L231`](main.py#L161-L231) |
 | `el.s10.PyRecipe` | Launching the external FSW process | [`main.py#L118-L130`](main.py#L118-L130) |
 | `start_timestamp` | Pins the sim clock to the 1969 mission epoch | [`main.py#L263-L274`](main.py#L263-L274) |
-| `elodin monte-carlo` `[build]` | One-time controller build before workers | [`campaign.toml`](campaign.toml) |
+| `elodin monte-carlo` `[[build]]` | One-time controller build before workers | [`campaign.toml`](campaign.toml) |
 
 ---
 

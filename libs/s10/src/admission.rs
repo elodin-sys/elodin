@@ -1,4 +1,4 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, OnceLock};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -6,12 +6,28 @@ use crate::Recipe;
 
 pub type AdmissionPermit = OwnedSemaphorePermit;
 
-static MAX_INFLIGHT: LazyLock<Option<usize>> = LazyLock::new(resolve_max_inflight);
-static SEMAPHORE: LazyLock<Option<Arc<Semaphore>>> =
-    LazyLock::new(|| MAX_INFLIGHT.map(|max| Arc::new(Semaphore::new(max))));
+/// Programmatic override of the admission budget (e.g. the monte-carlo
+/// `workers` knob). Takes precedence over `S10_MAX_INFLIGHT` when set.
+static OVERRIDE: OnceLock<Option<usize>> = OnceLock::new();
+/// Built lazily on first acquire so `configure` can still change the budget
+/// any time before the first run is admitted.
+static SEMAPHORE: OnceLock<Option<Arc<Semaphore>>> = OnceLock::new();
 
 pub fn max_inflight() -> Option<usize> {
-    *MAX_INFLIGHT
+    match OVERRIDE.get() {
+        Some(value) => *value,
+        None => resolve_max_inflight(),
+    }
+}
+
+/// Set the admission budget programmatically. Wins over `S10_MAX_INFLIGHT`.
+/// Returns `false` when the budget is already locked in (a permit was
+/// acquired, or a previous `configure` call happened first).
+pub fn configure(max: Option<usize>) -> bool {
+    if SEMAPHORE.get().is_some() {
+        return false;
+    }
+    OVERRIDE.set(max).is_ok()
 }
 
 pub fn recipe_weight(recipe: &Recipe) -> usize {
@@ -29,8 +45,10 @@ pub fn recipe_weight(recipe: &Recipe) -> usize {
 }
 
 pub async fn acquire_run_slot(weight: usize) -> Option<AdmissionPermit> {
-    let max = max_inflight()?;
-    let semaphore = SEMAPHORE.as_ref()?.clone();
+    let semaphore = SEMAPHORE
+        .get_or_init(|| max_inflight().map(|max| Arc::new(Semaphore::new(max))))
+        .clone()?;
+    let max = max_inflight().unwrap_or(usize::MAX);
     Some(acquire_run_slot_with(semaphore, max, weight).await)
 }
 
@@ -57,10 +75,22 @@ fn resolve_max_inflight() -> Option<usize> {
             {
                 return None;
             }
-            raw.parse::<usize>().ok().filter(|max| *max > 0)
+            parse_env_budget(raw)
         }
         Err(_) => std::thread::available_parallelism().ok().map(usize::from),
     }
+}
+
+/// The explicit numeric budget carried by `S10_MAX_INFLIGHT`, if any.
+/// `"off"`-style and unparsable values yield `None`: they disable admission
+/// limiting but express no budget, so callers deciding precedence (e.g. the
+/// monte-carlo `workers` knob) must not treat them as an override.
+pub fn env_budget() -> Option<usize> {
+    parse_env_budget(&std::env::var("S10_MAX_INFLIGHT").ok()?)
+}
+
+fn parse_env_budget(raw: &str) -> Option<usize> {
+    raw.trim().parse::<usize>().ok().filter(|max| *max > 0)
 }
 
 #[cfg(test)]
@@ -85,9 +115,20 @@ mod tests {
                 depends_on: Vec::new(),
                 ready: None,
                 ready_timeout: None,
+                own_process_group: false,
             },
             no_watch: false,
         })
+    }
+
+    #[test]
+    fn env_budget_only_accepts_positive_integers() {
+        assert_eq!(parse_env_budget("96"), Some(96));
+        assert_eq!(parse_env_budget(" 4 "), Some(4));
+        assert_eq!(parse_env_budget("0"), None);
+        assert_eq!(parse_env_budget("off"), None);
+        assert_eq!(parse_env_budget("ninety-six"), None);
+        assert_eq!(parse_env_budget(""), None);
     }
 
     #[test]

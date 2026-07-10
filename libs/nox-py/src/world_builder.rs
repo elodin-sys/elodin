@@ -136,6 +136,7 @@ impl WorldBuilder {
             depends_on: Vec::new(),
             ready: None,
             ready_timeout: None,
+            own_process_group: false,
         };
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
@@ -167,6 +168,7 @@ impl WorldBuilder {
                         depends_on: Vec::new(),
                         ready: None,
                         ready_timeout: None,
+                        own_process_group: false,
                     },
                     no_watch: true,
                 }),

@@ -66,6 +66,7 @@ pub mod assets_http;
 pub mod axum;
 pub mod cancellation;
 pub(crate) mod coalescing_sink;
+pub mod compact;
 pub mod drop;
 mod error;
 pub mod export;
