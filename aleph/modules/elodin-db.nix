@@ -60,18 +60,20 @@ in {
     };
     assetsDir = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      default = "/var/lib/elodin/assets";
+      default = null;
       description = ''
         Source assets/ tree ingested into each fresh database on creation
-        (passed to `elodin-db run --assets`). Defaults to the shared asset
-        root seeded by the elodin module, so every recorded database carries
-        its schematic assets and is a complete, portable record. Set to null
-        to disable ingest.
+        (passed to `elodin-db run --assets`). Defaults to null for DB-only
+        deployments; when services.elodin.examples is enabled, this defaults to
+        the shared asset root seeded by the elodin module. Set an explicit path
+        to ingest your own assets.
       '';
     };
   };
 
   config = lib.mkIf cfg.enable {
+    services.elodin-db.assetsDir = lib.mkIf elodinSeeds (lib.mkDefault "/var/lib/elodin/assets");
+
     systemd.services."elodin-db@" = {
       # Order after the asset seed (from the elodin module, when present) so a
       # fresh boot ingests a fully populated tree, not a partial one.
