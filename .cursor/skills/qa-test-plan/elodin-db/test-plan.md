@@ -63,10 +63,9 @@ then runs the **whole `elodin-db` command surface** over them. Coverage map (eve
 ### Hard-won operational rules
 
 1. **Teardown = process-group kill.** `elodin run` spawns an s10-managed python child with an *instant restart* policy; killing only the child respawns it and port 2240 never frees. Always `setsid` + `kill -9 -- -$PID` + wait for the port (run_probe.sh does all three).
-2. **The s10 run-group cancels when its first recipe finishes** — success included. `examples/video-stream` headless: the `rtsp-receiver` exits 0 immediately when `RTSP_URL` is unset, killing the whole group before the sim serves a single tick. Set a dummy `RTSP_URL` (the rtsp-streamer retries forever) to keep the group alive.
-3. **Port arithmetic.** A DB on TCP port `N` spawns its asset HTTP server on `N+1`. A source on 2240 therefore owns 2241 — put followers on **2242+**, never 2241.
-4. `elodin-db` offline commands print `INFO`/`WARN` housekeeping lines on stderr (e.g. `Skipping component without schema` for entity-name metadata dirs) — normal, not failures.
-5. `query` gotchas: `--precision` has no `-p` short form; `--time-format` values are `omit|datetime|seconds|milliseconds|microseconds` (the `mono-us`/`mono-ns` spellings belong to `export`).
+2. **Port arithmetic.** A DB on TCP port `N` spawns its asset HTTP server on `N+1`. A source on 2240 therefore owns 2241 — put followers on **2242+**, never 2241.
+3. `elodin-db` offline commands print `INFO`/`WARN` housekeeping lines on stderr (e.g. `Skipping component without schema` for entity-name metadata dirs) — normal, not failures.
+4. `query` gotchas: `--precision` has no `-p` short form; `--time-format` values are `omit|datetime|seconds|milliseconds|microseconds` (the `mono-us`/`mono-ns` spellings belong to `export`).
 
 ## Execution Rules
 
@@ -213,14 +212,14 @@ mv logstream-db /tmp/qa-db/logstream
 #### - [ ] DB-102 — Generate: video-stream H.264 DB
 
 - **Priority:** P1 | **Mode:** agent | **Requires:** SDK-001
-- **Description:** Runs the video-stream example headlessly: GStreamer `videotestsrc → x264enc → elodinsink` ingests real H.264 NALs into the `test-video` message log alongside the rolling-ball sim. **Requires the `RTSP_URL` keepalive workaround** (operational rule 2): without it the rtsp-receiver recipe exits 0 instantly and the s10 group cancels before the sim serves. Its `db_path="./video-stream-db"` is repo-root-relative; move it afterwards. No display needed — the pipeline is software-only.
-- **Expected duration:** ~2.5 min (first run builds `libgstelodin.so` + `rtsp-streamer`)
+- **Description:** Runs the video-stream example headlessly: GStreamer `videotestsrc → x264enc → elodinsink` ingests real H.264 NALs into the `test-video` message log alongside the rolling-ball sim. Optional receivers (`rtsp-receiver` without `RTSP_URL`, OBS SRT) may exit 0 immediately — s10 leaves the sim and GStreamer pipeline running (sidecar Ok exits do not cancel the group). Its `db_path="./video-stream-db"` is repo-root-relative; move it afterwards. No display needed — the pipeline is software-only.
+- **Expected duration:** ~2.5 min (first run builds `libgstelodin.so`)
 
 **Steps**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)" && rm -rf video-stream-db /tmp/qa-db/video-stream
-nix develop --command sh -c 'RTSP_URL="rtsp://127.0.0.1:1/keepalive" QA_RUN_LOG=/tmp/qa-db/video-gen.log bash .cursor/skills/qa-test-plan/examples/run_probe.sh examples/video-stream/main.py 75 ball.world_pos msg:test-video'
+nix develop --command sh -c 'QA_RUN_LOG=/tmp/qa-db/video-gen.log bash .cursor/skills/qa-test-plan/examples/run_probe.sh examples/video-stream/main.py 75 ball.world_pos msg:test-video'
 mv video-stream-db /tmp/qa-db/video-stream
 ```
 
@@ -233,7 +232,7 @@ mv video-stream-db /tmp/qa-db/video-stream
 
 **Result:**
 **Evidence:**
-**Notes:** AUTHOR-VALIDATED 2026-07-11 @822eb89a9: `MSG test-video COUNT 2563` at t=75 s, `ball.world_pos` 8759 samples; NAL byte tails visible. Without `RTSP_URL` the group reproducibly died at startup (`rtsp-receiver killed with code 0` → group cancel) — that failure mode is the reason for the dummy URL.
+**Notes:** AUTHOR-VALIDATED after s10 GroupRecipe fix: headless run without `RTSP_URL` keeps the sim + GStreamer alive after `rtsp-receiver` exits 0 (`ball.world_pos` thousands of samples; `MSG test-video COUNT` thousands).
 
 ---
 
@@ -821,6 +820,6 @@ nix develop --command sh -c 'elodin-db list-components /tmp/qa-db/surgery 2>/dev
 | BLOCKED | |
 | SKIPPED | |
 
-**Notable issues:** (author pre-run) `elodin-db run --config` with the bundled `libs/db/examples/db-config.lua` errors — the script calls `pair(...)`, which is no longer a Lua global (stale example config; product follow-up, no case covers it). `examples/video-stream` cannot run headlessly without the `RTSP_URL` keepalive workaround (s10 run-group cancels when its first recipe exits — even successfully).
+**Notable issues:** (author pre-run) `elodin-db run --config` with the bundled `libs/db/examples/db-config.lua` errors — the script calls `pair(...)`, which is no longer a Lua global (stale example config; product follow-up, no case covers it).
 
 **Follow-up items:** DB-160/DB-161 need a human with a display. Cleanup after the run: `rm -rf /tmp/qa-db` and confirm no `logstream-db`/`video-stream-db` directories linger at the repo root.

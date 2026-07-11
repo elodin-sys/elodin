@@ -45,7 +45,29 @@ pub enum Recipe {
     Sim(crate::sim::SimRecipe),
 }
 
+/// Whether a finished group member should tear down its siblings.
+///
+/// Simulations are leaders: when the sim ends, forever-running FSW sidecars
+/// must be cancelled (Monte Carlo, `elodin run`). Successful Process/Cargo
+/// exits must not cancel the group — optional sidecars (e.g. video-stream's
+/// rtsp-receiver when `RTSP_URL` is unset) may exit 0 without killing the sim.
+/// Any `Err` still cancels (fail-fast). Parent `CancelToken` cancellation
+/// (editor close, Ctrl-C, MC timeout) is independent of this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecipeRole {
+    Sim,
+    Sidecar,
+}
+
 impl Recipe {
+    fn role(&self) -> RecipeRole {
+        match self {
+            #[cfg(not(target_os = "windows"))]
+            Recipe::Sim(_) => RecipeRole::Sim,
+            _ => RecipeRole::Sidecar,
+        }
+    }
+
     fn depends_on(&self) -> &[String] {
         match self {
             Recipe::Cargo(c) => &c.process_args.depends_on,
@@ -157,7 +179,7 @@ impl GroupRecipe {
             .iter()
             .map(|(name, (_, rx))| (name.clone(), rx.clone()))
             .collect::<HashMap<_, _>>();
-        let mut recipes: JoinSet<_> = self
+        let recipes: JoinSet<_> = self
             .recipes
             .into_iter()
             .map(|(name, r)| {
@@ -187,17 +209,7 @@ impl GroupRecipe {
             })
             .collect::<Result<_, Error>>()?;
 
-        let mut result = Ok(());
-        if let Some(res) = recipes.join_next().await {
-            result = res.unwrap();
-            cancel_token.cancel();
-        }
-        while let Some(res) = recipes.join_next().await {
-            if result.is_ok() {
-                result = res.unwrap();
-            }
-        }
-        result
+        await_group_members(recipes, cancel_token).await
     }
 
     async fn watch(
@@ -219,7 +231,7 @@ impl GroupRecipe {
             .iter()
             .map(|(name, (_, rx))| (name.clone(), rx.clone()))
             .collect::<HashMap<_, _>>();
-        let mut recipes: JoinSet<_> = self
+        let recipes: JoinSet<_> = self
             .recipes
             .into_iter()
             .map(|(name, r)| {
@@ -249,18 +261,37 @@ impl GroupRecipe {
             })
             .collect::<Result<_, Error>>()?;
 
-        let mut result = Ok(());
-        if let Some(res) = recipes.join_next().await {
-            result = res.unwrap();
-            cancel_token.cancel();
-        }
-        while let Some(res) = recipes.join_next().await {
-            if result.is_ok() {
-                result = res.unwrap();
-            }
-        }
-        result
+        await_group_members(recipes, cancel_token).await
     }
+}
+
+/// Join group members until the group should end.
+///
+/// - Successful **sidecar** exits leave siblings running.
+/// - **Sim** exit or any **Err** cancels the shared token and drains the rest.
+async fn await_group_members(
+    mut recipes: JoinSet<(RecipeRole, Result<(), Error>)>,
+    cancel_token: CancelToken,
+) -> Result<(), Error> {
+    let mut result = Ok(());
+    while let Some(joined) = recipes.join_next().await {
+        let (role, res) = joined.unwrap();
+        let failed = res.is_err();
+        if result.is_ok() {
+            result = res;
+        }
+        if matches!(role, RecipeRole::Sim) || failed {
+            cancel_token.cancel();
+            while let Some(rest) = recipes.join_next().await {
+                let (_, r) = rest.unwrap();
+                if result.is_ok() {
+                    result = r;
+                }
+            }
+            break;
+        }
+    }
+    result
 }
 
 async fn run_with_readiness(
@@ -271,19 +302,25 @@ async fn run_with_readiness(
     cgroup: Option<Arc<CgroupScope>>,
     dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
     ready_tx: sync_watch::Sender<bool>,
-) -> Result<(), Error> {
-    let probe = expand_ready_probe(&recipe);
-    let ready_timeout = recipe.ready_timeout().map(str::to_string);
-    let log_path = recipe.log_path().map(PathBuf::from);
-    wait_for_dependencies(&name, dependencies).await?;
+) -> (RecipeRole, Result<(), Error>) {
+    // Capture before `prebuild`: Cargo becomes Process, but stays a sidecar.
+    let role = recipe.role();
+    let result = async {
+        let probe = expand_ready_probe(&recipe);
+        let ready_timeout = recipe.ready_timeout().map(str::to_string);
+        let log_path = recipe.log_path().map(PathBuf::from);
+        wait_for_dependencies(&name, dependencies).await?;
 
-    // Compile Cargo recipes before the readiness window opens so time-based
-    // probes (e.g. `Ready.delay`) measure from process spawn, not from build
-    // start. Otherwise a slow compile can elapse the delay and release
-    // `depends_on` dependents while the sidecar is still building.
-    let recipe = prebuild(recipe, release, &cancel_token).await?;
-    let mut run_fut = recipe.run(name, release, cancel_token, cgroup);
-    mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+        // Compile Cargo recipes before the readiness window opens so time-based
+        // probes (e.g. `Ready.delay`) measure from process spawn, not from build
+        // start. Otherwise a slow compile can elapse the delay and release
+        // `depends_on` dependents while the sidecar is still building.
+        let recipe = prebuild(recipe, release, &cancel_token).await?;
+        let mut run_fut = recipe.run(name, release, cancel_token, cgroup);
+        mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+    }
+    .await;
+    (role, result)
 }
 
 /// Performs a recipe's build phase (if any) up front so it does not overlap the
@@ -316,14 +353,19 @@ async fn watch_with_readiness(
     cgroup: Option<Arc<CgroupScope>>,
     dependencies: Vec<(String, sync_watch::Receiver<bool>)>,
     ready_tx: sync_watch::Sender<bool>,
-) -> Result<(), Error> {
-    let probe = expand_ready_probe(&recipe);
-    let ready_timeout = recipe.ready_timeout().map(str::to_string);
-    let log_path = recipe.log_path().map(PathBuf::from);
-    wait_for_dependencies(&name, dependencies).await?;
+) -> (RecipeRole, Result<(), Error>) {
+    let role = recipe.role();
+    let result = async {
+        let probe = expand_ready_probe(&recipe);
+        let ready_timeout = recipe.ready_timeout().map(str::to_string);
+        let log_path = recipe.log_path().map(PathBuf::from);
+        wait_for_dependencies(&name, dependencies).await?;
 
-    let mut run_fut = recipe.watch(name, release, cancel_token, cgroup);
-    mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+        let mut run_fut = recipe.watch(name, release, cancel_token, cgroup);
+        mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
+    }
+    .await;
+    (role, result)
 }
 
 /// Resolves a recipe's readiness probe placeholders against its env (overlaid
@@ -370,8 +412,8 @@ async fn mark_ready_or_wait(
     tokio::select! {
         // The child exited before the probe signaled ready: return its result
         // and let `ready_tx` drop, closing the channel so dependents fail fast
-        // instead of blocking. This task is the first in the group to finish, so
-        // the child's own exit status/error is what surfaces.
+        // instead of blocking. Group join policy then decides whether to cancel
+        // siblings (Sim exit / Err) or leave them running (sidecar Ok).
         result = &mut *run_fut => result,
         result = probe.wait(log_path.as_deref(), timeout) => {
             result.map_err(|err| Error::Readiness(err.to_string()))?;
@@ -1011,5 +1053,112 @@ mod tests {
                 .contains("dependency \"a\" exited before \"b\" became ready"),
             "unexpected error: {err}"
         );
+    }
+
+    /// Optional sidecars that exit 0 must not tear down the rest of the group
+    /// (regression from cancel-on-any-finish). The sleeper stays alive until
+    /// the outer timeout fires — proving the group did not cancel early.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sidecar_ok_exit_does_not_cancel_siblings() {
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: HashMap::from([
+                (
+                    "done".to_string(),
+                    process_recipe("true", &[], false, None, vec![]),
+                ),
+                (
+                    "linger".to_string(),
+                    process_recipe("sleep", &["30"], false, None, vec![]),
+                ),
+            ]),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            group.run(false, CancelToken::new(), None),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "group returned early after a successful sidecar exit; siblings were cancelled"
+        );
+    }
+
+    /// A failing sidecar (`fail_on_error`) must cancel siblings (fail-fast).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sidecar_err_cancels_siblings() {
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: HashMap::from([
+                (
+                    "boom".to_string(),
+                    process_recipe("false", &[], true, None, vec![]),
+                ),
+                (
+                    "linger".to_string(),
+                    process_recipe("sleep", &["30"], false, None, vec![]),
+                ),
+            ]),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            group.run(false, CancelToken::new(), None),
+        )
+        .await
+        .expect("group hung after a failing sidecar");
+        assert!(
+            result.is_err(),
+            "fail_on_error sidecar should fail the group"
+        );
+    }
+
+    /// Sim exit cancels remaining sidecars even on Ok — the Monte Carlo /
+    /// `elodin run` contract. Uses synthetic JoinSet members so we do not need
+    /// a real Python sim binary in unit tests.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sim_ok_exit_cancels_siblings() {
+        let cancel_token = CancelToken::new();
+        let child = cancel_token.child();
+        let mut set = JoinSet::new();
+        set.spawn(async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            (RecipeRole::Sim, Ok(()))
+        });
+        set.spawn(async move {
+            child.wait().await;
+            (RecipeRole::Sidecar, Ok(()))
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            await_group_members(set, cancel_token),
+        )
+        .await
+        .expect("sim exit did not cancel the waiting sidecar");
+        assert!(result.is_ok());
+    }
+
+    /// Successful sidecar-only finishes leave the group waiting (no cancel).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn await_group_members_ignores_sidecar_ok() {
+        let cancel_token = CancelToken::new();
+        let child = cancel_token.child();
+        let mut set = JoinSet::new();
+        set.spawn(async { (RecipeRole::Sidecar, Ok(())) });
+        set.spawn(async move {
+            tokio::select! {
+                _ = child.wait() => (RecipeRole::Sidecar, Ok(())),
+                _ = tokio::time::sleep(Duration::from_secs(30)) => (RecipeRole::Sidecar, Ok(())),
+            }
+        });
+        let result = tokio::time::timeout(
+            Duration::from_millis(400),
+            await_group_members(set, cancel_token.clone()),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "sidecar Ok should not finish the group while another member is alive"
+        );
+        cancel_token.cancel();
     }
 }
