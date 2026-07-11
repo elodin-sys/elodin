@@ -457,18 +457,25 @@ async fn main() -> miette::Result<()> {
                     .clone()
                     .or_else(|| elodin_db::assets::resolve_assets_root(None));
                 if let Some(source) = source {
-                    match elodin_db::assets::ingest_asset_dir(&path, &source) {
-                        Ok(report) if report.skipped => {
-                            info!(source = %source.display(), "assets already ingested; skipping")
-                        }
-                        Ok(report) => info!(
+                    if !source.is_dir() {
+                        tracing::warn!(
                             source = %source.display(),
-                            files = report.file_count,
-                            bytes = report.byte_count,
-                            "ingested assets into db"
-                        ),
-                        Err(err) => {
-                            tracing::warn!(?err, source = %source.display(), "failed to ingest assets")
+                            "asset source path does not exist; starting without asset ingest"
+                        );
+                    } else {
+                        match elodin_db::assets::ingest_asset_dir(&path, &source) {
+                            Ok(report) if report.skipped => {
+                                info!(source = %source.display(), "assets already ingested; skipping")
+                            }
+                            Ok(report) => info!(
+                                source = %source.display(),
+                                files = report.file_count,
+                                bytes = report.byte_count,
+                                "ingested assets into db"
+                            ),
+                            Err(err) => {
+                                tracing::warn!(?err, source = %source.display(), "failed to ingest assets")
+                            }
                         }
                     }
                 }
