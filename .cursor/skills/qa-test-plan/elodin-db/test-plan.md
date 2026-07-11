@@ -463,16 +463,17 @@ nix develop --command sh -c 'for f in /tmp/qa-db/sc-videos/*.mp4; do echo "== $f
 **Steps**
 
 ```bash
-nix develop --command sh -c '
+nix develop --command bash -c '
   rm -rf /tmp/qa-db/serve && cp -r /tmp/qa-db/drone /tmp/qa-db/serve
   setsid elodin-db run "[::]:2240" /tmp/qa-db/serve --log-level warn > /tmp/qa-db/serve.log 2>&1 &
   P=$!
   sleep 3
-  uv run python .cursor/skills/qa-test-plan/examples/probe.py 127.0.0.1:2240 drone.world_pos | head -6
-  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py replay 127.0.0.1:2240 drone.world_pos 50 100
-  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240
-  RC=$?
-  kill -9 -- -$P 2>/dev/null
+  RC=0
+  uv run python .cursor/skills/qa-test-plan/examples/probe.py 127.0.0.1:2240 drone.world_pos > /tmp/qa-db/serve-probe.txt || RC=$?
+  head -6 /tmp/qa-db/serve-probe.txt || true
+  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py replay 127.0.0.1:2240 drone.world_pos 50 100 || RC=$?
+  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240 || RC=$?
+  kill -9 -- -$P 2>/dev/null || true
   for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -q ":2240 " || break; sleep 0.5; done
   exit $RC'
 ```
@@ -499,21 +500,27 @@ nix develop --command sh -c '
 **Steps**
 
 ```bash
-nix develop --command sh -c '
+nix develop --command bash -c '
   rm -rf /tmp/qa-db/serve-http && cp -r /tmp/qa-db/drone /tmp/qa-db/serve-http
   setsid elodin-db run "[::]:2240" /tmp/qa-db/serve-http --http-addr 127.0.0.1:2360 --log-level warn > /tmp/qa-db/http.log 2>&1 &
   P=$!
   sleep 3
-  curl -s --max-time 5 http://127.0.0.1:2241/__index__ | head -c 200; echo
-  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240
+  RC=0
+  curl -s --max-time 5 http://127.0.0.1:2241/__index__ > /tmp/qa-db/assets-index.json || RC=$?
+  head -c 200 /tmp/qa-db/assets-index.json 2>/dev/null; echo
+  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240 || RC=$?
   curl -s --max-time 4 "http://127.0.0.1:2360/component/stream/qa.heartbeat" > /tmp/qa-db/http-stream.jsonl &
+  CURLPID=$!
   sleep 1
-  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240
-  sleep 4
-  echo "HTTP_LINES $(wc -l < /tmp/qa-db/http-stream.jsonl)"; head -1 /tmp/qa-db/http-stream.jsonl
-  curl -s --max-time 3 "http://127.0.0.1:2360/msg/stream/nonexistent"; echo
-  kill -9 -- -$P 2>/dev/null
-  for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -q ":2240 " || break; sleep 0.5; done; true'
+  uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240 || RC=$?
+  wait $CURLPID 2>/dev/null || true
+  LINES=$(wc -l < /tmp/qa-db/http-stream.jsonl 2>/dev/null || echo 0)
+  echo "HTTP_LINES $LINES"; head -1 /tmp/qa-db/http-stream.jsonl 2>/dev/null || true
+  test "$LINES" -ge 5 || RC=1
+  curl -s --max-time 3 "http://127.0.0.1:2360/msg/stream/nonexistent" || true; echo
+  kill -9 -- -$P 2>/dev/null || true
+  for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -q ":2240 " || break; sleep 0.5; done
+  exit $RC'
 ```
 
 **Pass criteria**
@@ -538,7 +545,7 @@ nix develop --command sh -c '
 **Steps**
 
 ```bash
-nix develop --command sh -c '
+nix develop --command bash -c '
   rm -rf /tmp/qa-db/serve-src /tmp/qa-db/follower && cp -r /tmp/qa-db/drone /tmp/qa-db/serve-src
   setsid elodin-db run "[::]:2240" /tmp/qa-db/serve-src --log-level warn > /tmp/qa-db/src.log 2>&1 &
   SRC=$!
@@ -546,10 +553,16 @@ nix develop --command sh -c '
   setsid elodin-db run "[::]:2242" /tmp/qa-db/follower --follows 127.0.0.1:2240 --follow-packet-size 9000 --log-level info > /tmp/qa-db/follower.log 2>&1 &
   FOL=$!
   sleep 10
-  echo "=== source ===";   uv run python .cursor/skills/qa-test-plan/examples/probe.py 127.0.0.1:2240 drone.world_pos | head -6
-  echo "=== follower ==="; uv run python .cursor/skills/qa-test-plan/examples/probe.py 127.0.0.1:2242 drone.world_pos | head -6
-  kill -9 -- -$FOL -$SRC 2>/dev/null
-  for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -qE ":2240 |:2242 " || break; sleep 0.5; done; true'
+  RC=0
+  echo "=== source ==="
+  uv run python .cursor/skills/qa-test-plan/examples/probe.py 127.0.0.1:2240 drone.world_pos > /tmp/qa-db/src-probe.txt || RC=$?
+  head -6 /tmp/qa-db/src-probe.txt || true
+  echo "=== follower ==="
+  uv run python .cursor/skills/qa-test-plan/examples/probe.py 127.0.0.1:2242 drone.world_pos > /tmp/qa-db/fol-probe.txt || RC=$?
+  head -6 /tmp/qa-db/fol-probe.txt || true
+  kill -9 -- -$FOL -$SRC 2>/dev/null || true
+  for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -qE ":2240 |:2242 " || break; sleep 0.5; done
+  exit $RC'
 ```
 
 **Pass criteria**

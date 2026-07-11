@@ -297,7 +297,7 @@ nix develop --command bash .cursor/skills/qa-test-plan/examples/run_probe.sh exa
 **Steps**
 
 ```bash
-nix develop --command sh -c 'uv run python examples/linalg/main.py bench --ticks 200 2>&1 | tee /tmp/qa-linalg.log; exit ${PIPESTATUS[0]}'
+nix develop --command bash -c 'uv run python examples/linalg/main.py bench --ticks 200 2>&1 | tee /tmp/qa-linalg.log; exit ${PIPESTATUS[0]}'
 ```
 
 **Pass criteria**
@@ -321,7 +321,7 @@ nix develop --command sh -c 'uv run python examples/linalg/main.py bench --ticks
 **Steps**
 
 ```bash
-nix develop --command sh -c 'uv run python examples/stablehlo/main.py bench --ticks 100 2>&1 | tee /tmp/qa-stablehlo.log; exit ${PIPESTATUS[0]}'
+nix develop --command bash -c 'uv run python examples/stablehlo/main.py bench --ticks 100 2>&1 | tee /tmp/qa-stablehlo.log; exit ${PIPESTATUS[0]}'
 ```
 
 **Pass criteria**
@@ -427,7 +427,7 @@ nix develop --command bash .cursor/skills/qa-test-plan/examples/run_probe.sh exa
 **Steps**
 
 ```bash
-nix develop --command sh -c 'uv run python examples/frames/main.py 2>&1 | tee /tmp/qa-frames.log; exit ${PIPESTATUS[0]}'
+nix develop --command bash -c 'uv run python examples/frames/main.py 2>&1 | tee /tmp/qa-frames.log; exit ${PIPESTATUS[0]}'
 ```
 
 **Pass criteria**
@@ -452,7 +452,7 @@ nix develop --command sh -c 'uv run python examples/frames/main.py 2>&1 | tee /t
 **Steps**
 
 ```bash
-nix develop --command sh -c 'MPLBACKEND=Agg uv run python examples/cube-sat-pysim/main.py 2>&1 | tee /tmp/qa-csp.log; exit ${PIPESTATUS[0]}'
+nix develop --command bash -c 'MPLBACKEND=Agg uv run python examples/cube-sat-pysim/main.py 2>&1 | tee /tmp/qa-csp.log; exit ${PIPESTATUS[0]}'
 ```
 
 **Pass criteria**
@@ -475,7 +475,7 @@ nix develop --command sh -c 'MPLBACKEND=Agg uv run python examples/cube-sat-pysi
 **Steps**
 
 ```bash
-nix develop --command sh -c 'uv run python examples/db-client/main.py --no-editor --duration 5 2>&1 | tee /tmp/qa-dbclient.log; exit ${PIPESTATUS[0]}'
+nix develop --command bash -c 'uv run python examples/db-client/main.py --no-editor --duration 5 2>&1 | tee /tmp/qa-dbclient.log; exit ${PIPESTATUS[0]}'
 ```
 
 **Pass criteria**
@@ -562,7 +562,7 @@ nix develop --command bash scripts/test-apollo-monte-carlo.sh
 **Steps**
 
 ```bash
-nix develop --command sh -c 'uv run python examples/betaflight-sitl/sim.py 2>&1 | tee /tmp/qa-bf.log; exit ${PIPESTATUS[0]}'
+nix develop --command bash -c 'uv run python examples/betaflight-sitl/sim.py 2>&1 | tee /tmp/qa-bf.log; exit ${PIPESTATUS[0]}'
 ```
 
 **Pass criteria**
