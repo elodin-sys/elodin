@@ -114,7 +114,7 @@
 
 ## 11. Elodin DB — Server, Storage Model & Protocol
 
-- **Server** — `elodin-db run <addr> <path>` (default `[::]:2240`, default dir `~/.local/share/elodin/db`); flags: `--config <lua>` (pre-register vtables/metadata/msgs), `--log-level`, `--start-timestamp`, `--http-addr` (HTTP API only if given), `--replay`, `--follows`, `--follow-packet-size`, `--assets <dir>` (ingest asset root, used on Aleph).
+- **Server** — `elodin-db run <addr> <path>` (default `[::]:2240`, default dir `~/.local/share/elodin/db`); flags: `--config <lua>` (pre-register vtables/metadata/msgs), `--log-level`, `--start-timestamp`, `--http-addr` (HTTP API only if given), `--follows`, `--follow-packet-size`, `--assets <dir>` (ingest asset root, used on Aleph).
 - **Data model** — Hierarchical dot-notation components (no entity IDs; FNV-1a `ComponentId`), fixed-shape dense tensors stored as timestamp+value time series (µs, i64; nanosecond ingest sources auto-divided), postcard-encoded variable-length message logs (video NALs/OBUs, logs, JSON events) with Umbra-style string offsets.
 - **Impeller2 protocol** — Packet types Table / Message / TimeSeries / MsgWithTimestamp with 4-byte header (type, id, request-id); VTables describe zero-copy tensor layouts (field offsets must respect PrimType alignment); request-reply correlation; pub-sub `Stream` subscriptions (selective, batched); optional zstd compression; transports: TCP, UDP, serial (COBS framing), shared memory (bbqueue), WebSockets.
 - **Impeller2 sub-crates** — `impeller2-bevy` (editor ECS sync), `impeller2-stellar` (async TCP/UDP client/server), `impeller2-bbq` (lock-free IPC), `impeller2-frame` (COBS serial), `impeller2-kdl` (schematic serdes), `impeller2-wkt` (well-known types: `Stream`, `SetStreamState`, `DumpMetadata`, ...).
@@ -131,7 +131,7 @@
 ## 13. Elodin DB — Replication, Replay & Asset Server
 
 - **Follow mode (`--follows <addr>`)** — TCP replication: schema/metadata sync on connect, full historical backfill, then live streaming; follower still accepts local writers (dual-source pattern, e.g. remote sim + local video); duplicate-component write warnings; `--follow-packet-size` tuning (default ~1500, jumbo 9000).
-- **Replay mode (`--replay`)** — Play a recorded DB as if live with progressive timeline reveal.
+- **Replay mode (`elodin editor <db> --replay`)** — Editor-side flag: play a recorded DB as if live with progressive timeline reveal (not an `elodin-db run` flag).
 - **Asset server** — During `run`, HTTP server on port N+1 serves `{db}/assets/`; local schematic asset paths (GLB, PNG icons, skybox cubemaps) rewritten to `db:` scheme at record time; followers mirror assets via `GET /__index__`; enables fully portable recordings (Aleph HITL DBs replay anywhere).
 - **Legacy replay directories** — `metadata.json`, `assets.bin` (internal format, not for external consumption), per-archetype Parquet files; opened via `elodin editor <dir>`; well-known archetypes `body`, `shape`, `asset_handle_panel`, `asset_handle_entity_metadata`.
 

@@ -11,11 +11,13 @@ Everything for this skill lives in this directory (`.cursor/skills/qa-test-plan/
 
 - Reusable template for new plans: [template.md](template.md)
 - **Ready-to-run plan — examples smoke/feature test:** [examples/test-plan.md](examples/test-plan.md) (24 cases: `SDK-001` build + one per `examples/` project). Shared helpers live alongside it in [examples/](examples/) (`run_probe.sh`, `probe.py`).
+- **Ready-to-run plan — Elodin-DB deep suite:** [elodin-db/test-plan.md](elodin-db/test-plan.md) (23 cases: generate realistic DBs from the examples — drone, logstream, video-stream, sensor-camera, apollo-lander, rc-jet — then exercise every `elodin-db` subcommand, serving mode, replication, exports, and clients on them). Helper: [elodin-db/serve_probe.py](elodin-db/serve_probe.py); reuses the examples probes.
 - New instantiated plans use the same focused-folder pattern: `<yyyy-mm-dd>-<release>/test-plan.md` plus evidence artifacts in that folder.
 
 ## Agent entry point
 
 - **"Run/execute the examples QA plan" (or "smoke-test the examples for a release")** → open [examples/test-plan.md](examples/test-plan.md), set the Plan Header (commit, branch, date, environment, executor), then execute cases top-to-bottom following that document's own **Execution Rules**. It is self-contained and every `agent` case has an `AUTHOR-VALIDATED` baseline. Run from the repo root inside `nix develop`. Note the two hard-won prerequisites baked into [examples/run_probe.sh](examples/run_probe.sh): live-run cases bind port `2240` exclusively (never parallelize them), and tearing a run down requires a **process-group kill** (the s10 child restarts on a plain kill).
+- **"Run/execute the Elodin-DB QA plan" (or "put elodin-db through its paces")** → open [elodin-db/test-plan.md](elodin-db/test-plan.md) and execute the same way. It first generates a stable of realistic DBs under `/tmp/qa-db/` from the examples, then runs the full `elodin-db` command surface over them; its **Hard-won operational rules** section (group-kill teardown, the s10 first-recipe-exit group cancel, the `tcp+1` asset-server port collision) is required reading before touching live servers.
 - **"Create/author a new plan for `<release>`"** → follow *Instantiating a Plan for a Release* below (copy `template.md` into this folder).
 - **"Add/edit a test case"** → follow *Authoring Test Cases* below and the case anatomy rules.
 
