@@ -25,7 +25,7 @@ use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{
     fmt::Write as _,
     path::PathBuf,
@@ -1060,6 +1060,8 @@ impl Pane {
         icons: &TileIcons,
         world: &mut World,
         target_window: Entity,
+        telemetry_mode: bool,
+        tabless: bool,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -1083,6 +1085,8 @@ impl Pane {
             }
             Pane::Viewport(pane) => {
                 const MONITOR_HEIGHT: f32 = 36.0;
+                const CLICK_DRAG_THRESHOLD: f32 = 5.0;
+                const VIEW_CUBE_HIT_PAD: f32 = 120.0;
                 let mut show_monitor = false;
                 let mut viewport_owner_rect = None;
                 let mut monitor_owner_rect = None;
@@ -1213,6 +1217,83 @@ impl Pane {
                         UiBlocker::Monitor,
                         PointerOwnerPriority::Panel,
                     );
+                }
+
+                // Telemetry chrome: muted title on tabless viewports + click-to-select.
+                if telemetry_mode {
+                    let title_rect = viewport_owner_rect.unwrap_or(content_rect);
+                    if tabless && !pane.name.is_empty() {
+                        let mut title_font = egui::TextStyle::Small.resolve(ui.style());
+                        title_font.size = 11.0;
+                        // Top-center; also stays clear of a top-right ViewCube when present.
+                        ui.painter().text(
+                            egui::pos2(title_rect.center().x, title_rect.min.y + 4.0),
+                            egui::Align2::CENTER_TOP,
+                            &pane.name,
+                            title_font,
+                            with_opacity(get_scheme().text_secondary, 0.85),
+                        );
+                    }
+
+                    if let (Some(cam), Some(rect)) = (pane.camera, viewport_owner_rect) {
+                        let press_id = egui::Id::new(("viewport_click_press", cam));
+                        let pointer = ui.input(|i| {
+                            (
+                                i.pointer.interact_pos(),
+                                i.pointer.primary_pressed(),
+                                i.pointer.primary_released(),
+                            )
+                        });
+                        if let Some(pos) = pointer.0 {
+                            if rect.contains(pos) {
+                                if pointer.1 {
+                                    ui.ctx().data_mut(|d| d.insert_temp(press_id, pos));
+                                }
+                                if pointer.2
+                                    && let Some(press_pos) =
+                                        ui.ctx().data_mut(|d| d.remove_temp::<egui::Pos2>(press_id))
+                                    && press_pos.distance(pos) <= CLICK_DRAG_THRESHOLD
+                                {
+                                    let over_view_cube = pane.nav_gizmo.is_some() && {
+                                        let cube = egui::Rect::from_min_max(
+                                            egui::pos2(
+                                                rect.max.x - VIEW_CUBE_HIT_PAD,
+                                                rect.min.y,
+                                            ),
+                                            egui::pos2(
+                                                rect.max.x,
+                                                rect.min.y + VIEW_CUBE_HIT_PAD,
+                                            ),
+                                        );
+                                        cube.contains(pos)
+                                    };
+                                    // Prefer region lookup: ViewCube Overlay may not be
+                                    // registered yet during pane_ui, so also exclude the
+                                    // cube corner when a view cube exists on this pane.
+                                    let owner_ok = world
+                                        .get_resource::<UiInputOwners>()
+                                        .is_some_and(|owners| {
+                                            matches!(
+                                                owners.resolve_owner_at(target_window, pos),
+                                                Some(PointerOwner::Viewport { camera })
+                                                    if camera == cam
+                                            )
+                                        });
+                                    if owner_ok && !over_view_cube {
+                                        if let Some(mut window_state) =
+                                            world.get_mut::<WindowState>(target_window)
+                                        {
+                                            window_state.ui_state.selected_object =
+                                                SelectedObject::Viewport {
+                                                    camera: cam,
+                                                    title: pane.name.clone(),
+                                                };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 egui_tiles::UiResponse::None
@@ -1837,6 +1918,21 @@ struct TreeBehavior<'w> {
     read_only: bool,
     target_window: Entity,
     inspector_visible: bool,
+    /// Pane tile IDs that are direct children of a Tabs container (have tab chrome).
+    panes_in_tabs: HashSet<TileId>,
+    telemetry_mode: bool,
+}
+
+/// Collect pane/container tile IDs that sit directly under a Tabs container.
+fn tiles_in_tabs(tiles: &Tiles<Pane>) -> HashSet<TileId> {
+    let mut out = HashSet::new();
+    for (_id, tile) in tiles.iter() {
+        let Tile::Container(Container::Tabs(tabs)) = tile else {
+            continue;
+        };
+        out.extend(tabs.children.iter().copied());
+    }
+    out
 }
 
 #[derive(Clone)]
@@ -1933,10 +2029,18 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(ui, &self.icons, self.world, self.target_window)
+        let tabless = !self.panes_in_tabs.contains(&tile_id);
+        pane.ui(
+            ui,
+            &self.icons,
+            self.world,
+            self.target_window,
+            self.telemetry_mode,
+            tabless,
+        )
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -2843,6 +2947,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 )
             };
             let overlay_icons = icons.clone();
+            let panes_in_tabs = tiles_in_tabs(&tree.tiles);
+            let telemetry_mode = world
+                .get_resource::<super::timeline::TelemetryMode>()
+                .is_some_and(|m| m.0);
             let mut behavior = TreeBehavior {
                 icons,
                 // This world here makes getting ui_state difficult.
@@ -2852,6 +2960,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 read_only,
                 target_window,
                 inspector_visible,
+                panes_in_tabs,
+                telemetry_mode,
             };
             tree.ui(&mut behavior, ui);
 

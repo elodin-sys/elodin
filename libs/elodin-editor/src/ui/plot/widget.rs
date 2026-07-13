@@ -1009,8 +1009,8 @@ impl TimeseriesPlot {
             let mut title_font = egui::TextStyle::Small.resolve(ui.style());
             title_font.size = 11.0;
             ui.painter().text(
-                egui::pos2(self.inner_rect.max.x - 4.0, self.inner_rect.min.y + 4.0),
-                egui::Align2::RIGHT_TOP,
+                egui::pos2(self.inner_rect.center().x, self.inner_rect.min.y + 4.0),
+                egui::Align2::CENTER_TOP,
                 &graph_state.label,
                 title_font,
                 with_opacity(get_scheme().text_secondary, 0.85),
