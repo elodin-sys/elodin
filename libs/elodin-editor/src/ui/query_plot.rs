@@ -450,7 +450,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 )
                 .offset(DVec2::new(0.0, -offset_y)); // Only subtract Y offset
                 let rect = ui.max_rect();
-                let inner_rect = get_inner_rect(ui.max_rect());
+                let inner_rect = get_inner_rect(ui.max_rect(), false);
                 let bounds = sync_bounds_query(&mut graph_state, data_bounds, rect, inner_rect);
 
                 graph_state.widget_width = ui.max_rect().width() as f64;
