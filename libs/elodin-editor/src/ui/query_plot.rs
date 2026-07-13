@@ -521,6 +521,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     entity,
                     &mut window_state.ui_state.selected_object,
                     state.time_range_behavior.as_mut(),
+                    false,
                 );
             }
             match &plot.state {

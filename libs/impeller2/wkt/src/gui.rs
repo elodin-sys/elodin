@@ -60,6 +60,9 @@ pub struct Schematic {
     pub origin: Option<GeoOriginConfig>,
     #[serde(default)]
     pub skybox: Option<SkyboxConfig>,
+    /// When true, enable dense telemetry presentation (locked graphs, compact chrome).
+    #[serde(default)]
+    pub telemetry_mode: bool,
 }
 
 /// Geographic origin in degrees/meters, as written in the schematic's
@@ -140,6 +143,12 @@ pub struct TimelineConfig {
     pub future_color: Color,
     #[serde(default)]
     pub follow_latest: bool,
+    /// Optional visible time window for graphs/timeline on schematic load.
+    /// Accepted values: `full`, `last_5s`, `last_15s`, `last_30s`, `last_1m`,
+    /// `last_5m`, `last_15m`, `last_30m`, `last_1h`, `last_6h`, `last_12h`,
+    /// `last_24h`, or `last_<N>s` / `<N>s` for a custom trailing duration.
+    #[serde(default)]
+    pub range: Option<String>,
 }
 
 impl Default for TimelineConfig {
@@ -148,6 +157,7 @@ impl Default for TimelineConfig {
             played_color: default_timeline_played_color(),
             future_color: default_timeline_future_color(),
             follow_latest: false,
+            range: None,
         }
     }
 }

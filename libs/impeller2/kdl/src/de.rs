@@ -28,6 +28,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
             schematic.skybox = Some(parse_skybox(node, input)?);
             continue;
         }
+        if node.name().value() == "telemetry_mode" {
+            schematic.telemetry_mode = parse_telemetry_mode(node, input)?;
+            continue;
+        }
 
         let elem = parse_schematic_elem(node, input)?;
         match elem {
@@ -48,6 +52,36 @@ fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicE
     Ok(SkyboxConfig {
         name: require_name(node, src)?,
     })
+}
+
+fn parse_telemetry_mode(node: &KdlNode, src: &str) -> Result<bool, KdlSchematicError> {
+    let Some(entry) = node.entries().first() else {
+        return Err(KdlSchematicError::MissingProperty {
+            property: "value".to_string(),
+            node: "telemetry_mode".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    };
+    if entry.name().is_some() {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "telemetry_mode".to_string(),
+            node: "telemetry_mode".to_string(),
+            expected: "a positional bool like telemetry_mode #true".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+    entry
+        .value()
+        .as_bool()
+        .ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "telemetry_mode".to_string(),
+            node: "telemetry_mode".to_string(),
+            expected: "#true or #false".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })
 }
 
 fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlSchematicError> {
@@ -153,7 +187,8 @@ fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicEr
 }
 
 fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchematicError> {
-    const TIMELINE_PROPERTIES: &[&str] = &["played_color", "future_color", "follow_latest"];
+    const TIMELINE_PROPERTIES: &[&str] =
+        &["played_color", "future_color", "follow_latest", "range"];
     const TIMELINE_CHILDREN: &[&str] = &["played_color", "future_color"];
 
     for entry in node.entries() {
@@ -236,11 +271,77 @@ fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchema
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let range = if let Some(value) = node.get("range") {
+        let raw = value
+            .as_string()
+            .ok_or_else(|| KdlSchematicError::InvalidValue {
+                property: "range".to_string(),
+                node: "timeline".to_string(),
+                expected: "a string like \"last_5s\" or \"full\"".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            })?;
+        if !is_valid_timeline_range(raw) {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "range".to_string(),
+                node: "timeline".to_string(),
+                expected: "full, last_5s, last_15s, last_30s, last_1m, last_5m, last_15m, last_30m, last_1h, last_6h, last_12h, last_24h, or last_<N>s".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        }
+        Some(raw.trim().to_string())
+    } else {
+        None
+    };
+
     Ok(TimelineConfig {
         played_color,
         future_color,
         follow_latest,
+        range,
     })
+}
+
+fn is_valid_timeline_range(raw: &str) -> bool {
+    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+    matches!(
+        normalized.as_str(),
+        "full"
+            | "full_range"
+            | "fullrange"
+            | "last_5s"
+            | "5s"
+            | "last_15s"
+            | "15s"
+            | "last_30s"
+            | "30s"
+            | "last_1m"
+            | "1m"
+            | "last_60s"
+            | "60s"
+            | "last_5m"
+            | "5m"
+            | "last_15m"
+            | "15m"
+            | "last_30m"
+            | "30m"
+            | "last_1h"
+            | "1h"
+            | "last_6h"
+            | "6h"
+            | "last_12h"
+            | "12h"
+            | "last_24h"
+            | "24h"
+    ) || {
+        let secs = normalized
+            .strip_prefix("last_")
+            .unwrap_or(&normalized)
+            .strip_suffix('s')
+            .and_then(|n| n.parse::<u64>().ok());
+        secs.is_some()
+    }
 }
 
 fn parse_coordinate(node: &KdlNode, src: &str) -> Result<CoordinateConfig, KdlSchematicError> {
@@ -1927,6 +2028,30 @@ mod tests {
         assert_eq!(timeline.played_color, Color::MINT);
         assert_eq!(timeline.future_color, Color::WHITE);
         assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_parse_timeline_range_and_telemetry_mode() {
+        let kdl = r#"
+timeline follow_latest=#true range="last_5s"
+telemetry_mode #true
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let timeline = schematic
+            .timeline
+            .expect("timeline config should be parsed");
+        assert_eq!(timeline.range.as_deref(), Some("last_5s"));
+        assert!(schematic.telemetry_mode);
+    }
+
+    #[test]
+    fn test_parse_timeline_unknown_range_is_rejected() {
+        let err = parse_schematic(r#"timeline range="last_3days""#).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("range") || msg.contains("last_3days"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]

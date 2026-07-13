@@ -102,6 +102,8 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 });
 
                 ui.add_space(8.0);
+                ui.checkbox(&mut graph_state.locked, "Lock");
+                ui.add_space(8.0);
                 ui.style_mut().spacing.slider_width = ui.available_size().x;
                 ui.style_mut().visuals.widgets.inactive.bg_fill = get_scheme().border_primary;
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))

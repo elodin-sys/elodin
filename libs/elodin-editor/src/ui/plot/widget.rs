@@ -47,7 +47,7 @@ use crate::{
         },
         tiles::WindowState,
         time_label::{PrettyDuration, time_label},
-        timeline::DurationExt,
+        timeline::{DurationExt, TelemetryMode},
         utils::format_num,
         widgets::WidgetSystem,
         window::window_entity_from_target,
@@ -77,6 +77,7 @@ pub struct PlotWidget<'w, 's> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    telemetry_mode: Res<'w, TelemetryMode>,
     line_query: Query<'w, 's, &'static LineHandle>,
     window_states: Query<'w, 's, &'static mut WindowState>,
 }
@@ -100,6 +101,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             earliest_timestamp,
             current_timestamp,
             mut time_range_behavior,
+            telemetry_mode,
             line_query,
             mut window_states,
         } = state.get_mut(world);
@@ -147,6 +149,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             id,
             &mut window_state.ui_state.selected_object,
             &mut time_range_behavior,
+            telemetry_mode.0,
         );
     }
 }
@@ -369,7 +372,7 @@ impl TimeseriesPlot {
         self
     }
 
-    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
+    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId, hide_labels: bool) {
         match self.x_axis_mode {
             XAxisMode::Numeric => {
                 // Numeric mode: Display arbitrary numeric values on X-axis (not time)
@@ -422,17 +425,19 @@ impl TimeseriesPlot {
                         egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
 
-                    // Use numeric formatting for non-time X values
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        format_num(i),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        // Use numeric formatting for non-time X values
+                        ui.painter().text(
+                            egui::pos2(
+                                x_pos,
+                                self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                            ),
+                            egui::Align2::CENTER_TOP,
+                            format_num(i),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
 
                     i += nice_step;
                 }
@@ -474,18 +479,20 @@ impl TimeseriesPlot {
                         egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
 
-                    // Convert seconds to Duration for PrettyDuration formatting
-                    let duration = hifitime::Duration::from_seconds(i);
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        PrettyDuration(duration).to_string(),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        // Convert seconds to Duration for PrettyDuration formatting
+                        let duration = hifitime::Duration::from_seconds(i);
+                        ui.painter().text(
+                            egui::pos2(
+                                x_pos,
+                                self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                            ),
+                            egui::Align2::CENTER_TOP,
+                            PrettyDuration(duration).to_string(),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
 
                     i += step_size_seconds;
                 }
@@ -534,16 +541,18 @@ impl TimeseriesPlot {
                         egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
 
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        PrettyDuration(offset).to_string(),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        ui.painter().text(
+                            egui::pos2(
+                                x_pos,
+                                self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                            ),
+                            egui::Align2::CENTER_TOP,
+                            PrettyDuration(offset).to_string(),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
                 }
             }
         }
@@ -825,6 +834,7 @@ impl TimeseriesPlot {
         graph_entity: Entity,
         selected_object: &mut SelectedObject,
         time_range_behavior: &mut TimeRangeBehavior,
+        telemetry_mode: bool,
     ) {
         egui_material_icons::initialize(ui.ctx());
 
@@ -837,17 +847,23 @@ impl TimeseriesPlot {
             };
         }
 
-        // Lock toggle (icons)
-        {
-            let lock_size = egui::vec2(20.0, 20.0);
-            let lock_pos = egui::pos2(
-                self.inner_rect.max.x - lock_size.x - 6.0,
-                self.rect.min.y + 6.0,
+        let chrome_pos = egui::pos2(self.inner_rect.max.x - 26.0, self.rect.min.y + 6.0);
+        if telemetry_mode {
+            // Overlay title replaces the padlock in telemetry mode.
+            let mut title_font = egui::TextStyle::Small.resolve(ui.style());
+            title_font.size = 11.0;
+            ui.painter().text(
+                chrome_pos,
+                egui::Align2::RIGHT_TOP,
+                &graph_state.label,
+                title_font,
+                with_opacity(get_scheme().text_secondary, 0.85),
             );
-
+        } else {
+            // Lock toggle (icons)
             egui::Area::new(egui::Id::new(("plot_lock_btn", graph_entity)))
                 .order(egui::Order::Foreground)
-                .fixed_pos(lock_pos)
+                .fixed_pos(chrome_pos)
                 .show(ui.ctx(), |ui| {
                     let old_pad = ui.spacing().button_padding;
                     ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
@@ -941,7 +957,7 @@ impl TimeseriesPlot {
         font_id.size = 11.0;
 
         draw_borders(ui, self.rect, self.inner_rect);
-        self.draw_x_axis(ui, &font_id);
+        self.draw_x_axis(ui, &font_id, telemetry_mode && graph_state.locked);
         draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
         self.draw_axis_labels(ui);
 

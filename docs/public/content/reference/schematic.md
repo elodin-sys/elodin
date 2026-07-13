@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `coordinate`, `theme`, `timeline`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`, `window`.
+- Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 - Booleans: KDL booleans are `#true`/`#false`. A bare `True` is a *string*, not a boolean — most flags silently fall back to their default if given one. Viewport flags (`hdr`, `show_grid`, `active`, ...) leniently accept `True`/`"true"` (case-insensitive), but prefer the `#` forms everywhere.
@@ -38,8 +38,15 @@ order = 6
 - `played_color`: named color or tuple string, default `yellow`. Used by the LIVE badge, the timeline playhead cursor, and the played segment of 3D trails.
 - `future_color`: named color or tuple string, default `white`. Used by the timeline latest/end cursor and the 3D trail segment that lies ahead of the current playback position.
 - `follow_latest`: bool, default `#false`. When omitted, the editor keeps the default start-from-beginning playback behavior. Set it to `#true` to switch to LIVE automatically once the connected stream proves that it is still advancing.
+- `range`: optional string preset for the visible time window on load. Accepted values: `full`, `last_5s`, `last_15s`, `last_30s`, `last_1m`, `last_5m`, `last_15m`, `last_30m`, `last_1h`, `last_6h`, `last_12h`, `last_24h`, or `last_<N>s` / `<N>s` for a custom trailing duration. When omitted, the editor uses full range. Under `--replay`, trailing windows follow the playhead as the effective latest timestamp.
 - Applies to the primary schematic only; secondary schematic files do not override the global timeline behavior.
 - These settings are also editable from the Timeline inspector, opened with the gear button in the timeline bar.
+
+### telemetry_mode
+- Optional top-level boolean node: `telemetry_mode #true`.
+- When enabled, graphs load locked (X-synced), singleton graph tab chrome is stripped, plot padlocks are replaced by a muted overlay title, and locked graphs hide X-axis tick labels (notches remain). Viewport multi-tabs keep their titles.
+- Unlock individual graphs from the graph inspector **Lock** checkbox.
+- Serialized only when `#true`.
 
 ### skybox
 - Optional top-level node that activates a cached skybox by manifest name.
@@ -206,6 +213,7 @@ schematic =
   ( coordinate
   | theme
   | timeline
+  | telemetry_mode
   | skybox
   | window
   | panel
@@ -226,8 +234,11 @@ timeline = "timeline"
          [played_color=color_name_or_tuple]
          [future_color=color_name_or_tuple]
          [follow_latest=bool]
+         [range=string]
 
 When omitted, `follow_latest` defaults to `#false`.
+
+telemetry_mode = "telemetry_mode" bool
 
 skybox = "skybox"
        name=string

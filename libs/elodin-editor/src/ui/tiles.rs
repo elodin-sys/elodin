@@ -2249,9 +2249,16 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
+        // Telemetry mode: allow singleton Tabs to collapse so graph panes sit
+        // directly in splits (no tab chrome / +). Multi-child Tabs (e.g. Strake
+        // cams) stay. Overlay titles replace graph tab labels.
+        let telemetry_mode = self
+            .world
+            .get_resource::<super::timeline::TelemetryMode>()
+            .is_some_and(|m| m.0);
         egui_tiles::SimplificationOptions {
             prune_empty_tabs: true,
-            all_panes_must_have_tabs: true,
+            all_panes_must_have_tabs: !telemetry_mode,
             join_nested_linear_containers: true,
             prune_single_child_tabs: true,
             ..Default::default()

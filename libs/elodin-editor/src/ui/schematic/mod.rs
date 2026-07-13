@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use crate::{
-    GridHandle,
+    GridHandle, TimeRangeBehavior,
     object_3d::Object3DState,
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
         inspector, monitor, plot, query_plot, query_table,
         tiles::{self, Pane},
-        timeline::TimelineSettings,
+        timeline::{TelemetryMode, TimelineSettings},
         window::compute_window_title,
     },
     vector_arrow::ViewportArrow,
@@ -80,6 +80,8 @@ pub struct SchematicParam<'w, 's> {
     pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub timeline_settings: Res<'w, TimelineSettings>,
+    pub time_range_behavior: Res<'w, TimeRangeBehavior>,
+    pub telemetry_mode: Res<'w, TelemetryMode>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
     pub coordinate: Res<'w, crate::Coordinate>,
@@ -527,7 +529,10 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
-    schematic.timeline = Some((*param.timeline_settings).into());
+    let mut timeline: impeller2_wkt::TimelineConfig = (*param.timeline_settings).into();
+    timeline.range = param.time_range_behavior.to_schematic_range();
+    schematic.timeline = Some(timeline);
+    schematic.telemetry_mode = param.telemetry_mode.0;
     if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
         && let Some(mode) = state.descriptor.mode.clone()
     {
