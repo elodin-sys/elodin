@@ -506,8 +506,7 @@ fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
     if let Some(range) = timeline.range.as_deref() {
         let normalized = range.trim().to_ascii_lowercase();
         if normalized != "full" && normalized != "full_range" && normalized != "fullrange" {
-            node.entries_mut()
-                .push(KdlEntry::new_prop("range", range));
+            node.entries_mut().push(KdlEntry::new_prop("range", range));
         }
     }
 

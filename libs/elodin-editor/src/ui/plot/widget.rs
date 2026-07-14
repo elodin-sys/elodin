@@ -475,10 +475,7 @@ impl TimeseriesPlot {
                     if !hide_labels {
                         // Use numeric formatting for non-time X values
                         ui.painter().text(
-                            egui::pos2(
-                                x_pos,
-                                self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN),
-                            ),
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
                             egui::Align2::CENTER_TOP,
                             format_num(i),
                             font_id.clone(),
@@ -530,10 +527,7 @@ impl TimeseriesPlot {
                         // Convert seconds to Duration for PrettyDuration formatting
                         let duration = hifitime::Duration::from_seconds(i);
                         ui.painter().text(
-                            egui::pos2(
-                                x_pos,
-                                self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN),
-                            ),
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
                             egui::Align2::CENTER_TOP,
                             PrettyDuration(duration).to_string(),
                             font_id.clone(),
@@ -590,10 +584,7 @@ impl TimeseriesPlot {
 
                     if !hide_labels {
                         ui.painter().text(
-                            egui::pos2(
-                                x_pos,
-                                self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN),
-                            ),
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
                             egui::Align2::CENTER_TOP,
                             PrettyDuration(offset).to_string(),
                             font_id.clone(),

@@ -1300,14 +1300,8 @@ impl Pane {
                                 {
                                     let over_view_cube = pane.nav_gizmo.is_some() && {
                                         let cube = egui::Rect::from_min_max(
-                                            egui::pos2(
-                                                rect.max.x - VIEW_CUBE_HIT_PAD,
-                                                rect.min.y,
-                                            ),
-                                            egui::pos2(
-                                                rect.max.x,
-                                                rect.min.y + VIEW_CUBE_HIT_PAD,
-                                            ),
+                                            egui::pos2(rect.max.x - VIEW_CUBE_HIT_PAD, rect.min.y),
+                                            egui::pos2(rect.max.x, rect.min.y + VIEW_CUBE_HIT_PAD),
                                         );
                                         cube.contains(pos)
                                     };
