@@ -927,9 +927,10 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
-        // Reference point (in frame coords) the shader subtracts from each raw
-        // vertex, and the entity's GeoPosition, so both stay small at ECEF
-        // magnitudes (avoids the paused-trail flicker from f32 cancellation).
+        // Reference point (in frame coords) subtracted from each raw vertex at
+        // ingestion (in f64), and used as the entity's GeoPosition, so the
+        // stored vertices stay small at ECEF magnitudes and keep mm precision
+        // (avoids the paused-trail flicker from the f32 cast).
         // It is the geo origin expressed in the line's frame: the ECEF geo
         // origin for an ECEF line, zero for ENU/NED (already launch-relative).
         let geo = line_3d.frame.or_default().map(|frame| {
@@ -956,12 +957,12 @@ impl LoadSchematicParams<'_, '_> {
         // coordinates, so its transform must carry the frame -> Bevy basis
         // change. Placing GeoPosition at `reference` (not zero) lets big_space
         // compute the (reference -> floating origin) offset in f64 while the
-        // shader subtracts the same `reference` from the vertices.
+        // same `reference` is subtracted from the vertices at ingestion.
         if let Some((frame, reference)) = geo {
             spawn.insert((
                 bevy_geo_frames::GeoPosition(frame, reference),
                 bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-                crate::ui::plot_3d::gpu::LineFrameOrigin(reference.as_vec3()),
+                crate::ui::plot_3d::gpu::LineFrameOrigin(reference),
             ));
         }
         spawn.insert(SchematicSpawned);

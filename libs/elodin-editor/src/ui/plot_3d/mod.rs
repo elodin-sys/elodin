@@ -85,7 +85,7 @@ pub fn sync_line_plot_3d(
                 .components
                 .entry(c.id)
                 .or_insert_with(|| {
-                    PlotDataComponent::new(
+                    let mut component = PlotDataComponent::new(
                         metadata.name.clone(),
                         metadata
                             .element_names()
@@ -93,7 +93,16 @@ pub fn sync_line_plot_3d(
                             .filter(|s| !s.is_empty())
                             .map(str::to_string)
                             .collect(),
-                    )
+                    );
+                    // Rebase this line's vertices against the frame origin in
+                    // f64 at ingestion so large ECEF coordinates keep mm
+                    // precision (see LineFrameOrigin). Set only at creation, so
+                    // a component already collected for a 2D graph is untouched.
+                    if let Some(frame_origin) = frame_origin {
+                        let r = frame_origin.0;
+                        component.value_offset = Some(vec![r.x, r.y, r.z]);
+                    }
+                    component
                 });
             handles[i] = data.lines.get(index).cloned();
         }
@@ -110,7 +119,9 @@ pub fn sync_line_plot_3d(
                     color: trail.played.unwrap_or(Vec4::ZERO),
                     depth_bias: 0.0,
                     model: Mat4::IDENTITY,
-                    world_origin: frame_origin.map(|o| o.0.extend(0.0)).unwrap_or(Vec4::ZERO),
+                    // Vertices are already rebased at ingestion (value_offset),
+                    // so the shader must not subtract the origin again.
+                    world_origin: Vec4::ZERO,
                     perspective: if line_plot.perspective { 1 } else { 0 },
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),

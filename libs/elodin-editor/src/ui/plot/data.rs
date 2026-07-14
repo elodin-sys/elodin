@@ -104,6 +104,13 @@ pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
     pub lines: BTreeMap<usize, Handle<Line>>,
+    /// Optional per-element `f64` offset subtracted from each incoming sample
+    /// **before** the `f32` cast, indexed by element. Used by `line_3d` for
+    /// large ECEF coordinates: the raw value (~6.4e6) loses ~0.5 m to `f32`
+    /// rounding, so we rebase against the frame origin here (in `f64`) to keep
+    /// millimetre precision in the stored vertices. `None` = no rebase (the
+    /// default for every 2D-graph component, so their values are untouched).
+    pub value_offset: Option<Vec<f64>>,
     request_states: HashMap<Timestamp, RequestState>,
     /// Whether the overview data has been requested for each line element
     overview_requested: HashMap<usize, bool>,
@@ -124,9 +131,21 @@ impl PlotDataComponent {
             label: component_label.to_string(),
             element_names,
             lines: BTreeMap::new(),
+            value_offset: None,
             request_states: HashMap::new(),
             overview_requested: HashMap::new(),
         }
+    }
+
+    /// `f64` offset subtracted from element `index` before the `f32` cast, or
+    /// `0.0` when no rebase is configured. See [`Self::value_offset`].
+    #[inline]
+    pub fn axis_offset(&self, index: usize) -> f64 {
+        self.value_offset
+            .as_ref()
+            .and_then(|o| o.get(index))
+            .copied()
+            .unwrap_or(0.0)
     }
 
     pub fn push_value(
@@ -144,7 +163,9 @@ impl PlotDataComponent {
             .map(|s| Some(s.as_str()))
             .chain(std::iter::repeat(None));
         for (i, (new_value, name)) in component_view.iter().zip(element_names).enumerate() {
-            let new_value = new_value.as_f32();
+            // Rebase against the frame origin in f64 before the f32 cast so
+            // large ECEF vertices keep mm precision (no-op when offset is None).
+            let new_value = (new_value.as_f64() - self.axis_offset(i)) as f32;
             let line = self.lines.entry(i).or_insert_with(|| {
                 let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
                 assets.add(Line {
@@ -439,6 +460,9 @@ fn process_time_series<T>(
         return;
     };
     for i in 0..len {
+        // Rebase in f64 before the f32 cast (no-op when offset is None); keeps
+        // large ECEF vertices from losing ~0.5 m to f32 rounding at storage.
+        let off = plot_data.axis_offset(i);
         let line = plot_data.lines.entry(i).or_insert_with(|| {
             let label = plot_data
                 .element_names
@@ -451,7 +475,11 @@ fn process_time_series<T>(
                 ..Default::default()
             })
         });
-        let values = data.iter().skip(i).step_by(len).map(|v| v.as_f32());
+        let values = data
+            .iter()
+            .skip(i)
+            .step_by(len)
+            .map(move |v| (v.as_f64() - off) as f32);
         let Some(line) = lines.get_mut(line) else {
             continue;
         };
@@ -894,6 +922,11 @@ fn handle_overview_response(
         return;
     };
 
+    // Keep overview points in the same rebased space as the full-resolution
+    // series (no-op when offset is None). Overview values are already f32 from
+    // the DB, so this only aligns placement, not precision.
+    let off = plot_data.axis_offset(element_index);
+
     // Get or create the line for this element
     let line = plot_data.lines.entry(element_index).or_insert_with(|| {
         let label = plot_data
@@ -918,7 +951,11 @@ fn handle_overview_response(
     };
 
     // Create a chunk with the overview data
-    if let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values.iter().copied()) {
+    if let Some(chunk) = Chunk::from_iter(
+        timestamps,
+        earliest_timestamp,
+        values.iter().map(|v| (*v as f64 - off) as f32),
+    ) {
         line.data.insert(chunk);
     }
 }
@@ -1078,12 +1115,16 @@ impl XYLine {
 
 pub trait AsF32 {
     fn as_f32(&self) -> f32;
+    /// `f64` view of the sample, used to subtract a large frame origin in full
+    /// precision before the lossy `f32` cast (see [`PlotDataComponent::value_offset`]).
+    fn as_f64(&self) -> f64;
 }
 macro_rules! impl_as_f32 {
     ($($t:ty),*) => {
         $(
             impl AsF32 for $t {
                 fn as_f32(&self) -> f32 { *self as f32 }
+                fn as_f64(&self) -> f64 { *self as f64 }
             }
         )*
     }
@@ -1095,10 +1136,16 @@ impl AsF32 for f32 {
     fn as_f32(&self) -> f32 {
         *self
     }
+    fn as_f64(&self) -> f64 {
+        *self as f64
+    }
 }
 
 impl AsF32 for bool {
     fn as_f32(&self) -> f32 {
+        if *self { 1.0 } else { 0.0 }
+    }
+    fn as_f64(&self) -> f64 {
         if *self { 1.0 } else { 0.0 }
     }
 }
