@@ -539,26 +539,30 @@ pub fn set_viewport_pos(
         // cancels it from the view direction. Snap on the first frame and on
         // jumps larger than the framing distance (seek / fast flight) so genuine
         // motion is never lagged. Without a look_at we keep the raw pose.
-        let (eff_pos, eff_look_at) = if let (Some(look_at), Some(sm)) =
-            (look_at_target, smoothing.as_deref_mut())
-        {
-            let raw_look = look_at.pos();
-            let snap_dist = (raw_look - raw_pos).length();
-            let alpha = follow_smoothing_alpha(time.delta_secs_f64());
-            let snap =
-                !sm.initialized || !snap_dist.is_finite() || sm.pos.distance(raw_pos) > snap_dist;
-            if snap {
-                sm.pos = raw_pos;
-                sm.look_at = raw_look;
+        let (eff_pos, eff_look_at) =
+            if let (Some(look_at), Some(sm)) = (look_at_target, smoothing.as_deref_mut()) {
+                let raw_look = look_at.pos();
+                let snap_dist = (raw_look - raw_pos).length();
+                let alpha = follow_smoothing_alpha(time.delta_secs_f64());
+                // Snap if *either* endpoint jumps farther than the framing distance,
+                // so a seek is followed instantly even when only the look_at target
+                // moves (fixed-vantage camera) and the pos stays put.
+                let snap = !sm.initialized
+                    || !snap_dist.is_finite()
+                    || sm.pos.distance(raw_pos) > snap_dist
+                    || sm.look_at.distance(raw_look) > snap_dist;
+                if snap {
+                    sm.pos = raw_pos;
+                    sm.look_at = raw_look;
+                } else {
+                    sm.pos = sm.pos.lerp(raw_pos, alpha);
+                    sm.look_at = sm.look_at.lerp(raw_look, alpha);
+                }
+                sm.initialized = true;
+                (sm.pos, Some(sm.look_at))
             } else {
-                sm.pos = sm.pos.lerp(raw_pos, alpha);
-                sm.look_at = sm.look_at.lerp(raw_look, alpha);
-            }
-            sm.initialized = true;
-            (sm.pos, Some(sm.look_at))
-        } else {
-            (raw_pos, look_at_target.map(|l| l.pos()))
-        };
+                (raw_pos, look_at_target.map(|l| l.pos()))
+            };
 
         // Keep the pos EQL's attitude (used when there is no look_at) and replace
         // the translation with the smoothed one.
