@@ -87,7 +87,6 @@ pub fn sync_line_plot_3d(
             };
             // Frame-origin coordinate for this axis (x/y/z of the reference).
             let r_i = frame_origin.map(|o| o.0[i]).unwrap_or(0.0);
-            let created = !collected_graph_data.components.contains_key(&c.id);
             let data = collected_graph_data
                 .components
                 .entry(c.id)
@@ -104,12 +103,15 @@ pub fn sync_line_plot_3d(
                 });
             // Rebase this axis's samples against the frame origin in f64 at
             // ingestion so large ECEF coordinates keep mm precision (see
-            // LineFrameOrigin). Element-indexed so an axis served by its own
-            // scalar component still subtracts its own coordinate. Set only at
-            // creation: a component already collected (e.g. by a 2D graph)
-            // keeps raw values, and the shader subtracts the residual instead
-            // (correct placement, pre-rebase precision).
-            if created && r_i != 0.0 {
+            // LineFrameOrigin). Element-indexed, so both a shared 3-vector
+            // component (X/Y/Z at indices 0/1/2) and per-axis scalar components
+            // subtract the right coordinate. Guarded on "no samples yet" rather
+            // than "just created", so every axis of a shared component is set,
+            // and a component that already holds data (e.g. collected by a 2D
+            // graph) is never mutated mid-stream: it keeps raw values and the
+            // shader subtracts the residual instead (correct placement, at the
+            // pre-rebase precision).
+            if r_i != 0.0 && data.lines.is_empty() {
                 let offsets = data.value_offset.get_or_insert_with(Vec::new);
                 if offsets.len() <= *index {
                     offsets.resize(index + 1, 0.0);
