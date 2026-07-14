@@ -103,13 +103,19 @@ impl Default for CurveCompressSettings {
 pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
+    /// Raw telemetry, one line per element, in the component's native units.
+    /// 2D graphs read these, so the values stay exactly as received.
     pub lines: BTreeMap<usize, Handle<Line>>,
-    /// Optional per-element `f64` offset subtracted from each incoming sample
-    /// **before** the `f32` cast, indexed by element. Used by `line_3d` for
-    /// large ECEF coordinates: the raw value (~6.4e6) loses ~0.5 m to `f32`
-    /// rounding, so we rebase against the frame origin here (in `f64`) to keep
-    /// millimetre precision in the stored vertices. `None` = no rebase (the
-    /// default for every 2D-graph component, so their values are untouched).
+    /// Origin-rebased mirror of [`Self::lines`], populated only when
+    /// [`Self::value_offset`] is set (i.e. for a framed `line_3d`). Each sample
+    /// is `raw - offset[element]` computed in `f64` before the `f32` cast, so
+    /// large ECEF vertices keep millimetre precision instead of snapping to the
+    /// ~0.5 m `f32` grid. `line_3d` renders from these; graphs never touch them,
+    /// so raw telemetry is never shown rebased.
+    pub rebased_lines: BTreeMap<usize, Handle<Line>>,
+    /// Optional per-element `f64` offset used to build [`Self::rebased_lines`].
+    /// `None` (the default, and every 2D-graph component) means no rebased
+    /// mirror is kept and rendering falls back to the raw lines.
     pub value_offset: Option<Vec<f64>>,
     request_states: HashMap<Timestamp, RequestState>,
     /// Whether the overview data has been requested for each line element
@@ -131,6 +137,7 @@ impl PlotDataComponent {
             label: component_label.to_string(),
             element_names,
             lines: BTreeMap::new(),
+            rebased_lines: BTreeMap::new(),
             value_offset: None,
             request_states: HashMap::new(),
             overview_requested: HashMap::new(),
@@ -148,6 +155,18 @@ impl PlotDataComponent {
             .unwrap_or(0.0)
     }
 
+    /// Handle a `line_3d` should render for `index`: the rebased mirror when a
+    /// rebase is configured (mm precision at ECEF scale), else the raw line.
+    /// Returns `None` while the chosen line has not been created yet.
+    #[inline]
+    pub fn render_line(&self, index: usize) -> Option<&Handle<Line>> {
+        if self.value_offset.is_some() {
+            self.rebased_lines.get(&index)
+        } else {
+            self.lines.get(&index)
+        }
+    }
+
     pub fn push_value(
         &mut self,
         component_view: ComponentView<'_>,
@@ -163,9 +182,7 @@ impl PlotDataComponent {
             .map(|s| Some(s.as_str()))
             .chain(std::iter::repeat(None));
         for (i, (new_value, name)) in component_view.iter().zip(element_names).enumerate() {
-            // Rebase against the frame origin in f64 before the f32 cast so
-            // large ECEF vertices keep mm precision (no-op when offset is None).
-            let new_value = (new_value.as_f64() - self.axis_offset(i)) as f32;
+            let raw = new_value.as_f32();
             let line = self.lines.entry(i).or_insert_with(|| {
                 let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
                 assets.add(Line {
@@ -178,28 +195,66 @@ impl PlotDataComponent {
             // line.  The FixedRate stream sends a snapshot at the current
             // playback position each frame; skipping timestamps already covered
             // prevents corrupting historical data loaded by GetTimeSeries.
-            let mut accepted = false;
-            if let Some(last) = line.data.last() {
-                if timestamp <= last.summary.end_timestamp {
-                    continue;
-                }
-                if last.timestamps.len() < CHUNK_LEN {
-                    line.data.update_last(|c| {
-                        c.push(timestamp, earliest_timestamp, new_value);
-                    });
-                    accepted = true;
-                }
+            if let Some(last) = line.data.last()
+                && timestamp <= last.summary.end_timestamp
+            {
+                continue;
             }
-            if !accepted {
-                let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
-                line.data.insert(new_chunk);
+            push_sample(line, timestamp, earliest_timestamp, raw, archive_enabled);
+
+            // Mirror the same sample, rebased in f64 before the f32 cast, into
+            // the rebased line line_3d renders from (kept only when configured).
+            if self.value_offset.is_some() {
+                let rebased = (new_value.as_f64() - self.axis_offset(i)) as f32;
+                let rebased_handle = self.rebased_lines.entry(i).or_insert_with(|| {
+                    let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
+                    assets.add(Line {
+                        label,
+                        ..Default::default()
+                    })
+                });
+                let rebased_line = assets
+                    .get_mut(rebased_handle.id())
+                    .expect("missing rebased line asset");
+                push_sample(
+                    rebased_line,
+                    timestamp,
+                    earliest_timestamp,
+                    rebased,
+                    archive_enabled,
+                );
             }
-            // Archive mirrors exactly the sequence accepted by the view. Monotonicity of raw is
-            // enforced by `push_raw` itself, so re-ingestion of historical timestamps (already
-            // rejected above) is doubly safe.
-            line.data.push_raw(archive_enabled, timestamp, new_value);
         }
     }
+}
+
+/// Append one already-cast `value` to a line's view (extending the last chunk
+/// or starting a new one) and to its raw archive. The caller is responsible for
+/// the monotonic-timestamp gate; `push_raw` enforces archive monotonicity too.
+fn push_sample(
+    line: &mut Line,
+    timestamp: Timestamp,
+    earliest_timestamp: Timestamp,
+    value: f32,
+    archive_enabled: bool,
+) {
+    let mut accepted = false;
+    if let Some(last) = line.data.last()
+        && last.timestamps.len() < CHUNK_LEN
+    {
+        line.data.update_last(|c| {
+            c.push(timestamp, earliest_timestamp, value);
+        });
+        accepted = true;
+    }
+    if !accepted {
+        line.data.insert(Chunk::from_initial_value(
+            timestamp,
+            earliest_timestamp,
+            value,
+        ));
+    }
+    line.data.push_raw(archive_enabled, timestamp, value);
 }
 
 #[derive(Resource, Clone, Default)]
@@ -284,16 +339,16 @@ pub fn maybe_compress_all_graph_lines(
         return;
     }
     for component in graph_data.components.values_mut() {
-        let handles: Vec<Handle<Line>> = component.lines.values().cloned().collect();
-        if handles.len() == 3 && try_joint_triline_compress(lines, &handles, earliest, settings) {
-            continue;
-        }
-        for line_handle in &handles {
-            let Some(line) = lines.get_mut(line_handle) else {
-                continue;
-            };
-            line.maybe_compress_live(earliest, settings);
-        }
+        // Compress the raw lines (2D graphs) and their rebased mirror (line_3d)
+        // identically, so both stay within GPU buffer limits and, for 3-vector
+        // components, keep coherent joint (triline) decimation.
+        compress_line_set(lines, component.lines.values().cloned(), earliest, settings);
+        compress_line_set(
+            lines,
+            component.rebased_lines.values().cloned(),
+            earliest,
+            settings,
+        );
     }
     if settings.archive_enabled {
         // Safety net: flag outsized archives so multi-hour aerospace runs don't silently blow up
@@ -314,6 +369,26 @@ pub fn maybe_compress_all_graph_lines(
                 }
             }
         }
+    }
+}
+
+/// Compress one set of lines: joint (triline) decimation when there are exactly
+/// three (keeps 3D curvature coherent), else per-line live compression.
+fn compress_line_set(
+    lines: &mut Assets<Line>,
+    handles: impl IntoIterator<Item = Handle<Line>>,
+    earliest: Timestamp,
+    settings: &CurveCompressSettings,
+) {
+    let handles: Vec<Handle<Line>> = handles.into_iter().collect();
+    if handles.len() == 3 && try_joint_triline_compress(lines, &handles, earliest, settings) {
+        return;
+    }
+    for line_handle in &handles {
+        let Some(line) = lines.get_mut(line_handle) else {
+            continue;
+        };
+        line.maybe_compress_live(earliest, settings);
     }
 }
 
@@ -459,34 +534,50 @@ fn process_time_series<T>(
     let Ok(data) = <[T]>::try_ref_from_bytes(time_series_buf) else {
         return;
     };
+    let rebase = plot_data.value_offset.is_some();
     for i in 0..len {
-        // Rebase in f64 before the f32 cast (no-op when offset is None); keeps
-        // large ECEF vertices from losing ~0.5 m to f32 rounding at storage.
-        let off = plot_data.axis_offset(i);
+        let label = plot_data
+            .element_names
+            .get(i)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("[{i}]"));
+
+        // Raw line for 2D graphs: values exactly as received.
         let line = plot_data.lines.entry(i).or_insert_with(|| {
-            let label = plot_data
-                .element_names
-                .get(i)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("[{i}]"));
             lines.add(Line {
-                label,
+                label: label.clone(),
                 ..Default::default()
             })
         });
-        let values = data
-            .iter()
-            .skip(i)
-            .step_by(len)
-            .map(move |v| (v.as_f64() - off) as f32);
-        let Some(line) = lines.get_mut(line) else {
-            continue;
-        };
-        let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values) else {
-            continue;
-        };
-        line.data.insert(chunk);
+        if let Some(line) = lines.get_mut(line) {
+            let values = data.iter().skip(i).step_by(len).map(|v| v.as_f32());
+            if let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values) {
+                line.data.insert(chunk);
+            }
+        }
+
+        // Rebased mirror for line_3d: subtract the frame origin in f64 before
+        // the f32 cast so large ECEF vertices keep mm precision.
+        if rebase {
+            let off = plot_data.axis_offset(i);
+            let rebased = plot_data.rebased_lines.entry(i).or_insert_with(|| {
+                lines.add(Line {
+                    label,
+                    ..Default::default()
+                })
+            });
+            if let Some(rebased) = lines.get_mut(rebased) {
+                let values = data
+                    .iter()
+                    .skip(i)
+                    .step_by(len)
+                    .map(move |v| (v.as_f64() - off) as f32);
+                if let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values) {
+                    rebased.data.insert(chunk);
+                }
+            }
+        }
     }
 }
 
@@ -922,41 +1013,54 @@ fn handle_overview_response(
         return;
     };
 
-    // Keep overview points in the same rebased space as the full-resolution
-    // series (no-op when offset is None). Overview values are already f32 from
-    // the DB, so this only aligns placement, not precision.
-    let off = plot_data.axis_offset(element_index);
-
-    // Get or create the line for this element
-    let line = plot_data.lines.entry(element_index).or_insert_with(|| {
-        let label = plot_data
-            .element_names
-            .get(element_index)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("[{element_index}]"));
-        lines.add(Line {
-            label,
-            ..Default::default()
-        })
-    });
-
-    let Some(line) = lines.get_mut(line) else {
-        return;
-    };
-
     // The response contains f32 values
     let Ok(values) = <[f32]>::try_ref_from_bytes(buf) else {
         return;
     };
 
-    // Create a chunk with the overview data
-    if let Some(chunk) = Chunk::from_iter(
-        timestamps,
-        earliest_timestamp,
-        values.iter().map(|v| (*v as f64 - off) as f32),
-    ) {
+    let label = plot_data
+        .element_names
+        .get(element_index)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("[{element_index}]"));
+
+    // Raw overview for 2D graphs.
+    let line = plot_data.lines.entry(element_index).or_insert_with(|| {
+        lines.add(Line {
+            label: label.clone(),
+            ..Default::default()
+        })
+    });
+    if let Some(line) = lines.get_mut(line)
+        && let Some(chunk) =
+            Chunk::from_iter(timestamps, earliest_timestamp, values.iter().copied())
+    {
         line.data.insert(chunk);
+    }
+
+    // Rebased overview mirror for line_3d. Overview values are already f32 from
+    // the DB, so this only aligns placement with the rebased full-res series.
+    if plot_data.value_offset.is_some() {
+        let off = plot_data.axis_offset(element_index);
+        let rebased = plot_data
+            .rebased_lines
+            .entry(element_index)
+            .or_insert_with(|| {
+                lines.add(Line {
+                    label,
+                    ..Default::default()
+                })
+            });
+        if let Some(rebased) = lines.get_mut(rebased)
+            && let Some(chunk) = Chunk::from_iter(
+                timestamps,
+                earliest_timestamp,
+                values.iter().map(|v| (*v as f64 - off) as f32),
+            )
+        {
+            rebased.data.insert(chunk);
+        }
     }
 }
 
@@ -2037,6 +2141,54 @@ mod tests {
         assert_eq!(next_timestamp(Timestamp(41)), Timestamp(42));
     }
 
+    /// A rebased component (line_3d) must keep raw telemetry untouched in
+    /// `lines` (what 2D graphs read) while `rebased_lines` holds the f64-rebased
+    /// mirror. This is the Bugbot #736 "2D graphs show rebased values" guard.
+    #[test]
+    fn rebase_leaves_raw_lines_untouched() {
+        let mut lines = Assets::<Line>::default();
+        let mut component =
+            PlotDataComponent::new("POS_ECEF", vec!["X".into(), "Y".into(), "Z".into()]);
+        component.value_offset = Some(vec![1_000_000.0, 2_000_000.0, 3_000_000.0]);
+
+        // Two samples, three elements, laid out sample-major: [s0xyz, s1xyz].
+        let samples: Vec<f64> = vec![
+            1_000_010.5, 2_000_020.5, 3_000_030.5, // sample 0
+            1_000_011.5, 2_000_021.5, 3_000_031.5, // sample 1
+        ];
+        let timestamps = [Timestamp(10), Timestamp(20)];
+        process_time_series::<f64>(
+            samples.as_bytes(),
+            &timestamps,
+            3,
+            &mut component,
+            &mut lines,
+            Timestamp(0),
+        );
+
+        // Raw line X keeps the native ECEF values (for 2D graphs).
+        let raw_x = lines.get(&component.lines[&0]).unwrap();
+        let (_, raw_vals) = raw_x.data.flattened_time_series();
+        assert_eq!(raw_vals, vec![1_000_010.5, 1_000_011.5]);
+
+        // Rebased line X subtracts the frame origin in f64: small, precise.
+        let reb_x = lines.get(&component.rebased_lines[&0]).unwrap();
+        let (_, reb_vals) = reb_x.data.flattened_time_series();
+        assert_eq!(reb_vals, vec![10.5, 11.5]);
+
+        // A component without an offset keeps no rebased mirror at all.
+        let mut plain = PlotDataComponent::new("V", vec!["X".into()]);
+        process_time_series::<f64>(
+            [7.0f64, 8.0].as_bytes(),
+            &timestamps,
+            1,
+            &mut plain,
+            &mut lines,
+            Timestamp(0),
+        );
+        assert!(plain.rebased_lines.is_empty());
+    }
+
     #[test]
     fn next_timestamp_saturates_at_i64_max() {
         assert_eq!(next_timestamp(Timestamp(i64::MAX)), Timestamp(i64::MAX));
@@ -2380,7 +2532,11 @@ pub fn collect_garbage(
         return;
     }
     for component in graph_data.components.values() {
-        for line in component.lines.values() {
+        for line in component
+            .lines
+            .values()
+            .chain(component.rebased_lines.values())
+        {
             let Some(line) = lines.get_mut(line) else {
                 continue;
             };

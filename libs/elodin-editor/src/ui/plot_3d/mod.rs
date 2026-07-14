@@ -101,16 +101,16 @@ pub fn sync_line_plot_3d(
                             .collect(),
                     )
                 });
-            // Rebase this axis's samples against the frame origin in f64 at
-            // ingestion so large ECEF coordinates keep mm precision (see
-            // LineFrameOrigin). Element-indexed, so both a shared 3-vector
-            // component (X/Y/Z at indices 0/1/2) and per-axis scalar components
-            // subtract the right coordinate. Guarded on "no samples yet" rather
-            // than "just created", so every axis of a shared component is set,
-            // and a component that already holds data (e.g. collected by a 2D
-            // graph) is never mutated mid-stream: it keeps raw values and the
-            // shader subtracts the residual instead (correct placement, at the
-            // pre-rebase precision).
+            // Configure the f64 rebase for this axis: ingestion then keeps a
+            // rebased mirror (PlotDataComponent::rebased_lines) that line_3d
+            // renders from, while the raw lines (2D graphs) stay untouched.
+            // Element-indexed, so both a shared 3-vector component (X/Y/Z at
+            // indices 0/1/2) and per-axis scalar components subtract the right
+            // coordinate. Only set before any samples arrive, so the mirror
+            // covers the whole series; a component that already holds data
+            // (e.g. a 2D graph fetched it first) keeps no mirror and line_3d
+            // falls back to the raw lines with the shader world_origin residual
+            // (correct placement, at the pre-rebase precision).
             if r_i != 0.0 && data.lines.is_empty() {
                 let offsets = data.value_offset.get_or_insert_with(Vec::new);
                 if offsets.len() <= *index {
@@ -119,7 +119,7 @@ pub fn sync_line_plot_3d(
                 offsets[*index] = r_i;
             }
             world_origin[i] = (r_i - data.axis_offset(*index)) as f32;
-            handles[i] = data.lines.get(index).cloned();
+            handles[i] = data.render_line(*index).cloned();
         }
         let [Some(x), Some(y), Some(z)] = handles else {
             continue;
