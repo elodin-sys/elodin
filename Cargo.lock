@@ -5537,6 +5537,7 @@ dependencies = [
  "stacker",
  "stellarator",
  "strum 0.27.2",
+ "tempfile",
  "test-case",
  "thiserror 2.0.18",
  "tokio",
@@ -7828,23 +7829,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller_py"
-version = "0.17.4-alpha.0"
-dependencies = [
- "anyhow",
- "futures-lite",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
- "postcard",
- "pyo3",
- "stellarator",
- "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "indent_write"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9084,13 +9068,16 @@ version = "0.17.4-alpha.0"
 dependencies = [
  "chrono",
  "csv",
+ "glob",
  "indicatif 0.17.11",
  "miette 7.6.0",
+ "nix 0.29.0",
  "s10",
  "serde",
  "serde_json",
  "stellarator",
  "sysinfo 0.34.2",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
@@ -9712,6 +9699,7 @@ dependencies = [
  "numpy",
  "paste",
  "postcard",
+ "postcard-schema",
  "pyo3",
  "s10",
  "serde",

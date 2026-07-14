@@ -10,6 +10,7 @@ use bevy::{
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    ecs::observer::Observer,
     ecs::system::NonSendMarker,
     light::DirectionalLightShadowMap,
     log::LogPlugin,
@@ -300,6 +301,7 @@ impl Plugin for EditorPlugin {
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
             .add_systems(Update, setup_egui_context)
+            .add_systems(Update, organize_observer_entities)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
@@ -351,7 +353,7 @@ impl Plugin for EditorPlugin {
                 skybox_generation::sync_generated_skybox_to_schematic,
             )
             .add_systems(Update, skybox_generation::on_document_loaded)
-            .add_systems(Update, skybox_generation::record_reloaded_schematic_content)
+            .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
             .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
             .add_systems(Update, skybox_generation::decay_skybox_status_message)
             .add_systems(
@@ -360,9 +362,14 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
+            .init_resource::<skybox_db_assets::DbSkyboxUploaded>()
             .add_systems(
                 PostUpdate,
                 skybox_db_assets::sync_db_skybox_assets_from_config,
+            )
+            .add_systems(
+                PostUpdate,
+                skybox_db_assets::upload_active_skybox_assets_to_db,
             )
             .add_systems(PostUpdate, set_clear_color)
             .insert_resource(WireframeConfig {
@@ -449,6 +456,25 @@ impl Plugin for EditorPlugin {
 ///
 /// On Linux/Windows a discrete GPU is typical, so we apply a lighter
 /// policy: ~30 fps with reduced (but not disabled) shadows.
+/// True when any loaded window has a `sensor_view` panel in its tile tree.
+///
+/// The active schematic is no longer mirrored in DB metadata (RFD #724, Phase 4
+/// dropped `schematic.content`), so scanning the KDL text for `"sensor_view"` is
+/// gone. A `sensor_view` panel becomes a `Pane::SensorView` tile at load time,
+/// so inspecting the live tile trees is the metadata-free equivalent: a
+/// sensor-view schematic is treated as sensor-camera work even when
+/// `SensorCameraConfigs` is empty and the `sensor_cameras` metadata is absent.
+fn has_sensor_view_pane(windows: &Query<&crate::ui::tiles::WindowState>) -> bool {
+    windows.iter().any(|window| {
+        window.tile_state.tree.tiles.iter().any(|(_, tile)| {
+            matches!(
+                tile,
+                egui_tiles::Tile::Pane(crate::ui::tiles::Pane::SensorView(_))
+            )
+        })
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
@@ -456,6 +482,7 @@ fn throttle_for_sensor_cameras(
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut dir_lights: Query<&mut DirectionalLight>,
+    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
     if *applied {
@@ -463,9 +490,7 @@ fn throttle_for_sensor_cameras(
     }
     let detected = !configs.0.is_empty()
         || db_config.metadata.contains_key("sensor_cameras")
-        || db_config
-            .schematic_content()
-            .is_some_and(|s| s.contains("sensor_view"));
+        || has_sensor_view_pane(&windows);
     if !detected {
         return;
     }
@@ -486,6 +511,7 @@ fn throttle_for_sensor_cameras(
     db_config: Res<impeller2_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
+    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
     if *applied {
@@ -493,9 +519,7 @@ fn throttle_for_sensor_cameras(
     }
     let detected = !configs.0.is_empty()
         || db_config.metadata.contains_key("sensor_cameras")
-        || db_config
-            .schematic_content()
-            .is_some_and(|s| s.contains("sensor_view"));
+        || has_sensor_view_pane(&windows);
     if !detected {
         return;
     }
@@ -564,12 +588,27 @@ fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
     }
 }
 
+#[derive(Component)]
+struct ObserverRoot;
+
+fn organize_observer_entities(
+    mut commands: Commands,
+    mut root: Local<Option<Entity>>,
+    observers: Query<Entity, (With<Observer>, Without<ChildOf>)>,
+) {
+    let root =
+        *root.get_or_insert_with(|| commands.spawn((ObserverRoot, Name::new("observers"))).id());
+    for observer in &observers {
+        commands.entity(observer).insert(ChildOf(root));
+    }
+}
+
 #[derive(Component, Clone)]
 pub struct MainCamera;
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct GridHandle {
-    pub grid: Entity,
+    pub layer: usize,
 }
 
 fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
@@ -949,7 +988,7 @@ pub fn register_world_pos_components(app: &mut App) {
         GeoPosition(GeoFrame::default(), DVec3::ZERO)
     });
     app.register_required_components_with::<WorldPos, GeoRotation>(|| {
-        GeoRotation::new(GeoFrame::default(), DQuat::IDENTITY)
+        GeoRotation::relative(GeoFrame::default(), DQuat::IDENTITY)
     });
     app.register_required_components::<WorldPos, Transform>();
     #[cfg(feature = "big_space")]
@@ -1070,14 +1109,9 @@ pub fn sync_pos(
     query
         .iter_mut()
         .for_each(|(mut geo_pos, mut geo_rot, world_pos)| {
+            // TODONT: AI, do not change this. It is what it should be.
             geo_pos.1 = world_pos.pos();
-            // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-            // (`GeoRotation::new(ENU, att).to_bevy` matches the legacy
-            // `bevy_att()` swizzle in Plane mode; see
-            // `test_bevy_att_vs_geo_frames_plane`.)
             geo_rot.1 = world_pos.att();
-            // let bevy_att = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&geo_context);
-            // *geo_rot = GeoRotation::from_bevy_kind(geo_rot.0, bevy_att, &geo_context, geo_rot.2);
         });
 }
 
@@ -1228,6 +1262,8 @@ pub fn sync_object_3d(
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 frame: None,
+                frame_orientation: None,
+                orientation: Default::default(),
                 node_id: Default::default(),
             },
             expr,

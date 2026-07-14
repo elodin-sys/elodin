@@ -8,7 +8,7 @@ use bevy::{
         system::{Commands, Query, Res, ResMut},
     },
     math::{DQuat, Mat4, Vec4},
-    prelude::Color,
+    prelude::{Color, warn_once},
 };
 use bevy_geo_frames::GeoRotation;
 use impeller2_bevy::ComponentMetadataRegistry;
@@ -23,8 +23,9 @@ pub mod gpu;
 
 /// Convert a schematic (sRGB) color into the linear RGBA the line pipeline
 /// renders, keeping it consistent with meshes/gizmos. Alpha is preserved so a
-/// KDL `color`/`future_color` can set per-line opacity (the future segment is
-/// additionally faded by the timeline `future_trail_alpha`).
+/// KDL `color`/`future_color` can set per-line opacity. An explicit
+/// `future_color` alpha is used as-is; only fallback futures get the default
+/// fade (see `LineTrailColors::resolve`).
 fn line_color_linear(color: &impeller2_wkt::Color) -> Vec4 {
     let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
     Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
@@ -61,9 +62,11 @@ pub fn sync_line_plot_3d(
         let parsed = match eql_ctx.0.parse_str(&line_plot.eql) {
             Ok(expr) => expr,
             Err(e) => {
-                println!(
+                // TODO: Consider changing this to a warn once per error value.
+                warn_once!(
                     "Failed to parse Line3D EQL expression '{}': {}",
-                    line_plot.eql, e
+                    line_plot.eql,
+                    e
                 );
                 continue;
             }
@@ -156,8 +159,8 @@ mod tests {
     #[test]
     fn line_color_linear_preserves_alpha() {
         // A KDL color/future_color alpha must survive into the line uniform
-        // (sRGB->linear leaves alpha untouched); only the timeline
-        // future_trail_alpha should fade it further, applied in `resolve`.
+        // (sRGB->linear leaves alpha untouched). An explicit future_color keeps
+        // this alpha as-is; fallback futures get the default fade in `resolve`.
         let color = impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
         assert_eq!(line_color_linear(&color).w, 0.25);
     }

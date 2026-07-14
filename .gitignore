@@ -9,6 +9,7 @@ result-bin
 .vscode
 node_modules
 profile_output
+.direnv/
 
 # ai
 ai-context
@@ -51,6 +52,7 @@ logstream-db/
 testvids/
 *.log
 **/testdata/*
+screenlog*
 
 # macOS debug symbols
 *.dSYM/

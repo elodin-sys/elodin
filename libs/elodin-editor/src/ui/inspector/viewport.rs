@@ -7,13 +7,12 @@ use bevy::picking::prelude::Pickable;
 use bevy::prelude::*;
 use bevy::{
     camera::Projection,
-    camera::visibility::Visibility,
+    camera::visibility::RenderLayers,
     ecs::{entity::Entity, system::Query},
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault};
-use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
 use nox::ArrayBuf;
@@ -87,7 +86,6 @@ pub struct InspectorViewport<'w, 's> {
     viewports: Query<'w, 's, &'static mut Viewport>,
     viewport_configs: Query<'w, 's, &'static mut ViewportConfig>,
     viewport_rects: Query<'w, 's, &'static ViewportRect, With<MainCamera>>,
-    grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     editor_cams: Query<'w, 's, &'static mut EditorCam>,
     object_3d_states: Query<'w, 's, &'static Object3DState>,
     eql_ctx: ResMut<'w, EqlContext>,
@@ -113,7 +111,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             mut viewports,
             mut viewport_configs,
             viewport_rects,
-            mut grid_visibility,
             mut editor_cams,
             object_3d_states,
             eql_ctx,
@@ -296,7 +293,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             }
         }
 
-        if let Some(&GridHandle { grid }) = cam.grid_handle {
+        if let Some(&GridHandle { layer }) = cam.grid_handle {
             ui.separator();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
@@ -304,14 +301,14 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("SHOW GRID").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                            let mut visibility = grid_visibility.get_mut(grid).unwrap();
-                            let mut visible = *visibility == Visibility::Visible;
+                            let mut visible =
+                                cam.render_layers.intersects(&RenderLayers::layer(layer));
                             theme::configure_input_with_border(ui.style_mut());
                             ui.checkbox(&mut visible, "");
                             if visible {
-                                *visibility = Visibility::Visible;
+                                *cam.render_layers = cam.render_layers.clone().with(layer);
                             } else {
-                                *visibility = Visibility::Hidden;
+                                *cam.render_layers = cam.render_layers.clone().without(layer);
                             }
                         });
                     });
@@ -550,16 +547,19 @@ pub fn sync_viewport_focus_pick_targets(
         }
     }
 
+    // `try_*` variants silence the command if the entity was despawned between
+    // building the target set and applying these deferred commands (e.g. a
+    // schematic reload triggered by skybox generation despawns Object3D meshes).
     for entity in current_targets.difference(&desired_targets) {
         commands
             .entity(*entity)
-            .remove::<(Pickable, ViewportFocusPickTarget)>();
+            .try_remove::<(Pickable, ViewportFocusPickTarget)>();
     }
 
     for entity in desired_targets.difference(&current_targets) {
         commands
             .entity(*entity)
-            .insert((Pickable::default(), ViewportFocusPickTarget));
+            .try_insert((Pickable::default(), ViewportFocusPickTarget));
     }
 }
 
@@ -683,7 +683,7 @@ mod tests {
                 .spawn((
                     super::WorldPos::default(),
                     GeoPosition(frame, DVec3::ZERO),
-                    GeoRotation::new(frame, DQuat::IDENTITY),
+                    GeoRotation::relative(frame, DQuat::IDENTITY),
                 ))
                 .id();
             // Values from the failing ball.kdl viewport.
@@ -888,7 +888,8 @@ mod tests {
             };
 
             let elodin_bevy = world_pos.bevy_att();
-            let geo_frames_bevy = GeoRotation::new(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let geo_frames_bevy =
+                GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
             assert_eq_quat!(
                 elodin_bevy.as_quat(),
                 geo_frames_bevy.as_quat(),
@@ -980,5 +981,89 @@ mod tests {
             let glam_quat = Quat::from_mat3(&g(glam_mat));
             assert_eq_quat!(nox_quat_bevy.as_quat(), glam_quat, "case {i} second");
         }
+    }
+
+    fn focus_object_state(eql: &str) -> Object3DState {
+        use impeller2_wkt::{Object3D, Object3DMesh};
+        Object3DState {
+            compiled_expr: None,
+            scale_expr: None,
+            scale_error: None,
+            error_covariance_cholesky_expr: None,
+            joint_animations: Vec::new(),
+            data: Object3D {
+                eql: eql.to_string(),
+                mesh: Object3DMesh::glb("model.glb"),
+                frame: None,
+                frame_orientation: None,
+                orientation: Default::default(),
+                icon: None,
+                thrusters: Vec::new(),
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            },
+        }
+    }
+
+    fn focus_viewport(eql: &str, parent_entity: Entity) -> Viewport {
+        Viewport {
+            parent_entity,
+            pos: EditableEQL {
+                eql: String::new(),
+                compiled_expr: None,
+            },
+            look_at: EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: None,
+            },
+            up: EditableEQL {
+                eql: String::new(),
+                compiled_expr: None,
+            },
+            frame: None,
+        }
+    }
+
+    /// Regression for the panic where a focus mesh entity is despawned between
+    /// `sync_viewport_focus_pick_targets` queueing its `insert` and the deferred
+    /// commands applying (e.g. skybox generation reloads the schematic). The
+    /// queued command must be silenced rather than panic on the dead entity.
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn sync_viewport_focus_pick_targets_survives_despawned_target() {
+        let mut world = World::new();
+        let parent = world.spawn(focus_object_state("e.world_pos")).id();
+        let mesh = world.spawn(Mesh3d(Handle::default())).id();
+        world.entity_mut(parent).add_child(mesh);
+        let viewport_parent = world.spawn_empty().id();
+        world.spawn(focus_viewport("e.world_pos", viewport_parent));
+
+        let mut state: SystemState<(
+            Commands,
+            Query<&Viewport>,
+            Query<(Entity, &Object3DState)>,
+            Query<&Children>,
+            Query<(), With<Mesh3d>>,
+            Query<Entity, With<ViewportFocusPickTarget>>,
+        )> = SystemState::new(&mut world);
+
+        {
+            let (commands, viewports, objects, children, mesh_entities, current_targets) =
+                state.get_mut(&mut world);
+            sync_viewport_focus_pick_targets(
+                commands,
+                viewports,
+                objects,
+                children,
+                mesh_entities,
+                current_targets,
+            );
+        }
+
+        // Despawn the target after the insert is queued but before it applies.
+        world.entity_mut(mesh).despawn();
+        state.apply(&mut world);
+
+        assert!(world.get_entity(mesh).is_err());
     }
 }

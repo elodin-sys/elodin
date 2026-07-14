@@ -105,21 +105,17 @@ impl TimeSeries {
 
         let start = range.start;
         let end = range.end;
-        let start_index = match timestamps.binary_search(&start) {
-            Ok(i) => i,
-            Err(i) => i,
-        };
+        let start_index = timestamps.partition_point(|&t| t < start);
+        let end_index = timestamps.partition_point(|&t| t <= end);
+        if start_index >= end_index {
+            return None;
+        }
 
-        let end_index = match timestamps.binary_search(&end) {
-            Ok(i) => i,
-            Err(i) => i.saturating_sub(1),
-        };
-
-        let timestamps = timestamps.get(start_index..=end_index)?;
+        let timestamps = timestamps.get(start_index..end_index)?;
         let element_size = self.element_size();
         let data = self
             .data
-            .get(start_index * element_size..end_index.saturating_add(1) * element_size)?;
+            .get(start_index * element_size..end_index * element_size)?;
 
         Some((timestamps, data))
     }

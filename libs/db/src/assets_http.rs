@@ -1,7 +1,9 @@
+use axum::Json;
 use axum::Router;
-use axum::extract::{Path as AxumPath, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use miette::IntoDiagnostic;
 use std::collections::HashSet;
@@ -57,7 +59,18 @@ pub enum SanitizeError {
 #[derive(Clone)]
 struct AssetsState {
     assets_dir: PathBuf,
+    /// When false (e.g. on a follower replica), `PUT` uploads are rejected so
+    /// the read-only mirror cannot diverge from its source.
+    writable: bool,
+    /// DB handle used to bump `assets.revision` on a successful `PUT`, so
+    /// followers re-mirror and editors reload after a byte-only change (RFD
+    /// #724). `None` when the server runs without a co-located DB.
+    db: Option<Arc<DB>>,
 }
+
+/// Upper bound on a single `PUT` asset upload. Generous enough for large GLB
+/// meshes while bounding memory use from a hostile client.
+const MAX_ASSET_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 
 pub fn assets_http_addr(tcp: SocketAddr) -> SocketAddr {
     SocketAddr::new(tcp.ip(), tcp.port().saturating_add(ASSETS_HTTP_PORT_OFFSET))
@@ -84,6 +97,14 @@ pub fn assets_http_base_url(tcp: SocketAddr) -> String {
 pub enum SyncAssetsError {
     #[error("failed to parse schematic KDL")]
     Parse(#[source] impeller2_kdl::KdlSchematicError),
+    #[error("asset index returned HTTP {0}")]
+    IndexStatus(reqwest::StatusCode),
+    #[error("failed to fetch asset index from source")]
+    IndexFetch(#[from] reqwest::Error),
+    #[error("follower asset mirror incomplete: {failed} of {total} assets failed")]
+    PartialMirror { failed: usize, total: usize },
+    #[error("source asset index empty while follower holds {local} local assets")]
+    EmptySourceIndex { local: usize },
     #[error("IO error")]
     Io(#[from] io::Error),
 }
@@ -91,12 +112,22 @@ pub enum SyncAssetsError {
 const ASSET_FETCH_ATTEMPTS: usize = 8;
 const ASSET_FETCH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 const ASSET_FETCH_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
-const ASSET_FETCH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+/// Per-read timeout (reqwest resets it after each successful chunk), **not** a
+/// total-request timeout. A stalled or dead connection still fails fast and
+/// retries, but a large yet healthy mesh/cubemap download is never capped
+/// mid-transfer the way a fixed total timeout did (RFD #724, Bug 2).
+const ASSET_FETCH_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// A follower mirror pass that returns an error (e.g. `PartialMirror` from a
+/// slow/missing source asset) is retried a bounded number of times with a
+/// backoff, so the follower converges on its own rather than staying incomplete
+/// until an unrelated `SetDbConfig` triggers another sync (RFD #724, Bug 3).
+const MIRROR_PASS_RETRY_ATTEMPTS: usize = 5;
+const MIRROR_PASS_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn sync_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .connect_timeout(ASSET_FETCH_CONNECT_TIMEOUT)
-        .timeout(ASSET_FETCH_REQUEST_TIMEOUT)
+        .read_timeout(ASSET_FETCH_READ_TIMEOUT)
         .build()
 }
 
@@ -176,25 +207,259 @@ async fn sync_one_schematic_asset(
     Some(bytes)
 }
 
-/// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local `assets/` dir.
-pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
-    let (content, db_config) = db.with_state(|s| {
-        (
-            s.db_config.schematic_content().map(str::to_owned),
-            s.db_config.clone(),
-        )
-    });
-    let Some(content) = content else {
-        return;
-    };
-    if let Err(err) =
-        sync_schematic_assets_from_source(source_tcp, &db.path, &content, Some(&db_config)).await
-    {
-        warn!(
-            ?err,
-            "failed to sync schematic assets from source; db: paths may not load"
-        );
+/// Serializes follower full-tree asset mirrors. Each `SetDbConfig` that requests
+/// an asset sync would otherwise spawn an independent mirror; overlapping passes
+/// can run `prune_stale_local_assets` from different index snapshots — deleting
+/// keys another in-flight pass still needs, or leaving a mixed, inconsistent
+/// follower asset tree (RFD #724, Bug 1).
+///
+/// Single-flight with coalescing: at most one mirror runs at a time. Requests
+/// arriving while a pass runs set a `rerun` flag so exactly one more pass runs
+/// afterwards, capturing the latest source state without unbounded stacking.
+#[derive(Default)]
+pub struct AssetMirrorCoordinator {
+    inner: std::sync::Mutex<MirrorRunState>,
+}
+
+#[derive(Default)]
+struct MirrorRunState {
+    running: bool,
+    rerun: bool,
+}
+
+impl AssetMirrorCoordinator {
+    /// Record a mirror request and try to claim the runner slot. Returns `true`
+    /// if this caller must run the mirror loop, `false` if a pass is already in
+    /// flight (it will observe the `rerun` we set and do one more pass).
+    fn try_begin(&self) -> bool {
+        let mut st = self.inner.lock().unwrap();
+        st.rerun = true;
+        if st.running {
+            return false;
+        }
+        st.running = true;
+        true
     }
+
+    /// Decide, atomically, whether the runner should do another pass. Clears
+    /// `rerun` and returns `true` when a request arrived during the last pass;
+    /// otherwise releases the runner slot and returns `false`. Doing both under
+    /// one lock avoids a lost wakeup (a request setting `rerun` between an
+    /// unlocked check and a separate clear).
+    fn finish_or_continue(&self) -> bool {
+        let mut st = self.inner.lock().unwrap();
+        if st.rerun {
+            st.rerun = false;
+            true
+        } else {
+            st.running = false;
+            false
+        }
+    }
+
+    /// Run a full-tree mirror, coalescing concurrent requests. Either performs
+    /// the pass(es) itself as the sole runner, or hands off to the pass already
+    /// in flight (which will do one more pass on this request's behalf).
+    pub async fn mirror_all(&self, source_tcp: SocketAddr, db_path: &Path) {
+        if !self.try_begin() {
+            return;
+        }
+        // Clear `running` even if a pass panics, so a crashed mirror never wedges
+        // every future sync. Fires only on unwind; the normal path releases the
+        // slot via `finish_or_continue`.
+        struct PanicGuard<'a>(&'a AssetMirrorCoordinator);
+        impl Drop for PanicGuard<'_> {
+            fn drop(&mut self) {
+                if std::thread::panicking() {
+                    self.0.inner.lock().unwrap().running = false;
+                }
+            }
+        }
+        let _panic_guard = PanicGuard(self);
+
+        loop {
+            if !self.finish_or_continue() {
+                return;
+            }
+            // Retry a failed pass with backoff so a follower recovers from a
+            // transient `PartialMirror` (slow/large asset) on its own instead of
+            // exiting with an incomplete tree until the next unrelated sync
+            // request (RFD #724, Bug 3).
+            let mut attempt = 0usize;
+            while let Err(err) = sync_all_assets_from_source(source_tcp, db_path).await {
+                // A newer request is already queued: stop burning this pass's
+                // retry budget and let the outer loop start a fresh mirror for
+                // the latest state.
+                if self.inner.lock().unwrap().rerun {
+                    warn!(
+                        ?err,
+                        "asset mirror incomplete; newer sync queued, deferring retry"
+                    );
+                    break;
+                }
+                attempt += 1;
+                if attempt >= MIRROR_PASS_RETRY_ATTEMPTS {
+                    warn!(
+                        ?err,
+                        attempts = attempt,
+                        "follower asset mirror still incomplete after retries; db: paths may not load"
+                    );
+                    break;
+                }
+                warn!(
+                    ?err,
+                    attempt, "follower asset mirror incomplete; retrying after backoff"
+                );
+                tokio::time::sleep(MIRROR_PASS_RETRY_DELAY).await;
+            }
+        }
+    }
+}
+
+/// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local
+/// `assets/` dir, serialized through the DB's mirror coordinator so concurrent
+/// syncs never overlap (RFD #724, Bug 1).
+pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
+    db.asset_mirror.mirror_all(source_tcp, &db.path).await;
+}
+
+async fn fetch_source_index(
+    client: &reqwest::Client,
+    base: &str,
+) -> Result<Vec<crate::assets::AssetEntry>, SyncAssetsError> {
+    let url = format!("{base}/{INDEX_KEY}");
+    let response = client.get(&url).send().await?;
+    if !response.status().is_success() {
+        return Err(SyncAssetsError::IndexStatus(response.status()));
+    }
+    let bytes = response.bytes().await?;
+    serde_json::from_slice(&bytes)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err).into())
+}
+
+fn local_asset_matches(assets_dir: &Path, key: &str, remote: &[u8]) -> bool {
+    read_asset_file(assets_dir, key)
+        .ok()
+        .is_some_and(|local| local == remote)
+}
+
+async fn mirror_asset_from_source(
+    client: &reqwest::Client,
+    base: &str,
+    assets_dir: &Path,
+    key: &str,
+) -> bool {
+    let url = format!("{base}/{key}");
+    let Some(remote) = fetch_source_asset(client, &url, key).await else {
+        return false;
+    };
+    if local_asset_matches(assets_dir, key, &remote) {
+        return true;
+    }
+    write_asset_file(assets_dir, key, &remote)
+        .inspect_err(|err| tracing::warn!(asset = %key, ?err, "failed to write mirrored asset"))
+        .is_ok()
+}
+
+/// Delete local assets whose keys the source no longer advertises, so a follower
+/// stops serving files removed upstream. Best-effort: individual prune failures
+/// are logged, not fatal. `index_assets_in` already excludes dotfiles (e.g. the
+/// ingest marker); reserved keys are skipped defensively.
+fn prune_stale_local_assets(assets_dir: &Path, source_keys: &HashSet<String>) {
+    let local = match crate::assets::index_assets_in(assets_dir, None) {
+        Ok(local) => local,
+        Err(err) => {
+            warn!(?err, "failed to list local assets for follower prune");
+            return;
+        }
+    };
+    for entry in local {
+        if source_keys.contains(&entry.key) || is_reserved_asset_key(&entry.key) {
+            continue;
+        }
+        match remove_asset_file(assets_dir, &entry.key) {
+            Ok(()) => {
+                tracing::info!(asset = %entry.key, "pruned stale local asset removed upstream")
+            }
+            Err(err) => warn!(asset = %entry.key, ?err, "failed to prune stale local asset"),
+        }
+    }
+}
+
+/// Mirrors the source DB's full asset tree into `db_path/assets/` via `GET /__index__`.
+///
+/// Assets absent from the source index are pruned locally so the follower never
+/// serves files deleted upstream. Returns [`SyncAssetsError::PartialMirror`] when
+/// any advertised asset failed to download, so callers don't treat an incomplete
+/// tree as a completed sync.
+pub async fn sync_all_assets_from_source(
+    source_tcp: SocketAddr,
+    db_path: &Path,
+) -> Result<(), SyncAssetsError> {
+    let base = assets_http_base_url(source_tcp);
+    let assets_dir = assets_dir(db_path);
+    std::fs::create_dir_all(&assets_dir)?;
+    let client = sync_http_client().map_err(io::Error::other)?;
+
+    let entries = fetch_source_index(&client, &base).await?;
+
+    // An empty index is never a trustworthy basis for pruning: the source may be
+    // up before its assets exist, or briefly serving an empty listing. Pruning
+    // against it deletes every locally mirrored asset, leaving the follower with
+    // an empty tree while metadata still advertises `schematic.active`. When the
+    // follower already holds assets, treat the empty index as an incomplete pass
+    // so the coordinator retries and converges once the source publishes its
+    // tree. A genuinely empty follower has nothing to lose, so accept it as a
+    // completed no-op (RFD #724).
+    if entries.is_empty() {
+        let local = crate::assets::index_assets_in(&assets_dir, None).unwrap_or_default();
+        if local.is_empty() {
+            return Ok(());
+        }
+        warn!(
+            local = local.len(),
+            "source asset index empty while follower holds assets; skipping prune to avoid wiping mirror"
+        );
+        return Err(SyncAssetsError::EmptySourceIndex { local: local.len() });
+    }
+
+    // Remember every key the source advertises so stale local files can be
+    // pruned once the mirror pass completes.
+    let mut source_keys = HashSet::new();
+    let mut synced = 0usize;
+    let mut failed = 0usize;
+    for entry in entries {
+        if is_reserved_asset_key(&entry.key) {
+            continue;
+        }
+        source_keys.insert(entry.key.clone());
+        if mirror_asset_from_source(&client, &base, &assets_dir, &entry.key).await {
+            synced += 1;
+        } else {
+            failed += 1;
+        }
+    }
+
+    // Prune is destructive, so only run it on a fully successful pass. On a
+    // partial pass the source (or its index) may be transiently unhealthy, and
+    // deleting local assets against that snapshot would compound the incomplete
+    // download with lost files. Skip pruning and return `PartialMirror`; the
+    // coordinator reruns and the next complete pass prunes on a trustworthy view
+    // (RFD #724).
+    if failed > 0 {
+        warn!(
+            synced,
+            failed, "follower asset mirror finished with missing assets; skipping prune"
+        );
+        return Err(SyncAssetsError::PartialMirror {
+            failed,
+            total: synced + failed,
+        });
+    }
+
+    prune_stale_local_assets(&assets_dir, &source_keys);
+
+    Ok(())
 }
 
 /// Copies `db:` assets referenced in schematic KDL from a source elodin-db assets server.
@@ -269,6 +534,12 @@ pub fn sanitize_asset_path(path: &str) -> Result<PathBuf, SanitizeError> {
 }
 
 pub fn write_asset_file(assets_dir: &Path, name: &str, data: &[u8]) -> io::Result<()> {
+    if is_reserved_asset_key(name) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "reserved asset key",
+        ));
+    }
     let rel = sanitize_asset_path(name)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset path"))?;
     std::fs::create_dir_all(assets_dir)?;
@@ -288,25 +559,131 @@ pub fn read_asset_file(assets_dir: &Path, name: &str) -> io::Result<Vec<u8>> {
     std::fs::read(assets_dir.join(rel))
 }
 
+/// Remove a stored asset by key. Sanitized like the read/write paths so a key
+/// can never escape the assets root. A missing file is treated as already gone.
+pub fn remove_asset_file(assets_dir: &Path, name: &str) -> io::Result<()> {
+    let rel = sanitize_asset_path(name)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset path"))?;
+    match std::fs::remove_file(assets_dir.join(rel)) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+/// Reserved key prefix for the asset index listing (network replacement for a
+/// filesystem `read_dir`): `GET /__index__` or `GET /__index__/<prefix>`.
+pub(crate) const INDEX_KEY: &str = "__index__";
+
+/// Keys reserved by the DB asset layer that must never be stored as real
+/// assets. Storing them would be unservable: the index namespace (`__index__`,
+/// `__index__/…`) is shadowed by the listing route, and the ingest marker
+/// (`.elodin-ingested`) would forge the copy-once guard. Enforced at every write
+/// path (uploads, skybox sync, ingest) and skipped when copying a source tree.
+pub(crate) fn is_reserved_asset_key(key: &str) -> bool {
+    key == crate::assets::INGEST_MARKER
+        || key == INDEX_KEY
+        || key
+            .strip_prefix(INDEX_KEY)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 async fn get_asset(
     AxumPath(path): AxumPath<String>,
     State(state): State<Arc<AssetsState>>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let rel = sanitize_asset_path(&path).map_err(|_| StatusCode::BAD_REQUEST)?;
+) -> Response {
+    if path == INDEX_KEY || path == "__index__/" {
+        return index_response(state.assets_dir.clone(), None).await;
+    }
+    if let Some(prefix) = path.strip_prefix("__index__/") {
+        return index_response(state.assets_dir.clone(), Some(prefix.to_string())).await;
+    }
+
+    let Ok(rel) = sanitize_asset_path(&path) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
     let full = state.assets_dir.join(rel);
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
-        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Ok(bytes)) => bytes.into_response(),
         Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
-            tracing::warn!(asset = %path, "asset http 404 (not found)");
-            Err(StatusCode::NOT_FOUND)
+            // A 404 is a routine client outcome (e.g. a mirror polling for an
+            // asset still being uploaded), not a server fault — log at info.
+            tracing::info!(asset = %path, "asset http 404 (not found)");
+            StatusCode::NOT_FOUND.into_response()
         }
         Ok(Err(err)) => {
             tracing::error!(asset = %path, ?err, "asset http 500 (read error)");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
         Err(err) => {
             tracing::error!(asset = %path, ?err, "asset http 500 (read task failed)");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// `PUT /<key>` writes an asset, the network replacement for a filesystem
+/// write. Path sanitization and reserved-key rejection live in
+/// `write_asset_file`; here we add the write gate (`writable`) so a follower
+/// replica returns `405` instead of diverging from its source. Uploads go
+/// through `write_uploaded_asset` so a `.kdl` schematic gets the same local →
+/// `db:` path rewrite as Impeller `StoreAsset` and tree ingest.
+async fn put_asset(
+    AxumPath(path): AxumPath<String>,
+    State(state): State<Arc<AssetsState>>,
+    body: Bytes,
+) -> Response {
+    if !state.writable {
+        tracing::warn!(asset = %path, "asset http PUT rejected (read-only server)");
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let assets_dir = state.assets_dir.clone();
+    let name = path.clone();
+    let db = state.db.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::assets::write_uploaded_asset(&assets_dir, &name, &body)?;
+        // Bytes changed: bump the revision so followers re-mirror and editors
+        // reload even under an unchanged `schematic.active`. A persistence
+        // hiccup must not fail the (already written) upload — log and move on.
+        if let Some(db) = db
+            && let Err(err) = db.bump_assets_revision()
+        {
+            tracing::warn!(?err, "failed to bump asset revision after PUT");
+        }
+        Ok::<(), io::Error>(())
+    })
+    .await
+    {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(err)) if err.kind() == io::ErrorKind::InvalidInput => {
+            // Reserved key or path escaping the assets root: a client fault.
+            tracing::warn!(asset = %path, ?err, "asset http PUT 400 (invalid key)");
+            StatusCode::BAD_REQUEST.into_response()
+        }
+        Ok(Err(err)) => {
+            tracing::error!(asset = %path, ?err, "asset http PUT 500 (write error)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Err(err) => {
+            tracing::error!(asset = %path, ?err, "asset http PUT 500 (write task failed)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn index_response(assets_dir: PathBuf, prefix: Option<String>) -> Response {
+    let walk = tokio::task::spawn_blocking(move || {
+        crate::assets::index_assets_in(&assets_dir, prefix.as_deref())
+    })
+    .await;
+    match walk {
+        Ok(Ok(entries)) => Json(entries).into_response(),
+        Ok(Err(err)) => {
+            tracing::error!(?err, "asset index 500 (walk error)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Err(err) => {
+            tracing::error!(?err, "asset index 500 (walk task failed)");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }
@@ -315,25 +692,41 @@ async fn serve_assets_with_listener(
     listener: tokio::net::TcpListener,
     addr: SocketAddr,
     assets_dir: PathBuf,
+    writable: bool,
+    db: Option<Arc<DB>>,
 ) -> miette::Result<()> {
-    let state = Arc::new(AssetsState { assets_dir });
+    let state = Arc::new(AssetsState {
+        assets_dir,
+        writable,
+        db,
+    });
     let app = Router::new()
-        .route("/{*path}", get(get_asset))
+        .route("/{*path}", get(get_asset).put(put_asset))
+        .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
         .with_state(state);
-    tracing::info!(?addr, "assets http server listening");
+    tracing::info!(?addr, writable, "assets http server listening");
     axum::serve(listener, app).await.into_diagnostic()?;
     Ok(())
 }
 
-pub async fn serve_assets(addr: SocketAddr, assets_dir: PathBuf) -> miette::Result<()> {
+pub async fn serve_assets(
+    addr: SocketAddr,
+    assets_dir: PathBuf,
+    writable: bool,
+) -> miette::Result<()> {
     std::fs::create_dir_all(&assets_dir).into_diagnostic()?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .into_diagnostic()?;
-    serve_assets_with_listener(listener, addr, assets_dir).await
+    serve_assets_with_listener(listener, addr, assets_dir, writable, None).await
 }
 
-pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()> {
+pub fn spawn_assets_http(
+    db_path: &Path,
+    tcp_addr: SocketAddr,
+    writable: bool,
+    db: Option<Arc<DB>>,
+) -> io::Result<()> {
     let addr = assets_http_addr(tcp_addr);
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
@@ -344,7 +737,8 @@ pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()>
         match tokio::net::TcpListener::from_std(listener) {
             Ok(listener) => {
                 if ready_tx.send(Ok(())).is_ok()
-                    && let Err(err) = serve_assets_with_listener(listener, addr, assets_dir).await
+                    && let Err(err) =
+                        serve_assets_with_listener(listener, addr, assets_dir, writable, db).await
                 {
                     tracing::error!(?err, "assets http server failed");
                 }
@@ -368,6 +762,48 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn mirror_coordinator_coalesces_overlapping_requests() {
+        let coord = AssetMirrorCoordinator::default();
+
+        // First request claims the runner slot.
+        assert!(coord.try_begin(), "first request becomes the runner");
+        // Any number of requests arriving while a pass runs are absorbed, not
+        // started — this is what prevents overlapping prune/download passes.
+        assert!(
+            !coord.try_begin(),
+            "concurrent request must not start a pass"
+        );
+        assert!(
+            !coord.try_begin(),
+            "further concurrent requests also absorbed"
+        );
+
+        // After the pass, exactly one more pass runs to capture the latest
+        // source state, regardless of how many requests were absorbed.
+        assert!(
+            coord.finish_or_continue(),
+            "absorbed requests trigger one rerun"
+        );
+        // No new request during that rerun: the runner releases the slot.
+        assert!(
+            !coord.finish_or_continue(),
+            "no pending request must release the runner slot"
+        );
+
+        // Slot is free again: a later request starts a fresh runner, which runs
+        // one pass for that request and then releases the slot when idle.
+        assert!(coord.try_begin(), "slot released, new runner can claim it");
+        assert!(
+            coord.finish_or_continue(),
+            "runner performs the pass for its initiating request"
+        );
+        assert!(
+            !coord.finish_or_continue(),
+            "and releases cleanly when idle"
+        );
+    }
 
     #[test]
     fn sanitize_rejects_traversal_and_empty() {
@@ -416,7 +852,7 @@ mod tests {
         let assets_addr = assets_http_addr(bound);
         let _conflict = std::net::TcpListener::bind(assets_addr).unwrap();
 
-        let err = spawn_assets_http(dir.path(), bound).unwrap_err();
+        let err = spawn_assets_http(dir.path(), bound, true, None).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
     }
 
@@ -430,7 +866,7 @@ mod tests {
         let bound = listener.local_addr().unwrap();
         drop(listener);
 
-        spawn_assets_http(dir.path(), bound).unwrap();
+        spawn_assets_http(dir.path(), bound, true, None).unwrap();
 
         let assets_addr = assets_http_addr(bound);
         let response = reqwest::Client::new()
@@ -452,6 +888,8 @@ mod tests {
 
         let state = Arc::new(AssetsState {
             assets_dir: assets.clone(),
+            writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -484,7 +922,11 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
 
-        let state = Arc::new(AssetsState { assets_dir: assets });
+        let state = Arc::new(AssetsState {
+            assets_dir: assets,
+            writable: true,
+            db: None,
+        });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
             .with_state(state);
@@ -501,6 +943,117 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Builds an in-process asset server and returns its bound address.
+    #[cfg(test)]
+    async fn spawn_test_asset_server(assets_dir: PathBuf, writable: bool) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let state = Arc::new(AssetsState {
+            assets_dir,
+            writable,
+            db: None,
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset).put(put_asset))
+            .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        bound
+    }
+
+    #[tokio::test]
+    async fn put_then_get_round_trips_when_writable() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        let bound = spawn_test_asset_server(assets, true).await;
+
+        let client = reqwest::Client::new();
+        let put = client
+            .put(format!("http://{bound}/models/rocket.glb"))
+            .body(b"glb-bytes".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::NO_CONTENT);
+
+        let get = client
+            .get(format!("http://{bound}/models/rocket.glb"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(get.status(), StatusCode::OK);
+        assert_eq!(get.bytes().await.unwrap().as_ref(), b"glb-bytes");
+    }
+
+    #[tokio::test]
+    async fn put_rewrites_schematic_paths_to_db() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        write_asset_file(&assets, "meshes/drone.glb", b"glb").unwrap();
+        let bound = spawn_test_asset_server(assets, true).await;
+
+        // A schematic uploaded over HTTP must get the same local → db: path
+        // rewrite as Impeller StoreAsset and tree ingest, or the editor and
+        // followers resolve `meshes/drone.glb` as a relative URL and fail.
+        let client = reqwest::Client::new();
+        let put = client
+            .put(format!("http://{bound}/schematics/main.kdl"))
+            .body(
+                b"object_3d \"drone.world_pos\" {\n    glb path=\"meshes/drone.glb\"\n}\n".to_vec(),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::NO_CONTENT);
+
+        let stored = client
+            .get(format!("http://{bound}/schematics/main.kdl"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(
+            stored.contains("path=\"db:meshes/drone.glb\""),
+            "PUT schematic should be rewritten to db: paths, got:\n{stored}"
+        );
+    }
+
+    #[tokio::test]
+    async fn put_rejected_on_read_only_server() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        let bound = spawn_test_asset_server(assets.clone(), false).await;
+
+        let put = reqwest::Client::new()
+            .put(format!("http://{bound}/models/rocket.glb"))
+            .body(b"glb-bytes".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert!(!assets.join("models/rocket.glb").exists());
+    }
+
+    #[tokio::test]
+    async fn put_rejects_reserved_key() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        let bound = spawn_test_asset_server(assets, true).await;
+
+        let put = reqwest::Client::new()
+            .put(format!("http://{bound}/{INDEX_KEY}"))
+            .body(b"forged-index".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
@@ -557,6 +1110,8 @@ mod tests {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -649,6 +1204,8 @@ object_3d "rocket.world_pos" {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -742,6 +1299,8 @@ object_3d "rocket.world_pos" {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -839,6 +1398,8 @@ object_3d "rocket.world_pos" {
 
         let state = Arc::new(AssetsState {
             assets_dir: source_assets.clone(),
+            writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -868,33 +1429,349 @@ viewport "main" { }
     }
 
     #[tokio::test]
-    async fn put_over_http_is_not_allowed() {
+    async fn index_endpoint_lists_assets_and_filters_prefix() {
+        use crate::assets::AssetEntry;
+
         let dir = tempdir().unwrap();
         let assets = dir.path().join("assets");
-        std::fs::create_dir_all(&assets).unwrap();
+        write_asset_file(&assets, "meshes/rocket.glb", b"glb").unwrap();
+        write_asset_file(&assets, "schematics/main.kdl", b"kdl").unwrap();
+        // The marker is a reserved key; create it directly to exercise the
+        // index's dotfile exclusion without going through `write_asset_file`.
+        std::fs::write(assets.join(".elodin-ingested"), b"{}").unwrap();
+
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
-
         let state = Arc::new(AssetsState {
             assets_dir: assets.clone(),
+            writable: true,
+            db: None,
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
             .with_state(state);
-
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let response = reqwest::Client::new()
-            .put(format!("http://{bound}/rocket.glb"))
-            .body(b"x".to_vec())
+        let client = reqwest::Client::new();
+        let all_bytes = client
+            .get(format!("http://{bound}/__index__"))
             .send()
             .await
+            .unwrap()
+            .bytes()
+            .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-        assert!(!assets.join("rocket.glb").exists());
+        let all: Vec<AssetEntry> = serde_json::from_slice(&all_bytes).unwrap();
+        let keys: Vec<_> = all.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["meshes/rocket.glb", "schematics/main.kdl"]);
+
+        let schematics_bytes = client
+            .get(format!("http://{bound}/__index__/schematics/"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        let schematics: Vec<AssetEntry> = serde_json::from_slice(&schematics_bytes).unwrap();
+        assert_eq!(schematics.len(), 1);
+        assert_eq!(schematics[0].key, "schematics/main.kdl");
+    }
+
+    #[test]
+    fn write_asset_file_rejects_reserved_keys() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+
+        for key in ["__index__", "__index__/foo", ".elodin-ingested"] {
+            let err = write_asset_file(&assets, key, b"x").unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "key {key} allowed");
+            assert!(!assets.join(key).exists(), "key {key} was written");
+        }
+
+        // Names that merely share the prefix are normal assets.
+        write_asset_file(&assets, "__index__notreserved.glb", b"x").unwrap();
+        assert!(assets.join("__index__notreserved.glb").is_file());
+    }
+
+    #[tokio::test]
+    async fn follower_sync_fetches_active_schematic_file() {
+        use crate::DB;
+
+        let dir = tempdir().unwrap();
+        let active_key = "schematics/main.kdl";
+        let active_kdl = "viewport {\n}\n";
+
+        // Source serves the active schematic file over its asset server.
+        let source_assets = dir.path().join("source_assets");
+        write_asset_file(&source_assets, active_key, active_kdl.as_bytes()).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        let state = Arc::new(AssetsState {
+            assets_dir: source_assets,
+            writable: true,
+            db: None,
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Follower state after a pointer-only repoint replicated from the
+        // source: the active pointer is set but the asset file is still missing
+        // locally.
+        let follower_db = DB::create(dir.path().join("follower_db")).unwrap();
+        follower_db.with_state_mut(|s| s.db_config.set_schematic_active(active_key));
+
+        sync_schematic_assets_for_db_from_source(tcp, &follower_db).await;
+
+        // The active file is fetched from the source so the follower's asset
+        // server can serve the key its config points at.
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db.path).join(active_key)).unwrap(),
+            active_kdl.as_bytes()
+        );
+        assert_eq!(
+            follower_db.read_active_schematic().as_deref(),
+            Some(active_kdl)
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_prunes_assets_removed_from_source() {
+        let dir = tempdir().unwrap();
+        let source_assets = dir.path().join("source_assets");
+        write_asset_file(&source_assets, "models/keep.glb", b"keep").unwrap();
+        let bound = spawn_test_asset_server(source_assets, false).await;
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+
+        // Follower already holds a stale asset the source no longer lists.
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+        write_asset_file(&follower_assets, "models/stale.glb", b"stale").unwrap();
+
+        sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(follower_assets.join("models/keep.glb")).unwrap(),
+            b"keep"
+        );
+        assert!(
+            !follower_assets.join("models/stale.glb").exists(),
+            "asset removed upstream must be pruned locally (Bug 1)"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_errors_on_partial_fetch() {
+        // Source advertises a key in its index but 404s the actual GET, so the
+        // mirror completes with a missing asset and must report failure (Bug 2).
+        async fn index() -> Response {
+            Json(vec![crate::assets::AssetEntry {
+                key: "models/rocket.glb".to_string(),
+                size: 3,
+            }])
+            .into_response()
+        }
+        async fn missing() -> Response {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        let app = Router::new()
+            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route("/{*path}", get(missing));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let err = sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                SyncAssetsError::PartialMirror {
+                    failed: 1,
+                    total: 1
+                }
+            ),
+            "expected PartialMirror, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_skips_prune_on_partial_fetch() {
+        // Source advertises a key it then 404s, so the pass is partial. A stale
+        // local asset absent from the index must NOT be pruned during that
+        // incomplete, possibly-unhealthy pass — pruning waits for a full pass so
+        // the follower never loses files against an untrustworthy snapshot.
+        async fn index() -> Response {
+            Json(vec![crate::assets::AssetEntry {
+                key: "models/rocket.glb".to_string(),
+                size: 3,
+            }])
+            .into_response()
+        }
+        async fn missing() -> Response {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        let app = Router::new()
+            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route("/{*path}", get(missing));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+        write_asset_file(&follower_assets, "models/stale.glb", b"stale").unwrap();
+
+        let err = sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, SyncAssetsError::PartialMirror { failed: 1, .. }),
+            "expected PartialMirror, got {err:?}"
+        );
+        assert!(
+            follower_assets.join("models/stale.glb").exists(),
+            "stale asset must survive a partial pass; prune only runs on a full pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_skips_prune_on_empty_index() {
+        // Source returns an empty index (up before assets exist, or a transient
+        // empty listing). A follower that already mirrors assets must NOT prune
+        // them to nothing against that snapshot; it reports an incomplete pass so
+        // the coordinator retries and converges once the source publishes assets.
+        async fn index() -> Response {
+            Json(Vec::<crate::assets::AssetEntry>::new()).into_response()
+        }
+        let app = Router::new().route(&format!("/{INDEX_KEY}"), get(index));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+        write_asset_file(&follower_assets, "models/rocket.glb", b"keep").unwrap();
+
+        let err = sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, SyncAssetsError::EmptySourceIndex { local: 1 }),
+            "expected EmptySourceIndex, got {err:?}"
+        );
+        assert!(
+            follower_assets.join("models/rocket.glb").exists(),
+            "an empty source index must not wipe the locally mirrored tree"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_all_assets_accepts_empty_index_for_empty_follower() {
+        // An empty source index paired with an empty follower is a legitimate
+        // no-op, not an error: nothing to mirror and nothing to lose.
+        async fn index() -> Response {
+            Json(Vec::<crate::assets::AssetEntry>::new()).into_response()
+        }
+        let app = Router::new().route(&format!("/{INDEX_KEY}"), get(index));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        sync_all_assets_from_source(tcp, &follower_db)
+            .await
+            .expect("empty index with empty follower is a no-op");
+    }
+
+    #[tokio::test]
+    async fn mirror_all_retries_until_source_recovers() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // The source advertises an asset that 404s on the first fetch (a slow /
+        // still-uploading asset) and succeeds afterwards. `mirror_all` must retry
+        // the failed pass on its own and converge, rather than exiting with an
+        // incomplete tree until an unrelated sync request arrives (Bug 3).
+        async fn index() -> Response {
+            Json(vec![crate::assets::AssetEntry {
+                key: "models/rocket.glb".to_string(),
+                size: 3,
+            }])
+            .into_response()
+        }
+        async fn flaky_asset(State(hits): State<Arc<AtomicUsize>>) -> Response {
+            if hits.fetch_add(1, Ordering::SeqCst) == 0 {
+                StatusCode::NOT_FOUND.into_response()
+            } else {
+                b"abc".to_vec().into_response()
+            }
+        }
+        let hits = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route("/{*path}", get(flaky_asset))
+            .with_state(hits.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let dir = tempdir().unwrap();
+        let follower_db = dir.path().join("follower_db");
+        let follower_assets = assets_dir(&follower_db);
+
+        AssetMirrorCoordinator::default()
+            .mirror_all(tcp, &follower_db)
+            .await;
+
+        assert!(
+            follower_assets.join("models/rocket.glb").exists(),
+            "retry should recover the asset once the source serves it"
+        );
+        assert!(
+            hits.load(Ordering::SeqCst) >= 2,
+            "the failed pass must be retried at least once"
+        );
     }
 }

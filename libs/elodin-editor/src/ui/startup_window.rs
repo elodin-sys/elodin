@@ -8,8 +8,8 @@ use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
-    ConnectionAddr, ConnectionStatus, CurrentStreamId, PacketRx, PacketTx, ThreadConnectionStatus,
-    spawn_tcp_connect,
+    ConnectionAddr, ConnectionStatus, CurrentStreamId, MsgPacketRx, MsgPacketTx, PacketRx,
+    PacketTx, ThreadConnectionStatus, spawn_msg_tcp_connect, spawn_tcp_connect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -125,6 +125,8 @@ pub struct StartupLayout<'w, 's> {
     modal_state: Local<'s, ModalState>,
     packet_tx: ResMut<'w, PacketTx>,
     packet_rx: ResMut<'w, PacketRx>,
+    msg_packet_tx: ResMut<'w, MsgPacketTx>,
+    msg_packet_rx: ResMut<'w, MsgPacketRx>,
     current_stream_id: ResMut<'w, CurrentStreamId>,
     status: ResMut<'w, ThreadConnectionStatus>,
     recent_files: ResMut<'w, RecentItems>,
@@ -190,7 +192,9 @@ impl StartupLayout<'_, '_> {
     fn connect(&mut self, addr: SocketAddr, reconnect: bool) -> ThreadConnectionStatus {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
             impeller2_bevy::channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = impeller2_bevy::msg_channels();
         let stream_id = fastrand::u64(..);
+        spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
         let status = spawn_tcp_connect(
             addr,
             outgoing_packet_rx,
@@ -202,6 +206,8 @@ impl StartupLayout<'_, '_> {
         *self.current_stream_id = CurrentStreamId(stream_id);
         *self.packet_tx = packet_tx;
         *self.packet_rx = packet_rx;
+        *self.msg_packet_tx = msg_tx;
+        *self.msg_packet_rx = msg_rx;
         *self.status = status.clone();
         status
     }

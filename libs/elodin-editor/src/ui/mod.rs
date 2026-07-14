@@ -1,4 +1,5 @@
 use bevy::{
+    camera::visibility::RenderLayers,
     camera::{RenderTarget, Viewport},
     ecs::{
         query::QueryData,
@@ -6,7 +7,7 @@ use bevy::{
     },
     // platform::collections::{HashMap, HashSet},
     input::keyboard::Key,
-    log::{error, info},
+    log::warn,
     prelude::*,
     render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
@@ -279,6 +280,7 @@ pub struct CameraQuery {
     entity: Entity,
     camera: &'static mut Camera,
     projection: &'static mut Projection,
+    render_layers: &'static mut RenderLayers,
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
     parent: Option<&'static ChildOf>,
@@ -335,14 +337,6 @@ fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        // Probe ELODIN_KDL_DIR once to inform or warn about an invalid
-        // directory surfaces immediately on startup.
-        match impeller2_kdl::env::schematic_dir() {
-            Ok(Some(path)) => info!("ELODIN_KDL_DIR set to {:?}", path.display()),
-            Ok(None) => info!("ELODIN_KDL_DIR defaulted to current working directory"),
-            Err(err) => error!("{err}, falling back to current working directory"),
-        }
-
         app.init_resource::<Paused>()
             .init_resource::<HoveredEntity>()
             .init_resource::<ComponentFilter>()

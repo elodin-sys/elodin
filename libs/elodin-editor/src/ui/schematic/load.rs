@@ -1,6 +1,11 @@
 use crate::icon_rasterizer::IconTextureCache;
 use crate::object_3d::CompileError;
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    ecs::system::SystemParam,
+    prelude::*,
+    tasks::{IoTaskPool, Task, futures_lite::future},
+    window::PrimaryWindow,
+};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
@@ -16,6 +21,7 @@ use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -27,7 +33,7 @@ use crate::{
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
-            DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
+            DocumentLoaded, DocumentReloaded, LastActiveSchematicContent, SchematicDocumentAsset,
             SchematicWindow,
         },
         render_layer_alloc::RenderLayerAllocator,
@@ -160,6 +166,40 @@ pub struct SyncedViewport;
 #[derive(Component)]
 pub struct SchematicSpawned;
 
+/// Number of fetch/parse attempts for one window sub-schematic before it is
+/// dropped with a warning. A window's asset can 404 or parse torn bytes
+/// transiently — a follower still mirroring it, or a save's `PUT`s mid-flight —
+/// and a single silent failure would make the window vanish for the session.
+const MAX_WINDOW_FETCH_ATTEMPTS: u32 = 10;
+
+/// Delay between window sub-schematic fetch attempts.
+const WINDOW_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+
+/// A window sub-schematic whose `db:`/HTTP KDL is being fetched off the main
+/// thread. Spawned by `load_schematic` and drained by
+/// `apply_pending_window_schematics` once the fetch lands, so a slow or
+/// unreachable DB never blocks the load for each window's request timeout.
+struct PendingWindowLoad {
+    descriptor: WindowDescriptor,
+    theme_mode: Option<String>,
+    theme_scheme: String,
+    path: PathBuf,
+    /// `None` while waiting for a scheduled retry slot.
+    task: Option<Task<Result<String, String>>>,
+    /// Failed attempts so far; transient errors retry bounded instead of
+    /// silently dropping the window.
+    attempts: u32,
+    retry_at: Option<Instant>,
+}
+
+/// Queue of in-flight remote window sub-schematic fetches (RFD #724). Cleared at
+/// the start of every `load_schematic` so a superseded load's windows never
+/// spawn into the new document.
+#[derive(Resource, Default)]
+pub struct PendingWindowSchematics {
+    loads: Vec<PendingWindowLoad>,
+}
+
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -189,6 +229,11 @@ pub struct LoadSchematicParams<'w, 's> {
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
+    pending_windows: ResMut<'w, PendingWindowSchematics>,
+    /// Records each spawned `db:` window's stored KDL so a revision-gated
+    /// refetch can tell a window-only remote save apart from an unrelated
+    /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
+    last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -207,21 +252,63 @@ struct WindowDescriptors {
     windows: Vec<WindowDescriptor>,
 }
 
+/// True for window sub-schematics served by the DB Asset Server (`db:`) or a
+/// raw HTTP(S) URL, as opposed to a local filesystem path (RFD #724).
+fn is_remote_asset_path(path: &str) -> bool {
+    path.starts_with("db:") || path.starts_with("http://") || path.starts_with("https://")
+}
+
+/// Read a window sub-schematic's KDL. `db:`/HTTP references are fetched from the
+/// DB Asset Server (RFD #724); everything else is read from the local filesystem
+/// (offline `--kdl` dev). The fetch is bounded so an unreachable DB cannot hang
+/// the load.
+fn read_window_schematic_kdl(
+    path: &Path,
+    connection_addr: Option<std::net::SocketAddr>,
+) -> Result<String, String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "non-utf8 window path".to_string())?;
+    if !is_remote_asset_path(path_str) {
+        return std::fs::read_to_string(path).map_err(|err| err.to_string());
+    }
+
+    let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|err| format!("{url}: {err}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|err| format!("{url}: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    response.text().map_err(|err| format!("{url}: {err}"))
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
     theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
-    let mut resolved = PathBuf::from(path_str);
-
-    if resolved.is_relative() {
-        if let Some(base) = base_dir {
-            resolved = base.join(resolved);
-        } else if let Ok(cwd) = std::env::current_dir() {
-            resolved = cwd.join(resolved);
+    // Keep `db:`/HTTP references verbatim; only local paths are anchored to the
+    // schematic's directory. The remote ones are fetched over HTTP at spawn time.
+    let resolved = if is_remote_asset_path(path_str) {
+        PathBuf::from(path_str)
+    } else {
+        let mut resolved = PathBuf::from(path_str);
+        if resolved.is_relative() {
+            if let Some(base) = base_dir {
+                resolved = base.join(resolved);
+            } else if let Ok(cwd) = std::env::current_dir() {
+                resolved = cwd.join(resolved);
+            }
         }
-    }
+        resolved
+    };
 
     Some(WindowDescriptor {
         path: Some(resolved),
@@ -303,6 +390,9 @@ impl LoadSchematicParams<'_, '_> {
             self.geo_context.origin = origin;
         }
 
+        // Drop any remote window fetches still in flight from a prior load so
+        // their windows can't spawn into this freshly-cleared document.
+        self.pending_windows.loads.clear();
         for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
                 continue;
@@ -483,7 +573,28 @@ impl LoadSchematicParams<'_, '_> {
             }
 
             if let Some(path) = descriptor.path.clone() {
-                match std::fs::read_to_string(&path) {
+                let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+                if path.to_str().is_some_and(is_remote_asset_path) {
+                    // Fetch `db:`/HTTP windows off the main thread: a blocking
+                    // request per window could otherwise stall the UI for the
+                    // full timeout each (RFD #724). The window spawns from
+                    // `apply_pending_window_schematics` once the fetch lands.
+                    let fetch_path = path.clone();
+                    let task = IoTaskPool::get().spawn(async move {
+                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                    });
+                    self.pending_windows.loads.push(PendingWindowLoad {
+                        descriptor,
+                        theme_mode: theme_mode.clone(),
+                        theme_scheme: theme_selection.scheme.clone(),
+                        path,
+                        task: Some(task),
+                        attempts: 0,
+                        retry_at: None,
+                    });
+                    continue;
+                }
+                match read_window_schematic_kdl(&path, connection_addr) {
                     Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
@@ -506,7 +617,7 @@ impl LoadSchematicParams<'_, '_> {
                     },
                     Err(err) => {
                         warn!(
-                            ?err,
+                            %err,
                             path = ?descriptor.path,
                             "Failed to read window schematic"
                         );
@@ -516,6 +627,97 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.current_schematic.0.skybox = schematic.skybox.clone();
+    }
+
+    /// Spawns windows whose remote sub-schematic fetch (queued by
+    /// `load_schematic`) has completed, draining the in-flight queue. Cheap when
+    /// nothing is pending; called every frame by `apply_pending_window_schematics`.
+    ///
+    /// Fetch and parse failures are retried bounded (Bug 4): a window's asset
+    /// can 404 or hold torn bytes transiently — a follower still mirroring it,
+    /// or a save's `PUT`s mid-flight — and a single silent failure would make
+    /// the window vanish for the rest of the session.
+    fn poll_pending_window_schematics(&mut self) {
+        if self.pending_windows.loads.is_empty() {
+            return;
+        }
+        let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let now = Instant::now();
+        let mut ready = Vec::new();
+        self.pending_windows.loads.retain_mut(|load| {
+            if load.task.is_none() {
+                if load.retry_at.is_some_and(|at| now < at) {
+                    return true;
+                }
+                let fetch_path = load.path.clone();
+                load.retry_at = None;
+                load.task =
+                    Some(IoTaskPool::get().spawn(async move {
+                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                    }));
+            }
+            let task = load.task.as_mut().expect("window fetch task just spawned");
+            let Some(result) = future::block_on(future::poll_once(task)) else {
+                return true;
+            };
+            load.task = None;
+            // Parse here so torn bytes share the retry path with fetch errors.
+            let parsed = result.and_then(|kdl| {
+                impeller2_wkt::Schematic::from_kdl(&kdl)
+                    .map(|schematic| (kdl, schematic))
+                    .map_err(|err| render_diag(&err))
+            });
+            match parsed {
+                Ok((kdl, schematic)) => {
+                    ready.push((
+                        std::mem::take(&mut load.descriptor),
+                        load.theme_mode.take(),
+                        std::mem::take(&mut load.theme_scheme),
+                        std::mem::take(&mut load.path),
+                        kdl,
+                        schematic,
+                    ));
+                    false
+                }
+                Err(err) => {
+                    load.attempts += 1;
+                    if load.attempts >= MAX_WINDOW_FETCH_ATTEMPTS {
+                        warn!(
+                            %err,
+                            path = ?load.path,
+                            "Failed to load window schematic; giving up"
+                        );
+                        false
+                    } else {
+                        debug!(
+                            %err,
+                            path = ?load.path,
+                            attempts = load.attempts,
+                            "Window schematic fetch failed; retrying"
+                        );
+                        load.retry_at = Some(now + WINDOW_FETCH_RETRY_DELAY);
+                        true
+                    }
+                }
+            }
+        });
+        for (descriptor, theme_mode, theme_scheme, path, kdl, window_schematic) in ready {
+            // Record the stored content so a revision-gated refetch can detect
+            // a later remote save that only touched this window (Bug 2).
+            if let (Some(key), Some(last_content)) = (
+                path.to_str().and_then(|p| p.strip_prefix("db:")),
+                self.last_content.as_deref_mut(),
+            ) {
+                last_content.record_window(key, &kdl);
+            }
+            self.spawn_window(
+                &window_schematic,
+                descriptor,
+                theme_mode.as_deref(),
+                &theme_scheme,
+                Some(path.as_path()),
+            );
+        }
     }
 
     fn spawn_window(
@@ -1350,6 +1552,12 @@ pub fn apply_document_loaded(
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
 }
 
+/// Spawns remote window sub-schematics once their off-thread fetch completes
+/// (RFD #724). Runs each frame and early-returns when nothing is pending.
+pub fn apply_pending_window_schematics(mut params: LoadSchematicParams) {
+    params.poll_pending_window_schematics();
+}
+
 pub fn apply_document_cleared(
     mut events: MessageReader<DocumentCleared>,
     mut params: LoadSchematicParams,
@@ -1358,25 +1566,6 @@ pub fn apply_document_cleared(
         return;
     }
     params.load_default_data_overview();
-}
-
-pub fn apply_document_saved(
-    mut events: MessageReader<DocumentSaved>,
-    mut windows_state: Query<(&WindowId, &mut WindowState)>,
-) {
-    for event in events.read() {
-        info!(path = %event.save_path.display(), "Saved schematic");
-        let base_dir = event.save_path.parent().unwrap_or_else(|| Path::new("."));
-        for (id, mut state) in &mut windows_state {
-            if id.is_primary() {
-                state.descriptor.path = Some(event.save_path.clone());
-                continue;
-            }
-            if let Some(info) = event.windows.iter().find(|w| w.window_id == *id) {
-                state.descriptor.path = Some(base_dir.join(&info.file_name));
-            }
-        }
-    }
 }
 
 pub fn show_document_command_failures(
@@ -1425,7 +1614,7 @@ mod tests {
         prelude::*,
         window::{PrimaryWindow, Window},
     };
-    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation};
+    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation, RotationKind};
     use bevy_mat3_material::Mat3Material;
     use impeller2_bevy::ComponentSchemaRegistry;
     use impeller2_kdl::FromKdl;
@@ -1462,6 +1651,7 @@ mod tests {
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
+            .init_resource::<super::PendingWindowSchematics>()
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));
@@ -1605,6 +1795,37 @@ mod tests {
     }
 
     #[test]
+    fn remote_asset_paths_are_detected() {
+        use super::is_remote_asset_path;
+        assert!(is_remote_asset_path("db:schematics/window.kdl"));
+        assert!(is_remote_asset_path(
+            "http://127.0.0.1:2241/schematics/w.kdl"
+        ));
+        assert!(is_remote_asset_path("https://example.com/w.kdl"));
+        assert!(!is_remote_asset_path("schematics/window.kdl"));
+        assert!(!is_remote_asset_path("/abs/path/window.kdl"));
+    }
+
+    #[test]
+    fn read_window_schematic_kdl_reads_local_file() {
+        use super::read_window_schematic_kdl;
+        let dir = std::env::temp_dir().join(format!(
+            "elodin-window-kdl-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("window.kdl");
+        std::fs::write(&path, "viewport name=\"W\"\n").unwrap();
+
+        let kdl = read_window_schematic_kdl(&path, None).expect("read local window kdl");
+        assert!(kdl.contains("viewport"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn coordinate_is_reset_on_clear() {
         let mut app = test_app();
         let schematic = Schematic::from_kdl("coordinate frame=NED").expect("parse test schematic");
@@ -1646,6 +1867,67 @@ mod tests {
         assert_eq!(line.frame, Some(GeoFrame::ECEF));
         assert_eq!(geo_pos.0, GeoFrame::ECEF);
         assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test]
+    fn object_3d_spawns_with_absolute_orientation() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            object_3d frame="NED" orientation=absolute "(0,0,0,1, 0,0,0)" {
+                sphere radius=0.2 {
+                    color 0 0 0
+                }
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&crate::object_3d::Object3DState, &GeoRotation)>();
+        let (object_3d, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("object_3d should spawn");
+
+        assert_eq!(object_3d.data.frame, Some(GeoFrame::NED));
+        assert_eq!(object_3d.data.orientation, RotationKind::Absolute);
+        assert_eq!(geo_rot.0, GeoFrame::NED);
+        assert_eq!(geo_rot.2, RotationKind::Absolute);
+    }
+
+    #[test]
+    fn object_3d_spawns_with_separate_frame_orientation() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            object_3d frame="ECEF" frame_orientation="NED" orientation=absolute "(0,0,0,1, 0,0,0)" {
+                sphere radius=0.2 {
+                    color 0 0 0
+                }
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query =
+            app.world_mut()
+                .query::<(&crate::object_3d::Object3DState, &GeoPosition, &GeoRotation)>();
+        let (object_3d, geo_pos, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("object_3d should spawn");
+
+        assert_eq!(object_3d.data.frame, Some(GeoFrame::ECEF));
+        assert_eq!(object_3d.data.frame_orientation, Some(GeoFrame::NED));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::NED);
+        assert_eq!(geo_rot.2, RotationKind::Absolute);
     }
 
     #[test]

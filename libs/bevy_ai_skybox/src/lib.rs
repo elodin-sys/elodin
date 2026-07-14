@@ -203,14 +203,22 @@ impl SkyboxManifest {
         Self::from_ron_str(&contents)
     }
 
+    pub fn to_ron_string(&self) -> Result<String> {
+        Ok(format!(
+            "{}\n",
+            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?
+        ))
+    }
+
+    pub fn to_ron_bytes(&self) -> Result<Vec<u8>> {
+        Ok(self.to_ron_string()?.into_bytes())
+    }
+
     pub fn write_atomic(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let contents = format!(
-            "{}\n",
-            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?
-        );
+        let contents = self.to_ron_string()?;
         let mut tmp = path.to_path_buf();
         let extension = path
             .extension()

@@ -280,7 +280,7 @@ timeout = "120s"
 retries = 0
 continue_on_error = true
 
-[build]
+[[build]]
 command = "cargo"
 args = ["build", "--release", "--manifest-path", "examples/apollo-lander/controller/Cargo.toml"]
 
@@ -300,11 +300,13 @@ post_run = "examples/apollo-lander/hooks/score.py"
 post_campaign = "examples/apollo-lander/hooks/report.py"
 ```
 
-The `[build]` step compiles the controller once before any worker starts (and fails
-the campaign if it can't). `[resources]` declares the named ports and the
-`port_stride` between workers. `[retention] keep_run_db = "on-fail"` keeps only
-failing runs' databases so a big campaign doesn't fill your disk. `[hooks]` points at
-the two Python lifecycle hooks.
+Each `[[build]]` step runs once before any worker starts (and fails the campaign if
+it can't). `[resources]` declares the named ports and the `port_stride` between
+workers — the whole plan is validated for every worker before anything launches, and
+a port can also be `"auto"` to have the runner allocate it dynamically per run.
+`[retention] keep_run_db = "on-fail"` keeps only failing runs' databases so a big
+campaign doesn't fill your disk. `[hooks]` points at the two Python lifecycle hooks.
+Add `workers = N` to pin concurrency (the default sizes itself from CPU cores).
 
 #### The sampling spec
 

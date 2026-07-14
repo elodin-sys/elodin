@@ -38,7 +38,7 @@ in {
     assetsPackage = lib.mkOption {
       type = lib.types.package;
       default = pkgs.elodin-assets;
-      description = "Default assets seeded into ELODIN_ASSETS_DIR.";
+      description = "Default assets seeded into ELODIN_ASSETS.";
     };
 
     enableRenderer = lib.mkOption {
@@ -61,7 +61,7 @@ in {
     environment.systemPackages = [cfg.package];
 
     # Every user resolves assets from the shared, writable asset root.
-    environment.sessionVariables.ELODIN_ASSETS_DIR = assetsDir;
+    environment.sessionVariables.ELODIN_ASSETS = assetsDir;
 
     # Pre-create each user's CLI data dir so the first-launch notice does not
     # short-circuit an interactive `elodin run`.

@@ -45,28 +45,35 @@ impl CgroupScope {
     fn create_in(base: PathBuf, name: impl AsRef<str>) -> io::Result<Option<Arc<Self>>> {
         let path = base.join(sanitize_name(name.as_ref()));
         match fs::create_dir(&path) {
-            Ok(()) => Ok(Some(Arc::new(Self { path }))),
-            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
-                Ok(Some(Arc::new(Self { path })))
-            }
-            Err(err) if is_unavailable(&err) => Ok(None),
-            Err(err) => Err(err),
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) if is_unavailable(&err) => return Ok(None),
+            Err(err) => return Err(err),
         }
+        // Mark the cgroup threaded (best-effort). The base cgroup usually
+        // still holds tasks (e.g. the caller's terminal session scope), and
+        // enabling `cpu` there via set_cpu_weight turns it into a thread
+        // root: plain *domain* children then reject process attach with
+        // EOPNOTSUPP (cgroup-v2 no-internal-process rule), while threaded
+        // children may host processes and their cpu.weight competes with the
+        // base's own tasks. Children of threaded cgroups start "domain
+        // invalid" and need this write to accept processes at all.
+        let _ = fs::write(path.join("cgroup.type"), "threaded");
+        Ok(Some(Arc::new(Self { path })))
     }
 
+    /// Move `pid` into this cgroup. Purely best-effort: grouping and priority
+    /// must never fail the run, and the kernel can refuse for environmental
+    /// reasons (delegation limits, domain/thread topology, controller quirks).
     #[cfg(target_os = "linux")]
-    pub fn add_pid(&self, pid: u32) -> io::Result<()> {
-        match fs::write(self.path.join("cgroup.procs"), pid.to_string()) {
-            Ok(()) => Ok(()),
-            Err(err) if is_unavailable(&err) => Ok(()),
-            Err(err) => Err(err),
+    pub fn add_pid(&self, pid: u32) {
+        if let Err(err) = fs::write(self.path.join("cgroup.procs"), pid.to_string()) {
+            tracing::debug!(?err, pid, path = %self.path.display(), "failed to move pid into cgroup");
         }
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub fn add_pid(&self, _pid: u32) -> io::Result<()> {
-        Ok(())
-    }
+    pub fn add_pid(&self, _pid: u32) {}
 
     /// Give every process in this cgroup a larger share of the CPU under
     /// contention (cgroup-v2 `cpu.weight`, 1..=10000, default 100), so the
@@ -94,9 +101,20 @@ impl CgroupScope {
     pub fn kill(&self) -> io::Result<()> {
         match fs::write(self.path.join("cgroup.kill"), "1") {
             Ok(()) => Ok(()),
+            // cgroup.kill is a process-level operation the kernel refuses on
+            // threaded cgroups (EOPNOTSUPP); signal members directly instead.
+            Err(err) if err.kind() == io::ErrorKind::Unsupported => {
+                self.kill_procs();
+                Ok(())
+            }
             Err(err) if is_unavailable(&err) => Ok(()),
             Err(err) => Err(err),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn kill_procs(&self) {
+        kill_procs_recursive(&self.path);
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -156,6 +174,19 @@ impl CgroupScope {
     }
 }
 
+/// Whether this process can create (and therefore kill) cgroup scopes: a
+/// writable cgroup-v2 base was found. Orchestrators use this to decide whether
+/// to self-scope under `systemd-run --user --scope` for reliable teardown.
+#[cfg(target_os = "linux")]
+pub fn cgroups_available() -> bool {
+    matches!(writable_base(), Ok(Some(_)))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn cgroups_available() -> bool {
+    false
+}
+
 /// Whether s10 should prioritize the simulation stack (via cgroup `cpu.weight`).
 /// On by default; set `ELODIN_S10_PRIORITY=off` to disable (for A/B comparison
 /// or debugging).
@@ -175,6 +206,28 @@ pub fn sim_cpu_weight() -> u32 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10_000)
+}
+
+#[cfg(target_os = "linux")]
+fn kill_procs_recursive(path: &Path) {
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|ty| ty.is_dir()) {
+                kill_procs_recursive(&entry.path());
+            }
+        }
+    }
+    // cgroup.procs is not readable inside a threaded subtree; fall back to
+    // cgroup.threads there. kill(2) on a TID signals its whole process.
+    let ids = fs::read_to_string(path.join("cgroup.procs"))
+        .or_else(|_| fs::read_to_string(path.join("cgroup.threads")))
+        .unwrap_or_default();
+    for pid in ids.lines().filter_map(|line| line.trim().parse().ok()) {
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -259,5 +312,6 @@ fn is_unavailable(err: &io::Error) -> bool {
         io::ErrorKind::NotFound
             | io::ErrorKind::PermissionDenied
             | io::ErrorKind::ReadOnlyFilesystem
+            | io::ErrorKind::Unsupported
     )
 }

@@ -270,6 +270,22 @@ impl Msg for SetDbConfig {
     const ID: PacketId = [224, 19];
 }
 
+/// Editor→DB asset upload: stores `bytes` at `{db}/assets/<key>`.
+///
+/// `key` is sanitized server-side (rejects `..` and absolute paths). Used to
+/// mirror assets added at runtime (e.g. a generated skybox's `manifest.ron`
+/// and cubemap) so followers and the render-server can fetch them over the DB
+/// asset HTTP server. It is a generic asset feature, not skybox-specific.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct StoreAsset {
+    pub key: String,
+    pub bytes: Vec<u8>,
+}
+
+impl Msg for StoreAsset {
+    const ID: PacketId = [224, 40];
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct DbConfig {
@@ -282,6 +298,10 @@ impl DbConfig {
     const TIME_START_TIMESTAMP_KEY: &'static str = "time.start_timestamp";
     const VERSION_CREATED_KEY: &'static str = "version.created";
     const VERSION_LAST_OPENED_KEY: &'static str = "version.last_opened";
+    /// Monotonic counter bumped on every asset write (HTTP `PUT`, `StoreAsset`).
+    /// Consumers watch it to reload/re-mirror when asset *bytes* change without
+    /// the `schematic.active` pointer moving (RFD #724).
+    pub const ASSETS_REVISION_KEY: &'static str = "assets.revision";
 
     /// Set the version that created this database
     pub fn set_version_created(&mut self, version: impl Into<String>) {
@@ -309,20 +329,19 @@ impl DbConfig {
             .map(String::as_str)
     }
 
-    pub fn set_schematic_path(&mut self, path: String) {
-        self.metadata.insert("schematic.path".to_string(), path);
+    /// Asset key of the active schematic under `{db}/assets/`
+    /// (e.g. `schematics/main.kdl`). Consumers fetch it over the Asset Server
+    /// HTTP (RFD #724).
+    pub fn set_schematic_active(&mut self, key: impl Into<String>) {
+        self.metadata
+            .insert("schematic.active".to_string(), key.into());
     }
 
-    pub fn schematic_path(&self) -> Option<&str> {
-        self.metadata.get("schematic.path").map(String::as_str)
-    }
-
-    pub fn set_schematic_content(&mut self, path: String) {
-        self.metadata.insert("schematic.content".to_string(), path);
-    }
-
-    pub fn schematic_content(&self) -> Option<&str> {
-        self.metadata.get("schematic.content").map(String::as_str)
+    pub fn schematic_active(&self) -> Option<&str> {
+        self.metadata
+            .get("schematic.active")
+            .filter(|key| !key.is_empty())
+            .map(String::as_str)
     }
 
     pub fn set_skybox_active(&mut self, name: Option<&str>) {
@@ -346,7 +365,7 @@ impl DbConfig {
 
     /// Headless/render-server skybox intent from metadata alone.
     ///
-    /// - `None` — key absent (no opinion; fall back to `schematic.content` if present)
+    /// - `None` — key absent (no opinion; derive from the active schematic instead)
     /// - `Some(None)` — key present but empty (explicit clear)
     /// - `Some(Some(name))` — active skybox name
     pub fn skybox_active_desired(&self) -> Option<Option<String>> {
@@ -357,6 +376,23 @@ impl DbConfig {
                 Some(raw.clone())
             }
         })
+    }
+
+    /// Current asset revision (0 when never written).
+    pub fn assets_revision(&self) -> u64 {
+        self.metadata
+            .get(Self::ASSETS_REVISION_KEY)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// Bump the asset revision, returning the new value. Saturates rather than
+    /// wrapping so consumers never observe a spurious "went backwards".
+    pub fn bump_assets_revision(&mut self) -> u64 {
+        let next = self.assets_revision().saturating_add(1);
+        self.metadata
+            .insert(Self::ASSETS_REVISION_KEY.to_string(), next.to_string());
+        next
     }
 
     pub fn set_time_start_timestamp_micros(&mut self, timestamp: i64) {
@@ -447,6 +483,10 @@ pub struct GetEarliestTimestamp;
 
 impl Msg for GetEarliestTimestamp {
     const ID: PacketId = [224, 22];
+}
+
+impl Request for GetEarliestTimestamp {
+    type Reply<B: IoBuf + Clone> = EarliestTimestamp;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]

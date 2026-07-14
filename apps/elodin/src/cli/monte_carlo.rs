@@ -30,7 +30,13 @@ enum Command {
     /// Run a Monte Carlo campaign
     Run(Box<RunArgs>),
     /// Resume a previous campaign
-    Resume { campaign_dir: PathBuf },
+    Resume {
+        campaign_dir: PathBuf,
+        /// Do not re-exec under `systemd-run --user --scope` when no
+        /// delegated cgroup is available.
+        #[arg(long)]
+        no_self_scope: bool,
+    },
     /// Rebuild a campaign report
     Report { campaign_dir: PathBuf },
 }
@@ -46,8 +52,16 @@ pub struct RunArgs {
     pub campaign: Option<PathBuf>,
     #[arg(long)]
     pub out: Option<PathBuf>,
+    /// Concurrent worker slots (exactly this many runs execute at once).
+    /// Overrides `S10_MAX_INFLIGHT` and `campaign.toml`'s `workers`.
+    #[arg(long)]
+    pub workers: Option<usize>,
     #[arg(long)]
     pub cache_dir: Option<PathBuf>,
+    /// Run per-run IO on a scratch filesystem ("auto" picks /dev/shm),
+    /// moving artifacts to --out as each run finishes.
+    #[arg(long)]
+    pub scratch_dir: Option<String>,
     #[arg(long)]
     pub retries: Option<usize>,
     #[arg(long)]
@@ -68,6 +82,14 @@ pub struct RunArgs {
     pub keep_existing: bool,
     #[arg(long)]
     pub clean: bool,
+    /// Error (instead of warn) when planned ports fall inside the kernel
+    /// ephemeral range.
+    #[arg(long)]
+    pub strict_ports: bool,
+    /// Do not re-exec under `systemd-run --user --scope` when no delegated
+    /// cgroup is available.
+    #[arg(long)]
+    pub no_self_scope: bool,
     #[arg(long)]
     pub runtime_threads: Option<usize>,
 }
@@ -85,7 +107,14 @@ impl Cli {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
             }
             Command::Run(args) => run_with_runtime(*args, rt),
-            Command::Resume { campaign_dir } => {
+            Command::Resume {
+                campaign_dir,
+                no_self_scope,
+            } => {
+                // Resumed runs need the same reliable teardown as fresh ones.
+                if !no_self_scope {
+                    self_scope_reexec();
+                }
                 rt.block_on(monte_carlo::resume_campaign(campaign_dir))
             }
             Command::Report { campaign_dir } => monte_carlo::rebuild_report(&campaign_dir),
@@ -94,12 +123,17 @@ impl Cli {
 }
 
 fn run_with_runtime(args: RunArgs, rt: tokio::runtime::Runtime) -> Result<()> {
+    if !args.dry_run && !args.no_self_scope {
+        self_scope_reexec();
+    }
     let runtime_threads = args.runtime_threads;
+    let workers = args.workers;
     let options = run_options(args)?;
     let shape = monte_carlo::resolve_run_shape(
         options.campaign_path.as_deref(),
         &options.plan_path,
         runtime_threads,
+        workers,
     )?;
     if shape.runtime_threads > 1 {
         let threaded_rt = tokio::runtime::Builder::new_multi_thread()
@@ -112,6 +146,49 @@ fn run_with_runtime(args: RunArgs, rt: tokio::runtime::Runtime) -> Result<()> {
         rt.block_on(monte_carlo::run_campaign(options))
     }
 }
+
+/// Without a delegated cgroup (e.g. a plain ssh session scope), the runner
+/// cannot kill a timed-out run's whole process tree. When `systemd-run
+/// --user --scope` can provide one, transparently re-exec the campaign inside
+/// it; `--scope` runs the command as our child with inherited stdio/env/cwd,
+/// so the progress UI is unaffected. `--no-self-scope` opts out.
+#[cfg(target_os = "linux")]
+fn self_scope_reexec() {
+    const GUARD: &str = "ELODIN_MC_SELF_SCOPED";
+    if std::env::var_os(GUARD).is_some() || s10::cgroups_available() {
+        return;
+    }
+    let probe = std::process::Command::new("systemd-run")
+        .args(["--user", "--scope", "--collect", "-q", "true"])
+        .status();
+    if !probe.map(|status| status.success()).unwrap_or(false) {
+        eprintln!(
+            "warning: no delegated cgroup and systemd-run --user unavailable; \
+             a timed-out run may leak child processes (fallback process-group kill still applies)"
+        );
+        return;
+    }
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(_) => return,
+    };
+    eprintln!("re-executing under `systemd-run --user --scope` for reliable run teardown");
+    let status = std::process::Command::new("systemd-run")
+        .args(["--user", "--scope", "--collect", "-q"])
+        .arg(exe)
+        .args(std::env::args_os().skip(1))
+        .env(GUARD, "1")
+        .status();
+    match status {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => {
+            eprintln!("warning: systemd-run re-exec failed ({err}); continuing unscoped");
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn self_scope_reexec() {}
 
 fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
     let out_dir = args.out.unwrap_or_else(|| {
@@ -136,6 +213,8 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         campaign_path: args.campaign,
         out_dir,
         cache_dir: args.cache_dir,
+        workers: args.workers,
+        scratch_dir: args.scratch_dir,
         retries: args.retries,
         timeout: args.timeout,
         post_run: args.post_run,
@@ -146,6 +225,7 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         memory_probe: args.memory_probe,
         keep_existing: args.keep_existing,
         clean: args.clean,
+        strict_ports: args.strict_ports,
     })
 }
 

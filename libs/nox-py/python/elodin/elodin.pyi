@@ -445,10 +445,6 @@ class Component:
 class ShapeIndexer:
     def __getitem__(self, index: Any) -> ShapeIndexer: ...
 
-class Impeller:
-    @staticmethod
-    def tcp(addr: str) -> Impeller: ...
-
 class Exec:
     def run(
         self,

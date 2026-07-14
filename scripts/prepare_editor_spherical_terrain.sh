@@ -45,8 +45,8 @@ fi
 
 # Force the asset root expected by the editor's default configuration. The
 # fetcher writes under ./assets relative to cwd, while the atlas writer honors
-# ELODIN_ASSETS_DIR; setting both cwd and env keeps them aligned.
-export ELODIN_ASSETS_DIR="$repo_root/assets"
+# ELODIN_ASSETS; setting both cwd and env keeps them aligned.
+export ELODIN_ASSETS="$repo_root/assets"
 export BEVY_ASSET_ROOT="$repo_root"
 
 terrain_dir="assets/terrains/spherical"
