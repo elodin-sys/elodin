@@ -9,6 +9,9 @@ struct LineUniform {
     color: vec4<f32>,
     depth_bias: f32,
     model: mat4x4<f32>,
+    // Reference point (raw frame coords) subtracted from each vertex before the
+    // model transform to avoid f32 cancellation at ECEF magnitudes. `w` unused.
+    world_origin: vec4<f32>,
     perspective: u32,
 #ifdef SIXTEEN_BYTE_ALIGNMENT
     // WebGL2 structs must be 16 byte aligned.
@@ -56,9 +59,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let index_x_b = index_x_buffer[vertex.instance_index + 1];
     let index_y_b = index_y_buffer[vertex.instance_index + 1];
     let index_z_b = index_z_buffer[vertex.instance_index + 1];
-    // Let's not assume ENU here.
-    let point_a = vec3(x_values[index_x_a], y_values[index_y_a], z_values[index_z_a]);
-    let point_b = vec3(x_values[index_x_b], y_values[index_y_b], z_values[index_z_b]);
+    // Let's not assume ENU here. Rebase onto `world_origin` (in the same raw
+    // frame coords as the vertices) so the f32 `model` multiply operates on
+    // small values instead of subtracting two ~6.4e6 ECEF magnitudes.
+    let origin = line_uniform.world_origin.xyz;
+    let point_a = vec3(x_values[index_x_a], y_values[index_y_a], z_values[index_z_a]) - origin;
+    let point_b = vec3(x_values[index_x_b], y_values[index_y_b], z_values[index_z_b]) - origin;
 
     // algorithm based on https://wwwtyro.net/2019/11/18/instanced-lines.html
     var clip0 = view.clip_from_world * line_uniform.model * vec4(point_a, 1.0);

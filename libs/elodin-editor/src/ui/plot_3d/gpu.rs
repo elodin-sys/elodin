@@ -161,6 +161,7 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
         uniform.model = transform.to_matrix();
     }
 }
+
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
@@ -224,6 +225,18 @@ pub struct LineUniform {
     pub color: Vec4,
     pub depth_bias: f32,
     pub model: Mat4,
+    /// Reference point (in the line's raw frame coordinates, e.g. ECEF) that the
+    /// shader subtracts from every vertex before the f32 `model` multiply.
+    ///
+    /// At ECEF magnitudes (~6.4e6 m) both the vertex and the model translation
+    /// are large and opposite, so `model * point` loses ~1 m of precision to
+    /// catastrophic cancellation; a sub-meter per-frame wobble of the floating
+    /// origin then flips low bits and the trail flickers even while paused.
+    /// Subtracting this reference keeps the shader operands small. It must match
+    /// the entity's `GeoPosition` reference so the model still supplies the
+    /// (reference -> floating origin) offset, computed by big_space in f64.
+    /// `w` is unused. See [`LineFrameOrigin`].
+    pub world_origin: Vec4,
     pub perspective: u32,
     #[cfg(target_arch = "wasm32")]
     pub _padding: f32,
@@ -236,12 +249,25 @@ impl LineUniform {
             color: Vec4::from_array(color.to_linear().to_f32_array()),
             depth_bias: 0.0,
             model: Mat4::IDENTITY,
+            world_origin: Vec4::ZERO,
             perspective: 0,
             #[cfg(target_arch = "wasm32")]
             _padding: Default::default(),
         }
     }
 }
+
+/// Per-`line_3d` reference point, in the line's frame coordinates, subtracted
+/// from the raw vertices before the f32 `model` transform (see
+/// [`LineUniform::world_origin`]).
+///
+/// Set at spawn from the schematic's `GeoContext` origin so it equals the
+/// entity's `GeoPosition` reference: for an ECEF line this is the geo origin in
+/// ECEF (~6.4e6 m), for ENU/NED it is zero (those vertices are already
+/// launch-relative). Mirroring the `GeoPosition` reference is what keeps the
+/// rendered coordinates small without shifting the line.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct LineFrameOrigin(pub bevy::math::Vec3);
 
 #[derive(Resource)]
 struct LineValuesLayout {
@@ -871,5 +897,87 @@ mod tests {
             future: Some(half),
         });
         assert_eq!(future, half);
+    }
+
+    /// Reproduces issue #735 numerically: the line_3d vertex pipeline is
+    /// `clip = clip_from_world · model · point`. The `model · point` product is
+    /// evaluated in f32. This emulates that product for an ECEF vertex, before
+    /// and after the `world_origin` rebase, while the big_space floating origin
+    /// drifts a few cm per frame (as it does when the camera settles even while
+    /// playback is paused). It asserts the *temporal variation* of the render
+    /// error — i.e. the visible flicker — collapses once the operands are small.
+    #[test]
+    fn ecef_world_origin_rebase_removes_paused_flicker() {
+        use bevy::math::{DQuat, DVec3, Mat4};
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, GeoPosition, GeoRotation};
+
+        // Mojave launch site, matching shane/line_3d.shane.kdl.
+        let ctx: GeoContext = GeoOrigin::new_from_degrees(35.3506640, -117.80902, 589.2740).into();
+
+        // ECEF reference the shader subtracts (and the entity's GeoPosition):
+        // the geo origin expressed in ECEF (~6.4e6 m).
+        let reference = GeoPosition::from_bevy(GeoFrame::ECEF, DVec3::ZERO, &ctx).1;
+        assert!(
+            reference.length() > 6.0e6,
+            "ECEF reference should be Earth-radius scale, got {}",
+            reference.length()
+        );
+
+        // Entity rotation (ECEF -> Bevy basis) and absolute Bevy positions.
+        let rot = GeoRotation::absolute(GeoFrame::ECEF, DQuat::IDENTITY).to_bevy(&ctx);
+        let rot_f32 = rot.as_quat();
+        let entity_abs_old = GeoPosition(GeoFrame::ECEF, DVec3::ZERO).to_bevy(&ctx); // ~ -R*ref
+        let entity_abs_new = GeoPosition(GeoFrame::ECEF, reference).to_bevy(&ctx); // ~ 0
+        assert!(
+            entity_abs_new.length() < 1.0,
+            "rebased entity should sit at the launch site (~0), got {}",
+            entity_abs_new.length()
+        );
+
+        // A vehicle vertex a couple of km from the launch site (still ECEF-scale
+        // in absolute terms — this is exactly what is stored for the trail).
+        let vertex_ecef = reference + DVec3::new(2100.0, -1300.0, 900.0);
+        let vehicle_bevy = GeoPosition(GeoFrame::ECEF, vertex_ecef).to_bevy(&ctx);
+
+        // f32 vertex data as uploaded to the value buffer.
+        let raw_f32 = vertex_ecef.as_vec3();
+        let origin_f32 = reference.as_vec3();
+
+        // Emulate the floating origin drifting ~3 cm/frame near the vehicle,
+        // plus a sub-mm asymptotic settle (camera damping never fully stops).
+        let spread = |entity_abs: DVec3, point: bevy::math::Vec3| -> f32 {
+            let mut min_err = f32::INFINITY;
+            let mut max_err = f32::NEG_INFINITY;
+            for i in 0..240i32 {
+                let t = i as f64;
+                let fo = vehicle_bevy
+                    + DVec3::new(0.03 * t, -0.02 * t, 0.015 * t)
+                    + DVec3::new(0.4 * (t * 0.3).sin(), 0.0, 0.0) * 0.001;
+                // model = entity GlobalTransform relative to the floating origin.
+                let model = Mat4::from_rotation_translation(rot_f32, (entity_abs - fo).as_vec3());
+                let rendered = model.transform_point3(point); // f32, like the shader
+                let truth = (vehicle_bevy - fo).as_vec3(); // f64 -> f32, no cancellation
+                let err = (rendered - truth).length();
+                min_err = min_err.min(err);
+                max_err = max_err.max(err);
+            }
+            max_err - min_err
+        };
+
+        // OLD: raw ECEF vertex, entity at ~ -R*ref -> model.translation ~ -6.4e6.
+        let old_spread = spread(entity_abs_old, raw_f32);
+        // NEW: vertex rebased by world_origin, entity at ~0 -> operands small.
+        let new_spread = spread(entity_abs_new, raw_f32 - origin_f32);
+
+        // The old path jitters on the order of decimetres frame-to-frame (the
+        // visible flicker); the rebase must cut that by orders of magnitude.
+        assert!(
+            old_spread > 0.1,
+            "expected the un-rebased ECEF path to flicker (>0.1 m), got {old_spread}"
+        );
+        assert!(
+            new_spread < old_spread / 50.0,
+            "rebase should remove the flicker: old={old_spread} new={new_spread}"
+        );
     }
 }

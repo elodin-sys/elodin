@@ -42,7 +42,10 @@ fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
 }
 
 pub fn sync_line_plot_3d(
-    line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
+    line_plot_3d_query: Query<
+        (Entity, &Line3d, Option<&gpu::LineFrameOrigin>),
+        Without<gpu::LineHandles>,
+    >,
     mut uniforms: Query<
         (
             Entity,
@@ -57,7 +60,7 @@ pub fn sync_line_plot_3d(
     mut collected_graph_data: ResMut<CollectedGraphData>,
     metadata_store: Res<ComponentMetadataRegistry>,
 ) {
-    for (entity, line_plot) in line_plot_3d_query.iter() {
+    for (entity, line_plot, frame_origin) in line_plot_3d_query.iter() {
         // Parse and compile the EQL expression
         let parsed = match eql_ctx.0.parse_str(&line_plot.eql) {
             Ok(expr) => expr,
@@ -107,6 +110,7 @@ pub fn sync_line_plot_3d(
                     color: trail.played.unwrap_or(Vec4::ZERO),
                     depth_bias: 0.0,
                     model: Mat4::IDENTITY,
+                    world_origin: frame_origin.map(|o| o.0.extend(0.0)).unwrap_or(Vec4::ZERO),
                     perspective: if line_plot.perspective { 1 } else { 0 },
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),

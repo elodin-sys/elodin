@@ -927,7 +927,21 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
-        let frame = line_3d.frame;
+        // Reference point (in frame coords) the shader subtracts from each raw
+        // vertex, and the entity's GeoPosition, so both stay small at ECEF
+        // magnitudes (avoids the paused-trail flicker from f32 cancellation).
+        // It is the geo origin expressed in the line's frame: the ECEF geo
+        // origin for an ECEF line, zero for ENU/NED (already launch-relative).
+        let geo = line_3d.frame.or_default().map(|frame| {
+            let reference = bevy_geo_frames::GeoPosition::from_bevy(
+                frame,
+                bevy::math::DVec3::ZERO,
+                &self.geo_context,
+            )
+            .1;
+            (frame, reference)
+        });
+
         let mut spawn = self.commands.spawn(line_3d);
         spawn.insert((
             Name::new("line_3d"),
@@ -939,11 +953,15 @@ impl LoadSchematicParams<'_, '_> {
 
         // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
         // The rotation is Absolute: the line's vertex data is raw frame
-        // coordinates, so its transform must carry the frame -> Bevy basis change.
-        if let Some(frame) = frame.or_default() {
+        // coordinates, so its transform must carry the frame -> Bevy basis
+        // change. Placing GeoPosition at `reference` (not zero) lets big_space
+        // compute the (reference -> floating origin) offset in f64 while the
+        // shader subtracts the same `reference` from the vertices.
+        if let Some((frame, reference)) = geo {
             spawn.insert((
-                bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+                bevy_geo_frames::GeoPosition(frame, reference),
                 bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
+                crate::ui::plot_3d::gpu::LineFrameOrigin(reference.as_vec3()),
             ));
         }
         spawn.insert(SchematicSpawned);
