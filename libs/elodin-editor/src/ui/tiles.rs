@@ -1714,6 +1714,8 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
+        camera.insert(crate::ui::inspector::viewport::ViewportFollowSmoothing::default());
+
         camera.insert(MeshPickingCamera);
         camera.insert(bloom_from_config(viewport.bloom.as_ref()));
         camera.insert(PrimarySkybox);

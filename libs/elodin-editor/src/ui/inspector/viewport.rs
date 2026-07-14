@@ -461,55 +461,131 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
     });
 }
 
+/// Time constant (seconds) of the follow-camera low-pass. Larger = smoother but
+/// laggier. Telemetry drives the follow pose only at the data rate (~5-10 Hz),
+/// so this must span a few data periods to actually reject the jitter; genuine
+/// fast motion is protected by the snap-to-target path, not by a small tau.
+const FOLLOW_SMOOTHING_TAU: f64 = 0.3;
+
+/// Per-viewport low-pass state for a following camera. Holds the previous
+/// frame's smoothed position and look-at target (viewport/sim coordinates) so
+/// telemetry noise in a `pos`/`look_at` EQL that tracks a moving entity does not
+/// shake the whole view during playback. Snaps to the raw target on the first
+/// frame and on jumps larger than the framing distance (seek / fast motion), so
+/// genuine motion is never lagged.
+#[derive(Component, Default)]
+pub struct ViewportFollowSmoothing {
+    initialized: bool,
+    pos: DVec3,
+    look_at: DVec3,
+}
+
+/// Framerate-independent exponential smoothing factor for time step `dt`.
+fn follow_smoothing_alpha(dt: f64) -> f64 {
+    if dt <= 0.0 {
+        return 1.0;
+    }
+    1.0 - (-dt / FOLLOW_SMOOTHING_TAU).exp()
+}
+
 pub fn set_viewport_pos(
-    mut viewports: Query<(&Viewport, &mut EditorCam)>,
+    mut viewports: Query<(
+        &Viewport,
+        &mut EditorCam,
+        Option<&mut ViewportFollowSmoothing>,
+    )>,
     mut pos: Query<&mut WorldPos>,
     entity_map: Res<EntityMap>,
     values: Query<&'static ComponentValue>,
     geo_context: Res<GeoContext>,
+    time: Res<Time>,
 ) {
-    for (viewport, mut editor_cam) in viewports.iter_mut() {
+    for (viewport, mut editor_cam, mut smoothing) in viewports.iter_mut() {
         let Ok(mut pos) = pos.get_mut(viewport.parent_entity) else {
             continue;
         };
-        if let Some(compiled_expr) = &viewport.pos.compiled_expr {
-            match compiled_expr.execute(&entity_map, &values) {
-                Ok(val) => {
-                    if let Some(world_pos) = val.as_world_pos() {
-                        *pos = world_pos;
-                    } else {
-                        bevy::log::warn!("viewport pos expression didn't produce a WorldPos");
-                    }
-                }
-                Err(e) => {
-                    bevy::log::error_once!("viewport pos formula execution error: {}", e);
-                }
-            }
-            if let Some(compiled_expr) = &viewport.look_at.compiled_expr
-                && let Ok(val) = compiled_expr.execute(&entity_map, &values)
-                && let Some(look_at) = val.as_world_pos()
-            {
-                let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
-                // Everything stays in the viewport's frame: direction and up
-                // are frame coordinates, and `GeoRotation::look_at` yields the
-                // attitude expressed in that frame. `sync_pos` carries it into
-                // the entity's `GeoRotation` unchanged.
-                let dir = look_at.pos() - pos.pos();
-                let target_distance = dir.length();
-
-                if !is_valid_viewport_target_distance(target_distance) {
+        let Some(pos_expr) = &viewport.pos.compiled_expr else {
+            continue;
+        };
+        let target = match pos_expr.execute(&entity_map, &values) {
+            Ok(val) => match val.as_world_pos() {
+                Some(world_pos) => world_pos,
+                None => {
+                    bevy::log::warn!("viewport pos expression didn't produce a WorldPos");
                     continue;
                 }
-                refresh_default_anchor_depth(&mut editor_cam, target_distance);
-                let up = viewport
-                    .up
-                    .compiled_expr
-                    .as_ref()
-                    .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
-                    .and_then(|v| extract_vec3(&v))
-                    .filter(|v| v.length_squared() > 1e-20);
-                pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
+            },
+            Err(e) => {
+                bevy::log::error_once!("viewport pos formula execution error: {}", e);
+                continue;
             }
+        };
+
+        // Optional look-at target: a following camera derives its framing from
+        // it. Without one the position EQL stands alone (e.g. a static camera).
+        let look_at_target = viewport
+            .look_at
+            .compiled_expr
+            .as_ref()
+            .and_then(|expr| expr.execute(&entity_map, &values).ok())
+            .and_then(|val| val.as_world_pos());
+
+        let raw_pos = target.pos();
+
+        // Temporally low-pass the follow pose so telemetry noise in the EQL does
+        // not shake the whole view (see #735 residual playback flicker). Only for
+        // following cameras (look_at present) that carry a smoothing state: `pos`
+        // and `look_at` share the same noise, so filtering both with one alpha
+        // cancels it from the view direction. Snap on the first frame and on
+        // jumps larger than the framing distance (seek / fast flight) so genuine
+        // motion is never lagged. Without a look_at we keep the raw pose.
+        let (eff_pos, eff_look_at) = if let (Some(look_at), Some(sm)) =
+            (look_at_target, smoothing.as_deref_mut())
+        {
+            let raw_look = look_at.pos();
+            let snap_dist = (raw_look - raw_pos).length();
+            let alpha = follow_smoothing_alpha(time.delta_secs_f64());
+            let snap =
+                !sm.initialized || !snap_dist.is_finite() || sm.pos.distance(raw_pos) > snap_dist;
+            if snap {
+                sm.pos = raw_pos;
+                sm.look_at = raw_look;
+            } else {
+                sm.pos = sm.pos.lerp(raw_pos, alpha);
+                sm.look_at = sm.look_at.lerp(raw_look, alpha);
+            }
+            sm.initialized = true;
+            (sm.pos, Some(sm.look_at))
+        } else {
+            (raw_pos, look_at_target.map(|l| l.pos()))
+        };
+
+        // Keep the pos EQL's attitude (used when there is no look_at) and replace
+        // the translation with the smoothed one.
+        *pos = target;
+        pos.pos = nox::Vector3::new(eff_pos.x, eff_pos.y, eff_pos.z);
+
+        if let Some(look_at_pos) = eff_look_at {
+            let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
+            // Everything stays in the viewport's frame: direction and up are
+            // frame coordinates, and `GeoRotation::look_at` yields the attitude
+            // expressed in that frame. `sync_pos` carries it into the entity's
+            // `GeoRotation` unchanged.
+            let dir = look_at_pos - eff_pos;
+            let target_distance = dir.length();
+
+            if !is_valid_viewport_target_distance(target_distance) {
+                continue;
+            }
+            refresh_default_anchor_depth(&mut editor_cam, target_distance);
+            let up = viewport
+                .up
+                .compiled_expr
+                .as_ref()
+                .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
+                .and_then(|v| extract_vec3(&v))
+                .filter(|v| v.length_squared() > 1e-20);
+            pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
         }
     }
 }
@@ -612,6 +688,21 @@ mod tests {
     }
 
     #[test]
+    fn follow_smoothing_alpha_is_bounded_and_framerate_consistent() {
+        // Non-positive dt (e.g. paused / first tick) snaps fully to the target.
+        assert_eq!(follow_smoothing_alpha(0.0), 1.0);
+        // A single big step approaches (but never exceeds) 1.
+        let big = follow_smoothing_alpha(10.0);
+        assert!(big > 0.99 && big < 1.0, "alpha={big}");
+        // Two half-steps must leave the same residual as one full step, so the
+        // filter behaves identically regardless of framerate.
+        let dt = 0.1;
+        let one = 1.0 - follow_smoothing_alpha(dt);
+        let two = (1.0 - follow_smoothing_alpha(dt / 2.0)).powi(2);
+        assert!((one - two).abs() < 1e-12, "one={one} two={two}");
+    }
+
+    #[test]
     fn refresh_default_anchor_depth_keeps_user_adjusted_depth() {
         let mut editor_cam = EditorCam {
             last_anchor_depth: -8.0,
@@ -666,6 +757,7 @@ mod tests {
             let mut app = bevy::app::App::new();
             app.insert_resource(GeoContext::default());
             app.init_resource::<super::EntityMap>();
+            app.init_resource::<bevy::time::Time>();
             crate::register_world_pos_components(&mut app);
             app.add_systems(
                 bevy::app::Update,
