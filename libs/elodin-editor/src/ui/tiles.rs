@@ -1288,46 +1288,46 @@ impl Pane {
                                 i.pointer.primary_released(),
                             )
                         });
-                        if let Some(pos) = pointer.0 {
-                            if rect.contains(pos) {
-                                if pointer.1 {
-                                    ui.ctx().data_mut(|d| d.insert_temp(press_id, pos));
-                                }
-                                if pointer.2
-                                    && let Some(press_pos) =
-                                        ui.ctx().data_mut(|d| d.remove_temp::<egui::Pos2>(press_id))
-                                    && press_pos.distance(pos) <= CLICK_DRAG_THRESHOLD
+                        if let Some(pos) = pointer.0
+                            && rect.contains(pos)
+                        {
+                            if pointer.1 {
+                                ui.ctx().data_mut(|d| d.insert_temp(press_id, pos));
+                            }
+                            if pointer.2
+                                && let Some(press_pos) =
+                                    ui.ctx().data_mut(|d| d.remove_temp::<egui::Pos2>(press_id))
+                                && press_pos.distance(pos) <= CLICK_DRAG_THRESHOLD
+                            {
+                                let over_view_cube = pane.nav_gizmo.is_some() && {
+                                    let cube = egui::Rect::from_min_max(
+                                        egui::pos2(rect.max.x - VIEW_CUBE_HIT_PAD, rect.min.y),
+                                        egui::pos2(rect.max.x, rect.min.y + VIEW_CUBE_HIT_PAD),
+                                    );
+                                    cube.contains(pos)
+                                };
+                                // Prefer region lookup: ViewCube Overlay may not be
+                                // registered yet during pane_ui, so also exclude the
+                                // cube corner when a view cube exists on this pane.
+                                let owner_ok = world
+                                    .get_resource::<UiInputOwners>()
+                                    .is_some_and(|owners| {
+                                        matches!(
+                                            owners.resolve_owner_at(target_window, pos),
+                                            Some(PointerOwner::Viewport { camera })
+                                                if camera == cam
+                                        )
+                                    });
+                                if owner_ok
+                                    && !over_view_cube
+                                    && let Some(mut window_state) =
+                                        world.get_mut::<WindowState>(target_window)
                                 {
-                                    let over_view_cube = pane.nav_gizmo.is_some() && {
-                                        let cube = egui::Rect::from_min_max(
-                                            egui::pos2(rect.max.x - VIEW_CUBE_HIT_PAD, rect.min.y),
-                                            egui::pos2(rect.max.x, rect.min.y + VIEW_CUBE_HIT_PAD),
-                                        );
-                                        cube.contains(pos)
-                                    };
-                                    // Prefer region lookup: ViewCube Overlay may not be
-                                    // registered yet during pane_ui, so also exclude the
-                                    // cube corner when a view cube exists on this pane.
-                                    let owner_ok = world
-                                        .get_resource::<UiInputOwners>()
-                                        .is_some_and(|owners| {
-                                            matches!(
-                                                owners.resolve_owner_at(target_window, pos),
-                                                Some(PointerOwner::Viewport { camera })
-                                                    if camera == cam
-                                            )
-                                        });
-                                    if owner_ok && !over_view_cube {
-                                        if let Some(mut window_state) =
-                                            world.get_mut::<WindowState>(target_window)
-                                        {
-                                            window_state.ui_state.selected_object =
-                                                SelectedObject::Viewport {
-                                                    camera: cam,
-                                                    title: pane.name.clone(),
-                                                };
-                                        }
-                                    }
+                                    window_state.ui_state.selected_object =
+                                        SelectedObject::Viewport {
+                                            camera: cam,
+                                            title: pane.name.clone(),
+                                        };
                                 }
                             }
                         }
