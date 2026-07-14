@@ -2153,8 +2153,12 @@ mod tests {
 
         // Two samples, three elements, laid out sample-major: [s0xyz, s1xyz].
         let samples: Vec<f64> = vec![
-            1_000_010.5, 2_000_020.5, 3_000_030.5, // sample 0
-            1_000_011.5, 2_000_021.5, 3_000_031.5, // sample 1
+            1_000_010.5,
+            2_000_020.5,
+            3_000_030.5, // sample 0
+            1_000_011.5,
+            2_000_021.5,
+            3_000_031.5, // sample 1
         ];
         let timestamps = [Timestamp(10), Timestamp(20)];
         process_time_series::<f64>(
