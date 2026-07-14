@@ -225,12 +225,12 @@ pub struct LineUniform {
     pub color: Vec4,
     pub depth_bias: f32,
     pub model: Mat4,
-    /// Reference point (raw frame coords) the shader subtracts from every vertex
-    /// before the f32 `model` multiply. Kept at zero now that the rebase happens
-    /// in f64 at ingestion (`PlotDataComponent::value_offset`), which also
-    /// recovers the ~0.5 m the vertices used to lose to the `f32` cast at ECEF
-    /// magnitudes. Retained (subtracting zero) so the uniform layout is stable.
-    /// `w` is unused. See [`LineFrameOrigin`].
+    /// Residual reference (raw frame coords) the shader subtracts from every
+    /// vertex before the f32 `model` multiply. Zero for axes rebased in f64 at
+    /// ingestion (`PlotDataComponent::value_offset`, the precise path); the
+    /// frame origin for axes whose component pre-existed with raw values (e.g.
+    /// first collected by a 2D graph), so they still render in place, at
+    /// pre-rebase precision. `w` is unused. See [`LineFrameOrigin`].
     pub world_origin: Vec4,
     pub perspective: u32,
     #[cfg(target_arch = "wasm32")]
@@ -895,19 +895,13 @@ mod tests {
         assert_eq!(future, half);
     }
 
-    /// Reproduces issue #735 numerically: the line_3d vertex pipeline is
-    /// `clip = clip_from_world · model · point`. The `model · point` product is
-    /// evaluated in f32. This emulates that product for an ECEF vertex, before
-    /// and after the `world_origin` rebase, while the big_space floating origin
-    /// drifts a few cm per frame (as it does when the camera settles even while
-    /// playback is paused). It asserts the *temporal variation* of the render
-    /// error — i.e. the visible flicker — collapses once the operands are small.
-    /// The trail's paused shimmer was the ~0.5 m the ECEF vertices lose when a
-    /// ~6.4e6 m `f64` position is cast straight to `f32` at ingestion: adjacent
-    /// samples snap to the same 0.5 m grid, so the polyline is permanently
-    /// jagged and shimmers under any camera motion. Rebasing against the frame
-    /// origin **in f64 before the cast** (what `value_offset` now does) stores
-    /// small launch-relative values that keep millimetre precision.
+    /// Reproduces issue #735 numerically. The trail's paused shimmer was the
+    /// ~0.5 m each ECEF vertex loses when its ~6.4e6 m `f64` position is cast
+    /// straight to `f32` at ingestion: adjacent samples snap to the same 0.5 m
+    /// grid, so the polyline is permanently jagged and shimmers under any
+    /// camera motion. Rebasing against the frame origin **in f64 before the
+    /// cast** (what `PlotDataComponent::value_offset` now does) stores small
+    /// launch-relative values that keep millimetre precision.
     #[test]
     fn ecef_ingest_rebase_preserves_precision() {
         use bevy::math::{DVec3, Vec3};

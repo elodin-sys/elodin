@@ -77,15 +77,22 @@ pub fn sync_line_plot_3d(
         let graph_components = parsed.to_graph_components();
         let skip = if graph_components.len() == 7 { 4 } else { 0 };
         let mut handles: [Option<Handle<Line>>; 3] = [None, None, None];
+        // Residual origin the shader must still subtract, per axis. Zero when
+        // the axis data is rebased at ingestion; the full frame origin when the
+        // component pre-existed without a rebase (see below).
+        let mut world_origin = Vec4::ZERO;
         for (i, (c, index)) in graph_components.iter().skip(skip).take(3).enumerate() {
             let Some(metadata) = metadata_store.get_metadata(&c.id) else {
                 continue;
             };
+            // Frame-origin coordinate for this axis (x/y/z of the reference).
+            let r_i = frame_origin.map(|o| o.0[i]).unwrap_or(0.0);
+            let created = !collected_graph_data.components.contains_key(&c.id);
             let data = collected_graph_data
                 .components
                 .entry(c.id)
                 .or_insert_with(|| {
-                    let mut component = PlotDataComponent::new(
+                    PlotDataComponent::new(
                         metadata.name.clone(),
                         metadata
                             .element_names()
@@ -93,17 +100,23 @@ pub fn sync_line_plot_3d(
                             .filter(|s| !s.is_empty())
                             .map(str::to_string)
                             .collect(),
-                    );
-                    // Rebase this line's vertices against the frame origin in
-                    // f64 at ingestion so large ECEF coordinates keep mm
-                    // precision (see LineFrameOrigin). Set only at creation, so
-                    // a component already collected for a 2D graph is untouched.
-                    if let Some(frame_origin) = frame_origin {
-                        let r = frame_origin.0;
-                        component.value_offset = Some(vec![r.x, r.y, r.z]);
-                    }
-                    component
+                    )
                 });
+            // Rebase this axis's samples against the frame origin in f64 at
+            // ingestion so large ECEF coordinates keep mm precision (see
+            // LineFrameOrigin). Element-indexed so an axis served by its own
+            // scalar component still subtracts its own coordinate. Set only at
+            // creation: a component already collected (e.g. by a 2D graph)
+            // keeps raw values, and the shader subtracts the residual instead
+            // (correct placement, pre-rebase precision).
+            if created && r_i != 0.0 {
+                let offsets = data.value_offset.get_or_insert_with(Vec::new);
+                if offsets.len() <= *index {
+                    offsets.resize(index + 1, 0.0);
+                }
+                offsets[*index] = r_i;
+            }
+            world_origin[i] = (r_i - data.axis_offset(*index)) as f32;
             handles[i] = data.lines.get(index).cloned();
         }
         let [Some(x), Some(y), Some(z)] = handles else {
@@ -119,9 +132,10 @@ pub fn sync_line_plot_3d(
                     color: trail.played.unwrap_or(Vec4::ZERO),
                     depth_bias: 0.0,
                     model: Mat4::IDENTITY,
-                    // Vertices are already rebased at ingestion (value_offset),
-                    // so the shader must not subtract the origin again.
-                    world_origin: Vec4::ZERO,
+                    // Zero for axes rebased at ingestion (value_offset); the
+                    // frame origin for axes whose component pre-existed with
+                    // raw values, so the shader re-centers them itself.
+                    world_origin,
                     perspective: if line_plot.perspective { 1 } else { 0 },
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),
