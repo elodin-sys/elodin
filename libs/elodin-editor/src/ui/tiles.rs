@@ -1309,9 +1309,8 @@ impl Pane {
                                 // Prefer region lookup: ViewCube Overlay may not be
                                 // registered yet during pane_ui, so also exclude the
                                 // cube corner when a view cube exists on this pane.
-                                let owner_ok = world
-                                    .get_resource::<UiInputOwners>()
-                                    .is_some_and(|owners| {
+                                let owner_ok =
+                                    world.get_resource::<UiInputOwners>().is_some_and(|owners| {
                                         matches!(
                                             owners.resolve_owner_at(target_window, pos),
                                             Some(PointerOwner::Viewport { camera })
