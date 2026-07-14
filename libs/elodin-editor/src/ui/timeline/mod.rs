@@ -33,6 +33,7 @@ pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
         .init_resource::<TimelineSettings>()
+        .init_resource::<TelemetryMode>()
         .init_resource::<LatestFollow>()
         .init_resource::<AutoFollowLatestState>()
         .add_systems(
@@ -65,6 +66,10 @@ pub struct TimelineSettings {
     pub follow_latest: bool,
 }
 
+/// When true, enable dense telemetry presentation for graph dashboards.
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TelemetryMode(pub bool);
+
 impl Default for TimelineSettings {
     fn default() -> Self {
         Self::from(impeller2_wkt::TimelineConfig::default())
@@ -87,6 +92,7 @@ impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
             played_color: value.played_color,
             future_color: value.future_color,
             follow_latest: value.follow_latest,
+            range: None,
         }
     }
 }

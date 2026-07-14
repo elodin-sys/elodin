@@ -29,7 +29,7 @@ use crate::tiles::WindowRelayout;
 #[cfg(target_os = "macos")]
 use crate::ui::window::placement::apply_physical_screen_rect;
 use crate::{
-    EqlContext, MainCamera,
+    EqlContext, MainCamera, TimeRangeBehavior,
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
@@ -51,7 +51,7 @@ use crate::{
             GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor, WindowId,
             WindowState,
         },
-        timeline::TimelineSettings,
+        timeline::{TelemetryMode, TimelineSettings},
     },
     vector_arrow::{VectorArrowState, ViewportArrow},
 };
@@ -60,6 +60,56 @@ use crate::{
 enum PanelContext {
     Main,
     Window(WindowId),
+}
+
+/// Unwrap singleton Tabs whose only child is a Graph pane so telemetry mode
+/// can reclaim tab-header chrome without affecting multi-tab viewport groups.
+fn strip_singleton_graph_tabs(tile_state: &mut TileState) {
+    let candidates: Vec<(TileId, TileId)> = tile_state
+        .tree
+        .tiles
+        .iter()
+        .filter_map(|(id, tile)| {
+            let Tile::Container(Container::Tabs(tabs)) = tile else {
+                return None;
+            };
+            if tabs.children.len() != 1 {
+                return None;
+            }
+            let child = tabs.children[0];
+            match tile_state.tree.tiles.get(child) {
+                Some(Tile::Pane(Pane::Graph(_))) => Some((*id, child)),
+                _ => None,
+            }
+        })
+        .collect();
+
+    for (tabs_id, graph_id) in candidates {
+        if tile_state.tree.root == Some(tabs_id) {
+            tile_state.tree.root = Some(graph_id);
+        } else if let Some(parent_id) = tile_state.tree.tiles.parent_of(tabs_id) {
+            match tile_state.tree.tiles.get_mut(parent_id) {
+                Some(Tile::Container(Container::Linear(linear))) => {
+                    if let Some(i) = linear.children.iter().position(|c| *c == tabs_id) {
+                        linear.children[i] = graph_id;
+                    }
+                    linear.shares.replace_with(tabs_id, graph_id);
+                }
+                Some(Tile::Container(Container::Tabs(tabs))) => {
+                    if let Some(i) = tabs.children.iter().position(|c| *c == tabs_id) {
+                        tabs.children[i] = graph_id;
+                    }
+                    if tabs.active == Some(tabs_id) {
+                        tabs.active = Some(graph_id);
+                    }
+                }
+                // Grid uses hole-aware indexing; leave singleton graph tabs nested there.
+                _ => {}
+            }
+        }
+        tile_state.tree.tiles.remove(tabs_id);
+        tile_state.container_titles.remove(&tabs_id);
+    }
 }
 
 fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<TileId> {
@@ -166,6 +216,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub timeline_settings: ResMut<'w, TimelineSettings>,
+    pub time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    pub telemetry_mode: ResMut<'w, TelemetryMode>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
@@ -367,7 +419,14 @@ impl LoadSchematicParams<'_, '_> {
         let theme_mode = Some(theme_selection.mode.clone());
         let theme_mode_str = theme_mode.as_deref();
         let mut descriptors = collect_window_descriptors(schematic, base_dir, theme_mode_str);
-        *self.timeline_settings = schematic.timeline.clone().unwrap_or_default().into();
+        let timeline = schematic.timeline.clone().unwrap_or_default();
+        *self.timeline_settings = timeline.clone().into();
+        *self.time_range_behavior = timeline
+            .range
+            .as_deref()
+            .and_then(TimeRangeBehavior::from_schematic_range)
+            .unwrap_or_default();
+        *self.telemetry_mode = TelemetryMode(schematic.telemetry_mode);
 
         let panel_count = schematic
             .elems
@@ -378,6 +437,7 @@ impl LoadSchematicParams<'_, '_> {
         let mut main_ui_state = crate::ui::WindowUiState::default();
 
         let fallback_frame = self.coordinate.0;
+        let force_graph_lock = schematic.telemetry_mode;
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
@@ -388,6 +448,7 @@ impl LoadSchematicParams<'_, '_> {
                         &p,
                         tabs_parent,
                         PanelContext::Main,
+                        force_graph_lock,
                     );
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
@@ -447,6 +508,9 @@ impl LoadSchematicParams<'_, '_> {
             // Apply sidebar visibility from loaded schematic.
             window_state.ui_state.left_sidebar_visible = main_ui_state.left_sidebar_visible;
             window_state.ui_state.right_sidebar_visible = main_ui_state.right_sidebar_visible;
+            if schematic.telemetry_mode {
+                strip_singleton_graph_tabs(&mut window_state.tile_state);
+            }
             // Resize if necessary.
             //
             #[cfg(not(target_os = "macos"))]
@@ -713,6 +777,7 @@ impl LoadSchematicParams<'_, '_> {
                     panel,
                     tabs_parent,
                     PanelContext::Window(id),
+                    false,
                 );
             }
         }
@@ -947,6 +1012,7 @@ impl LoadSchematicParams<'_, '_> {
         panel: &Panel,
         parent_id: Option<TileId>,
         context: PanelContext,
+        force_graph_lock: bool,
     ) -> Option<TileId> {
         match panel {
             Panel::Viewport(viewport) => {
@@ -993,7 +1059,14 @@ impl LoadSchematicParams<'_, '_> {
                     tile_state.container_titles.insert(tile_id, name);
                 }
                 for (i, panel) in split.panels.iter().enumerate() {
-                    let child_id = self.spawn_panel(tile_state, ui_state, panel, tile_id, context);
+                    let child_id = self.spawn_panel(
+                        tile_state,
+                        ui_state,
+                        panel,
+                        tile_id,
+                        context,
+                        force_graph_lock,
+                    );
                     let Some(tile_id) = tile_id else {
                         continue;
                     };
@@ -1042,7 +1115,14 @@ impl LoadSchematicParams<'_, '_> {
                 }
 
                 for panel in tabs.iter() {
-                    self.spawn_panel(tile_state, ui_state, panel, parent_for_children, context);
+                    self.spawn_panel(
+                        tile_state,
+                        ui_state,
+                        panel,
+                        parent_for_children,
+                        context,
+                        force_graph_lock,
+                    );
                 }
                 tile_id
             }
@@ -1117,7 +1197,7 @@ impl LoadSchematicParams<'_, '_> {
                     components_tree,
                     graph_label.clone(),
                 );
-                bundle.graph_state.locked = graph.locked;
+                bundle.graph_state.locked = force_graph_lock || graph.locked;
                 if matches!(context, PanelContext::Window(_)) {
                     bundle.camera.is_active = false;
                 }
@@ -1564,6 +1644,8 @@ mod tests {
             .init_resource::<IconTextureCache>()
             .init_resource::<HdrEnabled>()
             .init_resource::<TimelineSettings>()
+            .init_resource::<crate::TimeRangeBehavior>()
+            .init_resource::<crate::ui::timeline::TelemetryMode>()
             .init_resource::<ComponentSchemaRegistry>()
             .init_resource::<EqlContext>()
             .init_resource::<SensorCameraConfigs>()
@@ -1908,6 +1990,65 @@ mod tests {
             !cleared.follow_latest,
             "clearing the schematic should restore default timeline settings"
         );
+    }
+
+    #[test]
+    fn timeline_range_and_telemetry_mode_apply_and_clear() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            timeline follow_latest=#true range="last_5s"
+            telemetry_mode #true
+            graph "1.0" name="Constant"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let behavior = *app.world().resource::<crate::TimeRangeBehavior>();
+        assert_eq!(
+            behavior,
+            crate::TimeRangeBehavior::from_schematic_range("last_5s").unwrap(),
+            "timeline range should map to LAST_5S"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::ui::timeline::TelemetryMode>()
+                .0,
+            "telemetry mode should be enabled"
+        );
+
+        let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let graphs: Vec<_> = query.iter(app.world()).collect();
+        assert!(!graphs.is_empty(), "expected a loaded graph");
+        assert!(
+            graphs.iter().all(|g| g.locked),
+            "telemetry mode should force graph locks"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(
+            *app.world().resource::<crate::TimeRangeBehavior>(),
+            crate::TimeRangeBehavior::default(),
+            "clearing should restore default time range"
+        );
+        assert!(
+            !app.world()
+                .resource::<crate::ui::timeline::TelemetryMode>()
+                .0,
+            "clearing should disable telemetry mode"
+        );
+    }
+
+    #[test]
+    fn from_schematic_range_last_5s() {
+        let last_5s = crate::TimeRangeBehavior::from_schematic_range("last_5s").unwrap();
+        assert_eq!(
+            crate::TimeRangeBehavior::from_schematic_range("5s"),
+            Some(last_5s)
+        );
+        assert_eq!(last_5s.to_schematic_range().as_deref(), Some("last_5s"));
     }
 
     #[test]

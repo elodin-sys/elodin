@@ -22,6 +22,11 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
     if let Some(timeline) = schematic.timeline.as_ref() {
         doc.nodes_mut().push(serialize_timeline(timeline));
     }
+    if schematic.telemetry_mode {
+        let mut node = KdlNode::new("telemetry_mode");
+        node.entries_mut().push(KdlEntry::new(true));
+        doc.nodes_mut().push(node);
+    }
     if let Some(skybox) = schematic.skybox.as_ref() {
         doc.nodes_mut().push(serialize_skybox(skybox));
     }
@@ -496,6 +501,13 @@ fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
     if timeline.follow_latest {
         node.entries_mut()
             .push(KdlEntry::new_prop("follow_latest", true));
+    }
+
+    if let Some(range) = timeline.range.as_deref() {
+        let normalized = range.trim().to_ascii_lowercase();
+        if normalized != "full" && normalized != "full_range" && normalized != "fullrange" {
+            node.entries_mut().push(KdlEntry::new_prop("range", range));
+        }
     }
 
     node
@@ -1096,6 +1108,7 @@ mod tests {
                 played_color: Color::MINT,
                 future_color: Color::HYPERBLUE,
                 follow_latest: true,
+                range: None,
             }),
             ..Default::default()
         };
@@ -1112,6 +1125,37 @@ mod tests {
         assert_eq!(timeline.played_color, Color::MINT);
         assert_eq!(timeline.future_color, Color::HYPERBLUE);
         assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_serialize_timeline_range_and_telemetry_mode() {
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig {
+                played_color: default_timeline_played_color(),
+                future_color: default_timeline_future_color(),
+                follow_latest: true,
+                range: Some("last_5s".to_string()),
+            }),
+            telemetry_mode: true,
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(
+            serialized.contains("range=") && serialized.contains("last_5s"),
+            "serialized missing range: {serialized}"
+        );
+        assert!(
+            serialized.contains("telemetry_mode") && serialized.contains("#true"),
+            "serialized missing telemetry_mode: {serialized}"
+        );
+        assert_eq!(
+            parsed.timeline.expect("timeline").range.as_deref(),
+            Some("last_5s")
+        );
+        assert!(parsed.telemetry_mode);
     }
 
     #[test]

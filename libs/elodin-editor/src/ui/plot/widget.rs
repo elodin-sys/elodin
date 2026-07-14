@@ -47,7 +47,7 @@ use crate::{
         },
         tiles::WindowState,
         time_label::{PrettyDuration, time_label},
-        timeline::DurationExt,
+        timeline::{DurationExt, TelemetryMode},
         utils::format_num,
         widgets::WidgetSystem,
         window::window_entity_from_target,
@@ -77,6 +77,7 @@ pub struct PlotWidget<'w, 's> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    telemetry_mode: Res<'w, TelemetryMode>,
     line_query: Query<'w, 's, &'static LineHandle>,
     window_states: Query<'w, 's, &'static mut WindowState>,
 }
@@ -100,6 +101,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             earliest_timestamp,
             current_timestamp,
             mut time_range_behavior,
+            telemetry_mode,
             line_query,
             mut window_states,
         } = state.get_mut(world);
@@ -108,12 +110,13 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             return;
         };
 
+        let telemetry = telemetry_mode.0;
         let bounds = sync_bounds(
             &mut graph_state,
             selected_time_range.0.clone(),
             earliest_timestamp.0,
             ui.max_rect(),
-            get_inner_rect(ui.max_rect()),
+            get_inner_rect(ui.max_rect(), telemetry),
         );
 
         let line_visible_range = bounds.timestamp_range(earliest_timestamp.0);
@@ -130,6 +133,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             selected_time_range.0.clone(),
             earliest_timestamp.0,
             current_timestamp.0,
+            telemetry,
         );
         let data_source = PlotDataSource::Timeseries {
             lines: &lines,
@@ -147,6 +151,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             id,
             &mut window_state.ui_state.selected_object,
             &mut time_range_behavior,
+            telemetry,
         );
     }
 }
@@ -209,6 +214,8 @@ pub struct TimeseriesPlot {
     x_label: Option<String>,
     /// Optional label for Y-axis (displayed to the left of the axis, rotated)
     y_label: Option<String>,
+    /// Dense telemetry presentation (tight margins / short notches).
+    telemetry_mode: bool,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
@@ -217,11 +224,23 @@ pub const MARGIN: egui::Margin = egui::Margin {
     top: 35,
     bottom: 45,
 };
+
+/// Compact chrome for telemetry dashboards: tight Y gutter, almost no top band,
+/// bottom reserve for short X notches only (labels are hidden when locked).
+pub const TELEMETRY_MARGIN: egui::Margin = egui::Margin {
+    left: 56,
+    right: 0,
+    top: 0,
+    bottom: 5,
+};
+
 pub const TICK_MARK_LINE_WIDTH: f32 = 1.0;
 pub const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
 pub const NOTCH_LENGTH: f32 = 10.0;
+pub const TELEMETRY_NOTCH_LENGTH: f32 = 3.0;
 pub const AXIS_LABEL_MARGIN: f32 = 5.0;
 pub const Y_AXIS_LABEL_MARGIN: f32 = 10.0;
+pub const TELEMETRY_Y_AXIS_LABEL_MARGIN: f32 = 2.0;
 pub const Y_AXIS_FLAG_WIDTH: f32 = 70.0;
 pub const Y_AXIS_FLAG_HEIGHT: f32 = 20.0;
 pub const Y_AXIS_FLAG_MARGIN: f32 = 4.0;
@@ -236,6 +255,30 @@ pub const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
 
 /// Percentage of the Y range to add as padding on each side (5% = 0.05)
 pub const Y_AXIS_PADDING_PERCENT: f64 = 0.05;
+
+pub fn plot_margin(telemetry_mode: bool) -> egui::Margin {
+    if telemetry_mode {
+        TELEMETRY_MARGIN
+    } else {
+        MARGIN
+    }
+}
+
+pub fn notch_length(telemetry_mode: bool) -> f32 {
+    if telemetry_mode {
+        TELEMETRY_NOTCH_LENGTH
+    } else {
+        NOTCH_LENGTH
+    }
+}
+
+pub fn y_axis_label_margin(telemetry_mode: bool) -> f32 {
+    if telemetry_mode {
+        TELEMETRY_Y_AXIS_LABEL_MARGIN
+    } else {
+        Y_AXIS_LABEL_MARGIN
+    }
+}
 
 /// Calculate padded Y bounds with appropriate buffer based on magnitude.
 /// - For a range of values, adds a percentage-based padding on each side.
@@ -261,8 +304,8 @@ pub fn calculate_padded_y_bounds(min_y: f64, max_y: f64) -> (f64, f64) {
     }
 }
 
-pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
-    rect.shrink4(MARGIN)
+pub fn get_inner_rect(rect: egui::Rect, telemetry_mode: bool) -> egui::Rect {
+    rect.shrink4(plot_margin(telemetry_mode))
 }
 
 impl TimeseriesPlot {
@@ -273,6 +316,7 @@ impl TimeseriesPlot {
         selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -281,6 +325,7 @@ impl TimeseriesPlot {
             earliest_timestamp,
             current_timestamp,
             XAxisMode::TimestampAbsolute,
+            telemetry_mode,
         )
     }
 
@@ -304,6 +349,7 @@ impl TimeseriesPlot {
             } else {
                 XAxisMode::TimestampAbsolute
             },
+            false,
         )
     }
 
@@ -322,6 +368,7 @@ impl TimeseriesPlot {
             earliest_timestamp,
             current_timestamp,
             XAxisMode::Numeric,
+            false,
         )
     }
 
@@ -333,9 +380,10 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
         x_axis_mode: XAxisMode,
+        telemetry_mode: bool,
     ) -> Self {
         let mut selected_range = selected_range;
-        let inner_rect = get_inner_rect(rect);
+        let inner_rect = get_inner_rect(rect, telemetry_mode);
 
         if selected_range.start == selected_range.end {
             selected_range.end += Duration::from_secs(10);
@@ -359,6 +407,7 @@ impl TimeseriesPlot {
             x_axis_mode,
             x_label: None,
             y_label: None,
+            telemetry_mode,
         }
     }
 
@@ -369,7 +418,8 @@ impl TimeseriesPlot {
         self
     }
 
-    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
+    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId, hide_labels: bool) {
+        let notch = notch_length(self.telemetry_mode);
         match self.x_axis_mode {
             XAxisMode::Numeric => {
                 // Numeric mode: Display arbitrary numeric values on X-axis (not time)
@@ -417,22 +467,21 @@ impl TimeseriesPlot {
                     ui.painter().line_segment(
                         [
                             egui::pos2(x_pos, self.inner_rect.max.y),
-                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                            egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
                         egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
 
-                    // Use numeric formatting for non-time X values
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        format_num(i),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        // Use numeric formatting for non-time X values
+                        ui.painter().text(
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
+                            egui::Align2::CENTER_TOP,
+                            format_num(i),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
 
                     i += nice_step;
                 }
@@ -469,23 +518,22 @@ impl TimeseriesPlot {
                     ui.painter().line_segment(
                         [
                             egui::pos2(x_pos, self.inner_rect.max.y),
-                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                            egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
                         egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
 
-                    // Convert seconds to Duration for PrettyDuration formatting
-                    let duration = hifitime::Duration::from_seconds(i);
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        PrettyDuration(duration).to_string(),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        // Convert seconds to Duration for PrettyDuration formatting
+                        let duration = hifitime::Duration::from_seconds(i);
+                        ui.painter().text(
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
+                            egui::Align2::CENTER_TOP,
+                            PrettyDuration(duration).to_string(),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
 
                     i += step_size_seconds;
                 }
@@ -529,21 +577,20 @@ impl TimeseriesPlot {
                     ui.painter().line_segment(
                         [
                             egui::pos2(x_pos, self.inner_rect.max.y),
-                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                            egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
                         egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
 
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        PrettyDuration(offset).to_string(),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        ui.painter().text(
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
+                            egui::Align2::CENTER_TOP,
+                            PrettyDuration(offset).to_string(),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
                 }
             }
         }
@@ -825,6 +872,7 @@ impl TimeseriesPlot {
         graph_entity: Entity,
         selected_object: &mut SelectedObject,
         time_range_behavior: &mut TimeRangeBehavior,
+        telemetry_mode: bool,
     ) {
         egui_material_icons::initialize(ui.ctx());
 
@@ -837,14 +885,9 @@ impl TimeseriesPlot {
             };
         }
 
-        // Lock toggle (icons)
-        {
-            let lock_size = egui::vec2(20.0, 20.0);
-            let lock_pos = egui::pos2(
-                self.inner_rect.max.x - lock_size.x - 6.0,
-                self.rect.min.y + 6.0,
-            );
-
+        if !telemetry_mode {
+            // Lock toggle (icons) — lives in the top chrome band reserved by normal margins.
+            let lock_pos = egui::pos2(self.inner_rect.max.x - 26.0, self.rect.min.y + 6.0);
             egui::Area::new(egui::Id::new(("plot_lock_btn", graph_entity)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(lock_pos)
@@ -941,9 +984,29 @@ impl TimeseriesPlot {
         font_id.size = 11.0;
 
         draw_borders(ui, self.rect, self.inner_rect);
-        self.draw_x_axis(ui, &font_id);
-        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
+        self.draw_x_axis(ui, &font_id, telemetry_mode);
+        draw_y_axis(
+            ui,
+            self.bounds,
+            self.steps_y,
+            self.rect,
+            self.inner_rect,
+            self.telemetry_mode,
+        );
         self.draw_axis_labels(ui);
+
+        if telemetry_mode {
+            // Float title over plot ink (not in a reserved header band).
+            let mut title_font = egui::TextStyle::Small.resolve(ui.style());
+            title_font.size = 11.0;
+            ui.painter().text(
+                egui::pos2(self.inner_rect.center().x, self.inner_rect.min.y + 4.0),
+                egui::Align2::CENTER_TOP,
+                &graph_state.label,
+                title_font,
+                with_opacity(get_scheme().text_secondary, 0.85),
+            );
+        }
 
         if let Some(pointer_pos) = pointer_pos
             && self.inner_rect.contains(pointer_pos)
@@ -1125,23 +1188,26 @@ pub fn draw_y_axis(
     steps_y: usize,
     rect: egui::Rect,
     inner_rect: egui::Rect,
+    telemetry_mode: bool,
 ) {
     let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
     let scheme = get_scheme();
     let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
     font_id.size = 11.0;
+    let notch = notch_length(telemetry_mode);
+    let label_gap = y_axis_label_margin(telemetry_mode);
 
     let draw_tick = |tick| {
         let value = DVec2::new(bounds.min_x, tick);
         let screen_pos = bounds.value_to_screen_pos(rect, value);
         let screen_pos = egui::pos2(inner_rect.min.x, screen_pos.y);
         ui.painter().line_segment(
-            [screen_pos, screen_pos - egui::vec2(NOTCH_LENGTH, 0.0)],
+            [screen_pos, screen_pos - egui::vec2(notch, 0.0)],
             border_stroke,
         );
 
         ui.painter().text(
-            screen_pos - egui::vec2(NOTCH_LENGTH + Y_AXIS_LABEL_MARGIN, 0.0),
+            screen_pos - egui::vec2(notch + label_gap, 0.0),
             egui::Align2::RIGHT_CENTER,
             format_num(tick),
             font_id.clone(),

@@ -1432,7 +1432,7 @@ pub fn set_selected_range(
     }
 }
 
-#[derive(Resource, PartialEq, Eq, Clone, Copy)]
+#[derive(Resource, PartialEq, Eq, Clone, Copy, Debug)]
 pub struct TimeRangeBehavior {
     start: Offset,
     end: Offset,
@@ -1519,6 +1519,60 @@ impl TimeRangeBehavior {
         TimeRangeBehavior {
             start: Offset::Latest(duration),
             end: Offset::Latest(Duration::ZERO),
+        }
+    }
+
+    /// Parse a schematic `timeline range=...` value into a time-window behavior.
+    pub fn from_schematic_range(raw: &str) -> Option<Self> {
+        let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+        match normalized.as_str() {
+            "" | "full" | "full_range" | "fullrange" => Some(Self::FULL),
+            "last_5s" | "5s" => Some(Self::LAST_5S),
+            "last_15s" | "15s" => Some(Self::LAST_15S),
+            "last_30s" | "30s" => Some(Self::LAST_30S),
+            "last_1m" | "1m" | "last_60s" | "60s" => Some(Self::LAST_1M),
+            "last_5m" | "5m" => Some(Self::LAST_5M),
+            "last_15m" | "15m" => Some(Self::LAST_15M),
+            "last_30m" | "30m" => Some(Self::LAST_30M),
+            "last_1h" | "1h" => Some(Self::LAST_1H),
+            "last_6h" | "6h" => Some(Self::LAST_6H),
+            "last_12h" | "12h" => Some(Self::LAST_12H),
+            "last_24h" | "24h" => Some(Self::LAST_24H),
+            other => {
+                let secs = other
+                    .strip_prefix("last_")
+                    .unwrap_or(other)
+                    .strip_suffix('s')
+                    .and_then(|n| n.parse::<u64>().ok())?;
+                Some(Self::last(Duration::from_secs(secs)))
+            }
+        }
+    }
+
+    /// Serialize the current behavior for `timeline range=...` when non-default.
+    pub fn to_schematic_range(self) -> Option<String> {
+        match (self.start, self.end) {
+            (Offset::Earliest(start), Offset::Latest(end)) if start.is_zero() && end.is_zero() => {
+                None
+            }
+            (Offset::Latest(start), Offset::Latest(end)) if end.is_zero() => {
+                let secs = start.as_secs();
+                Some(match secs {
+                    5 => "last_5s".to_string(),
+                    15 => "last_15s".to_string(),
+                    30 => "last_30s".to_string(),
+                    60 => "last_1m".to_string(),
+                    300 => "last_5m".to_string(),
+                    900 => "last_15m".to_string(),
+                    1800 => "last_30m".to_string(),
+                    3600 => "last_1h".to_string(),
+                    21600 => "last_6h".to_string(),
+                    43200 => "last_12h".to_string(),
+                    86400 => "last_24h".to_string(),
+                    other => format!("last_{other}s"),
+                })
+            }
+            _ => None,
         }
     }
 
