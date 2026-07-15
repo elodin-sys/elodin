@@ -672,17 +672,21 @@ fn extract_lines(
                 });
                 let index_bind_group =
                     render_device.create_bind_group("line indexes", &index_layout.layout, &entries);
-                let counts = [0, 1, 2].map(|i| {
+                // Joint XYZ write with a world-space min spacing so the
+                // pre-launch / EKF-converge scribble collapses under a close
+                // follow camera, instead of three independent strides.
+                let xyz = [0, 1, 2].map(|i| {
                     let line = &line_handles.0[i];
-                    let line = line_assets.get(line).expect("line missing");
-                    line.data.write_to_index_buffer_with_step(
-                        &index_buffers[i],
-                        &render_queue,
-                        range.clone(),
-                        step,
-                    )
+                    &line_assets.get(line).expect("line missing").data
                 });
-                let count = counts.into_iter().min().unwrap_or_default();
+                let count = crate::ui::plot::data::write_joint_xyz_index_buffers_with_step(
+                    xyz,
+                    [&index_buffers[0], &index_buffers[1], &index_buffers[2]],
+                    &render_queue,
+                    range.clone(),
+                    step,
+                    crate::ui::plot::data::LINE_3D_MIN_SEGMENT_METERS,
+                );
                 if count < 2 {
                     return None;
                 }

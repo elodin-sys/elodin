@@ -1933,6 +1933,135 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 }
 
+/// Minimum world-space spacing (metres) between consecutive `line_3d` vertices.
+/// Collapses the pre-launch / EKF-converge scribble under a close follow camera.
+pub const LINE_3D_MIN_SEGMENT_METERS: f32 = 0.1;
+
+/// Write synchronized XYZ strip indices for a `line_3d`, dropping samples that
+/// stay within `min_dist` metres of the last kept vertex.
+///
+/// Collapses the pre-launch / EKF-converge scribble (cm-scale wander in a ~1 m
+/// ball) while preserving flight geometry. The three trees must share
+/// timestamps (same component axes); mismatched samples are skipped.
+pub fn write_joint_xyz_index_buffers_with_step(
+    xyz: [&LineTree<f32>; 3],
+    index_buffers: [&Buffer; 3],
+    render_queue: &RenderQueue,
+    line_visible_range: Range<Timestamp>,
+    step: usize,
+    min_dist: f32,
+) -> u32 {
+    let step = step.max(1);
+    let min_d2 = min_dist * min_dist;
+
+    let mut idx_x: Vec<u32> = Vec::new();
+    let mut idx_y: Vec<u32> = Vec::new();
+    let mut idx_z: Vec<u32> = Vec::new();
+    let mut last_kept: Option<[f32; 3]> = None;
+    let mut pending_tip: Option<[u32; 3]> = None;
+
+    let push_triple = |ix: &mut Vec<u32>, iy: &mut Vec<u32>, iz: &mut Vec<u32>, idx: [u32; 3]| {
+        if ix.len() >= INDEX_BUFFER_LEN {
+            return false;
+        }
+        ix.push(idx[0]);
+        iy.push(idx[1]);
+        iz.push(idx[2]);
+        true
+    };
+
+    'chunks: for chunk in xyz[0].range_iter(line_visible_range.clone()) {
+        let Some((start_offset, end_offset)) =
+            chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+        else {
+            continue;
+        };
+        if end_offset <= start_offset {
+            continue;
+        }
+        let base = {
+            let gpu = chunk.data.gpu.lock();
+            let Some(gpu) = gpu.as_ref() else {
+                continue;
+            };
+            gpu.as_index_chunk::<f32>(chunk.summary.len).range.start
+        };
+        let cpu = chunk.data.cpu();
+
+        if !push_triple(&mut idx_x, &mut idx_y, &mut idx_z, [0, 0, 0]) {
+            break 'chunks;
+        }
+
+        let last_local = end_offset - 1;
+        let mut locals = Vec::with_capacity(
+            2 + end_offset.saturating_sub(start_offset).saturating_sub(1) / step,
+        );
+        locals.push(start_offset);
+        let mut local = start_offset.saturating_add(step);
+        while local < end_offset {
+            locals.push(local);
+            local = local.saturating_add(step);
+        }
+        if *locals.last().unwrap_or(&start_offset) != last_local {
+            locals.push(last_local);
+        }
+
+        for local in locals {
+            let t = chunk.timestamps[local];
+            let x = cpu[local];
+            let gx = base.saturating_add(local as u32);
+            let Some((y, gy)) = xyz[1].gpu_sample_at_exact(t) else {
+                continue;
+            };
+            let Some((z, gz)) = xyz[2].gpu_sample_at_exact(t) else {
+                continue;
+            };
+            let p = [x, y, z];
+            let idx = [gx, gy, gz];
+            pending_tip = Some(idx);
+            let keep = match last_kept {
+                None => true,
+                Some(prev) => {
+                    let dx = p[0] - prev[0];
+                    let dy = p[1] - prev[1];
+                    let dz = p[2] - prev[2];
+                    dx * dx + dy * dy + dz * dz >= min_d2
+                }
+            };
+            if keep {
+                if !push_triple(&mut idx_x, &mut idx_y, &mut idx_z, idx) {
+                    break 'chunks;
+                }
+                last_kept = Some(p);
+                pending_tip = None;
+            }
+        }
+
+        if !push_triple(&mut idx_x, &mut idx_y, &mut idx_z, [0, 0, 0]) {
+            break 'chunks;
+        }
+    }
+
+    if let Some(idx) = pending_tip
+        && push_triple(&mut idx_x, &mut idx_y, &mut idx_z, [0, 0, 0])
+        && push_triple(&mut idx_x, &mut idx_y, &mut idx_z, idx)
+        && push_triple(&mut idx_x, &mut idx_y, &mut idx_z, idx)
+    {
+        let _ = push_triple(&mut idx_x, &mut idx_y, &mut idx_z, [0, 0, 0]);
+    }
+
+    let written = idx_x.len().min(INDEX_BUFFER_LEN) as u32;
+    for (buf, indices) in [
+        (index_buffers[0], &idx_x),
+        (index_buffers[1], &idx_y),
+        (index_buffers[2], &idx_z),
+    ] {
+        let bytes = indices[..written as usize].as_bytes();
+        render_queue.write_buffer(buf, 0, bytes);
+    }
+    written
+}
+
 fn release_line_chunk_gpu(
     chunk: &mut Chunk<f32>,
     data_alloc: &mut Option<BufferShardAlloc>,
@@ -1956,6 +2085,17 @@ fn release_line_chunk_gpu(
 }
 
 impl LineTree<f32> {
+    /// GPU index + CPU value for an exact timestamp, when the chunk is GPU-resident.
+    fn gpu_sample_at_exact(&self, timestamp: Timestamp) -> Option<(f32, u32)> {
+        let (_, chunk) = self.tree.overlapping(ii(timestamp.0, timestamp.0)).next()?;
+        let index = chunk.timestamps.binary_search(&timestamp).ok()?;
+        let value = *chunk.data.cpu().get(index)?;
+        let gpu = chunk.data.gpu.lock();
+        let gpu = gpu.as_ref()?;
+        let base = gpu.as_index_chunk::<f32>(chunk.summary.len).range.start;
+        Some((value, base.saturating_add(index as u32)))
+    }
+
     pub fn flattened_time_series(&self) -> (Vec<Timestamp>, Vec<f32>) {
         let mut ts = Vec::new();
         let mut vs = Vec::new();
