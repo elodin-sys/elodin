@@ -463,21 +463,30 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
 
 /// Time constant (seconds) of the follow-camera low-pass. Larger = smoother but
 /// laggier. Telemetry drives the follow pose only at the data rate (~5-10 Hz),
-/// so this must span a few data periods to actually reject the jitter; genuine
-/// fast motion is protected by the snap-to-target path, not by a small tau.
+/// so this must span a few data periods to actually reject the jitter. `pos` and
+/// `look_at` share the filter, so lag stays along-track and the vehicle remains
+/// framed; seeks jump straight via [`follow_should_snap`].
 const FOLLOW_SMOOTHING_TAU: f64 = 0.3;
+
+/// Minimum raw-target jump (metres) treated as a seek/teleport. Continuous
+/// mid-flight motion (Shane ~250 m/s → ~4 m/frame at 60 Hz) stays well below
+/// this; a timeline scrub of a second or more does not.
+const FOLLOW_SEEK_SNAP_MIN_METERS: f64 = 50.0;
 
 /// Per-viewport low-pass state for a following camera. Holds the previous
 /// frame's smoothed position and look-at target (viewport/sim coordinates) so
 /// telemetry noise in a `pos`/`look_at` EQL that tracks a moving entity does not
 /// shake the whole view during playback. Snaps to the raw target on the first
-/// frame and on jumps larger than the framing distance (seek / fast motion), so
-/// genuine motion is never lagged.
+/// frame and when the *raw* telemetry jumps farther than a seek threshold —
+/// not when the smoother merely lags during fast flight (that used to thrash
+/// against the framing distance and re-inject noise).
 #[derive(Component, Default)]
 pub struct ViewportFollowSmoothing {
     initialized: bool,
     pos: DVec3,
     look_at: DVec3,
+    prev_raw_pos: Option<DVec3>,
+    prev_raw_look: Option<DVec3>,
 }
 
 /// Framerate-independent exponential smoothing factor for time step `dt`.
@@ -486,6 +495,17 @@ fn follow_smoothing_alpha(dt: f64) -> f64 {
         return 1.0;
     }
     1.0 - (-dt / FOLLOW_SMOOTHING_TAU).exp()
+}
+
+/// Whether the follow pose should snap to the raw target instead of easing.
+///
+/// `raw_jump` is the max displacement of the raw `pos`/`look_at` since the
+/// previous frame (not the smoother's lag). Comparing lag to the framing
+/// distance (~3 m on Shane's ECEF cam) snapped every few frames at ~250 m/s and
+/// made the trail tremble; seek detection must use the raw step.
+fn follow_should_snap(initialized: bool, framing: f64, raw_jump: f64) -> bool {
+    let seek_thresh = (framing * 10.0).max(FOLLOW_SEEK_SNAP_MIN_METERS);
+    !initialized || !framing.is_finite() || raw_jump > seek_thresh
 }
 
 pub fn set_viewport_pos(
@@ -537,21 +557,22 @@ pub fn set_viewport_pos(
         // following cameras (look_at present) that carry a smoothing state: `pos`
         // and `look_at` share the same noise, so filtering both with one alpha
         // cancels it from the view direction. Snap on the first frame and on
-        // jumps larger than the framing distance (seek / fast flight) so genuine
-        // motion is never lagged. Without a look_at we keep the raw pose.
+        // raw teleports/seeks — not on smoother lag during fast flight (see
+        // [`follow_should_snap`]). Without a look_at we keep the raw pose.
         let (eff_pos, eff_look_at) =
             if let (Some(look_at), Some(sm)) = (look_at_target, smoothing.as_deref_mut()) {
                 let raw_look = look_at.pos();
-                let snap_dist = (raw_look - raw_pos).length();
+                let framing = (raw_look - raw_pos).length();
                 let alpha = follow_smoothing_alpha(time.delta_secs_f64());
-                // Snap if *either* endpoint jumps farther than the framing distance,
-                // so a seek is followed instantly even when only the look_at target
-                // moves (fixed-vantage camera) and the pos stays put.
-                let snap = !sm.initialized
-                    || !snap_dist.is_finite()
-                    || sm.pos.distance(raw_pos) > snap_dist
-                    || sm.look_at.distance(raw_look) > snap_dist;
-                if snap {
+                let raw_jump = match (sm.prev_raw_pos, sm.prev_raw_look) {
+                    (Some(prev_pos), Some(prev_look)) => {
+                        prev_pos.distance(raw_pos).max(prev_look.distance(raw_look))
+                    }
+                    _ => 0.0,
+                };
+                sm.prev_raw_pos = Some(raw_pos);
+                sm.prev_raw_look = Some(raw_look);
+                if follow_should_snap(sm.initialized, framing, raw_jump) {
                     sm.pos = raw_pos;
                     sm.look_at = raw_look;
                 } else {
@@ -704,6 +725,21 @@ mod tests {
         let one = 1.0 - follow_smoothing_alpha(dt);
         let two = (1.0 - follow_smoothing_alpha(dt / 2.0)).powi(2);
         assert!((one - two).abs() < 1e-12, "one={one} two={two}");
+    }
+
+    #[test]
+    fn follow_snap_ignores_fast_flight_lag_but_catches_seeks() {
+        // Shane ECEF cam framing ≈ 3.5 m; mid-flight ~4 m/frame must NOT snap
+        // (that thrash was the residual trajectory tremble).
+        let framing = 3.464;
+        assert!(follow_should_snap(false, framing, 0.0), "first frame");
+        assert!(!follow_should_snap(true, framing, 4.0), "60 Hz @ 250 m/s");
+        assert!(!follow_should_snap(true, framing, 25.0), "10 Hz @ 250 m/s");
+        assert!(
+            follow_should_snap(true, framing, 80.0),
+            "seek / long hitch"
+        );
+        assert!(follow_should_snap(true, f64::NAN, 0.0), "invalid framing");
     }
 
     #[test]

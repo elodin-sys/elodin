@@ -80,11 +80,20 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let screen0 = resolution * (0.5 * clip0.xy / clip0.w + 0.5);
     let screen1 = resolution * (0.5 * clip1.xy / clip1.w + 0.5);
 
-    let x_basis = normalize(screen1 - screen0);
+    // Stationary / near-duplicate samples (e.g. pre-launch ECEF pad) project to
+    // sub-pixel segments. `normalize(0)` is undefined and the expanded quad
+    // flickers as a scribble; collapse those instances instead.
+    let screen_delta = screen1 - screen0;
+    let screen_len = length(screen_delta);
+    let x_basis = select(vec2(1.0, 0.0), screen_delta / screen_len, screen_len >= 0.5);
     let y_basis = vec2(-x_basis.y, x_basis.x);
 
     var line_width = line_uniform.line_width;
     var color = line_uniform.color;
+    if (screen_len < 0.5) {
+        line_width = 0.0;
+        color.a = 0.0;
+    }
 
     if (line_uniform.perspective == 1) {
         line_width /= clip.w;
