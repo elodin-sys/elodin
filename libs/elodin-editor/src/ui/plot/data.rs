@@ -1940,9 +1940,9 @@ pub const LINE_3D_MIN_SEGMENT_METERS: f32 = 0.1;
 /// Write synchronized XYZ strip indices for a `line_3d`, dropping samples that
 /// stay within `min_dist` metres of the last kept vertex.
 ///
-/// Collapses the pre-launch / EKF-converge scribble (cm-scale wander in a ~1 m
-/// ball) while preserving flight geometry. The three trees must share
-/// timestamps (same component axes); mismatched samples are skipped.
+/// Walks the three trees in lockstep (same chunk / local index). If their
+/// layouts diverge, falls back to per-axis writes without dedupe so the trail
+/// is never truncated by a failed cross-axis timestamp lookup.
 pub fn write_joint_xyz_index_buffers_with_step(
     xyz: [&LineTree<f32>; 3],
     index_buffers: [&Buffer; 3],
@@ -1954,42 +1954,82 @@ pub fn write_joint_xyz_index_buffers_with_step(
     let step = step.max(1);
     let min_d2 = min_dist * min_dist;
 
+    let chunks_x: Vec<_> = xyz[0].range_iter(line_visible_range.clone()).collect();
+    let chunks_y: Vec<_> = xyz[1].range_iter(line_visible_range.clone()).collect();
+    let chunks_z: Vec<_> = xyz[2].range_iter(line_visible_range.clone()).collect();
+    if chunks_x.len() != chunks_y.len() || chunks_x.len() != chunks_z.len() || chunks_x.is_empty() {
+        return write_xyz_independent(xyz, index_buffers, render_queue, line_visible_range, step);
+    }
+
     let mut idx_x: Vec<u32> = Vec::new();
     let mut idx_y: Vec<u32> = Vec::new();
     let mut idx_z: Vec<u32> = Vec::new();
     let mut last_kept: Option<[f32; 3]> = None;
     let mut pending_tip: Option<[u32; 3]> = None;
 
-    let push_triple = |ix: &mut Vec<u32>, iy: &mut Vec<u32>, iz: &mut Vec<u32>, idx: [u32; 3]| {
-        if ix.len() >= INDEX_BUFFER_LEN {
+    let push_triple = |xs: &mut Vec<u32>, ys: &mut Vec<u32>, zs: &mut Vec<u32>, idx: [u32; 3]| {
+        if xs.len() >= INDEX_BUFFER_LEN {
             return false;
         }
-        ix.push(idx[0]);
-        iy.push(idx[1]);
-        iz.push(idx[2]);
+        xs.push(idx[0]);
+        ys.push(idx[1]);
+        zs.push(idx[2]);
         true
     };
 
-    'chunks: for chunk in xyz[0].range_iter(line_visible_range.clone()) {
+    for ((cx, cy), cz) in chunks_x.iter().zip(chunks_y.iter()).zip(chunks_z.iter()) {
+        if cx.summary.len != cy.summary.len || cx.summary.len != cz.summary.len {
+            return write_xyz_independent(
+                xyz,
+                index_buffers,
+                render_queue,
+                line_visible_range,
+                step,
+            );
+        }
         let Some((start_offset, end_offset)) =
-            chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+            chunk_visible_offsets(&cx.timestamps, &line_visible_range)
         else {
             continue;
         };
         if end_offset <= start_offset {
             continue;
         }
-        let base = {
-            let gpu = chunk.data.gpu.lock();
-            let Some(gpu) = gpu.as_ref() else {
-                continue;
-            };
-            gpu.as_index_chunk::<f32>(chunk.summary.len).range.start
+
+        let bases = {
+            let gx = cx.data.gpu.lock();
+            let gy = cy.data.gpu.lock();
+            let gz = cz.data.gpu.lock();
+            match (gx.as_ref(), gy.as_ref(), gz.as_ref()) {
+                (Some(gx), Some(gy), Some(gz)) => [
+                    gx.as_index_chunk::<f32>(cx.summary.len).range.start,
+                    gy.as_index_chunk::<f32>(cy.summary.len).range.start,
+                    gz.as_index_chunk::<f32>(cz.summary.len).range.start,
+                ],
+                _ => continue,
+            }
         };
-        let cpu = chunk.data.cpu();
+        let cpu_x = cx.data.cpu();
+        let cpu_y = cy.data.cpu();
+        let cpu_z = cz.data.cpu();
+        if cpu_x.len() < end_offset || cpu_y.len() < end_offset || cpu_z.len() < end_offset {
+            return write_xyz_independent(
+                xyz,
+                index_buffers,
+                render_queue,
+                line_visible_range,
+                step,
+            );
+        }
 
         if !push_triple(&mut idx_x, &mut idx_y, &mut idx_z, [0, 0, 0]) {
-            break 'chunks;
+            return write_xyz_independent(
+                xyz,
+                index_buffers,
+                render_queue,
+                line_visible_range,
+                step,
+            );
         }
 
         let last_local = end_offset - 1;
@@ -2007,17 +2047,12 @@ pub fn write_joint_xyz_index_buffers_with_step(
         }
 
         for local in locals {
-            let t = chunk.timestamps[local];
-            let x = cpu[local];
-            let gx = base.saturating_add(local as u32);
-            let Some((y, gy)) = xyz[1].gpu_sample_at_exact(t) else {
-                continue;
-            };
-            let Some((z, gz)) = xyz[2].gpu_sample_at_exact(t) else {
-                continue;
-            };
-            let p = [x, y, z];
-            let idx = [gx, gy, gz];
+            let p = [cpu_x[local], cpu_y[local], cpu_z[local]];
+            let idx = [
+                bases[0].saturating_add(local as u32),
+                bases[1].saturating_add(local as u32),
+                bases[2].saturating_add(local as u32),
+            ];
             pending_tip = Some(idx);
             let keep = match last_kept {
                 None => true,
@@ -2030,7 +2065,16 @@ pub fn write_joint_xyz_index_buffers_with_step(
             };
             if keep {
                 if !push_triple(&mut idx_x, &mut idx_y, &mut idx_z, idx) {
-                    break 'chunks;
+                    // Buffer full: rather than truncate the trail to the pad
+                    // scribble, fall back to undecimated independent writes
+                    // (already stride-fitted to INDEX_BUFFER_LEN).
+                    return write_xyz_independent(
+                        xyz,
+                        index_buffers,
+                        render_queue,
+                        line_visible_range,
+                        step,
+                    );
                 }
                 last_kept = Some(p);
                 pending_tip = None;
@@ -2038,7 +2082,13 @@ pub fn write_joint_xyz_index_buffers_with_step(
         }
 
         if !push_triple(&mut idx_x, &mut idx_y, &mut idx_z, [0, 0, 0]) {
-            break 'chunks;
+            return write_xyz_independent(
+                xyz,
+                index_buffers,
+                render_queue,
+                line_visible_range,
+                step,
+            );
         }
     }
 
@@ -2060,6 +2110,24 @@ pub fn write_joint_xyz_index_buffers_with_step(
         render_queue.write_buffer(buf, 0, bytes);
     }
     written
+}
+
+fn write_xyz_independent(
+    xyz: [&LineTree<f32>; 3],
+    index_buffers: [&Buffer; 3],
+    render_queue: &RenderQueue,
+    line_visible_range: Range<Timestamp>,
+    step: usize,
+) -> u32 {
+    let counts = [0, 1, 2].map(|i| {
+        xyz[i].write_to_index_buffer_with_step(
+            index_buffers[i],
+            render_queue,
+            line_visible_range.clone(),
+            step,
+        )
+    });
+    counts.into_iter().min().unwrap_or_default()
 }
 
 fn release_line_chunk_gpu(
@@ -2085,17 +2153,6 @@ fn release_line_chunk_gpu(
 }
 
 impl LineTree<f32> {
-    /// GPU index + CPU value for an exact timestamp, when the chunk is GPU-resident.
-    fn gpu_sample_at_exact(&self, timestamp: Timestamp) -> Option<(f32, u32)> {
-        let (_, chunk) = self.tree.overlapping(ii(timestamp.0, timestamp.0)).next()?;
-        let index = chunk.timestamps.binary_search(&timestamp).ok()?;
-        let value = *chunk.data.cpu().get(index)?;
-        let gpu = chunk.data.gpu.lock();
-        let gpu = gpu.as_ref()?;
-        let base = gpu.as_index_chunk::<f32>(chunk.summary.len).range.start;
-        Some((value, base.saturating_add(index as u32)))
-    }
-
     pub fn flattened_time_series(&self) -> (Vec<Timestamp>, Vec<f32>) {
         let mut ts = Vec::new();
         let mut vs = Vec::new();

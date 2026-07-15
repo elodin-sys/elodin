@@ -735,10 +735,7 @@ mod tests {
         assert!(follow_should_snap(false, framing, 0.0), "first frame");
         assert!(!follow_should_snap(true, framing, 4.0), "60 Hz @ 250 m/s");
         assert!(!follow_should_snap(true, framing, 25.0), "10 Hz @ 250 m/s");
-        assert!(
-            follow_should_snap(true, framing, 80.0),
-            "seek / long hitch"
-        );
+        assert!(follow_should_snap(true, framing, 80.0), "seek / long hitch");
         assert!(follow_should_snap(true, f64::NAN, 0.0), "invalid framing");
     }
 
