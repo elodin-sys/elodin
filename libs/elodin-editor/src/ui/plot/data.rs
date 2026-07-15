@@ -814,6 +814,11 @@ pub fn queue_timestamp_read(
     // This covers two use cases:
     // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading
     // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
+    //
+    // Framed `line_3d` components (`value_offset` set) always skip overview: the
+    // DB overview reply is already f32, so rebasing it cannot recover the mm
+    // precision that live / GetTimeSeries paths get via f64-before-cast. Mixing
+    // those coarse overview vertices with precise live points jumps/shimmers.
     const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
     let range_duration = query_range.end.0.saturating_sub(query_range.start.0);
     let use_overview = range_duration > TEN_MINUTES_MICROS;
@@ -830,7 +835,7 @@ pub fn queue_timestamp_read(
             continue;
         }
 
-        if use_overview {
+        if use_overview && component.value_offset.is_none() {
             // Request overview for each element that hasn't been requested yet
             let num_elements = component.element_names.len().max(1);
 
@@ -1025,10 +1030,12 @@ fn handle_overview_response(
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("[{element_index}]"));
 
-    // Raw overview for 2D graphs.
+    // Overview is f32 from the DB — fine for 2D graphs. Never mirror into
+    // `rebased_lines`: those require f64-before-cast rebase (see queue path
+    // skipping overview when `value_offset` is set).
     let line = plot_data.lines.entry(element_index).or_insert_with(|| {
         lines.add(Line {
-            label: label.clone(),
+            label,
             ..Default::default()
         })
     });
@@ -1037,30 +1044,6 @@ fn handle_overview_response(
             Chunk::from_iter(timestamps, earliest_timestamp, values.iter().copied())
     {
         line.data.insert(chunk);
-    }
-
-    // Rebased overview mirror for line_3d. Overview values are already f32 from
-    // the DB, so this only aligns placement with the rebased full-res series.
-    if plot_data.value_offset.is_some() {
-        let off = plot_data.axis_offset(element_index);
-        let rebased = plot_data
-            .rebased_lines
-            .entry(element_index)
-            .or_insert_with(|| {
-                lines.add(Line {
-                    label,
-                    ..Default::default()
-                })
-            });
-        if let Some(rebased) = lines.get_mut(rebased)
-            && let Some(chunk) = Chunk::from_iter(
-                timestamps,
-                earliest_timestamp,
-                values.iter().map(|v| (*v as f64 - off) as f32),
-            )
-        {
-            rebased.data.insert(chunk);
-        }
     }
 }
 
@@ -2388,6 +2371,25 @@ mod tests {
             Timestamp(0),
         );
         assert!(plain.rebased_lines.is_empty());
+    }
+
+    /// Bugbot #736 "Overview degrades rebased trail": rebasing after an f32
+    /// cast (what PlotOverviewQuery sends) cannot recover ECEF millimetres.
+    /// Framed line_3d must ingest via f64-before-cast (GetTimeSeries / live).
+    #[test]
+    fn ecef_rebase_must_precede_f32_cast() {
+        let origin = 2_551_234.567_890_123_f64;
+        let raw = origin + 0.001;
+        let precise = (raw - origin) as f32;
+        let via_overview_wire = (raw as f32 as f64 - origin) as f32;
+        assert!(
+            (precise - 0.001).abs() < 1e-6,
+            "f64-before-cast keeps mm: {precise}"
+        );
+        assert!(
+            (precise - via_overview_wire).abs() > 1e-4,
+            "f32-then-rebase loses precision: precise={precise} overview={via_overview_wire}"
+        );
     }
 
     #[test]

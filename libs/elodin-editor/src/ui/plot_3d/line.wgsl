@@ -83,17 +83,22 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Stationary / near-duplicate samples (e.g. pre-launch ECEF pad) project to
     // sub-pixel segments. `normalize(0)` is undefined and the expanded quad
     // flickers as a scribble; collapse those instances instead.
+    //
+    // Use a soft fade band rather than a hard pixel cutoff: a binary
+    // `screen_len < 0.5` gate shimmered when follow-camera jitter pushed the
+    // same segment above/below the threshold each frame. `smoothstep` keeps
+    // near-threshold segments partially visible so small moves don't flip
+    // width/alpha on and off.
     let screen_delta = screen1 - screen0;
     let screen_len = length(screen_delta);
-    let x_basis = select(vec2(1.0, 0.0), screen_delta / screen_len, screen_len >= 0.5);
+    let x_basis = select(vec2(1.0, 0.0), screen_delta / max(screen_len, 1e-4), screen_len >= 1e-4);
     let y_basis = vec2(-x_basis.y, x_basis.x);
 
-    var line_width = line_uniform.line_width;
+    // Invisible below ~0.25 px, fully opaque by ~1.0 px.
+    let visibility = smoothstep(0.25, 1.0, screen_len);
+    var line_width = line_uniform.line_width * visibility;
     var color = line_uniform.color;
-    if (screen_len < 0.5) {
-        line_width = 0.0;
-        color.a = 0.0;
-    }
+    color.a *= visibility;
 
     if (line_uniform.perspective == 1) {
         line_width /= clip.w;
