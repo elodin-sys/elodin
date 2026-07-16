@@ -132,13 +132,8 @@ fn apply_fallback_frame_to_panel(
             }
             Panel::Viewport(v)
         }
-        Panel::SpatialGauge(gauge) => {
-            let mut g = gauge.clone();
-            if g.source.is_none() {
-                g.source = fallback_frame;
-            }
-            Panel::SpatialGauge(g)
-        }
+        // SpatialGauge keeps `source: None` so it continues to track the
+        // schematic `coordinate` after save/reload (see SpatialGaugeData).
         Panel::Tabs(panels) => Panel::Tabs(
             panels
                 .iter()
@@ -1251,14 +1246,13 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| "Spatial Gauge".to_string());
-                // After `apply_fallback_frame_to_panel`, omitted source is the
-                // schematic coordinate; if that was also unset, use ECEF.
-                let source = monitor.source.unwrap_or(bevy_geo_frames::GeoFrame::ECEF);
+                // Preserve omitted `source` as None so the gauge keeps inheriting
+                // the live schematic `coordinate` (resolved at display time).
                 let entity = self
                     .commands
                     .spawn(crate::ui::spatial_gauge::SpatialGaugeData::new(
                         monitor.eql.clone(),
-                        source,
+                        monitor.source,
                         monitor.display,
                     ))
                     .id();
@@ -2036,6 +2030,87 @@ mod tests {
         assert_eq!(geo_pos.0, GeoFrame::NED);
         assert_eq!(geo_pos.1, DVec3::new(1.0, 2.0, 3.0));
         assert_eq!(geo_rot.0, GeoFrame::NED);
+    }
+
+    #[test]
+    fn spatial_gauge_omitted_source_stays_unset_and_tracks_coordinate() {
+        // Omitted `source` must remain None on SpatialGaugeData so a later
+        // `coordinate` change (or save/reload) keeps inheritance — not a
+        // snapshot of the frame at load time.
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="ENU"
+            spatial_gauge "rocket.world_pos" name="Pos" display="NED"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        {
+            let mut query = app
+                .world_mut()
+                .query::<&crate::ui::spatial_gauge::SpatialGaugeData>();
+            let source = query
+                .iter(app.world())
+                .next()
+                .expect("spatial_gauge entity")
+                .source;
+            assert_eq!(source, None, "omitted source must stay unset");
+            let coordinate = app.world().resource::<Coordinate>().0;
+            assert_eq!(
+                source.or(coordinate).unwrap_or(GeoFrame::ECEF),
+                GeoFrame::ENU
+            );
+        }
+
+        app.world_mut().resource_mut::<Coordinate>().0 = Some(GeoFrame::NED);
+        {
+            let mut query = app
+                .world_mut()
+                .query::<&crate::ui::spatial_gauge::SpatialGaugeData>();
+            let source = query
+                .iter(app.world())
+                .next()
+                .expect("spatial_gauge entity")
+                .source;
+            let coordinate = app.world().resource::<Coordinate>().0;
+            assert_eq!(
+                source.or(coordinate).unwrap_or(GeoFrame::ECEF),
+                GeoFrame::NED,
+                "inherited source must track live coordinate"
+            );
+        }
+    }
+
+    #[test]
+    fn spatial_gauge_explicit_source_is_preserved() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="ENU"
+            spatial_gauge "rocket.world_pos" source="ECEF" display="NED"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::spatial_gauge::SpatialGaugeData>();
+        let source = query
+            .iter(app.world())
+            .next()
+            .expect("spatial_gauge entity")
+            .source;
+        assert_eq!(source, Some(GeoFrame::ECEF));
+        assert_eq!(
+            source.or(Some(GeoFrame::ENU)).unwrap_or(GeoFrame::ECEF),
+            GeoFrame::ECEF,
+            "explicit source must not inherit coordinate"
+        );
     }
 
     #[test]

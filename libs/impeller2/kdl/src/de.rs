@@ -3637,6 +3637,20 @@ object_3d "a.world_pos" {
         assert_eq!(monitor.source, None);
         assert_eq!(monitor.display, DisplayFrame::NED);
 
+        // Save must not invent `source=` when it was omitted — otherwise the
+        // gauge stops tracking a changed global `coordinate` after reload.
+        let serialized_inherit = crate::serialize_schematic(&schematic);
+        assert!(
+            !serialized_inherit.contains("source="),
+            "omitted source must stay omitted on save, got:\n{serialized_inherit}"
+        );
+        let reparsed_inherit = parse_schematic(&serialized_inherit).unwrap();
+        if let SchematicElem::Panel(Panel::SpatialGauge(m)) = &reparsed_inherit.elems[0] {
+            assert_eq!(m.source, None);
+        } else {
+            panic!("Expected spatial_gauge after inherit round-trip");
+        }
+
         // LLA round-trips through serialization (positional eql).
         let kdl = r#"spatial_gauge "a.pos" name="M" source="NED" display="LLA""#;
         let parsed = parse_schematic(kdl).unwrap();

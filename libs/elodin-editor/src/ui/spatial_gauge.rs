@@ -37,7 +37,12 @@ impl SpatialGaugePane {
 #[derive(Component)]
 pub struct SpatialGaugeData {
     pub eql: String,
-    pub source: GeoFrame,
+    /// Frame the EQL position is expressed in.
+    ///
+    /// `None` means inherit the schematic global [`crate::Coordinate`] (same
+    /// as omitting `source` in KDL). Resolved at display/export via
+    /// [`Self::effective_source`].
+    pub source: Option<GeoFrame>,
     pub display: DisplayFrame,
     pub compiled_expr: Option<CompiledExpr>,
     /// Component IDs referenced by `compiled_expr`, used to resolve playhead
@@ -52,7 +57,7 @@ pub struct SpatialGaugeData {
 }
 
 impl SpatialGaugeData {
-    pub fn new(eql: String, source: GeoFrame, display: DisplayFrame) -> Self {
+    pub fn new(eql: String, source: Option<GeoFrame>, display: DisplayFrame) -> Self {
         Self {
             eql,
             source,
@@ -62,6 +67,12 @@ impl SpatialGaugeData {
             plain_component_id: None,
             compiled_for: None,
         }
+    }
+
+    /// Concrete source frame: explicit override, else schematic `coordinate`,
+    /// else ECEF (documented KDL fallback when both are unset).
+    pub fn effective_source(&self, coordinate: Option<GeoFrame>) -> GeoFrame {
+        self.source.or(coordinate).unwrap_or(GeoFrame::ECEF)
     }
 }
 
@@ -164,6 +175,7 @@ pub struct SpatialGaugeWidget<'w, 's> {
     telemetry_cache: Res<'w, TelemetryCache>,
     current_timestamp: Res<'w, CurrentTimestamp>,
     geo_context: Res<'w, GeoContext>,
+    coordinate: Res<'w, crate::Coordinate>,
 }
 
 impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
@@ -183,6 +195,7 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
             telemetry_cache,
             current_timestamp,
             geo_context,
+            coordinate,
         } = state.get_mut(world);
         let Ok(mut data) = gauges.get_mut(pane.entity) else {
             return;
@@ -208,7 +221,8 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
         } else {
             data.eql.to_ascii_uppercase()
         };
-        let source = data.source;
+        // Keep inherit (`source = None`) live against `Coordinate` changes.
+        let source = data.effective_source(coordinate.0);
         let combo_id = egui::Id::new(("spatial_gauge_display", pane.entity));
 
         egui::Frame::NONE
@@ -776,6 +790,23 @@ mod tests {
         assert_eq!(display_labels(DisplayFrame::ENU), ["E", "N", "U"]);
         assert_eq!(display_labels(DisplayFrame::ECEF), ["X", "Y", "Z"]);
         assert_eq!(display_labels(DisplayFrame::LLA), ["Lat", "Lon", "Alt"]);
+    }
+
+    #[test]
+    fn effective_source_inherits_coordinate_then_ecef() {
+        let inherit = SpatialGaugeData::new("a.pos".into(), None, DisplayFrame::NED);
+        assert_eq!(
+            inherit.effective_source(Some(GeoFrame::ENU)),
+            GeoFrame::ENU
+        );
+        assert_eq!(inherit.effective_source(None), GeoFrame::ECEF);
+
+        let explicit =
+            SpatialGaugeData::new("a.pos".into(), Some(GeoFrame::NED), DisplayFrame::NED);
+        assert_eq!(
+            explicit.effective_source(Some(GeoFrame::ENU)),
+            GeoFrame::NED
+        );
     }
 
     #[test]

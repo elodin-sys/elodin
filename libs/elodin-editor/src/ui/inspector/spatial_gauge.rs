@@ -55,8 +55,14 @@ impl WidgetSystem for InspectorSpatialGauge<'_, '_> {
                 ui.label(egui::RichText::new("SOURCE FRAME").color(get_scheme().text_secondary));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
+                    // None = inherit schematic `coordinate` (omit `source` in KDL).
+                    ui.selectable_value(&mut monitor.source, None, "Inherit");
                     for frame in [GeoFrame::ECEF, GeoFrame::NED, GeoFrame::ENU] {
-                        ui.selectable_value(&mut monitor.source, frame, geo_frame_label(frame));
+                        ui.selectable_value(
+                            &mut monitor.source,
+                            Some(frame),
+                            geo_frame_label(frame),
+                        );
                     }
                 });
 
