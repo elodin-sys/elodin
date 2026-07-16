@@ -72,6 +72,8 @@ in {
     systemd.services.elodin-assets-seed = lib.mkIf cfg.examples {
       description = "Seed the shared Elodin asset root with packaged defaults";
       wantedBy = ["multi-user.target"];
+      # Re-run seed when packaged assets change.
+      restartTriggers = [cfg.assetsPackage];
       path = with pkgs; [
         coreutils
         findutils
@@ -91,7 +93,8 @@ in {
           rm -f "$manifest"
         fi
 
-        cp -rn --no-preserve=mode,ownership ${cfg.assetsPackage}/. ${assetsDir}/
+        # Overwrite packaged defaults so schematic/asset updates deploy cleanly.
+        cp -r --no-preserve=mode,ownership ${cfg.assetsPackage}/. ${assetsDir}/
         chgrp -R wheel ${assetsDir}
         chmod -R g+rwX ${assetsDir}
         find ${assetsDir} -type d -exec chmod g+s {} +

@@ -398,6 +398,18 @@ pub struct GpuLine {
     #[allow(dead_code)]
     index_buffers: [Buffer; 3],
     count: u32,
+    /// Last range + LineTree `content_gen`s written into `index_buffers`.
+    /// Range alone is not enough: SeriesStore sync can clear/rebuild trees while
+    /// the quantized visible range stays fixed.
+    last_index_key: Option<(i64, i64, u64, u64, u64)>,
+}
+
+/// Per-entity cache of played/future GPU index state so TemporaryRenderEntity
+/// rebuilds can skip `write_to_index_buffer` when the quantized range is unchanged.
+#[derive(Component, Clone, Default)]
+struct GpuLineIndexCache {
+    played: Option<GpuLine>,
+    future: Option<GpuLine>,
 }
 
 pub struct SetLineBindGroup;
@@ -491,7 +503,7 @@ type LineQueryMut = (
     &'static LineConfig,
     &'static mut LineUniform,
     Option<&'static LineTrailColors>,
-    Option<&'static mut GpuLine>,
+    Option<&'static mut GpuLineIndexCache>,
 );
 
 fn extract_lines(
@@ -515,7 +527,14 @@ fn extract_lines(
             timeline_settings,
             latest_follow,
         ) = cached_state.state.get_mut(world);
-        let selected_range = selected_time_range.0.clone();
+        let selected_range = if crate::is_short_accuracy_window(&selected_time_range.0) {
+            selected_time_range.0.clone()
+        } else {
+            crate::quantize_visible_range(
+                selected_time_range.0.clone(),
+                crate::TRAILING_RANGE_QUANTUM_MICROS,
+            )
+        };
         let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
             earliest_timestamp.0..latest_timestamp.0
         } else {
@@ -534,10 +553,18 @@ fn extract_lines(
         // the snap-back below manufactures a 1-sample future range, and
         // the white trail overdraws the tail of the yellow trail.
         let live_follow = latest_follow.0;
+        let quantized_playhead = if crate::is_short_accuracy_window(&selected_range) {
+            current_timestamp.0
+        } else {
+            crate::floor_timestamp_quantum(
+                current_timestamp.0,
+                crate::TRAILING_RANGE_QUANTUM_MICROS,
+            )
+        };
         let played_range = if live_follow {
             selected_range.clone()
         } else {
-            selected_range.start..selected_range.end.min(current_timestamp.0)
+            selected_range.start..selected_range.end.min(quantized_playhead)
         };
         // Future segment must contain >= 2 samples or the shader draws only
         // sentinel(NaN)-to-point instances and nothing shows up. When
@@ -545,9 +572,9 @@ fn extract_lines(
         // streaming), the naive split leaves a single index in the future
         // range, which blinks at the render framerate near the rocket. Snap
         // the split back onto the previous sample boundary instead.
-        let split = selected_range.start.max(current_timestamp.0);
+        let split = selected_range.start.max(quantized_playhead);
 
-        'outer: for (entity, line_handles, config, uniform, trail_colors, gpu_line) in
+        'outer: for (entity, line_handles, config, uniform, trail_colors, mut index_cache) in
             lines.iter_mut()
         {
             let (played_color, future_color) = trail_colors.copied().unwrap_or_default().resolve(
@@ -589,8 +616,12 @@ fn extract_lines(
                 INDEX_BUFFER_LEN,
             );
 
-            let values_bind_group = if let Some(ref gpu_line) = gpu_line {
-                gpu_line.values_bind_group.clone()
+            let cached_values = index_cache
+                .as_ref()
+                .and_then(|c| c.played.as_ref().or(c.future.as_ref()))
+                .map(|g| g.values_bind_group.clone());
+            let values_bind_group = if let Some(bg) = cached_values {
+                bg
             } else {
                 let entries = [0, 1, 2].map(|i| {
                     let line = &line_handles.0[i];
@@ -611,9 +642,28 @@ fn extract_lines(
                 render_device.create_bind_group("line values", &values_layout.layout, &entries)
             };
 
-            let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>| {
+            let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>,
+                                  cached: Option<&GpuLine>| {
                 if range.start >= range.end {
                     return None;
+                }
+                let content_gens = [0, 1, 2].map(|i| {
+                    line_assets
+                        .get(&line_handles.0[i])
+                        .map(|l| l.data.content_gen())
+                        .unwrap_or(0)
+                });
+                let index_key = (
+                    range.start.0,
+                    range.end.0,
+                    content_gens[0],
+                    content_gens[1],
+                    content_gens[2],
+                );
+                if let Some(prev) = cached
+                    && prev.last_index_key == Some(index_key)
+                {
+                    return Some(prev.clone());
                 }
                 let mut step = sampling_step.max(1);
                 const MAX_INDEX_U32: u32 = INDEX_BUFFER_LEN as u32;
@@ -669,12 +719,16 @@ fn extract_lines(
                     index_bind_group,
                     index_buffers,
                     count,
+                    last_index_key: Some(index_key),
                 })
             };
 
-            if let Some(gpu_line) = build_gpu_line(played_range.clone()) {
+            let mut next_cache = GpuLineIndexCache::default();
+            let played_cached = index_cache.as_ref().and_then(|c| c.played.clone());
+            if let Some(gpu_line) = build_gpu_line(played_range.clone(), played_cached.as_ref()) {
                 let mut played_uniform = *uniform;
                 played_uniform.color = played_color;
+                next_cache.played = Some(gpu_line.clone());
                 commands.spawn((
                     MainEntity::from(entity),
                     line_handles.clone(),
@@ -704,9 +758,11 @@ fn extract_lines(
                 future_start..selected_range.end
             };
 
-            if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
+            let future_cached = index_cache.as_ref().and_then(|c| c.future.clone());
+            if let Some(gpu_line) = build_gpu_line(future_range.clone(), future_cached.as_ref()) {
                 let mut future_uniform = *uniform;
                 future_uniform.color = future_color;
+                next_cache.future = Some(gpu_line.clone());
                 commands.spawn((
                     MainEntity::from(entity),
                     line_handles.clone(),
@@ -719,6 +775,12 @@ fn extract_lines(
                     gpu_line,
                     TemporaryRenderEntity,
                 ));
+            }
+
+            if let Some(ref mut cache) = index_cache {
+                **cache = next_cache;
+            } else {
+                _main_commands.entity(entity).insert(next_cache);
             }
         }
         cached_state.state.apply(world)

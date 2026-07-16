@@ -111,13 +111,39 @@ pub enum DbMessage {
 /// Per-component time-series cache. Stores raw component values keyed by
 /// timestamp so the Editor can display data at any `CurrentTimestamp` without
 /// a DB round-trip.
+///
+/// Populated by allowlisted backfill + live table stream for **subscribed**
+/// components only ([`SeriesFetchPriority`]). Unsubscribed IDs are not stored.
+/// Plots project visible windows from this store into GPU LineTrees.
 #[derive(Resource, Default)]
 pub struct TelemetryCache {
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
+    /// Merged half-open coverage intervals `[start, end)` per component (micros).
+    coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
     generation: u64,
 }
 
+/// Alias used by the telemetry-cache / SeriesStore work.
+pub type SeriesStore = TelemetryCache;
+
+/// Progressive backfill progress — playback never waits on `complete`.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct SeriesStoreLoadState {
+    pub components_started: usize,
+    pub components_complete: usize,
+    pub samples_loaded: u64,
+    pub complete: bool,
+}
+
 impl TelemetryCache {
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn total_sample_count(&self) -> u64 {
+        self.components.values().map(|s| s.len() as u64).sum()
+    }
+
     pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
         let series = self.components.entry(component_id).or_default();
         // Keep the first value seen for a timestamp. In mixed backfill+live
@@ -146,12 +172,131 @@ impl TelemetryCache {
     pub fn component_ids(&self) -> impl Iterator<Item = &ComponentId> {
         self.components.keys()
     }
+
+    pub fn series(
+        &self,
+        component_id: &ComponentId,
+    ) -> Option<&BTreeMap<Timestamp, ComponentValue>> {
+        self.components.get(component_id)
+    }
+
+    /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
+    pub fn remove_series(&mut self, component_id: &ComponentId) {
+        let removed_components = self.components.remove(component_id).is_some();
+        let removed_coverage = self.coverage.remove(component_id).is_some();
+        if removed_components || removed_coverage {
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
+    /// Record that historical fetch has covered `[start, end)` (micros half-open).
+    pub fn mark_covered(&mut self, component_id: ComponentId, start: Timestamp, end: Timestamp) {
+        if end.0 <= start.0 {
+            return;
+        }
+        // Refuse bogus "cover everything" marks.
+        if end.0 == i64::MAX {
+            bevy::log::warn!(
+                target: "elodin_series_store",
+                component = %component_id,
+                start = start.0,
+                "refusing mark_covered to i64::MAX"
+            );
+            return;
+        }
+        let intervals = self.coverage.entry(component_id).or_default();
+        intervals.push((start.0, end.0));
+        merge_intervals(intervals);
+    }
+
+    /// True when `range` is fully contained in recorded coverage for this component.
+    pub fn is_covered(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> bool {
+        if range.end.0 <= range.start.0 {
+            return true;
+        }
+        let Some(intervals) = self.coverage.get(component_id) else {
+            return false;
+        };
+        let mut cursor = range.start.0;
+        let end = range.end.0;
+        for &(a, b) in intervals {
+            if b <= cursor {
+                continue;
+            }
+            if a > cursor {
+                return false;
+            }
+            cursor = cursor.max(b);
+            if cursor >= end {
+                return true;
+            }
+        }
+        cursor >= end
+    }
+
+    /// Sample count in `[range.start, range.end)`.
+    pub fn sample_count_in_range(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> usize {
+        self.components
+            .get(component_id)
+            .map(|s| s.range(range.start..range.end).count())
+            .unwrap_or(0)
+    }
+
+    /// First/last sample timestamps in range, if any.
+    pub fn sample_span_in_range(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> Option<(Timestamp, Timestamp)> {
+        let series = self.components.get(component_id)?;
+        let mut iter = series.range(range.start..range.end);
+        let (first, _) = iter.next()?;
+        let (last, _) = series.range(range.start..range.end).next_back()?;
+        Some((*first, *last))
+    }
 }
 
-/// Single vtable pass for incoming tables: append samples to the pending cache
-/// buffer and run [`WorldSink`] entity/path setup in the same traversal.
+fn merge_intervals(intervals: &mut Vec<(i64, i64)>) {
+    if intervals.is_empty() {
+        return;
+    }
+    intervals.sort_by_key(|&(a, _)| a);
+    let mut out = Vec::with_capacity(intervals.len());
+    let mut cur = intervals[0];
+    for &(a, b) in intervals.iter().skip(1) {
+        if a <= cur.1 {
+            cur.1 = cur.1.max(b);
+        } else {
+            out.push(cur);
+            cur = (a, b);
+        }
+    }
+    out.push(cur);
+    *intervals = out;
+}
+
+/// Allowlist of component IDs that may be stored in SeriesStore / TelemetryCache
+/// (enabled plots, Line3d, viewport adapters). Empty ⇒ no backfill / no live cache inserts.
+#[derive(Resource, Default)]
+pub struct SeriesFetchPriority {
+    pub high: std::collections::HashSet<ComponentId>,
+}
+
+/// Single vtable pass for incoming tables: append allowlisted samples to the
+/// pending cache buffer and run [`WorldSink`] entity/path setup in the same traversal.
 struct TableCacheAndWorldSink<'a, 'w, 's> {
     pending_cache: &'a mut Vec<(ComponentId, Timestamp, ComponentValue)>,
+    /// When `None`, treat as empty allowlist (cache nothing). When `Some`, only
+    /// push samples whose id is in the set.
+    allowlist: Option<&'a std::collections::HashSet<ComponentId>>,
     world: &'a mut WorldSink<'w, 's>,
 }
 
@@ -164,8 +309,13 @@ impl Decomponentize for TableCacheAndWorldSink<'_, '_, '_> {
         timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
         if let Some(ts) = timestamp {
-            let value = ComponentValue::from_view(view);
-            self.pending_cache.push((component_id, ts, value));
+            let allowed = self
+                .allowlist
+                .is_some_and(|set| set.contains(&component_id));
+            if allowed {
+                let value = ComponentValue::from_view(view);
+                self.pending_cache.push((component_id, ts, value));
+            }
         }
         self.world.apply_value(component_id, view, timestamp)?;
         Ok(())
@@ -177,12 +327,14 @@ impl Decomponentize for TableCacheAndWorldSink<'_, '_, '_> {
 /// (like `WorldPos`) with the cached data. This allows the viewport to
 /// display data at any timestamp the user scrubs to, without waiting for
 /// the DB stream to deliver it.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_cached_data(
     current_ts: bevy::prelude::Res<CurrentTimestamp>,
     cache: bevy::prelude::Res<TelemetryCache>,
     mut entity_map: ResMut<EntityMap>,
     mut query: Query<&mut ComponentValue>,
     adapters: bevy::prelude::Res<ComponentAdapters>,
+    path_reg: bevy::prelude::Res<ComponentPathRegistry>,
     mut commands: Commands,
     mut last_applied: bevy::prelude::Local<(Timestamp, u64)>,
 ) {
@@ -204,7 +356,14 @@ pub fn apply_cached_data(
         } else {
             commands.entity(entity).insert(value.clone());
         }
-        if let Some(adapter) = adapters.get(&component_id) {
+        // Adapters are keyed by type leaf (`world_pos`), while live/DB series use
+        // pair IDs (`ball_1.world_pos`). Resolve via path tail.
+        let adapter_key = path_reg
+            .0
+            .get(&component_id)
+            .map(|path| path.tail().id)
+            .unwrap_or(component_id);
+        if let Some(adapter) = adapters.get(&adapter_key) {
             let view = value.as_view();
             adapter.insert(&mut commands, &mut entity_map, component_id, view);
         }
@@ -215,19 +374,46 @@ pub fn apply_cached_data(
 #[derive(Resource, Default)]
 pub struct BackfillState {
     requested: std::collections::HashSet<ComponentId>,
+    complete: std::collections::HashSet<ComponentId>,
+}
+
+impl BackfillState {
+    /// Clear backfill bookkeeping for a component so it can be re-fetched if
+    /// re-subscribed.
+    pub fn clear_component(&mut self, component_id: ComponentId) {
+        self.requested.remove(&component_id);
+        self.complete.remove(&component_id);
+    }
 }
 
 const BACKFILL_CHUNK_SIZE: usize = 4096;
-const BACKFILL_MAX_CONCURRENT: usize = 200;
+/// Aggressive concurrent historical pages — does not block playback.
+const BACKFILL_MAX_CONCURRENT: usize = 96;
+
+/// Component IDs that should receive begin→end SeriesStore backfill: the
+/// allowlist intersected with components that have a known schema.
+pub fn series_store_backfill_candidates(
+    allowlist: &std::collections::HashSet<ComponentId>,
+    schema_reg: &ComponentSchemaRegistry,
+) -> Vec<ComponentId> {
+    allowlist
+        .iter()
+        .copied()
+        .filter(|id| schema_reg.0.contains_key(id))
+        .collect()
+}
 
 /// Bevy system that sends paginated `GetTimeSeries` requests for each
-/// known component to populate the `TelemetryCache` with historical data.
-/// Runs every frame but only sends requests for components not yet requested.
+/// **allowlisted** component to populate the `TelemetryCache` with historical data.
+/// Starts from the beginning of each series so early timeline scrubbing works
+/// as soon as the first pages land. Playback never waits for
+/// `SeriesStoreLoadState.complete`. Empty allowlist ⇒ no backfill.
 pub fn backfill_cache(
-    metadata_reg: bevy::prelude::Res<ComponentMetadataRegistry>,
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
     msg_request_handlers: bevy::prelude::Res<MsgRequestIdHandlers>,
     mut backfill: ResMut<BackfillState>,
+    priority: bevy::prelude::Res<SeriesFetchPriority>,
+    mut load_state: ResMut<SeriesStoreLoadState>,
     mut commands: Commands,
 ) {
     if msg_request_handlers.len() >= BACKFILL_MAX_CONCURRENT {
@@ -235,23 +421,32 @@ pub fn backfill_cache(
     }
     let mut dispatched = 0usize;
     let available = BACKFILL_MAX_CONCURRENT - msg_request_handlers.len();
-    for (&component_id, _metadata) in metadata_reg.iter() {
+
+    let ordered = series_store_backfill_candidates(&priority.high, &schema_reg);
+    let eligible = ordered.len();
+    load_state.components_started = backfill.requested.len().max(load_state.components_started);
+    load_state.components_complete = backfill.complete.len();
+    load_state.complete =
+        eligible > 0 && backfill.complete.len() >= eligible && msg_request_handlers.is_empty();
+
+    for component_id in ordered {
         if dispatched >= available {
             break;
         }
         if backfill.requested.contains(&component_id) {
             continue;
         }
-        if !schema_reg.0.contains_key(&component_id) {
-            continue;
-        }
         backfill.requested.insert(component_id);
+        load_state.components_started = backfill.requested.len();
+        // Always stream from the series start so jump-to-beginning / early
+        // windows become usable as soon as the first pages arrive.
         send_backfill_page(&mut commands, component_id, Timestamp(i64::MIN));
         dispatched += 1;
     }
 }
 
 fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start: Timestamp) {
+    let page_start = start;
     let msg = GetTimeSeries {
         id: PacketId::default(),
         range: start..Timestamp(i64::MAX),
@@ -264,7 +459,14 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
         move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
               mut cache: ResMut<TelemetryCache>,
               schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+              priority: bevy::prelude::Res<SeriesFetchPriority>,
+              mut backfill: ResMut<BackfillState>,
+              mut load_state: ResMut<SeriesStoreLoadState>,
               mut cmds: Commands| {
+            // Component may have left the allowlist while this page was in flight.
+            if !priority.high.contains(&component_id) {
+                return true;
+            }
             let OwnedPacket::TimeSeries(ts) = &*pkt else {
                 return true;
             };
@@ -300,8 +502,25 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 }
             }
 
+            if count > 0 {
+                let cover_start = timestamps.first().copied().unwrap_or(page_start);
+                let cover_end = Timestamp(last_ts.0.saturating_add(1));
+                cache.mark_covered(component_id, cover_start, cover_end);
+                load_state.samples_loaded = load_state.samples_loaded.saturating_add(count as u64);
+            }
+
+            // Re-check after inserts: allowlist may have changed mid-handler.
+            if !priority.high.contains(&component_id) {
+                cache.remove_series(&component_id);
+                return true;
+            }
+
             if count >= BACKFILL_CHUNK_SIZE {
+                // Continue from the beginning forward — usable incrementally.
                 send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1));
+            } else {
+                backfill.complete.insert(component_id);
+                load_state.components_complete = backfill.complete.len();
             }
             true
         },
@@ -318,6 +537,9 @@ fn sink_inner(
     let mut count = 0;
     let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
+    let allowlist = world
+        .get_resource::<SeriesFetchPriority>()
+        .map(|p| p.high.clone());
     loop {
         if !pending_cache_entries.is_empty()
             && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
@@ -450,23 +672,18 @@ fn sink_inner(
                 let _span = tracing::info_span!("impeller2_table_sink").entered();
                 let mut combined = TableCacheAndWorldSink {
                     pending_cache: &mut pending_cache_entries,
+                    allowlist: allowlist.as_ref(),
                     world: &mut world_sink,
                 };
                 let _ = table.sink(vtable_registry, &mut combined)?;
             }
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
-                let is_first = world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
-                if is_first {
-                    *world_sink.earliest_timestamp = new_earliest;
-                } else if new_earliest.0 < world_sink.earliest_timestamp.0 {
-                    // Keep EarliestTimestamp monotonic (min) to avoid narrowing
-                    // the clamp window from stale/out-of-order updates.
-                    *world_sink.earliest_timestamp = new_earliest;
-                }
-                if is_first {
-                    world_sink.current_timestamp.0 = new_earliest.0;
-                }
+                apply_earliest_timestamp(
+                    &mut world_sink.earliest_timestamp,
+                    &mut world_sink.current_timestamp,
+                    new_earliest,
+                );
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
                 let _ = m;
@@ -484,6 +701,29 @@ fn sink_inner(
         }
     }
     Ok(())
+}
+
+/// Apply a server `EarliestTimestamp` update.
+///
+/// On the first bound after reset (`earliest == MAX`), adopt the new earliest.
+/// Snap the playhead to that earliest only when it is still uninitialized
+/// (`CurrentTimestamp == EPOCH`) — soft reconnect preserves a non-EPOCH playhead.
+pub(crate) fn apply_earliest_timestamp(
+    earliest: &mut EarliestTimestamp,
+    current: &mut CurrentTimestamp,
+    new_earliest: EarliestTimestamp,
+) {
+    let is_first = earliest.0 == Timestamp(i64::MAX);
+    if is_first {
+        *earliest = new_earliest;
+    } else if new_earliest.0 < earliest.0 {
+        // Keep EarliestTimestamp monotonic (min) to avoid narrowing
+        // the clamp window from stale/out-of-order updates.
+        *earliest = new_earliest;
+    }
+    if is_first && current.0 == Timestamp::EPOCH {
+        current.0 = new_earliest.0;
+    }
 }
 
 pub fn sink(world: &mut World, world_sink_state: &mut SystemState<WorldSink>) {
@@ -918,7 +1158,9 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<MsgRequestQueue>()
             .init_resource::<DbConfig>()
             .init_resource::<TelemetryCache>()
-            .init_resource::<BackfillState>();
+            .init_resource::<BackfillState>()
+            .init_resource::<SeriesStoreLoadState>()
+            .init_resource::<SeriesFetchPriority>();
     }
 }
 
@@ -1371,5 +1613,125 @@ impl ComponentValueExt for ComponentValue {
                     .map(|(i, x)| (i, ElementValueMut::F64(x))),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod earliest_timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn first_earliest_snaps_epoch_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(i64::MAX));
+        let mut current = CurrentTimestamp(Timestamp::EPOCH);
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(1_000)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_000));
+        assert_eq!(current.0, Timestamp(1_000));
+    }
+
+    #[test]
+    fn first_earliest_preserves_non_epoch_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(i64::MAX));
+        let mut current = CurrentTimestamp(Timestamp(5_000));
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(1_000)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_000));
+        assert_eq!(current.0, Timestamp(5_000));
+    }
+
+    #[test]
+    fn later_earliest_is_monotonic_min_without_moving_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(2_000));
+        let mut current = CurrentTimestamp(Timestamp(5_000));
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(1_500)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_500));
+        assert_eq!(current.0, Timestamp(5_000));
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(3_000)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_500));
+        assert_eq!(current.0, Timestamp(5_000));
+    }
+}
+
+#[cfg(test)]
+mod series_store_allowlist_tests {
+    use super::*;
+    use impeller2::types::PrimType;
+    use std::collections::HashSet;
+
+    #[test]
+    fn backfill_candidates_only_allowlisted_with_schema() {
+        let allow: HashSet<ComponentId> = [ComponentId(1), ComponentId(2)].into_iter().collect();
+        let mut schema_reg = ComponentSchemaRegistry::default();
+        schema_reg.0.insert(
+            ComponentId(1),
+            Schema::new(PrimType::F64, [1usize]).expect("schema"),
+        );
+        // ComponentId(2) allowlisted but no schema — excluded.
+        // ComponentId(3) has schema but not allowlisted — excluded.
+        schema_reg.0.insert(
+            ComponentId(3),
+            Schema::new(PrimType::F64, [1usize]).expect("schema"),
+        );
+
+        let candidates = series_store_backfill_candidates(&allow, &schema_reg);
+        assert_eq!(candidates, vec![ComponentId(1)]);
+    }
+
+    #[test]
+    fn empty_allowlist_yields_no_backfill_candidates() {
+        let allow = HashSet::new();
+        let mut schema_reg = ComponentSchemaRegistry::default();
+        schema_reg.0.insert(
+            ComponentId(1),
+            Schema::new(PrimType::F64, [1usize]).expect("schema"),
+        );
+        assert!(series_store_backfill_candidates(&allow, &schema_reg).is_empty());
+    }
+
+    #[test]
+    fn remove_series_drops_samples_and_coverage() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(42);
+        cache.insert(
+            id,
+            Timestamp(1),
+            ComponentValue::F64(nox::array![1.0f64].to_dyn()),
+        );
+        cache.mark_covered(id, Timestamp(1), Timestamp(2));
+        assert!(cache.has_series(&id));
+        cache.remove_series(&id);
+        assert!(!cache.has_series(&id));
+        assert!(!cache.is_covered(&id, &(Timestamp(1)..Timestamp(2))));
+    }
+
+    #[test]
+    fn live_insert_allowed_only_when_in_allowlist() {
+        let allow: HashSet<ComponentId> = [ComponentId(1)].into_iter().collect();
+        let mut pending = Vec::new();
+        for (cid, ts) in [
+            (ComponentId(1), Timestamp(10)),
+            (ComponentId(2), Timestamp(11)),
+        ] {
+            if allow.contains(&cid) {
+                pending.push((cid, ts, ComponentValue::F64(nox::array![0.0f64].to_dyn())));
+            }
+        }
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, ComponentId(1));
     }
 }

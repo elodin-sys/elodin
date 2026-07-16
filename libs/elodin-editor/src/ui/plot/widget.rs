@@ -304,6 +304,23 @@ pub fn calculate_padded_y_bounds(min_y: f64, max_y: f64) -> (f64, f64) {
     }
 }
 
+/// Whether a new auto-Y range should replace the current one for short trailing windows.
+/// Expands when data exceeds the current pad by >5% of span; shrinks only when the
+/// new span is &lt;75% of the old (avoids chatter as the window slides).
+pub(crate) fn should_update_short_window_y(
+    current: &std::ops::Range<f64>,
+    new_min: f64,
+    new_max: f64,
+) -> bool {
+    let old_span = (current.end - current.start).abs().max(1e-12);
+    let expand_thresh = old_span * 0.05;
+    if new_min < current.start - expand_thresh || new_max > current.end + expand_thresh {
+        return true;
+    }
+    let new_span = (new_max - new_min).abs();
+    new_span < old_span * 0.75
+}
+
 pub fn get_inner_rect(rect: egui::Rect, telemetry_mode: bool) -> egui::Rect {
     rect.shrink4(plot_margin(telemetry_mode))
 }
@@ -1369,7 +1386,24 @@ pub fn auto_y_bounds(
     line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
+    mut last_run: Local<Option<std::time::Instant>>,
 ) {
+    let short = crate::is_short_accuracy_window(&selected_range.0);
+    // Short windows: SelectedTimeRange tracks the playhead every frame — do not
+    // hard-resync Y on every tick. Long windows: still refresh on range change.
+    let range_changed = selected_range.is_changed();
+    let due = last_run
+        .map(|t| t.elapsed() >= std::time::Duration::from_millis(50))
+        .unwrap_or(true);
+    if short {
+        if !due {
+            return;
+        }
+    } else if !range_changed && !due {
+        return;
+    }
+    *last_run = Some(std::time::Instant::now());
+
     for mut graph_state in graph_states.iter_mut() {
         if graph_state.auto_y_range {
             let mut y_min: Option<f32> = None;
@@ -1421,6 +1455,11 @@ pub fn auto_y_bounds(
             // (e.g., query_plot's auto_bounds which uses line_entity, not enabled_lines)
             if let (Some(min), Some(max)) = (y_min, y_max) {
                 let (padded_min, padded_max) = calculate_padded_y_bounds(min as f64, max as f64);
+                if short
+                    && !should_update_short_window_y(&graph_state.y_range, padded_min, padded_max)
+                {
+                    continue;
+                }
                 graph_state.y_range = padded_min..padded_max;
             }
         }
@@ -1433,6 +1472,7 @@ pub fn sync_graphs(
     metadata_store: Res<ComponentMetadataRegistry>,
     schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
+    mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
 ) {
     for mut graph_state in graph_states.iter_mut() {
@@ -1464,18 +1504,31 @@ pub fn sync_graphs(
                 });
 
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
+                // Ensure a Line asset exists so we can spawn GPU entities before
+                // SeriesStore has projected samples into the tree.
+                let line_handle = component.lines.entry(value_index).or_insert_with(|| {
+                    let label = component
+                        .element_names
+                        .get(value_index)
+                        .filter(|s| !s.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| format!("[{value_index}]"));
+                    lines.add(Line {
+                        label,
+                        ..Default::default()
+                    })
+                });
+                let line = line_handle.clone();
+
                 let entity = graph_state
                     .enabled_lines
                     .get_mut(&(component_path.clone(), value_index));
-                let Some(line) = component.lines.get(&value_index) else {
-                    continue;
-                };
 
                 match (entity, enabled) {
                     (None, true) => {
                         let entity = commands
                             .spawn(LineBundle {
-                                line: LineHandle::Timeseries(line.clone()),
+                                line: LineHandle::Timeseries(line),
                                 uniform: LineUniform::new(
                                     graph_state.line_width,
                                     color.into_bevy(),
@@ -1506,7 +1559,8 @@ pub fn sync_graphs(
                             .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
                             .try_insert(graph_state.graph_type)
                             .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
-                            .try_insert(graph_state.visible_range.clone());
+                            .try_insert(graph_state.visible_range.clone())
+                            .try_insert(LineHandle::Timeseries(line));
                     }
                     (None, false) => {}
                 }
@@ -2141,5 +2195,29 @@ pub fn graph_touch(
             }
             TouchGestures::None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod short_window_y_tests {
+    use super::should_update_short_window_y;
+
+    #[test]
+    fn short_y_hysteresis_ignores_small_drift() {
+        let current = 0.0..10.0;
+        assert!(!should_update_short_window_y(&current, 0.2, 9.8));
+    }
+
+    #[test]
+    fn short_y_hysteresis_expands_on_outlier() {
+        let current = 0.0..10.0;
+        assert!(should_update_short_window_y(&current, -1.0, 10.0));
+        assert!(should_update_short_window_y(&current, 0.0, 12.0));
+    }
+
+    #[test]
+    fn short_y_hysteresis_shrinks_when_much_smaller() {
+        let current = 0.0..10.0;
+        assert!(should_update_short_window_y(&current, 4.0, 6.0));
     }
 }

@@ -1418,9 +1418,9 @@ impl LoadSchematicParams<'_, '_> {
 
     /// Create a default Data Overview panel when no schematic is found.
     /// This provides immediate visibility into the database contents.
-    pub fn load_default_data_overview(&mut self) {
+    pub fn load_default_data_overview(&mut self) -> bool {
         if self.eql.0.component_parts.is_empty() {
-            return;
+            return false;
         }
 
         let primary_window = *self.primary_window;
@@ -1432,7 +1432,7 @@ impl LoadSchematicParams<'_, '_> {
 
         // Only add if the tile tree is empty (no non-sidebar content)
         if !window_state.tile_state.is_empty() {
-            return;
+            return true;
         }
 
         let target_id = {
@@ -1491,6 +1491,7 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
         }
+        true
     }
 }
 
@@ -1545,10 +1546,12 @@ pub fn apply_document_reloaded(
 pub fn apply_document_loaded(
     mut events: MessageReader<DocumentLoaded>,
     mut params: LoadSchematicParams,
+    mut pending: ResMut<PendingDataOverview>,
 ) {
     let Some(event) = events.read().last().cloned() else {
         return;
     };
+    pending.0 = false;
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
 }
 
@@ -1558,14 +1561,34 @@ pub fn apply_pending_window_schematics(mut params: LoadSchematicParams) {
     params.poll_pending_window_schematics();
 }
 
+/// Pending Data Overview load after DocumentCleared raced ahead of EQL metadata.
+#[derive(Resource, Default)]
+pub struct PendingDataOverview(pub bool);
+
 pub fn apply_document_cleared(
     mut events: MessageReader<DocumentCleared>,
     mut params: LoadSchematicParams,
+    mut pending: ResMut<PendingDataOverview>,
 ) {
     if events.read().next().is_none() {
         return;
     }
-    params.load_default_data_overview();
+    if !params.load_default_data_overview() {
+        pending.0 = true;
+    }
+}
+
+/// Finish a pending Data Overview once component metadata is available.
+pub fn retry_pending_data_overview(
+    mut pending: ResMut<PendingDataOverview>,
+    mut params: LoadSchematicParams,
+) {
+    if !pending.0 {
+        return;
+    }
+    if params.load_default_data_overview() {
+        pending.0 = false;
+    }
 }
 
 pub fn show_document_command_failures(

@@ -63,7 +63,8 @@ const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
-pub const INDEX_BUFFER_LEN: usize = 1024 * 4;
+/// Sized for ≤30 s @ ~4 kHz truth strips (plus per-chunk sentinel overhead).
+pub const INDEX_BUFFER_LEN: usize = 1024 * 128;
 pub const INDEX_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((INDEX_BUFFER_LEN * size_of::<u32>()) as u64).unwrap();
 
@@ -185,11 +186,29 @@ impl LineMut<'_> {
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
     ) -> u32 {
+        self.write_to_index_buffer_sampled(
+            index_buffer,
+            render_queue,
+            line_visible_range,
+            i64::MAX,
+            pixel_width,
+        )
+    }
+
+    pub fn write_to_index_buffer_sampled(
+        &mut self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        selected_span_micros: i64,
+        pixel_width: usize,
+    ) -> u32 {
         match self {
-            LineMut::Timeseries(line) => line.data.write_to_index_buffer(
+            LineMut::Timeseries(line) => line.data.write_to_index_buffer_with_sampling_range(
                 index_buffer,
                 render_queue,
                 line_visible_range,
+                selected_span_micros,
                 pixel_width,
             ),
             LineMut::XY(xy_line) => {
@@ -447,6 +466,10 @@ pub struct GpuLine {
     values_bind_group: BindGroup,
     index_buffer: Buffer,
     count: u32,
+    /// Cache key part A: `(selected_span_micros, clip_start)`.
+    last_index_range: Option<(i64, i64)>,
+    /// Cache key part B: `(clip_end, pixel_width)`.
+    last_clip_range: Option<(i64, i64)>,
 }
 
 pub struct SetLineBindGroup;
@@ -530,15 +553,28 @@ fn extract_lines(
         Query<'static, 'static, LineQueryMut>,
         ResMut<'static, Assets<Line>>,
         ResMut<'static, Assets<XYLine>>,
+        Res<'static, crate::SelectedTimeRange>,
     )>::new(&mut main_world);
-    let (mut lines, mut line_assets, mut xy_lines) = state.get_mut(&mut main_world);
+    let (mut lines, mut line_assets, mut xy_lines, selected_range) = state.get_mut(&mut main_world);
+    let selected = selected_range.0.clone();
+    let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
+    let short_window = crate::is_short_accuracy_window(&selected);
     for (entity, line_handle, config, uniform, line_visible_range, width, graph_type, gpu_line) in
         lines.iter_mut()
     {
         let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
             continue;
         };
-        line.queue_load_range(line_visible_range.0.clone(), &render_queue, &render_device);
+        // Camera / clip: continuous visible range for short windows (silky scrub);
+        // long windows keep 100 ms quantum to limit index rewrite churn.
+        let visible = line_visible_range.0.clone();
+        let clip_range = if short_window {
+            visible.clone()
+        } else {
+            crate::quantize_visible_range(visible.clone(), crate::TRAILING_RANGE_QUANTUM_MICROS)
+        };
+        // Short windows: step = 1 on clip (truth). Long windows: pixel stride on clip.
+        line.queue_load_range(clip_range.clone(), &render_queue, &render_device);
         let index_buffer = if let Some(ref gpu_line) = gpu_line {
             gpu_line.index_buffer.clone()
         } else {
@@ -587,16 +623,34 @@ fn extract_lines(
                 ],
             )
         };
-        let count = line.write_to_index_buffer(
-            &index_buffer,
-            &render_queue,
-            line_visible_range.0.clone(),
-            width.0,
+        let range_key = (
+            selected_span_micros,
+            clip_range.start.0,
+            clip_range.end.0,
+            width.0 as i64,
         );
+        let prev_key = gpu_line.as_ref().and_then(|g| {
+            let (sa, sb) = g.last_index_range?;
+            let (ca, cb) = g.last_clip_range?;
+            Some((sa, sb, ca, cb))
+        });
+        let count = if prev_key == Some(range_key) {
+            gpu_line.as_ref().map(|g| g.count).unwrap_or(0)
+        } else {
+            line.write_to_index_buffer_sampled(
+                &index_buffer,
+                &render_queue,
+                clip_range.clone(),
+                selected_span_micros,
+                width.0,
+            )
+        };
         let gpu_line = GpuLine {
             values_bind_group,
             index_buffer,
             count,
+            last_index_range: Some((range_key.0, range_key.1)),
+            last_clip_range: Some((range_key.2, range_key.3)),
         };
 
         commands.spawn((

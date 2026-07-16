@@ -1,6 +1,6 @@
 ---
 name: elodin-db
-description: Work with Elodin-DB, the time-series telemetry database. Use when running elodin-db, writing client integrations (C, C++, Rust, Python), configuring replication/follow mode, querying data via the Lua REPL, or connecting the Elodin Editor to a database.
+description: Work with Elodin-DB, the time-series telemetry database. Use when running elodin-db, writing client integrations (C, C++, Rust, Python), configuring replication/follow mode, the DB Asset Server / assets ingest, querying data via the Lua REPL, or connecting the Elodin Editor to a database.
 ---
 
 # Elodin-DB
@@ -26,7 +26,7 @@ elodin-db lua
 ## Running the Database
 
 ```bash
-elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--log-level <level>]
+elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--assets <dir>] [--log-level <level>]
 ```
 
 | Parameter | Example | Purpose |
@@ -34,7 +34,71 @@ elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--log-level <level>]
 | `bind_addr` | `[::]:2240` | Listen address (IPv4/IPv6 + port) |
 | `data_dir` | `$HOME/.local/share/elodin/db` | Storage directory |
 | `--config` | `libs/db/examples/db-config.lua` | Lua configuration script |
+| `--assets` | `/var/lib/elodin/assets` | Source `assets/` tree to ingest on **fresh** DB create (overrides `ELODIN_ASSETS`) |
 | `--log-level` | `warn` | Log verbosity: error, warn, info, debug, trace |
+
+Impeller TCP listens on port `N` (e.g. `2240`). The **DB Asset Server** always binds `N+1` (e.g. `2241`) and serves `{data_dir}/assets/` over HTTP. Do not put a follower Impeller listener on `N+1`.
+
+## Assets and the DB Asset Server
+
+Visual files for schematics live under `{db}/assets/{relative_key}` and are served at `http://host:(tcp_port+1)/{relative_key}` while the DB runs. Record once, copy the DB directory, replay anywhere — no separate `assets/` tree required on the consumer.
+
+### Source asset root (ingest)
+
+On first create of an empty DB, `elodin-db run` (and Python `world.run(..., db_path=…)`) copies a source tree into `{db}/assets/` **once**, then writes a `.elodin-ingested` marker. Later opens skip ingest so recorded/editor assets are never wiped.
+
+Source resolution (CLI `--assets` wins when set; otherwise):
+
+1. `$ELODIN_ASSETS`
+2. `<sim_entry>/assets` (simulations only)
+3. `<cwd>/assets`
+4. Nearest ancestor `assets/` (simulations only)
+
+```bash
+# Seed a fresh DB from an explicit tree (Aleph / HITL pattern)
+elodin-db run [::]:2240 ./my-db --assets /var/lib/elodin/assets
+```
+
+### Conventional keys inside `{db}/assets/`
+
+Same layout as the simulation asset root (see elodin-simulation skill):
+
+| Key prefix | Contents |
+|------------|----------|
+| `*.glb`, `meshes/…`, `models/…` | Meshes referenced by `glb path=` (rewritten to `db:…` in stored KDL) |
+| `schematics/*.kdl` | Active schematic (default `schematics/main.kdl`) and window sub-schematics |
+| `skyboxes/manifest.ron` + `*.cubemap.ktx2` | Named skyboxes |
+| `terrains/…` | Terrain atlases for `world_mesh` |
+| `color_schemes/…` | Optional theme JSON (local editor; not required for replay of built-in names) |
+
+`schematic.active` metadata points at the active KDL asset key (usually `schematics/main.kdl`). Consumers fetch that KDL over HTTP — there is no inline KDL mirror in DB metadata.
+
+### Paths and the `db:` scheme
+
+At record/ingest, local paths like `models/jet.glb` become `db:models/jet.glb` in stored schematics. Already-`db:` / `http(s):` / `icon builtin=…` paths are left alone. Keys must not contain `..`.
+
+### Follow mode and assets
+
+Telemetry replicates over Impeller TCP. Assets do **not** — the follower `GET`s `http://source:(N+1)/__index__` and mirrors missing/changed keys into its own `{db}/assets/`, then serves them on `(follower_port+1)`.
+
+```bash
+elodin-db run 127.0.0.1:2240 ./source-db
+elodin-db run 127.0.0.1:2242 ./follower-db --follows 127.0.0.1:2240   # assets on 2243
+elodin editor 127.0.0.1:2242
+```
+
+Point `--follows` at the source **Impeller** port (`N`), not the asset port.
+
+### Verify
+
+```bash
+curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:2241/schematics/main.kdl
+ls -lh "$DB_PATH/assets/"
+```
+
+Empty `assets/` after a sim usually means a temp DB (`world.run` without `db_path` / `ELODIN_DB_PATH`). Mesh 404s mean the source tree was never ingested — re-run against a fresh DB with the correct `--assets` / `ELODIN_ASSETS`.
+
+Full reference: [docs/public/content/reference/db-asset-server.md](../../../docs/public/content/reference/db-asset-server.md)
 
 ## Lua REPL
 
@@ -111,6 +175,7 @@ The follower:
 1. Synchronizes all existing metadata and schemas
 2. Backfills historical component data and message logs
 3. Streams real-time updates as they arrive
+4. Mirrors schematic assets from the source DB Asset Server on port `N+1` (see Assets above)
 
 ### Packet Size Tuning
 
@@ -193,6 +258,7 @@ Storage is append-only with configurable retention. The database supports concur
 ## Key References
 
 - Full documentation: [libs/db/README.md](../../../libs/db/README.md)
+- DB Asset Server: [docs/public/content/reference/db-asset-server.md](../../../docs/public/content/reference/db-asset-server.md)
 - C client example: [libs/db/examples/client.c](../../../libs/db/examples/client.c)
 - C++ client example: [libs/db/examples/client.cpp](../../../libs/db/examples/client.cpp)
 - Rust client example: [libs/db/examples/rust_client/](../../../libs/db/examples/rust_client/)

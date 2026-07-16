@@ -92,6 +92,15 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(get_scheme().text_secondary),
                     ));
 
+                    let ram_str = process_resident_memory_gb()
+                        .map(|gb| format!("{gb:.1}"))
+                        .unwrap_or_else(|| "N/A".to_string());
+                    ui.add(egui::Label::new(
+                        egui::RichText::new(format!("RAM Usage: {ram_str} GB"))
+                            .text_style(egui::TextStyle::Small)
+                            .color(get_scheme().text_secondary),
+                    ));
+
                     super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
                 });
             });
@@ -159,4 +168,24 @@ fn editor_status_label_ui(ui: &mut egui::Ui, status: ConnectionStatus) -> egui::
 
 pub fn editor_status_label(status: ConnectionStatus) -> impl egui::Widget {
     move |ui: &mut egui::Ui| editor_status_label_ui(ui, status)
+}
+
+/// Process resident set size in GiB (Linux `/proc/self/status` VmRSS).
+fn process_resident_memory_gb() -> Option<f64> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        for line in status.lines() {
+            let Some(rest) = line.strip_prefix("VmRSS:") else {
+                continue;
+            };
+            let kb: f64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kb / (1024.0 * 1024.0));
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
 }
