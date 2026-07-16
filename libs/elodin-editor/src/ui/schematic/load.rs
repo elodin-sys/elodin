@@ -1239,6 +1239,22 @@ impl LoadSchematicParams<'_, '_> {
                 let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
+            Panel::SpatialGauge(monitor) => {
+                let label = monitor
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Spatial Gauge".to_string());
+                let entity = self
+                    .commands
+                    .spawn(crate::ui::spatial_gauge::SpatialGaugeData::new(
+                        monitor.eql.clone(),
+                        monitor.source,
+                        monitor.display,
+                    ))
+                    .id();
+                let pane = crate::ui::spatial_gauge::SpatialGaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::SpatialGauge(pane)), parent_id, false)
+            }
             Panel::QueryTable(data) => {
                 let has_query = !data.query.trim().is_empty();
                 let entity = self

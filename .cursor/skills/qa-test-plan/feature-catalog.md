@@ -174,7 +174,7 @@
 ### 16.3 Panels & KDL Schematics
 - **Document lifecycle** — Load KDL from path/inline content, save, Save As, Save To DB, clear; hot-reload via `ELODIN_KDL_DIR` file watcher (300 ms debounce, symlink-safe); embedded schematic fallback from Python (`world.schematic()`); multi-window document trees (`window path= title= screen= rect=`) with persisted geometry.
 - **Layout containers** — `tabs`, `hsplit`, `vsplit` with `share` weights; tab context menu (inspector, rename).
-- **Panels** — `viewport`, `graph`, `component_monitor` (live scalar values), `query_table` (EQL/SQL), `query_plot` (EQL/SQL; `timeseries|xy`; `refresh_interval`, `auto_refresh`), `action_pane` (named Lua actions, e.g. `send_msg` presets), `video_stream`, `sensor_view`, `log_stream` (level filters TRACE–ERROR, auto-scroll), `data_overview` (all-component sparklines), `schematic_tree`, `dashboard` (Bevy-UI flex/grid layouts with text/colors), `inspector` and `hierarchy` sidebars.
+- **Panels** — `viewport`, `graph`, `component_monitor` (live scalar values), `spatial_gauge` (position in source frame shown as ECEF/NED/ENU/LLA), `query_table` (EQL/SQL), `query_plot` (EQL/SQL; `timeseries|xy`; `refresh_interval`, `auto_refresh`), `action_pane` (named Lua actions, e.g. `send_msg` presets), `video_stream`, `sensor_view`, `log_stream` (level filters TRACE–ERROR, auto-scroll), `data_overview` (all-component sparklines), `schematic_tree`, `dashboard` (Bevy-UI flex/grid layouts with text/colors), `inspector` and `hierarchy` sidebars.
 - **Root config nodes** — `coordinate` (ENU/NED/ECEF + geodetic origin lat/lon/alt; per-element frame overrides), `theme` (scheme + dark/light mode), `timeline` (`played_color`, `future_color`, `follow_latest`), `skybox`.
 
 ### 16.4 Graphs & Data

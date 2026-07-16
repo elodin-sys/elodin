@@ -627,6 +627,48 @@ fn monitor_parts(
         .collect()
 }
 
+pub fn create_spatial_gauge(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Spatial Gauge",
+        TILES_LABEL,
+        move |_: In<String>, eql: Res<EqlContext>| {
+            PalettePage::new(spatial_gauge_parts(&eql.0.component_parts, tile_id))
+                .prompt("Select a position component to monitor")
+                .into_event()
+        },
+    )
+}
+
+fn spatial_gauge_parts(
+    parts: &BTreeMap<String, eql::ComponentPart>,
+    tile_id: Option<TileId>,
+) -> Vec<PaletteItem> {
+    parts
+        .iter()
+        .map(|(name, part)| {
+            let part = part.clone();
+            PaletteItem::new(
+                name.clone(),
+                "Component",
+                move |_: In<String>,
+                      mut tile_param: TileParam,
+                      palette_state: Res<CommandPaletteState>| {
+                    let Some(mut tile_state) = tile_param.target(palette_state.target_window)
+                    else {
+                        return PaletteEvent::Error("Secondary window unavailable".to_string());
+                    };
+                    if let Some(component) = &part.component {
+                        tile_state.create_spatial_gauge_tile(component.name.clone(), tile_id);
+                        PaletteEvent::Exit
+                    } else {
+                        PalettePage::new(spatial_gauge_parts(&part.children, tile_id)).into()
+                    }
+                },
+            )
+        })
+        .collect()
+}
+
 fn reset_cameras() -> PaletteItem {
     PaletteItem::new(
         "Reset Cameras",
@@ -2089,6 +2131,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_graph(Some(tile_id)),
         create_action(Some(tile_id)),
         create_monitor(Some(tile_id)),
+        create_spatial_gauge(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
@@ -2159,6 +2202,7 @@ impl Default for PalettePage {
             create_graph(None),
             create_action(None),
             create_monitor(None),
+            create_spatial_gauge(None),
             create_viewport(None),
             create_query_table(None),
             create_query_plot(None),

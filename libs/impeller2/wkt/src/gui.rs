@@ -312,6 +312,7 @@ pub enum Panel {
     HSplit(Split),
     Graph(Graph),
     ComponentMonitor(ComponentMonitor),
+    SpatialGauge(SpatialGauge),
     ActionPane(ActionPane),
     QueryTable(QueryTable),
     QueryPlot(QueryPlot),
@@ -335,6 +336,7 @@ impl Panel {
             Panel::ComponentMonitor(monitor) => {
                 monitor.name.as_deref().unwrap_or(&monitor.component_name)
             }
+            Panel::SpatialGauge(monitor) => monitor.name.as_deref().unwrap_or("Spatial Gauge"),
             Panel::ActionPane(action_pane) => action_pane.name.as_str(),
             Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
             Panel::QueryPlot(query_plot) => &query_plot.name,
@@ -1205,6 +1207,67 @@ pub struct ComponentMonitor {
     /// monitor, which can be a simple component_name.
     pub component_name: String,
     pub name: Option<String>,
+}
+
+/// A monitor for a spatial position: reads an EQL-bound position expressed in
+/// `source` and displays it, converted, in `display` (a spatial frame or LLA).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct SpatialGauge {
+    /// EQL expression yielding a position (a 3-vector), or a pose whose tail 3
+    /// elements are the position (e.g. a `world_pos` 7-vector).
+    pub eql: String,
+    /// Coordinate frame the EQL result is expressed in.
+    pub source: bevy_geo_frames::GeoFrame,
+    /// Coordinate system to display the position in (a spatial frame or LLA).
+    pub display: DisplayFrame,
+    pub name: Option<String>,
+}
+
+/// Display coordinate choice for a [`SpatialGauge`]: the spatial
+/// [`bevy_geo_frames::GeoFrame`]s plus geodetic latitude/longitude/altitude.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DisplayFrame {
+    ECEF,
+    #[default]
+    NED,
+    ENU,
+    /// Geodetic latitude/longitude/altitude (deg, deg, m).
+    LLA,
+}
+
+impl DisplayFrame {
+    /// The matching [`bevy_geo_frames::GeoFrame`], or `None` for
+    /// [`DisplayFrame::LLA`] (which is not a Cartesian frame).
+    pub fn geo_frame(self) -> Option<bevy_geo_frames::GeoFrame> {
+        match self {
+            DisplayFrame::ECEF => Some(bevy_geo_frames::GeoFrame::ECEF),
+            DisplayFrame::NED => Some(bevy_geo_frames::GeoFrame::NED),
+            DisplayFrame::ENU => Some(bevy_geo_frames::GeoFrame::ENU),
+            DisplayFrame::LLA => None,
+        }
+    }
+
+    /// Parse from a case-insensitive string (`ECEF`, `NED`, `ENU`, `LLA`).
+    pub fn from_str_ci(s: &str) -> Option<Self> {
+        match s.to_ascii_uppercase().as_str() {
+            "ECEF" => Some(DisplayFrame::ECEF),
+            "NED" => Some(DisplayFrame::NED),
+            "ENU" => Some(DisplayFrame::ENU),
+            "LLA" => Some(DisplayFrame::LLA),
+            _ => None,
+        }
+    }
+
+    /// Uppercase tag used in KDL (`ECEF`, `NED`, `ENU`, `LLA`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DisplayFrame::ECEF => "ECEF",
+            DisplayFrame::NED => "NED",
+            DisplayFrame::ENU => "ENU",
+            DisplayFrame::LLA => "LLA",
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

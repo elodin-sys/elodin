@@ -202,8 +202,10 @@ fn parse_telemetry_mode(node: &KdlNode, src: &str) -> Result<bool, KdlSchematicE
 fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlSchematicError> {
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
-        | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
-        | "schematic_tree" | "data_overview" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        | "spatial_gauge" | "action_pane" | "query_table" | "query_plot" | "inspector"
+        | "hierarchy" | "schematic_tree" | "data_overview" => {
+            Ok(SchematicElem::Panel(parse_panel(node, src)?))
+        }
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "timeline" => Ok(SchematicElem::Timeline(parse_timeline(node, src)?)),
@@ -640,6 +642,7 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "viewport" => parse_viewport(node, kdl_src),
         "graph" => parse_graph(node, kdl_src),
         "component_monitor" => parse_component_monitor(node, kdl_src),
+        "spatial_gauge" => parse_spatial_gauge(node, kdl_src),
         "action_pane" => parse_action_pane(node, kdl_src),
         "query_table" => parse_query_table(node),
         "query_plot" => parse_query_plot(node, kdl_src),
@@ -1054,6 +1057,49 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 
     Ok(Panel::ComponentMonitor(ComponentMonitor {
         component_name: component_name.to_string(),
+        name,
+    }))
+}
+
+fn parse_spatial_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let name = parse_name(node);
+    let eql = node
+        .get("eql")
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "eql".to_string(),
+            node: "spatial_gauge".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+
+    let source = match node.get("source").and_then(|v| v.as_string()) {
+        Some(s) => GeoFrame::from_str(s).map_err(|_| KdlSchematicError::InvalidValue {
+            property: "source".to_string(),
+            node: "spatial_gauge".to_string(),
+            expected: "ENU, NED, or ECEF".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?,
+        None => GeoFrame::ECEF,
+    };
+
+    let display = match node.get("display").and_then(|v| v.as_string()) {
+        Some(s) => DisplayFrame::from_str_ci(s).ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "display".to_string(),
+            node: "spatial_gauge".to_string(),
+            expected: "ECEF, NED, ENU, or LLA".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?,
+        None => DisplayFrame::default(),
+    };
+
+    Ok(Panel::SpatialGauge(SpatialGauge {
+        eql,
+        source,
+        display,
         name,
     }))
 }
@@ -3535,6 +3581,50 @@ object_3d "a.world_pos" {
             assert_eq!(monitor.component_name, "a.world_pos");
         } else {
             panic!("Expected component_monitor");
+        }
+    }
+
+    #[test]
+    fn test_spatial_gauge() {
+        let kdl = r#"spatial_gauge name="Missile" eql="NAVEKFSTATE.POS_ECEF" source="ECEF" display="NED""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::SpatialGauge(monitor)) = &schematic.elems[0] {
+            assert_eq!(monitor.eql, "NAVEKFSTATE.POS_ECEF");
+            assert_eq!(monitor.source, GeoFrame::ECEF);
+            assert_eq!(monitor.display, DisplayFrame::NED);
+            assert_eq!(monitor.name.as_deref(), Some("Missile"));
+        } else {
+            panic!("Expected spatial_gauge");
+        }
+    }
+
+    #[test]
+    fn test_spatial_gauge_defaults_and_round_trip() {
+        // Omitted source/display fall back to ECEF source, NED display.
+        let schematic = parse_schematic(r#"spatial_gauge eql="a.pos""#).unwrap();
+        let SchematicElem::Panel(panel) = &schematic.elems[0] else {
+            panic!("Expected panel");
+        };
+        let Panel::SpatialGauge(monitor) = panel else {
+            panic!("Expected spatial_gauge");
+        };
+        assert_eq!(monitor.source, GeoFrame::ECEF);
+        assert_eq!(monitor.display, DisplayFrame::NED);
+
+        // LLA round-trips through serialization.
+        let kdl = r#"spatial_gauge name="M" eql="a.pos" source="NED" display="LLA""#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let serialized = crate::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::SpatialGauge(m)) = &reparsed.elems[0] {
+            assert_eq!(m.eql, "a.pos");
+            assert_eq!(m.source, GeoFrame::NED);
+            assert_eq!(m.display, DisplayFrame::LLA);
+            assert_eq!(m.name.as_deref(), Some("M"));
+        } else {
+            panic!("Expected spatial_gauge after round-trip");
         }
     }
 

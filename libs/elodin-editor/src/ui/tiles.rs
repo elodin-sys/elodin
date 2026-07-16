@@ -53,6 +53,7 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
+    spatial_gauge::{SpatialGaugePane, SpatialGaugeWidget},
     video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
@@ -746,6 +747,11 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddMonitor(tile_id, eql));
     }
 
+    pub fn create_spatial_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddSpatialGauge(tile_id, eql));
+    }
+
     pub fn create_action_tile(
         &mut self,
         button_name: String,
@@ -814,6 +820,7 @@ impl TileState {
                             Pane::Viewport(viewport) => ("Viewport", viewport.name.as_str()),
                             Pane::Graph(graph) => ("Graph", graph.name.as_str()),
                             Pane::Monitor(monitor) => ("Monitor", monitor.name.as_str()),
+                            Pane::SpatialGauge(monitor) => ("SpatialGauge", monitor.name.as_str()),
                             Pane::QueryTable(table) => ("QueryTable", table.name.as_str()),
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
                             Pane::ActionTile(action) => ("Action", action.name.as_str()),
@@ -934,6 +941,11 @@ impl TileState {
                         e.despawn();
                     }
                 }
+                Tile::Pane(Pane::SpatialGauge(monitor)) => {
+                    if let Ok(mut e) = commands.get_entity(monitor.entity) {
+                        e.despawn();
+                    }
+                }
                 _ => {}
             }
         }
@@ -998,6 +1010,7 @@ pub enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
     Monitor(MonitorPane),
+    SpatialGauge(SpatialGaugePane),
     QueryTable(QueryTablePane),
     QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
@@ -1024,6 +1037,7 @@ impl Pane {
             Pane::VideoStream(pane) => out.push_ui_node(pane.entity),
             Pane::SensorView(pane) => out.push_ui_node(pane.entity),
             Pane::Monitor(_)
+            | Pane::SpatialGauge(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
             | Pane::LogStream(_)
@@ -1042,6 +1056,7 @@ impl Pane {
             }
             Pane::Viewport(viewport) => viewport.name.to_string(),
             Pane::Monitor(monitor) => monitor.name.to_string(),
+            Pane::SpatialGauge(monitor) => monitor.name.to_string(),
             Pane::QueryTable(table) => table.name.to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
@@ -1069,6 +1084,9 @@ impl Pane {
                 targets.graph_id = Some(graph.id);
             }
             Pane::Monitor(monitor) => {
+                monitor.name = title.to_string();
+            }
+            Pane::SpatialGauge(monitor) => {
                 monitor.name = title.to_string();
             }
             Pane::QueryTable(table) => {
@@ -1349,6 +1367,18 @@ impl Pane {
                     PointerOwnerPriority::Panel,
                 );
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
+                egui_tiles::UiResponse::None
+            }
+            Pane::SpatialGauge(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
+                ui.add_widget_with::<SpatialGaugeWidget>(world, "spatial_gauge", pane.clone());
                 egui_tiles::UiResponse::None
             }
             Pane::QueryTable(pane) => {
@@ -1943,6 +1973,7 @@ pub enum TreeAction {
     AddViewport(Option<TileId>),
     AddGraph(Option<TileId>, Box<Option<GraphBundle>>),
     AddMonitor(Option<TileId>, PaneName),
+    AddSpatialGauge(Option<TileId>, PaneName),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
@@ -2879,6 +2910,20 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                             .cmd_palette_state
                             .open_for_window(target_window, palette_items::create_monitor(None));
                     }
+
+                    let create_spatial_gauge_btn = ui.add(
+                        ETileButton::new("Spatial Gauge", icons.add)
+                            .description("Spatial Gauge")
+                            .width(button_width)
+                            .height(160.0),
+                    );
+
+                    if create_spatial_gauge_btn.clicked() {
+                        state_mut.cmd_palette_state.open_for_window(
+                            target_window,
+                            palette_items::create_spatial_gauge(None),
+                        );
+                    }
                 });
             },
         );
@@ -3038,6 +3083,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
+                        if let egui_tiles::Tile::Pane(Pane::SpatialGauge(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
                         if let egui_tiles::Tile::Pane(
                             Pane::VideoStream(pane) | Pane::SensorView(pane),
                         ) = tile
@@ -3180,6 +3229,29 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddSpatialGauge(parent_tile_id, eql) => {
+                        if read_only {
+                            continue;
+                        }
+                        let entity = state_mut
+                            .commands
+                            .spawn(super::spatial_gauge::SpatialGaugeData::new(
+                                eql.clone(),
+                                bevy_geo_frames::GeoFrame::ECEF,
+                                impeller2_wkt::DisplayFrame::default(),
+                            ))
+                            .id();
+                        let monitor = SpatialGaugePane::new(entity, eql.clone());
+
+                        let pane = Pane::SpatialGauge(monitor);
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.selected_object =
+                                SelectedObject::SpatialGauge { gauge_id: entity };
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                     TreeAction::AddVideoStream(parent_tile_id, msg_name, name) => {
                         if read_only {
                             continue;
@@ -3260,6 +3332,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 Pane::Monitor(monitor) => {
                                     ui_state.selected_object = SelectedObject::Monitor {
                                         monitor_id: monitor.entity,
+                                    };
+                                }
+                                Pane::SpatialGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::SpatialGauge {
+                                        gauge_id: gauge.entity,
                                     };
                                 }
                                 Pane::QueryTable(table) => {
@@ -3472,6 +3549,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     Pane::Monitor(_) => {}
+                    Pane::SpatialGauge(_) => {}
                     Pane::QueryTable(_) => {}
                     Pane::QueryPlot(query_plot) => {
                         if visible {

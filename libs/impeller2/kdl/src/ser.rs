@@ -202,6 +202,7 @@ fn serialize_panel(panel: &Panel) -> KdlNode {
         Panel::Viewport(viewport) => serialize_viewport(viewport),
         Panel::Graph(graph) => serialize_graph(graph),
         Panel::ComponentMonitor(monitor) => serialize_component_monitor(monitor),
+        Panel::SpatialGauge(monitor) => serialize_spatial_gauge(monitor),
         Panel::ActionPane(action_pane) => serialize_action_pane(action_pane),
         Panel::QueryTable(query_table) => serialize_query_table(query_table),
         Panel::QueryPlot(query_plot) => serialize_query_plot(query_plot),
@@ -644,6 +645,18 @@ fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
         "component_name",
         monitor.component_name.clone(),
     ));
+    node
+}
+
+fn serialize_spatial_gauge(monitor: &SpatialGauge) -> KdlNode {
+    let mut node = KdlNode::new("spatial_gauge");
+    push_optional_name_prop(&mut node, monitor.name.as_deref());
+    node.entries_mut()
+        .push(KdlEntry::new_prop("eql", monitor.eql.clone()));
+    node.entries_mut()
+        .push(KdlEntry::new_prop("source", <&str>::from(monitor.source)));
+    node.entries_mut()
+        .push(KdlEntry::new_prop("display", monitor.display.as_str()));
     node
 }
 

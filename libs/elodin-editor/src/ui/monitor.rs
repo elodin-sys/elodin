@@ -145,19 +145,59 @@ fn render_component_value_cards(
     metadata: &ComponentMetadata,
     value: &mut ComponentValue,
 ) {
+    let element_names = metadata
+        .element_names()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(Option::Some)
+        .chain(std::iter::repeat(None));
+
+    let cards: Vec<(String, String)> = value
+        .indexed_iter_mut()
+        .zip(element_names)
+        .map(|((dim_i, value), element_name)| {
+            let label = element_name
+                .map(|name| name.to_string())
+                .unwrap_or_else(|| format!("{dim_i:?}"));
+
+            let value = match value {
+                impeller2_bevy::ElementValueMut::U8(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::U16(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::U32(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::U64(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::I8(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::I16(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::I32(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::I64(v) => v.to_string(),
+                impeller2_bevy::ElementValueMut::F64(v) => {
+                    let mut str = format!("{v:.8}");
+                    str.truncate(10);
+                    str
+                }
+                impeller2_bevy::ElementValueMut::F32(v) => {
+                    let mut str = format!("{v:.8}");
+                    str.truncate(10);
+                    str
+                }
+                impeller2_bevy::ElementValueMut::Bool(v) => v.to_string(),
+            };
+            (label, value)
+        })
+        .collect();
+
+    render_value_cards(ui, &cards);
+}
+
+/// Render a row of labelled value cards (shared by the component monitor and
+/// the spatial gauge).
+pub fn render_value_cards(ui: &mut egui::Ui, cards: &[(String, String)]) {
     let width = ui.max_rect().width();
     ui.horizontal_wrapped(|ui| {
         ui.set_width(width);
-        let element_names = metadata
-            .element_names()
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(Option::Some)
-            .chain(std::iter::repeat(None));
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.spacing_mut().item_spacing.y = 0.0;
 
-        for ((dim_i, value), element_name) in value.indexed_iter_mut().zip(element_names) {
+        for (label, value) in cards {
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
 
             ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
@@ -169,31 +209,6 @@ fn render_component_value_cards(
                         ui.set_width(120. - 8.);
                         ui.set_height(50.);
                         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                            let label = element_name
-                                .map(|name| name.to_string())
-                                .unwrap_or_else(|| format!("{dim_i:?}"));
-
-                            let value = match value {
-                                impeller2_bevy::ElementValueMut::U8(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::U16(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::U32(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::U64(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I8(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I16(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I32(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I64(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::F64(v) => {
-                                    let mut str = format!("{v:.8}");
-                                    str.truncate(10);
-                                    str
-                                }
-                                impeller2_bevy::ElementValueMut::F32(v) => {
-                                    let mut str = format!("{v:.8}");
-                                    str.truncate(10);
-                                    str
-                                }
-                                impeller2_bevy::ElementValueMut::Bool(v) => v.to_string(),
-                            };
                             ui.add_space(8.0);
                             let scheme = get_scheme();
                             let value = RichText::new(value)

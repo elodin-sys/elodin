@@ -26,6 +26,7 @@ pub mod monitor;
 pub mod object3d;
 pub mod query_table;
 pub mod sensor_camera;
+pub mod spatial_gauge;
 pub mod timeline;
 pub mod viewport;
 
@@ -35,7 +36,8 @@ pub use widgets::*;
 use self::{
     data_overview::InspectorDataOverview, entity::InspectorEntity, graph::InspectorGraph,
     monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
-    sensor_camera::InspectorSensorCamera, timeline::InspectorTimeline, viewport::InspectorViewport,
+    sensor_camera::InspectorSensorCamera, spatial_gauge::InspectorSpatialGauge,
+    timeline::InspectorTimeline, viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -158,6 +160,14 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         world,
                                         "inspector_monitor",
                                         monitor_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::SpatialGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorSpatialGauge>(
+                                        world,
+                                        "inspector_spatial_gauge",
+                                        gauge_id,
                                     );
                                     Default::default()
                                 }

@@ -125,6 +125,7 @@ fn panel(
         Panel::VSplit(_) | Panel::HSplit(_) => icons.container,
         Panel::Graph(_) => icons.plot,
         Panel::ComponentMonitor(_) => icons.viewport,
+        Panel::SpatialGauge(_) => icons.viewport,
         Panel::ActionPane(_) => icons.viewport,
         Panel::QueryTable(_) => icons.viewport,
         Panel::QueryPlot(_) => icons.plot,

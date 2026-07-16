@@ -6,7 +6,7 @@ use crate::{
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
-        inspector, monitor, plot, query_plot, query_table,
+        inspector, monitor, plot, query_plot, query_table, spatial_gauge,
         tiles::{self, Pane},
         timeline::{TelemetryMode, TimelineSettings},
         window::compute_window_title,
@@ -20,8 +20,9 @@ use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
-    VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
+    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem,
+    SpatialGauge, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
+    WorldMesh,
 };
 
 pub mod bindings;
@@ -54,6 +55,7 @@ pub struct CurrentWindowSchematics(pub Vec<WindowSchematicEntry>);
 pub struct SchematicParam<'w, 's> {
     pub query_tables: Query<'w, 's, &'static query_table::QueryTableData>,
     pub monitors: Query<'w, 's, &'static monitor::MonitorData>,
+    pub spatial_gauges: Query<'w, 's, &'static spatial_gauge::SpatialGaugeData>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
@@ -99,6 +101,7 @@ impl SchematicParam<'_, '_> {
                 .ok()
                 .map(|state| state.label.clone()),
             Pane::Monitor(monitor) => Some(monitor.name.clone()),
+            Pane::SpatialGauge(monitor) => Some(monitor.name.clone()),
             Pane::QueryTable(table) => Some(table.name.clone()),
             Pane::QueryPlot(plot) => self
                 .graph_states
@@ -300,6 +303,16 @@ impl SchematicParam<'_, '_> {
                         let monitor_data = self.monitors.get(monitor.entity).ok()?;
                         Some(Panel::ComponentMonitor(ComponentMonitor {
                             component_name: monitor_data.component_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
+
+                    Pane::SpatialGauge(monitor) => {
+                        let data = self.spatial_gauges.get(monitor.entity).ok()?;
+                        Some(Panel::SpatialGauge(SpatialGauge {
+                            eql: data.eql.clone(),
+                            source: data.source,
+                            display: data.display,
                             name: pane_name,
                         }))
                     }
