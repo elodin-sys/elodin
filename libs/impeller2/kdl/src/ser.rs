@@ -650,9 +650,8 @@ fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
 
 fn serialize_spatial_gauge(monitor: &SpatialGauge) -> KdlNode {
     let mut node = KdlNode::new("spatial_gauge");
+    node.entries_mut().push(KdlEntry::new(monitor.eql.clone()));
     push_optional_name_prop(&mut node, monitor.name.as_deref());
-    node.entries_mut()
-        .push(KdlEntry::new_prop("eql", monitor.eql.clone()));
     node.entries_mut()
         .push(KdlEntry::new_prop("source", <&str>::from(monitor.source)));
     node.entries_mut()

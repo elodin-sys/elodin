@@ -1063,9 +1063,13 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 
 fn parse_spatial_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
     let name = parse_name(node);
+    // Prefer positional eql (matches the grammar / graph), fall back to named.
     let eql = node
-        .get("eql")
-        .and_then(|v| v.as_string())
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .or_else(|| node.get("eql").and_then(|v| v.as_string()))
         .ok_or_else(|| KdlSchematicError::MissingProperty {
             property: "eql".to_string(),
             node: "spatial_gauge".to_string(),
@@ -3586,7 +3590,7 @@ object_3d "a.world_pos" {
 
     #[test]
     fn test_spatial_gauge() {
-        let kdl = r#"spatial_gauge name="Missile" eql="NAVEKFSTATE.POS_ECEF" source="ECEF" display="NED""#;
+        let kdl = r#"spatial_gauge "NAVEKFSTATE.POS_ECEF" name="Missile" source="ECEF" display="NED""#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert_eq!(schematic.elems.len(), 1);
@@ -3601,9 +3605,22 @@ object_3d "a.world_pos" {
     }
 
     #[test]
+    fn test_spatial_gauge_named_eql() {
+        // Named eql= is also accepted (same as older schematics / docs examples).
+        let schematic =
+            parse_schematic(r#"spatial_gauge name="Missile" eql="NAVEKFSTATE.POS_ECEF""#).unwrap();
+        if let SchematicElem::Panel(Panel::SpatialGauge(monitor)) = &schematic.elems[0] {
+            assert_eq!(monitor.eql, "NAVEKFSTATE.POS_ECEF");
+            assert_eq!(monitor.name.as_deref(), Some("Missile"));
+        } else {
+            panic!("Expected spatial_gauge");
+        }
+    }
+
+    #[test]
     fn test_spatial_gauge_defaults_and_round_trip() {
         // Omitted source/display fall back to ECEF source, NED display.
-        let schematic = parse_schematic(r#"spatial_gauge eql="a.pos""#).unwrap();
+        let schematic = parse_schematic(r#"spatial_gauge "a.pos""#).unwrap();
         let SchematicElem::Panel(panel) = &schematic.elems[0] else {
             panic!("Expected panel");
         };
@@ -3613,10 +3630,19 @@ object_3d "a.world_pos" {
         assert_eq!(monitor.source, GeoFrame::ECEF);
         assert_eq!(monitor.display, DisplayFrame::NED);
 
-        // LLA round-trips through serialization.
-        let kdl = r#"spatial_gauge name="M" eql="a.pos" source="NED" display="LLA""#;
+        // LLA round-trips through serialization (positional eql).
+        let kdl = r#"spatial_gauge "a.pos" name="M" source="NED" display="LLA""#;
         let parsed = parse_schematic(kdl).unwrap();
         let serialized = crate::serialize_schematic(&parsed);
+        assert!(
+            serialized.contains("spatial_gauge a.pos")
+                || serialized.contains(r#"spatial_gauge "a.pos""#),
+            "expected positional eql in: {serialized}"
+        );
+        assert!(
+            !serialized.contains("eql="),
+            "eql should be positional, not named, in: {serialized}"
+        );
         let reparsed = parse_schematic(&serialized).unwrap();
         if let SchematicElem::Panel(Panel::SpatialGauge(m)) = &reparsed.elems[0] {
             assert_eq!(m.eql, "a.pos");
