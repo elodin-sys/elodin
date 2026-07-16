@@ -1,6 +1,6 @@
 use bevy::asset::Asset;
 use bevy::log::warn_once;
-use bevy::prelude::{DetectChanges, InRef, Res, ResMut};
+use bevy::prelude::{InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{Assets, Handle},
@@ -9,22 +9,22 @@ use bevy::{
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PrimType, Timestamp};
+use impeller2::types::{ComponentId, ComponentView, OwnedPacket, Timestamp};
 use impeller2_bevy::{
-    CommandsExt, ComponentSchemaRegistry, ComponentValueMap, EntityMap, PacketGrantR,
-    PacketHandlerInput, PacketHandlers,
+    BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
+    PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
 };
 use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, GetTimeSeries, LastUpdated, PlotOverviewQuery,
+    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, Line3d, VectorArrow3d,
 };
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
 use nodit::interval::ii;
 use roaring::bitmap::RoaringBitmap;
-use zerocopy::{Immutable, IntoBytes, TryFromBytes};
+use zerocopy::{Immutable, IntoBytes};
 
 use std::any::type_name;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -32,8 +32,14 @@ use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
+use crate::object_3d::Object3DState;
+use crate::sensor_camera::SensorCameraConfigs;
+use crate::ui::inspector::viewport::Viewport;
+use crate::ui::monitor::MonitorData;
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
-use crate::{SelectedTimeRange, TimeRangeBehavior};
+use crate::ui::plot::state::GraphState;
+use crate::ui::schematic::EqlExt;
+use crate::{EqlContext, SelectedTimeRange};
 use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
 use super::PlotBounds;
@@ -104,18 +110,8 @@ pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
     pub lines: BTreeMap<usize, Handle<Line>>,
-    request_states: HashMap<Timestamp, RequestState>,
-    /// Whether the overview data has been requested for each line element
-    overview_requested: HashMap<usize, bool>,
-}
-
-#[derive(Clone, Debug)]
-enum RequestState {
-    Requested(Instant),
-    Returned {
-        len: usize,
-        last_timestamp: Option<Timestamp>,
-    },
+    /// Last time this component's LineTrees were synced from SeriesStore.
+    last_query_attempt: Option<Instant>,
 }
 
 impl PlotDataComponent {
@@ -124,8 +120,7 @@ impl PlotDataComponent {
             label: component_label.to_string(),
             element_names,
             lines: BTreeMap::new(),
-            request_states: HashMap::new(),
-            overview_requested: HashMap::new(),
+            last_query_attempt: None,
         }
     }
 
@@ -154,9 +149,8 @@ impl PlotDataComponent {
             });
             let line = assets.get_mut(line.id()).expect("missing line asset");
             // Only accept data at timestamps beyond all existing data for this
-            // line.  The FixedRate stream sends a snapshot at the current
-            // playback position each frame; skipping timestamps already covered
-            // prevents corrupting historical data loaded by GetTimeSeries.
+            // line. Live FixedRate snapshots can repeat the playhead timestamp;
+            // skipping already-covered times keeps the tip monotonic.
             let mut accepted = false;
             if let Some(last) = line.data.last() {
                 if timestamp <= last.summary.end_timestamp {
@@ -211,6 +205,7 @@ pub fn pkt_handler(
     tick: Res<CurrentTimestamp>,
     earliest_timestamp: Res<EarliestTimestamp>,
     curve_compress: Res<CurveCompressSettings>,
+    selected_range: Res<SelectedTimeRange>,
 ) {
     let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
@@ -236,12 +231,15 @@ pub fn pkt_handler(
         ) {
             warn_once!(?err, "graph sink failed");
         }
-        maybe_compress_all_graph_lines(
-            &mut collected_graph_data,
-            &mut lines,
-            earliest_timestamp.0,
-            &curve_compress,
-        );
+        // Short windows draw every sample — do not rewrite the CPU LineTree via HC.
+        if !crate::is_short_accuracy_window(&selected_range.0) {
+            maybe_compress_all_graph_lines(
+                &mut collected_graph_data,
+                &mut lines,
+                earliest_timestamp.0,
+                &curve_compress,
+            );
+        }
     }
 }
 
@@ -249,8 +247,9 @@ pub fn pkt_handler(
 /// (`hamann-chen-line`, algorithm structure from Shane Celis’s C# gist linked on
 /// [`CurveCompressSettings`]).
 ///
-/// Does nothing when [`CurveCompressSettings::enabled`] is false. Otherwise, for each plot
-/// component: if there are **three** lines and timestamps match across them, tries joint 3D
+/// Does nothing when [`CurveCompressSettings::enabled`] is false. Callers should also skip this
+/// for short accuracy windows (≤30 s) so live ingest cannot rewrite truth. Otherwise, for each
+/// plot component: if there are **three** lines and timestamps match across them, tries joint 3D
 /// compression; else compresses each line independently. GPU index-buffer sizing is handled
 /// separately in the plot render path.
 pub fn maybe_compress_all_graph_lines(
@@ -425,504 +424,611 @@ pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut comman
     packet_handlers.0.push(sys);
 }
 
-fn process_time_series<T>(
-    time_series_buf: &[u8],
-    timestamps: &[Timestamp],
-    len: usize,
-    plot_data: &mut PlotDataComponent,
-    lines: &mut Assets<Line>,
-    earliest_timestamp: Timestamp,
-) where
-    T: AsF32 + TryFromBytes + Immutable,
-{
-    let Ok(data) = <[T]>::try_ref_from_bytes(time_series_buf) else {
-        return;
-    };
-    for i in 0..len {
-        let line = plot_data.lines.entry(i).or_insert_with(|| {
-            let label = plot_data
-                .element_names
-                .get(i)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("[{i}]"));
-            lines.add(Line {
-                label,
-                ..Default::default()
-            })
-        });
-        let values = data.iter().skip(i).step_by(len).map(|v| v.as_f32());
-        let Some(line) = lines.get_mut(line) else {
-            continue;
-        };
-        let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values) else {
-            continue;
-        };
-        line.data.insert(chunk);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn handle_time_series(
-    InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
-    mut collected_graph_data: ResMut<CollectedGraphData>,
-    entity_map: Res<EntityMap>,
-    component_values: Query<&ComponentValueMap>,
-    mut lines: ResMut<Assets<Line>>,
-    mut commands: Commands,
-    mut range: Range<Timestamp>,
-    entity_id: ComponentId,
-    component_id: ComponentId,
-    earliest_timestamp: Res<EarliestTimestamp>,
-    schema_reg: Res<ComponentSchemaRegistry>,
-) {
-    match pkt {
-        OwnedPacket::Msg(_) => {}
-        OwnedPacket::Table(_) => {}
-        OwnedPacket::TimeSeries(time_series) => {
-            let Some((len, prim_type)) = entity_map
-                .get(&entity_id)
-                .and_then(|entity| component_values.get(*entity).ok())
-                .and_then(|component_value_map| component_value_map.get(&component_id))
-                .map(|current_value| {
-                    (
-                        current_value.shape().iter().copied().product::<usize>(),
-                        current_value.prim_type(),
-                    )
-                })
-                .or_else(|| {
-                    let schema = schema_reg.0.get(&component_id)?;
-                    Some((
-                        schema.shape().iter().copied().product::<usize>(),
-                        schema.prim_type(),
-                    ))
-                })
-            else {
-                return;
-            };
-            let Ok(timestamps) = time_series.timestamps() else {
-                return;
-            };
-            let Ok(buf) = time_series.data() else {
-                return;
-            };
-            let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
-                return;
-            };
-            match prim_type {
-                PrimType::U8 => process_time_series::<u8>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::U16 => process_time_series::<u16>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::U32 => process_time_series::<u32>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::U64 => process_time_series::<u64>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I8 => process_time_series::<i8>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I16 => process_time_series::<i16>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I32 => process_time_series::<i32>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I64 => process_time_series::<i64>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::Bool => process_time_series::<bool>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::F32 => process_time_series::<f32>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::F64 => process_time_series::<f64>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-            }
-            plot_data.request_states.insert(
-                range.start,
-                RequestState::Returned {
-                    len: timestamps.len(),
-                    last_timestamp: timestamps.last().copied(),
-                },
-            );
-            let Some(last_timestamp) = timestamps.last() else {
-                return;
-            };
-            if last_timestamp >= &range.end {
-                return;
-            }
-            // GetTimeSeries returns the end bound inclusively, so reusing the
-            // terminal timestamp overlaps the next page with the current chunk.
-            range.start = next_timestamp(*last_timestamp);
-
-            if range.start >= range.end {
-                return;
-            }
-
-            if timestamps.len() < CHUNK_LEN {
-                return;
-            }
-            let range = next_range(range, plot_data, &lines);
-
-            let packet_id = fastrand::u16(..).to_le_bytes();
-            let start = range.start;
-            let end = range.end;
-            let msg = GetTimeSeries {
-                id: packet_id,
-                range,
-                component_id,
-                limit: Some(CHUNK_LEN),
-            };
-            commands.send_req_with_handler(
-                msg,
-                packet_id,
-                move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                      collected_graph_data: ResMut<CollectedGraphData>,
-                      entity_map: Res<EntityMap>,
-                      component_values: Query<&ComponentValueMap>,
-                      lines: ResMut<Assets<Line>>,
-                      earliest_timestamp: Res<EarliestTimestamp>,
-                      schema_reg: Res<ComponentSchemaRegistry>,
-                      commands: Commands| {
-                    handle_time_series(
-                        pkt,
-                        collected_graph_data,
-                        entity_map,
-                        component_values,
-                        lines,
-                        commands,
-                        start..end,
-                        entity_id,
-                        component_id,
-                        earliest_timestamp,
-                        schema_reg,
-                    );
-                },
-            );
-        }
-    }
-}
-
 pub fn queue_timestamp_read(
     selected_range: Res<SelectedTimeRange>,
-    mut commands: Commands,
+    behavior: Res<crate::TimeRangeBehavior>,
     mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
     earliest_timestamp: Res<EarliestTimestamp>,
-    latest_timestamp: Res<LastUpdated>,
-    replay_mode: Option<Res<crate::ReplayMode>>,
+    graph_states: Query<&GraphState>,
+    line_3ds: Query<&Line3d>,
+    object_3ds: Query<&Object3DState>,
+    eql_ctx: Res<EqlContext>,
+    series_store: Res<TelemetryCache>,
+    mut sync_state: ResMut<PlotSyncState>,
+    mut prefetch: ResMut<VisiblePrefetchState>,
+    schema_reg: Res<ComponentSchemaRegistry>,
+    mut commands: Commands,
 ) {
-    if selected_range.0.end.0 == i64::MIN
-        || selected_range.0.start.0 == i64::MAX
-        || selected_range.0.start.0 == i64::MIN
-        || selected_range.0.end.0 == i64::MAX
-    {
+    let sync_range = visible_sync_range(&selected_range, &behavior);
+    let Some((range_key, sync_range)) = sync_range else {
         return;
-    }
+    };
 
-    let query_range = data_query_range(
-        selected_range.0.clone(),
-        earliest_timestamp.0,
-        latest_timestamp.0,
-        replay_mode.is_some(),
+    // Fill the visible window ASAP for enabled plots while full begin→end
+    // backfill continues in the background.
+    prefetch_visible_window(
+        &sync_range,
+        range_key,
+        &graph_states,
+        &line_3ds,
+        &object_3ds,
+        &eql_ctx,
+        &series_store,
+        &schema_reg,
+        &mut prefetch,
+        &mut commands,
     );
-    if query_range.start >= query_range.end {
+
+    sync_plot_lines_from_series_store(
+        range_key,
+        &sync_range,
+        &mut graph_data,
+        &mut lines,
+        earliest_timestamp.0,
+        &graph_states,
+        &line_3ds,
+        &object_3ds,
+        &eql_ctx,
+        &series_store,
+        &mut sync_state,
+    );
+}
+
+fn visible_sync_range(
+    selected_range: &SelectedTimeRange,
+    behavior: &crate::TimeRangeBehavior,
+) -> Option<((i64, i64), Range<Timestamp>)> {
+    let selected = selected_range.0.clone();
+    if selected.start.0 == i64::MIN
+        || selected.end.0 == i64::MAX
+        || selected.start >= selected.end
+    {
+        return None;
+    }
+    let range_key = if behavior.is_trailing_window() {
+        let start = floor_ts_quantum(selected.start, REQUEST_KEY_QUANTUM_MICROS);
+        let end = Timestamp(
+            selected
+                .end
+                .0
+                .div_euclid(REQUEST_KEY_QUANTUM_MICROS)
+                .saturating_add(1)
+                .saturating_mul(REQUEST_KEY_QUANTUM_MICROS),
+        );
+        (start.0, end.0.max(start.0.saturating_add(1)))
+    } else {
+        (selected.start.0, selected.end.0)
+    };
+    Some((range_key, Timestamp(range_key.0)..Timestamp(range_key.1)))
+}
+
+/// Dedupes in-flight visible-window GetTimeSeries requests.
+#[derive(Resource, Default)]
+pub struct VisiblePrefetchState {
+    in_flight: HashSet<(ComponentId, i64, i64)>,
+}
+
+const VISIBLE_PREFETCH_LIMIT: usize = 8192;
+
+fn prefetch_visible_window(
+    sync_range: &Range<Timestamp>,
+    range_key: (i64, i64),
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    object_3ds: &Query<&Object3DState>,
+    eql_ctx: &EqlContext,
+    series_store: &TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+    prefetch: &mut VisiblePrefetchState,
+    commands: &mut Commands,
+) {
+    // Prefetch only plot/3D consumers; monitors/viewport/arrows are allowlisted
+    // in `update_series_fetch_priority` and filled by live + begin→end backfill.
+    let fetch_ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    if fetch_ids.is_empty() {
         return;
     }
-
-    // Simple volume-based decision: use overview for large time ranges (> 10 minutes)
-    // This covers two use cases:
-    // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading
-    // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
-    const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
-    let range_duration = query_range.end.0.saturating_sub(query_range.start.0);
-    let use_overview = range_duration > TEN_MINUTES_MICROS;
-
-    for (&component_id, component) in graph_data.components.iter_mut() {
-        let mut line = component
-            .lines
-            .first_key_value()
-            .and_then(|(_k, v)| lines.get_mut(v));
-
-        if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref())
-            && last_queried.elapsed() <= Duration::from_millis(250)
-        {
+    const MAX_VISIBLE_PREFETCH_IN_FLIGHT: usize = 32;
+    for component_id in fetch_ids {
+        if prefetch.in_flight.len() >= MAX_VISIBLE_PREFETCH_IN_FLIGHT {
+            break;
+        }
+        if !schema_reg.0.contains_key(&component_id) {
             continue;
         }
-
-        if use_overview {
-            // Request overview for each element that hasn't been requested yet
-            let num_elements = component.element_names.len().max(1);
-
-            for element_index in 0..num_elements {
-                if component
-                    .overview_requested
-                    .get(&element_index)
-                    .copied()
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-
-                // Mark as requested
-                component.overview_requested.insert(element_index, true);
-
-                let packet_id = fastrand::u16(..).to_le_bytes();
-
-                let query = PlotOverviewQuery {
-                    id: packet_id,
-                    component_id,
-                    range: query_range.clone(),
-                    max_points: OVERVIEW_MAX_POINTS as u32,
-                    element_index,
-                };
-                let earliest = earliest_timestamp.0;
-
-                commands.send_req_with_handler(
-                    query,
-                    packet_id,
-                    move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                          mut collected_graph_data: ResMut<CollectedGraphData>,
-                          mut lines: ResMut<Assets<Line>>| {
-                        handle_overview_response(
-                            pkt,
-                            &mut collected_graph_data,
-                            &mut lines,
-                            component_id,
-                            element_index,
-                            earliest,
-                        );
-                    },
-                );
-            }
-            // When using overview mode, skip the regular gap-filling logic
-            // Overview provides downsampled data for the full range at once
+        if series_store.sample_count_in_range(&component_id, sync_range) > 0 {
+            prefetch
+                .in_flight
+                .remove(&(component_id, range_key.0, range_key.1));
             continue;
         }
-
-        let mut process_range = |mut range: Range<Timestamp>| {
-            let packet_id = fastrand::u16(..).to_le_bytes();
-
-            loop {
-                match component.request_states.get(&range.start) {
-                    // Rerequest chunks if we have not received a response for 10 seconds
-                    Some(RequestState::Requested(time))
-                        if time.elapsed() > Duration::from_secs(10) =>
-                    {
-                        break;
-                    }
-
-                    // When the visible range grows (replay mode), extend the tail
-                    // from the last returned timestamp instead of replacing the
-                    // whole partial chunk from its original start.
-                    Some(RequestState::Returned {
-                        len,
-                        last_timestamp,
-                    }) if *len < CHUNK_LEN
-                        && last_timestamp
-                            .map(|t| t < query_range.end)
-                            .unwrap_or_default() =>
-                    {
-                        let Some(last_timestamp) = *last_timestamp else {
-                            return;
-                        };
-                        range.start = next_timestamp(last_timestamp);
-                        if range.start >= range.end {
-                            return;
-                        }
-                    }
-                    // Skip the chunk if it was already requested
-                    Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
-                        return;
-                    }
-                    None => break,
-                }
-            }
-
-            component
-                .request_states
-                .insert(range.start, RequestState::Requested(Instant::now()));
-
-            let start = range.start;
-            let end = range.end;
-            let msg = GetTimeSeries {
-                id: packet_id,
-                range: range.clone(),
-                component_id,
-                limit: Some(CHUNK_LEN),
-            };
-            commands.send_req_with_handler(
-                msg,
-                packet_id,
-                move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                      collected_graph_data: ResMut<CollectedGraphData>,
-                      entity_map: Res<EntityMap>,
-                      component_values: Query<&ComponentValueMap>,
-                      lines: ResMut<Assets<Line>>,
-                      earliest_timestamp: Res<EarliestTimestamp>,
-                      schema_reg: Res<ComponentSchemaRegistry>,
-                      commands: Commands| {
-                    handle_time_series(
-                        pkt,
-                        collected_graph_data,
-                        entity_map,
-                        component_values,
-                        lines,
-                        commands,
-                        start..end,
-                        component_id,
-                        component_id,
-                        earliest_timestamp,
-                        schema_reg,
-                    );
-                },
-            );
+        let key = (component_id, range_key.0, range_key.1);
+        if prefetch.in_flight.contains(&key) {
+            continue;
+        }
+        prefetch.in_flight.insert(key);
+        let start = sync_range.start;
+        let end = sync_range.end;
+        let packet_id = fastrand::u16(..).to_le_bytes();
+        let msg = GetTimeSeries {
+            id: packet_id,
+            range: start..end,
+            component_id,
+            limit: Some(VISIBLE_PREFETCH_LIMIT),
         };
-        if let Some(line) = line.as_mut() {
-            line.last_queried = Some(Instant::now());
-            line.data
-                .tree
-                .gaps_trimmed(nodit::interval::ie(query_range.start.0, query_range.end.0))
-                .map(|i| Timestamp(i.start())..Timestamp(i.end()))
-                .for_each(process_range)
-        } else {
-            process_range(query_range.clone());
-        }
+        commands.send_req_with_handler(
+            msg,
+            packet_id,
+            move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+                  mut series_store: ResMut<TelemetryCache>,
+                  schema_reg: Res<ComponentSchemaRegistry>,
+                  mut prefetch: ResMut<VisiblePrefetchState>,
+                  mut commands: Commands| {
+                apply_visible_prefetch_page(
+                    &pkt,
+                    component_id,
+                    start,
+                    end,
+                    range_key,
+                    &mut series_store,
+                    &schema_reg,
+                    &mut prefetch,
+                    &mut commands,
+                );
+            },
+        );
     }
 }
 
+fn apply_visible_prefetch_page(
+    pkt: &OwnedPacket<PacketGrantR>,
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    range_key: (i64, i64),
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+    prefetch: &mut VisiblePrefetchState,
+    commands: &mut Commands,
+) {
+    let OwnedPacket::TimeSeries(time_series) = pkt else {
+        prefetch
+            .in_flight
+            .remove(&(component_id, range_key.0, range_key.1));
+        return;
+    };
+    let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
+        prefetch
+            .in_flight
+            .remove(&(component_id, range_key.0, range_key.1));
+        return;
+    };
+    let Some(schema) = schema_reg.0.get(&component_id) else {
+        prefetch
+            .in_flight
+            .remove(&(component_id, range_key.0, range_key.1));
+        return;
+    };
+    let elem_size = schema.size();
+    let mut last_ts = req_start;
+    for (i, &timestamp) in timestamps.iter().enumerate() {
+        let offset = i * elem_size;
+        if offset + elem_size > buf.len() {
+            break;
+        }
+        if let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+            &buf[offset..offset + elem_size],
+            schema.shape(),
+            schema.prim_type(),
+        ) {
+            series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
+            last_ts = timestamp;
+        }
+    }
+    if let Some(&first) = timestamps.first() {
+        series_store.mark_covered(
+            component_id,
+            first,
+            Timestamp(last_ts.0.saturating_add(1)),
+        );
+    }
+    // Continue paging until the visible window is filled or the DB has no more.
+    if !timestamps.is_empty()
+        && timestamps.len() >= VISIBLE_PREFETCH_LIMIT
+        && last_ts.0.saturating_add(1) < req_end.0
+    {
+        let next_start = Timestamp(last_ts.0.saturating_add(1));
+        let packet_id = fastrand::u16(..).to_le_bytes();
+        let msg = GetTimeSeries {
+            id: packet_id,
+            range: next_start..req_end,
+            component_id,
+            limit: Some(VISIBLE_PREFETCH_LIMIT),
+        };
+        commands.send_req_with_handler(
+            msg,
+            packet_id,
+            move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+                  mut series_store: ResMut<TelemetryCache>,
+                  schema_reg: Res<ComponentSchemaRegistry>,
+                  mut prefetch: ResMut<VisiblePrefetchState>,
+                  mut commands: Commands| {
+                apply_visible_prefetch_page(
+                    &pkt,
+                    component_id,
+                    next_start,
+                    req_end,
+                    range_key,
+                    &mut series_store,
+                    &schema_reg,
+                    &mut prefetch,
+                    &mut commands,
+                );
+            },
+        );
+    } else {
+        prefetch
+            .in_flight
+            .remove(&(component_id, range_key.0, range_key.1));
+    }
+}
+
+/// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
+/// Playback is never blocked: whatever samples are already in the store are shown;
+/// as backfill / visible prefetch streams in, subsequent syncs fill gaps.
+pub fn sync_plot_lines_from_series_store(
+    range_key: (i64, i64),
+    sync_range: &Range<Timestamp>,
+    graph_data: &mut CollectedGraphData,
+    lines: &mut Assets<Line>,
+    earliest: Timestamp,
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    object_3ds: &Query<&Object3DState>,
+    eql_ctx: &EqlContext,
+    series_store: &TelemetryCache,
+    sync_state: &mut PlotSyncState,
+) {
+    let fetch_ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let range_changed = sync_state.last_range != Some(range_key);
+    let enabled_changed = sync_state.last_enabled != fetch_ids;
+    let gen_changed = series_store.generation() != sync_state.last_generation;
+    let due = sync_state
+        .last_rebuild
+        .map(|t| t.elapsed() >= Duration::from_millis(100))
+        .unwrap_or(true);
+
+    if !range_changed && !enabled_changed && !(gen_changed && due) {
+        return;
+    }
+
+    sync_state.last_range = Some(range_key);
+    sync_state.last_generation = series_store.generation();
+    sync_state.last_enabled = fetch_ids.clone();
+    sync_state.last_rebuild = Some(Instant::now());
+
+    const TEN_MINUTES_MICROS: i64 = 600_000_000;
+    let range_duration = sync_range.end.0.saturating_sub(sync_range.start.0);
+    let max_points = if range_duration > TEN_MINUTES_MICROS {
+        Some(OVERVIEW_MAX_POINTS)
+    } else {
+        None
+    };
+
+    for (&component_id, component) in graph_data.components.iter_mut() {
+        if !fetch_ids.contains(&component_id) {
+            continue;
+        }
+        let samples_in_window = series_store.sample_count_in_range(&component_id, sync_range);
+        let num_elements = component.element_names.len().max(1);
+        for element_index in 0..num_elements {
+            let handle = component.lines.entry(element_index).or_insert_with(|| {
+                let label = component
+                    .element_names
+                    .get(element_index)
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| format!("[{element_index}]"));
+                lines.add(Line {
+                    label,
+                    ..Default::default()
+                })
+            });
+            let Some(line) = lines.get_mut(handle) else {
+                continue;
+            };
+            if samples_in_window == 0 {
+                // Don't wipe live tip / prior draw when the store hasn't caught
+                // up to this window yet — unless the camera moved (show empty).
+                if range_changed {
+                    line.data.clear();
+                }
+                continue;
+            }
+            line.data.clear();
+            project_series_element_to_line(
+                series_store,
+                component_id,
+                element_index,
+                sync_range,
+                earliest,
+                &mut line.data,
+                max_points,
+            );
+            line.last_queried = Some(Instant::now());
+        }
+        component.last_query_attempt = Some(Instant::now());
+    }
+}
+
+/// Tracks when plot LineTrees were last rebuilt from SeriesStore.
+#[derive(Resource, Default)]
+pub struct PlotSyncState {
+    last_range: Option<(i64, i64)>,
+    last_generation: u64,
+    last_enabled: HashSet<ComponentId>,
+    last_rebuild: Option<Instant>,
+}
+
+/// Request-key quantum (100 ms) — used when quantizing trailing sync windows.
+pub(crate) const REQUEST_KEY_QUANTUM_MICROS: i64 = 100_000;
+
+fn floor_ts_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
+    if quantum_micros <= 0 {
+        return ts;
+    }
+    Timestamp(ts.0.div_euclid(quantum_micros).saturating_mul(quantum_micros))
+}
+
+/// Parse an EQL string and insert every referenced component ID into `out`.
+fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<ComponentId>) {
+    if eql.trim().is_empty() {
+        return;
+    }
+    let Ok(parsed) = eql_ctx.0.parse_str(eql) else {
+        return;
+    };
+    for (c, _) in parsed.to_graph_components() {
+        out.insert(c.id);
+    }
+}
+
+/// Component IDs for plot LineTree sync / visible-window prefetch
+/// (graphs + Line3d + object_3d only).
+fn plot_fetch_component_ids(
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    object_3ds: &Query<&Object3DState>,
+    eql_ctx: &EqlContext,
+) -> HashSet<ComponentId> {
+    let mut ids = HashSet::new();
+    for gs in graph_states.iter() {
+        for ((path, _), _) in &gs.enabled_lines {
+            ids.insert(path.id);
+        }
+    }
+    for line in line_3ds.iter() {
+        collect_eql_component_ids(&line.eql, eql_ctx, &mut ids);
+    }
+    for obj in object_3ds.iter() {
+        collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+    }
+    ids
+}
+
+/// Full SeriesStore consumer set: plots/3D plus monitors, viewport cameras,
+/// and vector arrows.
+fn enabled_fetch_component_ids(
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    object_3ds: &Query<&Object3DState>,
+    monitors: &Query<&MonitorData>,
+    viewports: &Query<&Viewport>,
+    vector_arrows: &Query<&VectorArrow3d>,
+    eql_ctx: &EqlContext,
+) -> HashSet<ComponentId> {
+    let mut ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    for monitor in monitors.iter() {
+        if !monitor.component_name.trim().is_empty() {
+            ids.insert(ComponentId::new(&monitor.component_name));
+        }
+    }
+    for viewport in viewports.iter() {
+        collect_eql_component_ids(&viewport.pos.eql, eql_ctx, &mut ids);
+        collect_eql_component_ids(&viewport.look_at.eql, eql_ctx, &mut ids);
+        collect_eql_component_ids(&viewport.up.eql, eql_ctx, &mut ids);
+    }
+    for arrow in vector_arrows.iter() {
+        collect_eql_component_ids(&arrow.vector, eql_ctx, &mut ids);
+        if let Some(origin) = &arrow.origin {
+            collect_eql_component_ids(origin, eql_ctx, &mut ids);
+        }
+    }
+    ids
+}
+
+/// SeriesStore allowlist: UI consumers plus viewport adapter pair IDs
+/// (e.g. `ball_1.world_pos`, not only the static `world_pos` type id).
+pub(crate) fn build_series_store_allowlist(
+    consumer_ids: HashSet<ComponentId>,
+    extra_ids: impl IntoIterator<Item = ComponentId>,
+) -> HashSet<ComponentId> {
+    let mut ids = consumer_ids;
+    ids.extend(extra_ids);
+    ids
+}
+
+/// All `ComponentPathRegistry` IDs whose leaf name matches a registered adapter
+/// type (`WorldPos::COMPONENT_ID` = hash("world_pos"), etc.), plus the static
+/// adapter keys themselves.
+pub(crate) fn viewport_adapter_component_ids(
+    path_reg: &ComponentPathRegistry,
+    adapter_leaf_ids: &HashSet<ComponentId>,
+) -> HashSet<ComponentId> {
+    let mut ids = adapter_leaf_ids.clone();
+    for (&id, path) in path_reg.0.iter() {
+        if adapter_leaf_ids.contains(&path.tail().id) {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// `{entity}.world_pos` for each configured sensor camera parent entity.
+pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> HashSet<ComponentId> {
+    configs
+        .0
+        .iter()
+        .map(|c| ComponentId::new(&format!("{}.world_pos", c.entity_name)))
+        .collect()
+}
+
+/// Keep SeriesStore allowlist in sync with enabled plot / 3D / UI consumers.
+/// Reclaims RAM when IDs leave the allowlist so re-subscribe re-fetches cleanly.
+pub fn update_series_fetch_priority(
+    graph_states: Query<&GraphState>,
+    line_3ds: Query<&Line3d>,
+    object_3ds: Query<&Object3DState>,
+    monitors: Query<&MonitorData>,
+    viewports: Query<&Viewport>,
+    vector_arrows: Query<&VectorArrow3d>,
+    eql_ctx: Res<EqlContext>,
+    path_reg: Res<ComponentPathRegistry>,
+    adapters: Res<ComponentAdapters>,
+    sensor_cameras: Res<SensorCameraConfigs>,
+    mut priority: ResMut<SeriesFetchPriority>,
+    mut cache: ResMut<TelemetryCache>,
+    mut backfill: ResMut<BackfillState>,
+) {
+    let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
+    let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
+    extras.extend(sensor_camera_world_pos_ids(&sensor_cameras));
+    let next = build_series_store_allowlist(
+        enabled_fetch_component_ids(
+            &graph_states,
+            &line_3ds,
+            &object_3ds,
+            &monitors,
+            &viewports,
+            &vector_arrows,
+            &eql_ctx,
+        ),
+        extras,
+    );
+    for id in priority.high.difference(&next).copied().collect::<Vec<_>>() {
+        cache.remove_series(&id);
+        backfill.clear_component(id);
+    }
+    priority.high = next;
+}
+
+/// Project SeriesStore samples into a plot `LineTree` for one element.
+/// When `max_points` is set, stride-downsample so long windows stay GPU-friendly.
+pub(crate) fn project_series_element_to_line(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+    earliest: Timestamp,
+    line: &mut LineTree<f32>,
+    max_points: Option<usize>,
+) -> usize {
+    let Some(series) = cache.series(&component_id) else {
+        return 0;
+    };
+    let count = series.range(range.start..range.end).count();
+    if count == 0 {
+        return 0;
+    }
+    let stride = max_points
+        .map(|max| ((count + max - 1) / max).max(1))
+        .unwrap_or(1);
+
+    let mut timestamps = Vec::new();
+    let mut values = Vec::new();
+    let mut total = 0usize;
+    for (i, (ts, val)) in series.range(range.start..range.end).enumerate() {
+        if i % stride != 0 && i + 1 != count {
+            continue;
+        }
+        let Some(elem) = val.get(element_index) else {
+            continue;
+        };
+        timestamps.push(*ts);
+        values.push(elem.as_f32());
+        if timestamps.len() >= CHUNK_LEN {
+            let n = timestamps.len();
+            if let Some(chunk) = Chunk::from_iter(&timestamps, earliest, values.iter().copied()) {
+                line.insert(chunk);
+                total += n;
+            }
+            timestamps.clear();
+            values.clear();
+        }
+    }
+    if !timestamps.is_empty() {
+        let n = timestamps.len();
+        if let Some(chunk) = Chunk::from_iter(&timestamps, earliest, values.into_iter()) {
+            line.insert(chunk);
+            total += n;
+        }
+    }
+    total
+}
+
+/// Fraction of `a`'s duration that overlaps `b` (0.0–1.0).
+#[cfg(test)]
+pub(crate) fn range_overlap_ratio(a: &Range<Timestamp>, b: &Range<Timestamp>) -> f64 {
+    let overlap_start = a.start.0.max(b.start.0);
+    let overlap_end = a.end.0.min(b.end.0);
+    let overlap = overlap_end.saturating_sub(overlap_start).max(0);
+    let a_len = a.end.0.saturating_sub(a.start.0).max(1);
+    overlap as f64 / a_len as f64
+}
+
+/// Expand a selected window with prefetch margin for trailing / non-replay fetches.
+#[cfg(test)]
+pub(crate) fn expand_query_range_with_margin(
+    selected_range: Range<Timestamp>,
+    earliest: Timestamp,
+    latest: Timestamp,
+    trailing: bool,
+) -> Range<Timestamp> {
+    const MIN_PREFETCH_MARGIN: Duration = Duration::from_secs(2);
+    if !trailing {
+        return selected_range.start.max(earliest)..selected_range.end.min(latest);
+    }
+    let span = selected_range
+        .end
+        .0
+        .saturating_sub(selected_range.start.0)
+        .max(0);
+    let margin = span.max(MIN_PREFETCH_MARGIN.as_micros() as i64);
+    let start = Timestamp(selected_range.start.0.saturating_sub(margin).max(earliest.0));
+    let end = Timestamp(selected_range.end.0.saturating_add(margin).min(latest.0));
+    if start < end {
+        start..end
+    } else {
+        selected_range.start.max(earliest)..selected_range.end.min(latest)
+    }
+}
+
+#[cfg(test)]
 fn data_query_range(
     selected_range: Range<Timestamp>,
     earliest: Timestamp,
     latest: Timestamp,
     replay_mode: bool,
+    trailing: bool,
 ) -> Range<Timestamp> {
-    if replay_mode && earliest < latest {
-        earliest..latest
-    } else {
-        selected_range
-    }
+    // Trailing and replay: fetch selected ± margin (not the entire DB).
+    // Non-trailing recorded: clamp selected to DB bounds only.
+    let use_margin = trailing || replay_mode;
+    expand_query_range_with_margin(selected_range, earliest, latest, use_margin)
 }
 
-/// Handle the response from a PlotOverviewQuery.
-/// This inserts downsampled data into the LineTree for quick rendering.
-fn handle_overview_response(
-    pkt: InRef<OwnedPacket<PacketGrantR>>,
-    collected_graph_data: &mut CollectedGraphData,
-    lines: &mut Assets<Line>,
-    component_id: ComponentId,
-    element_index: usize,
-    earliest_timestamp: Timestamp,
-) {
-    let OwnedPacket::TimeSeries(time_series) = &*pkt else {
-        return;
-    };
-
-    let Ok(timestamps) = time_series.timestamps() else {
-        return;
-    };
-    let Ok(buf) = time_series.data() else {
-        return;
-    };
-
-    if timestamps.is_empty() {
-        return;
-    }
-
-    let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
-        return;
-    };
-
-    // Get or create the line for this element
-    let line = plot_data.lines.entry(element_index).or_insert_with(|| {
-        let label = plot_data
-            .element_names
-            .get(element_index)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("[{element_index}]"));
-        lines.add(Line {
-            label,
-            ..Default::default()
-        })
-    });
-
-    let Some(line) = lines.get_mut(line) else {
-        return;
-    };
-
-    // The response contains f32 values
-    let Ok(values) = <[f32]>::try_ref_from_bytes(buf) else {
-        return;
-    };
-
-    // Create a chunk with the overview data
-    if let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values.iter().copied()) {
-        line.data.insert(chunk);
-    }
-}
-
+#[cfg(test)]
 fn next_range(
     mut current_range: Range<Timestamp>,
     component: &PlotDataComponent,
@@ -938,6 +1044,7 @@ fn next_range(
     current_range
 }
 
+#[cfg(test)]
 fn next_timestamp(timestamp: Timestamp) -> Timestamp {
     Timestamp(timestamp.0.saturating_add(1))
 }
@@ -1073,33 +1180,6 @@ impl XYLine {
         let mut buf = SharedBuffer::default();
         buf.push(value);
         self.y_values.push(buf);
-    }
-}
-
-pub trait AsF32 {
-    fn as_f32(&self) -> f32;
-}
-macro_rules! impl_as_f32 {
-    ($($t:ty),*) => {
-        $(
-            impl AsF32 for $t {
-                fn as_f32(&self) -> f32 { *self as f32 }
-            }
-        )*
-    }
-}
-
-impl_as_f32!(u8, u16, u32, u64, i8, i16, i32, i64, f64);
-
-impl AsF32 for f32 {
-    fn as_f32(&self) -> f32 {
-        *self
-    }
-}
-
-impl AsF32 for bool {
-    fn as_f32(&self) -> f32 {
-        if *self { 1.0 } else { 0.0 }
     }
 }
 
@@ -1322,9 +1402,9 @@ pub struct LineTree<D: Clone + BoundOrd> {
     /// the archive is never decimated, running HC multiple times produces identical output
     /// (monotone quality) and parameter changes can be re-applied without loss.
     ///
-    /// Populated only for live streaming. Samples arriving via `GetTimeSeries` (historical DB
-    /// scroll) go through `handle_time_series`, which bypasses `push_value` and fills the view
-    /// directly — the archive stays empty for those ranges (elodin-db itself is the archive).
+    /// Populated only for live streaming via [`PlotDataComponent::push_value`].
+    /// Historical samples projected from SeriesStore fill the view (`tree`) directly
+    /// without updating this archive.
     raw_timestamps: Vec<Timestamp>,
     raw_values: Vec<D>,
     /// Archive length at the end of the last HC pass, for throttling decisions.
@@ -1622,11 +1702,12 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
     ) -> u32 {
+        // No selected-span context: treat as a long window (pixel-faithful on clip).
         self.write_to_index_buffer_with_sampling_range(
             index_buffer,
             render_queue,
-            line_visible_range.clone(),
             line_visible_range,
+            i64::MAX,
             pixel_width,
         )
     }
@@ -1636,11 +1717,16 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
-        sampling_range: Range<Timestamp>,
+        selected_span_micros: i64,
         pixel_width: usize,
     ) -> u32 {
-        let (chunk_count, index_count) = self.range_index_stats(sampling_range);
-        let step = index_sampling_step(chunk_count, index_count, pixel_width);
+        let (chunk_count, index_count) = self.range_index_stats(line_visible_range.clone());
+        let step = index_sampling_step_for_selection(
+            selected_span_micros,
+            chunk_count,
+            index_count,
+            pixel_width,
+        );
         self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
     }
 
@@ -1753,32 +1839,38 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         let first_half =
             nodit::interval::ii(i64::MIN, line_visible_range.start.0.saturating_sub(1));
         let second_half = nodit::interval::ii(line_visible_range.end.0.saturating_add(1), i64::MAX);
-        for (range, chunk) in self
-            .tree
-            .overlapping(first_half)
-            .chain(self.tree.overlapping(second_half))
-        {
-            if line_visible_range.contains(&Timestamp(range.start()))
-                || line_visible_range.contains(&Timestamp(range.end()))
-            {
-                continue;
+        for interval in [first_half, second_half] {
+            for (_range, chunk) in self.tree.remove_overlapping(interval) {
+                if let Some(alloc) = &mut self.data_buffer_shard_alloc
+                    && let Some(gpu) = chunk.data.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
+                if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc
+                    && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
             }
+        }
+    }
+
+    /// Drop all CPU/GPU chunks (full rebuild from SeriesStore).
+    pub fn clear(&mut self) {
+        let full = nodit::interval::ii(i64::MIN, i64::MAX);
+        for (_range, chunk) in self.tree.remove_overlapping(full) {
             if let Some(alloc) = &mut self.data_buffer_shard_alloc
                 && let Some(gpu) = chunk.data.gpu.lock().take()
             {
                 alloc.dealloc(gpu);
-                chunk.data.gpu_dirty.store(true, atomic::Ordering::SeqCst);
             }
             if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc
                 && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
             {
                 alloc.dealloc(gpu);
-                chunk
-                    .timestamps_float
-                    .gpu_dirty
-                    .store(true, atomic::Ordering::SeqCst);
             }
         }
+        self.clear_raw();
     }
 }
 
@@ -1981,9 +2073,25 @@ pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: 
     index_count.div_ceil(desired_index_len.max(1)).max(1)
 }
 
+/// For short accuracy windows (≤30 s), always draw every sample (`step = 1`).
+/// Longer windows use a pixel-faithful stride on the visible clip.
+pub fn index_sampling_step_for_selection(
+    selected_span_micros: i64,
+    zoomed_chunk_count: usize,
+    zoomed_index_count: usize,
+    pixel_width: usize,
+) -> usize {
+    if selected_span_micros <= crate::SHORT_WINDOW_ACCURACY_MICROS {
+        1
+    } else {
+        index_sampling_step(zoomed_chunk_count, zoomed_index_count, pixel_width)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use impeller2_wkt::ComponentValue;
 
     #[test]
     fn next_timestamp_advances_by_one_microsecond() {
@@ -2017,25 +2125,74 @@ mod tests {
     }
 
     #[test]
-    fn replay_query_range_uses_full_available_extent() {
+    fn replay_query_range_uses_selected_plus_margin() {
         let range = data_query_range(
-            Timestamp(50)..Timestamp(75),
-            Timestamp(10),
-            Timestamp(100),
+            Timestamp(5_000_000)..Timestamp(5_000_100),
+            Timestamp(0),
+            Timestamp(20_000_000),
             true,
+            false,
         );
-        assert_eq!(range, Timestamp(10)..Timestamp(100));
+        // span 100µs → margin max(100, 2s) = 2s
+        assert_eq!(range, Timestamp(3_000_000)..Timestamp(7_000_100));
     }
 
     #[test]
-    fn non_replay_query_range_stays_visible_window() {
+    fn non_replay_query_range_stays_visible_window_when_not_trailing() {
         let range = data_query_range(
             Timestamp(50)..Timestamp(75),
             Timestamp(10),
             Timestamp(100),
             false,
+            false,
         );
         assert_eq!(range, Timestamp(50)..Timestamp(75));
+    }
+
+    #[test]
+    fn trailing_query_range_expands_with_margin_clamped_to_db() {
+        // 5s window → margin max(5s, 2s) = 5s
+        let selected = Timestamp(10_000_000)..Timestamp(15_000_000);
+        let range = expand_query_range_with_margin(
+            selected,
+            Timestamp(0),
+            Timestamp(20_000_000),
+            true,
+        );
+        assert_eq!(range.start, Timestamp(5_000_000));
+        assert_eq!(range.end, Timestamp(20_000_000));
+    }
+
+    #[test]
+    fn request_key_quantum_collides_sub_100ms_starts() {
+        let a = floor_ts_quantum(Timestamp(40_050_000), REQUEST_KEY_QUANTUM_MICROS);
+        let b = floor_ts_quantum(Timestamp(40_090_000), REQUEST_KEY_QUANTUM_MICROS);
+        assert_eq!(a, b);
+        assert_eq!(a, Timestamp(40_000_000));
+    }
+
+    #[test]
+    fn range_overlap_ratio_full_overlap_is_one() {
+        let a = Timestamp(0)..Timestamp(1_000_000);
+        let b = Timestamp(0)..Timestamp(1_000_000);
+        assert!((range_overlap_ratio(&a, &b) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn range_overlap_ratio_half_slide_is_below_half() {
+        // Previous overview: [0, 20min]. Current: [15min, 35min] → 25% of prev remains.
+        let prev = Timestamp(0)..Timestamp(1_200_000_000);
+        let curr = Timestamp(900_000_000)..Timestamp(2_100_000_000);
+        let ratio = range_overlap_ratio(&prev, &curr);
+        assert!(ratio < 0.5, "ratio={ratio}");
+        assert!(ratio > 0.2, "ratio={ratio}");
+    }
+
+    #[test]
+    fn range_overlap_ratio_no_overlap_is_zero() {
+        let a = Timestamp(0)..Timestamp(100);
+        let b = Timestamp(200)..Timestamp(300);
+        assert_eq!(range_overlap_ratio(&a, &b), 0.0);
     }
 
     #[test]
@@ -2058,6 +2215,282 @@ mod tests {
     fn index_sampling_step_matches_index_budget() {
         assert_eq!(index_sampling_step(1, 100, 100), 1);
         assert_eq!(index_sampling_step(1, 1_000, 100), 3);
+    }
+
+    #[test]
+    fn series_store_allowlist_unions_plots_and_adapters() {
+        let plot = ComponentId(10);
+        let adapter = ComponentId(20);
+        let ids = build_series_store_allowlist(
+            [plot].into_iter().collect(),
+            [adapter],
+        );
+        assert!(ids.contains(&plot));
+        assert!(ids.contains(&adapter));
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn series_store_allowlist_adapters_alone_still_subscribe() {
+        let adapter = ComponentId(7);
+        let ids = build_series_store_allowlist(HashSet::new(), [adapter]);
+        assert_eq!(ids, [adapter].into_iter().collect());
+    }
+
+    #[test]
+    fn viewport_adapter_ids_expand_pair_paths_by_leaf() {
+        use impeller2_wkt::ComponentPath;
+        let leaf = ComponentId::new("world_pos");
+        let pair = ComponentId::new("ball_1.world_pos");
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg
+            .0
+            .insert(pair, ComponentPath::from_name("ball_1.world_pos"));
+        // Unrelated component must not be pulled in.
+        path_reg.0.insert(
+            ComponentId::new("ball_1.world_vel"),
+            ComponentPath::from_name("ball_1.world_vel"),
+        );
+        let adapter_leaves = [leaf].into_iter().collect();
+        let ids = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
+        assert!(ids.contains(&leaf));
+        assert!(ids.contains(&pair));
+        assert!(!ids.contains(&ComponentId::new("ball_1.world_vel")));
+    }
+
+    #[test]
+    fn monitor_component_name_maps_to_component_id() {
+        let name = "PCDUMESSAGE.ADC_12V";
+        assert_eq!(ComponentId::new(name), ComponentId::new("PCDUMESSAGE.ADC_12V"));
+    }
+
+    #[test]
+    fn sensor_camera_world_pos_ids_from_configs() {
+        use crate::sensor_camera::SensorCameraConfigs;
+        use impeller2_wkt::SensorCameraConfig;
+        let configs = SensorCameraConfigs(vec![SensorCameraConfig {
+            entity_name: "cam_ball_a".into(),
+            camera_name: "scene_cam".into(),
+            width: 64,
+            height: 64,
+            fov_degrees: 90.0,
+            near: 0.1,
+            far: 100.0,
+            pos_offset: [0.0, 0.0, 0.0],
+            rot_offset: [0.0, 0.0, 0.0],
+            format: "rgba8".into(),
+            effect: String::new(),
+            effect_params: Default::default(),
+            create_frustum: false,
+            show_ellipsoids: false,
+            frustums_color: Default::default(),
+            projection_color: Default::default(),
+            frustums_thickness: 0.01,
+            fps: 30.0,
+        }]);
+        let ids = sensor_camera_world_pos_ids(&configs);
+        assert!(ids.contains(&ComponentId::new("cam_ball_a.world_pos")));
+    }
+
+    #[test]
+    fn allowlist_unions_consumers_and_extras() {
+        let consumer = ComponentId::new("CONTROLMESSAGE.ACC_CMD_BODY");
+        let extra = ComponentId::new("ball_1.world_pos");
+        let ids = build_series_store_allowlist([consumer].into_iter().collect(), [extra]);
+        assert!(ids.contains(&consumer));
+        assert!(ids.contains(&extra));
+    }
+
+    #[test]
+    fn short_window_sampling_step_is_always_one() {
+        // Truth mode: ≤30 s never strides, even with many points / narrow widgets.
+        assert_eq!(
+            index_sampling_step_for_selection(5_000_000, 2, 8_000, 400),
+            1
+        );
+        assert_eq!(
+            index_sampling_step_for_selection(30_000_000, 10, 30_000, 200),
+            1
+        );
+        // Zoomed sub-range still step 1 under a short selection.
+        assert_eq!(
+            index_sampling_step_for_selection(5_000_000, 1, 200, 400),
+            1
+        );
+    }
+
+    #[test]
+    fn long_window_sampling_step_uses_visible_clip() {
+        let zoomed_step = index_sampling_step(1, 200, 400);
+        let long = index_sampling_step_for_selection(60_000_000, 1, 200, 400);
+        assert_eq!(long, zoomed_step);
+        let dense = index_sampling_step_for_selection(60_000_000, 2, 8_000, 400);
+        assert!(dense > 1, "dense={dense}");
+    }
+
+    #[test]
+    fn short_window_1khz_5s_fits_index_buffer_at_step_one() {
+        // Synthetic 1 kHz × 5 s (~5000 samples), matching SITL IMU rate.
+        let mut tree = LineTree::<f32>::default();
+        let n = 5_000;
+        let ts: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64 * 1_000)).collect();
+        let vals: Vec<f32> = (0..n).map(|i| (i as f32).sin()).collect();
+        // Insert in CHUNK_LEN-sized pieces like production.
+        let mut offset = 0;
+        while offset < n {
+            let end = (offset + CHUNK_LEN).min(n);
+            let chunk = Chunk::from_iter(
+                &ts[offset..end],
+                Timestamp(0),
+                vals[offset..end].iter().copied(),
+            )
+            .expect("chunk");
+            tree.insert(chunk);
+            offset = end;
+        }
+        let full = Timestamp(0)..Timestamp((n as i64 - 1) * 1_000);
+        let zoomed = Timestamp(1_000_000)..Timestamp(2_000_000); // 1 s sub-range
+        let full_count = tree.count_strip_index_u32s(full.clone(), 1);
+        let zoom_count = tree.count_strip_index_u32s(zoomed.clone(), 1);
+        assert!(
+            (full_count as usize) <= INDEX_BUFFER_LEN,
+            "full_count={full_count} INDEX_BUFFER_LEN={INDEX_BUFFER_LEN}"
+        );
+        assert!(zoom_count < full_count);
+        assert_eq!(
+            index_sampling_step_for_selection(5_000_000, 2, n, 400),
+            1
+        );
+        assert_eq!(
+            index_sampling_step_for_selection(5_000_000, 1, 1_000, 400),
+            1
+        );
+    }
+
+    #[test]
+    fn series_store_coverage_contains_marked_range() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.cov");
+        cache.mark_covered(id, Timestamp(100), Timestamp(500));
+        assert!(cache.is_covered(&id, &(Timestamp(100)..Timestamp(500))));
+        assert!(cache.is_covered(&id, &(Timestamp(200)..Timestamp(400))));
+        assert!(!cache.is_covered(&id, &(Timestamp(50)..Timestamp(150))));
+        cache.mark_covered(id, Timestamp(500), Timestamp(800));
+        assert!(cache.is_covered(&id, &(Timestamp(100)..Timestamp(800))));
+    }
+
+    #[test]
+    fn series_store_refuses_cover_to_i64_max() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.cov.max");
+        cache.mark_covered(id, Timestamp(100), Timestamp(i64::MAX));
+        assert!(!cache.is_covered(&id, &(Timestamp(100)..Timestamp(200))));
+        assert_eq!(cache.sample_count_in_range(&id, &(Timestamp(0)..Timestamp(i64::MAX))), 0);
+    }
+
+    #[test]
+    fn series_store_sample_span_in_range() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.span");
+        cache.insert(
+            id,
+            Timestamp(1_000_000),
+            ComponentValue::F64(nox::array![1.0f64].to_dyn()),
+        );
+        cache.insert(
+            id,
+            Timestamp(2_000_000),
+            ComponentValue::F64(nox::array![2.0f64].to_dyn()),
+        );
+        let span = cache
+            .sample_span_in_range(&id, &(Timestamp(0)..Timestamp(3_000_000)))
+            .expect("span");
+        assert_eq!(span.0, Timestamp(1_000_000));
+        assert_eq!(span.1, Timestamp(2_000_000));
+        assert_eq!(
+            cache.sample_count_in_range(&id, &(Timestamp(0)..Timestamp(3_000_000))),
+            2
+        );
+    }
+
+    #[test]
+    fn project_from_store_rebuilds_visible_window_only() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.project");
+        // 10s of 100 Hz data (0..10_000_000 micros)
+        for i in 0..1000 {
+            let ts = Timestamp(i * 10_000);
+            cache.insert(
+                id,
+                ts,
+                ComponentValue::F64(nox::array![i as f64].to_dyn()),
+            );
+        }
+        let earliest = Timestamp(0);
+        let mut line = LineTree::<f32>::default();
+        // Tip window: last 5s
+        let tip = Timestamp(5_000_000)..Timestamp(10_000_000);
+        let n = project_series_element_to_line(&cache, id, 0, &tip, earliest, &mut line, None);
+        assert_eq!(n, 500);
+        assert_eq!(line.total_points(), 500);
+
+        // Jump to start: first 5s — clear and rebuild
+        line.clear();
+        let start = Timestamp(0)..Timestamp(5_000_000);
+        let n2 = project_series_element_to_line(&cache, id, 0, &start, earliest, &mut line, None);
+        assert_eq!(n2, 500);
+        assert_eq!(line.total_points(), 500);
+        // Store still holds full history
+        assert_eq!(cache.total_sample_count(), 1000);
+    }
+
+    #[test]
+    fn project_stride_caps_long_window() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.stride");
+        for i in 0..10_000 {
+            cache.insert(
+                id,
+                Timestamp(i),
+                ComponentValue::F64(nox::array![i as f64].to_dyn()),
+            );
+        }
+        let mut line = LineTree::<f32>::default();
+        let range = Timestamp(0)..Timestamp(10_000);
+        let n = project_series_element_to_line(
+            &cache,
+            id,
+            0,
+            &range,
+            Timestamp(0),
+            &mut line,
+            Some(100),
+        );
+        assert!(n <= 101, "n={n}");
+        assert!(n >= 100, "n={n}");
+    }
+
+    #[test]
+    fn sync_skips_clear_when_store_empty_and_range_unchanged() {
+        // Mirrors the tip-window case: live LineTree has points, SeriesStore has
+        // not caught up yet — sync must not wipe the line.
+        let mut line = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(1_000_000), Timestamp(2_000_000)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        line.insert(chunk);
+        assert_eq!(line.total_points(), 2);
+
+        let cache = TelemetryCache::default();
+        let id = ComponentId::new("empty.yet");
+        let range = Timestamp(0)..Timestamp(5_000_000);
+        let n = project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None);
+        assert_eq!(n, 0);
+        // Caller must not clear on n==0 when range unchanged — points remain.
+        assert_eq!(line.total_points(), 2);
     }
 
     #[test]
@@ -2321,25 +2754,6 @@ fn try_append_u32(view: &mut [u8], val: u32) -> Option<&mut [u8]> {
     }
     view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
     Some(&mut view[size_of::<u32>()..])
-}
-
-pub fn collect_garbage(
-    behavior: Res<TimeRangeBehavior>,
-    selected_range: Res<SelectedTimeRange>,
-    graph_data: ResMut<CollectedGraphData>,
-    mut lines: ResMut<Assets<Line>>,
-) {
-    if !behavior.is_changed() {
-        return;
-    }
-    for component in graph_data.components.values() {
-        for line in component.lines.values() {
-            let Some(line) = lines.get_mut(line) else {
-                continue;
-            };
-            line.data.garbage_collect(selected_range.0.clone());
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

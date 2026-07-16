@@ -341,7 +341,11 @@ impl Plugin for EditorPlugin {
                     .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
-            .add_systems(Update, impeller2_bevy::backfill_cache)
+            .add_systems(
+                Update,
+                impeller2_bevy::backfill_cache
+                    .after(crate::ui::plot::update_series_fetch_priority),
+            )
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
@@ -379,6 +383,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+            .insert_resource(FetchTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
             .init_resource::<Coordinate>()
@@ -1308,6 +1313,9 @@ fn clear_state_new_connection(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
     mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
+    mut series_load: ResMut<impeller2_bevy::SeriesStoreLoadState>,
+    mut plot_sync: ResMut<crate::ui::plot::data::PlotSyncState>,
+    mut visible_prefetch: ResMut<crate::ui::plot::data::VisiblePrefetchState>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -1358,6 +1366,9 @@ fn clear_state_new_connection(
     *graph_data = CollectedGraphData::default();
     *telemetry_cache = impeller2_bevy::TelemetryCache::default();
     *backfill_state = impeller2_bevy::BackfillState::default();
+    *series_load = impeller2_bevy::SeriesStoreLoadState::default();
+    *plot_sync = crate::ui::plot::data::PlotSyncState::default();
+    *visible_prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
 }
 
 /// Reset timestamp resources so the next connection initializes correctly.
@@ -1378,8 +1389,18 @@ fn reset_timestamps_on_new_connection(
 }
 
 #[derive(Resource, Clone)]
-pub struct SelectedTimeRange(Range<Timestamp>);
+pub struct SelectedTimeRange(pub Range<Timestamp>);
 impl Default for SelectedTimeRange {
+    fn default() -> Self {
+        Self(Timestamp(i64::MIN)..Timestamp(i64::MAX))
+    }
+}
+
+/// Quantized window used for plot fetch / EQL / request dedup.
+/// Display camera uses continuous [`SelectedTimeRange`] so trailing windows don't lurch at 10 Hz.
+#[derive(Resource, Clone)]
+pub struct FetchTimeRange(pub Range<Timestamp>);
+impl Default for FetchTimeRange {
     fn default() -> Self {
         Self(Timestamp(i64::MIN)..Timestamp(i64::MAX))
     }
@@ -1394,8 +1415,117 @@ pub struct FullTimeRange(pub Range<Timestamp>);
 #[derive(Resource, Default)]
 pub struct ReplayMode;
 
+/// Quantize step for trailing `LAST_*` **fetch** windows (not display camera).
+pub(crate) const TRAILING_RANGE_QUANTUM_MICROS: i64 = 100_000; // 100 ms
+
+/// Short windows (5 / 15 / 30 s presets): prefer full-fidelity GPU stride and Y hysteresis.
+pub(crate) const SHORT_WINDOW_ACCURACY_MICROS: i64 = 30_000_000; // 30 s
+
+pub(crate) fn is_short_accuracy_window(range: &Range<Timestamp>) -> bool {
+    range
+        .end
+        .0
+        .saturating_sub(range.start.0)
+        .max(0)
+        <= SHORT_WINDOW_ACCURACY_MICROS
+}
+
+pub(crate) fn floor_timestamp_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
+    if quantum_micros <= 0 {
+        return ts;
+    }
+    Timestamp(ts.0.div_euclid(quantum_micros).saturating_mul(quantum_micros))
+}
+
+pub(crate) fn ceil_timestamp_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
+    if quantum_micros <= 0 {
+        return ts;
+    }
+    let q = quantum_micros;
+    let floored = ts.0.div_euclid(q).saturating_mul(q);
+    if floored == ts.0 {
+        ts
+    } else {
+        Timestamp(floored.saturating_add(q))
+    }
+}
+
+/// Snap a range onto the GPU/visible-range quantum grid (`end > start`).
+pub(crate) fn quantize_visible_range(
+    range: Range<Timestamp>,
+    quantum_micros: i64,
+) -> Range<Timestamp> {
+    let start = floor_timestamp_quantum(range.start, quantum_micros);
+    let end = ceil_timestamp_quantum(range.end, quantum_micros);
+    if end <= start {
+        start..Timestamp(start.0.saturating_add(quantum_micros.max(1)))
+    } else {
+        start..end
+    }
+}
+
+/// Snap a trailing selected window onto the quantum grid while keeping `end > start`.
+pub(crate) fn quantize_trailing_range(
+    range: Range<Timestamp>,
+    quantum_micros: i64,
+) -> Range<Timestamp> {
+    let mut start = floor_timestamp_quantum(range.start, quantum_micros);
+    let mut end = ceil_timestamp_quantum(range.end, quantum_micros);
+    if end <= start {
+        end = Timestamp(start.0.saturating_add(quantum_micros.max(1)));
+    }
+    // Prefer not extending past the unquantized end by more than one quantum when
+    // the raw window was already valid.
+    if end.0 > range.end.0.saturating_add(quantum_micros) {
+        end = ceil_timestamp_quantum(range.end, quantum_micros);
+    }
+    if end <= start {
+        start = Timestamp(end.0.saturating_sub(quantum_micros.max(1)));
+    }
+    start..end
+}
+
+/// Resolve timeline-bar (`FullTimeRange`) and plot-window (`SelectedTimeRange`)
+/// anchors.
+///
+/// - Non-replay: the timeline bar spans the full DB (`earliest..LastUpdated`).
+/// - Replay: both bar and non-trailing selection progressive-reveal to the playhead.
+/// - Trailing `LAST_*` presets always end at `min(LastUpdated, CurrentTimestamp)`
+///   so recordings without `--replay` still window relative to the playhead.
+///
+/// Display selected range is **continuous** (no fetch quantum). Callers that need
+/// fetch/EQL stability should run [`quantize_trailing_range`] for trailing windows.
+fn resolve_time_range_anchors(
+    earliest: Timestamp,
+    db_latest: Timestamp,
+    current: Timestamp,
+    behavior: TimeRangeBehavior,
+    replay: bool,
+) -> (Range<Timestamp>, Result<Range<Timestamp>, TimeRangeError>) {
+    let playhead_capped = db_latest.min(current);
+    let full_latest = if replay { playhead_capped } else { db_latest };
+
+    let full_range = if earliest < full_latest {
+        earliest..full_latest
+    } else if earliest < db_latest {
+        earliest..db_latest
+    } else {
+        // No usable span yet; caller keeps the previous FullTimeRange.
+        earliest..earliest
+    };
+
+    let selected_latest = if behavior.is_trailing_window() {
+        playhead_capped
+    } else {
+        full_latest
+    };
+    let selected = behavior.calculate_selected_range(earliest, selected_latest);
+    (full_range, selected)
+}
+
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
+    mut fetch_range: ResMut<FetchTimeRange>,
     mut full_range: ResMut<FullTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
@@ -1403,25 +1533,36 @@ pub fn set_selected_range(
     behavior: Res<TimeRangeBehavior>,
     replay: Option<Res<ReplayMode>>,
 ) {
-    let effective_latest = if replay.is_some() {
-        latest.0.min(current_ts.0)
-    } else {
-        latest.0
-    };
+    let (resolved_full, selected) = resolve_time_range_anchors(
+        earliest.0,
+        latest.0,
+        current_ts.0,
+        *behavior,
+        replay.is_some(),
+    );
 
-    if earliest.0 < effective_latest {
-        full_range.0 = earliest.0..effective_latest;
-    } else if earliest.0 < latest.0 {
-        full_range.0 = earliest.0..latest.0;
+    if resolved_full.start < resolved_full.end && full_range.0 != resolved_full {
+        full_range.0 = resolved_full;
     }
 
-    match behavior.calculate_selected_range(earliest.0, effective_latest) {
+    match selected {
         Ok(range) => {
-            selected_range.0 = range;
+            if selected_range.0 != range {
+                selected_range.0 = range.clone();
+            }
+            let fetch = if behavior.is_trailing_window() {
+                quantize_trailing_range(range, TRAILING_RANGE_QUANTUM_MICROS)
+            } else {
+                range
+            };
+            if fetch_range.0 != fetch {
+                fetch_range.0 = fetch;
+            }
         }
         Err(TimeRangeError::NoData) => {
             if selected_range.0.start.0 == i64::MIN || selected_range.0.end.0 == i64::MAX {
                 selected_range.0 = Timestamp(0)..Timestamp(1_000_000);
+                fetch_range.0 = selected_range.0.clone();
             }
         }
         Err(TimeRangeError::InvalidRange { start, end }) => {
@@ -1520,6 +1661,12 @@ impl TimeRangeBehavior {
             start: Offset::Latest(duration),
             end: Offset::Latest(Duration::ZERO),
         }
+    }
+
+    /// `LAST_*` presets: both ends are [`Offset::Latest`] (e.g. last 5s →
+    /// `Latest(5s)..Latest(0)`). Trailing windows follow the playhead.
+    pub(crate) const fn is_trailing_window(self) -> bool {
+        matches!((self.start, self.end), (Offset::Latest(_), Offset::Latest(_)))
     }
 
     /// Parse a schematic `timeline range=...` value into a time-window behavior.
@@ -1663,42 +1810,261 @@ mod time_range_tests {
     }
 
     #[test]
-    fn last_30s_window_at_mid_replay_position() {
+    fn last_30s_window_at_mid_playhead_position() {
         let behavior = TimeRangeBehavior::last(Duration::from_secs(30));
         let earliest = timestamp_secs(0);
-        let effective_latest = timestamp_secs(40);
+        let playhead = timestamp_secs(40);
 
         let range = behavior
-            .calculate_selected_range(earliest, effective_latest)
-            .expect("valid replay window");
+            .calculate_selected_range(earliest, playhead)
+            .expect("valid trailing window");
         assert_eq!(range.start, timestamp_secs(10));
         assert_eq!(range.end, timestamp_secs(40));
     }
 
     #[test]
-    fn last_30s_window_at_early_replay_clamps_to_earliest() {
+    fn last_30s_window_at_early_playhead_clamps_to_earliest() {
         let behavior = TimeRangeBehavior::last(Duration::from_secs(30));
         let earliest = timestamp_secs(0);
-        let effective_latest = timestamp_secs(15);
+        let playhead = timestamp_secs(15);
 
         let range = behavior
-            .calculate_selected_range(earliest, effective_latest)
-            .expect("valid replay window");
+            .calculate_selected_range(earliest, playhead)
+            .expect("valid trailing window");
         assert_eq!(range.start, timestamp_secs(0));
         assert_eq!(range.end, timestamp_secs(15));
     }
 
     #[test]
-    fn full_range_at_replay_position_uses_effective_latest() {
+    fn full_range_with_capped_latest_uses_that_latest() {
         let behavior = TimeRangeBehavior::FULL;
         let earliest = timestamp_secs(0);
-        let effective_latest = timestamp_secs(20);
+        let capped_latest = timestamp_secs(20);
 
         let range = behavior
-            .calculate_selected_range(earliest, effective_latest)
-            .expect("valid replay window");
+            .calculate_selected_range(earliest, capped_latest)
+            .expect("valid full window");
         assert_eq!(range.start, earliest);
-        assert_eq!(range.end, effective_latest);
+        assert_eq!(range.end, capped_latest);
+    }
+
+    #[test]
+    fn non_replay_last_5s_mid_playhead_keeps_full_timeline() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let playhead = timestamp_secs(40);
+        let (full, selected) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            playhead,
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        assert_eq!(full, earliest..db_latest);
+        let selected = selected.expect("valid last_5s window");
+        assert_eq!(selected.start, timestamp_secs(35));
+        assert_eq!(selected.end, playhead);
+    }
+
+    #[test]
+    fn non_replay_last_5s_early_playhead_clamps_to_earliest() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let playhead = timestamp_secs(3);
+        let (full, selected) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            playhead,
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        assert_eq!(full, earliest..db_latest);
+        let selected = selected.expect("valid last_5s window");
+        assert_eq!(selected.start, earliest);
+        assert_eq!(selected.end, playhead);
+    }
+
+    #[test]
+    fn non_replay_full_mid_playhead_keeps_full_db_selection() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let playhead = timestamp_secs(40);
+        let (full, selected) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            playhead,
+            TimeRangeBehavior::FULL,
+            false,
+        );
+        assert_eq!(full, earliest..db_latest);
+        let selected = selected.expect("valid full window");
+        assert_eq!(selected.start, earliest);
+        assert_eq!(selected.end, db_latest);
+    }
+
+    #[test]
+    fn non_replay_last_5s_live_like_playhead_at_db_end() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let (full, selected) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            db_latest,
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        assert_eq!(full, earliest..db_latest);
+        let selected = selected.expect("valid last_5s window");
+        assert_eq!(selected.start, timestamp_secs(95));
+        assert_eq!(selected.end, db_latest);
+    }
+
+    #[test]
+    fn replay_full_progressive_reveals_both_ranges() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let playhead = timestamp_secs(20);
+        let (full, selected) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            playhead,
+            TimeRangeBehavior::FULL,
+            true,
+        );
+        assert_eq!(full, earliest..playhead);
+        let selected = selected.expect("valid replay full window");
+        assert_eq!(selected.start, earliest);
+        assert_eq!(selected.end, playhead);
+    }
+
+    #[test]
+    fn is_trailing_window_detects_last_presets_only() {
+        assert!(TimeRangeBehavior::LAST_5S.is_trailing_window());
+        assert!(TimeRangeBehavior::last(Duration::from_secs(7)).is_trailing_window());
+        assert!(!TimeRangeBehavior::FULL.is_trailing_window());
+    }
+
+    #[test]
+    fn trailing_display_range_tracks_playhead_continuously() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let (_, a) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            Timestamp(40_050_000),
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        let (_, b) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            Timestamp(40_090_000),
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        let a = a.expect("a");
+        let b = b.expect("b");
+        // Display window follows playhead without 100 ms quantization.
+        assert_ne!(a.end, b.end);
+        assert_eq!(b.end.0 - a.end.0, 40_000);
+    }
+
+    #[test]
+    fn trailing_fetch_quantize_stable_within_100ms() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let (_, a) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            Timestamp(40_050_000),
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        let (_, b) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            Timestamp(40_090_000),
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        let fa = quantize_trailing_range(a.expect("a"), TRAILING_RANGE_QUANTUM_MICROS);
+        let fb = quantize_trailing_range(b.expect("b"), TRAILING_RANGE_QUANTUM_MICROS);
+        assert_eq!(fa, fb);
+    }
+
+    #[test]
+    fn trailing_fetch_quantize_advances_across_100ms() {
+        let earliest = timestamp_secs(0);
+        let db_latest = timestamp_secs(100);
+        let (_, a) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            Timestamp(40_000_000),
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        let (_, b) = resolve_time_range_anchors(
+            earliest,
+            db_latest,
+            Timestamp(40_100_000),
+            TimeRangeBehavior::LAST_5S,
+            false,
+        );
+        let fa = quantize_trailing_range(a.expect("a"), TRAILING_RANGE_QUANTUM_MICROS);
+        let fb = quantize_trailing_range(b.expect("b"), TRAILING_RANGE_QUANTUM_MICROS);
+        assert_ne!(fa.end, fb.end);
+        assert_eq!(fb.end.0 - fa.end.0, TRAILING_RANGE_QUANTUM_MICROS);
+    }
+
+    #[test]
+    fn is_short_accuracy_window_for_last_presets() {
+        assert!(is_short_accuracy_window(
+            &(Timestamp(0)..Timestamp(5_000_000))
+        ));
+        assert!(is_short_accuracy_window(
+            &(Timestamp(0)..Timestamp(30_000_000))
+        ));
+        assert!(!is_short_accuracy_window(
+            &(Timestamp(0)..Timestamp(30_000_001))
+        ));
+    }
+
+    #[test]
+    fn quantize_trailing_range_keeps_end_after_start() {
+        let range = quantize_trailing_range(
+            Timestamp(100)..Timestamp(150),
+            TRAILING_RANGE_QUANTUM_MICROS,
+        );
+        assert!(range.end > range.start);
+    }
+
+    #[test]
+    fn quantize_visible_range_stable_within_quantum() {
+        let a = quantize_visible_range(
+            Timestamp(1_050_000)..Timestamp(6_050_000),
+            TRAILING_RANGE_QUANTUM_MICROS,
+        );
+        let b = quantize_visible_range(
+            Timestamp(1_099_000)..Timestamp(6_099_000),
+            TRAILING_RANGE_QUANTUM_MICROS,
+        );
+        assert_eq!(a, b);
+        assert_eq!(a.start.0 % TRAILING_RANGE_QUANTUM_MICROS, 0);
+        assert_eq!(a.end.0 % TRAILING_RANGE_QUANTUM_MICROS, 0);
+    }
+
+    #[test]
+    fn quantize_visible_range_advances_across_quantum() {
+        let a = quantize_visible_range(
+            Timestamp(1_000_000)..Timestamp(6_000_000),
+            TRAILING_RANGE_QUANTUM_MICROS,
+        );
+        let b = quantize_visible_range(
+            Timestamp(1_100_000)..Timestamp(6_100_000),
+            TRAILING_RANGE_QUANTUM_MICROS,
+        );
+        assert_ne!(a, b);
+        assert_eq!(b.start.0 - a.start.0, TRAILING_RANGE_QUANTUM_MICROS);
     }
 }
 
@@ -1760,9 +2126,12 @@ pub fn update_eql_context(
     );
 }
 
-pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut<EqlContext>) {
-    eql.0.earliest_timestamp = time_range.0.start;
-    eql.0.last_timestamp = time_range.0.end;
+pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<EqlContext>) {
+    if eql.0.earliest_timestamp == fetch_range.0.start && eql.0.last_timestamp == fetch_range.0.end {
+        return;
+    }
+    eql.0.earliest_timestamp = fetch_range.0.start;
+    eql.0.last_timestamp = fetch_range.0.end;
 }
 
 pub fn dirs() -> directories::ProjectDirs {

@@ -114,12 +114,30 @@ The editor registers as a set of Bevy plugins. Each feature area (view cube, cam
 
 The `ui/` module contains all immediate-mode UI rendering. Egui runs inside Bevy via `bevy_egui`. The tile-based layout system (`ui/tiles.rs`) manages panel arrangement (viewports, graphs, inspectors).
 
-### Telemetry Data Flow
+### Telemetry cache (SeriesStore)
 
-1. Impeller2 client subscribes to component streams from Elodin-DB
-2. Data arrives as time-series samples
-3. Plot system buffers and renders via GPU-accelerated rendering (`ui/plot/gpu.rs`)
-4. Inspector panels show latest values
+**Strategy:** cache only what the UI uses. Full history per subscribed ID (no time-based SeriesStore GC). Menus use metadata/`EqlContext`, not store keys. Playback/scrub never wait on backfill — project whatever is already in RAM.
+
+```text
+DB ──► allowlisted GetTimeSeries backfill + live ──► TelemetryCache (SeriesStore)
+                                                      ├─► project SelectedTimeRange → LineTree → GPU
+                                                      └─► apply_cached_data @ playhead → 3D / inspectors
+Metadata ──► EqlContext ──► ADD COMPONENT / palettes (full list)
+```
+
+| Piece | Where |
+|-------|--------|
+| Allowlist + reclaim | `ui/plot/data.rs` → `update_series_fetch_priority` |
+| Backfill / live filter | `impeller2_bevy` → `backfill_cache`, `SeriesFetchPriority` |
+| Schedule | editor + headless: priority then `backfill_cache` (`lib.rs`, `headless.rs`) |
+
+**Allowlist** (`SeriesFetchPriority.high`): enabled graph lines; `Line3d` / `object_3d` EQL; monitors; viewport `pos`/`look_at`/`up` EQL; `vector_arrow` EQL; path-registry adapter pairs (`*.world_pos`, …); sensor-camera `{entity}.world_pos`. Empty ⇒ no SeriesStore I/O. Leaving an ID drops it from RAM. **Any new live consumer must extend this allowlist** or it will be blank/stale. Adapter leaf match is case-sensitive (`WORLD_POS` ≠ `world_pos`).
+
+**Plots:** LineTree is a visible-window projection only (sliding GC here ≠ SeriesStore). Tip/`LAST_*` fetches quantized (~100 ms) + prefetch margin; also immediate visible-window prefetch so tip fills before begin→end backfill. Do not clear a LineTree when the store has zero samples in-window (unless camera range moved). ≤30 s (`SHORT_WINDOW_ACCURACY_MICROS`): GPU `step = 1`, skip Hamann–Chen (`INDEX_BUFFER_LEN` = 32768). Longer windows: GPU stride on clip; CPU project stride only for &gt;10 min.
+
+**Headless:** separate process, separate store — same priority + backfill or `sensor_view` poses freeze while effects still animate.
+
+**Do not:** gate menus on SeriesStore keys; wait on `SeriesStoreLoadState.complete` for scrub; reintroduce full-metadata backfill; time-GC SeriesStore without fixing jump-to-start/scrub holes first.
 
 ### KDL Schematics
 

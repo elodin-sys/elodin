@@ -294,12 +294,13 @@ pub fn sync_db_skybox_assets_from_config(
 /// server only logs store failures, and a mid-upload disconnect is silent), so
 /// we don't trust the send alone: we mark an `(addr, skybox, content)` done only
 /// once the DB asset server actually serves the bytes back, and otherwise
-/// re-send with a backoff. The content fingerprint ensures that regenerating a
-/// skybox under the same name re-uploads the new bytes.
+/// re-send with a backoff. Content is fingerprinted by digest (not mtime) so a
+/// DB→local mirror rewrite of identical bytes does not invalidate confirmation
+/// and re-upload forever.
 #[derive(Resource, Default)]
 pub struct DbSkyboxUploaded {
-    /// `(addr, skybox, fingerprint)` confirmed queryable from the DB.
-    confirmed: Option<(MirrorKey, UploadFingerprint)>,
+    /// `(addr, skybox, digest)` confirmed queryable from the DB.
+    confirmed: Option<(MirrorKey, CubemapDigest)>,
     /// Last (re)send attempt, throttles retries until the upload is confirmed.
     last_attempt: Option<(MirrorKey, Instant)>,
     /// In-flight upload/verify state machine for the active skybox.
@@ -308,20 +309,27 @@ pub struct DbSkyboxUploaded {
 
 struct DbSkyboxUpload {
     key: MirrorKey,
-    fingerprint: UploadFingerprint,
+    digest: CubemapDigest,
     phase: UploadPhase,
 }
 
 /// `(db asset key, bytes)` pairs ready to send as [`StoreAsset`] messages.
 type UploadPayload = Vec<(String, Vec<u8>)>;
 
-/// Output of the prepare step: the messages to send plus the digest of the
-/// cubemap bytes, used to confirm the *fresh* bytes (not a stale same-named
-/// file) actually landed in the DB.
-type PrepareOutput = (UploadPayload, CubemapDigest);
+/// Result of the prepare step: either the DB already has matching bytes, or we
+/// need to `StoreAsset` the (merged) manifest + cubemap and then verify.
+enum PrepareOutput {
+    /// DB already serves this skybox entry with matching cubemap digest.
+    AlreadyPresent { digest: CubemapDigest },
+    /// Messages to send, plus the digest used to confirm they landed.
+    NeedsUpload {
+        uploads: UploadPayload,
+        digest: CubemapDigest,
+    },
+}
 
 enum UploadPhase {
-    /// Fetching the DB manifest and merging our entry off the main thread.
+    /// Checking the DB / building the upload payload off the main thread.
     Preparing(Task<Result<PrepareOutput, String>>),
     /// Confirming the DB now serves the uploaded assets.
     Verifying(Task<Result<bool, String>>),
@@ -344,24 +352,11 @@ fn digest_bytes(bytes: &[u8]) -> CubemapDigest {
     }
 }
 
-/// Identifies the on-disk cubemap content, so a same-name regeneration (new
-/// bytes) invalidates a prior confirmed upload.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct UploadFingerprint {
-    len: u64,
-    modified: Option<Duration>,
-}
-
-fn cubemap_fingerprint(path: &Path) -> Option<UploadFingerprint> {
-    let meta = std::fs::metadata(path).ok()?;
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok());
-    Some(UploadFingerprint {
-        len: meta.len(),
-        modified,
-    })
+/// Content digest of the on-disk cubemap. Same bytes ⇒ same digest regardless
+/// of mtime (DB mirror rewrites must not look like a regeneration).
+fn cubemap_digest(path: &Path) -> Option<CubemapDigest> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(digest_bytes(&bytes))
 }
 
 fn spawn_skybox_verify(
@@ -419,7 +414,7 @@ pub fn upload_active_skybox_assets_to_db(
         return;
     };
     let cubemap_path = settings.cache_dir.join(&entry.cubemap_file);
-    let Some(fingerprint) = cubemap_fingerprint(&cubemap_path) else {
+    let Some(digest) = cubemap_digest(&cubemap_path) else {
         return; // bytes not on disk yet (e.g. generation still running)
     };
     if !settings.manifest_path().exists() {
@@ -429,19 +424,27 @@ pub fn upload_active_skybox_assets_to_db(
     if uploaded
         .confirmed
         .as_ref()
-        .is_some_and(|(confirmed, fp)| confirmed == &key && *fp == fingerprint)
+        .is_some_and(|(confirmed, confirmed_digest)| {
+            confirmed == &key && *confirmed_digest == digest
+        })
     {
         return;
     }
 
     // Drive the upload/verify state machine.
     if let Some(up) = uploaded.in_flight.as_mut() {
-        if up.key != key || up.fingerprint != fingerprint {
+        if up.key != key || up.digest != digest {
             uploaded.in_flight = None; // desired skybox or local content changed
         } else {
             match &mut up.phase {
                 UploadPhase::Preparing(task) => match future::block_on(future::poll_once(task)) {
-                    Some(Ok((uploads, digest))) => {
+                    Some(Ok(PrepareOutput::AlreadyPresent { digest })) => {
+                        uploaded.confirmed = Some((key, digest));
+                        uploaded.last_attempt = None;
+                        uploaded.in_flight = None;
+                        return;
+                    }
+                    Some(Ok(PrepareOutput::NeedsUpload { uploads, digest })) => {
                         for (asset_key, bytes) in uploads {
                             tx.send_msg(StoreAsset {
                                 key: asset_key,
@@ -469,7 +472,7 @@ pub fn upload_active_skybox_assets_to_db(
                 },
                 UploadPhase::Verifying(task) => match future::block_on(future::poll_once(task)) {
                     Some(Ok(true)) => {
-                        uploaded.confirmed = Some((key, fingerprint));
+                        uploaded.confirmed = Some((key, digest));
                         uploaded.last_attempt = None;
                         uploaded.in_flight = None;
                         return;
@@ -502,7 +505,7 @@ pub fn upload_active_skybox_assets_to_db(
     uploaded.last_attempt = Some((key.clone(), Instant::now()));
     uploaded.in_flight = Some(DbSkyboxUpload {
         key,
-        fingerprint,
+        digest,
         phase: UploadPhase::Preparing(IoTaskPool::get().spawn(async move {
             tokio::runtime::Runtime::new()
                 .map_err(|err| err.to_string())?
@@ -511,25 +514,35 @@ pub fn upload_active_skybox_assets_to_db(
     });
 }
 
-/// Prepares the `(db key, bytes)` pairs to upload for the active skybox.
+/// Prepares an upload for the active skybox, or reports that the DB already
+/// serves matching bytes (so no `StoreAsset` is needed — common for recorded
+/// DBs that ingested the skybox at sim time).
 ///
-/// The manifest is **merged** into the DB's current copy rather than sent
-/// wholesale, so entries written by `persist_schematic_assets` or other clients
-/// are preserved instead of being clobbered by the editor's local manifest.
+/// When uploading, the manifest is **merged** into the DB's current copy rather
+/// than sent wholesale, so entries written by `persist_schematic_assets` or
+/// other clients are preserved instead of being clobbered by the editor's local
+/// manifest.
 async fn prepare_skybox_upload(
     connection_addr: SocketAddr,
     entry: ManifestEntry,
     cubemap_path: PathBuf,
 ) -> Result<PrepareOutput, String> {
+    let skybox_name = entry.name.clone();
     let (cubemap_name, cubemap_bytes, digest) =
         read_local_cubemap(&entry.cubemap_file, &cubemap_path)?;
+
+    // Recorded / already-ingested DBs already hold the cubemap. Confirm first
+    // so we do not re-StoreAsset ~16MB every few seconds on editor connect.
+    if verify_db_skybox_assets(&skybox_name, connection_addr, digest).await? {
+        return Ok(PrepareOutput::AlreadyPresent { digest });
+    }
 
     let mut manifest = fetch_db_skybox_manifest(connection_addr).await?;
     manifest.upsert(entry);
     let manifest_bytes = manifest.to_ron_bytes().map_err(|err| err.to_string())?;
 
-    Ok((
-        vec![
+    Ok(PrepareOutput::NeedsUpload {
+        uploads: vec![
             (
                 impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
                 manifest_bytes,
@@ -537,7 +550,7 @@ async fn prepare_skybox_upload(
             (cubemap_name, cubemap_bytes),
         ],
         digest,
-    ))
+    })
 }
 
 /// Local (no-network) portion of an upload: validates the cubemap file path,
@@ -664,26 +677,21 @@ async fn verify_db_skybox_assets(
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
     let cubemap_url = format!("{base}/{cubemap_name}");
 
-    // Cheap precheck: a HEAD reveals presence + length without transferring the
-    // (large) cubemap; a length mismatch means the fresh bytes haven't landed.
-    // axum serves HEAD for `get` routes automatically.
-    let head = client
-        .head(&cubemap_url)
-        .send()
-        .await
-        .map_err(|err| format!("{cubemap_url}: {err}"))?;
-    if head.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(false);
-    }
-    let head = head
-        .error_for_status()
-        .map_err(|err| format!("{cubemap_url}: {err}"))?;
-    if head.content_length().is_some_and(|len| len != expected.len) {
-        return Ok(false);
-    }
-
-    // Confirm the served bytes are exactly the ones we uploaded.
-    let cubemap_bytes = fetch_asset(&client, &cubemap_url).await?;
+    // Do not use HEAD for length: axum's auto-HEAD for `get` handlers that
+    // return an owned body reports `Content-Length: 0` to reqwest, which made
+    // verify always fail and re-StoreAsset the cubemap every retry.
+    // Confirm the served bytes are exactly the ones we uploaded / expect.
+    let cubemap_bytes = match client.get(&cubemap_url).send().await {
+        Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => return Ok(false),
+        Ok(resp) => resp
+            .error_for_status()
+            .map_err(|err| format!("{cubemap_url}: {err}"))?
+            .bytes()
+            .await
+            .map_err(|err| format!("{cubemap_url}: {err}"))?
+            .to_vec(),
+        Err(err) => return Err(format!("{cubemap_url}: {err}")),
+    };
     Ok(digest_bytes(&cubemap_bytes) == expected)
 }
 
@@ -698,6 +706,15 @@ fn cubemap_cache_path(cache_dir: &Path, cubemap_file: &str) -> Result<PathBuf, S
 
 fn write_cubemap(cache_dir: &Path, cubemap_file: &str, bytes: &[u8]) -> Result<(), String> {
     let path = cubemap_cache_path(cache_dir, cubemap_file)?;
+    // Skip rewrite when content already matches — avoids mtime churn that used
+    // to invalidate upload confirmation under the old len+mtime fingerprint.
+    if path.is_file()
+        && std::fs::read(&path)
+            .ok()
+            .is_some_and(|existing| existing.as_slice() == bytes)
+    {
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| format!("{}: {err}", parent.display()))?;
     }
@@ -820,6 +837,70 @@ mod tests {
     fn cubemap_digest_changes_with_content() {
         assert_ne!(digest_bytes(b"old-cubemap"), digest_bytes(b"new-cubemap"));
         assert_eq!(digest_bytes(b"same"), digest_bytes(b"same"));
+    }
+
+    /// Live regression: reqwest HEAD against axum owned-body GET reports
+    /// `Content-Length: 0`, which used to make verify always fail. Hitting a
+    /// running DB on 127.0.0.1:2240 confirms GET-based verify succeeds.
+    #[test]
+    fn verify_live_db_skybox_if_listening() {
+        let addr: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        let cubemap_path =
+            Path::new("/home/dan/dual/fsw/assets/skyboxes/desert_night.cubemap.ktx2");
+        let Some(expected) = cubemap_digest(cubemap_path) else {
+            return;
+        };
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(_) => return,
+        };
+        // Skip when no local DB is up (CI / offline).
+        let probe = rt.block_on(async {
+            reqwest::Client::builder()
+                .timeout(Duration::from_millis(500))
+                .build()
+                .ok()?
+                .get("http://127.0.0.1:2241/skyboxes/manifest.ron")
+                .send()
+                .await
+                .ok()
+        });
+        if probe.is_none() {
+            return;
+        }
+        let ok = rt
+            .block_on(verify_db_skybox_assets("desert_night", addr, expected))
+            .expect("verify against live DB");
+        assert!(
+            ok,
+            "DB already serves matching desert_night cubemap; verify must succeed (HEAD CL=0 regression)"
+        );
+    }
+
+    #[test]
+    fn cubemap_digest_ignores_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sky.cubemap.ktx2");
+        std::fs::write(&path, b"stable-bytes").unwrap();
+        let first = cubemap_digest(&path).unwrap();
+        // Re-write identical bytes (mtime changes; content does not).
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, b"stable-bytes").unwrap();
+        let second = cubemap_digest(&path).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn write_cubemap_skips_identical_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path();
+        write_cubemap(cache, "desert_night.cubemap.ktx2", b"ktx2").unwrap();
+        let path = cubemap_cache_path(cache, "desert_night.cubemap.ktx2").unwrap();
+        let mtime_before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        write_cubemap(cache, "desert_night.cubemap.ktx2", b"ktx2").unwrap();
+        let mtime_after = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(mtime_before, mtime_after);
     }
 
     #[test]

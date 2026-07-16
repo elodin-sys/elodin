@@ -1,6 +1,6 @@
 ---
 name: elodin-simulation
-description: Create and modify physics simulations using the Elodin Python SDK. Use when writing or editing simulation Python files, defining components or systems, spawning entities, configuring 6DOF physics, setting up visualization, or integrating with SITL/HITL workflows.
+description: Create and modify physics simulations using the Elodin Python SDK. Use when writing or editing simulation Python files, defining components or systems, spawning entities, configuring 6DOF physics, setting up visualization or assets (GLB, schematics, skyboxes, terrains), or integrating with SITL/HITL workflows.
 ---
 
 # Elodin Simulation
@@ -152,6 +152,68 @@ Elodin uses Featherstone spatial vectors. Key types:
 Quaternion operations: `Quaternion.from_axis_angle()`, `q @ vector` (rotate), `q.inverse()`, `q.integrate_body(omega)`.
 
 ## Visualization
+
+### Asset root (`assets/`)
+
+Simulations load meshes, schematics, skyboxes, themes, and terrains from a single **asset root**. Paths in KDL (`glb path=…`, `icon path=…`) are relative to that root.
+
+**Where it lives (resolution order):**
+
+1. `$ELODIN_ASSETS` — explicit override (absolute or cwd-relative)
+2. `<sim_entry_dir>/assets` — next to `main.py` / the sim entrypoint
+3. `<cwd>/assets`
+4. Nearest ancestor of the sim entry that contains an `assets/` directory
+
+Repo examples usually run from the Elodin checkout root and use the shared tree at `assets/` (many `.glb` files live at the root of that tree). For a standalone sim, put an `assets/` folder beside `main.py`, or set `ELODIN_ASSETS`.
+
+When the sim records with `db_path=…` or `ELODIN_DB_PATH`, that tree is **ingested once** into `{db}/assets/` and KDL local paths become `db:…` for portable replay. See the elodin-db skill and [DB Asset Server](https://docs.elodin.systems/reference/db-asset-server/).
+
+### Native folders under the asset root
+
+Only create the subtrees you need. Keys preserve subdirectories; there is no hard schema beyond these conventions:
+
+```text
+assets/
+  # GLB meshes — flat at root (repo default) or under meshes/ / models/
+  f22.glb
+  meshes/rocket.glb          # also fine; reference as path="meshes/rocket.glb"
+  models/jet.glb             # docs/tests often use models/
+
+  schematics/                # KDL panels / window sub-schematics
+    main.kdl                 # conventional active schematic key after ingest
+    telemetry.kdl            # window path="telemetry.kdl" → stored under schematics/
+
+  skyboxes/
+    manifest.ron             # required for named skybox name="…"
+    desert_night.cubemap.ktx2
+
+  color_schemes/             # optional UI themes (not copied into DB by name alone)
+    default_dark.json
+    default_light.json
+
+  terrains/
+    planar/<region>/         # world_mesh region="<region>"
+      region.toml            # optional; built-in presets exist
+      config.tc              # preprocess output
+      data/height/<tile>.bin
+      data/albedo/<tile>.bin
+    spherical/               # globe-style terrain
+```
+
+| Folder | Purpose | Referenced by |
+|--------|---------|---------------|
+| (root) / `meshes/` / `models/` | GLB / custom `.png` icons | `glb path="…"`, `icon path="…"` |
+| `schematics/` | KDL schematics & window subtrees | Active key `schematics/main.kdl`; `window path="…"` |
+| `skyboxes/` | Cubemap skyboxes | `skybox name="…"` + `manifest.ron` |
+| `color_schemes/` | Editor theme JSON | `theme scheme=…` (local only; built-ins need no files) |
+| `terrains/` | Planar / spherical `world_mesh` atlases | `world_mesh "death_valley"` etc. |
+
+**Agent tips:**
+- Prefer paths relative to the asset root (`path="edu-450-v2-drone.glb"`), not filesystem paths outside it.
+- Do not invent reserved keys: `.elodin-ingested` and `__index__/` are DB-internal.
+- Procedural meshes (`sphere`, `box`, …) and `icon builtin=…` need no asset files.
+- Custom color-scheme JSON is **not** persisted into the DB today — only the scheme name travels in KDL.
+- If the editor cannot find a mesh, check cwd / `ELODIN_ASSETS` before changing KDL.
 
 ### KDL Schematics
 
@@ -346,4 +408,5 @@ gradual drift (floating-point).
 
 - For the full Python API reference, see [api-reference.md](api-reference.md)
 - For simulation code patterns from examples, see [examples.md](examples.md)
+- Asset / DB Asset Server docs: https://docs.elodin.systems/reference/db-asset-server/
 - Online docs: https://docs.elodin.systems

@@ -7,8 +7,8 @@ pub use hamann_chen_line::{
 
 pub use data::{
     BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, CurveCompressSettings, Line,
-    OVERVIEW_MAX_POINTS, PlotDataComponent, XYLine, collect_garbage,
-    maybe_compress_all_graph_lines, queue_timestamp_read, setup_pkt_handler,
+    OVERVIEW_MAX_POINTS, PlotDataComponent, PlotSyncState, XYLine, maybe_compress_all_graph_lines,
+    queue_timestamp_read, setup_pkt_handler, update_series_fetch_priority,
 };
 
 pub mod gpu;
@@ -30,7 +30,7 @@ pub use state::*;
 
 use crate::ui::UiInputConsumerSet;
 use bevy::{
-    app::{Plugin, PostUpdate, Startup, Update},
+    app::{Plugin, Startup, Update},
     ecs::schedule::IntoScheduleConfigs,
 };
 
@@ -41,6 +41,8 @@ impl Plugin for PlotPlugin {
             .init_resource::<CurveCompressSettings>()
             .init_resource::<LockTracker>()
             .init_resource::<XSyncClock>()
+            .init_resource::<PlotSyncState>()
+            .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
             .add_systems(Startup, setup_pkt_handler)
             .add_systems(Update, zoom_graph.in_set(UiInputConsumerSet))
             .add_systems(Update, graph_touch.in_set(UiInputConsumerSet))
@@ -61,9 +63,15 @@ impl Plugin for PlotPlugin {
                     .after(pan_graph)
                     .after(reset_graph),
             )
-            .add_systems(PostUpdate, queue_timestamp_read)
-            .add_systems(Update, collect_garbage)
             .add_systems(Update, sync_graphs)
+            .add_systems(
+                Update,
+                update_series_fetch_priority.after(sync_graphs),
+            )
+            .add_systems(
+                Update,
+                queue_timestamp_read.after(update_series_fetch_priority),
+            )
             .add_systems(Update, auto_y_bounds.after(sync_graphs))
             .add_plugins(PlotGpuPlugin);
     }
