@@ -338,10 +338,14 @@ fn display_up(display: DisplayFrame) -> DVec3 {
 
 /// Pitch / roll of the body relative to display-frame level, looking along body +X.
 /// Pitch nose-up and roll right-wing-down are positive (aircraft convention).
+///
+/// Uses display-frame sky (`up_display`) so NED (−Z up) and ENU (+Z up) both
+/// read wings-level at identity, unlike a body-+Z atan2 that flips for NED.
 fn ai_pitch_roll(q_body_to_display: DQuat, up_display: DVec3) -> (f32, f32) {
-    let up_b = q_body_to_display.inverse() * up_display;
-    let pitch = up_b.x.atan2(up_b.z) as f32;
-    let roll = up_b.y.atan2(up_b.z) as f32;
+    let forward = q_body_to_display * DVec3::X;
+    let right = q_body_to_display * DVec3::Y;
+    let pitch = forward.dot(up_display).asin() as f32;
+    let roll = (-right.dot(up_display)).asin() as f32;
     (pitch, roll)
 }
 
