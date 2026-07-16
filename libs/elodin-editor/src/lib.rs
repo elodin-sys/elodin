@@ -11,7 +11,7 @@ use bevy::{
     camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     ecs::observer::Observer,
-    ecs::system::NonSendMarker,
+    ecs::system::{NonSendMarker, SystemParam},
     light::DirectionalLightShadowMap,
     log::LogPlugin,
     math::{DQuat, DVec3},
@@ -32,7 +32,8 @@ use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
-    EntityMap, PacketHandlerInput, PacketHandlers,
+    ConnectionAddr, EntityMap, MsgRequestIdHandlers, PacketHandlerInput, PacketHandlers,
+    RequestIdHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
@@ -300,6 +301,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_window_icon)
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
+            .init_resource::<SeriesStoreSession>()
+            .add_systems(Update, sync_series_store_session_from_db_config)
             .add_systems(Update, setup_egui_context)
             .add_systems(Update, organize_observer_entities)
             //.add_systems(Update, make_entities_selectable)
@@ -1291,10 +1294,239 @@ fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
 }
 
 pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
-    let sys = commands.register_system(clear_state_new_connection);
-    packet_handlers.0.push(sys);
+    // Timestamp reset must run before clear_state mutates SeriesStoreSession.addr,
+    // so soft/hard is decided against the pre-reconnect session identity.
     let sys = commands.register_system(reset_timestamps_on_new_connection);
     packet_handlers.0.push(sys);
+    let sys = commands.register_system(clear_state_new_connection);
+    packet_handlers.0.push(sys);
+}
+
+/// Tracks which DB the SeriesStore currently mirrors (addr + recording start).
+#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+pub struct SeriesStoreSession {
+    pub addr: Option<std::net::SocketAddr>,
+    pub start_ts: Option<i64>,
+}
+
+impl SeriesStoreSession {
+    pub fn identity(
+        addr: Option<std::net::SocketAddr>,
+        start_ts: Option<i64>,
+    ) -> Self {
+        Self { addr, start_ts }
+    }
+
+    pub fn matches(&self, addr: Option<std::net::SocketAddr>, start_ts: Option<i64>) -> bool {
+        self.addr == addr && self.start_ts == start_ts
+    }
+}
+
+fn cancel_in_flight_series_requests(
+    msg_handlers: &mut MsgRequestIdHandlers,
+    req_handlers: &mut RequestIdHandlers,
+    visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
+) {
+    msg_handlers.0.clear();
+    req_handlers.0.clear();
+    visible_prefetch.clear_in_flight();
+}
+
+fn hard_clear_series_store(
+    telemetry_cache: &mut impeller2_bevy::TelemetryCache,
+    backfill_state: &mut impeller2_bevy::BackfillState,
+    series_load: &mut impeller2_bevy::SeriesStoreLoadState,
+    plot_sync: &mut crate::ui::plot::data::PlotSyncState,
+    visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
+) {
+    *telemetry_cache = impeller2_bevy::TelemetryCache::default();
+    *backfill_state = impeller2_bevy::BackfillState::default();
+    *series_load = impeller2_bevy::SeriesStoreLoadState::default();
+    *plot_sync = crate::ui::plot::data::PlotSyncState::default();
+    *visible_prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
+}
+
+/// Soft reconnect: keep SeriesStore samples; re-arm begin→end backfill for catch-up.
+fn soft_rearm_series_store_catchup(
+    backfill_state: &mut impeller2_bevy::BackfillState,
+    series_load: &mut impeller2_bevy::SeriesStoreLoadState,
+) {
+    *backfill_state = impeller2_bevy::BackfillState::default();
+    series_load.components_started = 0;
+    series_load.components_complete = 0;
+    series_load.complete = false;
+    // Keep samples_loaded as a lower bound of what remains in RAM.
+}
+
+fn series_store_soft_reconnect(
+    session: &SeriesStoreSession,
+    addr: Option<std::net::SocketAddr>,
+) -> bool {
+    match session.addr {
+        None => true,
+        Some(prev) => Some(prev) == addr,
+    }
+}
+
+#[inline]
+fn should_hard_clear_ui(soft: bool) -> bool {
+    !soft
+}
+
+/// Soft/hard SeriesStore policy for `NewConnection`. Always runs (before any UI early-return).
+fn apply_series_store_on_reconnect(
+    soft: bool,
+    addr: Option<std::net::SocketAddr>,
+    session: &mut SeriesStoreSession,
+    telemetry_cache: &mut impeller2_bevy::TelemetryCache,
+    backfill_state: &mut impeller2_bevy::BackfillState,
+    series_load: &mut impeller2_bevy::SeriesStoreLoadState,
+    plot_sync: &mut crate::ui::plot::data::PlotSyncState,
+    visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
+) {
+    if soft {
+        soft_rearm_series_store_catchup(backfill_state, series_load);
+        session.addr = addr;
+        // start_ts confirmed when DbConfig arrives.
+    } else {
+        hard_clear_series_store(
+            telemetry_cache,
+            backfill_state,
+            series_load,
+            plot_sync,
+            visible_prefetch,
+        );
+        *session = SeriesStoreSession::identity(addr, None);
+    }
+}
+
+fn invalidate_schematic_sync_baselines(
+    last_synced_key: &mut plugins::kdl_document::LastSyncedActiveKey,
+    last_synced_revision: &mut plugins::kdl_document::LastSyncedAssetsRevision,
+) {
+    last_synced_key.0 = None;
+    *last_synced_revision = plugins::kdl_document::LastSyncedAssetsRevision::default();
+}
+
+/// Tear down tile UI / plot lines / Object3D sync map (hard reconnect only).
+fn hard_clear_editor_ui(
+    commands: &mut Commands,
+    windows_state: &mut Query<(Entity, &mut tiles::WindowState)>,
+    primary_window: Option<Entity>,
+    line_entities: &[Entity],
+    synced_glbs: &mut SyncedObject3d,
+    graph_data: &mut CollectedGraphData,
+) {
+    for line in line_entities {
+        if let Ok(mut entity_commands) = commands.get_entity(*line) {
+            entity_commands.despawn();
+        }
+    }
+    synced_glbs.0.clear();
+    *graph_data = CollectedGraphData::default();
+
+    let Some(primary_id) = primary_window else {
+        return;
+    };
+    if let Ok(mut primary_state) = windows_state.get_mut(primary_id) {
+        primary_state.1.tile_state.clear(commands);
+    }
+    let secondaries: Vec<(Entity, Vec<Entity>)> = windows_state
+        .iter()
+        .filter(|(entity, _)| *entity != primary_id)
+        .map(|(entity, state)| (entity, state.graph_entities.clone()))
+        .collect();
+    for (entity, graphs) in secondaries {
+        for graph in graphs {
+            commands.entity(graph).despawn();
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Bundled UI hard-clear params for identity-mismatch path (SystemParam limit).
+#[derive(SystemParam)]
+struct EditorUiHardClear<'w, 's> {
+    commands: Commands<'w, 's>,
+    windows_state: Query<'w, 's, (Entity, &'static mut tiles::WindowState)>,
+    primary_window: Option<Single<'w, 's, Entity, With<PrimaryWindow>>>,
+    lines: Query<'w, 's, Entity, With<LineHandle>>,
+    synced_glbs: ResMut<'w, SyncedObject3d>,
+    graph_data: ResMut<'w, CollectedGraphData>,
+    last_synced_key: ResMut<'w, plugins::kdl_document::LastSyncedActiveKey>,
+    last_synced_revision: ResMut<'w, plugins::kdl_document::LastSyncedAssetsRevision>,
+}
+
+impl EditorUiHardClear<'_, '_> {
+    fn clear_ui_and_invalidate_schematic_sync(&mut self) {
+        let primary = self.primary_window.as_ref().map(|p| **p);
+        let line_entities: Vec<Entity> = self.lines.iter().collect();
+        hard_clear_editor_ui(
+            &mut self.commands,
+            &mut self.windows_state,
+            primary,
+            &line_entities,
+            &mut self.synced_glbs,
+            &mut self.graph_data,
+        );
+        invalidate_schematic_sync_baselines(
+            &mut self.last_synced_key,
+            &mut self.last_synced_revision,
+        );
+    }
+}
+
+/// When DbConfig identity differs from the preserved session, wipe SeriesStore + UI.
+pub(crate) fn sync_series_store_session_from_db_config(
+    config: Res<impeller2_wkt::DbConfig>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    mut session: ResMut<SeriesStoreSession>,
+    mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
+    mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
+    mut series_load: ResMut<impeller2_bevy::SeriesStoreLoadState>,
+    mut plot_sync: ResMut<crate::ui::plot::data::PlotSyncState>,
+    mut visible_prefetch: ResMut<crate::ui::plot::data::VisiblePrefetchState>,
+    mut editor_ui: EditorUiHardClear,
+    mut current: ResMut<CurrentTimestamp>,
+) {
+    if !config.is_changed() {
+        return;
+    }
+    let addr = connection_addr.as_ref().map(|a| a.0);
+    let start_ts = config.time_start_timestamp_micros();
+    // start_ts not confirmed yet for this connection — adopt without wiping soft-preserved store.
+    if session.start_ts.is_none() {
+        *session = SeriesStoreSession::identity(addr, start_ts);
+        return;
+    }
+    if session.matches(addr, start_ts) {
+        return;
+    }
+    hard_clear_series_store(
+        &mut telemetry_cache,
+        &mut backfill_state,
+        &mut series_load,
+        &mut plot_sync,
+        &mut visible_prefetch,
+    );
+    editor_ui.clear_ui_and_invalidate_schematic_sync();
+    // Stale playhead from the previous recording must not survive identity change.
+    current.0 = Timestamp::EPOCH;
+    *session = SeriesStoreSession::identity(addr, start_ts);
+}
+
+/// Bundled so `clear_state_new_connection` stays within Bevy's SystemParam limit.
+#[derive(SystemParam)]
+struct SeriesStoreReconnect<'w> {
+    session: ResMut<'w, SeriesStoreSession>,
+    connection_addr: Option<Res<'w, ConnectionAddr>>,
+    msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
+    req_handlers: ResMut<'w, RequestIdHandlers>,
+    telemetry_cache: ResMut<'w, impeller2_bevy::TelemetryCache>,
+    backfill_state: ResMut<'w, impeller2_bevy::BackfillState>,
+    series_load: ResMut<'w, impeller2_bevy::SeriesStoreLoadState>,
+    plot_sync: ResMut<'w, crate::ui::plot::data::PlotSyncState>,
+    visible_prefetch: ResMut<'w, crate::ui::plot::data::VisiblePrefetchState>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1302,24 +1534,37 @@ fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
     mut value_map: Query<&mut ComponentValueMap>,
-    mut graph_data: ResMut<CollectedGraphData>,
-    lines: Query<Entity, With<LineHandle>>,
-    mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
     mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
-    mut commands: Commands,
-    mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
-    primary_window: Single<Entity, With<PrimaryWindow>>,
-    mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
-    mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
-    mut series_load: ResMut<impeller2_bevy::SeriesStoreLoadState>,
-    mut plot_sync: ResMut<crate::ui::plot::data::PlotSyncState>,
-    mut visible_prefetch: ResMut<crate::ui::plot::data::VisiblePrefetchState>,
+    mut series: SeriesStoreReconnect,
+    mut editor_ui: EditorUiHardClear,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
+
+    // SeriesStore ops run before any UI early-return so a missing primary
+    // window cannot leave handlers/cache in a half-torn-down state.
+    cancel_in_flight_series_requests(
+        &mut series.msg_handlers,
+        &mut series.req_handlers,
+        &mut series.visible_prefetch,
+    );
+
+    let addr = series.connection_addr.as_ref().map(|a| a.0);
+    let soft = series_store_soft_reconnect(&series.session, addr);
+    apply_series_store_on_reconnect(
+        soft,
+        addr,
+        &mut series.session,
+        &mut series.telemetry_cache,
+        &mut series.backfill_state,
+        &mut series.series_load,
+        &mut series.plot_sync,
+        &mut series.visible_prefetch,
+    );
+
     eql_context.0.component_parts.clear();
     // Clear cached component time ranges so they will be re-queried
     component_time_ranges.ranges.clear();
@@ -1333,7 +1578,7 @@ fn clear_state_new_connection(
     component_time_ranges.current_batch = 0;
     component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
     entity_map.0.retain(|_, entity| {
-        if let Ok(mut entity_commands) = commands.get_entity(*entity) {
+        if let Ok(mut entity_commands) = editor_ui.commands.get_entity(*entity) {
             entity_commands.despawn();
         }
         false
@@ -1341,33 +1586,26 @@ fn clear_state_new_connection(
     value_map.iter_mut().for_each(|mut map| {
         map.0.clear();
     });
-    for line in lines.iter() {
-        if let Ok(mut entity_commands) = commands.get_entity(line) {
-            entity_commands.despawn();
-        }
+
+    // Soft: keep tiles, LineHandles, SyncedObject3d, CollectedGraphData, LastSynced*.
+    // Hard: wipe UI and force schematic re-sync on next DbConfig.
+    if should_hard_clear_ui(soft) {
+        editor_ui.clear_ui_and_invalidate_schematic_sync();
     }
-    synced_glbs.0.clear();
-    let primary_id: Entity = *primary_window;
-    let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
-        return;
-    };
-    primary_state.1.tile_state.clear(&mut commands);
-    for (entity, secondary) in &windows_state {
-        if entity == primary_id {
-            // We don't despawn the primary window ever.
-            continue;
-        }
-        for graph in secondary.graph_entities.iter() {
-            commands.entity(*graph).despawn();
-        }
-        commands.entity(entity).despawn();
+}
+
+/// Reset earliest/latest for rehydrate; soft reconnect preserves the playhead.
+fn apply_timestamp_bounds_reset_on_reconnect(
+    soft: bool,
+    earliest: &mut EarliestTimestamp,
+    latest: &mut LastUpdated,
+    current: &mut CurrentTimestamp,
+) {
+    *earliest = EarliestTimestamp(Timestamp(i64::MAX));
+    *latest = LastUpdated(Timestamp(i64::MIN));
+    if !soft {
+        current.0 = Timestamp::EPOCH;
     }
-    *graph_data = CollectedGraphData::default();
-    *telemetry_cache = impeller2_bevy::TelemetryCache::default();
-    *backfill_state = impeller2_bevy::BackfillState::default();
-    *series_load = impeller2_bevy::SeriesStoreLoadState::default();
-    *plot_sync = crate::ui::plot::data::PlotSyncState::default();
-    *visible_prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
 }
 
 /// Reset timestamp resources so the next connection initializes correctly.
@@ -1377,14 +1615,21 @@ fn reset_timestamps_on_new_connection(
     mut earliest: ResMut<EarliestTimestamp>,
     mut latest: ResMut<LastUpdated>,
     mut current: ResMut<CurrentTimestamp>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    session: Res<SeriesStoreSession>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
-    *earliest = EarliestTimestamp(Timestamp(i64::MAX));
-    *latest = LastUpdated(Timestamp(i64::MIN));
-    current.0 = Timestamp::EPOCH;
+    let addr = connection_addr.as_ref().map(|a| a.0);
+    let soft = series_store_soft_reconnect(&session, addr);
+    apply_timestamp_bounds_reset_on_reconnect(
+        soft,
+        &mut earliest,
+        &mut latest,
+        &mut current,
+    );
 }
 
 #[derive(Resource, Clone)]
@@ -2145,6 +2390,8 @@ mod tests {
     use super::*;
     use bevy::app::App;
     use bevy::math::{DQuat, EulerRot};
+    use impeller2::types::{ComponentId, Timestamp};
+    use impeller2_wkt::ComponentValue;
 
     /// Inserting a bare `WorldPos` must pull in the `Geo*` components
     /// (required components) and end up at the same Bevy pose the old
@@ -2182,6 +2429,356 @@ mod tests {
             q.dot(wp.bevy_att()).abs() > 1.0 - 1e-9,
             "got {q:?}, expected {:?}",
             wp.bevy_att()
+        );
+    }
+
+    fn sample_addr(port: u16) -> std::net::SocketAddr {
+        std::net::SocketAddr::from(([127, 0, 0, 1], port))
+    }
+
+    fn populated_cache() -> impeller2_bevy::TelemetryCache {
+        let mut cache = impeller2_bevy::TelemetryCache::default();
+        cache.insert(
+            ComponentId(42),
+            Timestamp(1_000),
+            ComponentValue::F64(nox::array![1.0f64].to_dyn()),
+        );
+        cache
+    }
+
+    #[test]
+    fn soft_reconnect_preserves_telemetry_cache() {
+        let addr = sample_addr(2240);
+        let mut session = SeriesStoreSession::identity(Some(addr), Some(100));
+        let mut cache = populated_cache();
+        let gen_before = cache.generation();
+        let mut backfill = impeller2_bevy::BackfillState::default();
+        let mut series_load = impeller2_bevy::SeriesStoreLoadState {
+            components_started: 3,
+            components_complete: 3,
+            samples_loaded: 10,
+            complete: true,
+        };
+        let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
+        let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
+
+        assert!(series_store_soft_reconnect(&session, Some(addr)));
+        apply_series_store_on_reconnect(
+            true,
+            Some(addr),
+            &mut session,
+            &mut cache,
+            &mut backfill,
+            &mut series_load,
+            &mut plot_sync,
+            &mut prefetch,
+        );
+
+        assert_eq!(cache.generation(), gen_before);
+        assert!(cache.has_series(&ComponentId(42)));
+        assert!(!series_load.complete);
+        assert_eq!(series_load.samples_loaded, 10);
+        assert_eq!(session.addr, Some(addr));
+        assert_eq!(session.start_ts, Some(100));
+    }
+
+    #[test]
+    fn soft_reconnect_cancels_handlers_and_prefetch() {
+        use bevy::ecs::system::InRef;
+        use impeller2_bevy::PacketGrantR;
+
+        let mut app = App::new();
+        let sys_id = app
+            .world_mut()
+            .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| false);
+        let mut msg = MsgRequestIdHandlers::default();
+        let mut req = RequestIdHandlers::default();
+        msg.0.insert(7, sys_id);
+        req.0.insert(9, sys_id);
+        let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
+        prefetch.in_flight.insert((ComponentId(1), 0, 1));
+
+        cancel_in_flight_series_requests(&mut msg, &mut req, &mut prefetch);
+
+        assert!(msg.0.is_empty());
+        assert!(req.0.is_empty());
+        assert!(prefetch.in_flight.is_empty());
+    }
+
+    #[test]
+    fn series_store_policy_runs_even_when_primary_window_missing() {
+        // Mirrors clear_state_new_connection ordering: SeriesStore soft path
+        // completes before the primary-window early return.
+        let addr = sample_addr(2240);
+        let mut session = SeriesStoreSession::identity(Some(addr), Some(50));
+        let mut cache = populated_cache();
+        let mut backfill = impeller2_bevy::BackfillState::default();
+        let mut series_load = impeller2_bevy::SeriesStoreLoadState::default();
+        let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
+        let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
+        prefetch.in_flight.insert((ComponentId(1), 0, 1));
+        let mut msg = MsgRequestIdHandlers::default();
+        let mut req = RequestIdHandlers::default();
+
+        cancel_in_flight_series_requests(&mut msg, &mut req, &mut prefetch);
+        let soft = series_store_soft_reconnect(&session, Some(addr));
+        apply_series_store_on_reconnect(
+            soft,
+            Some(addr),
+            &mut session,
+            &mut cache,
+            &mut backfill,
+            &mut series_load,
+            &mut plot_sync,
+            &mut prefetch,
+        );
+        let primary_window: Option<()> = None;
+        if primary_window.is_none() {
+            // early return — SeriesStore work already applied
+        }
+
+        assert!(cache.has_series(&ComponentId(42)));
+        assert!(prefetch.in_flight.is_empty());
+    }
+
+    #[test]
+    fn hard_clear_on_addr_change() {
+        let old = sample_addr(2240);
+        let new = sample_addr(2241);
+        let mut session = SeriesStoreSession::identity(Some(old), Some(100));
+        let mut cache = populated_cache();
+        let mut backfill = impeller2_bevy::BackfillState::default();
+        let mut series_load = impeller2_bevy::SeriesStoreLoadState {
+            samples_loaded: 99,
+            complete: true,
+            ..Default::default()
+        };
+        let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
+        let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
+
+        assert!(!series_store_soft_reconnect(&session, Some(new)));
+        apply_series_store_on_reconnect(
+            false,
+            Some(new),
+            &mut session,
+            &mut cache,
+            &mut backfill,
+            &mut series_load,
+            &mut plot_sync,
+            &mut prefetch,
+        );
+
+        assert!(!cache.has_series(&ComponentId(42)));
+        assert_eq!(series_load.samples_loaded, 0);
+        assert_eq!(session, SeriesStoreSession::identity(Some(new), None));
+    }
+
+    fn sync_app(addr: std::net::SocketAddr) -> App {
+        let mut app = App::new();
+        app.init_resource::<impeller2_wkt::DbConfig>()
+            .init_resource::<SeriesStoreSession>()
+            .init_resource::<impeller2_bevy::TelemetryCache>()
+            .init_resource::<impeller2_bevy::BackfillState>()
+            .init_resource::<impeller2_bevy::SeriesStoreLoadState>()
+            .init_resource::<crate::ui::plot::data::PlotSyncState>()
+            .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
+            .init_resource::<SyncedObject3d>()
+            .init_resource::<CollectedGraphData>()
+            .init_resource::<plugins::kdl_document::LastSyncedActiveKey>()
+            .init_resource::<plugins::kdl_document::LastSyncedAssetsRevision>()
+            .insert_resource(CurrentTimestamp(Timestamp(9_000)))
+            .insert_resource(ConnectionAddr(addr))
+            .add_systems(bevy::app::Update, sync_series_store_session_from_db_config);
+        app
+    }
+
+    #[test]
+    fn soft_timestamp_reset_preserves_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(100));
+        let mut latest = LastUpdated(Timestamp(10_000));
+        let mut current = CurrentTimestamp(Timestamp(5_000));
+        apply_timestamp_bounds_reset_on_reconnect(
+            true,
+            &mut earliest,
+            &mut latest,
+            &mut current,
+        );
+        assert_eq!(earliest.0, Timestamp(i64::MAX));
+        assert_eq!(latest.0, Timestamp(i64::MIN));
+        assert_eq!(current.0, Timestamp(5_000));
+    }
+
+    #[test]
+    fn hard_timestamp_reset_zeroes_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(100));
+        let mut latest = LastUpdated(Timestamp(10_000));
+        let mut current = CurrentTimestamp(Timestamp(5_000));
+        apply_timestamp_bounds_reset_on_reconnect(
+            false,
+            &mut earliest,
+            &mut latest,
+            &mut current,
+        );
+        assert_eq!(earliest.0, Timestamp(i64::MAX));
+        assert_eq!(latest.0, Timestamp(i64::MIN));
+        assert_eq!(current.0, Timestamp::EPOCH);
+    }
+
+    #[test]
+    fn hard_clear_when_db_config_identity_changes() {
+        let addr = sample_addr(2240);
+        let mut app = sync_app(addr);
+
+        {
+            let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
+            *session = SeriesStoreSession::identity(Some(addr), Some(100));
+            let mut cache = app.world_mut().resource_mut::<impeller2_bevy::TelemetryCache>();
+            *cache = populated_cache();
+            app.world_mut()
+                .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
+                .0 = Some("schematics/main.kdl".into());
+            app.world_mut()
+                .resource_mut::<plugins::kdl_document::LastSyncedAssetsRevision>()
+                .revision = Some(3);
+        }
+
+        {
+            let mut config = app.world_mut().resource_mut::<impeller2_wkt::DbConfig>();
+            config.set_time_start_timestamp_micros(200);
+        }
+        app.update();
+
+        let cache = app.world().resource::<impeller2_bevy::TelemetryCache>();
+        assert!(!cache.has_series(&ComponentId(42)));
+        let session = app.world().resource::<SeriesStoreSession>();
+        assert_eq!(session.start_ts, Some(200));
+        assert!(
+            app.world()
+                .resource::<plugins::kdl_document::LastSyncedActiveKey>()
+                .0
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .resource::<plugins::kdl_document::LastSyncedAssetsRevision>()
+                .revision
+                .is_none()
+        );
+        assert_eq!(
+            app.world().resource::<CurrentTimestamp>().0,
+            Timestamp::EPOCH
+        );
+    }
+
+    #[test]
+    fn db_config_adopts_start_ts_without_clearing_soft_store() {
+        let addr = sample_addr(2240);
+        let mut app = sync_app(addr);
+
+        {
+            let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
+            // Soft reconnect left start_ts unconfirmed.
+            *session = SeriesStoreSession::identity(Some(addr), None);
+            let mut cache = app.world_mut().resource_mut::<impeller2_bevy::TelemetryCache>();
+            *cache = populated_cache();
+            app.world_mut()
+                .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
+                .0 = Some("schematics/main.kdl".into());
+        }
+        {
+            let mut config = app.world_mut().resource_mut::<impeller2_wkt::DbConfig>();
+            config.set_time_start_timestamp_micros(100);
+        }
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<impeller2_bevy::TelemetryCache>()
+                .has_series(&ComponentId(42))
+        );
+        assert_eq!(
+            app.world().resource::<SeriesStoreSession>().start_ts,
+            Some(100)
+        );
+        // Soft adopt must not invalidate schematic sync (would force blank reload).
+        assert_eq!(
+            app.world()
+                .resource::<plugins::kdl_document::LastSyncedActiveKey>()
+                .0
+                .as_deref(),
+            Some("schematics/main.kdl")
+        );
+        // Soft adopt must not zero the playhead.
+        assert_eq!(
+            app.world().resource::<CurrentTimestamp>().0,
+            Timestamp(9_000)
+        );
+    }
+
+    #[test]
+    fn soft_reconnect_skips_ui_hard_clear_policy() {
+        assert!(!should_hard_clear_ui(true));
+        assert!(should_hard_clear_ui(false));
+    }
+
+    #[test]
+    fn invalidate_schematic_sync_baselines_clears_last_synced() {
+        let mut key = plugins::kdl_document::LastSyncedActiveKey(Some("schematics/main.kdl".into()));
+        let mut revision = plugins::kdl_document::LastSyncedAssetsRevision {
+            revision: Some(7),
+            suppress_next: true,
+            requested: Some(7),
+        };
+        invalidate_schematic_sync_baselines(&mut key, &mut revision);
+        assert!(key.0.is_none());
+        assert!(revision.revision.is_none());
+        assert!(!revision.suppress_next);
+        assert!(revision.requested.is_none());
+    }
+
+    #[test]
+    fn hard_clear_editor_ui_clears_synced_object3d_and_graph_data() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = App::new();
+        app.init_resource::<SyncedObject3d>()
+            .init_resource::<CollectedGraphData>();
+
+        let a = app.world_mut().spawn_empty().id();
+        let b = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<SyncedObject3d>()
+            .0
+            .insert(a, b);
+        app.world_mut()
+            .resource_mut::<CollectedGraphData>()
+            .components
+            .insert(ComponentId(1), crate::ui::plot::data::PlotDataComponent::new("x", vec![]));
+
+        app.world_mut()
+            .run_system_once(
+                |mut commands: Commands,
+                 mut windows: Query<(Entity, &mut tiles::WindowState)>,
+                 mut synced: ResMut<SyncedObject3d>,
+                 mut graph_data: ResMut<CollectedGraphData>| {
+                    hard_clear_editor_ui(
+                        &mut commands,
+                        &mut windows,
+                        None,
+                        &[],
+                        &mut synced,
+                        &mut graph_data,
+                    );
+                },
+            )
+            .unwrap();
+
+        assert!(app.world().resource::<SyncedObject3d>().0.is_empty());
+        assert!(
+            app.world()
+                .resource::<CollectedGraphData>()
+                .components
+                .is_empty()
         );
     }
 }

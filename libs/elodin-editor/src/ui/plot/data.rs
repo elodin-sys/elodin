@@ -505,7 +505,13 @@ fn visible_sync_range(
 /// Dedupes in-flight visible-window GetTimeSeries requests.
 #[derive(Resource, Default)]
 pub struct VisiblePrefetchState {
-    in_flight: HashSet<(ComponentId, i64, i64)>,
+    pub(crate) in_flight: HashSet<(ComponentId, i64, i64)>,
+}
+
+impl VisiblePrefetchState {
+    pub fn clear_in_flight(&mut self) {
+        self.in_flight.clear();
+    }
 }
 
 const VISIBLE_PREFETCH_LIMIT: usize = 8192;

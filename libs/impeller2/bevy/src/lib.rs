@@ -679,17 +679,11 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
-                let is_first = world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
-                if is_first {
-                    *world_sink.earliest_timestamp = new_earliest;
-                } else if new_earliest.0 < world_sink.earliest_timestamp.0 {
-                    // Keep EarliestTimestamp monotonic (min) to avoid narrowing
-                    // the clamp window from stale/out-of-order updates.
-                    *world_sink.earliest_timestamp = new_earliest;
-                }
-                if is_first {
-                    world_sink.current_timestamp.0 = new_earliest.0;
-                }
+                apply_earliest_timestamp(
+                    &mut world_sink.earliest_timestamp,
+                    &mut world_sink.current_timestamp,
+                    new_earliest,
+                );
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
                 let _ = m;
@@ -707,6 +701,29 @@ fn sink_inner(
         }
     }
     Ok(())
+}
+
+/// Apply a server `EarliestTimestamp` update.
+///
+/// On the first bound after reset (`earliest == MAX`), adopt the new earliest.
+/// Snap the playhead to that earliest only when it is still uninitialized
+/// (`CurrentTimestamp == EPOCH`) — soft reconnect preserves a non-EPOCH playhead.
+pub(crate) fn apply_earliest_timestamp(
+    earliest: &mut EarliestTimestamp,
+    current: &mut CurrentTimestamp,
+    new_earliest: EarliestTimestamp,
+) {
+    let is_first = earliest.0 == Timestamp(i64::MAX);
+    if is_first {
+        *earliest = new_earliest;
+    } else if new_earliest.0 < earliest.0 {
+        // Keep EarliestTimestamp monotonic (min) to avoid narrowing
+        // the clamp window from stale/out-of-order updates.
+        *earliest = new_earliest;
+    }
+    if is_first && current.0 == Timestamp::EPOCH {
+        current.0 = new_earliest.0;
+    }
 }
 
 pub fn sink(world: &mut World, world_sink_state: &mut SystemState<WorldSink>) {
@@ -1596,6 +1613,57 @@ impl ComponentValueExt for ComponentValue {
                     .map(|(i, x)| (i, ElementValueMut::F64(x))),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod earliest_timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn first_earliest_snaps_epoch_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(i64::MAX));
+        let mut current = CurrentTimestamp(Timestamp::EPOCH);
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(1_000)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_000));
+        assert_eq!(current.0, Timestamp(1_000));
+    }
+
+    #[test]
+    fn first_earliest_preserves_non_epoch_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(i64::MAX));
+        let mut current = CurrentTimestamp(Timestamp(5_000));
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(1_000)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_000));
+        assert_eq!(current.0, Timestamp(5_000));
+    }
+
+    #[test]
+    fn later_earliest_is_monotonic_min_without_moving_playhead() {
+        let mut earliest = EarliestTimestamp(Timestamp(2_000));
+        let mut current = CurrentTimestamp(Timestamp(5_000));
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(1_500)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_500));
+        assert_eq!(current.0, Timestamp(5_000));
+        apply_earliest_timestamp(
+            &mut earliest,
+            &mut current,
+            EarliestTimestamp(Timestamp(3_000)),
+        );
+        assert_eq!(earliest.0, Timestamp(1_500));
+        assert_eq!(current.0, Timestamp(5_000));
     }
 }
 
