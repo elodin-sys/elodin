@@ -1078,15 +1078,19 @@ fn parse_spatial_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicE
         })?
         .to_string();
 
+    // Omit → None so load can inherit the schematic `coordinate` frame
+    // (same pattern as viewport `frame`).
     let source = match node.get("source").and_then(|v| v.as_string()) {
-        Some(s) => GeoFrame::from_str(s).map_err(|_| KdlSchematicError::InvalidValue {
-            property: "source".to_string(),
-            node: "spatial_gauge".to_string(),
-            expected: "ENU, NED, or ECEF".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?,
-        None => GeoFrame::ECEF,
+        Some(s) => Some(
+            GeoFrame::from_str(s).map_err(|_| KdlSchematicError::InvalidValue {
+                property: "source".to_string(),
+                node: "spatial_gauge".to_string(),
+                expected: "ENU, NED, or ECEF".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            })?,
+        ),
+        None => None,
     };
 
     let display = match node.get("display").and_then(|v| v.as_string()) {
@@ -3597,7 +3601,7 @@ object_3d "a.world_pos" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::SpatialGauge(monitor)) = &schematic.elems[0] {
             assert_eq!(monitor.eql, "NAVEKFSTATE.POS_ECEF");
-            assert_eq!(monitor.source, GeoFrame::ECEF);
+            assert_eq!(monitor.source, Some(GeoFrame::ECEF));
             assert_eq!(monitor.display, DisplayFrame::NED);
             assert_eq!(monitor.name.as_deref(), Some("Missile"));
         } else {
@@ -3613,6 +3617,7 @@ object_3d "a.world_pos" {
         if let SchematicElem::Panel(Panel::SpatialGauge(monitor)) = &schematic.elems[0] {
             assert_eq!(monitor.eql, "NAVEKFSTATE.POS_ECEF");
             assert_eq!(monitor.name.as_deref(), Some("Missile"));
+            assert_eq!(monitor.source, None);
         } else {
             panic!("Expected spatial_gauge");
         }
@@ -3620,7 +3625,8 @@ object_3d "a.world_pos" {
 
     #[test]
     fn test_spatial_gauge_defaults_and_round_trip() {
-        // Omitted source/display fall back to ECEF source, NED display.
+        // Omitted source stays unset (inherits schematic coordinate at load);
+        // omitted display defaults to NED.
         let schematic = parse_schematic(r#"spatial_gauge "a.pos""#).unwrap();
         let SchematicElem::Panel(panel) = &schematic.elems[0] else {
             panic!("Expected panel");
@@ -3628,7 +3634,7 @@ object_3d "a.world_pos" {
         let Panel::SpatialGauge(monitor) = panel else {
             panic!("Expected spatial_gauge");
         };
-        assert_eq!(monitor.source, GeoFrame::ECEF);
+        assert_eq!(monitor.source, None);
         assert_eq!(monitor.display, DisplayFrame::NED);
 
         // LLA round-trips through serialization (positional eql).
@@ -3647,7 +3653,7 @@ object_3d "a.world_pos" {
         let reparsed = parse_schematic(&serialized).unwrap();
         if let SchematicElem::Panel(Panel::SpatialGauge(m)) = &reparsed.elems[0] {
             assert_eq!(m.eql, "a.pos");
-            assert_eq!(m.source, GeoFrame::NED);
+            assert_eq!(m.source, Some(GeoFrame::NED));
             assert_eq!(m.display, DisplayFrame::LLA);
             assert_eq!(m.name.as_deref(), Some("M"));
         } else {

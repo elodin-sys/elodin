@@ -311,7 +311,7 @@ impl SchematicParam<'_, '_> {
                         let data = self.spatial_gauges.get(monitor.entity).ok()?;
                         Some(Panel::SpatialGauge(SpatialGauge {
                             eql: data.eql.clone(),
-                            source: data.source,
+                            source: Some(data.source),
                             display: data.display,
                             name: pane_name,
                         }))

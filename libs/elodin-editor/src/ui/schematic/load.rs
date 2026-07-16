@@ -132,6 +132,13 @@ fn apply_fallback_frame_to_panel(
             }
             Panel::Viewport(v)
         }
+        Panel::SpatialGauge(gauge) => {
+            let mut g = gauge.clone();
+            if g.source.is_none() {
+                g.source = fallback_frame;
+            }
+            Panel::SpatialGauge(g)
+        }
         Panel::Tabs(panels) => Panel::Tabs(
             panels
                 .iter()
@@ -1244,11 +1251,14 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| "Spatial Gauge".to_string());
+                // After `apply_fallback_frame_to_panel`, omitted source is the
+                // schematic coordinate; if that was also unset, use ECEF.
+                let source = monitor.source.unwrap_or(bevy_geo_frames::GeoFrame::ECEF);
                 let entity = self
                     .commands
                     .spawn(crate::ui::spatial_gauge::SpatialGaugeData::new(
                         monitor.eql.clone(),
-                        monitor.source,
+                        source,
                         monitor.display,
                     ))
                     .id();

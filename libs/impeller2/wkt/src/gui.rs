@@ -1218,7 +1218,10 @@ pub struct SpatialGauge {
     /// elements are the position (e.g. a `world_pos` 7-vector).
     pub eql: String,
     /// Coordinate frame the EQL result is expressed in.
-    pub source: bevy_geo_frames::GeoFrame,
+    ///
+    /// When `None`, inherits the schematic global `coordinate` frame (same as
+    /// viewport `frame`); if that is also unset, the editor falls back to ECEF.
+    pub source: Option<bevy_geo_frames::GeoFrame>,
     /// Coordinate system to display the position in (a spatial frame or LLA).
     pub display: DisplayFrame,
     pub name: Option<String>,
