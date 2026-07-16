@@ -1310,10 +1310,7 @@ pub struct SeriesStoreSession {
 }
 
 impl SeriesStoreSession {
-    pub fn identity(
-        addr: Option<std::net::SocketAddr>,
-        start_ts: Option<i64>,
-    ) -> Self {
+    pub fn identity(addr: Option<std::net::SocketAddr>, start_ts: Option<i64>) -> Self {
         Self { addr, start_ts }
     }
 
@@ -1624,12 +1621,7 @@ fn reset_timestamps_on_new_connection(
     }
     let addr = connection_addr.as_ref().map(|a| a.0);
     let soft = series_store_soft_reconnect(&session, addr);
-    apply_timestamp_bounds_reset_on_reconnect(
-        soft,
-        &mut earliest,
-        &mut latest,
-        &mut current,
-    );
+    apply_timestamp_bounds_reset_on_reconnect(soft, &mut earliest, &mut latest, &mut current);
 }
 
 #[derive(Resource, Clone)]
@@ -2597,12 +2589,7 @@ mod tests {
         let mut earliest = EarliestTimestamp(Timestamp(100));
         let mut latest = LastUpdated(Timestamp(10_000));
         let mut current = CurrentTimestamp(Timestamp(5_000));
-        apply_timestamp_bounds_reset_on_reconnect(
-            true,
-            &mut earliest,
-            &mut latest,
-            &mut current,
-        );
+        apply_timestamp_bounds_reset_on_reconnect(true, &mut earliest, &mut latest, &mut current);
         assert_eq!(earliest.0, Timestamp(i64::MAX));
         assert_eq!(latest.0, Timestamp(i64::MIN));
         assert_eq!(current.0, Timestamp(5_000));
@@ -2613,12 +2600,7 @@ mod tests {
         let mut earliest = EarliestTimestamp(Timestamp(100));
         let mut latest = LastUpdated(Timestamp(10_000));
         let mut current = CurrentTimestamp(Timestamp(5_000));
-        apply_timestamp_bounds_reset_on_reconnect(
-            false,
-            &mut earliest,
-            &mut latest,
-            &mut current,
-        );
+        apply_timestamp_bounds_reset_on_reconnect(false, &mut earliest, &mut latest, &mut current);
         assert_eq!(earliest.0, Timestamp(i64::MAX));
         assert_eq!(latest.0, Timestamp(i64::MIN));
         assert_eq!(current.0, Timestamp::EPOCH);
@@ -2632,7 +2614,9 @@ mod tests {
         {
             let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
             *session = SeriesStoreSession::identity(Some(addr), Some(100));
-            let mut cache = app.world_mut().resource_mut::<impeller2_bevy::TelemetryCache>();
+            let mut cache = app
+                .world_mut()
+                .resource_mut::<impeller2_bevy::TelemetryCache>();
             *cache = populated_cache();
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
@@ -2679,7 +2663,9 @@ mod tests {
             let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
             // Soft reconnect left start_ts unconfirmed.
             *session = SeriesStoreSession::identity(Some(addr), None);
-            let mut cache = app.world_mut().resource_mut::<impeller2_bevy::TelemetryCache>();
+            let mut cache = app
+                .world_mut()
+                .resource_mut::<impeller2_bevy::TelemetryCache>();
             *cache = populated_cache();
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
@@ -2723,7 +2709,8 @@ mod tests {
 
     #[test]
     fn invalidate_schematic_sync_baselines_clears_last_synced() {
-        let mut key = plugins::kdl_document::LastSyncedActiveKey(Some("schematics/main.kdl".into()));
+        let mut key =
+            plugins::kdl_document::LastSyncedActiveKey(Some("schematics/main.kdl".into()));
         let mut revision = plugins::kdl_document::LastSyncedAssetsRevision {
             revision: Some(7),
             suppress_next: true,
@@ -2753,7 +2740,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<CollectedGraphData>()
             .components
-            .insert(ComponentId(1), crate::ui::plot::data::PlotDataComponent::new("x", vec![]));
+            .insert(
+                ComponentId(1),
+                crate::ui::plot::data::PlotDataComponent::new("x", vec![]),
+            );
 
         app.world_mut()
             .run_system_once(
