@@ -2293,8 +2293,8 @@ mod tests {
     fn line_tree_content_gen_bumps_on_clear() {
         let mut tree = LineTree::<f32>::default();
         assert_eq!(tree.content_gen(), 0);
-        let chunk = Chunk::from_iter(&[Timestamp(1)], Timestamp(0), [1.0f32].into_iter())
-            .expect("chunk");
+        let chunk =
+            Chunk::from_iter(&[Timestamp(1)], Timestamp(0), [1.0f32].into_iter()).expect("chunk");
         tree.insert(chunk);
         tree.clear();
         assert_eq!(tree.content_gen(), 1);
