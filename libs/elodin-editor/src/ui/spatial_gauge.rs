@@ -5,8 +5,9 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Vec2};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, ecef_to_lla_deg};
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, DisplayFrame};
+use impeller2::types::{ComponentId, Timestamp};
+use impeller2_bevy::{EntityMap, TelemetryCache};
+use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use crate::EqlContext;
@@ -39,6 +40,12 @@ pub struct SpatialGaugeData {
     pub source: GeoFrame,
     pub display: DisplayFrame,
     pub compiled_expr: Option<CompiledExpr>,
+    /// Component IDs referenced by `compiled_expr`, used to resolve playhead
+    /// samples from [`TelemetryCache`] (same path as the component monitor).
+    component_ids: Vec<ComponentId>,
+    /// When the EQL is a bare component (no formulas/ops), resolve that id
+    /// directly from the cache — same as [`super::monitor::MonitorWidget`].
+    plain_component_id: Option<ComponentId>,
     /// The `eql` string `compiled_expr` was built from, so recompilation only
     /// happens when the text actually changes (or a prior compile failed).
     compiled_for: Option<String>,
@@ -51,6 +58,8 @@ impl SpatialGaugeData {
             source,
             display,
             compiled_expr: None,
+            component_ids: Vec::new(),
+            plain_component_id: None,
             compiled_for: None,
         }
     }
@@ -69,17 +78,80 @@ pub fn compile_spatial_gauge_exprs(
             continue;
         }
         let eql = data.eql.clone();
-        data.compiled_expr = if eql.trim().is_empty() {
-            None
+        let (compiled, component_ids, plain_component_id) = if eql.trim().is_empty() {
+            (None, Vec::new(), None)
         } else {
-            eql_context
-                .0
-                .parse_str(&eql)
-                .ok()
-                .and_then(|expr| compile_eql_expr(expr).ok())
+            match eql_context.0.parse_str(&eql) {
+                Ok(expr) => {
+                    let plain_component_id = match &expr {
+                        eql::Expr::ComponentPart(part) => Some(part.id),
+                        _ => None,
+                    };
+                    let mut ids = Vec::new();
+                    collect_component_ids(&expr, &mut ids);
+                    (compile_eql_expr(expr).ok(), ids, plain_component_id)
+                }
+                Err(_) => (None, Vec::new(), None),
+            }
         };
+        data.compiled_expr = compiled;
+        data.component_ids = component_ids;
+        data.plain_component_id = plain_component_id;
         data.compiled_for = Some(eql);
     }
+}
+
+/// Walk an EQL AST and collect every referenced component id.
+fn collect_component_ids(expr: &eql::Expr, out: &mut Vec<ComponentId>) {
+    match expr {
+        eql::Expr::ComponentPart(part) => out.push(part.id),
+        eql::Expr::Time(component) => out.push(component.id),
+        eql::Expr::ArrayAccess(inner, _)
+        | eql::Expr::Formula(_, inner)
+        | eql::Expr::Last(inner, _)
+        | eql::Expr::First(inner, _) => collect_component_ids(inner, out),
+        eql::Expr::Tuple(exprs) => {
+            for e in exprs {
+                collect_component_ids(e, out);
+            }
+        }
+        eql::Expr::BinaryOp(left, right, _) => {
+            collect_component_ids(left, out);
+            collect_component_ids(right, out);
+        }
+        eql::Expr::FloatLiteral(_) | eql::Expr::StringLiteral(_) => {}
+    }
+}
+
+/// Returns true when any referenced component has cached history but no sample
+/// at/before the playhead — the same gap where `apply_cached_data` leaves a
+/// stale entity `ComponentValue` behind.
+fn playhead_sample_missing(
+    component_ids: &[ComponentId],
+    telemetry_cache: &TelemetryCache,
+    ts: Timestamp,
+) -> bool {
+    component_ids.iter().any(|id| {
+        telemetry_cache.has_series(id) && telemetry_cache.get_at_or_before(id, ts).is_none()
+    })
+}
+
+/// Resolve a bare component at the playhead — identical to [`super::monitor::MonitorWidget`].
+fn resolve_plain_component(
+    id: ComponentId,
+    entity_map: &EntityMap,
+    values: &Query<&ComponentValue>,
+    telemetry_cache: &TelemetryCache,
+    ts: Timestamp,
+) -> Option<ComponentValue> {
+    if let Some(cached) = telemetry_cache.get_at_or_before(&id, ts) {
+        return Some(cached.clone());
+    }
+    if !telemetry_cache.has_series(&id) {
+        let entity = entity_map.get(&id)?;
+        return values.get(*entity).ok().cloned();
+    }
+    None
 }
 
 #[derive(SystemParam)]
@@ -87,6 +159,8 @@ pub struct SpatialGaugeWidget<'w, 's> {
     gauges: Query<'w, 's, &'static mut SpatialGaugeData>,
     entity_map: Res<'w, EntityMap>,
     values: Query<'w, 's, &'static ComponentValue>,
+    telemetry_cache: Res<'w, TelemetryCache>,
+    current_timestamp: Res<'w, CurrentTimestamp>,
     geo_context: Res<'w, GeoContext>,
 }
 
@@ -104,6 +178,8 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
             mut gauges,
             entity_map,
             values,
+            telemetry_cache,
+            current_timestamp,
             geo_context,
         } = state.get_mut(world);
         let Ok(mut data) = gauges.get_mut(pane.entity) else {
@@ -112,10 +188,18 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
 
         // Evaluate before borrowing `data` for the ComboBox mutation.
         let labels = display_labels(data.display);
-        let value = data
-            .compiled_expr
-            .as_ref()
-            .and_then(|expr| expr.execute(&entity_map, &values).ok());
+        let ts = current_timestamp.0;
+        let value = if playhead_sample_missing(&data.component_ids, &telemetry_cache, ts) {
+            None
+        } else if let Some(id) = data.plain_component_id {
+            resolve_plain_component(id, &entity_map, &values, &telemetry_cache, ts)
+        } else {
+            // Formula / multi-component EQL: entity values are synced by
+            // `apply_cached_data` when samples exist; the gate above rejects gaps.
+            data.compiled_expr
+                .as_ref()
+                .and_then(|expr| expr.execute(&entity_map, &values).ok())
+        };
         let out = value
             .as_ref()
             .and_then(component_value_tail_to_vec3)
