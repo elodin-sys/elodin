@@ -839,44 +839,6 @@ mod tests {
         assert_eq!(digest_bytes(b"same"), digest_bytes(b"same"));
     }
 
-    /// Live regression: reqwest HEAD against axum owned-body GET reports
-    /// `Content-Length: 0`, which used to make verify always fail. Hitting a
-    /// running DB on 127.0.0.1:2240 confirms GET-based verify succeeds.
-    #[test]
-    fn verify_live_db_skybox_if_listening() {
-        let addr: SocketAddr = "127.0.0.1:2240".parse().unwrap();
-        let cubemap_path =
-            Path::new("/home/dan/dual/fsw/assets/skyboxes/desert_night.cubemap.ktx2");
-        let Some(expected) = cubemap_digest(cubemap_path) else {
-            return;
-        };
-        let rt = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(_) => return,
-        };
-        // Skip when no local DB is up (CI / offline).
-        let probe = rt.block_on(async {
-            reqwest::Client::builder()
-                .timeout(Duration::from_millis(500))
-                .build()
-                .ok()?
-                .get("http://127.0.0.1:2241/skyboxes/manifest.ron")
-                .send()
-                .await
-                .ok()
-        });
-        if probe.is_none() {
-            return;
-        }
-        let ok = rt
-            .block_on(verify_db_skybox_assets("desert_night", addr, expected))
-            .expect("verify against live DB");
-        assert!(
-            ok,
-            "DB already serves matching desert_night cubemap; verify must succeed (HEAD CL=0 regression)"
-        );
-    }
-
     #[test]
     fn cubemap_digest_ignores_mtime() {
         let dir = tempfile::tempdir().unwrap();

@@ -210,7 +210,11 @@ impl TelemetryCache {
     }
 
     /// True when `range` is fully contained in recorded coverage for this component.
-    pub fn is_covered(&self, component_id: &ComponentId, range: &std::ops::Range<Timestamp>) -> bool {
+    pub fn is_covered(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> bool {
         if range.end.0 <= range.start.0 {
             return true;
         }
@@ -323,6 +327,7 @@ impl Decomponentize for TableCacheAndWorldSink<'_, '_, '_> {
 /// (like `WorldPos`) with the cached data. This allows the viewport to
 /// display data at any timestamp the user scrubs to, without waiting for
 /// the DB stream to deliver it.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_cached_data(
     current_ts: bevy::prelude::Res<CurrentTimestamp>,
     cache: bevy::prelude::Res<TelemetryCache>,
@@ -454,9 +459,14 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
         move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
               mut cache: ResMut<TelemetryCache>,
               schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+              priority: bevy::prelude::Res<SeriesFetchPriority>,
               mut backfill: ResMut<BackfillState>,
               mut load_state: ResMut<SeriesStoreLoadState>,
               mut cmds: Commands| {
+            // Component may have left the allowlist while this page was in flight.
+            if !priority.high.contains(&component_id) {
+                return true;
+            }
             let OwnedPacket::TimeSeries(ts) = &*pkt else {
                 return true;
             };
@@ -496,9 +506,13 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 let cover_start = timestamps.first().copied().unwrap_or(page_start);
                 let cover_end = Timestamp(last_ts.0.saturating_add(1));
                 cache.mark_covered(component_id, cover_start, cover_end);
-                load_state.samples_loaded = load_state
-                    .samples_loaded
-                    .saturating_add(count as u64);
+                load_state.samples_loaded = load_state.samples_loaded.saturating_add(count as u64);
+            }
+
+            // Re-check after inserts: allowlist may have changed mid-handler.
+            if !priority.high.contains(&component_id) {
+                cache.remove_series(&component_id);
+                return true;
             }
 
             if count >= BACKFILL_CHUNK_SIZE {
@@ -1646,11 +1660,7 @@ mod series_store_allowlist_tests {
             (ComponentId(2), Timestamp(11)),
         ] {
             if allow.contains(&cid) {
-                pending.push((
-                    cid,
-                    ts,
-                    ComponentValue::F64(nox::array![0.0f64].to_dyn()),
-                ));
+                pending.push((cid, ts, ComponentValue::F64(nox::array![0.0f64].to_dyn())));
             }
         }
         assert_eq!(pending.len(), 1);

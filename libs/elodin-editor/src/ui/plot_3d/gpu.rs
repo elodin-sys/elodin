@@ -398,8 +398,10 @@ pub struct GpuLine {
     #[allow(dead_code)]
     index_buffers: [Buffer; 3],
     count: u32,
-    /// Last quantized range written into `index_buffers` (micros).
-    last_index_range: Option<(i64, i64)>,
+    /// Last range + LineTree `content_gen`s written into `index_buffers`.
+    /// Range alone is not enough: SeriesStore sync can clear/rebuild trees while
+    /// the quantized visible range stays fixed.
+    last_index_key: Option<(i64, i64, u64, u64, u64)>,
 }
 
 /// Per-entity cache of played/future GPU index state so TemporaryRenderEntity
@@ -525,15 +527,14 @@ fn extract_lines(
             timeline_settings,
             latest_follow,
         ) = cached_state.state.get_mut(world);
-        let selected_range =
-            if crate::is_short_accuracy_window(&selected_time_range.0) {
-                selected_time_range.0.clone()
-            } else {
-                crate::quantize_visible_range(
-                    selected_time_range.0.clone(),
-                    crate::TRAILING_RANGE_QUANTUM_MICROS,
-                )
-            };
+        let selected_range = if crate::is_short_accuracy_window(&selected_time_range.0) {
+            selected_time_range.0.clone()
+        } else {
+            crate::quantize_visible_range(
+                selected_time_range.0.clone(),
+                crate::TRAILING_RANGE_QUANTUM_MICROS,
+            )
+        };
         let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
             earliest_timestamp.0..latest_timestamp.0
         } else {
@@ -641,78 +642,86 @@ fn extract_lines(
                 render_device.create_bind_group("line values", &values_layout.layout, &entries)
             };
 
-            let build_gpu_line =
-                |range: std::ops::Range<impeller2::types::Timestamp>,
-                 cached: Option<&GpuLine>| {
-                    if range.start >= range.end {
-                        return None;
-                    }
-                    let range_key = (range.start.0, range.end.0);
-                    if let Some(prev) = cached {
-                        if prev.last_index_range == Some(range_key) {
-                            return Some(prev.clone());
-                        }
-                    }
-                    let mut step = sampling_step.max(1);
-                    const MAX_INDEX_U32: u32 = INDEX_BUFFER_LEN as u32;
-                    for _ in 0..26 {
-                        let mut max_needed = 0u32;
-                        for i in 0..3 {
-                            let line = &line_handles.0[i];
-                            let line = line_assets.get(line).expect("line missing");
-                            max_needed = max_needed
-                                .max(line.data.count_strip_index_u32s(range.clone(), step));
-                        }
-                        if max_needed <= MAX_INDEX_U32 {
-                            break;
-                        }
-                        step = step.saturating_mul(2).max(2);
-                    }
-                    let index_buffers = ['x', 'y', 'z'].map(|axis| {
-                        render_device.create_buffer(
-                            &(BufferDescriptor {
-                                label: Some(&format!("Line {} Index Buffer", axis)),
-                                size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                                mapped_at_creation: false,
-                            }),
-                        )
-                    });
-                    let entries = [0, 1, 2].map(|i| BindGroupEntry {
-                        binding: i as u32,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: &index_buffers[i],
-                            offset: 0,
-                            size: Some(INDEX_BUFFER_SIZE),
-                        }),
-                    });
-                    let index_bind_group = render_device.create_bind_group(
-                        "line indexes",
-                        &index_layout.layout,
-                        &entries,
-                    );
-                    let counts = [0, 1, 2].map(|i| {
+            let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>,
+                                  cached: Option<&GpuLine>| {
+                if range.start >= range.end {
+                    return None;
+                }
+                let content_gens = [0, 1, 2].map(|i| {
+                    line_assets
+                        .get(&line_handles.0[i])
+                        .map(|l| l.data.content_gen())
+                        .unwrap_or(0)
+                });
+                let index_key = (
+                    range.start.0,
+                    range.end.0,
+                    content_gens[0],
+                    content_gens[1],
+                    content_gens[2],
+                );
+                if let Some(prev) = cached
+                    && prev.last_index_key == Some(index_key)
+                {
+                    return Some(prev.clone());
+                }
+                let mut step = sampling_step.max(1);
+                const MAX_INDEX_U32: u32 = INDEX_BUFFER_LEN as u32;
+                for _ in 0..26 {
+                    let mut max_needed = 0u32;
+                    for i in 0..3 {
                         let line = &line_handles.0[i];
                         let line = line_assets.get(line).expect("line missing");
-                        line.data.write_to_index_buffer_with_step(
-                            &index_buffers[i],
-                            &render_queue,
-                            range.clone(),
-                            step,
-                        )
-                    });
-                    let count = counts.into_iter().min().unwrap_or_default();
-                    if count < 2 {
-                        return None;
+                        max_needed =
+                            max_needed.max(line.data.count_strip_index_u32s(range.clone(), step));
                     }
-                    Some(GpuLine {
-                        values_bind_group: values_bind_group.clone(),
-                        index_bind_group,
-                        index_buffers,
-                        count,
-                        last_index_range: Some(range_key),
-                    })
-                };
+                    if max_needed <= MAX_INDEX_U32 {
+                        break;
+                    }
+                    step = step.saturating_mul(2).max(2);
+                }
+                let index_buffers = ['x', 'y', 'z'].map(|axis| {
+                    render_device.create_buffer(
+                        &(BufferDescriptor {
+                            label: Some(&format!("Line {} Index Buffer", axis)),
+                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    )
+                });
+                let entries = [0, 1, 2].map(|i| BindGroupEntry {
+                    binding: i as u32,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &index_buffers[i],
+                        offset: 0,
+                        size: Some(INDEX_BUFFER_SIZE),
+                    }),
+                });
+                let index_bind_group =
+                    render_device.create_bind_group("line indexes", &index_layout.layout, &entries);
+                let counts = [0, 1, 2].map(|i| {
+                    let line = &line_handles.0[i];
+                    let line = line_assets.get(line).expect("line missing");
+                    line.data.write_to_index_buffer_with_step(
+                        &index_buffers[i],
+                        &render_queue,
+                        range.clone(),
+                        step,
+                    )
+                });
+                let count = counts.into_iter().min().unwrap_or_default();
+                if count < 2 {
+                    return None;
+                }
+                Some(GpuLine {
+                    values_bind_group: values_bind_group.clone(),
+                    index_bind_group,
+                    index_buffers,
+                    count,
+                    last_index_key: Some(index_key),
+                })
+            };
 
             let mut next_cache = GpuLineIndexCache::default();
             let played_cached = index_cache.as_ref().and_then(|c| c.played.clone());

@@ -343,8 +343,7 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                impeller2_bevy::backfill_cache
-                    .after(crate::ui::plot::update_series_fetch_priority),
+                impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
             )
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(Update, update_eql_context)
@@ -1422,19 +1421,17 @@ pub(crate) const TRAILING_RANGE_QUANTUM_MICROS: i64 = 100_000; // 100 ms
 pub(crate) const SHORT_WINDOW_ACCURACY_MICROS: i64 = 30_000_000; // 30 s
 
 pub(crate) fn is_short_accuracy_window(range: &Range<Timestamp>) -> bool {
-    range
-        .end
-        .0
-        .saturating_sub(range.start.0)
-        .max(0)
-        <= SHORT_WINDOW_ACCURACY_MICROS
+    range.end.0.saturating_sub(range.start.0).max(0) <= SHORT_WINDOW_ACCURACY_MICROS
 }
 
 pub(crate) fn floor_timestamp_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
     if quantum_micros <= 0 {
         return ts;
     }
-    Timestamp(ts.0.div_euclid(quantum_micros).saturating_mul(quantum_micros))
+    Timestamp(
+        ts.0.div_euclid(quantum_micros)
+            .saturating_mul(quantum_micros),
+    )
 }
 
 pub(crate) fn ceil_timestamp_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
@@ -1523,6 +1520,7 @@ fn resolve_time_range_anchors(
     (full_range, selected)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
     mut fetch_range: ResMut<FetchTimeRange>,
@@ -1666,7 +1664,10 @@ impl TimeRangeBehavior {
     /// `LAST_*` presets: both ends are [`Offset::Latest`] (e.g. last 5s →
     /// `Latest(5s)..Latest(0)`). Trailing windows follow the playhead.
     pub(crate) const fn is_trailing_window(self) -> bool {
-        matches!((self.start, self.end), (Offset::Latest(_), Offset::Latest(_)))
+        matches!(
+            (self.start, self.end),
+            (Offset::Latest(_), Offset::Latest(_))
+        )
     }
 
     /// Parse a schematic `timeline range=...` value into a time-window behavior.
@@ -2127,7 +2128,8 @@ pub fn update_eql_context(
 }
 
 pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<EqlContext>) {
-    if eql.0.earliest_timestamp == fetch_range.0.start && eql.0.last_timestamp == fetch_range.0.end {
+    if eql.0.earliest_timestamp == fetch_range.0.start && eql.0.last_timestamp == fetch_range.0.end
+    {
         return;
     }
     eql.0.earliest_timestamp = fetch_range.0.start;

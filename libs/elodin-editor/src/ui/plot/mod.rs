@@ -64,10 +64,7 @@ impl Plugin for PlotPlugin {
                     .after(reset_graph),
             )
             .add_systems(Update, sync_graphs)
-            .add_systems(
-                Update,
-                update_series_fetch_priority.after(sync_graphs),
-            )
+            .add_systems(Update, update_series_fetch_priority.after(sync_graphs))
             .add_systems(
                 Update,
                 queue_timestamp_read.after(update_series_fetch_priority),

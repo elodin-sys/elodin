@@ -146,8 +146,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Update, crate::ui::plot::update_series_fetch_priority)
             .add_systems(
                 Update,
-                impeller2_bevy::backfill_cache
-                    .after(crate::ui::plot::update_series_fetch_priority),
+                impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
             )
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, poll_headless_db_config)

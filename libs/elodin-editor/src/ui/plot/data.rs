@@ -424,6 +424,7 @@ pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut comman
     packet_handlers.0.push(sys);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn queue_timestamp_read(
     selected_range: Res<SelectedTimeRange>,
     behavior: Res<crate::TimeRangeBehavior>,
@@ -480,9 +481,7 @@ fn visible_sync_range(
     behavior: &crate::TimeRangeBehavior,
 ) -> Option<((i64, i64), Range<Timestamp>)> {
     let selected = selected_range.0.clone();
-    if selected.start.0 == i64::MIN
-        || selected.end.0 == i64::MAX
-        || selected.start >= selected.end
+    if selected.start.0 == i64::MIN || selected.end.0 == i64::MAX || selected.start >= selected.end
     {
         return None;
     }
@@ -511,6 +510,7 @@ pub struct VisiblePrefetchState {
 
 const VISIBLE_PREFETCH_LIMIT: usize = 8192;
 
+#[allow(clippy::too_many_arguments)]
 fn prefetch_visible_window(
     sync_range: &Range<Timestamp>,
     range_key: (i64, i64),
@@ -563,6 +563,7 @@ fn prefetch_visible_window(
             move |pkt: InRef<OwnedPacket<PacketGrantR>>,
                   mut series_store: ResMut<TelemetryCache>,
                   schema_reg: Res<ComponentSchemaRegistry>,
+                  priority: Res<SeriesFetchPriority>,
                   mut prefetch: ResMut<VisiblePrefetchState>,
                   mut commands: Commands| {
                 apply_visible_prefetch_page(
@@ -573,6 +574,7 @@ fn prefetch_visible_window(
                     range_key,
                     &mut series_store,
                     &schema_reg,
+                    &priority,
                     &mut prefetch,
                     &mut commands,
                 );
@@ -581,6 +583,7 @@ fn prefetch_visible_window(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_visible_prefetch_page(
     pkt: &OwnedPacket<PacketGrantR>,
     component_id: ComponentId,
@@ -589,25 +592,30 @@ fn apply_visible_prefetch_page(
     range_key: (i64, i64),
     series_store: &mut TelemetryCache,
     schema_reg: &ComponentSchemaRegistry,
+    priority: &SeriesFetchPriority,
     prefetch: &mut VisiblePrefetchState,
     commands: &mut Commands,
 ) {
-    let OwnedPacket::TimeSeries(time_series) = pkt else {
+    let drop_in_flight = |prefetch: &mut VisiblePrefetchState| {
         prefetch
             .in_flight
             .remove(&(component_id, range_key.0, range_key.1));
+    };
+    // Component may have left the allowlist while this page was in flight.
+    if !priority.high.contains(&component_id) {
+        drop_in_flight(prefetch);
+        return;
+    }
+    let OwnedPacket::TimeSeries(time_series) = pkt else {
+        drop_in_flight(prefetch);
         return;
     };
     let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
-        prefetch
-            .in_flight
-            .remove(&(component_id, range_key.0, range_key.1));
+        drop_in_flight(prefetch);
         return;
     };
     let Some(schema) = schema_reg.0.get(&component_id) else {
-        prefetch
-            .in_flight
-            .remove(&(component_id, range_key.0, range_key.1));
+        drop_in_flight(prefetch);
         return;
     };
     let elem_size = schema.size();
@@ -627,11 +635,12 @@ fn apply_visible_prefetch_page(
         }
     }
     if let Some(&first) = timestamps.first() {
-        series_store.mark_covered(
-            component_id,
-            first,
-            Timestamp(last_ts.0.saturating_add(1)),
-        );
+        series_store.mark_covered(component_id, first, Timestamp(last_ts.0.saturating_add(1)));
+    }
+    if !priority.high.contains(&component_id) {
+        series_store.remove_series(&component_id);
+        drop_in_flight(prefetch);
+        return;
     }
     // Continue paging until the visible window is filled or the DB has no more.
     if !timestamps.is_empty()
@@ -652,6 +661,7 @@ fn apply_visible_prefetch_page(
             move |pkt: InRef<OwnedPacket<PacketGrantR>>,
                   mut series_store: ResMut<TelemetryCache>,
                   schema_reg: Res<ComponentSchemaRegistry>,
+                  priority: Res<SeriesFetchPriority>,
                   mut prefetch: ResMut<VisiblePrefetchState>,
                   mut commands: Commands| {
                 apply_visible_prefetch_page(
@@ -662,21 +672,21 @@ fn apply_visible_prefetch_page(
                     range_key,
                     &mut series_store,
                     &schema_reg,
+                    &priority,
                     &mut prefetch,
                     &mut commands,
                 );
             },
         );
     } else {
-        prefetch
-            .in_flight
-            .remove(&(component_id, range_key.0, range_key.1));
+        drop_in_flight(prefetch);
     }
 }
 
 /// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
 /// Playback is never blocked: whatever samples are already in the store are shown;
 /// as backfill / visible prefetch streams in, subsequent syncs fill gaps.
+#[allow(clippy::too_many_arguments)]
 pub fn sync_plot_lines_from_series_store(
     range_key: (i64, i64),
     sync_range: &Range<Timestamp>,
@@ -699,7 +709,7 @@ pub fn sync_plot_lines_from_series_store(
         .map(|t| t.elapsed() >= Duration::from_millis(100))
         .unwrap_or(true);
 
-    if !range_changed && !enabled_changed && !(gen_changed && due) {
+    if !(range_changed || enabled_changed || (gen_changed && due)) {
         return;
     }
 
@@ -778,7 +788,10 @@ fn floor_ts_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
     if quantum_micros <= 0 {
         return ts;
     }
-    Timestamp(ts.0.div_euclid(quantum_micros).saturating_mul(quantum_micros))
+    Timestamp(
+        ts.0.div_euclid(quantum_micros)
+            .saturating_mul(quantum_micros),
+    )
 }
 
 /// Parse an EQL string and insert every referenced component ID into `out`.
@@ -804,7 +817,7 @@ fn plot_fetch_component_ids(
 ) -> HashSet<ComponentId> {
     let mut ids = HashSet::new();
     for gs in graph_states.iter() {
-        for ((path, _), _) in &gs.enabled_lines {
+        for (path, _) in gs.enabled_lines.keys() {
             ids.insert(path.id);
         }
     }
@@ -886,6 +899,7 @@ pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> Hash
 
 /// Keep SeriesStore allowlist in sync with enabled plot / 3D / UI consumers.
 /// Reclaims RAM when IDs leave the allowlist so re-subscribe re-fetches cleanly.
+#[allow(clippy::too_many_arguments)]
 pub fn update_series_fetch_priority(
     graph_states: Query<&GraphState>,
     line_3ds: Query<&Line3d>,
@@ -900,6 +914,7 @@ pub fn update_series_fetch_priority(
     mut priority: ResMut<SeriesFetchPriority>,
     mut cache: ResMut<TelemetryCache>,
     mut backfill: ResMut<BackfillState>,
+    mut prefetch: ResMut<VisiblePrefetchState>,
 ) {
     let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
     let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
@@ -919,6 +934,7 @@ pub fn update_series_fetch_priority(
     for id in priority.high.difference(&next).copied().collect::<Vec<_>>() {
         cache.remove_series(&id);
         backfill.clear_component(id);
+        prefetch.in_flight.retain(|(cid, _, _)| *cid != id);
     }
     priority.high = next;
 }
@@ -942,7 +958,7 @@ pub(crate) fn project_series_element_to_line(
         return 0;
     }
     let stride = max_points
-        .map(|max| ((count + max - 1) / max).max(1))
+        .map(|max| count.div_ceil(max).max(1))
         .unwrap_or(1);
 
     let mut timestamps = Vec::new();
@@ -1005,7 +1021,13 @@ pub(crate) fn expand_query_range_with_margin(
         .saturating_sub(selected_range.start.0)
         .max(0);
     let margin = span.max(MIN_PREFETCH_MARGIN.as_micros() as i64);
-    let start = Timestamp(selected_range.start.0.saturating_sub(margin).max(earliest.0));
+    let start = Timestamp(
+        selected_range
+            .start
+            .0
+            .saturating_sub(margin)
+            .max(earliest.0),
+    );
     let end = Timestamp(selected_range.end.0.saturating_add(margin).min(latest.0));
     if start < end {
         start..end
@@ -1411,6 +1433,9 @@ pub struct LineTree<D: Clone + BoundOrd> {
     last_hc_archive_len: usize,
     /// Wall-clock instant of the last HC pass, for time-based throttling.
     last_hc_instant: Option<std::time::Instant>,
+    /// Bumped on [`Self::clear`] / view rebuild so GPU index caches can invalidate
+    /// when LineTree contents change without a visible-range change.
+    content_gen: u64,
 }
 
 impl<D: Clone + BoundOrd> Default for LineTree<D> {
@@ -1423,6 +1448,7 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
             raw_values: Vec::new(),
             last_hc_archive_len: 0,
             last_hc_instant: None,
+            content_gen: 0,
         }
     }
 }
@@ -1457,6 +1483,11 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     pub fn total_points(&self) -> usize {
         self.tree.iter().map(|(_, c)| c.summary.len).sum()
+    }
+
+    /// Identity for GPU index-cache invalidation when the view is rebuilt in place.
+    pub fn content_gen(&self) -> u64 {
+        self.content_gen
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -1857,6 +1888,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     /// Drop all CPU/GPU chunks (full rebuild from SeriesStore).
     pub fn clear(&mut self) {
+        self.content_gen = self.content_gen.wrapping_add(1);
         let full = nodit::interval::ii(i64::MIN, i64::MAX);
         for (_range, chunk) in self.tree.remove_overlapping(full) {
             if let Some(alloc) = &mut self.data_buffer_shard_alloc
@@ -1940,6 +1972,8 @@ impl LineTree<f32> {
         {
             return;
         }
+
+        self.content_gen = self.content_gen.wrapping_add(1);
 
         let mut new_tree: NoditMap<i64, nodit::Interval<i64>, Chunk<f32>> = NoditMap::default();
         let mut offset = 0usize;
@@ -2153,12 +2187,8 @@ mod tests {
     fn trailing_query_range_expands_with_margin_clamped_to_db() {
         // 5s window → margin max(5s, 2s) = 5s
         let selected = Timestamp(10_000_000)..Timestamp(15_000_000);
-        let range = expand_query_range_with_margin(
-            selected,
-            Timestamp(0),
-            Timestamp(20_000_000),
-            true,
-        );
+        let range =
+            expand_query_range_with_margin(selected, Timestamp(0), Timestamp(20_000_000), true);
         assert_eq!(range.start, Timestamp(5_000_000));
         assert_eq!(range.end, Timestamp(20_000_000));
     }
@@ -2221,10 +2251,7 @@ mod tests {
     fn series_store_allowlist_unions_plots_and_adapters() {
         let plot = ComponentId(10);
         let adapter = ComponentId(20);
-        let ids = build_series_store_allowlist(
-            [plot].into_iter().collect(),
-            [adapter],
-        );
+        let ids = build_series_store_allowlist([plot].into_iter().collect(), [adapter]);
         assert!(ids.contains(&plot));
         assert!(ids.contains(&adapter));
         assert_eq!(ids.len(), 2);
@@ -2259,9 +2286,25 @@ mod tests {
     }
 
     #[test]
+    fn line_tree_content_gen_bumps_on_clear() {
+        let mut tree = LineTree::<f32>::default();
+        assert_eq!(tree.content_gen(), 0);
+        let chunk = Chunk::from_iter(&[Timestamp(1)], Timestamp(0), [1.0f32].into_iter())
+            .expect("chunk");
+        tree.insert(chunk);
+        tree.clear();
+        assert_eq!(tree.content_gen(), 1);
+        tree.clear();
+        assert_eq!(tree.content_gen(), 2);
+    }
+
+    #[test]
     fn monitor_component_name_maps_to_component_id() {
         let name = "PCDUMESSAGE.ADC_12V";
-        assert_eq!(ComponentId::new(name), ComponentId::new("PCDUMESSAGE.ADC_12V"));
+        assert_eq!(
+            ComponentId::new(name),
+            ComponentId::new("PCDUMESSAGE.ADC_12V")
+        );
     }
 
     #[test]
@@ -2313,10 +2356,7 @@ mod tests {
             1
         );
         // Zoomed sub-range still step 1 under a short selection.
-        assert_eq!(
-            index_sampling_step_for_selection(5_000_000, 1, 200, 400),
-            1
-        );
+        assert_eq!(index_sampling_step_for_selection(5_000_000, 1, 200, 400), 1);
     }
 
     #[test]
@@ -2357,10 +2397,7 @@ mod tests {
             "full_count={full_count} INDEX_BUFFER_LEN={INDEX_BUFFER_LEN}"
         );
         assert!(zoom_count < full_count);
-        assert_eq!(
-            index_sampling_step_for_selection(5_000_000, 2, n, 400),
-            1
-        );
+        assert_eq!(index_sampling_step_for_selection(5_000_000, 2, n, 400), 1);
         assert_eq!(
             index_sampling_step_for_selection(5_000_000, 1, 1_000, 400),
             1
@@ -2385,7 +2422,10 @@ mod tests {
         let id = ComponentId::new("test.cov.max");
         cache.mark_covered(id, Timestamp(100), Timestamp(i64::MAX));
         assert!(!cache.is_covered(&id, &(Timestamp(100)..Timestamp(200))));
-        assert_eq!(cache.sample_count_in_range(&id, &(Timestamp(0)..Timestamp(i64::MAX))), 0);
+        assert_eq!(
+            cache.sample_count_in_range(&id, &(Timestamp(0)..Timestamp(i64::MAX))),
+            0
+        );
     }
 
     #[test]
@@ -2420,11 +2460,7 @@ mod tests {
         // 10s of 100 Hz data (0..10_000_000 micros)
         for i in 0..1000 {
             let ts = Timestamp(i * 10_000);
-            cache.insert(
-                id,
-                ts,
-                ComponentValue::F64(nox::array![i as f64].to_dyn()),
-            );
+            cache.insert(id, ts, ComponentValue::F64(nox::array![i as f64].to_dyn()));
         }
         let earliest = Timestamp(0);
         let mut line = LineTree::<f32>::default();
@@ -2487,7 +2523,8 @@ mod tests {
         let cache = TelemetryCache::default();
         let id = ComponentId::new("empty.yet");
         let range = Timestamp(0)..Timestamp(5_000_000);
-        let n = project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None);
+        let n =
+            project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None);
         assert_eq!(n, 0);
         // Caller must not clear on n==0 when range unchanged — points remain.
         assert_eq!(line.total_points(), 2);
