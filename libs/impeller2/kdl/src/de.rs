@@ -3590,7 +3590,8 @@ object_3d "a.world_pos" {
 
     #[test]
     fn test_spatial_gauge() {
-        let kdl = r#"spatial_gauge "NAVEKFSTATE.POS_ECEF" name="Missile" source="ECEF" display="NED""#;
+        let kdl =
+            r#"spatial_gauge "NAVEKFSTATE.POS_ECEF" name="Missile" source="ECEF" display="NED""#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert_eq!(schematic.elems.len(), 1);
