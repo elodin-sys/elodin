@@ -918,7 +918,8 @@ pub fn update_series_fetch_priority(
     mut priority: ResMut<SeriesFetchPriority>,
     mut cache: ResMut<TelemetryCache>,
     mut backfill: ResMut<BackfillState>,
-    mut prefetch: ResMut<VisiblePrefetchState>,
+    // Present in the interactive editor; absent in headless render-server.
+    mut prefetch: Option<ResMut<VisiblePrefetchState>>,
 ) {
     let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
     let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
@@ -938,7 +939,9 @@ pub fn update_series_fetch_priority(
     for id in priority.high.difference(&next).copied().collect::<Vec<_>>() {
         cache.remove_series(&id);
         backfill.clear_component(id);
-        prefetch.in_flight.retain(|(cid, _, _)| *cid != id);
+        if let Some(ref mut prefetch) = prefetch {
+            prefetch.in_flight.retain(|(cid, _, _)| *cid != id);
+        }
     }
     priority.high = next;
 }
