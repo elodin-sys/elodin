@@ -33,7 +33,7 @@ use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
     ConnectionAddr, EntityMap, MsgRequestIdHandlers, PacketHandlerInput, PacketHandlers,
-    RequestIdHandlers,
+    PacketIdHandlers, RequestIdHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
@@ -1323,12 +1323,16 @@ fn cancel_in_flight_series_requests(
     commands: &mut Commands,
     msg_handlers: &mut MsgRequestIdHandlers,
     req_handlers: &mut RequestIdHandlers,
+    packet_id_handlers: &mut PacketIdHandlers,
     visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
 ) {
     for (_, system_id) in msg_handlers.0.drain() {
         commands.unregister_system(system_id);
     }
     for (_, system_id) in req_handlers.0.drain() {
+        commands.unregister_system(system_id);
+    }
+    for (_, system_id) in packet_id_handlers.0.drain() {
         commands.unregister_system(system_id);
     }
     visible_prefetch.clear_in_flight();
@@ -1489,58 +1493,59 @@ impl EditorUiHardClear<'_, '_> {
     }
 }
 
-/// When DbConfig identity differs from the preserved session, wipe SeriesStore + UI.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn sync_series_store_session_from_db_config(
-    config: Res<impeller2_wkt::DbConfig>,
-    connection_addr: Option<Res<ConnectionAddr>>,
-    mut session: ResMut<SeriesStoreSession>,
-    mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
-    mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
-    mut series_load: ResMut<impeller2_bevy::SeriesStoreLoadState>,
-    mut plot_sync: ResMut<crate::ui::plot::data::PlotSyncState>,
-    mut visible_prefetch: ResMut<crate::ui::plot::data::VisiblePrefetchState>,
-    mut editor_ui: EditorUiHardClear,
-    mut current: ResMut<CurrentTimestamp>,
-) {
-    if !config.is_changed() {
-        return;
-    }
-    let addr = connection_addr.as_ref().map(|a| a.0);
-    let start_ts = config.time_start_timestamp_micros();
-    // start_ts not confirmed yet for this connection — adopt without wiping soft-preserved store.
-    if session.start_ts.is_none() {
-        *session = SeriesStoreSession::identity(addr, start_ts);
-        return;
-    }
-    if session.matches(addr, start_ts) {
-        return;
-    }
-    hard_clear_series_store(
-        &mut telemetry_cache,
-        &mut backfill_state,
-        &mut series_load,
-        &mut plot_sync,
-        &mut visible_prefetch,
-    );
-    editor_ui.clear_ui_and_invalidate_schematic_sync();
-    // Stale playhead from the previous recording must not survive identity change.
-    current.0 = Timestamp::EPOCH;
-    *session = SeriesStoreSession::identity(addr, start_ts);
-}
-
-/// Bundled so `clear_state_new_connection` stays within Bevy's SystemParam limit.
+/// Bundled so reconnect systems stay within Bevy's SystemParam limit.
 #[derive(SystemParam)]
 struct SeriesStoreReconnect<'w> {
     session: ResMut<'w, SeriesStoreSession>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
     req_handlers: ResMut<'w, RequestIdHandlers>,
+    packet_id_handlers: ResMut<'w, PacketIdHandlers>,
     telemetry_cache: ResMut<'w, impeller2_bevy::TelemetryCache>,
     backfill_state: ResMut<'w, impeller2_bevy::BackfillState>,
     series_load: ResMut<'w, impeller2_bevy::SeriesStoreLoadState>,
     plot_sync: ResMut<'w, crate::ui::plot::data::PlotSyncState>,
     visible_prefetch: ResMut<'w, crate::ui::plot::data::VisiblePrefetchState>,
+}
+
+/// When DbConfig identity differs from the preserved session, wipe SeriesStore + UI.
+pub(crate) fn sync_series_store_session_from_db_config(
+    config: Res<impeller2_wkt::DbConfig>,
+    mut series: SeriesStoreReconnect,
+    mut editor_ui: EditorUiHardClear,
+    mut current: ResMut<CurrentTimestamp>,
+) {
+    if !config.is_changed() {
+        return;
+    }
+    let addr = series.connection_addr.as_ref().map(|a| a.0);
+    let start_ts = config.time_start_timestamp_micros();
+    // start_ts not confirmed yet for this connection — adopt without wiping soft-preserved store.
+    if series.session.start_ts.is_none() {
+        *series.session = SeriesStoreSession::identity(addr, start_ts);
+        return;
+    }
+    if series.session.matches(addr, start_ts) {
+        return;
+    }
+    cancel_in_flight_series_requests(
+        &mut editor_ui.commands,
+        &mut series.msg_handlers,
+        &mut series.req_handlers,
+        &mut series.packet_id_handlers,
+        &mut series.visible_prefetch,
+    );
+    hard_clear_series_store(
+        &mut series.telemetry_cache,
+        &mut series.backfill_state,
+        &mut series.series_load,
+        &mut series.plot_sync,
+        &mut series.visible_prefetch,
+    );
+    editor_ui.clear_ui_and_invalidate_schematic_sync();
+    // Stale playhead from the previous recording must not survive identity change.
+    current.0 = Timestamp::EPOCH;
+    *series.session = SeriesStoreSession::identity(addr, start_ts);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1564,6 +1569,7 @@ fn clear_state_new_connection(
         &mut editor_ui.commands,
         &mut series.msg_handlers,
         &mut series.req_handlers,
+        &mut series.packet_id_handlers,
         &mut series.visible_prefetch,
     );
 
@@ -2499,11 +2505,13 @@ mod tests {
     #[test]
     fn soft_reconnect_cancels_handlers_and_prefetch() {
         use bevy::ecs::system::{InRef, RunSystemOnce};
+        use impeller2::types::PacketId;
         use impeller2_bevy::PacketGrantR;
 
         let mut app = App::new();
         app.init_resource::<MsgRequestIdHandlers>()
             .init_resource::<RequestIdHandlers>()
+            .init_resource::<PacketIdHandlers>()
             .init_resource::<crate::ui::plot::data::VisiblePrefetchState>();
 
         let msg_sys = app
@@ -2512,11 +2520,17 @@ mod tests {
         let req_sys = app
             .world_mut()
             .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| false);
+        let pkt_sys = app
+            .world_mut()
+            .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| {});
+        let packet_id: PacketId = 42u16.to_le_bytes();
         {
             let mut msg = app.world_mut().resource_mut::<MsgRequestIdHandlers>();
             msg.0.insert(7, msg_sys);
             let mut req = app.world_mut().resource_mut::<RequestIdHandlers>();
             req.0.insert(9, req_sys);
+            let mut pkt = app.world_mut().resource_mut::<PacketIdHandlers>();
+            pkt.0.insert(packet_id, pkt_sys);
             app.world_mut()
                 .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
                 .in_flight
@@ -2528,11 +2542,13 @@ mod tests {
                 |mut commands: Commands,
                  mut msg: ResMut<MsgRequestIdHandlers>,
                  mut req: ResMut<RequestIdHandlers>,
+                 mut pkt: ResMut<PacketIdHandlers>,
                  mut prefetch: ResMut<crate::ui::plot::data::VisiblePrefetchState>| {
                     cancel_in_flight_series_requests(
                         &mut commands,
                         &mut msg,
                         &mut req,
+                        &mut pkt,
                         &mut prefetch,
                     );
                 },
@@ -2541,6 +2557,7 @@ mod tests {
 
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
+        assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
         assert!(
             app.world()
                 .resource::<crate::ui::plot::data::VisiblePrefetchState>()
@@ -2550,6 +2567,7 @@ mod tests {
         // Systems were unregistered — a second unregister must fail.
         assert!(app.world_mut().unregister_system(msg_sys).is_err());
         assert!(app.world_mut().unregister_system(req_sys).is_err());
+        assert!(app.world_mut().unregister_system(pkt_sys).is_err());
     }
 
     #[test]
@@ -2647,6 +2665,9 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<impeller2_wkt::DbConfig>()
             .init_resource::<SeriesStoreSession>()
+            .init_resource::<MsgRequestIdHandlers>()
+            .init_resource::<RequestIdHandlers>()
+            .init_resource::<PacketIdHandlers>()
             .init_resource::<impeller2_bevy::TelemetryCache>()
             .init_resource::<impeller2_bevy::BackfillState>()
             .init_resource::<impeller2_bevy::SeriesStoreLoadState>()
@@ -2686,9 +2707,21 @@ mod tests {
 
     #[test]
     fn hard_clear_when_db_config_identity_changes() {
+        use bevy::ecs::system::InRef;
+        use impeller2_bevy::PacketGrantR;
+
         let addr = sample_addr(2240);
         let mut app = sync_app(addr);
 
+        let msg_sys = app
+            .world_mut()
+            .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| false);
+        let req_sys = app
+            .world_mut()
+            .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| false);
+        let pkt_sys = app
+            .world_mut()
+            .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| {});
         {
             let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
             *session = SeriesStoreSession::identity(Some(addr), Some(100));
@@ -2696,6 +2729,22 @@ mod tests {
                 .world_mut()
                 .resource_mut::<impeller2_bevy::TelemetryCache>();
             *cache = populated_cache();
+            app.world_mut()
+                .resource_mut::<MsgRequestIdHandlers>()
+                .0
+                .insert(1, msg_sys);
+            app.world_mut()
+                .resource_mut::<RequestIdHandlers>()
+                .0
+                .insert(2, req_sys);
+            app.world_mut()
+                .resource_mut::<PacketIdHandlers>()
+                .0
+                .insert(3u16.to_le_bytes(), pkt_sys);
+            app.world_mut()
+                .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
+                .in_flight
+                .insert((ComponentId(1), 0, 1));
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
                 .0 = Some("schematics/main.kdl".into());
@@ -2714,6 +2763,15 @@ mod tests {
         assert!(!cache.has_series(&ComponentId(42)));
         let session = app.world().resource::<SeriesStoreSession>();
         assert_eq!(session.start_ts, Some(200));
+        assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
+        assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
+        assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
+        assert!(
+            app.world()
+                .resource::<crate::ui::plot::data::VisiblePrefetchState>()
+                .in_flight
+                .is_empty()
+        );
         assert!(
             app.world()
                 .resource::<plugins::kdl_document::LastSyncedActiveKey>()
@@ -2730,6 +2788,9 @@ mod tests {
             app.world().resource::<CurrentTimestamp>().0,
             Timestamp::EPOCH
         );
+        assert!(app.world_mut().unregister_system(msg_sys).is_err());
+        assert!(app.world_mut().unregister_system(req_sys).is_err());
+        assert!(app.world_mut().unregister_system(pkt_sys).is_err());
     }
 
     #[test]

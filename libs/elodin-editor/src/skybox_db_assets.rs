@@ -9,7 +9,7 @@ use impeller2_wkt::{DbConfig, StoreAsset};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crate::object_3d::assets_http_base;
@@ -305,6 +305,9 @@ pub struct DbSkyboxUploaded {
     last_attempt: Option<(MirrorKey, Instant)>,
     /// In-flight upload/verify state machine for the active skybox.
     in_flight: Option<DbSkyboxUpload>,
+    /// Memo of the last on-disk cubemap digest so the hot path can `stat`
+    /// instead of re-reading multi-MB KTX2 bytes every frame.
+    digest_cache: Option<(PathBuf, SystemTime, u64, CubemapDigest)>,
 }
 
 struct DbSkyboxUpload {
@@ -357,6 +360,24 @@ fn digest_bytes(bytes: &[u8]) -> CubemapDigest {
 fn cubemap_digest(path: &Path) -> Option<CubemapDigest> {
     let bytes = std::fs::read(path).ok()?;
     Some(digest_bytes(&bytes))
+}
+
+/// Metadata-gated digest: `stat` first; only re-read when path/mtime/len change.
+fn cubemap_digest_cached(
+    cache: &mut Option<(PathBuf, SystemTime, u64, CubemapDigest)>,
+    path: &Path,
+) -> Option<CubemapDigest> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let len = meta.len();
+    if let Some((cached_path, cached_mtime, cached_len, digest)) = cache.as_ref() {
+        if cached_path == path && *cached_mtime == mtime && *cached_len == len {
+            return Some(*digest);
+        }
+    }
+    let digest = cubemap_digest(path)?;
+    *cache = Some((path.to_path_buf(), mtime, len, digest));
+    Some(digest)
 }
 
 fn spawn_skybox_verify(
@@ -414,7 +435,7 @@ pub fn upload_active_skybox_assets_to_db(
         return;
     };
     let cubemap_path = settings.cache_dir.join(&entry.cubemap_file);
-    let Some(digest) = cubemap_digest(&cubemap_path) else {
+    let Some(digest) = cubemap_digest_cached(&mut uploaded.digest_cache, &cubemap_path) else {
         return; // bytes not on disk yet (e.g. generation still running)
     };
     if !settings.manifest_path().exists() {
@@ -850,6 +871,38 @@ mod tests {
         std::fs::write(&path, b"stable-bytes").unwrap();
         let second = cubemap_digest(&path).unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn cubemap_digest_cached_same_bytes_rewrite_returns_equal_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sky.cubemap.ktx2");
+        std::fs::write(&path, b"stable-bytes").unwrap();
+        let mut cache = None;
+        let first = cubemap_digest_cached(&mut cache, &path).unwrap();
+        assert!(cache.is_some());
+        // Same-bytes rewrite bumps mtime/len match fails → re-read; digest equal.
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, b"stable-bytes").unwrap();
+        let second = cubemap_digest_cached(&mut cache, &path).unwrap();
+        assert_eq!(first, second);
+        // Unchanged mtime/len hits the memo path (still equal).
+        let third = cubemap_digest_cached(&mut cache, &path).unwrap();
+        assert_eq!(first, third);
+    }
+
+    #[test]
+    fn cubemap_digest_cached_changed_bytes_yields_new_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sky.cubemap.ktx2");
+        std::fs::write(&path, b"old-cubemap").unwrap();
+        let mut cache = None;
+        let first = cubemap_digest_cached(&mut cache, &path).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&path, b"new-cubemap").unwrap();
+        let second = cubemap_digest_cached(&mut cache, &path).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(second, digest_bytes(b"new-cubemap"));
     }
 
     #[test]
