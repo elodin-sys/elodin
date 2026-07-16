@@ -272,7 +272,7 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                 ui.add_space(8.0);
                 // Frame sphere: display-frame U/E/N triad in body view, driven
                 // by the SpatialTransform attitude when available.
-                paint_frame_sphere(ui, display, att_display);
+                paint_frame_sphere(ui, display, att_display, value.is_some());
             });
     }
 }
@@ -367,7 +367,14 @@ fn project_body_axis(v: DVec3) -> (f32, f32, f32) {
 /// Paint a circular frame sphere with an AI-style tilting horizon and three
 /// axis labels. When `att_display` is set (body→display), the hatched ground
 /// banks with roll and slides with pitch, and the U/E/N triad tracks attitude.
-fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Option<DQuat>) {
+/// With no playhead sample (`has_sample == false`), draw a muted empty rim so
+/// the sphere does not read as wings-level while the cards show "—".
+fn paint_frame_sphere(
+    ui: &mut egui::Ui,
+    display: DisplayFrame,
+    att_display: Option<DQuat>,
+    has_sample: bool,
+) {
     let scheme = get_scheme();
     // Respect the tile's actual available height — do not invent a 140px floor
     // that can overflow short panels.
@@ -380,6 +387,22 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
 
     let center = rect.center();
     let radius = size * 0.42;
+
+    if !has_sample {
+        painter.circle_stroke(
+            center,
+            radius,
+            Stroke::new(1.5, scheme.border_primary.gamma_multiply(0.5)),
+        );
+        painter.text(
+            center,
+            Align2::CENTER_CENTER,
+            "—",
+            FontId::monospace(22.0),
+            scheme.text_secondary,
+        );
+        return;
+    }
 
     let q = att_display.unwrap_or(DQuat::IDENTITY);
     let (pitch, roll) = ai_pitch_roll(q, display_up(display));
