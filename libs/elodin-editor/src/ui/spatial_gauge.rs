@@ -188,8 +188,8 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
             return;
         };
 
-        // Evaluate before borrowing `data` for the ComboBox mutation.
-        let labels = display_labels(data.display);
+        // Evaluate the pose before the ComboBox mutates `data.display`; convert
+        // cards / attitude after the dropdown so a frame change applies immediately.
         let ts = current_timestamp.0;
         let value = if playhead_sample_missing(&data.component_ids, &telemetry_cache, ts) {
             None
@@ -202,36 +202,13 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                 .as_ref()
                 .and_then(|expr| expr.execute(&entity_map, &values).ok())
         };
-        let out = value
-            .as_ref()
-            .and_then(component_value_tail_to_vec3)
-            .map(|pos_src| convert(pos_src, data.source, data.display, &geo_context));
-        // Attitude from the same SpatialTransform (quat head); optional if the
-        // EQL is a bare 3-vector.
-        let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
-            let frame = data.display.geo_frame().unwrap_or(GeoFrame::NED);
-            GeoRotation::relative(data.source, wp.att())
-                .as_frame(frame, &geo_context)
-                .1
-        });
-
-        let cards: Vec<(String, String)> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, label)| {
-                let value = out
-                    .map(|v| fmt_val(v[i]))
-                    .unwrap_or_else(|| "—".to_string());
-                ((*label).to_string(), value)
-            })
-            .collect();
 
         let title = if data.eql.trim().is_empty() {
             pane.name.as_str().to_ascii_uppercase()
         } else {
             data.eql.to_ascii_uppercase()
         };
-        let display = data.display;
+        let source = data.source;
         let combo_id = egui::Id::new(("spatial_gauge_display", pane.entity));
 
         egui::Frame::NONE
@@ -262,6 +239,32 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                             ui.selectable_value(&mut data.display, frame, frame.as_str());
                         }
                     });
+
+                let display = data.display;
+                let labels = display_labels(display);
+                let out = value
+                    .as_ref()
+                    .and_then(component_value_tail_to_vec3)
+                    .map(|pos_src| convert(pos_src, source, display, &geo_context));
+                // Attitude from the same SpatialTransform (quat head); optional if the
+                // EQL is a bare 3-vector.
+                let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
+                    let frame = display.geo_frame().unwrap_or(GeoFrame::NED);
+                    GeoRotation::relative(source, wp.att())
+                        .as_frame(frame, &geo_context)
+                        .1
+                });
+
+                let cards: Vec<(String, String)> = labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| {
+                        let value = out
+                            .map(|v| fmt_val(v[i]))
+                            .unwrap_or_else(|| "—".to_string());
+                        ((*label).to_string(), value)
+                    })
+                    .collect();
 
                 ui.add_space(4.0);
                 render_value_cards(ui, &cards);
