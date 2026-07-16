@@ -261,11 +261,11 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                     .and_then(component_value_to_position)
                     .map(|pos_src| convert(pos_src, source, display, &geo_context));
                 // Attitude from the same SpatialTransform (quat head); optional if the
-                // EQL is a bare 3-vector.
+                // EQL is a bare 3-vector. LLA has no Cartesian frame — use NED so the
+                // sphere's local-level axes match `ai_pitch_roll` / `sphere_axis_dirs`.
                 let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
-                    let frame = display.geo_frame().unwrap_or(GeoFrame::NED);
                     GeoRotation::relative(source, wp.att())
-                        .as_frame(frame, &geo_context)
+                        .as_frame(attitude_frame(display), &geo_context)
                         .1
                 });
 
@@ -346,21 +346,30 @@ fn fmt_val(v: f64) -> String {
     s
 }
 
+/// Cartesian frame used for the attitude sphere / AI horizon.
+///
+/// LLA is geodetic (lat/lon/alt), not a body→frame rotation basis — use NED so
+/// the local-level triad and pitch/roll match the attitude quaternion.
+fn attitude_frame(display: DisplayFrame) -> GeoFrame {
+    display.geo_frame().unwrap_or(GeoFrame::NED)
+}
+
 /// Labels drawn on the sphere rim for the selected display frame.
 fn sphere_axis_labels(display: DisplayFrame) -> [&'static str; 3] {
     match display {
         // Sketch: U at top, E / N on the rim; hatched half = "down".
-        DisplayFrame::NED => ["U", "E", "N"],
+        // LLA shares NED's local-level triad (see [`attitude_frame`]).
+        DisplayFrame::NED | DisplayFrame::LLA => ["U", "E", "N"],
         DisplayFrame::ENU => ["U", "E", "N"],
         DisplayFrame::ECEF => ["Z", "Y", "X"],
-        DisplayFrame::LLA => ["Z", "E", "N"],
     }
 }
 
 /// Unit axes in the display frame matching [`sphere_axis_labels`].
 fn sphere_axis_dirs(display: DisplayFrame) -> [DVec3; 3] {
     match display {
-        DisplayFrame::NED => [
+        // LLA attitude uses NED — keep dirs in lockstep with [`attitude_frame`].
+        DisplayFrame::NED | DisplayFrame::LLA => [
             DVec3::new(0.0, 0.0, -1.0), // U = -D
             DVec3::new(0.0, 1.0, 0.0),  // E
             DVec3::new(1.0, 0.0, 0.0),  // N
@@ -370,7 +379,7 @@ fn sphere_axis_dirs(display: DisplayFrame) -> [DVec3; 3] {
             DVec3::X, // E
             DVec3::Y, // N
         ],
-        DisplayFrame::ECEF | DisplayFrame::LLA => [DVec3::Z, DVec3::Y, DVec3::X],
+        DisplayFrame::ECEF => [DVec3::Z, DVec3::Y, DVec3::X],
     }
 }
 
@@ -795,10 +804,7 @@ mod tests {
     #[test]
     fn effective_source_inherits_coordinate_then_ecef() {
         let inherit = SpatialGaugeData::new("a.pos".into(), None, DisplayFrame::NED);
-        assert_eq!(
-            inherit.effective_source(Some(GeoFrame::ENU)),
-            GeoFrame::ENU
-        );
+        assert_eq!(inherit.effective_source(Some(GeoFrame::ENU)), GeoFrame::ENU);
         assert_eq!(inherit.effective_source(None), GeoFrame::ECEF);
 
         let explicit =
@@ -837,5 +843,23 @@ mod tests {
         let (pitch, roll) = ai_pitch_roll(q, DVec3::Z);
         assert!(pitch > 0.3, "expected nose-up pitch, got {pitch}");
         assert!(roll.abs() < 1e-4, "roll should stay ~0, got {roll}");
+    }
+
+    #[test]
+    fn lla_attitude_sphere_matches_ned_local_level() {
+        // Regression: LLA used to transform attitude in NED while the sphere
+        // treated up/axes as ECEF (+Z / Z,Y,X), so identity looked banked.
+        assert_eq!(attitude_frame(DisplayFrame::LLA), GeoFrame::NED);
+        assert_eq!(
+            sphere_axis_labels(DisplayFrame::LLA),
+            sphere_axis_labels(DisplayFrame::NED)
+        );
+        assert_eq!(
+            sphere_axis_dirs(DisplayFrame::LLA),
+            sphere_axis_dirs(DisplayFrame::NED)
+        );
+        let (pitch, roll) = ai_pitch_roll(DQuat::IDENTITY, display_up(DisplayFrame::LLA));
+        assert!(pitch.abs() < 1e-5, "LLA identity pitch {pitch}");
+        assert!(roll.abs() < 1e-5, "LLA identity roll {roll}");
     }
 }
