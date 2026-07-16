@@ -369,8 +369,12 @@ fn project_body_axis(v: DVec3) -> (f32, f32, f32) {
 /// banks with roll and slides with pitch, and the U/E/N triad tracks attitude.
 fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Option<DQuat>) {
     let scheme = get_scheme();
-    let available = ui.available_width().min(ui.available_height().max(140.0));
-    let size = available.clamp(120.0, 180.0);
+    // Respect the tile's actual available height — do not invent a 140px floor
+    // that can overflow short panels.
+    let size = ui
+        .available_width()
+        .min(ui.available_height())
+        .clamp(0.0, 180.0);
     let (rect, _response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     let painter = ui.painter_at(rect);
 
