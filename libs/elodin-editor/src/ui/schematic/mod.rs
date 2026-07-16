@@ -575,6 +575,7 @@ impl Plugin for SchematicPlugin {
             .insert_resource(CurrentWindowSchematics::default())
             .init_resource::<SchematicBindings>()
             .init_resource::<load::PendingWindowSchematics>()
+            .init_resource::<load::PendingDataOverview>()
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,
@@ -586,6 +587,7 @@ impl Plugin for SchematicPlugin {
                 PreUpdate,
                 (
                     load::apply_document_cleared,
+                    load::retry_pending_data_overview,
                     load::apply_document_loaded.before(crate::ui::sync_windows),
                     load::apply_document_reloaded.before(crate::ui::sync_windows),
                     load::apply_pending_window_schematics.before(crate::ui::sync_windows),

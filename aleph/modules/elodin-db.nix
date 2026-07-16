@@ -140,10 +140,13 @@ in {
 
     system.activationScripts.restartElodinDb = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
       text = ''
-        if [ -d /run/systemd/system ] && \
-           /run/current-system/sw/bin/systemctl is-active --quiet elodin-db-default.service 2>/dev/null; then
-          echo "restarting elodin-db-default for fresh database..."
-          /run/current-system/sw/bin/systemctl restart elodin-db-default.service || true
+        if [ -d /run/systemd/system ]; then
+          # Kill leftover SITL/manual elodin-db on :2240, then start flight DB.
+          echo "ensuring flight elodin-db owns :2240..."
+          /run/current-system/sw/bin/systemctl stop 'elodin-db@*' elodin-db-default.service elodin-db.service 2>/dev/null || true
+          /run/current-system/sw/bin/pkill -9 -f 'elodin-db run' 2>/dev/null || true
+          sleep 1
+          /run/current-system/sw/bin/systemctl start elodin-db-default.service || true
         fi
       '';
     };
