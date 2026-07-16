@@ -72,8 +72,10 @@ pub fn compile_spatial_gauge_exprs(
     eql_context: Res<EqlContext>,
 ) {
     for mut data in gauges.iter_mut() {
-        let up_to_date =
-            data.compiled_expr.is_some() && data.compiled_for.as_deref() == Some(data.eql.as_str());
+        // Empty EQL is a settled state (`compiled_expr = None`). Non-empty must
+        // have a successful compile; failures retry when the context catches up.
+        let up_to_date = data.compiled_for.as_deref() == Some(data.eql.as_str())
+            && (data.eql.trim().is_empty() || data.compiled_expr.is_some());
         if up_to_date {
             continue;
         }
