@@ -370,10 +370,12 @@ fn cubemap_digest_cached(
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta.modified().ok()?;
     let len = meta.len();
-    if let Some((cached_path, cached_mtime, cached_len, digest)) = cache.as_ref() {
-        if cached_path == path && *cached_mtime == mtime && *cached_len == len {
-            return Some(*digest);
-        }
+    if let Some((cached_path, cached_mtime, cached_len, digest)) = cache.as_ref()
+        && cached_path == path
+        && *cached_mtime == mtime
+        && *cached_len == len
+    {
+        return Some(*digest);
     }
     let digest = cubemap_digest(path)?;
     *cache = Some((path.to_path_buf(), mtime, len, digest));
