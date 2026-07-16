@@ -1220,7 +1220,7 @@ pub struct SpatialGauge {
     /// Coordinate frame the EQL result is expressed in.
     ///
     /// When `None`, inherits the schematic global `coordinate` frame (same as
-    /// viewport `frame`); if that is also unset, the editor falls back to ECEF.
+    /// viewport `frame`); if that is also unset, the editor falls back to ENU.
     pub source: Option<bevy_geo_frames::GeoFrame>,
     /// Coordinate system to display the position in (a spatial frame or LLA).
     pub display: DisplayFrame,

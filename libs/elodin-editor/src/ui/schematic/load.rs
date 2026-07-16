@@ -2060,7 +2060,7 @@ mod tests {
             assert_eq!(source, None, "omitted source must stay unset");
             let coordinate = app.world().resource::<Coordinate>().0;
             assert_eq!(
-                source.or(coordinate).unwrap_or(GeoFrame::ECEF),
+                source.or(coordinate).unwrap_or(GeoFrame::ENU),
                 GeoFrame::ENU
             );
         }
@@ -2077,7 +2077,7 @@ mod tests {
                 .source;
             let coordinate = app.world().resource::<Coordinate>().0;
             assert_eq!(
-                source.or(coordinate).unwrap_or(GeoFrame::ECEF),
+                source.or(coordinate).unwrap_or(GeoFrame::ENU),
                 GeoFrame::NED,
                 "inherited source must track live coordinate"
             );
@@ -2107,7 +2107,7 @@ mod tests {
             .source;
         assert_eq!(source, Some(GeoFrame::ECEF));
         assert_eq!(
-            source.or(Some(GeoFrame::ENU)).unwrap_or(GeoFrame::ECEF),
+            source.or(Some(GeoFrame::ENU)).unwrap_or(GeoFrame::ENU),
             GeoFrame::ECEF,
             "explicit source must not inherit coordinate"
         );

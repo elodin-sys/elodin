@@ -70,9 +70,9 @@ impl SpatialGaugeData {
     }
 
     /// Concrete source frame: explicit override, else schematic `coordinate`,
-    /// else ECEF (documented KDL fallback when both are unset).
+    /// else ENU (same fallback as viewport / view-cube when both are unset).
     pub fn effective_source(&self, coordinate: Option<GeoFrame>) -> GeoFrame {
-        self.source.or(coordinate).unwrap_or(GeoFrame::ECEF)
+        self.source.or(coordinate).unwrap_or(GeoFrame::ENU)
     }
 }
 
@@ -284,9 +284,9 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                 render_value_cards(ui, &cards);
 
                 ui.add_space(8.0);
-                // Frame sphere: display-frame U/E/N triad in body view, driven
-                // by the SpatialTransform attitude when available.
-                paint_frame_sphere(ui, display, att_display, out.is_some());
+                // Frame sphere needs a WorldPos quaternion. Position-only EQL
+                // (bare 3-vector) must not paint identity as wings-level.
+                paint_frame_sphere(ui, display, att_display);
             });
     }
 }
@@ -416,14 +416,9 @@ fn project_body_axis(v: DVec3) -> (f32, f32, f32) {
 /// Paint a circular frame sphere with an AI-style tilting horizon and three
 /// axis labels. When `att_display` is set (body→display), the hatched ground
 /// banks with roll and slides with pitch, and the U/E/N triad tracks attitude.
-/// With no playhead sample (`has_sample == false`), draw a muted empty rim so
-/// the sphere does not read as wings-level while the cards show "—".
-fn paint_frame_sphere(
-    ui: &mut egui::Ui,
-    display: DisplayFrame,
-    att_display: Option<DQuat>,
-    has_sample: bool,
-) {
+/// Without attitude (no sample, or position-only 3-vector), draw a muted empty
+/// rim — never treat missing attitude as identity / wings-level.
+fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Option<DQuat>) {
     let scheme = get_scheme();
     // Respect the tile's actual available height — do not invent a 140px floor
     // that can overflow short panels.
@@ -437,7 +432,7 @@ fn paint_frame_sphere(
     let center = rect.center();
     let radius = size * 0.42;
 
-    if !has_sample {
+    let Some(q) = att_display else {
         painter.circle_stroke(
             center,
             radius,
@@ -451,9 +446,8 @@ fn paint_frame_sphere(
             scheme.text_secondary,
         );
         return;
-    }
+    };
 
-    let q = att_display.unwrap_or(DQuat::IDENTITY);
     let (pitch, roll) = ai_pitch_roll(q, display_up(display));
 
     // Outer rim.
@@ -737,12 +731,27 @@ mod tests {
     }
 
     #[test]
+    fn bare_position_vector_has_no_attitude() {
+        // Regression: position-only must not drive the sphere via identity quat.
+        let v = f64_value(&[1.0, 2.0, 3.0]);
+        assert!(component_value_to_position(&v).is_some());
+        assert!(
+            v.as_world_pos().is_none(),
+            "bare XYZ has position cards but no attitude for the sphere"
+        );
+    }
+
+    #[test]
     fn position_from_spatial_transform() {
         // quat (x,y,z,w) + pos — same layout as WorldPos / SpatialTransform.
         let v = f64_value(&[0.0, 0.0, 0.0, 1.0, 10.0, 20.0, 30.0]);
         assert_eq!(
             component_value_to_position(&v),
             Some(DVec3::new(10.0, 20.0, 30.0))
+        );
+        assert!(
+            v.as_world_pos().is_some(),
+            "SpatialTransform supplies attitude for the sphere"
         );
     }
 
@@ -802,16 +811,16 @@ mod tests {
     }
 
     #[test]
-    fn effective_source_inherits_coordinate_then_ecef() {
+    fn effective_source_inherits_coordinate_then_enu() {
         let inherit = SpatialGaugeData::new("a.pos".into(), None, DisplayFrame::NED);
-        assert_eq!(inherit.effective_source(Some(GeoFrame::ENU)), GeoFrame::ENU);
-        assert_eq!(inherit.effective_source(None), GeoFrame::ECEF);
+        assert_eq!(inherit.effective_source(Some(GeoFrame::NED)), GeoFrame::NED);
+        assert_eq!(inherit.effective_source(None), GeoFrame::ENU);
 
         let explicit =
-            SpatialGaugeData::new("a.pos".into(), Some(GeoFrame::NED), DisplayFrame::NED);
+            SpatialGaugeData::new("a.pos".into(), Some(GeoFrame::ECEF), DisplayFrame::NED);
         assert_eq!(
             explicit.effective_source(Some(GeoFrame::ENU)),
-            GeoFrame::NED
+            GeoFrame::ECEF
         );
     }
 
