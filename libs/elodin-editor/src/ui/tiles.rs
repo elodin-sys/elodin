@@ -3382,6 +3382,24 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         graph_id: plot.entity,
                                     };
                                 }
+                                Pane::Monitor(monitor) => {
+                                    ui_state.selected_object = SelectedObject::Monitor {
+                                        monitor_id: monitor.entity,
+                                    };
+                                }
+                                Pane::SpatialGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::SpatialGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::QueryTable(table) => {
+                                    ui_state.selected_object = SelectedObject::QueryTable {
+                                        table_id: table.entity,
+                                    };
+                                }
+                                Pane::DataOverview(_) => {
+                                    ui_state.selected_object = SelectedObject::DataOverview;
+                                }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
                                         ui_state.selected_object = SelectedObject::Viewport {
