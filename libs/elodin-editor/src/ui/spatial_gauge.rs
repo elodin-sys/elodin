@@ -8,12 +8,12 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, ecef_to_lla_deg};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
+use nox::ArrayBuf;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use crate::EqlContext;
 use crate::WorldPosExt;
 use crate::object_3d::{CompiledExpr, ComponentArrayExt, compile_eql_expr};
-use crate::vector_arrow::component_value_tail_to_vec3;
 
 use super::{
     PaneName, colors::get_scheme, monitor::render_value_cards, theme, widgets::WidgetSystem,
@@ -244,7 +244,7 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                 let labels = display_labels(display);
                 let out = value
                     .as_ref()
-                    .and_then(component_value_tail_to_vec3)
+                    .and_then(component_value_to_position)
                     .map(|pos_src| convert(pos_src, source, display, &geo_context));
                 // Attitude from the same SpatialTransform (quat head); optional if the
                 // EQL is a bare 3-vector.
@@ -272,8 +272,34 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                 ui.add_space(8.0);
                 // Frame sphere: display-frame U/E/N triad in body view, driven
                 // by the SpatialTransform attitude when available.
-                paint_frame_sphere(ui, display, att_display, value.is_some());
+                paint_frame_sphere(ui, display, att_display, out.is_some());
             });
+    }
+}
+
+/// Extract a position (metres) from a component value for the spatial gauge.
+///
+/// Accepts only:
+/// - a bare 3-vector (`F32`/`F64` with exactly three elements), or
+/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (`F64`, ≥7
+///   elements: quat + position).
+///
+/// Rejects other lengths (e.g. 4-element fin deflections) so the gauge does not
+/// treat arbitrary trailing floats as coordinates and invent NED/LLA values.
+fn component_value_to_position(value: &ComponentValue) -> Option<DVec3> {
+    if let Some(wp) = value.as_world_pos() {
+        return Some(wp.pos());
+    }
+    match value {
+        ComponentValue::F32(array) => {
+            let data = array.buf.as_buf();
+            (data.len() == 3).then(|| DVec3::new(data[0] as f64, data[1] as f64, data[2] as f64))
+        }
+        ComponentValue::F64(array) => {
+            let data = array.buf.as_buf();
+            (data.len() == 3).then(|| DVec3::new(data[0], data[1], data[2]))
+        }
+        _ => None,
     }
 }
 
@@ -669,6 +695,45 @@ fn draw_ellipse_arc(
 mod tests {
     use super::*;
     use bevy_geo_frames::GeoOrigin;
+    use nox::{Array, Dyn};
+
+    fn f64_value(values: &[f64]) -> ComponentValue {
+        ComponentValue::F64(
+            Array::<f64, Dyn>::from_shape_vec(smallvec::smallvec![values.len()], values.to_vec())
+                .expect("f64 buffer"),
+        )
+    }
+
+    #[test]
+    fn position_from_bare_xyz_vector() {
+        let v = f64_value(&[1.0, 2.0, 3.0]);
+        assert_eq!(
+            component_value_to_position(&v),
+            Some(DVec3::new(1.0, 2.0, 3.0))
+        );
+    }
+
+    #[test]
+    fn position_from_spatial_transform() {
+        // quat (x,y,z,w) + pos — same layout as WorldPos / SpatialTransform.
+        let v = f64_value(&[0.0, 0.0, 0.0, 1.0, 10.0, 20.0, 30.0]);
+        assert_eq!(
+            component_value_to_position(&v),
+            Some(DVec3::new(10.0, 20.0, 30.0))
+        );
+    }
+
+    #[test]
+    fn non_pose_multi_element_is_not_a_position() {
+        // e.g. fin deflections: last three must not become fake metres.
+        let fins = f64_value(&[0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(component_value_to_position(&fins), None);
+        assert_eq!(component_value_to_position(&f64_value(&[1.0, 2.0])), None);
+        assert_eq!(
+            component_value_to_position(&f64_value(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])),
+            None
+        );
+    }
 
     #[test]
     fn convert_ecef_to_ned_and_lla_at_origin() {
