@@ -58,7 +58,7 @@ use super::{
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
 use crate::{
-    EqlContext, GridHandle, MainCamera,
+    Coordinate, EqlContext, GridHandle, MainCamera,
     object_3d::{CompileError, ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr},
     plugins::{
         LogicalKeyState,
@@ -2940,6 +2940,7 @@ pub struct TileLayout<'w, 's> {
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
+    coordinate: Res<'w, Coordinate>,
     tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
@@ -3233,11 +3234,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
+                        let source = state_mut
+                            .coordinate
+                            .0
+                            .unwrap_or(bevy_geo_frames::GeoFrame::ECEF);
                         let entity = state_mut
                             .commands
                             .spawn(super::spatial_gauge::SpatialGaugeData::new(
                                 eql.clone(),
-                                bevy_geo_frames::GeoFrame::ECEF,
+                                source,
                                 impeller2_wkt::DisplayFrame::default(),
                             ))
                             .id();
