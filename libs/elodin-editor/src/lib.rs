@@ -1320,13 +1320,28 @@ impl SeriesStoreSession {
 }
 
 fn cancel_in_flight_series_requests(
+    commands: &mut Commands,
     msg_handlers: &mut MsgRequestIdHandlers,
     req_handlers: &mut RequestIdHandlers,
     visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
 ) {
-    msg_handlers.0.clear();
-    req_handlers.0.clear();
+    for (_, system_id) in msg_handlers.0.drain() {
+        commands.unregister_system(system_id);
+    }
+    for (_, system_id) in req_handlers.0.drain() {
+        commands.unregister_system(system_id);
+    }
     visible_prefetch.clear_in_flight();
+}
+
+/// Despawn freestanding object_3d visuals tracked by [`SyncedObject3d`].
+/// Source impeller entities are despawned separately; visuals are not their children.
+fn despawn_synced_object_3d(commands: &mut Commands, synced_glbs: &mut SyncedObject3d) {
+    for (_, visual) in synced_glbs.0.drain() {
+        if let Ok(mut entity_commands) = commands.get_entity(visual) {
+            entity_commands.despawn();
+        }
+    }
 }
 
 fn hard_clear_series_store(
@@ -1371,6 +1386,7 @@ fn should_hard_clear_ui(soft: bool) -> bool {
 }
 
 /// Soft/hard SeriesStore policy for `NewConnection`. Always runs (before any UI early-return).
+#[allow(clippy::too_many_arguments)]
 fn apply_series_store_on_reconnect(
     soft: bool,
     addr: Option<std::net::SocketAddr>,
@@ -1419,7 +1435,7 @@ fn hard_clear_editor_ui(
             entity_commands.despawn();
         }
     }
-    synced_glbs.0.clear();
+    despawn_synced_object_3d(commands, synced_glbs);
     *graph_data = CollectedGraphData::default();
 
     let Some(primary_id) = primary_window else {
@@ -1474,6 +1490,7 @@ impl EditorUiHardClear<'_, '_> {
 }
 
 /// When DbConfig identity differs from the preserved session, wipe SeriesStore + UI.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_series_store_session_from_db_config(
     config: Res<impeller2_wkt::DbConfig>,
     connection_addr: Option<Res<ConnectionAddr>>,
@@ -1544,6 +1561,7 @@ fn clear_state_new_connection(
     // SeriesStore ops run before any UI early-return so a missing primary
     // window cannot leave handlers/cache in a half-torn-down state.
     cancel_in_flight_series_requests(
+        &mut editor_ui.commands,
         &mut series.msg_handlers,
         &mut series.req_handlers,
         &mut series.visible_prefetch,
@@ -1583,8 +1601,12 @@ fn clear_state_new_connection(
     value_map.iter_mut().for_each(|mut map| {
         map.0.clear();
     });
+    // Object3D visuals are freestanding (not children of impeller sources).
+    // Always despawn them when EntityMap is wiped so sync_object_3d does not
+    // leave duplicates after sources respawn.
+    despawn_synced_object_3d(&mut editor_ui.commands, &mut editor_ui.synced_glbs);
 
-    // Soft: keep tiles, LineHandles, SyncedObject3d, CollectedGraphData, LastSynced*.
+    // Soft: keep tiles, LineHandles, CollectedGraphData, LastSynced*.
     // Hard: wipe UI and force schematic re-sync on next DbConfig.
     if should_hard_clear_ui(soft) {
         editor_ui.clear_ui_and_invalidate_schematic_sync();
@@ -2476,25 +2498,83 @@ mod tests {
 
     #[test]
     fn soft_reconnect_cancels_handlers_and_prefetch() {
-        use bevy::ecs::system::InRef;
+        use bevy::ecs::system::{InRef, RunSystemOnce};
         use impeller2_bevy::PacketGrantR;
 
         let mut app = App::new();
-        let sys_id = app
+        app.init_resource::<MsgRequestIdHandlers>()
+            .init_resource::<RequestIdHandlers>()
+            .init_resource::<crate::ui::plot::data::VisiblePrefetchState>();
+
+        let msg_sys = app
             .world_mut()
             .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| false);
-        let mut msg = MsgRequestIdHandlers::default();
-        let mut req = RequestIdHandlers::default();
-        msg.0.insert(7, sys_id);
-        req.0.insert(9, sys_id);
-        let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
-        prefetch.in_flight.insert((ComponentId(1), 0, 1));
+        let req_sys = app
+            .world_mut()
+            .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| false);
+        {
+            let mut msg = app.world_mut().resource_mut::<MsgRequestIdHandlers>();
+            msg.0.insert(7, msg_sys);
+            let mut req = app.world_mut().resource_mut::<RequestIdHandlers>();
+            req.0.insert(9, req_sys);
+            app.world_mut()
+                .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
+                .in_flight
+                .insert((ComponentId(1), 0, 1));
+        }
 
-        cancel_in_flight_series_requests(&mut msg, &mut req, &mut prefetch);
+        app.world_mut()
+            .run_system_once(
+                |mut commands: Commands,
+                 mut msg: ResMut<MsgRequestIdHandlers>,
+                 mut req: ResMut<RequestIdHandlers>,
+                 mut prefetch: ResMut<crate::ui::plot::data::VisiblePrefetchState>| {
+                    cancel_in_flight_series_requests(
+                        &mut commands,
+                        &mut msg,
+                        &mut req,
+                        &mut prefetch,
+                    );
+                },
+            )
+            .unwrap();
 
-        assert!(msg.0.is_empty());
-        assert!(req.0.is_empty());
-        assert!(prefetch.in_flight.is_empty());
+        assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
+        assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
+        assert!(
+            app.world()
+                .resource::<crate::ui::plot::data::VisiblePrefetchState>()
+                .in_flight
+                .is_empty()
+        );
+        // Systems were unregistered — a second unregister must fail.
+        assert!(app.world_mut().unregister_system(msg_sys).is_err());
+        assert!(app.world_mut().unregister_system(req_sys).is_err());
+    }
+
+    #[test]
+    fn despawn_synced_object_3d_removes_visuals() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = App::new();
+        app.init_resource::<SyncedObject3d>();
+        let visual = app.world_mut().spawn_empty().id();
+        let source = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<SyncedObject3d>()
+            .0
+            .insert(source, visual);
+
+        app.world_mut()
+            .run_system_once(
+                |mut commands: Commands, mut synced: ResMut<SyncedObject3d>| {
+                    despawn_synced_object_3d(&mut commands, &mut synced);
+                },
+            )
+            .unwrap();
+
+        assert!(app.world().resource::<SyncedObject3d>().0.is_empty());
+        assert!(app.world().get_entity(visual).is_err());
     }
 
     #[test]
@@ -2509,10 +2589,8 @@ mod tests {
         let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
         let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
         prefetch.in_flight.insert((ComponentId(1), 0, 1));
-        let mut msg = MsgRequestIdHandlers::default();
-        let mut req = RequestIdHandlers::default();
+        prefetch.clear_in_flight();
 
-        cancel_in_flight_series_requests(&mut msg, &mut req, &mut prefetch);
         let soft = series_store_soft_reconnect(&session, Some(addr));
         apply_series_store_on_reconnect(
             soft,
