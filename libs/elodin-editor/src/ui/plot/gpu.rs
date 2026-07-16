@@ -63,8 +63,8 @@ const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
-/// Sized for ≤30 s @ ~1 kHz truth strips (plus per-chunk sentinel overhead).
-pub const INDEX_BUFFER_LEN: usize = 1024 * 32;
+/// Sized for ≤30 s @ ~4 kHz truth strips (plus per-chunk sentinel overhead).
+pub const INDEX_BUFFER_LEN: usize = 1024 * 128;
 pub const INDEX_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((INDEX_BUFFER_LEN * size_of::<u32>()) as u64).unwrap();
 

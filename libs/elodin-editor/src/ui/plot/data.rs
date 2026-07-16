@@ -826,6 +826,10 @@ fn plot_fetch_component_ids(
     }
     for obj in object_3ds.iter() {
         collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
+        for thruster in &obj.data.thrusters {
+            collect_eql_component_ids(&thruster.intensity, eql_ctx, &mut ids);
+        }
     }
     ids
 }
