@@ -474,12 +474,25 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
 
     let (pitch, roll) = ai_pitch_roll(q, display_up(display));
 
-    // Classic artificial-horizon shading: white above the horizon (sky/up),
-    // black below (ground/down) — fixed, independent of the UI theme.
-    let sky = Color32::from_gray(232);
-    let ground = Color32::from_gray(14);
-    let hatch = Color32::from_gray(110);
-    let horizon = Color32::from_gray(150);
+    // Classic artificial-horizon shading: light above the horizon (sky/up),
+    // dark below (ground/down). In light mode the sky is toned down so the disc
+    // still separates from the pale panel background.
+    let light_mode = crate::ui::colors::is_light_mode();
+    let (sky, ground, hatch, horizon) = if light_mode {
+        (
+            Color32::from_gray(205),
+            Color32::from_gray(30),
+            Color32::from_gray(90),
+            Color32::from_gray(120),
+        )
+    } else {
+        (
+            Color32::from_gray(232),
+            Color32::from_gray(14),
+            Color32::from_gray(110),
+            Color32::from_gray(150),
+        )
+    };
 
     paint_ai_horizon(
         &painter,
