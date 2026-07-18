@@ -774,39 +774,41 @@ fn swap_zoom_buttons_on_alt(
     keys: Res<ButtonInput<KeyCode>>,
     zoom_icon_materials: Option<Res<ZoomIconMaterials>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut last_pressed: Local<Option<bool>>,
 ) {
-    let pressed = if keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight) {
-        Some(true)
-    } else if keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight) {
-        Some(false)
-    } else {
-        None
-    };
-    if let Some(pressed) = pressed {
-        for mut action in &mut buttons {
-            match *action {
-                ViewportActionButton::ZoomIn | ViewportActionButton::ZoomOut => {
-                    if pressed {
-                        *action = ViewportActionButton::ZoomIn;
-                    } else {
-                        *action = ViewportActionButton::ZoomOut;
-                    }
-                }
-                _ => (),
-            }
-        }
-        let Some(zoom_icon_materials) = zoom_icon_materials else {
-            return;
-        };
-
-        let Some(zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
-            return;
-        };
-        let zoom_icon: Handle<Image> = if pressed {
-            zoom_icon_materials.zoom_in.clone()
-        } else {
-            zoom_icon_materials.zoom_out.clone()
-        };
-        zoom_material.base_color_texture = Some(zoom_icon);
+    // Poll the *level* state of Alt rather than just_pressed/just_released. On
+    // Linux the window manager frequently grabs Alt (Alt+drag, menu mnemonics)
+    // and focus changes drop the key edges, so an edge-triggered swap would
+    // leave the icon stuck on ZoomOut. Reconciling the level each frame is
+    // resilient to any missed press/release edge.
+    let pressed = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if *last_pressed == Some(pressed) {
+        return;
     }
+    *last_pressed = Some(pressed);
+
+    for mut action in &mut buttons {
+        if matches!(
+            *action,
+            ViewportActionButton::ZoomIn | ViewportActionButton::ZoomOut
+        ) {
+            *action = if pressed {
+                ViewportActionButton::ZoomIn
+            } else {
+                ViewportActionButton::ZoomOut
+            };
+        }
+    }
+
+    let Some(zoom_icon_materials) = zoom_icon_materials else {
+        return;
+    };
+    let Some(zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
+        return;
+    };
+    zoom_material.base_color_texture = Some(if pressed {
+        zoom_icon_materials.zoom_in.clone()
+    } else {
+        zoom_icon_materials.zoom_out.clone()
+    });
 }
