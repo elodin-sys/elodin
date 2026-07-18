@@ -236,60 +236,72 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                         .size(13.0)
                         .color(scheme.text_secondary),
                 );
-                ui.add_space(8.0);
+                ui.add_space(6.0);
 
-                // In-panel display-frame dropdown (source stays in the inspector).
-                theme::configure_input_with_border(ui.style_mut());
-                egui::ComboBox::from_id_salt(combo_id)
-                    .selected_text(data.display.as_str())
-                    .width(96.0)
-                    .show_ui(ui, |ui| {
-                        for frame in [
-                            DisplayFrame::NED,
-                            DisplayFrame::ENU,
-                            DisplayFrame::ECEF,
-                            DisplayFrame::LLA,
-                        ] {
-                            ui.selectable_value(&mut data.display, frame, frame.as_str());
-                        }
+                // Two columns: dropdown + stacked value cards on the left, the
+                // gimbal filling the remaining space on the right.
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(CARD_COLUMN_WIDTH);
+                        // In-panel display-frame dropdown (source stays in the inspector).
+                        theme::configure_input_with_border(ui.style_mut());
+                        egui::ComboBox::from_id_salt(combo_id)
+                            .selected_text(data.display.as_str())
+                            .width(CARD_COLUMN_WIDTH - 16.0)
+                            .show_ui(ui, |ui| {
+                                for frame in [
+                                    DisplayFrame::NED,
+                                    DisplayFrame::ENU,
+                                    DisplayFrame::ECEF,
+                                    DisplayFrame::LLA,
+                                ] {
+                                    ui.selectable_value(&mut data.display, frame, frame.as_str());
+                                }
+                            });
+
+                        let display = data.display;
+                        let labels = display_labels(display);
+                        let out = value
+                            .as_ref()
+                            .and_then(component_value_to_position)
+                            .map(|pos_src| convert(pos_src, source, display, &geo_context));
+                        let cards: Vec<(String, String)> = labels
+                            .iter()
+                            .enumerate()
+                            .map(|(i, label)| {
+                                let value = out
+                                    .map(|v| fmt_val(v[i]))
+                                    .unwrap_or_else(|| "—".to_string());
+                                ((*label).to_string(), value)
+                            })
+                            .collect();
+
+                        ui.add_space(2.0);
+                        // The column fits exactly one card, so the wrapped
+                        // cards stack vertically.
+                        render_value_cards(ui, &cards);
                     });
 
-                let display = data.display;
-                let labels = display_labels(display);
-                let out = value
-                    .as_ref()
-                    .and_then(component_value_to_position)
-                    .map(|pos_src| convert(pos_src, source, display, &geo_context));
-                // Attitude from the same SpatialTransform (quat head); optional if the
-                // EQL is a bare 3-vector. LLA has no Cartesian frame — use NED so the
-                // sphere's local-level axes match `ai_pitch_roll` / `sphere_axis_dirs`.
-                let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
-                    GeoRotation::relative(source, wp.att())
-                        .as_frame(attitude_frame(display), &geo_context)
-                        .1
+                    // Attitude from the same SpatialTransform (quat head); optional if the
+                    // EQL is a bare 3-vector. LLA has no Cartesian frame — use NED so the
+                    // sphere's local-level axes match `ai_pitch_roll` / `sphere_axis_dirs`.
+                    // Read `display` after the ComboBox so a change applies immediately.
+                    let display = data.display;
+                    let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
+                        GeoRotation::relative(source, wp.att())
+                            .as_frame(attitude_frame(display), &geo_context)
+                            .1
+                    });
+                    // Frame sphere needs a WorldPos quaternion. Position-only EQL
+                    // (bare 3-vector) must not paint identity as wings-level.
+                    paint_frame_sphere(ui, display, att_display);
                 });
-
-                let cards: Vec<(String, String)> = labels
-                    .iter()
-                    .enumerate()
-                    .map(|(i, label)| {
-                        let value = out
-                            .map(|v| fmt_val(v[i]))
-                            .unwrap_or_else(|| "—".to_string());
-                        ((*label).to_string(), value)
-                    })
-                    .collect();
-
-                ui.add_space(4.0);
-                render_value_cards(ui, &cards);
-
-                ui.add_space(8.0);
-                // Frame sphere needs a WorldPos quaternion. Position-only EQL
-                // (bare 3-vector) must not paint identity as wings-level.
-                paint_frame_sphere(ui, display, att_display);
             });
     }
 }
+
+/// Width of the left column: one value card (130) plus its outer margins.
+const CARD_COLUMN_WIDTH: f32 = 146.0;
 
 /// Extract a position (metres) from a component value for the spatial gauge.
 ///
@@ -414,19 +426,23 @@ fn project_body_axis(v: DVec3) -> (f32, f32, f32) {
 }
 
 /// Paint a circular frame sphere with an AI-style tilting horizon and three
-/// axis labels. When `att_display` is set (body→display), the hatched ground
-/// banks with roll and slides with pitch, and the U/E/N triad tracks attitude.
-/// Without attitude (no sample, or position-only 3-vector), draw a muted empty
-/// rim — never treat missing attitude as identity / wings-level.
+/// axis labels. When `att_display` is set (body→display), the black ground
+/// banks with roll and slides with pitch under the white sky, and the U/E/N
+/// triad tracks attitude (back-facing tips stay visible, dimmed, through the
+/// sphere). Without attitude (no sample, or position-only 3-vector), draw a
+/// muted empty rim — never treat missing attitude as identity / wings-level.
 fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Option<DQuat>) {
     let scheme = get_scheme();
-    // Respect the tile's actual available height — do not invent a 140px floor
-    // that can overflow short panels.
+    // Respect the tile's actual available space — do not invent a floor that
+    // can overflow short panels. Centre the sphere in the remaining width.
     let size = ui
         .available_width()
         .min(ui.available_height())
-        .clamp(0.0, 180.0);
-    let (rect, _response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+        .clamp(0.0, 220.0);
+    let avail = ui.available_width();
+    let (full_rect, _response) =
+        ui.allocate_exact_size(Vec2::new(avail.max(size), size), Sense::hover());
+    let rect = egui::Rect::from_center_size(full_rect.center(), Vec2::splat(size));
     let painter = ui.painter_at(rect);
 
     let center = rect.center();
@@ -450,12 +466,12 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
 
     let (pitch, roll) = ai_pitch_roll(q, display_up(display));
 
-    // Outer rim.
-    painter.circle_stroke(center, radius, Stroke::new(1.5, scheme.border_primary));
-
-    let hatch = scheme.border_primary.gamma_multiply(0.55);
-    let ground = scheme.bg_secondary.gamma_multiply(0.85);
-    let sky = scheme.bg_primary.gamma_multiply(0.4);
+    // Classic artificial-horizon shading: white above the horizon (sky/up),
+    // black below (ground/down) — fixed, independent of the UI theme.
+    let sky = Color32::from_gray(232);
+    let ground = Color32::from_gray(14);
+    let hatch = Color32::from_gray(110);
+    let horizon = Color32::from_gray(150);
 
     paint_ai_horizon(
         &painter,
@@ -463,11 +479,12 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
         radius,
         pitch,
         roll,
-        [ground, sky, hatch, scheme.text_secondary],
+        [ground, sky, hatch, horizon],
     );
 
-    // Meridian / equator curves for a bit of sphere depth (drawn lightly over horizon).
-    let curve = scheme.border_primary.gamma_multiply(0.7);
+    // Meridian / equator curves for a bit of sphere depth. Mid-gray reads on
+    // both the white and black halves.
+    let curve = Color32::from_gray(128).gamma_multiply(0.8);
     draw_ellipse_arc(
         &painter,
         center,
@@ -485,8 +502,12 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
         Stroke::new(1.0, curve),
     );
 
-    // Fixed aircraft reference (wings + center) — body-fixed, horizon moves under it.
-    let wing = scheme.text_primary;
+    // Outer rim, over the fills so the disc has a crisp edge.
+    painter.circle_stroke(center, radius, Stroke::new(1.5, scheme.border_primary));
+
+    // Fixed aircraft reference (wings + center) — body-fixed, horizon moves
+    // under it. Amber like a real ADI: visible on both white and black.
+    let wing = Color32::from_rgb(255, 179, 0);
     painter.line_segment(
         [
             Pos2::new(center.x - radius * 0.22, center.y),
@@ -504,9 +525,10 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     painter.circle_stroke(center, 3.5, Stroke::new(1.5, wing));
 
     // Display-frame axes in body coordinates (identity ⇒ body aligns with frame).
+    // Drawn last so back-facing tips remain visible "through" the sphere.
     let q_inv = q.inverse();
     let labels = sphere_axis_labels(display);
-    let mut tips: Vec<(f32, &'static str, Pos2, Color32, Color32)> = sphere_axis_dirs(display)
+    let mut tips: Vec<(f32, &'static str, Pos2, f32)> = sphere_axis_dirs(display)
         .into_iter()
         .zip(labels)
         .map(|(dir, label)| {
@@ -517,34 +539,48 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
                 center.x + radius * sx * scale,
                 center.y - radius * sy * scale,
             );
-            let front = depth >= 0.0;
-            let tip = if front {
-                scheme.text_secondary
-            } else {
-                scheme.text_secondary.gamma_multiply(0.35)
-            };
-            let text = if front {
-                scheme.text_primary
-            } else {
-                scheme.text_primary.gamma_multiply(0.4)
-            };
-            (depth, label, pos, tip, text)
+            let alpha = if depth >= 0.0 { 1.0 } else { 0.45 };
+            (depth, label, pos, alpha)
         })
         .collect();
     tips.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    for &(_depth, label, pos, tip_color, label_color) in &tips {
-        painter.line_segment([center, pos], Stroke::new(1.0, curve));
-        painter.circle_filled(pos, 3.0, tip_color);
+    for &(_depth, label, pos, alpha) in &tips {
+        painter.line_segment([center, pos], Stroke::new(1.0, curve.gamma_multiply(alpha)));
+        painter.circle_filled(pos, 3.0, Color32::from_gray(160).gamma_multiply(alpha));
         let offset = (pos - center).normalized() * 12.0;
-        painter.text(
+        // White text with a black halo stays readable over both halves.
+        text_with_halo(
+            &painter,
             pos + offset,
-            Align2::CENTER_CENTER,
             label,
             FontId::monospace(13.0),
-            label_color,
+            Color32::WHITE.gamma_multiply(alpha),
+            Color32::BLACK.gamma_multiply(alpha * 0.9),
         );
     }
+}
+
+/// Draw `text` with a 1px halo so it reads over both the white sky and the
+/// black ground of the horizon.
+fn text_with_halo(
+    painter: &egui::Painter,
+    pos: Pos2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    halo: Color32,
+) {
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        painter.text(
+            pos + Vec2::new(dx, dy),
+            Align2::CENTER_CENTER,
+            text,
+            font.clone(),
+            halo,
+        );
+    }
+    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
 
 /// Artificial-horizon fill: hatched ground / sky banked by `roll`, shifted by `pitch`.
