@@ -16,7 +16,11 @@ use crate::WorldPosExt;
 use crate::object_3d::{CompiledExpr, ComponentArrayExt, compile_eql_expr};
 
 use super::{
-    PaneName, colors::get_scheme, monitor::render_value_cards, theme, widgets::WidgetSystem,
+    PaneName,
+    colors::get_scheme,
+    monitor::{CardStyle, render_value_cards},
+    theme,
+    widgets::WidgetSystem,
 };
 
 #[derive(Clone)]
@@ -226,17 +230,17 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
         let combo_id = egui::Id::new(("spatial_gauge_display", pane.entity));
 
         egui::Frame::NONE
-            .inner_margin(egui::Margin::same(8))
+            .inner_margin(egui::Margin::same(4))
             .show(ui, |ui| {
                 // Title — component / EQL path, matching the sketch header.
                 let scheme = get_scheme();
                 ui.label(
                     egui::RichText::new(title)
                         .monospace()
-                        .size(13.0)
+                        .size(10.0)
                         .color(scheme.text_secondary),
                 );
-                ui.add_space(6.0);
+                ui.add_space(3.0);
 
                 // Two columns: dropdown + stacked value cards on the left, the
                 // gimbal filling the remaining space on the right.
@@ -245,9 +249,13 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                         ui.set_width(CARD_COLUMN_WIDTH);
                         // In-panel display-frame dropdown (source stays in the inspector).
                         theme::configure_input_with_border(ui.style_mut());
+                        ui.style_mut()
+                            .text_styles
+                            .iter_mut()
+                            .for_each(|(_, font)| font.size = 10.0);
                         egui::ComboBox::from_id_salt(combo_id)
                             .selected_text(data.display.as_str())
-                            .width(CARD_COLUMN_WIDTH - 16.0)
+                            .width(CARD_COLUMN_WIDTH - 12.0)
                             .show_ui(ui, |ui| {
                                 for frame in [
                                     DisplayFrame::NED,
@@ -279,7 +287,7 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                         ui.add_space(2.0);
                         // The column fits exactly one card, so the wrapped
                         // cards stack vertically.
-                        render_value_cards(ui, &cards);
+                        render_value_cards(ui, &cards, &CardStyle::COMPACT);
                     });
 
                     // Attitude from the same SpatialTransform (quat head); optional if the
@@ -300,8 +308,8 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
     }
 }
 
-/// Width of the left column: one value card (130) plus its outer margins.
-const CARD_COLUMN_WIDTH: f32 = 146.0;
+/// Width of the left column: one compact value card plus a small gutter.
+const CARD_COLUMN_WIDTH: f32 = 110.0;
 
 /// Extract a position (metres) from a component value for the spatial gauge.
 ///
@@ -438,7 +446,7 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     let size = ui
         .available_width()
         .min(ui.available_height())
-        .clamp(0.0, 220.0);
+        .clamp(0.0, 150.0);
     let avail = ui.available_width();
     let (full_rect, _response) =
         ui.allocate_exact_size(Vec2::new(avail.max(size), size), Sense::hover());
@@ -458,7 +466,7 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
             center,
             Align2::CENTER_CENTER,
             "—",
-            FontId::monospace(22.0),
+            FontId::monospace(15.0),
             scheme.text_secondary,
         );
         return;
@@ -548,13 +556,13 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     for &(_depth, label, pos, alpha) in &tips {
         painter.line_segment([center, pos], Stroke::new(1.0, curve.gamma_multiply(alpha)));
         painter.circle_filled(pos, 3.0, Color32::from_gray(160).gamma_multiply(alpha));
-        let offset = (pos - center).normalized() * 12.0;
+        let offset = (pos - center).normalized() * 9.0;
         // White text with a black halo stays readable over both halves.
         text_with_halo(
             &painter,
             pos + offset,
             label,
-            FontId::monospace(13.0),
+            FontId::monospace(10.0),
             Color32::WHITE.gamma_multiply(alpha),
             Color32::BLACK.gamma_multiply(alpha * 0.9),
         );

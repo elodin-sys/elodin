@@ -514,24 +514,34 @@ w.schematic(
     // meaningful for the spatial gauge below.
     coordinate frame=ENU lat=28.6084 lon=-80.6043 alt=3.0
     hsplit {
-        tabs share=0.8 {
+        // Spatial Gauge (#738): same ENU world_pos shown in the four frames as a
+        // compact 2x2 grid on the left.
+        vsplit share=0.22 {
+            hsplit {
+                spatial_gauge name="NED" eql="rocket.world_pos" source="ENU" display="NED"
+                spatial_gauge name="ENU" eql="rocket.world_pos" source="ENU" display="ENU"
+            }
+            hsplit {
+                spatial_gauge name="ECEF" eql="rocket.world_pos" source="ENU" display="ECEF"
+                spatial_gauge name="LLA" eql="rocket.world_pos" source="ENU" display="LLA"
+            }
+        }
+        tabs share=0.5 {
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }
-        vsplit share=0.45 {
-            vsplit share=0.35 {
+        vsplit share=0.28 {
+            vsplit share=0.6 {
                 graph "rocket.fin_control_trim" name="Trim Control"
                 graph "rocket.fin_deflect" name="Fin Deflection"
                 graph "rocket.aero_coefs" name="Aero Coefficients"
             }
-            vsplit share=0.3 {
+            vsplit {
                 // EQL-derived aerodynamic angles and velocity magnitude
                 query_plot name="Angle-of-Attack-EQL" query="((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()" type="eql" auto_refresh=#true
 
                 // Velocity magnitude using norm() formula
                 query_plot name="Velocity-Magnitude" query="rocket.v_body.norm()" type="eql" auto_refresh=#true
             }
-            // Spatial Gauge (#738): ENU world_pos → NED cards + frame sphere
-            spatial_gauge name="Position (NED)" eql="rocket.world_pos" source="ENU" display="NED"
         }
     }
 
