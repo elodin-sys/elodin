@@ -7,10 +7,9 @@ use bevy::{
         query::{With, Without},
         system::{Commands, Query, Res, ResMut},
     },
-    math::{DQuat, Mat4, Vec4},
-    prelude::{Color, warn_once},
+    math::Vec4,
+    prelude::{Color, GlobalTransform, Transform, warn_once},
 };
-use bevy_geo_frames::GeoRotation;
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::Line3d;
 
@@ -100,13 +99,15 @@ pub fn sync_line_plot_3d(
 
         let trail = line_trail_colors(line_plot);
         if let Ok(mut entity) = commands.get_entity(entity) {
+            // Pose is set each frame to the first sample under BigSpaceRoot;
+            // vertices are stored relative to that point (frame→Bevy on CPU).
             entity.try_insert((
                 gpu::LineHandles([x, y, z]),
                 LineUniform {
                     line_width: line_plot.line_width,
                     color: trail.played.unwrap_or(Vec4::ZERO),
                     depth_bias: 0.0,
-                    model: Mat4::IDENTITY,
+                    model: bevy::math::Mat4::IDENTITY,
                     perspective: if line_plot.perspective { 1 } else { 0 },
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),
@@ -115,12 +116,14 @@ pub fn sync_line_plot_3d(
                 LineConfig {
                     render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
                 },
+                Transform::default(),
+                GlobalTransform::default(),
+                #[cfg(feature = "big_space")]
+                crate::spatial::GridCell::default(),
             ));
-            if let Some(frame) = line_plot.frame {
-                // Absolute: the line's vertex data is raw frame coordinates, so
-                // its transform must carry the frame -> Bevy basis change.
-                entity.try_insert(GeoRotation::absolute(frame, DQuat::IDENTITY));
-            }
+            // Remove legacy absolute GeoRotation: it would double-apply the
+            // frame→Bevy basis now done when building vertex buffers.
+            entity.remove::<bevy_geo_frames::GeoRotation>();
         }
     }
     for (entity, line_plot, mut uniform, trail) in uniforms.iter_mut() {

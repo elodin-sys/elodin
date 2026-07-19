@@ -17,11 +17,10 @@
 //!   development ergonomics during the Bevy migration; it is **not
 //!   intended to be shipped**.
 //!
-//! Note: spawning the editor's `FloatingOriginPlugin` registers a
-//! [`attach_parentless_grid_cells`] system. Any entity that holds a
-//! [`GridCell`] and no [`ChildOf`] will be reparented to the
-//! [`BigSpaceRoot`] automatically. Call sites can therefore spawn
-//! grid-aware entities without explicitly setting their parent.
+//! Note: spawning the editor's `FloatingOriginPlugin` registers systems that
+//! keep `GridCell` entities under a valid big_space parent: parentless cells
+//! are adopted by [`BigSpaceRoot`], and cells parented under non-spatial
+//! impeller path segments (e.g. `vehicle.world_pos`) are reparented there too.
 
 use bevy::{math::DVec3, prelude::*, transform::TransformSystems};
 
@@ -99,14 +98,26 @@ impl Plugin for FloatingOriginPlugin {
         app.insert_resource(self.settings.clone())
             .add_plugins(big_space::prelude::BigSpaceDefaultPlugins)
             .add_systems(Startup, setup_floating_origin)
-            .add_systems(PreUpdate, attach_parentless_grid_cells)
+            .add_systems(
+                PreUpdate,
+                (
+                    attach_parentless_grid_cells,
+                    reparent_misparented_grid_cells,
+                )
+                    .chain(),
+            )
             // Also adopt right before transform propagation (and big_space's
             // PostUpdate hierarchy validation) so entities that gained a
             // `GridCell` during this frame never cross a validation pass
-            // parentless.
+            // parentless / under a non-spatial path parent.
             .add_systems(
                 PostUpdate,
-                attach_parentless_grid_cells.before(TransformSystems::Propagate),
+                (
+                    attach_parentless_grid_cells,
+                    reparent_misparented_grid_cells,
+                )
+                    .chain()
+                    .before(TransformSystems::Propagate),
             );
     }
 }
@@ -145,6 +156,34 @@ fn attach_parentless_grid_cells(
     };
 
     for entity in &entities {
+        commands.entity(entity).insert(ChildOf(root));
+    }
+}
+
+/// Impeller path hierarchy (`vehicle.world_pos`) parents spatial leaves under
+/// non-spatial path segments. big_space rejects `GridCell` children of
+/// non-spatial entities and skips their `GlobalTransform` propagation — which
+/// leaves meshes at the wrong place while `line_3d` (telemetry-driven) looks
+/// correct, so the trail appears to drift relative to the vehicle.
+///
+/// Reparent any `GridCell` whose parent is not a `Grid` / `GridCell` /
+/// `BigSpace` onto the [`BigSpaceRoot`].
+#[allow(clippy::type_complexity)]
+fn reparent_misparented_grid_cells(
+    mut commands: Commands,
+    roots: Query<Entity, With<BigSpaceRoot>>,
+    cells: Query<(Entity, &ChildOf), (With<GridCell>, Without<BigSpaceRoot>)>,
+    spatial_parents: Query<Entity, Or<(With<Grid>, With<GridCell>, With<BigSpace>)>>,
+) {
+    let Some(root) = roots.iter().next() else {
+        return;
+    };
+
+    for (entity, child_of) in &cells {
+        let parent = child_of.parent();
+        if parent == root || spatial_parents.contains(parent) {
+            continue;
+        }
         commands.entity(entity).insert(ChildOf(root));
     }
 }
