@@ -4,8 +4,8 @@ use bevy::{
     camera::visibility::RenderLayers,
     ecs::{
         entity::Entity,
-        query::{With, Without},
-        system::{Commands, Query, Res, ResMut},
+        query::{Added, With, Without},
+        system::{Commands, Local, Query, Res, ResMut},
     },
     math::{DVec3, Vec4},
     prelude::{Color, GlobalTransform, IntoScheduleConfigs, Transform, warn_once},
@@ -44,34 +44,46 @@ fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
 /// Write the line's first sample into `GeoPosition` (frame coords). The geo
 /// pipeline then owns Transform/GridCell; GPU vertices stay frame-relative to
 /// that same first point.
+///
+/// Entities are queued when their `gpu::LineHandles` are added and stay queued
+/// until all three line assets have a first sample, so the anchor is written
+/// exactly once per handle insertion.
 fn sync_line_3d_anchor(
+    added: Query<Entity, (Added<gpu::LineHandles>, With<Line3d>)>,
+    mut queue: Local<Vec<Entity>>,
     mut lines: Query<(&gpu::LineHandles, &mut GeoPosition), With<Line3d>>,
     line_assets: Res<Assets<Line>>,
 ) {
-    for (handles, mut geo) in &mut lines {
+    queue.extend(&added);
+    queue.retain(|&entity| {
+        let Ok((handles, mut geo)) = lines.get_mut(entity) else {
+            // Entity despawned or lost its components; drop it from the queue.
+            return false;
+        };
         let Some(x) = line_assets
             .get(&handles.0[0])
             .and_then(|l| l.data.first_sample())
         else {
-            continue;
+            return true;
         };
         let Some(y) = line_assets
             .get(&handles.0[1])
             .and_then(|l| l.data.first_sample())
         else {
-            continue;
+            return true;
         };
         let Some(z) = line_assets
             .get(&handles.0[2])
             .and_then(|l| l.data.first_sample())
         else {
-            continue;
+            return true;
         };
         let first = DVec3::new(x as f64, y as f64, z as f64);
         if geo.1 != first {
             geo.1 = first;
         }
-    }
+        false
+    });
 }
 
 pub fn sync_line_plot_3d(
