@@ -101,12 +101,22 @@ wmm.path = "libs/wmm"
 inherits = "release"
 debug = true
 
+# TODO: switch back to crates.io once bevy_editor_cam ships a Bevy 0.19 release
+# (tracking upstream PR https://github.com/aevyrie/bevy_editor_cam/pull/66).
 [workspace.dependencies.bevy_editor_cam]
-version = "0.8"
+git = "https://github.com/m-edlund/bevy_editor_cam"
+rev = "90460341ab6a3b5ff803cbe4f9463655705490ce"
+# bevy_editor_cam's bevy-0.19 branch pins bevy_framepace to a personal git
+# branch; use the same official tagged source everywhere (see [patch] below)
+# so only one FramepacePlugin instance exists. Switch back to crates.io "0.22"
+# together with bevy_editor_cam.
+[workspace.dependencies.bevy_framepace]
+git = "https://github.com/aevyrie/bevy_framepace"
+tag = "v0.22.0"
 [workspace.dependencies.bevy_math]
-version = "0.18"
+version = "0.19"
 [workspace.dependencies.bevy]
-version = "0.18.1"
+version = "0.19.0"
 default-features = false
 features = [
   "std",
@@ -119,6 +129,7 @@ features = [
   "bevy_core_pipeline",
   "bevy_post_process",
   "bevy_anti_alias",
+  "bevy_dev_tools",
   "bevy_gilrs",
   "bevy_gizmos",
   "bevy_gltf",
@@ -127,7 +138,7 @@ features = [
   "bevy_pbr",
   "bevy_picking",
   "bevy_render",
-  "bevy_scene",
+  "bevy_world_serialization",
   "bevy_image",
   "bevy_mesh",
   "bevy_camera",
@@ -161,8 +172,11 @@ features = [
   "zstd_rust",
 ]
 
+# TODO: switch back to crates.io once big_space 0.13 is released for Bevy 0.19
+# (tracking upstream PR https://github.com/aevyrie/big_space/pull/78).
 [workspace.dependencies.big_space]
-version = "0.12.0"
+git = "https://github.com/aevyrie/big_space"
+rev = "5f255228e9b4ff30756347b80f92b19ebf7b5c56"
 features = ["i128"]
 
 [workspace.dependencies.muxide]
@@ -170,3 +184,10 @@ version = "0.2.5"
 
 [patch.crates-io]
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
+
+# bevy_editor_cam's bevy-0.19 branch depends on bevy_framepace from this
+# personal git branch; redirect it to the official v0.22.0 tag so the whole
+# graph shares a single bevy_framepace instance. Remove together with the
+# bevy_editor_cam git pin above.
+[patch."https://github.com/hacknus/bevy_framepace.git"]
+bevy_framepace = { git = "https://github.com/aevyrie/bevy_framepace", tag = "v0.22.0" }

@@ -22,7 +22,7 @@ impl WidgetSystem for InspectorAction<'_, '_> {
         ui: &mut egui::Ui,
         entity: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.get_mut(world).expect("system params invalid");
         let Ok(mut tile) = state.action_tiles.get_mut(entity) else {
             return;
         };

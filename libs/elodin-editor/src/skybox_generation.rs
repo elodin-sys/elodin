@@ -276,12 +276,20 @@ pub(crate) fn on_document_loaded(
         );
     }
 
-    last_synced_key.0 = config.schematic_active().map(str::to_string);
-    // Record the revision we just loaded so config sync only reloads on a later
-    // byte change at this key (RFD #724, Bug 1).
-    if let Some(revision) = last_synced_revision.as_deref_mut() {
-        revision.revision = Some(config.assets_revision());
-        revision.suppress_next = false;
+    // Only adopt DB sync baselines for DB-keyed documents. A local `--kdl` load
+    // must not mark `schematic.active` as already synced — that lets a later
+    // `assets.revision` bump refetch the DB schematic over the CLI file.
+    let loaded_db_key = event
+        .save_path
+        .as_deref()
+        .and_then(std::path::Path::to_str)
+        .filter(|path| is_db_schematic_key(path));
+    if loaded_db_key.is_some() {
+        last_synced_key.0 = config.schematic_active().map(str::to_string);
+        if let Some(revision) = last_synced_revision.as_deref_mut() {
+            revision.revision = Some(config.assets_revision());
+            revision.suppress_next = false;
+        }
     }
 }
 
@@ -291,7 +299,15 @@ pub(crate) fn record_reloaded_schematic_key(
     mut last_synced_key: ResMut<LastSyncedActiveKey>,
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
 ) {
-    if reloaded.read().last().is_some() {
+    let Some(event) = reloaded.read().last() else {
+        return;
+    };
+    let loaded_db_key = event
+        .save_path
+        .as_deref()
+        .and_then(std::path::Path::to_str)
+        .filter(|path| is_db_schematic_key(path));
+    if loaded_db_key.is_some() {
         last_synced_key.0 = config.schematic_active().map(str::to_string);
         if let Some(revision) = last_synced_revision.as_deref_mut() {
             revision.revision = Some(config.assets_revision());
@@ -463,7 +479,7 @@ mod tests {
             .add_systems(Update, on_document_loaded);
 
         app.world_mut().write_message(DocumentLoaded {
-            save_path: None,
+            save_path: Some(PathBuf::from("schematics/main.kdl")),
             document: SchematicDocumentAsset {
                 root: Schematic {
                     skybox: Some(SkyboxConfig {
@@ -481,6 +497,35 @@ mod tests {
         // DB's echo of our own load isn't mistaken for an external change.
         let last = app.world().resource::<LastSyncedActiveKey>();
         assert_eq!(last.0.as_deref(), Some("schematics/main.kdl"));
+    }
+
+    #[test]
+    fn on_document_loaded_skips_baseline_for_local_path() {
+        let mut app = App::new();
+        let mut config = DbConfig::default();
+        config.set_schematic_active("schematics/main.kdl");
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<LastSyncedActiveKey>()
+            .insert_resource(config)
+            .init_resource::<LocallyPushedSkyboxActive>()
+            .add_message::<DocumentLoaded>()
+            .add_systems(Update, on_document_loaded);
+
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: Some(PathBuf::from("/tmp/local-main.kdl")),
+            document: SchematicDocumentAsset {
+                root: Schematic::default(),
+                windows: Vec::new(),
+            },
+            explicit: true,
+        });
+        app.update();
+
+        let last = app.world().resource::<LastSyncedActiveKey>();
+        assert!(
+            last.0.is_none(),
+            "local --kdl loads must not adopt schematic.active as last_synced"
+        );
     }
 
     #[test]

@@ -17,15 +17,12 @@ use bevy::render::render_phase::{
 };
 
 use bevy::camera::visibility::RenderLayers;
-use bevy::image::BevyDefault;
 use bevy::mesh::VertexBufferLayout;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
-use bevy::sprite_render::{
-    Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup, init_mesh_2d_pipeline,
-};
+use bevy::sprite_render::{Mesh2dPipeline, SetMesh2dViewBindGroup, init_mesh_2d_pipeline};
 use bevy::{
     app::Plugin,
     asset::{Handle, load_internal_asset},
@@ -42,7 +39,6 @@ use bevy::{
         render_phase::{AddRenderCommand, PhaseItem, RenderCommand},
         render_resource::{binding_types::uniform_buffer, *},
         renderer::RenderDevice,
-        view::ViewTarget,
     },
 };
 use bevy_render::extract_component::ExtractComponent;
@@ -255,8 +251,12 @@ impl LineHandle {
         xy_lines: &'m mut Assets<XYLine>,
     ) -> Option<LineMut<'m>> {
         match self {
-            Self::Timeseries(handle) => lines.get_mut(handle).map(LineMut::Timeseries),
-            Self::XY(handle) => xy_lines.get_mut(handle).map(LineMut::XY),
+            Self::Timeseries(handle) => lines
+                .get_mut(handle)
+                .map(|line| LineMut::Timeseries(line.into_inner())),
+            Self::XY(handle) => xy_lines
+                .get_mut(handle)
+                .map(|line| LineMut::XY(line.into_inner())),
         }
     }
 }
@@ -363,7 +363,10 @@ fn init_line_pipeline(
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
-    view_key: Mesh2dPipelineKey,
+    msaa_samples: u32,
+    /// The view's color target format (Bevy 0.19 removed the
+    /// `Mesh2dPipelineKey::HDR` bit in favor of `ExtractedView::target_format`).
+    target_format: TextureFormat,
     graph_type: GraphType,
 }
 
@@ -387,11 +390,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             self.storage_layout.clone(),
         ];
 
-        let format = if key.view_key.contains(Mesh2dPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
+        let format = key.target_format;
         let shader = match key.graph_type {
             GraphType::Line => LINE_SHADER_HANDLE,
             GraphType::Point => POINT_SHADER_HANDLE,
@@ -423,8 +422,8 @@ impl SpecializedRenderPipeline for LinePipeline {
             },
             depth_stencil: Some(DepthStencilState {
                 format: CORE_2D_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::Always,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(CompareFunction::Always),
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -438,12 +437,12 @@ impl SpecializedRenderPipeline for LinePipeline {
                 },
             }),
             multisample: MultisampleState {
-                count: key.view_key.msaa_samples(),
+                count: key.msaa_samples,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
             label: Some("Plot Line Pipeline".into()),
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         }
     }
@@ -555,7 +554,9 @@ fn extract_lines(
         ResMut<'static, Assets<XYLine>>,
         Res<'static, crate::SelectedTimeRange>,
     )>::new(&mut main_world);
-    let (mut lines, mut line_assets, mut xy_lines, selected_range) = state.get_mut(&mut main_world);
+    let (mut lines, mut line_assets, mut xy_lines, selected_range) = state
+        .get_mut(&mut main_world)
+        .expect("system params invalid");
     let selected = selected_range.0.clone();
     let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
     let short_window = crate::is_short_accuracy_window(&selected);
@@ -686,9 +687,6 @@ fn queue_line(
             continue;
         };
 
-        let mesh_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
-            | Mesh2dPipelineKey::from_hdr(view.hdr);
-
         let render_layers = render_layers.unwrap_or_default();
         for (entity, main_entity, config, graph_type) in &lines {
             if !config.render_layers.intersects(render_layers) {
@@ -699,12 +697,13 @@ fn queue_line(
                 &pipeline_cache,
                 &pipeline,
                 LinePipelineKey {
-                    view_key: mesh_key,
+                    msaa_samples: msaa.samples(),
+                    target_format: view.target_format,
                     graph_type: *graph_type,
                 },
             );
 
-            transparent_phase.add(Transparent2d {
+            transparent_phase.add_transient(Transparent2d {
                 entity: (entity, *main_entity),
                 draw_function,
                 pipeline,

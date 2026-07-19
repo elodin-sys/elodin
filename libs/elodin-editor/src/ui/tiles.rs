@@ -135,11 +135,9 @@ pub(crate) fn plugin(app: &mut App) {
 fn spawn_viewport_grids(mut commands: Commands) {
     for (frame, layer) in GRID_RENDER_LAYERS {
         commands.spawn((
-            bevy_infinite_grid::InfiniteGridBundle {
-                settings: viewport_grid_settings(frame),
-                visibility: Visibility::Visible,
-                ..Default::default()
-            },
+            bevy::dev_tools::infinite_grid::InfiniteGrid,
+            viewport_grid_settings(frame),
+            Visibility::Visible,
             RenderLayers::layer(layer),
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
@@ -155,9 +153,9 @@ fn spawn_viewport_grids(mut commands: Commands) {
 
 fn viewport_grid_settings(
     frame: bevy_geo_frames::GeoFrame,
-) -> bevy_infinite_grid::InfiniteGridSettings {
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
     match frame {
-        GeoFrame::NED | GeoFrame::ENU => bevy_infinite_grid::InfiniteGridSettings {
+        GeoFrame::NED | GeoFrame::ENU => bevy::dev_tools::infinite_grid::InfiniteGridSettings {
             minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
             major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
             x_axis_color: crate::ui::colors::bevy::RED,
@@ -166,7 +164,7 @@ fn viewport_grid_settings(
             scale: 0.1,
             ..Default::default()
         },
-        GeoFrame::ECEF => bevy_infinite_grid::InfiniteGridSettings {
+        GeoFrame::ECEF => bevy::dev_tools::infinite_grid::InfiniteGridSettings {
             minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
             major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
             x_axis_color: crate::ui::colors::bevy::RED,
@@ -1143,7 +1141,8 @@ impl Pane {
                             &impeller2_bevy::ComponentValue,
                         )>,
                     )>::new(world);
-                    let (configs, component_values) = state.get(world);
+                    let (configs, component_values) =
+                        state.get(world).expect("system params invalid");
                     {
                         let monitor_enabled = configs
                             .get(cam)
@@ -1680,7 +1679,7 @@ impl ViewportPane {
             crate::spatial::LowPrecisionRoot,
             EditorCam {
                 orbit_constraint: OrbitConstraint::Fixed {
-                    up: Vec3::Y,
+                    up: bevy::math::DVec3::Y,
                     can_pass_tdc: false,
                 },
                 zoom_limits: ZoomLimits {
@@ -2002,7 +2001,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         let mut query = SystemState::<Query<&GraphState>>::new(self.world);
-        let graphs = query.get(self.world);
+        let graphs = query.get(self.world).expect("system params invalid");
         pane.title(&graphs).into()
     }
 
@@ -2169,7 +2168,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                                 .font(egui::TextStyle::Button)
                                 .clip_text(true)
                                 .desired_width(edit_rect.width())
-                                .frame(false),
+                                .frame(egui::Frame::NONE),
                         )
                     })
                     .inner;
@@ -2311,7 +2310,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn on_tab_button(
         &mut self,
-        _tiles: &Tiles<Pane>,
+        _tiles: &mut Tiles<Pane>,
         tile_id: TileId,
         button_response: egui::Response,
     ) -> egui::Response {
@@ -2419,7 +2418,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
             let mut layout = SystemState::<TileLayout>::new(self.world);
-            let mut layout = layout.get_mut(self.world);
+            let mut layout = layout.get_mut(self.world).expect("system params invalid");
             layout
                 .cmd_palette_state
                 .open_page_for_window(Some(self.target_window), move || {
@@ -2444,7 +2443,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         target: Option<Entity>,
     ) -> Option<(TileIcons, bool, bool)> {
         let read_only = false;
-        let params = state.get_mut(world);
+        let params = state.get_mut(world).expect("system params invalid");
         let mut contexts = params.contexts;
         let images = params.images;
         let target_id = target.unwrap_or_else(|| *params.primary_window);
@@ -2574,9 +2573,9 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         // Left sidebar - Hierarchy (only if visible)
         if left_sidebar_visible {
-            egui::SidePanel::left("hierarchy_sidebar")
-                .default_width(SIDEBAR_DEFAULT_WIDTH)
-                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+            egui::Panel::left("hierarchy_sidebar")
+                .default_size(SIDEBAR_DEFAULT_WIDTH)
+                .size_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
                 .resizable(true)
                 .frame(Frame {
                     fill: get_scheme().bg_primary,
@@ -2606,9 +2605,9 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         // Right sidebar - Inspector (only if visible)
         if right_sidebar_visible {
-            egui::SidePanel::right("inspector_sidebar")
-                .default_width(SIDEBAR_DEFAULT_WIDTH)
-                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+            egui::Panel::right("inspector_sidebar")
+                .default_size(SIDEBAR_DEFAULT_WIDTH)
+                .size_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
                 .resizable(true)
                 .frame(Frame {
                     fill: get_scheme().bg_primary,
@@ -2737,6 +2736,7 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
 
         let central = egui::CentralPanel::default().frame(frame);
 
+        #[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
         central.show(ctx, |ui| {
             Self::render_panel_contents(
                 world,
@@ -2806,7 +2806,7 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
         let button_width = max_button_width.min(base_button_width);
         let desired_size = egui::vec2(button_width * 3.0 + button_spacing * 2.0, button_height);
 
-        let mut state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world).expect("system params invalid");
         let target_window = window.or_else(|| state_mut.primary_window.iter().next());
 
         ui.scope_builder(
@@ -2905,13 +2905,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
         } = args;
 
         let target_window = {
-            let state_mut = state.get_mut(world);
+            let state_mut = state.get_mut(world).expect("system params invalid");
             window.unwrap_or(*state_mut.primary_window)
         };
 
         let (tree, mut tree_actions, empty_overlay_rect, overlay_icons) = {
             let (tab_diffs, container_titles, mut tree, inspector_visible) = {
-                let mut state_mut = state.get_mut(world);
+                let mut state_mut = state.get_mut(world).expect("system params invalid");
                 let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
                 else {
                     return;
@@ -2969,7 +2969,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
         };
 
         {
-            let mut state_mut = state.get_mut(world);
+            let mut state_mut = state.get_mut(world).expect("system params invalid");
             let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
             else {
                 return;
@@ -3508,8 +3508,8 @@ fn render_sidebar_toolbar(
 ) -> Option<ToolbarAction> {
     let mut action = None;
 
-    egui::TopBottomPanel::top("sidebar_toggle_toolbar")
-        .exact_height(32.0)
+    egui::Panel::top("sidebar_toggle_toolbar")
+        .exact_size(32.0)
         .frame(Frame {
             fill: get_scheme().bg_secondary,
             stroke: egui::Stroke::new(1.0, get_scheme().border_primary),

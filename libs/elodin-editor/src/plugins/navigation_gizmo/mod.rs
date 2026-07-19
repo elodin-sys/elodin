@@ -368,7 +368,10 @@ fn side_clicked_cb(
         }
         if click.button == PointerButton::Primary {
             look_to.write(LookToTrigger::auto_snap_up_direction(
-                direction, entity, transform, editor_cam,
+                direction.as_dvec3(),
+                entity,
+                &transform.rotation.as_dquat(),
+                editor_cam,
             ));
         }
     }
@@ -442,10 +445,12 @@ fn set_camera_viewport(
         let Some(window_entity) = target_window else {
             continue;
         };
-        let Ok((_, window, egui_settings)) = windows.get(window_entity) else {
+        let Ok((_, window, _egui_settings)) = windows.get(window_entity) else {
             continue;
         };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`; the
+        // window scale factor is the full logical->physical conversion now.
+        let scale_factor = window.scale_factor();
         let margin = margin * scale_factor;
         let top_offset = top_offset * scale_factor;
         let pos = rect.left_top().to_vec2() * scale_factor;

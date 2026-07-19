@@ -44,7 +44,7 @@ fn sync_mat3_params_from_component(
         let params: Mat3Uniforms = comp.linear.into();
 
         if let Some(mesh_material) = maybe_mesh_material {
-            if let Some(material) = materials.get_mut(&mesh_material.0) {
+            if let Some(mut material) = materials.get_mut(&mesh_material.0) {
                 material.extension.params = params;
             }
         }
@@ -52,7 +52,7 @@ fn sync_mat3_params_from_component(
         if maybe_children.is_some() {
             for descendant in children_query.iter_descendants(entity) {
                 if let Ok(mesh_material) = child_mesh_materials.get(descendant) {
-                    if let Some(material) = materials.get_mut(&mesh_material.0) {
+                    if let Some(mut material) = materials.get_mut(&mesh_material.0) {
                         material.extension.params = params;
                     }
                 }

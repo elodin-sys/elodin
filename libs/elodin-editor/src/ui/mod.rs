@@ -1,4 +1,5 @@
 use bevy::{
+    camera::Hdr,
     camera::visibility::RenderLayers,
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -9,7 +10,6 @@ use bevy::{
     input::keyboard::Key,
     log::warn,
     prelude::*,
-    render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
     winit::WINIT_WINDOWS,
 };
@@ -317,7 +317,7 @@ fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx
         .data(|data| data.get_temp::<bool>(egui_popup_hovered_id()))
         .unwrap_or(false);
 
-    if ctx.is_popup_open() && pointer_over_popup {
+    if ctx.any_popup_open() && pointer_over_popup {
         register_window_input_blocker(
             world,
             window,
@@ -454,7 +454,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let _state = state.get_mut(world);
+        let _state = state.get_mut(world).expect("system params invalid");
 
         // Update theme every frame to reflect color scheme changes
         theme::set_theme(ctx);
@@ -472,6 +472,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_os = "macos"))]
         let frame = egui::Frame::new();
 
+        #[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
             ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
@@ -497,7 +498,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.get_mut(world).expect("system params invalid");
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
@@ -715,10 +716,11 @@ fn set_camera_viewport(
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
-    let Some((primary_entity, window, egui_settings)) = window.iter().next() else {
+    let Some((primary_entity, window, _egui_settings)) = window.iter().next() else {
         return;
     };
-    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+    // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`.
+    let scale_factor = window.scale_factor();
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
@@ -785,11 +787,12 @@ fn set_secondary_camera_viewport(
         &bevy_egui::EguiContextSettings,
     )>,
 ) {
-    for (_window_entity, window, id, state, egui_settings) in &window_query {
+    for (_window_entity, window, id, state, _egui_settings) in &window_query {
         if id.is_primary() {
             continue;
         }
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`.
+        let scale_factor = window.scale_factor();
 
         let mut next_order = 0;
 

@@ -1708,7 +1708,9 @@ mod tests {
 
     fn load_schematic(app: &mut App, schematic: &Schematic) {
         let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
-        let mut params = system_state.get_mut(app.world_mut());
+        let mut params = system_state
+            .get_mut(app.world_mut())
+            .expect("system params invalid");
         params.load_schematic(schematic, None, None);
         system_state.apply(app.world_mut());
         settle(app);

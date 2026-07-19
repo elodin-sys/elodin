@@ -53,7 +53,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
             entity_map,
             telemetry_cache,
             current_timestamp,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
         let Ok(monitor) = monitors.get(pane.entity) else {
             return;
         };

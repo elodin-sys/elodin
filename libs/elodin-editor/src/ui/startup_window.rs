@@ -290,7 +290,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.get_mut(world).expect("system params invalid");
         let logo_full = state
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.logo_full.id()));
@@ -305,6 +305,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
+        #[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -360,8 +361,9 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                 )
             });
 
-        egui::SidePanel::right("right")
-            .exact_width(322.0)
+        #[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
+        egui::Panel::right("right")
+            .exact_size(322.0)
             .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
             .resizable(false)
             .show(ctx, |ui| {

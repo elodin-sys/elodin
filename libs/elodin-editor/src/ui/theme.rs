@@ -9,7 +9,7 @@ use crate::ui::colors::{self, get_scheme, with_opacity};
 use super::colors::ColorExt;
 
 pub fn set_theme(context: &egui::Context) {
-    let mut style = (*context.style()).clone();
+    let mut style = (*context.global_style()).clone();
     let scheme = colors::get_scheme();
 
     style.spacing.item_spacing = egui::vec2(0., 0.);
@@ -65,8 +65,12 @@ pub fn set_theme(context: &egui::Context) {
     style.visuals.text_cursor.stroke.color = scheme.text_primary;
 
     configure_default_fonts(context);
+    // Bind the "material-icons" font family up front: egui 0.34 panics on
+    // text laid out with an unbound family, and icon glyphs can hit layout
+    // before the first widget-level `initialize` call runs.
+    egui_material_icons::initialize(context);
 
-    context.set_style(style);
+    context.set_global_style(style);
 }
 
 pub fn corner_radius_xs() -> CornerRadius {

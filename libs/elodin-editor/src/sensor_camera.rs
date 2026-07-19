@@ -5,11 +5,9 @@ use bevy::{
     asset::{Assets, embedded_asset},
     camera::{RenderTarget, visibility::RenderLayers},
     core_pipeline::{
-        FullscreenShader,
-        core_3d::graph::{Core3d, Node3d},
-        tonemapping::Tonemapping,
+        Core3d, Core3dSystems, FullscreenShader,
+        tonemapping::{Tonemapping, tonemapping},
     },
-    ecs::query::QueryItem,
     image::Image,
     math::{DVec3, Vec3},
     prelude::*,
@@ -20,16 +18,13 @@ use bevy::{
             UniformComponentPlugin,
         },
         render_asset::RenderAssets,
-        render_graph::{
-            NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
-        },
         render_resource::{
             Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, MapMode,
             PollType, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureFormat, TextureUsages,
             binding_types::{sampler, texture_2d, uniform_buffer},
             *,
         },
-        renderer::{RenderContext, RenderDevice, RenderQueue},
+        renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
         view::ViewTarget,
     },
 };
@@ -128,72 +123,64 @@ pub struct SensorCameraRenderMetrics {
 }
 
 // ---------------------------------------------------------------------------
-// Post-process render graph
+// Post-process render pass
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-struct SensorPostProcessLabel;
-
-#[derive(Default)]
-struct SensorPostProcessNode;
-
-impl ViewNode for SensorPostProcessNode {
-    type ViewQuery = (
+/// Fullscreen post-process pass for sensor cameras. Runs in the `Core3d`
+/// schedule after `tonemapping` (previously a `ViewNode` wired between
+/// `Node3d::Tonemapping` and `Node3d::EndMainPassPostProcessing`). The
+/// `ViewQuery` param skips the system for views without
+/// `SensorEffectSettings`, matching the old `ViewNodeRunner` behavior.
+fn sensor_post_process_pass(
+    view: ViewQuery<(
         &'static ViewTarget,
         &'static SensorEffectSettings,
         &'static DynamicUniformIndex<SensorEffectSettings>,
+    )>,
+    pipeline_res: Res<SensorPostProcessPipeline>,
+    pipeline_cache: Res<PipelineCache>,
+    settings_uniforms: Res<ComponentUniforms<SensorEffectSettings>>,
+    mut render_context: RenderContext,
+) {
+    let (view_target, _settings, settings_index) = view.into_inner();
+
+    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
+        return;
+    };
+
+    let Some(settings_binding) = settings_uniforms.uniforms().binding() else {
+        return;
+    };
+
+    let post_process = view_target.post_process_write();
+
+    let bind_group = render_context.render_device().create_bind_group(
+        "sensor_post_process_bind_group",
+        &pipeline_res.bind_group_layout,
+        &BindGroupEntries::sequential((
+            post_process.source,
+            &pipeline_res.sampler,
+            settings_binding.clone(),
+        )),
     );
 
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        (view_target, _settings, settings_index): QueryItem<Self::ViewQuery>,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
-        let pipeline_res = world.resource::<SensorPostProcessPipeline>();
-        let pipeline_cache = world.resource::<PipelineCache>();
+    let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+        label: Some("sensor_post_process_pass"),
+        color_attachments: &[Some(RenderPassColorAttachment {
+            view: post_process.destination,
+            depth_slice: None,
+            resolve_target: None,
+            ops: Operations::default(),
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        ..default()
+    });
 
-        let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
-            return Ok(());
-        };
-
-        let settings_uniforms = world.resource::<ComponentUniforms<SensorEffectSettings>>();
-        let Some(settings_binding) = settings_uniforms.uniforms().binding() else {
-            return Ok(());
-        };
-
-        let post_process = view_target.post_process_write();
-
-        let bind_group = render_context.render_device().create_bind_group(
-            "sensor_post_process_bind_group",
-            &pipeline_res.bind_group_layout,
-            &BindGroupEntries::sequential((
-                post_process.source,
-                &pipeline_res.sampler,
-                settings_binding.clone(),
-            )),
-        );
-
-        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("sensor_post_process_pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: post_process.destination,
-                depth_slice: None,
-                resolve_target: None,
-                ops: Operations::default(),
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        render_pass.set_render_pipeline(pipeline);
-        render_pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
-        render_pass.draw(0..3, 0..1);
-
-        Ok(())
-    }
+    render_pass.set_render_pipeline(pipeline);
+    render_pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
+    render_pass.draw(0..3, 0..1);
 }
 
 #[derive(Resource)]
@@ -236,7 +223,10 @@ fn init_sensor_post_process_pipeline(
         fragment: Some(FragmentState {
             shader,
             targets: vec![Some(ColorTargetState {
-                format: TextureFormat::bevy_default(),
+                // Sensor cameras render to LDR `Rgba8UnormSrgb` image targets
+                // (see `Image::new_target_texture` below); 0.19 deprecated
+                // `TextureFormat::bevy_default()`.
+                format: TextureFormat::Rgba8UnormSrgb,
                 blend: None,
                 write_mask: ColorWrites::ALL,
             })],
@@ -298,17 +288,11 @@ impl Plugin for SensorCameraPlugin {
                         .after(RenderSystems::Render),
                 )
                 .add_systems(RenderStartup, init_sensor_post_process_pipeline)
-                .add_render_graph_node::<ViewNodeRunner<SensorPostProcessNode>>(
+                .add_systems(
                     Core3d,
-                    SensorPostProcessLabel,
-                )
-                .add_render_graph_edges(
-                    Core3d,
-                    (
-                        Node3d::Tonemapping,
-                        SensorPostProcessLabel,
-                        Node3d::EndMainPassPostProcessing,
-                    ),
+                    sensor_post_process_pass
+                        .in_set(Core3dSystems::PostProcess)
+                        .after(tonemapping),
                 );
         }
     }
@@ -404,7 +388,7 @@ fn spawn_sensor_cameras(
         };
 
         let mut render_target_image =
-            Image::new_target_texture(size.width, size.height, TextureFormat::bevy_default(), None);
+            Image::new_target_texture(size.width, size.height, TextureFormat::Rgba8UnormSrgb, None);
         render_target_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let render_target_handle = images.add(render_target_image);
 
@@ -672,11 +656,16 @@ fn image_copy_driver(
             continue;
         };
 
-        let block_dimensions = src_image.texture_format.block_dimensions();
-        let block_size = src_image.texture_format.block_copy_size(None).unwrap();
+        let block_dimensions = src_image.texture_descriptor.format.block_dimensions();
+        let block_size = src_image
+            .texture_descriptor
+            .format
+            .block_copy_size(None)
+            .unwrap();
 
         let padded_bytes_per_row = RenderDevice::align_copy_bytes_per_row(
-            (src_image.size.width as usize / block_dimensions.0 as usize) * block_size as usize,
+            (src_image.texture_descriptor.size.width as usize / block_dimensions.0 as usize)
+                * block_size as usize,
         );
 
         let buf_idx = buffer_toggle.0.get(i).copied().unwrap_or(0);
@@ -694,7 +683,7 @@ fn image_copy_driver(
                     rows_per_image: None,
                 },
             },
-            src_image.size,
+            src_image.texture_descriptor.size,
         );
         any_copies = true;
     }

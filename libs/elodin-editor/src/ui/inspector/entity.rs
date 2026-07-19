@@ -66,7 +66,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             path_reg,
             mut render_layer_alloc,
             mut filter,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         let (icons, pair) = args;
 

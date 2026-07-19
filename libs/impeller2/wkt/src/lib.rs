@@ -70,10 +70,7 @@ impl Default for Color {
 }
 
 #[derive(Clone, Serialize, Deserialize, Default, Copy)]
-#[cfg_attr(
-    feature = "bevy",
-    derive(bevy::prelude::Resource, bevy::prelude::Component)
-)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct Tick(pub u64);
 
 #[cfg(feature = "nox")]
@@ -108,10 +105,7 @@ impl impeller2::component::Component for Tick {
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "bevy",
-    derive(bevy::prelude::Resource, bevy::prelude::Component)
-)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct SimulationTimeStep(pub f64);
 
 impl SimulationTimeStep {
@@ -239,10 +233,7 @@ impl impeller2::com_de::Decomponentize for WorldPos {
 }
 
 #[derive(Clone, Serialize, Deserialize, Copy)]
-#[cfg_attr(
-    feature = "bevy",
-    derive(bevy::prelude::Resource, bevy::prelude::Component)
-)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct CurrentTimestamp(pub Timestamp);
 
 impl Default for CurrentTimestamp {

@@ -40,7 +40,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
         let InspectorSensorCamera {
             streams,
             mut configs,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         let Ok(stream) = streams.get(stream_entity) else {
             ui.add(empty_inspector());

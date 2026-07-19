@@ -13,7 +13,7 @@ use bevy::{
     asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
     color::ColorToComponents,
     core_pipeline::{
-        core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
+        core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d, TransparentSortingInfo3d},
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
     ecs::{
@@ -27,7 +27,6 @@ use bevy::{
         },
         world::{FromWorld, Mut, World},
     },
-    image::BevyDefault,
     math::{Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
@@ -41,7 +40,7 @@ use bevy::{
         },
         render_resource::{binding_types::uniform_buffer, *},
         renderer::{RenderDevice, RenderQueue},
-        view::{ExtractedView, Msaa, ViewTarget},
+        view::{ExtractedView, Msaa},
     },
     transform::TransformSystems,
     transform::components::{GlobalTransform, Transform},
@@ -152,7 +151,10 @@ impl Plugin for Plot3dGpuPlugin {
             descriptor: index_descriptor,
         });
 
-        render_app.init_resource::<LinePipeline>();
+        render_app.add_systems(
+            bevy::render::RenderStartup,
+            init_line_pipeline_3d.after(bevy::pbr::MeshPipelineSystems),
+        );
     }
 }
 
@@ -291,20 +293,30 @@ pub struct LinePipeline {
     values_layout: BindGroupLayoutDescriptor,
 }
 
-impl FromWorld for LinePipeline {
-    fn from_world(world: &mut bevy::prelude::World) -> Self {
-        Self {
-            mesh_pipeline: world.resource::<MeshPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().descriptor.clone(),
-            index_layout: world.resource::<LineIndexLayout>().descriptor.clone(),
-            values_layout: world.resource::<LineValuesLayout>().descriptor.clone(),
-        }
-    }
+/// `MeshPipeline` is created in a `RenderStartup` system since Bevy 0.19, so
+/// the line pipeline must be built there too (after `MeshPipelineSystems`)
+/// instead of via `FromWorld` in plugin `finish`.
+fn init_line_pipeline_3d(
+    mut commands: Commands,
+    mesh_pipeline: Res<MeshPipeline>,
+    uniform_layout: Res<UniformLayout>,
+    index_layout: Res<LineIndexLayout>,
+    values_layout: Res<LineValuesLayout>,
+) {
+    commands.insert_resource(LinePipeline {
+        mesh_pipeline: mesh_pipeline.clone(),
+        uniform_layout: uniform_layout.descriptor.clone(),
+        index_layout: index_layout.descriptor.clone(),
+        values_layout: values_layout.descriptor.clone(),
+    });
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
     view_key: MeshPipelineKey,
+    /// The view's color target format (Bevy 0.19 removed the
+    /// `MeshPipelineKey::HDR` bit in favor of `ExtractedView::target_format`).
+    target_format: TextureFormat,
 }
 
 impl SpecializedRenderPipeline for LinePipeline {
@@ -332,11 +344,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             self.index_layout.clone(),
         ];
 
-        let format = if key.view_key.contains(MeshPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
+        let format = key.target_format;
 
         RenderPipelineDescriptor {
             vertex: VertexState {
@@ -359,8 +367,8 @@ impl SpecializedRenderPipeline for LinePipeline {
             primitive: PrimitiveState::default(),
             depth_stencil: Some(DepthStencilState {
                 format: CORE_3D_DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Greater,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(CompareFunction::Greater),
                 stencil: StencilState::default(),
                 bias: DepthBiasState::default(),
             }),
@@ -370,7 +378,7 @@ impl SpecializedRenderPipeline for LinePipeline {
                 alpha_to_coverage_enabled: false,
             },
             label: Some("Plot Line Pipeline 3d".into()),
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         }
     }
@@ -526,7 +534,10 @@ fn extract_lines(
             current_timestamp,
             timeline_settings,
             latest_follow,
-        ) = cached_state.state.get_mut(world);
+        ) = cached_state
+            .state
+            .get_mut(world)
+            .expect("system params invalid");
         let selected_range = if crate::is_short_accuracy_window(&selected_time_range.0) {
             selected_time_range.0.clone()
         } else {
@@ -583,7 +594,7 @@ fn extract_lines(
                 future_trail_alpha,
             );
             for line in &line_handles.0 {
-                let Some(line) = line_assets.get_mut(line) else {
+                let Some(mut line) = line_assets.get_mut(line) else {
                     continue 'outer;
                 };
                 line.data
@@ -789,6 +800,7 @@ fn extract_lines(
 
 type ViewQuery = (
     &'static ExtractedView,
+    &'static bevy::render::camera::ExtractedCamera,
     &'static Msaa,
     Option<&'static RenderLayers>,
     (
@@ -796,6 +808,10 @@ type ViewQuery = (
         Has<DepthPrepass>,
         Has<MotionVectorPrepass>,
         Has<DeferredPrepass>,
+    ),
+    (
+        Option<&'static bevy::core_pipeline::tonemapping::Tonemapping>,
+        Option<&'static bevy::core_pipeline::tonemapping::DebandDither>,
     ),
 );
 
@@ -813,9 +829,11 @@ fn queue_line(
 
     for (
         view,
+        camera,
         msaa,
         render_layers,
         (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
+        (tonemapping, dither),
     ) in &mut views
     {
         let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
@@ -824,8 +842,7 @@ fn queue_line(
         };
         let render_layers = render_layers.cloned().unwrap_or_default();
 
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
-            | MeshPipelineKey::from_hdr(view.hdr);
+        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples());
 
         if normal_prepass {
             view_key |= MeshPipelineKey::NORMAL_PREPASS;
@@ -843,15 +860,35 @@ fn queue_line(
             view_key |= MeshPipelineKey::DEFERRED_PREPASS;
         }
 
+        // Mirror bevy_pbr's view specialization: LDR views with tonemapping
+        // bind the LUT entries in the mesh view bind group layout, so the
+        // pipeline layout must carry the same key bits or the bind group is
+        // incompatible at draw time.
+        if !camera.hdr {
+            if let Some(tonemapping) = tonemapping {
+                view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
+                view_key |= bevy::pbr::tonemapping_pipeline_key(*tonemapping);
+            }
+            if let Some(bevy::core_pipeline::tonemapping::DebandDither::Enabled) = dither {
+                view_key |= MeshPipelineKey::DEBAND_DITHER;
+            }
+        }
+
         for (entity, main_entity, _handle, config) in &lines {
             if !config.render_layers.intersects(&render_layers) {
                 continue;
             }
 
-            let pipeline =
-                pipelines.specialize(&pipeline_cache, &pipeline, LinePipelineKey { view_key });
+            let pipeline = pipelines.specialize(
+                &pipeline_cache,
+                &pipeline,
+                LinePipelineKey {
+                    view_key,
+                    target_format: view.target_format,
+                },
+            );
 
-            transparent_phase.add(Transparent3d {
+            transparent_phase.add_transient(Transparent3d {
                 entity: (entity, *main_entity),
                 draw_function,
                 pipeline,
@@ -859,6 +896,7 @@ fn queue_line(
                 batch_range: 0..1,
                 extra_index: PhaseItemExtraIndex::None,
                 indexed: true,
+                sorting_info: TransparentSortingInfo3d::AlwaysOnTop,
             });
         }
     }

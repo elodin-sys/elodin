@@ -244,7 +244,7 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
         ui: &mut egui::Ui,
         LogStreamWidgetArgs { entity }: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.get_mut(world).expect("system params invalid");
         let current_ts = state.current_time.0;
         let Ok(LogWidgetQueryItem {
             state: log_state,

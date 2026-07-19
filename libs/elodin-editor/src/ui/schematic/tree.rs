@@ -51,7 +51,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
             mut state,
             mut window_states,
             bindings,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
         let Ok(mut window_state) = window_states.get_mut(target_window) else {
             return;
         };

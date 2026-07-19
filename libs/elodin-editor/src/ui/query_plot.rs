@@ -320,7 +320,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
         // Use a default texture ID if scrub_icon is not provided
         // This should only happen during initialization, and will be set properly in the UI
         let scrub_icon = scrub_icon.unwrap_or(egui::TextureId::default());
-        let mut state = state.get_mut(world);
+        let mut state = state.get_mut(world).expect("system params invalid");
         let Ok(mut plot) = state.states.get_mut(entity) else {
             return;
         };

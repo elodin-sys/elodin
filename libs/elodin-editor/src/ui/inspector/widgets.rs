@@ -242,7 +242,7 @@ pub fn search(
                     ui.add(
                         egui::TextEdit::singleline(filter)
                             .desired_width(ui.available_width())
-                            .frame(false)
+                            .frame(egui::Frame::NONE)
                             .font(font_id),
                     );
                 });

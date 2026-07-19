@@ -159,7 +159,7 @@
 - **Editor dev loop** — `cargo run -p elodin -- editor ...`, `cargo watch` hot-reload, cargo features `big_space`, `inspector`, `debug`, `tracy`.
 
 ### 16.2 Viewport & 3D Rendering
-- **3D viewport** — Bevy 0.18 + big_space floating-origin rendering; per-viewport `fov`, `near`/`far`, fixed `aspect`, `hdr`, `bloom`, grid toggle, EQL-driven camera `pos`/`look_at`/`up` (follow/chase cameras).
+- **3D viewport** — Bevy 0.19 + big_space floating-origin rendering; per-viewport `fov`, `near`/`far`, fixed `aspect`, `hdr`, `bloom`, grid toggle, EQL-driven camera `pos`/`look_at`/`up` (follow/chase cameras).
 - **Camera interaction** — Mouse orbit/pan/zoom; touch gestures (one-finger orbit, two-finger pan + pinch zoom, gated to active viewport); camera anchoring/tracking of entities; safe anchor computation guards against NaN transforms.
 - **View cube (Cube-Viewer)** — CAD-style orientation widget: face/edge/corner snapping (incl. hidden-face border groups), rotation arrows (roll/yaw/pitch steps), reset and zoom-out buttons, hover highlighting, camera sync, ENU axis labels.
 - **Gizmos & annotations** — `vector_arrow` (EQL vectors; `scale`, `normalize`, `body_frame`, `arrow_thickness`, `label_position`, emissivity, text labels), body axes, `line_3d` trails (played/future color split, `perspective`, `line_width`).
@@ -194,7 +194,7 @@
 ### 16.7 Theming & Assets
 - **Color schemes** — Built-ins `default`, `eggplant`, `catppuccini-macchiato/mocha/latte`, `matrix`; custom JSON presets in `color_schemes/` (assets or app-data dir, user overrides built-ins); persisted in `color_scheme.json`; dark/light modes; KDL `theme` node.
 - **Asset sources** — `ELODIN_ASSETS` default source (fallback `./assets`, invalid-path warnings); `kdl` asset source from `ELODIN_KDL_DIR`; `http`/`https` remote assets with ETag-aware filesystem caching (304 reuse); remote GLB loading (`glb path="https://..."`).
-- **GLB pipeline constraint** — Bevy 0.18 loads plain glTF 2.0 only (no Draco/meshopt/quantization/basisu); `scripts/optimize-glb.sh <file> <keep-ratio>` decimation workflow for LFS size control with visual verification.
+- **GLB pipeline constraint** — Bevy 0.19 loads plain glTF 2.0 only (no Draco/meshopt/quantization/basisu); `scripts/optimize-glb.sh <file> <keep-ratio>` decimation workflow for LFS size control with visual verification.
 
 ## 17. Video Streaming & Decoding
 

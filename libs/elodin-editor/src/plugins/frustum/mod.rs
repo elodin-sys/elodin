@@ -489,7 +489,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         };
 
         if let Some((entity, mesh_handle)) = existing_faces_by_key.remove(&face.key) {
-            if let Some(mesh_asset) = params.meshes.get_mut(&mesh_handle) {
+            if let Some(mut mesh_asset) = params.meshes.get_mut(&mesh_handle) {
                 *mesh_asset = face.mesh;
             } else {
                 let new_mesh = params.meshes.add(face.mesh);

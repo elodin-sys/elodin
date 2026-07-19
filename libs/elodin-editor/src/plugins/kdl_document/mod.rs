@@ -310,7 +310,10 @@ mod tests {
     fn camera_skybox_handle(app: &mut App) -> Option<Handle<Image>> {
         let world = app.world_mut();
         let mut query = world.query::<&Skybox>();
-        query.iter(world).next().map(|skybox| skybox.image.clone())
+        query
+            .iter(world)
+            .next()
+            .and_then(|skybox| skybox.image.clone())
     }
 
     fn load_test_document(app: &mut App, skybox: Option<&str>) {
@@ -1181,6 +1184,117 @@ mod tests {
                 .resource::<SeenOpenDocumentRequests>()
                 .0
                 .is_empty()
+        );
+    }
+
+    /// Sticky CLI `--kdl` (via `given_path` every sync): gaining `schematic.active`
+    /// must not open the DB schematic over the local file.
+    #[test]
+    fn sticky_given_path_blocks_schematic_active_open() {
+        let temp = TempTestDir::new("sticky-kdl-blocks-active");
+        let path = temp.path().join("local.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .insert_resource(SyncPath(Some(path)))
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .init_resource::<SeenOpenDocumentRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    sync_path.pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                    collect_open_document_requests,
+                )
+                    .chain(),
+            );
+        {
+            let mut current_document = app.world_mut().resource_mut::<CurrentDocument>();
+            current_document.handle = Some(Handle::<SchematicDocumentAsset>::default());
+            current_document.save_path = Some(resolved_path);
+        }
+
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/main.kdl");
+        app.update();
+
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "sticky --kdl must not open schematic.active"
+        );
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "already-loaded sticky path must not re-open"
+        );
+    }
+
+    /// Sticky CLI `--kdl` must still win when `assets.revision` bumps (unrelated
+    /// asset write) while the local file is the on-screen document.
+    #[test]
+    fn sticky_given_path_blocks_revision_bump_reload() {
+        let temp = TempTestDir::new("sticky-kdl-blocks-revision");
+        let path = temp.path().join("local.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .insert_resource(SyncPath(Some(path)))
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<SeenActiveRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentCleared>()
+            .add_systems(
+                Update,
+                (
+                    sync_path.pipe(super::operations::sync_document_from_config),
+                    collect_active_requests,
+                )
+                    .chain(),
+            );
+        {
+            let mut current_document = app.world_mut().resource_mut::<CurrentDocument>();
+            current_document.handle = Some(Handle::<SchematicDocumentAsset>::default());
+            current_document.save_path = Some(resolved_path);
+        }
+        // Poison last_synced as if a local load wrongly adopted schematic.active
+        // (pre-fix behavior); sticky path must still block the refetch.
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_active("schematics/main.kdl");
+        app.world_mut().resource_mut::<LastSyncedActiveKey>().0 =
+            Some("schematics/main.kdl".to_string());
+        app.world_mut()
+            .resource_mut::<LastSyncedAssetsRevision>()
+            .revision = Some(0);
+
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .bump_assets_revision();
+        app.update();
+
+        assert!(
+            app.world().resource::<SeenActiveRequests>().0.is_empty(),
+            "sticky --kdl must not reload from DB on assets.revision bump"
         );
     }
 

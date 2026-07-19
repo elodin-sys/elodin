@@ -76,7 +76,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let mut state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world).expect("system params invalid");
 
         let (icons, is_side_panel, target_window) = args;
         let selected_object = {

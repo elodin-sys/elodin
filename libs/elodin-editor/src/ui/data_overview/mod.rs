@@ -248,7 +248,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         ui: &mut egui::Ui,
         (mut pane, target_window): Self::Args,
     ) -> Self::Output {
-        let mut params = state.get_mut(world);
+        let mut params = state.get_mut(world).expect("system params invalid");
         let Ok(mut window_state) = params.window_states.get_mut(target_window) else {
             return pane;
         };

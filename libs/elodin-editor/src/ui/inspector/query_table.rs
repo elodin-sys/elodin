@@ -45,7 +45,7 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
             earliest_timestamp,
             last_updated,
             mut commands,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
         let Ok(mut table) = tables.get_mut(entity) else {
             return;
         };

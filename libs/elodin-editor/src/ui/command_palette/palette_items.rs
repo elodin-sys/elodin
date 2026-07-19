@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 
 use crate::plugins::kdl_document::{
-    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, LastActiveSchematicContent,
-    LastSyncedActiveKey, LastSyncedAssetsRevision, PendingActiveSchematic, SchematicDocumentAsset,
-    fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,
-    upload_db_save_plan,
+    ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, InitialKdlPath,
+    LastActiveSchematicContent, LastSyncedActiveKey, LastSyncedAssetsRevision,
+    PendingActiveSchematic, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
+    schematic_name_from_key, schematic_save_key_from_name, upload_db_save_plan,
 };
 use crate::skybox_generation::{
     LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
@@ -1196,6 +1196,7 @@ fn poll_schematic_save(
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut last_content: Option<ResMut<LastActiveSchematicContent>>,
     mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
+    mut initial_kdl: ResMut<InitialKdlPath>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     let Some(task) = save_in_flight.task.as_mut() else {
@@ -1228,6 +1229,9 @@ fn poll_schematic_save(
                 return;
             };
             if let Some(active_key) = active_key {
+                // Save / Save As committed to the DB — drop the CLI `--kdl` pin
+                // so sticky sync does not keep re-forcing the local filesystem path.
+                initial_kdl.0 = None;
                 // The key we're moving away from (currently loaded == DB active)
                 // is the stale pointer the pin should tolerate until our repoint
                 // echoes; capture it before overwriting last_synced.
@@ -1343,7 +1347,10 @@ pub fn clear_schematic() -> PaletteItem {
          mut skyboxes: MessageWriter<SetActiveSkybox>,
          mut skybox_cache: ResMut<SkyboxCache>,
          mut skybox_mirror: ResMut<crate::skybox_db_assets::DbSkyboxAssetMirror>,
+         mut initial_kdl: ResMut<InitialKdlPath>,
          config: Res<DbConfig>| {
+            // Leave the CLI `--kdl` pin so Clear isn't undone by sticky sync.
+            initial_kdl.0 = None;
             params.current_document.clear();
             params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
             // `load_schematic` despawns every schematic entity and zeroes
@@ -1415,7 +1422,8 @@ fn open_schematic_item(key: String) -> PaletteItem {
               config: Res<DbConfig>,
               mut pending_active: ResMut<PendingActiveSchematic>,
               mut last_synced: ResMut<LastSyncedActiveKey>,
-              mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>| {
+              mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
+              mut initial_kdl: ResMut<InitialKdlPath>| {
             // Repoint the DB's active schematic rather than loading locally:
             // config sync then loads it over HTTP, and `schematic.active` stays
             // authoritative so later DbConfig updates and "Save Schematic" both
@@ -1425,6 +1433,8 @@ fn open_schematic_item(key: String) -> PaletteItem {
             // pointer until it echoes this repoint, instead of momentarily
             // reloading the schematic we're switching away from. Record the key
             // we're leaving so the pin releases if the pointer moves elsewhere.
+            // Drop the CLI `--kdl` pin so sticky sync cannot re-open the local file.
+            initial_kdl.0 = None;
             let superseded = config.schematic_active().map(str::to_string);
             pending_active.pin(key.clone(), superseded);
             // Force a reload even when the chosen key is already `schematic.active`:

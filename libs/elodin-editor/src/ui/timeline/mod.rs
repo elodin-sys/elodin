@@ -428,7 +428,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         ui: &mut egui::Ui,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.get_mut(world).expect("system params invalid");
         let Ok(target_window) = state_mut.primary_window.single() else {
             return;
         };
@@ -463,7 +463,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                 .add_image(EguiTextureHandle::Weak(images.icon_vertical_chevrons.id())),
         };
 
-        egui::TopBottomPanel::bottom("timeline_panel")
+        egui::Panel::bottom("timeline_panel")
             .frame(egui::Frame {
                 fill: get_scheme().bg_primary,
                 //stroke: egui::Stroke::new(1.0, get_scheme().border_primary),

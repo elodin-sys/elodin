@@ -131,7 +131,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         root_window: Self::Args,
     ) {
         let Some((setting_modal_state, modal_rect, close_icon)) = ({
-            let state_mut = state.get_mut(world);
+            let state_mut = state.get_mut(world).expect("system params invalid");
 
             let mut contexts = state_mut.contexts;
             let images = state_mut.images;
@@ -232,7 +232,7 @@ impl WidgetSystem for ModalDialog<'_, '_> {
         ui: &mut egui::Ui,
         args: <Self as WidgetSystem>::Args,
     ) {
-        let mut state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world).expect("system params invalid");
         let (close_icon, dialog) = args;
 
         let title_margin = egui::Margin::same(8).bottom(16.0);

@@ -427,7 +427,7 @@ impl WidgetSystem for TimelineSlider<'_> {
             mut latest_follow,
             mut auto_follow_latest_state,
             timeline_settings,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         tick_origin.observe_stream(**current_stream_id);
 

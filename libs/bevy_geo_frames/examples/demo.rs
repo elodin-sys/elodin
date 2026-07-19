@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 use bevy::color::palettes::css;
+use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridPlugin, InfiniteGridSettings};
 use bevy::math::primitives::{Cuboid, Plane3d};
 use bevy::math::{DQuat, DVec3};
 use bevy::prelude::*;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
-use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings};
 use map_3d::Ellipsoid;
 
 /// Marker for the demo cuboid we switch frames on.
@@ -107,7 +107,7 @@ fn setup(
     // Light
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -118,13 +118,15 @@ fn setup(
     let _ground_mat = materials.add(Color::srgb(0.1, 0.1, 0.1));
 
     // Infinite grid (visible in Plane mode).
-    commands
-        .spawn((InfiniteGridBundle::default(), GridMarker))
-        .insert(InfiniteGridSettings {
+    commands.spawn((
+        InfiniteGrid,
+        GridMarker,
+        InfiniteGridSettings {
             x_axis_color: css::PINK.into(),
             z_axis_color: css::DARK_CYAN.into(),
             ..default()
-        });
+        },
+    ));
 
     // Demo cuboid
     let cuboid_mesh = meshes.add(Cuboid::new(1.0, 2.0, 3.0));

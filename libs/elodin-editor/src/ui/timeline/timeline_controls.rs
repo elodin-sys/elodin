@@ -90,7 +90,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             primary_windows,
             mut window_states,
             replay_mode,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);

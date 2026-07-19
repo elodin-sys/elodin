@@ -61,7 +61,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.get_mut(world).expect("system params invalid");
 
         let (icons, graph_id) = args;
 

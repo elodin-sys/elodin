@@ -610,7 +610,9 @@ fn sink_inner(
                 bevy::log::error!(?err, "packet handler error");
             }
         }
-        let mut world_sink = world_sink_state.get_mut(world);
+        let mut world_sink = world_sink_state
+            .get_mut(world)
+            .expect("WorldSink params invalid");
         match &pkt {
             OwnedPacket::Msg(m) if m.id == VTableMsg::ID => {
                 let vtable = m.parse::<VTableMsg>()?;
@@ -757,7 +759,9 @@ pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState
             return;
         }
         let pkt = {
-            let MsgSinkState { mut msg_rx } = msg_sink_state.get_mut(world);
+            let MsgSinkState { mut msg_rx } = msg_sink_state
+                .get_mut(world)
+                .expect("MsgSinkState params invalid");
             msg_rx.try_recv_pkt()
         };
         let Some(pkt) = pkt else {
@@ -1049,6 +1053,34 @@ where
     }
 }
 
+/// Adapter for DB components that mirror into a Bevy [`Resource`] instead of
+/// an entity component (e.g. `SimulationTimeStep`). Since Bevy 0.19 resources
+/// are unique components on dedicated entities, inserting a resource type onto
+/// a regular entity would despawn the resource; write the resource directly.
+pub struct ResourceComponentAdapter<R>(PhantomData<R>);
+impl<R> Default for ResourceComponentAdapter<R> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<R> ComponentAdapter for ResourceComponentAdapter<R>
+where
+    R: impeller2::component::Component + Decomponentize + Default + Resource,
+{
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        _entity_map: &mut EntityMap,
+        _component_id: ComponentId,
+        value: ComponentView<'_>,
+    ) {
+        let mut val = R::default();
+        let _ = val.apply_value(R::COMPONENT_ID, value, None);
+        commands.insert_resource(val);
+    }
+}
+
 pub trait AppExt {
     fn add_impeller_component<C>(&mut self) -> &mut Self
     where
@@ -1127,8 +1159,14 @@ pub struct DefaultAdaptersPlugin;
 impl Plugin for DefaultAdaptersPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_impeller_component::<WorldPos>();
-        app.add_impeller_component::<CurrentTimestamp>();
-        app.add_impeller_component::<impeller2_wkt::SimulationTimeStep>();
+        // `SimulationTimeStep` mirrors into the Bevy resource of the same
+        // type rather than an entity component (resources are unique
+        // components in Bevy 0.19, so inserting one on a regular entity
+        // would despawn the resource entity).
+        app.add_impeller_component_with_adapter::<impeller2_wkt::SimulationTimeStep>(Box::<
+            ResourceComponentAdapter<impeller2_wkt::SimulationTimeStep>,
+        >::default(
+        ));
     }
 }
 
@@ -1174,6 +1212,8 @@ impl<S> Command for ReqHandlerCommand<S>
 where
     S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>,
 {
+    type Out = ();
+
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
         let mut handlers = world
@@ -1207,6 +1247,8 @@ impl<S> Command for ReplyHandlerCommand<S>
 where
     S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = bool>,
 {
+    type Out = ();
+
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
 
@@ -1267,6 +1309,8 @@ impl<S> Command for MsgReplyHandlerCommand<S>
 where
     S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = bool>,
 {
+    type Out = ();
+
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
 

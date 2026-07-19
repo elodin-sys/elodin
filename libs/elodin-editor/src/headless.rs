@@ -12,7 +12,6 @@ use bevy::{
     diagnostic::{DiagnosticsPlugin, DiagnosticsStore},
     ecs::system::SystemParam,
     gilrs::GilrsPlugin,
-    gizmos::GizmoPlugin,
     input::InputPlugin,
     log::LogPlugin,
     math::{EulerRot, Quat},
@@ -86,11 +85,23 @@ impl Plugin for HeadlessEditorPlugin {
                     .disable::<TextPlugin>()
                     .disable::<UiPlugin>()
                     .disable::<UiRenderPlugin>()
-                    .disable::<GizmoPlugin>()
+                    // GizmoPlugin must stay enabled since Bevy 0.19:
+                    // bevy_light's LightGizmoPlugin (nested in LightPlugin,
+                    // not individually disableable) registers gizmo systems
+                    // that require GizmoPlugin's resources.
                     .disable::<StatesPlugin>()
                     .disable::<PointerInputPlugin>()
                     .disable::<PickingPlugin>()
                     .disable::<InteractionPlugin>()
+                    // In DefaultPlugins since Bevy 0.19; its
+                    // `dispatch_focused_input` systems read input messages
+                    // that are never initialized with `InputPlugin` disabled.
+                    .disable::<bevy::input_focus::InputDispatchPlugin>()
+                    // Pulled into DefaultPlugins by the `bevy_dev_tools`
+                    // cargo feature (needed for the native infinite grid);
+                    // its `handle_input` reads `ButtonInput<KeyCode>` which
+                    // doesn't exist without `InputPlugin`.
+                    .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
                     .set(AssetPlugin {
                         watch_for_changes_override: Some(true),
                         unapproved_path_mode: UnapprovedPathMode::Allow,
@@ -99,7 +110,7 @@ impl Plugin for HeadlessEditorPlugin {
             )
             .add_plugins(crate::skybox_asset_plugin_headless())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
-            .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
+            .add_plugins(bevy::dev_tools::infinite_grid::InfiniteGridPlugin)
             .add_plugins(bevy::pbr::wireframe::WireframePlugin::default())
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
@@ -179,7 +190,7 @@ fn setup_headless_lighting(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 10_000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, 0.4, 0.0)),

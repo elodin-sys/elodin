@@ -1,6 +1,6 @@
+use bevy::material::AlphaMode;
 use bevy::mesh::{Mesh, SphereKind, SphereMeshBuilder, VertexAttributeValues};
 use bevy::prelude::*;
-use bevy::render::alpha::AlphaMode;
 
 use bevy_mat3_material::{
     uv_sphere_grid_line_mesh, Mat3Material, Mat3MaterialPlugin, Mat3Params, Mat3TransformExt,
@@ -51,7 +51,7 @@ fn setup(
     // Light
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(2.0, 4.0, 2.0).looking_at(Vec3::ZERO, Vec3::Y),

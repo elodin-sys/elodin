@@ -147,7 +147,7 @@ impl PlotDataComponent {
                     ..Default::default()
                 })
             });
-            let line = assets.get_mut(line.id()).expect("missing line asset");
+            let mut line = assets.get_mut(line.id()).expect("missing line asset");
             // Only accept data at timestamps beyond all existing data for this
             // line. Live FixedRate snapshots can repeat the playhead timestamp;
             // skipping already-covered times keeps the tip monotonic.
@@ -267,7 +267,7 @@ pub fn maybe_compress_all_graph_lines(
             continue;
         }
         for line_handle in &handles {
-            let Some(line) = lines.get_mut(line_handle) else {
+            let Some(mut line) = lines.get_mut(line_handle) else {
                 continue;
             };
             line.maybe_compress_live(earliest, settings);
@@ -398,24 +398,32 @@ fn try_joint_triline_compress(
         let new_z: Vec<f32> = idx.iter().map(|&i| vz[i]).collect();
         (new_ts, new_x, new_y, new_z)
     };
-    let Some(xl) = lines.get_mut(hx) else {
-        return false;
-    };
-    xl.data
-        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
-    xl.data.mark_compressed();
-    let Some(yl) = lines.get_mut(hy) else {
-        return false;
-    };
-    yl.data
-        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
-    yl.data.mark_compressed();
-    let Some(zl) = lines.get_mut(hz) else {
-        return false;
-    };
-    zl.data
-        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
-    zl.data.mark_compressed();
+    // Scope each `AssetMut` guard so consecutive `get_mut` calls don't
+    // overlap mutable borrows of the `Assets` collection.
+    {
+        let Some(mut xl) = lines.get_mut(hx) else {
+            return false;
+        };
+        xl.data
+            .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
+        xl.data.mark_compressed();
+    }
+    {
+        let Some(mut yl) = lines.get_mut(hy) else {
+            return false;
+        };
+        yl.data
+            .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
+        yl.data.mark_compressed();
+    }
+    {
+        let Some(mut zl) = lines.get_mut(hz) else {
+            return false;
+        };
+        zl.data
+            .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+        zl.data.mark_compressed();
+    }
     true
 }
 
@@ -751,7 +759,7 @@ pub fn sync_plot_lines_from_series_store(
                     ..Default::default()
                 })
             });
-            let Some(line) = lines.get_mut(handle) else {
+            let Some(mut line) = lines.get_mut(handle) else {
                 continue;
             };
             if samples_in_window == 0 {
@@ -1154,7 +1162,7 @@ impl XYLine {
                 NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
             )
             .expect("no write buf");
-        let mut view = &mut view[..];
+        let mut view = view.slice(..);
         let mut written_u32s: u32 = 0;
         let mut global_index = 0usize;
         for buf in &mut self.x_values {
@@ -1834,7 +1842,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                 NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
             )
             .expect("no write buf");
-        let mut view = &mut view[..];
+        let mut view = view.slice(..);
         let mut written_u32s: u32 = 0;
         'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
             let Some(v) = try_append_u32(view, 0) else {
@@ -2154,14 +2162,16 @@ mod tests {
     fn next_range_skips_the_last_timestamp_of_the_existing_chunk() {
         let mut lines = Assets::<Line>::default();
         let handle = lines.add(Line::default());
-        let line = lines.get_mut(&handle).expect("line asset should exist");
         let chunk = Chunk::from_iter(
             &[Timestamp(10), Timestamp(20)],
             Timestamp(0),
             [1.0_f32, 2.0_f32].into_iter(),
         )
         .expect("chunk should exist");
-        line.data.insert(chunk);
+        {
+            let mut line = lines.get_mut(&handle).expect("line asset should exist");
+            line.data.insert(chunk);
+        }
 
         let mut component = PlotDataComponent::new("test", vec![]);
         component.lines.insert(0, handle);
@@ -2798,12 +2808,13 @@ mod tests {
     }
 }
 
-fn try_append_u32(view: &mut [u8], val: u32) -> Option<&mut [u8]> {
+fn try_append_u32(view: wgpu::WriteOnly<'_, [u8]>, val: u32) -> Option<wgpu::WriteOnly<'_, [u8]>> {
     if view.len() < size_of::<u32>() {
         return None;
     }
-    view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
-    Some(&mut view[size_of::<u32>()..])
+    let (mut head, rest) = view.split_at(size_of::<u32>());
+    head.copy_from_slice(&val.to_le_bytes());
+    Some(rest)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -5,7 +5,7 @@ use bevy::{
         world::World,
     },
     prelude::*,
-    scene::SceneRoot,
+    world_serialization::WorldAssetRoot,
 };
 use bevy_egui::egui::{self, Align, RichText};
 use impeller2_wkt::{
@@ -74,7 +74,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             ellipse_visuals,
             children_query,
             mesh_child_markers,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         let (_icons, entity) = args;
 
@@ -562,7 +562,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     }
                 }
 
-                commands.entity(entity).remove::<SceneRoot>();
+                commands.entity(entity).remove::<WorldAssetRoot>();
 
                 spawn_mesh(
                     &mut commands,

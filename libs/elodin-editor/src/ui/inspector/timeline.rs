@@ -31,7 +31,7 @@ impl WidgetSystem for InspectorTimeline<'_, '_> {
         let InspectorTimeline {
             mut timeline_settings,
             mut lines,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         ui.spacing_mut().item_spacing.y = 8.0;
 

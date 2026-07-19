@@ -104,7 +104,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             telemetry_mode,
             line_query,
             mut window_states,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
 
         let Ok(mut graph_state) = graphs_state.get_mut(id) else {
             return;

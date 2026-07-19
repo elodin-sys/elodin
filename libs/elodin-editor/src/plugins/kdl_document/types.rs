@@ -5,8 +5,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// When set (e.g. by CLI `--kdl`), the path is applied to `DbConfig` once so that the schematic
-/// is loaded after connecting to the database.
+/// When set (e.g. by CLI `--kdl`), this filesystem path overrides DB
+/// `schematic.active` for the session. Cleared only when the user explicitly
+/// leaves the CLI file (Open Schematic, Clear Schematic, Save/Save As to DB).
 #[derive(Resource, Default)]
 pub struct InitialKdlPath(pub Option<PathBuf>);
 

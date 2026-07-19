@@ -101,7 +101,7 @@ impl WidgetSystem for ActionTileWidget<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.get_mut(world).expect("system params invalid");
         let mut tile = state.action_tiles.get_mut(args).unwrap();
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(32))

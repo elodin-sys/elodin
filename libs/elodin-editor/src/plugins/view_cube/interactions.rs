@@ -1286,7 +1286,7 @@ pub fn on_arrow_hover_start(
 
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
-        && let Some(mat) = materials.get_mut(&mat_handle.0)
+        && let Some(mut mat) = materials.get_mut(&mat_handle.0)
     {
         mat.base_color = colors.arrow_hover;
     }
@@ -1307,7 +1307,7 @@ pub fn on_arrow_hover_end(
 
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
-        && let Some(mat) = materials.get_mut(&mat_handle.0)
+        && let Some(mut mat) = materials.get_mut(&mat_handle.0)
     {
         mat.base_color = colors.arrow_normal;
     }
@@ -1328,7 +1328,7 @@ pub fn on_action_button_hover_start(
 
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
-        && let Some(mat) = materials.get_mut(&mat_handle.0)
+        && let Some(mut mat) = materials.get_mut(&mat_handle.0)
     {
         mat.base_color = colors.arrow_hover;
     }
@@ -1349,7 +1349,7 @@ pub fn on_action_button_hover_end(
 
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
-        && let Some(mat) = materials.get_mut(&mat_handle.0)
+        && let Some(mut mat) = materials.get_mut(&mat_handle.0)
     {
         mat.base_color = colors.arrow_normal;
     }
@@ -1522,7 +1522,7 @@ fn apply_highlight(
     hover_emissive: LinearRgba,
 ) {
     if let Ok(mat_handle) = material_query.get(entity) {
-        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+        if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
             original_materials
                 .colors
                 .entry(entity)
@@ -1535,7 +1535,7 @@ fn apply_highlight(
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
             if let Ok(mat_handle) = material_query.get(child) {
-                if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
                     original_materials
                         .colors
                         .entry(child)
@@ -1557,7 +1557,7 @@ fn reset_highlight(
     original_materials: &OriginalMaterials,
 ) {
     if let Ok(mat_handle) = material_query.get(entity) {
-        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+        if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
             if let Some(&original_color) = original_materials.colors.get(&entity) {
                 mat.base_color = original_color;
             }
@@ -1568,7 +1568,7 @@ fn reset_highlight(
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
             if let Ok(mat_handle) = material_query.get(child) {
-                if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                if let Some(mut mat) = materials.get_mut(&mat_handle.0) {
                     if let Some(&original_color) = original_materials.colors.get(&child) {
                         mat.base_color = original_color;
                     }
@@ -1850,7 +1850,9 @@ mod tests {
                 With<ViewCubeCamera>,
             >,
         )> = SystemState::new(app.world_mut());
-        let (windows, overlay_cameras) = system_state.get(app.world());
+        let (windows, overlay_cameras) = system_state
+            .get(app.world())
+            .expect("system params invalid");
         let owners = UiInputOwners::default();
 
         assert!(permits_view_cube_interaction(

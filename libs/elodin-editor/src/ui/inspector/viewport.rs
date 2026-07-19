@@ -102,7 +102,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         args: Self::Args,
     ) {
         let scheme = get_scheme();
-        let state_mut = state.get_mut(world);
+        let state_mut = state.get_mut(world).expect("system params invalid");
 
         let (camera, title) = args;
 
@@ -1049,7 +1049,7 @@ mod tests {
 
         {
             let (commands, viewports, objects, children, mesh_entities, current_targets) =
-                state.get_mut(&mut world);
+                state.get_mut(&mut world).expect("system params invalid");
             sync_viewport_focus_pick_targets(
                 commands,
                 viewports,

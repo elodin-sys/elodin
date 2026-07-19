@@ -32,7 +32,7 @@ cargo run --bin elodin editor 127.0.0.1:2240
 
 Optional features declared in `libs/elodin-editor/Cargo.toml` (re-exported by `apps/elodin/Cargo.toml`):
 
-- `big_space` (default): upstream `big_space` 0.12 floating-origin layer.
+- `big_space` (default): upstream `big_space` 0.13 floating-origin layer.
 - `inspector`: adds the `bevy-inspector-egui` runtime entity inspector.
 - `debug`: enables `big_space`'s debug diagnostics.
 - `tracy`: enables Tracy profiling (see `.cursor/skills/elodin-tracy/SKILL.md`).
@@ -172,9 +172,81 @@ Key crates used in the editor:
 - GPU plot rendering is in `ui/plot/gpu.rs` — changes here affect all telemetry graphs
 - The command palette (`ui/command_palette/`) is the entry point for user actions
 
+## Screenshot-driven design, build, and test
+
+Prefer Bevy's native window screenshot path over OS screen capture. It captures the full editor window (3D viewports **and** egui chrome) without macOS Screen Recording permissions, and works the same in local iteration and CI-style scripts.
+
+### Harness
+
+| Piece | Path / env |
+|-------|------------|
+| Plugin | `libs/elodin-editor/src/plugins/screenshot.rs` (`EnvScreenshotPlugin`) |
+| Batch script | `scripts/ci/screenshot_examples.sh <out-dir> [example …]` |
+| Activate | `ELODIN_SCREENSHOT=/abs/path/out.png` |
+| Delay before capture | `ELODIN_SCREENSHOT_DELAY` (seconds; default **8**; use **12–20** for heavy examples) |
+| Exit after write | `ELODIN_SCREENSHOT_EXIT=1` (required for bounded runs) |
+
+The plugin queues `Screenshot::primary_window()`, waits until the PNG is non-empty on disk (async GPU readback), then sends `AppExit::Success` when exit is requested. Do **not** kill the process on a timer alone — that tears down the render thread mid-readback and yields a missing/empty PNG.
+
+### One-shot capture (design / verify a change)
+
+```bash
+# Release binary is much faster for visual loops
+cargo build -p elodin --release
+
+rm -f /tmp/editor-shot.png
+ELODIN_SCREENSHOT=/tmp/editor-shot.png \
+ELODIN_SCREENSHOT_DELAY=12 \
+ELODIN_SCREENSHOT_EXIT=1 \
+  ./target/release/elodin editor examples/ball/main.py
+```
+
+Then **Read the PNG** in the agent (vision) and check concrete UI/scene facts — e.g. status-bar `RAM Usage: X.Y GB` (not `N/A` / not stuck at `0.0`), trajectory line present, view cube visible, graph panels populated. OCR (`tesseract`) is optional backup for status-bar text.
+
+### Batch regression (examples gallery)
+
+```bash
+# Default set: ball three-body drone rc-jet apollo-lander video-stream
+#             sensor-camera cube-sat voyager geo-frames
+scripts/ci/screenshot_examples.sh /tmp/elodin-shots ball three-body drone
+```
+
+Env overrides: `ELODIN_BIN`, `ELODIN_SCREENSHOT_DELAY` (script default 20), `SCREENSHOT_WATCHDOG` (default 180). One editor at a time; each run has a watchdog so a hung capture cannot block forever.
+
+### Workflow for UI / rendering changes
+
+1. **Baseline** — screenshot the affected example(s) before the change into `/tmp/elodin-shots-baseline/`.
+2. **Implement** — keep the change scoped; rebuild `elodin` (release for visual checks).
+3. **Compare** — re-screenshot into `/tmp/elodin-shots-after/` and Read both PNGs. Assert the intended delta and that unrelated chrome (timeline, status bar, view cube) still looks healthy.
+4. **Stress the failure mode** — if the bug was GPU/render-path specific (e.g. FPV + HDR + plot_3d), pick the example that exercises that path (`rc-jet`, `sensor-camera`, …), not only `ball`.
+5. **Stale DBs** — if an example refuses to start with DB/time-travel errors, delete its on-disk DB (e.g. `rm -rf examples/voyager/dbs/voyager`, `rm -rf video-stream-db`) and retry. Do not dig into GStreamer until a clean DB still fails.
+
+### Gotchas
+
+- **Port 2240** — live `elodin editor` / `elodin run` binds the sim DB; do not parallelize with monte-carlo or another editor. Group-kill leftovers before the next case.
+- **RAM gauge** — status-bar RSS is read via platform APIs in `ui/status_bar.rs` (not Bevy `SystemInformationDiagnosticsPlugin`). On macOS Bevy's sysinfo is built with `apple-app-store` and always reports 0 GiB for the current process.
+- **video-stream** — clear `./video-stream-db` if the editor hangs or video never appears; `GST_PLUGIN_PATH=target/release` can make `gst-plugin-scanner` warn about `libelodin.dylib` (benign).
+- **voyager** — needs SPICE kernels under `examples/voyager/nasa_spice_data/` and a clean DB dir after interrupted runs.
+- **nix develop** — prefer it for CI-parity builds; for a tight screenshot loop, a warm `cargo build -p elodin --release` outside a full env rebuild is fine once the toolchain is already installed.
+
+### When to use which example
+
+| Goal | Example |
+|------|---------|
+| Lightest viewport + trail + vector label | `ball` |
+| Multi-body + graph panels | `three-body` |
+| GLB + joint animation | `drone` |
+| FPV / plot_3d / aero | `rc-jet` |
+| SITL + thrusters / descent | `apollo-lander` |
+| H.264 tile in UI | `video-stream` |
+| GPU sensor cameras / frusta | `sensor-camera` |
+| Terrain / geo frames | `geo-frames` |
+| Spacecraft + MEKF graphs | `cube-sat` |
+
 ## Key References
 
 - Bevy Tips (ECS): [../bevy/SKILL.md](../bevy/SKILL.md)
+- Editor QA plan: [../qa-test-plan/elodin-editor/test-plan.md](../qa-test-plan/elodin-editor/test-plan.md)
 - Editor README: [apps/elodin/README.md](../../../apps/elodin/README.md)
 - KDL schematic syntax: [docs/public/content/reference/schematic.md](../../../docs/public/content/reference/schematic.md)
 - Command palette reference: [docs/public/content/reference/command-palette.md](../../../docs/public/content/reference/command-palette.md)

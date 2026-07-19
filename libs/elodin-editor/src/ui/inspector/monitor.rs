@@ -32,7 +32,7 @@ impl WidgetSystem for InspectorMonitor<'_, '_> {
         let InspectorMonitor {
             mut monitors,
             eql_context,
-        } = state.get_mut(world);
+        } = state.get_mut(world).expect("system params invalid");
         let Ok(mut monitor) = monitors.get_mut(entity) else {
             return;
         };

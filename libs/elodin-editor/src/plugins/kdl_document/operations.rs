@@ -1,7 +1,6 @@
 use crate::ui::schematic::CurrentSchematic;
 use bevy::asset::{AssetPath, AssetServer};
 use bevy::prelude::*;
-use impeller2_bevy::DbMessage;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
 use impeller2_kdl::{FromKdl, ToKdl};
@@ -30,7 +29,7 @@ pub fn sync_document_skybox(
         // Keep the in-memory document in sync for save, but suppress the asset
         // Modified event so skybox-only edits do not reload the full schematic.
         current_document.suppress_ids.insert(handle.id());
-        if let Some(document) = document_assets.get_mut(handle) {
+        if let Some(mut document) = document_assets.get_mut(handle) {
             document.root.skybox = skybox;
         }
     }
@@ -432,32 +431,13 @@ fn put_db_asset(
     Ok(())
 }
 
-/// Applies `InitialKdlPath` to `DbConfig` so that document sync can load that file.
-/// Runs before `sync_document_from_config`. Re-applies when the path is missing or different (e.g.
-/// after the connection overwrote DbConfig with metadata) so the schematic loads.
-pub fn apply_initial_kdl_path(
-    mut reader: MessageReader<DbMessage>,
-    mut initial: ResMut<InitialKdlPath>,
-    current_document: Res<CurrentDocument>,
-) -> Option<PathBuf> {
-    // If the user passed `--kdl`, we want to open that file exactly once.
-    //
-    // Historically this was only triggered by a DB config update message, but
-    // that prevents using `elodin editor --kdl <file>` in offline / no-DB
-    // scenarios.
-    let path = initial.0.take()?;
-
-    // Only apply when either:
-    // - a DB config update arrived (normal flow), OR
-    // - there is no current document loaded yet (offline flow).
-    let db_updated = reader.read().any(|m| matches!(m, DbMessage::UpdateConfig));
-    if db_updated || current_document.handle.is_none() {
-        Some(path)
-    } else {
-        // Put it back; we'll try again on the next config update.
-        initial.0 = Some(path);
-        None
-    }
+/// Feeds `InitialKdlPath` into `sync_document_from_config` as an explicit path
+/// override. Sticky for the session: every sync receives the CLI path while it
+/// remains set, so later `DbConfig` / `schematic.active` updates cannot fall
+/// through and replace the local file. `current_document_matches_path` in
+/// `sync_document_from_config` prevents re-open spam once loaded.
+pub fn apply_initial_kdl_path(initial: Res<InitialKdlPath>) -> Option<PathBuf> {
+    initial.0.clone()
 }
 
 fn current_document_matches_path(current_document: &CurrentDocument, path: &Path) -> bool {
