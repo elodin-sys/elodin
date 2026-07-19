@@ -2,7 +2,7 @@ use crate::{
     SelectedTimeRange,
     ui::plot::{
         Line,
-        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, VALUE_BUFFER_SIZE},
+        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE},
     },
     ui::timeline::TimelineSettings,
 };
@@ -19,7 +19,6 @@ use bevy::{
     ecs::{
         component::Component,
         entity::Entity,
-        hierarchy::ChildOf,
         query::Has,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
@@ -29,10 +28,10 @@ use bevy::{
         world::{FromWorld, Mut, World},
     },
     image::BevyDefault,
-    math::{DVec3, Mat4, Quat, Vec3, Vec4},
+    math::{DVec3, Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Reflect, Resource, With},
+    prelude::{Color, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -49,7 +48,7 @@ use bevy::{
         components::{GlobalTransform, Transform},
     },
 };
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, Present};
+use bevy_geo_frames::{GeoFrame, GeoPosition};
 use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
@@ -81,14 +80,7 @@ impl Plugin for Plot3dGpuPlugin {
             .init_asset::<Line>()
             .add_systems(
                 PostUpdate,
-                (
-                    // After geo rotation so we own Transform; before propagate
-                    // so big_space sees the first-point GridCell pose.
-                    place_line_3d_at_first_point
-                        .after(bevy_geo_frames::apply_geo_rotation)
-                        .before(TransformSystems::Propagate),
-                    update_uniform_model.after(TransformSystems::Propagate),
-                ),
+                update_uniform_model.after(TransformSystems::Propagate),
             );
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
@@ -176,8 +168,8 @@ impl Plugin for Plot3dGpuPlugin {
 }
 
 fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) {
-    // Entity sits at the line's first sample under BigSpaceRoot; big_space
-    // puts that in FO-local GlobalTransform. Vertices are (p - first).
+    // Entity GeoPosition is the first sample; GeoRotation carries the
+    // frame→Bevy basis. Vertices are (p_frame - first_frame).
     for (mut uniform, transform) in query.iter_mut() {
         uniform.model = transform.to_matrix();
     }
@@ -418,8 +410,8 @@ pub struct GpuLine {
     #[allow(dead_code)]
     index_buffers: [Buffer; 3],
     count: u32,
-    /// Last range + LineTree `content_gen`s + GeoContext/frame hash written
-    /// into the GPU buffers. Placement comes from the entity GlobalTransform.
+    /// Last range + LineTree `content_gen`s + frame/anchor hash written into
+    /// the GPU buffers. Placement comes from the entity GlobalTransform.
     #[allow(clippy::type_complexity)]
     last_index_key: Option<(i64, i64, u64, u64, u64, u64)>,
 }
@@ -528,26 +520,21 @@ type LineQueryMut = (
     Option<&'static mut GpuLineIndexCache>,
 );
 
-/// Hash of GeoContext fields that affect frame→Bevy conversion, plus the
-/// resolved line frame. Buffers built under a different context (e.g. before
-/// the schematic origin lands) must not be reused.
-fn geo_context_cache_key(ctx: &GeoContext, frame: GeoFrame) -> u64 {
+/// Cache key for frame-relative vertex buffers: frame discriminant + anchor
+/// (first sample in frame coords). Independent of GeoContext — FO/origin
+/// changes are handled by the entity's GeoPosition → GlobalTransform.
+fn anchor_cache_key(frame: GeoFrame, anchor: DVec3) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    ctx.origin.latitude.to_bits().hash(&mut hasher);
-    ctx.origin.longitude.to_bits().hash(&mut hasher);
-    ctx.origin.altitude.to_bits().hash(&mut hasher);
-    match ctx.present {
-        Present::Plane => 0u8,
-        Present::Sphere => 1u8,
-    }
-    .hash(&mut hasher);
     match frame {
         GeoFrame::ENU => 0u8,
         GeoFrame::NED => 1u8,
         GeoFrame::ECEF => 2u8,
     }
     .hash(&mut hasher);
+    anchor.x.to_bits().hash(&mut hasher);
+    anchor.y.to_bits().hash(&mut hasher);
+    anchor.z.to_bits().hash(&mut hasher);
     hasher.finish()
 }
 
@@ -558,116 +545,28 @@ fn resolve_line_frame(geo_pos: Option<&GeoPosition>, line: Option<&Line3d>) -> G
     line.and_then(|l| l.frame).unwrap_or_default()
 }
 
-/// Convert a frame-space sample to absolute Bevy coordinates (f64).
-fn frame_point_to_bevy(frame: GeoFrame, x: f32, y: f32, z: f32, geo_ctx: &GeoContext) -> DVec3 {
-    GeoPosition(frame, DVec3::new(x as f64, y as f64, z as f64)).to_bevy(geo_ctx)
-}
-
-/// First sample of the line (full recording), in Bevy space. Stable geographic
-/// anchor for both the entity pose and relative vertex buffers.
-fn line_first_point_bevy(
+/// First sample of the line (full recording), in the line's own frame.
+fn line_first_point_frame(
     line_assets: &Assets<Line>,
     handles: &[Handle<Line>; 3],
-    frame: GeoFrame,
-    geo_ctx: &GeoContext,
 ) -> Option<DVec3> {
-    let full = impeller2::types::Timestamp(i64::MIN)..impeller2::types::Timestamp(i64::MAX);
-    // Huge step still keeps the first sample (and last); we only need the first.
-    let step = usize::MAX;
-    let xs = line_assets
-        .get(&handles[0])?
-        .data
-        .collect_strip_values(full.clone(), step);
-    let ys = line_assets
-        .get(&handles[1])?
-        .data
-        .collect_strip_values(full.clone(), step);
-    let zs = line_assets
-        .get(&handles[2])?
-        .data
-        .collect_strip_values(full, step);
-    let x = *xs.first()?;
-    let y = *ys.first()?;
-    let z = *zs.first()?;
-    Some(frame_point_to_bevy(frame, x, y, z, geo_ctx))
-}
-
-/// Place each `line_3d` entity at its first sample under [`BigSpaceRoot`] so
-/// big_space owns FO-local `GlobalTransform`. Vertices are stored relative to
-/// that same first point.
-#[allow(clippy::type_complexity)]
-fn place_line_3d_at_first_point(
-    mut commands: Commands,
-    mut lines: Query<(
-        Entity,
-        &LineHandles,
-        Option<&GeoPosition>,
-        Option<&Line3d>,
-        &mut Transform,
-        Option<&ChildOf>,
-    )>,
-    line_assets: Res<Assets<Line>>,
-    geo_ctx: Res<GeoContext>,
-    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
-    #[cfg(feature = "big_space")] roots: Query<Entity, With<crate::spatial::BigSpaceRoot>>,
-) {
-    #[cfg(feature = "big_space")]
-    let Some(root) = roots.iter().next() else {
-        return;
-    };
-
-    for (entity, handles, geo_pos, line_3d, mut transform, child_of) in &mut lines {
-        // Vertices are already converted frame→Bevy; a GeoRotation basis on
-        // this entity would double-apply the frame change.
-        commands
-            .entity(entity)
-            .remove::<bevy_geo_frames::GeoRotation>();
-
-        let frame = resolve_line_frame(geo_pos, line_3d);
-        let Some(anchor) = line_first_point_bevy(&line_assets, &handles.0, frame, &geo_ctx) else {
-            continue;
-        };
-
-        #[cfg(feature = "big_space")]
-        {
-            let (grid_cell, translation) = settings.translation_to_grid(anchor);
-            *transform = Transform {
-                translation,
-                rotation: Quat::IDENTITY,
-                scale: Vec3::ONE,
-            };
-            commands
-                .entity(entity)
-                .insert(grid_cell)
-                .insert(GlobalTransform::default());
-            if child_of.map(|c| c.parent()) != Some(root) {
-                commands.entity(entity).insert(ChildOf(root));
-            }
-        }
-        #[cfg(not(feature = "big_space"))]
-        {
-            let _ = child_of;
-            *transform = Transform {
-                translation: anchor.as_vec3(),
-                rotation: Quat::IDENTITY,
-                scale: Vec3::ONE,
-            };
-        }
-    }
+    let x = line_assets.get(&handles[0])?.data.first_sample()?;
+    let y = line_assets.get(&handles[1])?.data.first_sample()?;
+    let z = line_assets.get(&handles[2])?.data.first_sample()?;
+    Some(DVec3::new(x as f64, y as f64, z as f64))
 }
 
 /// Build dense first-point-relative XYZ value buffers + remapped strip indices.
 ///
-/// `anchor` is the line's first sample in Bevy space (entity world pose).
-/// Vertices are `p - anchor`. Index layout matches the historical NaN-sentinel
-/// strip: leading/trailing `0` (NaN slot), samples at `1..n`.
-#[allow(clippy::too_many_arguments)]
+/// `anchor` is the line's first sample in frame coordinates (entity
+/// `GeoPosition`). Vertices are `p_frame - anchor`. The entity's
+/// `GeoRotation::absolute` carries the frame→Bevy basis via GlobalTransform.
+/// Index layout matches the historical NaN-sentinel strip: leading/trailing
+/// `0` (NaN slot), samples at `1..n`.
 fn write_anchor_local_line_buffers(
     xs: &[f32],
     ys: &[f32],
     zs: &[f32],
-    frame: GeoFrame,
-    geo_ctx: &GeoContext,
     anchor: DVec3,
     render_device: &RenderDevice,
     render_queue: &RenderQueue,
@@ -683,11 +582,10 @@ fn write_anchor_local_line_buffers(
     let mut y_local = vec![f32::NAN; n + 1];
     let mut z_local = vec![f32::NAN; n + 1];
     for i in 0..n {
-        let p = frame_point_to_bevy(frame, xs[i], ys[i], zs[i], geo_ctx);
-        let local = (p - anchor).as_vec3();
-        x_local[i + 1] = local.x;
-        y_local[i + 1] = local.y;
-        z_local[i + 1] = local.z;
+        let local = DVec3::new(xs[i] as f64, ys[i] as f64, zs[i] as f64) - anchor;
+        x_local[i + 1] = local.x as f32;
+        y_local[i + 1] = local.y as f32;
+        z_local[i + 1] = local.z as f32;
     }
 
     // Single contiguous strip with NaN sentinels (one logical chunk).
@@ -741,7 +639,6 @@ fn extract_lines(
     index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let geo_ctx = world.resource::<GeoContext>().clone();
         let replay_mode = world.contains_resource::<crate::ReplayMode>();
         let (
             mut lines,
@@ -814,7 +711,6 @@ fn extract_lines(
         ) in lines.iter_mut()
         {
             let frame = resolve_line_frame(geo_pos, line_3d);
-            let geo_key = geo_context_cache_key(&geo_ctx, frame);
             let (played_color, future_color) = trail_colors.copied().unwrap_or_default().resolve(
                 played_timeline_color,
                 future_timeline_color,
@@ -826,13 +722,12 @@ fn extract_lines(
                 }
             }
 
-            // Shared geographic anchor = first sample of the full line. Entity
-            // pose (GlobalTransform → model) is placed there in main world.
-            let Some(line_anchor) =
-                line_first_point_bevy(&line_assets, &line_handles.0, frame, &geo_ctx)
-            else {
+            // Frame-space first sample. Entity GeoPosition is synced to this;
+            // GeoRotation carries the frame→Bevy basis into GlobalTransform.
+            let Some(line_anchor) = line_first_point_frame(&line_assets, &line_handles.0) else {
                 continue 'outer;
             };
+            let anchor_key = anchor_cache_key(frame, line_anchor);
 
             // Replay grows the revealed prefix every frame. If the decimation
             // step is derived from only that prefix, the full trail gets
@@ -861,33 +756,6 @@ fn extract_lines(
                 INDEX_BUFFER_LEN,
             );
 
-            // let cached_values = index_cache
-            //     .as_ref()
-            //     .and_then(|c| c.played.as_ref().or(c.future.as_ref()))
-            //     .map(|g| g.values_bind_group.clone());
-            // XXX: This is not used. Delete?
-            // let _values_bind_group = if let Some(bg) = cached_values {
-            //     bg
-            // } else {
-            //     let entries = [0, 1, 2].map(|i| {
-            //         let line = &line_handles.0[i];
-            //         let line = line_assets.get(line).expect("line missing");
-            //         BindGroupEntry {
-            //             binding: i as u32,
-            //             resource: BindingResource::Buffer(BufferBinding {
-            //                 buffer: line
-            //                     .data
-            //                     .data_buffer_shard_alloc()
-            //                     .expect("no data buf")
-            //                     .buffer(),
-            //                 offset: 0,
-            //                 size: Some(VALUE_BUFFER_SIZE),
-            //             }),
-            //         }
-            //     });
-            //     render_device.create_bind_group("line values", &values_layout.layout, &entries)
-            // };
-
             let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>,
                                   cached: Option<&GpuLine>| {
                 if range.start >= range.end {
@@ -905,7 +773,7 @@ fn extract_lines(
                     content_gens[0],
                     content_gens[1],
                     content_gens[2],
-                    geo_key,
+                    anchor_key,
                 );
                 if let Some(prev) = cached
                     && prev.last_index_key == Some(index_key)
@@ -949,8 +817,6 @@ fn extract_lines(
                     &xs,
                     &ys,
                     &zs,
-                    frame,
-                    &geo_ctx,
                     line_anchor,
                     &render_device,
                     &render_queue,
@@ -1204,66 +1070,40 @@ mod tests {
     }
 
     #[test]
-    fn frame_point_to_bevy_matches_geoposition() {
-        let ctx = GeoContext::default();
-        let p_frame = DVec3::new(10.0, 20.0, 30.0);
-        let expected = GeoPosition(GeoFrame::ENU, p_frame).to_bevy(&ctx);
-        let actual = frame_point_to_bevy(
-            GeoFrame::ENU,
-            p_frame.x as f32,
-            p_frame.y as f32,
-            p_frame.z as f32,
-            &ctx,
-        );
-        assert!((actual - expected).length() < 1e-6);
-    }
-
-    #[test]
     fn relative_vertices_plus_entity_pose_recover_bevy_point() {
-        // Entity at first sample; vertex = p - first; model*vertex ≈ p - fo
-        // when model is the FO-local entity pose (first - fo).
+        // Vertices are frame-relative; entity pose = GeoPosition(first) +
+        // GeoRotation::absolute(frame). model * (p - first) recovers Bevy p.
+        use bevy_geo_frames::{GeoContext, GeoRotation};
         let ctx = GeoContext::default();
         let start_frame = DVec3::new(1.0, 2.0, 3.0);
         let tip_frame = DVec3::new(11.0, 22.0, 33.0);
-        let anchor = frame_point_to_bevy(
-            GeoFrame::ENU,
-            start_frame.x as f32,
-            start_frame.y as f32,
-            start_frame.z as f32,
-            &ctx,
-        );
-        let tip = frame_point_to_bevy(
-            GeoFrame::ENU,
-            tip_frame.x as f32,
-            tip_frame.y as f32,
-            tip_frame.z as f32,
-            &ctx,
-        );
-        let tip_local = (tip - anchor).as_vec3();
-        let fo = DVec3::new(100.0, 200.0, 300.0);
-        let model = Mat4::from_translation((anchor - fo).as_vec3());
+        let tip_local = (tip_frame - start_frame).as_vec3();
+        let translation = GeoPosition(GeoFrame::ENU, start_frame).to_bevy(&ctx);
+        let rotation =
+            GeoRotation::absolute(GeoFrame::ENU, bevy::math::DQuat::IDENTITY).to_bevy(&ctx);
+        let model = Mat4::from_rotation_translation(rotation.as_quat(), translation.as_vec3());
         let placed_tip = model.transform_point3(tip_local);
-        assert!((placed_tip.as_dvec3() + fo - tip).length() < 1e-3);
-        let placed_start = model.transform_point3(Vec3::ZERO);
-        assert!((placed_start.as_dvec3() + fo - anchor).length() < 1e-3);
+        let expected_tip = GeoPosition(GeoFrame::ENU, tip_frame).to_bevy(&ctx);
+        assert!((placed_tip.as_dvec3() - expected_tip).length() < 1e-3);
+        let placed_start = model.transform_point3(bevy::math::Vec3::ZERO);
+        assert!((placed_start.as_dvec3() - translation).length() < 1e-3);
     }
 
     #[test]
-    fn geo_context_cache_key_changes_with_origin() {
-        let a = GeoContext::default();
-        let mut b = a.clone();
-        b.origin.latitude += 1e-6;
+    fn anchor_cache_key_changes_with_frame_and_anchor() {
+        let a = DVec3::new(1.0, 2.0, 3.0);
+        let b = DVec3::new(1.0, 2.0, 3.001);
         assert_ne!(
-            geo_context_cache_key(&a, GeoFrame::ENU),
-            geo_context_cache_key(&b, GeoFrame::ENU)
+            anchor_cache_key(GeoFrame::ENU, a),
+            anchor_cache_key(GeoFrame::ENU, b)
         );
         assert_eq!(
-            geo_context_cache_key(&a, GeoFrame::ENU),
-            geo_context_cache_key(&a, GeoFrame::ENU)
+            anchor_cache_key(GeoFrame::ENU, a),
+            anchor_cache_key(GeoFrame::ENU, a)
         );
         assert_ne!(
-            geo_context_cache_key(&a, GeoFrame::ENU),
-            geo_context_cache_key(&a, GeoFrame::ECEF)
+            anchor_cache_key(GeoFrame::ENU, a),
+            anchor_cache_key(GeoFrame::ECEF, a)
         );
     }
 }

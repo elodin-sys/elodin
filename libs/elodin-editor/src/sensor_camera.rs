@@ -362,6 +362,7 @@ pub fn spawn_sensor_camera_frustum_sources(
     mut commands: Commands,
     configs: Res<SensorCameraConfigs>,
     mut spawned: ResMut<SensorCameraFrustumSourcesSpawned>,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
         let mut perspective = PerspectiveProjection {
@@ -375,7 +376,7 @@ pub fn spawn_sensor_camera_frustum_sources(
             perspective.aspect_ratio = config.width as f32 / config.height as f32;
         }
 
-        commands.spawn((
+        let mut entity = commands.spawn((
             Transform::default(),
             GlobalTransform::default(),
             Projection::Perspective(perspective),
@@ -384,6 +385,8 @@ pub fn spawn_sensor_camera_frustum_sources(
             SensorCameraFrustumSource { config_index: i },
             Name::new(format!("sensor_camera_frustum_{}", config.camera_name)),
         ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
     }
 
     spawned.0 = true;
@@ -395,6 +398,7 @@ fn spawn_sensor_cameras(
     mut images: ResMut<Assets<Image>>,
     render_device: Res<RenderDevice>,
     mut spawned: ResMut<SensorCamerasSpawned>,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
         let size = Extent3d {
@@ -456,7 +460,7 @@ fn spawn_sensor_cameras(
             _ => (0u32, 0.0, 0.0),
         };
 
-        commands.spawn((
+        let mut entity = commands.spawn((
             (
                 Camera3d::default(),
                 Camera {
@@ -486,6 +490,8 @@ fn spawn_sensor_cameras(
             sensor_camera_render_layers(config),
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
 
         bevy::log::debug!(
             "Spawned sensor camera '{}' ({}x{}, effect={})",

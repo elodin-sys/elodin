@@ -1503,6 +1503,15 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.content_gen
     }
 
+    /// Earliest sample value in the tree (first point of the first chunk by time).
+    pub fn first_sample(&self) -> Option<D>
+    where
+        D: Copy,
+    {
+        let (_, chunk) = self.tree.first_key_value()?;
+        chunk.data.cpu().first().copied()
+    }
+
     pub fn chunk_count(&self) -> usize {
         self.tree.iter().count()
     }

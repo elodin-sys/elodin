@@ -248,6 +248,7 @@ fn spawn_arrow_endpoint(
     world_pos: WorldPos,
     frame: Option<GeoFrame>,
     name: &'static str,
+    #[cfg(feature = "big_space")] root: Option<&crate::spatial::BigSpaceRootEntity>,
 ) -> Entity {
     let mut endpoint = commands.spawn((
         world_pos,
@@ -263,6 +264,8 @@ fn spawn_arrow_endpoint(
             GeoRotation::relative(frame, bevy::math::DQuat::IDENTITY),
         ));
     }
+    #[cfg(feature = "big_space")]
+    crate::spatial::parent_under_big_space(&mut endpoint, root);
     endpoint.id()
 }
 
@@ -282,6 +285,7 @@ pub fn evaluate_vector_arrows(
     )>,
     mut world_pos: Query<&mut WorldPos>,
     mut logged_missing: Local<HashSet<Entity>>,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (entity, arrow, mut state, endpoints) in arrows.iter_mut() {
         let Some((start, end)) =
@@ -309,8 +313,24 @@ pub fn evaluate_vector_arrows(
         } else {
             // Use ENU if no frame is specified.
             let frame = arrow.frame.or_default();
-            let start = spawn_arrow_endpoint(&mut commands, entity, start, frame, "arrow_start");
-            let end = spawn_arrow_endpoint(&mut commands, entity, end, frame, "arrow_end");
+            let start = spawn_arrow_endpoint(
+                &mut commands,
+                entity,
+                start,
+                frame,
+                "arrow_start",
+                #[cfg(feature = "big_space")]
+                root.as_deref(),
+            );
+            let end = spawn_arrow_endpoint(
+                &mut commands,
+                entity,
+                end,
+                frame,
+                "arrow_end",
+                #[cfg(feature = "big_space")]
+                root.as_deref(),
+            );
             commands
                 .entity(entity)
                 .insert(ArrowEndpoints { start, end });
