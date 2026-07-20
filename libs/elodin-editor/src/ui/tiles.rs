@@ -1658,6 +1658,32 @@ impl ViewportPane {
 
         let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(perspective.far);
 
+        let mut editor_cam = EditorCam {
+            orbit_constraint: OrbitConstraint::Fixed {
+                up: bevy::math::DVec3::Y,
+                can_pass_tdc: false,
+            },
+            zoom_limits: ZoomLimits {
+                min_size_per_pixel,
+                max_size_per_pixel,
+                zoom_through_objects: false,
+            },
+            sensitivity: Sensitivity {
+                zoom: 0.2,
+                ..default()
+            },
+            last_anchor_depth: -2.0,
+            ..Default::default()
+        };
+        if let Some(near) = viewport.near {
+            // A KDL-configured near plane is authoritative (same as editing near
+            // in the inspector). Without this pin, bevy_editor_cam derives near
+            // from the anchor depth (look_at distance * 0.05), so a chase cam
+            // aimed at a target kilometers away gets a near plane of 100m+ and
+            // clips its own near-field subject mesh.
+            editor_cam.perspective.near_clip_limits = near..near;
+        }
+
         let mut camera = commands.spawn((
             Transform::default(),
             Camera3d::default(),
@@ -1677,23 +1703,7 @@ impl ViewportPane {
             MainCamera,
             #[cfg(feature = "big_space")]
             crate::spatial::LowPrecisionRoot,
-            EditorCam {
-                orbit_constraint: OrbitConstraint::Fixed {
-                    up: bevy::math::DVec3::Y,
-                    can_pass_tdc: false,
-                },
-                zoom_limits: ZoomLimits {
-                    min_size_per_pixel,
-                    max_size_per_pixel,
-                    zoom_through_objects: false,
-                },
-                sensitivity: Sensitivity {
-                    zoom: 0.2,
-                    ..default()
-                },
-                last_anchor_depth: -2.0,
-                ..Default::default()
-            },
+            editor_cam,
             GridHandle { layer: grid_layer },
             ViewportConfig {
                 aspect: viewport.aspect,

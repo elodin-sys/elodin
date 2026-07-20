@@ -356,6 +356,10 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
+            .add_systems(
+                Update,
+                plugins::kdl_document::reload_sticky_kdl_when_eql_ready.after(update_eql_context),
+            )
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
             .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
@@ -2370,7 +2374,19 @@ pub fn update_eql_context(
 ) {
     if path_reg.0.is_empty() {
         return;
-    };
+    }
+    // Rebuild only when the registries that feed the context change. Blindly
+    // assigning every frame marks `EqlContext` dirty and forces downstream
+    // recompiles (viewports / object_3d) for no reason.
+    if !path_reg.is_changed()
+        && !component_metadata_registry.is_changed()
+        && !component_schema_registry.is_changed()
+        && !eql_context.0.component_parts.is_empty()
+    {
+        return;
+    }
+    let earliest = eql_context.0.earliest_timestamp;
+    let latest = eql_context.0.last_timestamp;
     eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
@@ -2391,8 +2407,8 @@ pub fn update_eql_context(
             }
             Some(Arc::new(component))
         }),
-        Timestamp(i64::MIN),
-        Timestamp(i64::MAX),
+        earliest,
+        latest,
     );
 }
 

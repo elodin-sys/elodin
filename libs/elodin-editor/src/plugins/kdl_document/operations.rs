@@ -440,6 +440,79 @@ pub fn apply_initial_kdl_path(initial: Res<InitialKdlPath>) -> Option<PathBuf> {
     initial.0.clone()
 }
 
+/// Settle time after the EQL component fingerprint last changes before a sticky
+/// `--kdl` reopen. Metadata dumps often arrive in several packets; reloading on
+/// the first non-empty context still leaves graphs with `ComponentNotFound`.
+const STICKY_KDL_EQL_SETTLE_SECS: f64 = 0.35;
+
+/// Topology fingerprint of leaf components in an EQL context. Ignores
+/// timestamp-range updates so sticky-KDL reloads only run when the component
+/// set changes.
+fn eql_component_fingerprint(ctx: &eql::Context) -> u64 {
+    fn walk(parts: &std::collections::BTreeMap<String, eql::ComponentPart>, ids: &mut Vec<u64>) {
+        for part in parts.values() {
+            if let Some(component) = &part.component {
+                ids.push(component.id.0);
+            }
+            walk(&part.children, ids);
+        }
+    }
+    let mut ids = Vec::new();
+    walk(&ctx.component_parts, &mut ids);
+    ids.sort_unstable();
+    let mut hash = ids.len() as u64;
+    for id in ids {
+        hash = hash.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(id);
+    }
+    hash
+}
+
+/// When CLI `--kdl` is sticky and the EQL component set changes (then settles),
+/// reopen the local schematic so panels that hit `ComponentNotFound` on an
+/// empty/partial first open can compile against the real component set.
+pub fn reload_sticky_kdl_when_eql_ready(
+    eql: Res<crate::EqlContext>,
+    initial: Res<InitialKdlPath>,
+    time: Res<Time>,
+    mut open: MessageWriter<OpenDocumentRequest>,
+    mut last_fingerprint: Local<u64>,
+    mut pending_since: Local<Option<f64>>,
+    mut last_reloaded_fp: Local<u64>,
+) {
+    let Some(path) = initial.0.clone() else {
+        *last_fingerprint = 0;
+        *pending_since = None;
+        *last_reloaded_fp = 0;
+        return;
+    };
+    if eql.0.component_parts.is_empty() {
+        return;
+    }
+    let fingerprint = eql_component_fingerprint(&eql.0);
+    let now = time.elapsed_secs_f64();
+    if fingerprint != *last_fingerprint {
+        *last_fingerprint = fingerprint;
+        *pending_since = Some(now);
+    }
+    let Some(since) = *pending_since else {
+        return;
+    };
+    if now - since < STICKY_KDL_EQL_SETTLE_SECS {
+        return;
+    }
+    *pending_since = None;
+    if fingerprint == *last_reloaded_fp {
+        return;
+    }
+    *last_reloaded_fp = fingerprint;
+    info!(
+        path = %path.display(),
+        fingerprint,
+        "Reloading --kdl schematic after EQL metadata settled"
+    );
+    open.write(OpenDocumentRequest(path));
+}
+
 fn current_document_matches_path(current_document: &CurrentDocument, path: &Path) -> bool {
     current_document.handle.is_some()
         && current_document

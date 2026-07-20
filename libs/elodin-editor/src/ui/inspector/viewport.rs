@@ -482,7 +482,9 @@ pub fn set_viewport_pos(
                     }
                 }
                 Err(e) => {
-                    bevy::log::error_once!("viewport pos formula execution error: {}", e);
+                    // Missing ComponentValue is normal while connecting / before the
+                    // series has samples at the playhead — not an actionable error.
+                    bevy::log::debug!("viewport pos formula execution error: {e}");
                 }
             }
             if let Some(compiled_expr) = &viewport.look_at.compiled_expr

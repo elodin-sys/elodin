@@ -8,8 +8,8 @@ mod types;
 pub use commands::*;
 pub use messages::*;
 pub use operations::{
-    apply_initial_kdl_path, fetch_active_schematic_kdl, sync_document_from_config,
-    sync_document_skybox,
+    apply_initial_kdl_path, fetch_active_schematic_kdl, reload_sticky_kdl_when_eql_ready,
+    sync_document_from_config, sync_document_skybox,
 };
 pub(crate) use operations::{
     fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,
@@ -1184,6 +1184,83 @@ mod tests {
                 .resource::<SeenOpenDocumentRequests>()
                 .0
                 .is_empty()
+        );
+    }
+
+    /// When EQL metadata settles, sticky `--kdl` must re-open so panels that
+    /// failed `ComponentNotFound` on the empty/partial first open can recompile.
+    #[test]
+    fn reload_sticky_kdl_when_eql_ready_reopens_once() {
+        use std::sync::Arc;
+
+        use bevy::time::TimeUpdateStrategy;
+        use impeller2::schema::Schema;
+        use impeller2::types::{ComponentId, PrimType, Timestamp};
+
+        let temp = TempTestDir::new("sticky-kdl-eql-ready");
+        let path = temp.path().join("local.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(super::InitialKdlPath(Some(path.clone())))
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+                100,
+            )))
+            .init_resource::<crate::EqlContext>()
+            .init_resource::<SeenOpenDocumentRequests>()
+            .add_message::<OpenDocumentRequest>()
+            .add_systems(
+                Update,
+                (
+                    super::operations::reload_sticky_kdl_when_eql_ready,
+                    collect_open_document_requests,
+                )
+                    .chain(),
+            );
+
+        app.update();
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "must not reload while EQL context is empty"
+        );
+
+        let component = Arc::new(eql::Component::new(
+            "body.WORLD_POS".to_string(),
+            ComponentId::new("body.WORLD_POS"),
+            Schema::new(PrimType::F64, [7usize]).unwrap(),
+        ));
+        app.world_mut().resource_mut::<crate::EqlContext>().0 =
+            eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+        // Fingerprint change arms the settle timer; must not reopen immediately.
+        app.update();
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "must wait for EQL metadata settle before reopening"
+        );
+
+        // 0.35s settle; ManualDuration advances 100ms per update.
+        for _ in 0..4 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<SeenOpenDocumentRequests>().0,
+            vec![path.clone()],
+            "must reopen sticky --kdl once after metadata settles"
+        );
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<SeenOpenDocumentRequests>().0.len(),
+            1,
+            "must not reopen every frame after EQL is ready"
         );
     }
 
