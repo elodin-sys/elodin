@@ -87,8 +87,8 @@ Coverage map (feature-catalog §16–17 → cases):
 |---|----|------|------|----------|------|--------|
 | 1 | SDK-001 | Toolchain build and install | SDK | P0 | agent | |
 | 2 | EDITOR-100 | Release editor binary builds | Editor | P0 | agent | |
-| 3 | EDITOR-101 | Connect editor to a live DB address | Editor | P1 | agent | |
-| 4 | EDITOR-102 | Open a recorded DB path | Editor | P1 | agent | |
+| 3 | EDITOR-101 | Connect editor to a live DB address | Editor | P1 | agent+visual | |
+| 4 | EDITOR-102 | Open a recorded DB path | Editor | P1 | agent+visual | |
 | 5 | EDITOR-110 | ball — viewport, trail, status bar, RAM | Editor | P0 | agent+visual | |
 | 6 | EDITOR-111 | three-body — multi-entity + graphs | Editor | P0 | agent+visual | |
 | 7 | EDITOR-112 | drone — GLB + joint animation | Editor | P1 | agent+visual | |
