@@ -500,6 +500,8 @@ fn basis_perp(u: DVec3) -> (DVec3, DVec3) {
 
 /// True when the front-hemisphere sphere point projecting to `p` (unit-disk
 /// coords, `+y` up) is on the sky side of the horizon plane ⊥ `u_cam`.
+/// Test-only sky/ground oracle (the fill uses the convex-cap boundary).
+#[cfg(test)]
 fn front_point_is_sky(p: Vec2, u_cam: DVec3) -> bool {
     let r2 = (p.x * p.x + p.y * p.y) as f64;
     let z = (1.0 - r2).max(0.0).sqrt();
@@ -628,22 +630,20 @@ fn paint_frame_sphere(
     let u_cam = cam.project(q_draw * triad[0]);
     let to_screen = |p: Vec2| Pos2::new(center.x + radius * p.x, center.y - radius * p.y);
 
-    // Classic artificial-horizon shading: light above the horizon (sky/up),
-    // dark below (ground/down). In light mode the sky is toned down so the disc
-    // still separates from the pale panel background.
+    // Two-tone hemispheres: light for the up half, a muted gray for the down
+    // half. Kept deliberately flat (no hatching / ground texture) so it reads
+    // as "which way is up", not a simulated artificial-horizon instrument.
     let light_mode = crate::ui::colors::is_light_mode();
-    let (sky, ground, hatch, horizon) = if light_mode {
+    let (sky, ground, horizon) = if light_mode {
         (
-            Color32::from_gray(205),
-            Color32::from_gray(30),
-            Color32::from_gray(90),
+            Color32::from_gray(210),
+            Color32::from_gray(140),
             Color32::from_gray(120),
         )
     } else {
         (
-            Color32::from_gray(232),
-            Color32::from_gray(14),
-            Color32::from_gray(110),
+            Color32::from_gray(225),
+            Color32::from_gray(120),
             Color32::from_gray(150),
         )
     };
@@ -669,45 +669,6 @@ fn paint_frame_sphere(
             if boundary.len() >= 3 {
                 let pts: Vec<Pos2> = boundary.iter().map(|&p| to_screen(p)).collect();
                 painter.add(Shape::convex_polygon(pts, cap, Stroke::NONE));
-            }
-        }
-    }
-
-    // Hatch the ground, lines parallel to the projected horizon. Each sample
-    // is tested against the true front-hemisphere surface, so the hatching
-    // hugs the curved horizon instead of a straight approximation.
-    if !(arcs.is_none() && u_cam.z >= 0.0) {
-        let s = Vec2::new(u_cam.x as f32, u_cam.y as f32);
-        let (s_hat, t_hat) = if s.length() > 1e-6 {
-            let sh = s.normalized();
-            (sh, Vec2::new(-sh.y, sh.x))
-        } else {
-            (Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0))
-        };
-        const HATCH_LINES: usize = 9;
-        const SAMPLES: usize = 32;
-        for i in 0..HATCH_LINES {
-            let d = -1.0 + 2.0 * (i as f32 + 0.5) / HATCH_LINES as f32;
-            let half = (1.0 - d * d).max(0.0).sqrt() * 0.98;
-            let mut run_start: Option<Vec2> = None;
-            let mut run_end = Vec2::ZERO;
-            for k in 0..=SAMPLES {
-                let t = -half + 2.0 * half * (k as f32 / SAMPLES as f32);
-                let p = s_hat * d + t_hat * t;
-                let on_ground = !front_point_is_sky(p, u_cam);
-                if on_ground {
-                    if run_start.is_none() {
-                        run_start = Some(p);
-                    }
-                    run_end = p;
-                }
-                if (!on_ground || k == SAMPLES)
-                    && let Some(a) = run_start.take()
-                    && (run_end - a).length() > 1e-3
-                {
-                    painter
-                        .line_segment([to_screen(a), to_screen(run_end)], Stroke::new(1.0, hatch));
-                }
             }
         }
     }
