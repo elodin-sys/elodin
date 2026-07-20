@@ -614,16 +614,18 @@ fn paint_frame_sphere(
         return;
     };
 
-    // Everything below derives from the display triad's "up" expressed in
-    // body coordinates: the horizon is the true 3D great circle ⊥ up, so any
-    // attitude (including inverted flight) renders continuously — no
-    // asin-clamped pitch/roll intermediate. The camera is anchored to the
-    // source frame, so "level in source" always reads U-near-top while the
-    // drawn triad keeps its physical (possibly tilted) direction.
+    // The markings co-rotate with the body (like the 3D cube in the viewport):
+    // we apply the attitude `q` directly to the source-frame triad, so a
+    // right-hand spin turns the gimbal's top the same way as the vehicle's.
+    // (Applying `q.inverse()` instead would draw the world as seen from the
+    // body — an ADI cockpit view whose top counter-rotates.) The horizon is
+    // still the true 3D great circle ⊥ up, so any attitude renders
+    // continuously; the camera is anchored to the source frame, so "level in
+    // source" reads U-near-top while the triad keeps its physical direction.
     let triad = display_triad_in_source(display, source, geo_context);
     let cam = SphereCamera::new(frame_triad(source));
-    let q_inv = q.inverse();
-    let u_cam = cam.project(q_inv * triad[0]);
+    let q_draw = q;
+    let u_cam = cam.project(q_draw * triad[0]);
     let to_screen = |p: Vec2| Pos2::new(center.x + radius * p.x, center.y - radius * p.y);
 
     // Classic artificial-horizon shading: light above the horizon (sky/up),
@@ -714,7 +716,7 @@ fn paint_frame_sphere(
     // back halves stay visible, dimmed, "through" the sphere.
     let curve = Color32::from_gray(128).gamma_multiply(0.8);
     for axis in triad {
-        match great_circle_arcs(cam.project(q_inv * axis)) {
+        match great_circle_arcs(cam.project(q_draw * axis)) {
             Some((front_c, back_c)) => {
                 let back: Vec<Pos2> = back_c.iter().map(|&p| to_screen(p)).collect();
                 painter.add(Shape::line(
@@ -746,8 +748,8 @@ fn paint_frame_sphere(
     // Outer rim, over the fills so the disc has a crisp edge.
     painter.circle_stroke(center, radius, Stroke::new(1.5, scheme.border_primary));
 
-    // Fixed aircraft reference (wings + center) — body-fixed, horizon moves
-    // under it. Amber like a real ADI: visible on both white and black.
+    // Fixed centre reticle (wings + dot): a screen-fixed reference the
+    // co-rotating markings move against. Amber so it reads on white and black.
     let wing = Color32::from_rgb(255, 179, 0);
     painter.line_segment(
         [
@@ -765,15 +767,15 @@ fn paint_frame_sphere(
     );
     painter.circle_stroke(center, 3.5, Stroke::new(1.5, wing));
 
-    // Display-triad axes in body coordinates (source identity ⇒ physical
-    // directions). Drawn last so back-facing tips remain visible "through"
-    // the sphere. Unit vectors project inside the disc, no rim clamp needed.
+    // Display-triad axes rotated by the body attitude (source identity ⇒
+    // physical directions). Drawn last so back-facing tips remain visible
+    // "through" the sphere. Unit vectors project inside the disc, no clamp.
     let labels = sphere_axis_labels(display);
     let mut tips: Vec<(f32, &'static str, Pos2, f32)> = triad
         .into_iter()
         .zip(labels)
         .map(|(dir, label)| {
-            let c = cam.project(q_inv * dir);
+            let c = cam.project(q_draw * dir);
             let (sx, sy, depth) = (c.x as f32, c.y as f32, c.z as f32);
             let pos = Pos2::new(center.x + radius * sx, center.y - radius * sy);
             let alpha = if depth >= 0.0 { 1.0 } else { 0.45 };
@@ -966,10 +968,12 @@ mod tests {
     }
 
     /// Camera-space up for a body→source quaternion, `display == source` (what
-    /// the painter uses for the same-frame gauges in these tests).
+    /// the painter uses for the same-frame gauges in these tests). Markings
+    /// co-rotate with the body, so the attitude is applied directly (matches
+    /// `q_draw` in `paint_frame_sphere`).
     fn up_cam(display: DisplayFrame, q: DQuat) -> DVec3 {
         let cam = SphereCamera::new(frame_triad(attitude_frame(display)));
-        cam.project(q.inverse() * sphere_axis_dirs(display)[0])
+        cam.project(q * sphere_axis_dirs(display)[0])
     }
 
     #[test]
@@ -1012,6 +1016,53 @@ mod tests {
             }
             prev = Some(angle);
         }
+    }
+
+    #[test]
+    fn gimbal_markings_corotate_with_body() {
+        // Screen angle of a projected point as it is spun about ENU up.
+        let cam = SphereCamera::new(frame_triad(GeoFrame::ENU));
+        let screen_angle = |v: DVec3| {
+            let c = cam.project(v);
+            c.y.atan2(c.x)
+        };
+        let unwrap_delta = |a: f64, b: f64| {
+            let mut d = b - a;
+            while d > std::f64::consts::PI {
+                d -= std::f64::consts::TAU;
+            }
+            while d < -std::f64::consts::PI {
+                d += std::f64::consts::TAU;
+            }
+            d
+        };
+
+        // Witnesses in the rotation's equatorial plane (⊥ the ENU up spin
+        // axis) so their projected screen angle tracks the rotation cleanly.
+        let e = DVec3::X; // east marking
+        let body_ref = DVec3::Y; // north: any other body-fixed in-plane point
+        let q0 = DQuat::from_rotation_z(0.1);
+        let q1 = DQuat::from_rotation_z(0.2);
+
+        // New convention (q_draw = q): the marking co-rotates with a
+        // body-fixed point — same sign of screen-angle change as the cube.
+        let d_mark = unwrap_delta(screen_angle(q0 * e), screen_angle(q1 * e));
+        let d_body = unwrap_delta(screen_angle(q0 * body_ref), screen_angle(q1 * body_ref));
+        assert!(
+            d_mark * d_body > 0.0,
+            "marking must turn the same way as the body: {d_mark} vs {d_body}"
+        );
+
+        // The old world-relative convention (q.inverse()) turned the opposite
+        // way — that was the reported anti-correlation.
+        let d_old = unwrap_delta(
+            screen_angle(q0.inverse() * e),
+            screen_angle(q1.inverse() * e),
+        );
+        assert!(
+            d_mark * d_old < 0.0,
+            "conjugate must reverse the previous rotation sense: {d_mark} vs {d_old}"
+        );
     }
 
     #[test]
