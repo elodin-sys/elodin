@@ -315,6 +315,8 @@ impl SchematicParam<'_, '_> {
                             // from `coordinate` survives a round-trip.
                             source: data.source,
                             display: data.display,
+                            // None when identity so the default stays implicit.
+                            reference: data.reference_kdl(),
                             name: pane_name,
                         }))
                     }

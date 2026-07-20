@@ -1,4 +1,5 @@
 use bevy::ecs::system::SystemParam;
+use bevy::math::DQuat;
 use bevy::prelude::{Entity, Query, Res};
 use bevy_egui::egui;
 use bevy_geo_frames::GeoFrame;
@@ -79,6 +80,35 @@ impl WidgetSystem for InspectorSpatialGauge<'_, '_> {
                         ui.selectable_value(&mut monitor.display, display, display.as_str());
                     }
                 });
+
+                ui.add_space(12.0);
+                ui.label(
+                    egui::RichText::new("REFERENCE ATTITUDE (X Y Z W)")
+                        .color(get_scheme().text_secondary),
+                );
+                ui.add_space(4.0);
+                // Body→source quaternion the gimbal treats as neutral;
+                // normalized on edit so hand-typed values stay a rotation.
+                let q = &mut monitor.reference;
+                let mut parts = [q.x, q.y, q.z, q.w];
+                let mut changed = false;
+                ui.horizontal(|ui| {
+                    for part in &mut parts {
+                        changed |= ui
+                            .add(egui::DragValue::new(part).speed(0.01).range(-1.0..=1.0))
+                            .changed();
+                    }
+                    if ui.button("Reset").clicked() {
+                        parts = [0.0, 0.0, 0.0, 1.0];
+                        changed = true;
+                    }
+                });
+                if changed {
+                    let next = DQuat::from_xyzw(parts[0], parts[1], parts[2], parts[3]);
+                    if next.length() > 1e-9 {
+                        *q = next.normalize();
+                    }
+                }
             });
     }
 }

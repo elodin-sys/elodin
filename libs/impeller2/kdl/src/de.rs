@@ -1104,12 +1104,50 @@ fn parse_spatial_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicE
         None => DisplayFrame::default(),
     };
 
+    // Optional `reference x y z w` child: the body→source attitude shown as
+    // neutral by the gimbal.
+    let reference = node
+        .children()
+        .into_iter()
+        .flat_map(|c| c.nodes())
+        .find(|child| child.name().value() == "reference")
+        .map(|child| parse_reference_quat(child, src))
+        .transpose()?;
+
     Ok(Panel::SpatialGauge(SpatialGauge {
         eql,
         source,
         display,
+        reference,
         name,
     }))
+}
+
+fn parse_reference_quat(node: &KdlNode, src: &str) -> Result<[f64; 4], KdlSchematicError> {
+    let invalid = || KdlSchematicError::InvalidValue {
+        property: "reference".to_string(),
+        node: "spatial_gauge".to_string(),
+        expected: "four numeric entries: reference x y z w".to_string(),
+        src: src.to_string(),
+        span: node.span(),
+    };
+    let entries: Vec<_> = node
+        .entries()
+        .iter()
+        .filter(|e| e.name().is_none())
+        .collect();
+    if entries.len() != 4 {
+        return Err(invalid());
+    }
+    let mut q = [0f64; 4];
+    for (idx, entry) in entries.iter().enumerate() {
+        q[idx] = entry
+            .value()
+            .as_float()
+            .or_else(|| entry.value().as_integer().map(|v| v as f64))
+            .ok_or_else(invalid)?;
+    }
+    Ok(q)
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -3607,6 +3645,39 @@ object_3d "a.world_pos" {
         } else {
             panic!("Expected spatial_gauge");
         }
+    }
+
+    #[test]
+    fn test_spatial_gauge_reference_round_trip() {
+        // No `reference` child ⇒ None, and save must not invent one.
+        let plain = parse_schematic(r#"spatial_gauge "a.pos""#).unwrap();
+        if let SchematicElem::Panel(Panel::SpatialGauge(m)) = &plain.elems[0] {
+            assert_eq!(m.reference, None);
+        } else {
+            panic!("Expected spatial_gauge");
+        }
+        assert!(!crate::serialize_schematic(&plain).contains("reference"));
+
+        let kdl = r#"
+        spatial_gauge "a.pos" display="NED" {
+            reference 0.0 0.7071 0.0 0.7071
+        }
+        "#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::SpatialGauge(m)) = &parsed.elems[0] else {
+            panic!("Expected spatial_gauge");
+        };
+        assert_eq!(m.reference, Some([0.0, 0.7071, 0.0, 0.7071]));
+
+        let serialized = crate::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::SpatialGauge(m2)) = &reparsed.elems[0] else {
+            panic!("Expected spatial_gauge after round-trip");
+        };
+        assert_eq!(m2.reference, m.reference);
+
+        // Wrong arity is a parse error, not a silent identity.
+        assert!(parse_schematic(r#"spatial_gauge "a.pos" { reference 1 0 0 }"#).is_err());
     }
 
     #[test]

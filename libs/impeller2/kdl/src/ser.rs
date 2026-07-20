@@ -658,6 +658,17 @@ fn serialize_spatial_gauge(monitor: &SpatialGauge) -> KdlNode {
     }
     node.entries_mut()
         .push(KdlEntry::new_prop("display", monitor.display.as_str()));
+    if let Some(q) = monitor.reference {
+        let mut reference = KdlNode::new("reference");
+        for v in q {
+            reference
+                .entries_mut()
+                .push(KdlEntry::new(round_float_default(v)));
+        }
+        let mut children = KdlDocument::new();
+        children.nodes_mut().push(reference);
+        node.set_children(children);
+    }
     node
 }
 

@@ -1250,11 +1250,14 @@ impl LoadSchematicParams<'_, '_> {
                 // the live schematic `coordinate` (resolved at display time).
                 let entity = self
                     .commands
-                    .spawn(crate::ui::spatial_gauge::SpatialGaugeData::new(
-                        monitor.eql.clone(),
-                        monitor.source,
-                        monitor.display,
-                    ))
+                    .spawn(
+                        crate::ui::spatial_gauge::SpatialGaugeData::new(
+                            monitor.eql.clone(),
+                            monitor.source,
+                            monitor.display,
+                        )
+                        .with_reference(monitor.reference),
+                    )
                     .id();
                 let pane = crate::ui::spatial_gauge::SpatialGaugePane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::SpatialGauge(pane)), parent_id, false)

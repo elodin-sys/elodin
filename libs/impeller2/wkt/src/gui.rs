@@ -1224,6 +1224,11 @@ pub struct SpatialGauge {
     pub source: Option<bevy_geo_frames::GeoFrame>,
     /// Coordinate system to display the position in (a spatial frame or LLA).
     pub display: DisplayFrame,
+    /// Attitude quaternion (`[x, y, z, w]`, body→`source`) that the gauge's
+    /// gimbal shows as neutral: the displayed attitude is `reference⁻¹ · q`.
+    /// `None` means identity (raw component attitude).
+    #[serde(default)]
+    pub reference: Option<[f64; 4]>,
     pub name: Option<String>,
 }
 

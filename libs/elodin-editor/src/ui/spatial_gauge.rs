@@ -48,6 +48,9 @@ pub struct SpatialGaugeData {
     /// [`Self::effective_source`].
     pub source: Option<GeoFrame>,
     pub display: DisplayFrame,
+    /// Attitude (body→source) the gimbal shows as neutral: the sphere renders
+    /// `reference⁻¹ · q`. Identity means the raw component attitude.
+    pub reference: DQuat,
     pub compiled_expr: Option<CompiledExpr>,
     /// Component IDs referenced by `compiled_expr`, used to resolve playhead
     /// samples from [`TelemetryCache`] (same path as the component monitor).
@@ -66,11 +69,31 @@ impl SpatialGaugeData {
             eql,
             source,
             display,
+            reference: DQuat::IDENTITY,
             compiled_expr: None,
             component_ids: Vec::new(),
             plain_component_id: None,
             compiled_for: None,
         }
+    }
+
+    /// Set the neutral-attitude quaternion from its KDL form (`[x, y, z, w]`,
+    /// normalized here so hand-written schematics don't need to be exact).
+    pub fn with_reference(mut self, reference: Option<[f64; 4]>) -> Self {
+        if let Some([x, y, z, w]) = reference {
+            let q = DQuat::from_xyzw(x, y, z, w);
+            if q.length() > 1e-9 {
+                self.reference = q.normalize();
+            }
+        }
+        self
+    }
+
+    /// KDL form of [`Self::reference`]: `None` when it is (numerically) the
+    /// identity, so the common case serializes to nothing.
+    pub fn reference_kdl(&self) -> Option<[f64; 4]> {
+        let q = self.reference;
+        (q.dot(DQuat::IDENTITY).abs() < 1.0 - 1e-9).then_some([q.x, q.y, q.z, q.w])
     }
 
     /// Concrete source frame: explicit override, else schematic `coordinate`,
@@ -292,11 +315,17 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
 
                     // Attitude from the same SpatialTransform (quat head); optional if the
                     // EQL is a bare 3-vector. LLA has no Cartesian frame — use NED so the
-                    // sphere's local-level axes match `ai_pitch_roll` / `sphere_axis_dirs`.
+                    // sphere's local-level axes match `sphere_axis_dirs`.
                     // Read `display` after the ComboBox so a change applies immediately.
                     let display = data.display;
+                    let reference = data.reference;
                     let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
-                        GeoRotation::relative(source, wp.att())
+                        // Attitude change since the neutral pose, expressed in
+                        // `source` (right-multiplied so a world-frame pitch
+                        // still reads as pitch when the neutral is rotated).
+                        // Identity reference ⇒ raw component attitude.
+                        let q_rel = wp.att() * reference.inverse();
+                        GeoRotation::relative(source, q_rel)
                             .as_frame(attitude_frame(display), &geo_context)
                             .1
                     });
@@ -975,6 +1004,25 @@ mod tests {
             rim_mid.x as f64 * pole.x + rim_mid.y as f64 * pole.y > 0.0,
             "rim arc must close on the sky side"
         );
+    }
+
+    #[test]
+    fn reference_attitude_reads_neutral_and_round_trips() {
+        // Identity reference stays implicit in KDL.
+        let data = SpatialGaugeData::new("a.pos".into(), None, DisplayFrame::NED);
+        assert_eq!(data.reference_kdl(), None);
+
+        // A non-identity reference is normalized on load and round-trips.
+        let raw = [0.0, 2.0, 0.0, 2.0]; // unnormalized 90° about Y
+        let data = data.with_reference(Some(raw));
+        assert!((data.reference.length() - 1.0).abs() < 1e-12);
+        let kdl = data.reference_kdl().expect("non-identity serializes");
+        assert!((kdl[1] - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9);
+
+        // At the reference pose the gimbal shows identity (level).
+        let q_vehicle = data.reference;
+        let q_rel = q_vehicle * data.reference.inverse();
+        assert!(q_rel.abs_diff_eq(DQuat::IDENTITY, 1e-12));
     }
 
     #[test]
