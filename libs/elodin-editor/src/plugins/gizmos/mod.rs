@@ -1,5 +1,6 @@
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
+use bevy::material::AlphaMode;
 use bevy::picking::prelude::Pickable;
 use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
@@ -17,7 +18,6 @@ use bevy::{
     transform::components::Transform,
 };
 use bevy_geo_frames::prelude::*;
-use bevy_render::alpha::AlphaMode;
 use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
@@ -948,7 +948,7 @@ fn update_arrow_label_ui(
                             },
                             Text::new(label_text.clone()),
                             TextFont {
-                                font_size: 14.0,
+                                font_size: bevy::text::FontSize::Px(14.0),
                                 ..default()
                             },
                             TextColor(label_color),

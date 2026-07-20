@@ -32,6 +32,7 @@ use crate::{
 };
 
 use super::{color_popup, empty_inspector, eql_autocomplete, query};
+use crate::ui::widgets::SystemStateExt;
 
 const DEFAULT_EDITOR_CAM_ANCHOR_DEPTH: f64 = -2.0;
 const ANCHOR_DEPTH_EPSILON: f64 = 1.0e-9;
@@ -102,7 +103,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         args: Self::Args,
     ) {
         let scheme = get_scheme();
-        let state_mut = state.get_mut(world);
+        let state_mut = state.params_mut(world);
 
         let (camera, title) = args;
 
@@ -482,7 +483,9 @@ pub fn set_viewport_pos(
                     }
                 }
                 Err(e) => {
-                    bevy::log::error_once!("viewport pos formula execution error: {}", e);
+                    // Missing ComponentValue is normal while connecting / before the
+                    // series has samples at the playhead — not an actionable error.
+                    bevy::log::debug!("viewport pos formula execution error: {e}");
                 }
             }
             if let Some(compiled_expr) = &viewport.look_at.compiled_expr
@@ -1049,7 +1052,7 @@ mod tests {
 
         {
             let (commands, viewports, objects, children, mesh_entities, current_targets) =
-                state.get_mut(&mut world);
+                state.params_mut(&mut world);
             sync_viewport_focus_pick_targets(
                 commands,
                 viewports,

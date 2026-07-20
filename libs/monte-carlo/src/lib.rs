@@ -4996,7 +4996,7 @@ mod tests {
         // Admission disabled falls back to logical cores (clamped to the plan).
         assert_eq!(
             resolve_auto_workers(100, 2, None),
-            available_cpus().max(1).min(100)
+            available_cpus().clamp(1, 100)
         );
     }
 
@@ -5009,7 +5009,7 @@ mod tests {
             // A large budget scales threads but never exceeds logical cores.
             assert_eq!(
                 resolve_runtime_threads(Some(1000), 100, None),
-                cores.min(100).max(2)
+                cores.clamp(2, 100)
             );
             // Never spins up more threads than there are runs (floor of 2).
             assert_eq!(resolve_runtime_threads(Some(1000), 1, None), 2);

@@ -24,6 +24,7 @@ use super::{
     AutoFollowLatestState, DurationExt, LatestFollow, StreamTickOrigin, TimelineArgs,
     TimelineIcons, TimelineSettings, get_position_range, position_from_value, value_from_position,
 };
+use crate::ui::widgets::SystemStateExt;
 
 // ----------------------------------------------------------------------------
 
@@ -427,7 +428,7 @@ impl WidgetSystem for TimelineSlider<'_> {
             mut latest_follow,
             mut auto_follow_latest_state,
             timeline_settings,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         tick_origin.observe_stream(**current_stream_id);
 

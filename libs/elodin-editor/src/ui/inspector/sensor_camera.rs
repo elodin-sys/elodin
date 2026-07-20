@@ -18,6 +18,7 @@ use crate::{
 };
 
 use super::{color_popup, empty_inspector};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct InspectorSensorCamera<'w, 's> {
@@ -40,7 +41,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
         let InspectorSensorCamera {
             streams,
             mut configs,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         let Ok(stream) = streams.get(stream_entity) else {
             ui.add(empty_inspector());

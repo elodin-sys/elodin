@@ -32,6 +32,7 @@ use super::{
     PaneName,
     colors::{ColorExt, get_scheme},
 };
+use crate::ui::widgets::SystemStateExt;
 
 // ---------------------------------------------------------------------------
 // Public pane types (unchanged API)
@@ -850,17 +851,21 @@ fn upload_frame(
     image_node: &mut bevy::prelude::Mut<'_, ImageNode>,
     images: &mut Assets<Image>,
 ) {
-    if let Some(existing) = images.get_mut(&image_node.image) {
+    let reused = if let Some(mut existing) = images.get_mut(&image_node.image) {
         if existing.width() == frame.width()
             && existing.height() == frame.height()
             && let Some(dst) = &mut existing.data
             && let Some(src) = &frame.data
         {
             dst.copy_from_slice(src);
+            true
         } else {
-            image_node.image = images.add(frame);
+            false
         }
     } else {
+        false
+    };
+    if !reused {
         image_node.image = images.add(frame);
     }
 }
@@ -879,7 +884,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         ui: &mut egui::Ui,
         VideoStreamWidgetArgs { entity, window }: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.params_mut(world);
 
         let Ok(WidgetQueryItem {
             mut stream,
@@ -912,7 +917,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             if data.len() == expected {
                                 let data = Arc::clone(data);
                                 let mut wrote_direct = false;
-                                if let Some(existing) = state.images.get_mut(&image_node.image)
+                                if let Some(mut existing) = state.images.get_mut(&image_node.image)
                                     && existing.width() == w
                                     && existing.height() == h
                                     && let Some(dst) = &mut existing.data
@@ -1016,13 +1021,16 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         // ---------------------------------------------------------------
         let max_rect = ui.max_rect();
 
-        let Ok(egui_settings) = state.window_settings.get(window) else {
+        // Guard: only lay out when the window still has an egui context.
+        // bevy_egui 0.40 removed `EguiContextSettings::scale_factor` (zoom is
+        // handled via egui's native pixels-per-point now); egui points map
+        // 1:1 onto Bevy UI logical pixels.
+        if state.window_settings.get(window).is_err() {
             return;
         };
 
-        let scale_factor = egui_settings.scale_factor;
-        let viewport_pos = max_rect.left_top().to_vec2() * scale_factor;
-        let viewport_size = max_rect.size() * scale_factor;
+        let viewport_pos = max_rect.left_top().to_vec2();
+        let viewport_size = max_rect.size();
 
         let (width, height) = if let Some(image) = state.images.get(&image_node.image) {
             let aspect_ratio = image.height() as f32 / image.width() as f32;

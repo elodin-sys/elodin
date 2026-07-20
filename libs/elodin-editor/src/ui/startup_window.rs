@@ -29,6 +29,7 @@ use super::{
     theme::corner_radius_sm,
     widgets::{RootWidgetSystem, RootWidgetSystemExt},
 };
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Component)]
 pub struct StartupWindow;
@@ -290,7 +291,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.params_mut(world);
         let logo_full = state
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.logo_full.id()));
@@ -305,9 +306,10 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+        super::utils::show_central_panel(
+            egui::CentralPanel::default().frame(egui::Frame::NONE),
+            ctx,
+            |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(408.0, 470.0),
                     egui::Layout::top_down(egui::Align::Center),
@@ -358,13 +360,16 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         }
                     },
                 )
-            });
+            },
+        );
 
-        egui::SidePanel::right("right")
-            .exact_width(322.0)
-            .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
-            .resizable(false)
-            .show(ctx, |ui| {
+        super::utils::show_panel(
+            egui::Panel::right("right")
+                .exact_size(322.0)
+                .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
+                .resizable(false),
+            ctx,
+            |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for item in state.recent_files.recent_files.clone().into_values().rev() {
                         if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
@@ -379,7 +384,8 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         }
                     }
                 });
-            });
+            },
+        );
         match state.modal_state.clone() {
             ModalState::None => {}
             ModalState::ConnectToIp {

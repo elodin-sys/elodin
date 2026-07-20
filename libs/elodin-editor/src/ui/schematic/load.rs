@@ -941,8 +941,8 @@ impl LoadSchematicParams<'_, '_> {
             Transform::default(),
             GlobalTransform::default(),
             // Absolute: vertex data is frame-relative; GeoRotation carries
-            // the frame → Bevy basis. GeoPosition is the first sample (synced
-            // once LineHandles have data).
+            // the frame → Bevy basis. GeoPosition tracks the LineTree's first
+            // sample (visible-window anchor; see sync_line_3d_anchor).
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
             bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
             #[cfg(feature = "big_space")]
@@ -1624,6 +1624,7 @@ pub fn show_document_load_failures(
 #[cfg(test)]
 mod tests {
     use super::LoadSchematicParams;
+    use crate::ui::widgets::SystemStateExt;
     use crate::{
         Coordinate, EqlContext,
         icon_rasterizer::IconTextureCache,
@@ -1716,7 +1717,7 @@ mod tests {
 
     fn load_schematic(app: &mut App, schematic: &Schematic) {
         let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
-        let mut params = system_state.get_mut(app.world_mut());
+        let mut params = system_state.params_mut(app.world_mut());
         params.load_schematic(schematic, None, None);
         system_state.apply(app.world_mut());
         settle(app);

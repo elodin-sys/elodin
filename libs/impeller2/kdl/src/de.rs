@@ -2852,7 +2852,8 @@ object_3d "a.world_pos" {
 
     #[test]
     fn test_parse_object_3d_integer_primitive_dimensions() {
-        let cases: [(&str, fn(&Mesh) -> bool); 3] = [
+        type MeshCheck = fn(&Mesh) -> bool;
+        let cases: [(&str, MeshCheck); 3] = [
             (
                 r#"object_3d "a.world_pos" { sphere radius=50 }"#,
                 |mesh: &Mesh| match mesh {

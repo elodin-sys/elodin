@@ -31,7 +31,7 @@ use bevy::{
         render_resource::*,
         renderer::RenderDevice,
         sync_world::{MainEntity, MainEntityHashMap},
-        view::{ExtractedView, Msaa, ViewTarget},
+        view::{ExtractedView, Msaa},
         Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
     },
     shader::{ShaderDefVal, ShaderRef},
@@ -49,6 +49,10 @@ use std::{any::TypeId, hash::Hash, marker::PhantomData};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, SpecializerKey)]
 pub struct TerrainPipelineKey {
     pub flags: TerrainPipelineFlags,
+    /// The color target format of the view being rendered to. Bevy 0.19
+    /// removed `ExtractedView::hdr` / `ViewTarget::TEXTURE_FORMAT_HDR`;
+    /// the actual format now comes from `ExtractedView::target_format`.
+    pub target_format: TextureFormat,
 }
 
 bitflags::bitflags! {
@@ -73,7 +77,6 @@ bitflags::bitflags! {
         const TEST1              = 1 << 14;
         const TEST2              = 1 << 15;
         const TEST3              = 1 << 16;
-        const HDR                = 1 << 17;
         const MSAA_RESERVED_BITS = TerrainPipelineFlags::MSAA_MASK_BITS << TerrainPipelineFlags::MSAA_SHIFT_BITS;
     }
 }
@@ -276,11 +279,7 @@ impl<M: Material> Specializer<RenderPipeline> for TerrainSpecializer<M> {
         descriptor.multisample.count = key.flags.msaa_samples();
         if let Some(fragment) = &mut descriptor.fragment {
             if let Some(Some(target)) = fragment.targets.first_mut() {
-                target.format = if key.flags.contains(TerrainPipelineFlags::HDR) {
-                    ViewTarget::TEXTURE_FORMAT_HDR
-                } else {
-                    TextureFormat::bevy_default()
-                };
+                target.format = key.target_format;
             }
         }
 
@@ -355,7 +354,7 @@ impl<M: Material> FromWorld for TerrainRenderPipeline<M> {
                 terrain_view_layout,
                 material_layout,
             ],
-            push_constant_ranges: default(),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
             vertex: VertexState {
                 shader: vertex_shader,
@@ -377,15 +376,17 @@ impl<M: Material> FromWorld for TerrainRenderPipeline<M> {
                 shader_defs: Vec::new(),
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::bevy_default(),
+                    // Placeholder; the specializer overwrites this with the
+                    // view's actual `target_format`.
+                    format: TextureFormat::Rgba8UnormSrgb,
                     blend: Some(BlendState::REPLACE),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
             depth_stencil: Some(DepthStencilState {
                 format: TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Greater,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(CompareFunction::Greater),
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -489,7 +490,6 @@ pub(crate) fn extract_terrain_materials<M: Material>(
 /// and `MaterialBindGroupAllocators` (indexed by `TypeId::of::<M>()`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn queue_terrain<M: Material>(
-    change_tick: bevy::ecs::system::SystemChangeTick,
     draw_functions: Res<DrawFunctions<Opaque3d>>,
     debug: Option<Res<DebugTerrain>>,
     render_materials: Res<ErasedRenderAssets<PreparedMaterial>>,
@@ -500,7 +500,6 @@ pub(crate) fn queue_terrain<M: Material>(
     material_instances: Res<TerrainMaterialInstances<M>>,
     views: Query<(&ExtractedView, &Msaa)>,
 ) {
-    let change_tick = change_tick.this_run();
     let draw_function = draw_functions.read().get_id::<DrawTerrain<M>>().unwrap();
 
     for (view, msaa) in &views {
@@ -521,9 +520,6 @@ pub(crate) fn queue_terrain<M: Material>(
             };
 
             let mut flags = TerrainPipelineFlags::from_msaa_samples(msaa.samples());
-            if view.hdr {
-                flags |= TerrainPipelineFlags::HDR;
-            }
             if gpu_tile_atlas.is_spherical {
                 flags |= TerrainPipelineFlags::SPHERICAL;
             }
@@ -540,7 +536,10 @@ pub(crate) fn queue_terrain<M: Material>(
                     | TerrainPipelineFlags::HIGH_PRECISION;
             }
 
-            let key = TerrainPipelineKey { flags };
+            let key = TerrainPipelineKey {
+                flags,
+                target_format: view.target_format,
+            };
             let Ok(pipeline) = terrain_pipeline.variants.specialize(&pipeline_cache, key) else {
                 continue;
             };
@@ -549,8 +548,7 @@ pub(crate) fn queue_terrain<M: Material>(
                 pipeline,
                 draw_function,
                 material_bind_group_index: Some(material.binding.group.0),
-                vertex_slab: default(),
-                index_slab: None,
+                slabs: default(),
                 lightmap_slab: None,
             };
             let bin_key = Opaque3dBinKey {
@@ -562,7 +560,6 @@ pub(crate) fn queue_terrain<M: Material>(
                 (render_entity, *main_entity),
                 InputUniformIndex::default(),
                 BinnedRenderPhaseType::NonMesh,
-                change_tick,
             );
         }
     }
@@ -661,14 +658,17 @@ where
     }
 
     fn finish(&self, app: &mut App) {
-        // Bevy 0.17 moved many render resources (including `MaterialPipeline`)
-        // from `Plugin::finish` to `RenderStartup` (migration guide PRs
-        // #19841..#20210). Our `TerrainRenderPipeline::<M>::from_world` only
-        // needs `MeshPipeline` + `RenderDevice` + `AssetServer`, all of which
-        // are still available during `finish`, so the resource init stays
-        // here. `Variants` owns the specialization cache internally, so
-        // there's no more `SpecializedRenderPipelines<_>` to register.
-        app.sub_app_mut(RenderApp)
-            .init_resource::<TerrainRenderPipeline<M>>();
+        // Bevy 0.19 creates `MeshPipeline` in a `RenderStartup` system
+        // (after `MeshPipelineSystems`), so our pipeline — whose `FromWorld`
+        // reads `MeshPipeline` — must also be initialized there rather than
+        // during plugin `finish`.
+        app.sub_app_mut(RenderApp).add_systems(
+            bevy::render::RenderStartup,
+            init_terrain_render_pipeline::<M>.after(bevy::pbr::MeshPipelineSystems),
+        );
     }
+}
+
+fn init_terrain_render_pipeline<M: Material>(world: &mut World) {
+    world.init_resource::<TerrainRenderPipeline<M>>();
 }

@@ -29,6 +29,7 @@ use super::{
     AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
     TimelineSettings,
 };
+use crate::ui::widgets::SystemStateExt;
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<TimelineStepButtons>();
@@ -90,7 +91,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             primary_windows,
             mut window_states,
             replay_mode,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);

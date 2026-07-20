@@ -58,6 +58,7 @@ use super::{
     PlotDataComponent, XYLine,
     gpu::{self, LineHandle, LineVisibleRange, LineWidgetWidth},
 };
+use crate::ui::widgets::SystemStateExt;
 
 /// Tracks locked state transitions
 #[derive(Resource, Default)]
@@ -104,7 +105,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             telemetry_mode,
             line_query,
             mut window_states,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         let Ok(mut graph_state) = graphs_state.get_mut(id) else {
             return;

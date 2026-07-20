@@ -254,7 +254,7 @@ fn intersection_light_for(
         color: Color::srgb(color.r, color.g, color.b),
         intensity: INTERSECTION_LIGHT_INTENSITY,
         range: (radius * 8.0).max(1.0),
-        shadows_enabled: false,
+        shadow_maps_enabled: false,
         ..Default::default()
     };
     (light, Transform::from_translation(translation))
@@ -303,13 +303,13 @@ fn apply_ellipsoid_tint(
             // Tint is applied by FrustumTintMaterial shader; no CPU-side edit.
         }
         EllipsoidMaterialTarget::Standard(handle) => {
-            if let Some(material) = standard_materials.get_mut(handle) {
+            if let Some(mut material) = standard_materials.get_mut(handle) {
                 material.base_color = tinted;
                 material.emissive = emissive.into();
             }
         }
         EllipsoidMaterialTarget::Mat3(handle) => {
-            if let Some(material) = mat3_materials.get_mut(handle) {
+            if let Some(mut material) = mat3_materials.get_mut(handle) {
                 material.base.base_color = tinted;
                 material.base.emissive = emissive.into();
             }
@@ -791,7 +791,7 @@ fn draw_frustum_ellipsoid_intersections(
 
     for visual in desired {
         if let Some((entity, mesh_handle)) = existing_by_key.remove(&visual.key) {
-            if let Some(mesh_asset) = params.meshes.get_mut(&mesh_handle) {
+            if let Some(mut mesh_asset) = params.meshes.get_mut(&mesh_handle) {
                 *mesh_asset = visual.mesh;
             } else {
                 let new_mesh = params.meshes.add(visual.mesh);

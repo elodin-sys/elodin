@@ -102,10 +102,10 @@ fn main() {
             } else {
                 let requested = deadline - now;
                 let start = Instant::now();
-                if let Some(sleep_dur) = requested.checked_sub(margin) {
-                    if !sleep_dur.is_zero() {
-                        stellarator::sleep(sleep_dur).await;
-                    }
+                if let Some(sleep_dur) = requested.checked_sub(margin)
+                    && !sleep_dur.is_zero()
+                {
+                    stellarator::sleep(sleep_dur).await;
                 }
                 while Instant::now() < deadline {
                     std::hint::spin_loop();

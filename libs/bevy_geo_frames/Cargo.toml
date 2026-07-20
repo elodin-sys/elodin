@@ -15,7 +15,7 @@ map_3d = "0.1.5"
 serde = { version = "1", features = ["derive"], optional = true }
 strum = { version = "0.27.2", optional = true }
 strum_macros = { version = "0.27.2", optional = true }
-bevy-inspector-egui = { version = "0.36", optional = true }
+bevy-inspector-egui = { version = "0.37", optional = true }
 
 [features]
 default = [ "strum", "bevy" ]
@@ -27,6 +27,5 @@ strum = ["dep:strum", "dep:strum_macros"]
 default_enu = []
 
 [dev-dependencies]
-bevy-inspector-egui = "0.36"
-bevy_editor_cam = "0.8"
-bevy_infinite_grid = "0.18"
+bevy-inspector-egui = "0.37"
+bevy_editor_cam.workspace = true

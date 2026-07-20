@@ -108,6 +108,11 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         """
         world_mesh "death_valley" translate="(0.0, 0.0, 0.0)"
 
+        // Denser "what's happening now" layout: combined line graphs instead of
+        // component_monitor widgets, plus an Intercept tab for engagement views.
+        timeline follow_latest=#true range="last_30s"
+        telemetry_mode #true
+
         tabs {
             hsplit name="Main View" {
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#false show_frustums=#true active=#true far=100000

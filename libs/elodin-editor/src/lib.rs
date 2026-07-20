@@ -5,6 +5,7 @@ use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 use crate::plugins::{editor_cam_input, editor_cam_touch};
 #[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
+use bevy::material::AlphaMode;
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
@@ -27,7 +28,6 @@ use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::{PickingSettings, PickingSystems, mesh_picking::update_hits};
-use bevy_render::alpha::AlphaMode;
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
@@ -250,6 +250,10 @@ impl Plugin for EditorPlugin {
                     .disable::<TransformPlugin>()
                     .disable::<DiagnosticsPlugin>()
                     .disable::<LogPlugin>()
+                    // Pulled into DefaultPlugins by the `bevy_dev_tools`
+                    // cargo feature (needed for the native infinite grid);
+                    // keep 0.18 behavior — no F1 render-debug keybind.
+                    .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
                     .build(),
             )
             .add_plugins(plugins::kdl_document::plugin)
@@ -279,7 +283,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(editor_cam_input::EditorCamInputPlugin)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
-            .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
+            .add_plugins(bevy::dev_tools::infinite_grid::InfiniteGridPlugin)
             .add_plugins(render_layer_alloc::plugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(ViewCubePlugin {
@@ -291,6 +295,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(GizmoPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
         app.add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
@@ -306,7 +312,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, setup_egui_context)
             .add_systems(Update, organize_observer_entities)
             //.add_systems(Update, make_entities_selectable)
-            .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
                 PreUpdate,
                 sanitize_editor_cam_anchor_depth.before(SyncCameraPosition),
@@ -351,6 +356,10 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
+            .add_systems(
+                Update,
+                plugins::kdl_document::reload_sticky_kdl_when_eql_ready.after(update_eql_context),
+            )
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
             .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
@@ -381,6 +390,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
+                ..default()
             })
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
@@ -504,7 +514,7 @@ fn throttle_for_sensor_cameras(
     settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(42));
     shadow_map.size = 256;
     for mut light in dir_lights.iter_mut() {
-        light.shadows_enabled = false;
+        light.shadow_maps_enabled = false;
     }
     tracing::info!(
         "Sensor cameras detected — editor throttled to ~24 fps, shadows off (macOS GPU sharing)"
@@ -1287,12 +1297,6 @@ pub fn sync_object_3d(
     }
 }
 
-fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
-    for t in &q {
-        *res = t.clone();
-    }
-}
-
 pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
     // Timestamp reset must run before clear_state mutates SeriesStoreSession.addr,
     // so soft/hard is decided against the pre-reconnect session identity.
@@ -1417,6 +1421,10 @@ fn apply_series_store_on_reconnect(
     }
 }
 
+/// Clears DB sync baselines on hard reconnect. Does **not** clear
+/// [`InitialKdlPath`](plugins::kdl_document::InitialKdlPath): a CLI `--kdl`
+/// override must stay sticky so reconnect re-applies the local file instead of
+/// only `schematic.active`.
 fn invalidate_schematic_sync_baselines(
     last_synced_key: &mut plugins::kdl_document::LastSyncedActiveKey,
     last_synced_revision: &mut plugins::kdl_document::LastSyncedAssetsRevision,
@@ -2366,7 +2374,19 @@ pub fn update_eql_context(
 ) {
     if path_reg.0.is_empty() {
         return;
-    };
+    }
+    // Rebuild only when the registries that feed the context change. Blindly
+    // assigning every frame marks `EqlContext` dirty and forces downstream
+    // recompiles (viewports / object_3d) for no reason.
+    if !path_reg.is_changed()
+        && !component_metadata_registry.is_changed()
+        && !component_schema_registry.is_changed()
+        && !eql_context.0.component_parts.is_empty()
+    {
+        return;
+    }
+    let earliest = eql_context.0.earliest_timestamp;
+    let latest = eql_context.0.last_timestamp;
     eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
@@ -2387,8 +2407,8 @@ pub fn update_eql_context(
             }
             Some(Arc::new(component))
         }),
-        Timestamp(i64::MIN),
-        Timestamp(i64::MAX),
+        earliest,
+        latest,
     );
 }
 

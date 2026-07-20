@@ -1,4 +1,5 @@
 use bevy::{
+    camera::Hdr,
     camera::visibility::RenderLayers,
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -9,14 +10,13 @@ use bevy::{
     input::keyboard::Key,
     log::warn,
     prelude::*,
-    render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::AsyncPlugin;
 use bevy_editor_cam::input::EditorCamInputMessage;
 use bevy_egui::{
-    EguiContext, EguiContexts, EguiPreUpdateSet,
+    EguiContext, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
 };
 use std::collections::{HashMap, HashSet};
@@ -77,6 +77,7 @@ use crate::{
 use self::inspector::entity::ComponentFilter;
 
 use self::command_palette::CommandPalette;
+pub use self::widgets::SystemStateExt;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 
 pub mod actions;
@@ -317,7 +318,7 @@ fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx
         .data(|data| data.get_temp::<bool>(egui_popup_hovered_id()))
         .unwrap_or(false);
 
-    if ctx.is_popup_open() && pointer_over_popup {
+    if ctx.any_popup_open() && pointer_over_popup {
         register_window_input_blocker(
             world,
             window,
@@ -439,23 +440,20 @@ impl SettingModalState {
 }
 
 #[derive(SystemParam)]
-pub struct MainLayout<'w, 's> {
-    _contexts: EguiContexts<'w, 's>,
-    _images: Local<'s, images::Images>,
+pub struct MainLayout<'s> {
+    _marker: Local<'s, ()>,
 }
 
-impl RootWidgetSystem for MainLayout<'_, '_> {
+impl RootWidgetSystem for MainLayout<'_> {
     type Args = ();
     type Output = ();
 
     fn ctx_system(
         world: &mut World,
-        state: &mut SystemState<Self>,
+        _state: &mut SystemState<Self>,
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let _state = state.get_mut(world);
-
         // Update theme every frame to reflect color scheme changes
         theme::set_theme(ctx);
 
@@ -472,7 +470,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_os = "macos"))]
         let frame = egui::Frame::new();
 
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+        utils::show_central_panel(egui::CentralPanel::default().frame(frame), ctx, |ui| {
             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
             ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
         });
@@ -497,7 +495,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.params_mut(world);
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
@@ -699,7 +697,7 @@ type MainCameraViewportQueryItem = (
 );
 
 fn set_camera_viewport(
-    window: Query<(Entity, &Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
+    window: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut main_camera_query: Query<MainCameraViewportQueryItem, With<MainCamera>>,
     mut entries: Local<Vec<(Entity, bool)>>,
 ) {
@@ -715,10 +713,12 @@ fn set_camera_viewport(
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
-    let Some((primary_entity, window, egui_settings)) = window.iter().next() else {
+    let Some((primary_entity, window)) = window.iter().next() else {
         return;
     };
-    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+    // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`; the window
+    // scale factor is the full logical→physical conversion now.
+    let scale_factor = window.scale_factor();
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
@@ -777,19 +777,15 @@ fn set_camera_viewport(
 
 fn set_secondary_camera_viewport(
     mut cameras: Query<(&mut Camera, &ViewportRect, Option<&NavGizmoCamera>)>,
-    window_query: Query<(
-        Entity,
-        &Window,
-        &tiles::WindowId,
-        &tiles::WindowState,
-        &bevy_egui::EguiContextSettings,
-    )>,
+    window_query: Query<(Entity, &Window, &tiles::WindowId, &tiles::WindowState)>,
 ) {
-    for (_window_entity, window, id, state, egui_settings) in &window_query {
+    for (_window_entity, window, id, state) in &window_query {
         if id.is_primary() {
             continue;
         }
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`; the window
+        // scale factor is the full logical→physical conversion now.
+        let scale_factor = window.scale_factor();
 
         let mut next_order = 0;
 

@@ -121,7 +121,8 @@ fn update_theme_on_mode_change(
             for child in children.iter() {
                 original_materials.colors.insert(child, new_color);
                 if let Ok(mat_handle) = material_query.get(child)
-                    && let Some(mat) = materials.get_mut(&mat_handle.0)
+                    && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+                    && mat.base_color != new_color
                 {
                     mat.base_color = new_color;
                 }
@@ -130,7 +131,8 @@ fn update_theme_on_mode_change(
 
         original_materials.colors.insert(entity, new_color);
         if let Ok(mat_handle) = material_query.get(entity)
-            && let Some(mat) = materials.get_mut(&mat_handle.0)
+            && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+            && mat.base_color != new_color
         {
             mat.base_color = new_color;
         }
@@ -138,7 +140,8 @@ fn update_theme_on_mode_change(
 
     for (entity, _) in arrows.iter() {
         if let Ok(mat_handle) = material_query.get(entity)
-            && let Some(mat) = materials.get_mut(&mat_handle.0)
+            && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+            && mat.base_color != colors.arrow_normal
         {
             mat.base_color = colors.arrow_normal;
         }
@@ -146,7 +149,8 @@ fn update_theme_on_mode_change(
 
     for (entity, _) in action_buttons.iter() {
         if let Ok(mat_handle) = material_query.get(entity)
-            && let Some(mat) = materials.get_mut(&mat_handle.0)
+            && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+            && mat.base_color != colors.arrow_normal
         {
             mat.base_color = colors.arrow_normal;
         }

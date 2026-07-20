@@ -36,6 +36,7 @@ use crate::{
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 
 use super::plot::{Line, gpu};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Clone)]
 pub struct QueryPlotPane {
@@ -320,7 +321,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
         // Use a default texture ID if scrub_icon is not provided
         // This should only happen during initialization, and will be set properly in the UI
         let scrub_icon = scrub_icon.unwrap_or(egui::TextureId::default());
-        let mut state = state.get_mut(world);
+        let mut state = state.params_mut(world);
         let Ok(mut plot) = state.states.get_mut(entity) else {
             return;
         };

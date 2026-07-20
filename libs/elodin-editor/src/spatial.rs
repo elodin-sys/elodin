@@ -8,8 +8,8 @@
 //! Two implementations live behind the `big_space` cargo feature:
 //!
 //! * `feature = "big_space"` (default, **the only supported product mode**):
-//!   the surface re-exports / wraps types from `big_space` 0.12. The
-//!   wrapper is needed because that release reorganised the API:
+//!   the surface re-exports / wraps types from `big_space` 0.13. The
+//!   wrapper is needed because the 0.12 release reorganised the API:
 //!   `FloatingOriginSettings` is gone, replaced by a `Grid` component
 //!   stored on the `BigSpace` root entity.
 //! * `not(feature = "big_space")`: dummy implementations that compile but

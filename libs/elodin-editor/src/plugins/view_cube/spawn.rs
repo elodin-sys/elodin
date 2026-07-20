@@ -100,7 +100,7 @@ fn spawn_frame_view_cube_mesh(
     let scene = asset_server.load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
 
     let cube_root_cmd = commands.spawn((
-        SceneRoot(scene),
+        WorldAssetRoot(scene),
         Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(config.scale)),
         Visibility::Hidden,
         ViewCubeRoot,
@@ -264,7 +264,7 @@ fn spawn_axes(
     let axis_origin = -points_to * (CUBE_HALF_EXTENT + axis_center_offset);
 
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
-    let font: Handle<FontMesh> =
+    let font: Handle<Font> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
     let axis_label_scale = 0.37;
     let axis_label_depth = 0.005;
@@ -302,27 +302,23 @@ fn spawn_axes(
 
         let label_pos = axis_origin + direction * axis_label_distance;
         let mut label_cmd = commands.spawn((
-            TextMeshBundle {
-                text_mesh: TextMesh {
-                    text: name.to_string(),
-                    font: font.clone(),
-                    style: TextMeshStyle {
-                        depth: axis_label_depth,
-                        anchor: TextAnchor::Center,
-                        ..default()
-                    },
-                },
-                material: MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: color,
-                    emissive: LinearRgba::BLACK,
-                    unlit: true,
-                    cull_mode: None,
+            TextMesh {
+                text: name.to_string(),
+                font: font.clone(),
+                style: TextMeshStyle {
+                    depth: axis_label_depth,
+                    anchor: TextAnchor::Center,
                     ..default()
-                })),
-                transform: Transform::from_translation(label_pos)
-                    .with_scale(Vec3::splat(axis_label_scale)),
-                ..default()
+                },
             },
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: color,
+                emissive: LinearRgba::BLACK,
+                unlit: true,
+                cull_mode: None,
+                ..default()
+            })),
+            Transform::from_translation(label_pos).with_scale(Vec3::splat(axis_label_scale)),
             Pickable::IGNORE,
             AxisLabelBillboard {
                 axis_direction: direction,
@@ -426,7 +422,7 @@ fn spawn_face_labels(
     render_layers: Option<&RenderLayers>,
     parent: Entity,
 ) {
-    let font: Handle<FontMesh> =
+    let font: Handle<Font> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
 
     let label_scale = 0.6;
@@ -445,23 +441,19 @@ fn spawn_face_labels(
         });
 
         let mut label_cmd = commands.spawn((
-            TextMeshBundle {
-                text_mesh: TextMesh {
-                    text: label.text.to_string(),
-                    font: font.clone(),
-                    style: TextMeshStyle {
-                        depth: label_depth,
-                        anchor: TextAnchor::Center,
-                        ..default()
-                    },
+            TextMesh {
+                text: label.text.to_string(),
+                font: font.clone(),
+                style: TextMeshStyle {
+                    depth: label_depth,
+                    anchor: TextAnchor::Center,
                     ..default()
                 },
-                material: MeshMaterial3d(material),
-                transform: Transform::from_translation(label.position)
-                    .with_rotation(label.rotation)
-                    .with_scale(Vec3::splat(label_scale)),
-                ..default()
             },
+            MeshMaterial3d(material),
+            Transform::from_translation(label.position)
+                .with_rotation(label.rotation)
+                .with_scale(Vec3::splat(label_scale)),
             Pickable::IGNORE,
             ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
@@ -799,7 +791,7 @@ fn swap_zoom_buttons_on_alt(
             return;
         };
 
-        let Some(zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
+        let Some(mut zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
             return;
         };
         let zoom_icon: Handle<Image> = if pressed {

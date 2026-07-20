@@ -6,7 +6,7 @@ use crate::terrain::{
         terrain_material::TerrainMaterialPlugin,
         terrain_view_bind_group::TerrainViewData,
         tiling_prepass::{
-            queue_tiling_prepass, TilingPrepassItem, TilingPrepassLabel, TilingPrepassNode,
+            dispatch_tiling_prepass, queue_tiling_prepass, TilingPrepassItem,
             TilingPrepassPipelines,
         },
         world_mesh_material::WorldMeshMaterial,
@@ -20,10 +20,12 @@ use crate::terrain::{
     terrain_view::TerrainViewComponents,
 };
 use bevy::{
+    core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
-        graph::CameraDriverLabel, render_graph::RenderGraph, render_resource::*, Render, RenderApp,
-        RenderSystems,
+        render_resource::*,
+        renderer::{RenderGraph, RenderGraphSystems},
+        Render, RenderApp, RenderSystems,
     },
 };
 
@@ -119,13 +121,16 @@ impl Plugin for TerrainPlugin {
     fn finish(&self, app: &mut App) {
         load_terrain_shaders(app);
 
-        let render_app = app
-            .sub_app_mut(RenderApp)
+        app.sub_app_mut(RenderApp)
             .init_resource::<TilingPrepassPipelines>()
-            .init_resource::<SpecializedComputePipelines<TilingPrepassPipelines>>();
-
-        let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
-        render_graph.add_node(TilingPrepassLabel, TilingPrepassNode);
-        render_graph.add_node_edge(TilingPrepassLabel, CameraDriverLabel);
+            .init_resource::<SpecializedComputePipelines<TilingPrepassPipelines>>()
+            // Fill the indirect buffers before any camera renders the terrain
+            // (previously a render-graph node edge to `CameraDriverLabel`).
+            .add_systems(
+                RenderGraph,
+                dispatch_tiling_prepass
+                    .in_set(RenderGraphSystems::Render)
+                    .before(camera_driver),
+            );
     }
 }

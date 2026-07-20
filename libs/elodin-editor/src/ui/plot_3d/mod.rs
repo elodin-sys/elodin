@@ -1,14 +1,15 @@
 use bevy::{
-    app::{PreUpdate, Update},
+    app::{PostUpdate, Update},
     asset::{Assets, Handle},
     camera::visibility::RenderLayers,
     ecs::{
         entity::Entity,
-        query::{Added, With, Without},
-        system::{Commands, Local, Query, Res, ResMut},
+        query::{With, Without},
+        system::{Commands, Query, Res, ResMut},
     },
     math::{DVec3, Vec4},
     prelude::{Color, GlobalTransform, IntoScheduleConfigs, Transform, warn_once},
+    transform::TransformSystems,
 };
 use bevy_geo_frames::GeoPosition;
 use impeller2_bevy::ComponentMetadataRegistry;
@@ -16,8 +17,8 @@ use impeller2_wkt::Line3d;
 
 use gpu::{LineConfig, LineUniform};
 
-use super::plot::{CollectedGraphData, Line, PlotDataComponent};
-use crate::{EqlContext, PositionSync, ui::schematic::EqlExt};
+use super::plot::{CollectedGraphData, Line, PlotDataComponent, queue_timestamp_read};
+use crate::{EqlContext, ui::schematic::EqlExt};
 
 pub mod gpu;
 
@@ -41,49 +42,47 @@ fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
     }
 }
 
-/// Write the line's first sample into `GeoPosition` (frame coords). The geo
-/// pipeline then owns Transform/GridCell; GPU vertices stay frame-relative to
-/// that same first point.
+/// Keep `GeoPosition` aligned with the LineTree's first sample (frame coords).
+/// GPU vertices are `p - first`; the entity pose must use the same first point
+/// so the trail lands in world space.
 ///
-/// Entities are queued when their `gpu::LineHandles` are added and stay queued
-/// until all three line assets have a first sample, so the anchor is written
-/// exactly once per handle insertion.
+/// Short selected-time windows rebuild each LineTree to the visible range, so
+/// that first sample slides as the window rolls. The pose must track it —
+/// writing once at handle insert strands the trail at the original start while
+/// vertices re-anchor to the window (trail appears to vanish near the craft).
+/// Full-range recordings keep a stable first sample, so this is a no-op write
+/// after the initial sync and does not reintroduce ECEF jitter.
+///
+/// Scheduled after [`queue_timestamp_read`] so a rolling-window rebuild and the
+/// pose update land in the same frame (before PostUpdate geo→Transform).
 fn sync_line_3d_anchor(
-    added: Query<Entity, (Added<gpu::LineHandles>, With<Line3d>)>,
-    mut queue: Local<Vec<Entity>>,
     mut lines: Query<(&gpu::LineHandles, &mut GeoPosition), With<Line3d>>,
     line_assets: Res<Assets<Line>>,
 ) {
-    queue.extend(&added);
-    queue.retain(|&entity| {
-        let Ok((handles, mut geo)) = lines.get_mut(entity) else {
-            // Entity despawned or lost its components; drop it from the queue.
-            return false;
-        };
+    for (handles, mut geo) in &mut lines {
         let Some(x) = line_assets
             .get(&handles.0[0])
             .and_then(|l| l.data.first_sample())
         else {
-            return true;
+            continue;
         };
         let Some(y) = line_assets
             .get(&handles.0[1])
             .and_then(|l| l.data.first_sample())
         else {
-            return true;
+            continue;
         };
         let Some(z) = line_assets
             .get(&handles.0[2])
             .and_then(|l| l.data.first_sample())
         else {
-            return true;
+            continue;
         };
         let first = DVec3::new(x as f64, y as f64, z as f64);
         if geo.1 != first {
             geo.1 = first;
         }
-        false
-    });
+    }
 }
 
 pub fn sync_line_plot_3d(
@@ -198,7 +197,28 @@ impl bevy::app::Plugin for LinePlot3dPlugin {
         app.init_resource::<CollectedGraphData>()
             .add_plugins(gpu::Plot3dGpuPlugin)
             .add_systems(Update, sync_line_plot_3d)
-            .add_systems(PreUpdate, sync_line_3d_anchor.before(PositionSync));
+            // After SeriesStore→LineTree projection so rolling windows update
+            // the anchor in the same frame the tree's first sample slides.
+            .add_systems(
+                Update,
+                sync_line_3d_anchor
+                    .after(queue_timestamp_read)
+                    .after(sync_line_plot_3d),
+            )
+            // Re-apply geo→Transform after Update may have moved the anchor;
+            // `update_uniform_model` (after Propagate) then copies a matching model.
+            .add_systems(
+                PostUpdate,
+                (
+                    #[cfg(not(feature = "big_space"))]
+                    bevy_geo_frames::apply_transforms,
+                    bevy_geo_frames::apply_geo_rotation,
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::apply_big_translation,
+                )
+                    .chain()
+                    .before(TransformSystems::Propagate),
+            );
     }
 }
 
@@ -213,5 +233,22 @@ mod tests {
         // this alpha as-is; fallback futures get the default fade in `resolve`.
         let color = impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
         assert_eq!(line_color_linear(&color).w, 0.25);
+    }
+
+    #[test]
+    fn rolling_window_anchor_must_match_entity_pose() {
+        // GPU vertices are `p - first_visible`. Entity pose must use that same
+        // first point; a stale recording-start pose offsets the trail by
+        // (start - first_visible) and the path leaves the craft.
+        let recording_start = DVec3::new(0.0, 0.0, 0.0);
+        let window_first = DVec3::new(100.0, 0.0, 50.0);
+        let tip = DVec3::new(120.0, 0.0, 60.0);
+        let tip_local = tip - window_first;
+
+        let stale_placed = recording_start + tip_local;
+        assert!((stale_placed - tip).length() > 10.0);
+
+        let synced_placed = window_first + tip_local;
+        assert!((synced_placed - tip).length() < 1e-9);
     }
 }

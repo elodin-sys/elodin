@@ -9,7 +9,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::log::warn;
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
-use bevy::scene::{SceneInstance, SceneSpawner};
+use bevy::world_serialization::{WorldInstance, WorldInstanceSpawner};
 use bevy_editor_cam::controller::component::{EditorCam, OrbitConstraint};
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
@@ -49,7 +49,10 @@ pub fn snap_initial_camera(
     for (entity, transform, editor_cam) in cameras.iter() {
         if let Ok(direction) = Dir3::new(Vec3::NEG_Z) {
             look_to.write(LookToTrigger::auto_snap_up_direction(
-                direction, entity, transform, editor_cam,
+                direction.as_dvec3(),
+                entity,
+                &transform.rotation.as_dquat(),
+                editor_cam,
             ));
         }
         commands.entity(entity).remove::<NeedsInitialSnap>();
@@ -205,8 +208,8 @@ pub fn orient_axis_labels_to_screen_plane(
 pub fn apply_render_layers_to_scene(
     view_cube_query: Query<(Entity, &RenderLayers, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
-    scene_instances: Query<&SceneInstance>,
-    scene_spawner: Res<SceneSpawner>,
+    scene_instances: Query<&WorldInstance>,
+    scene_spawner: Res<WorldInstanceSpawner>,
     view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
@@ -463,8 +466,8 @@ pub fn handle_view_cube_editor(
                         choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
                     });
                 let trigger = LookToTrigger {
-                    target_facing_direction: facing_local,
-                    target_up_direction: chosen_up,
+                    target_facing_direction: facing_local.as_dvec3(),
+                    target_up_direction: chosen_up.as_dvec3(),
                     camera: entity,
                 };
                 let target_rotation = trigger_rotation(&trigger);
@@ -508,8 +511,8 @@ pub fn handle_view_cube_editor(
                 let (chosen_up, _, _, _, _, _) =
                     choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local);
                 let trigger = LookToTrigger {
-                    target_facing_direction: facing_local,
-                    target_up_direction: chosen_up,
+                    target_facing_direction: facing_local.as_dvec3(),
+                    target_up_direction: chosen_up.as_dvec3(),
                     camera: entity,
                 };
                 let target_rotation = trigger_rotation(&trigger);
@@ -549,8 +552,8 @@ pub fn handle_view_cube_editor(
                         choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
                     });
                 let trigger = LookToTrigger {
-                    target_facing_direction: facing_local,
-                    target_up_direction: chosen_up,
+                    target_facing_direction: facing_local.as_dvec3(),
+                    target_up_direction: chosen_up.as_dvec3(),
                     camera: entity,
                 };
                 lookup.arrow_cache.set_target(
@@ -617,7 +620,7 @@ pub fn handle_view_cube_editor(
             // (world vertical) like a drag-orbit, so the horizon stays level.
             // Falls back to the camera up only when the orbit is unconstrained.
             let orbit_up_world = match editor_cam.orbit_constraint {
-                OrbitConstraint::Fixed { up, .. } => up,
+                OrbitConstraint::Fixed { up, .. } => up.as_vec3(),
                 OrbitConstraint::Free => base_up_world,
             };
 
@@ -679,8 +682,8 @@ pub fn handle_view_cube_editor(
             let up_local = new_rotation_local * Vec3::Y;
             if let (Ok(facing), Ok(up_dir)) = (Dir3::new(facing_local), Dir3::new(up_local)) {
                 look_to.write(LookToTrigger {
-                    target_facing_direction: facing,
-                    target_up_direction: up_dir,
+                    target_facing_direction: facing.as_dvec3(),
+                    target_up_direction: up_dir.as_dvec3(),
                     camera: entity,
                 });
             }
@@ -709,9 +712,9 @@ pub fn handle_view_cube_editor(
                     );
                     if let Ok(facing) = Dir3::new(Vec3::NEG_Z) {
                         look_to.write(LookToTrigger::auto_snap_up_direction(
-                            facing,
+                            facing.as_dvec3(),
                             entity,
-                            transform.as_ref(),
+                            &transform.rotation.as_dquat(),
                             &editor_cam,
                         ));
                     }
@@ -731,8 +734,8 @@ pub fn handle_view_cube_editor(
 fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
     Transform::default()
         .looking_to(
-            *trigger.target_facing_direction,
-            *trigger.target_up_direction,
+            trigger.target_facing_direction.as_vec3(),
+            trigger.target_up_direction.as_vec3(),
         )
         .rotation
 }
@@ -1093,7 +1096,7 @@ mod tests {
     use super::*;
     use crate::plugins::render_layer_alloc::view_cube_render_layers;
     use bevy::asset::AssetPlugin;
-    use bevy::scene::{Scene, ScenePlugin, SceneRoot};
+    use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldSerializationPlugin};
 
     #[test]
     fn angle_to_target_rotation_default_is_zero() {
@@ -1297,7 +1300,7 @@ mod tests {
     fn view_cube_scene_descendants_are_layered_before_scene_is_revealed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.init_resource::<SceneSpawner>();
+        app.init_resource::<WorldInstanceSpawner>();
         app.add_systems(Update, apply_render_layers_to_scene);
 
         let expected_layers = view_cube_render_layers(bevy_geo_frames::GeoFrame::ENU);
@@ -1342,20 +1345,24 @@ mod tests {
     #[test]
     fn view_cube_scene_root_is_revealed_after_scene_instance_is_ready() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default(), ScenePlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            WorldSerializationPlugin,
+        ));
         app.add_systems(Update, apply_render_layers_to_scene);
 
         let render_layers = view_cube_render_layers(bevy_geo_frames::GeoFrame::ENU);
         let default_layers = RenderLayers::layer(0);
         let scene_handle = app
             .world_mut()
-            .resource_mut::<Assets<Scene>>()
-            .add(Scene::new(World::new()));
+            .resource_mut::<Assets<WorldAsset>>()
+            .add(WorldAsset::new(World::new()));
 
         let root = app
             .world_mut()
             .spawn((
-                SceneRoot(scene_handle),
+                WorldAssetRoot(scene_handle),
                 ViewCubeRoot,
                 Visibility::Hidden,
                 render_layers,

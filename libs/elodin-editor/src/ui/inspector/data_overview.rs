@@ -4,6 +4,7 @@ use bevy_egui::egui;
 
 use impeller2::types::ComponentId;
 
+use crate::ui::widgets::SystemStateExt;
 use crate::{
     EqlContext,
     ui::{
@@ -46,7 +47,7 @@ impl WidgetSystem for InspectorDataOverview<'_> {
         ui: &mut egui::Ui,
         (): Self::Args,
     ) -> Self::Output {
-        let mut params = state.get_mut(_world);
+        let mut params = state.params_mut(_world);
         let mut entries: Vec<(ComponentId, String, String, bool)> = Vec::new();
         let mut components: Vec<(ComponentId, String, String)> = Vec::new();
         collect_components(&params.eql_context.0.component_parts, &mut components);

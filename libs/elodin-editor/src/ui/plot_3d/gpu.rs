@@ -1,3 +1,4 @@
+use crate::ui::widgets::SystemStateExt;
 use crate::{
     SelectedTimeRange,
     ui::plot::{
@@ -12,14 +13,10 @@ use bevy::{
     app::{Plugin, PostUpdate},
     asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
     color::ColorToComponents,
-    core_pipeline::{
-        core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
-        prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
-    },
+    core_pipeline::core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d, TransparentSortingInfo3d},
     ecs::{
         component::Component,
         entity::Entity,
-        query::Has,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
             Commands, Query, Res, ResMut, SystemState,
@@ -27,10 +24,9 @@ use bevy::{
         },
         world::{FromWorld, Mut, World},
     },
-    image::BevyDefault,
     math::{DVec3, Mat4, Vec4},
     mesh::VertexBufferLayout,
-    pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
+    pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup, ViewKeyCache},
     prelude::{Color, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
@@ -41,7 +37,7 @@ use bevy::{
         },
         render_resource::{binding_types::uniform_buffer, *},
         renderer::{RenderDevice, RenderQueue},
-        view::{ExtractedView, Msaa, ViewTarget},
+        view::ExtractedView,
     },
     transform::{
         TransformSystems,
@@ -163,7 +159,10 @@ impl Plugin for Plot3dGpuPlugin {
             descriptor: index_descriptor,
         });
 
-        render_app.init_resource::<LinePipeline>();
+        render_app.add_systems(
+            bevy::render::RenderStartup,
+            init_line_pipeline_3d.after(bevy::pbr::MeshPipelineSystems),
+        );
     }
 }
 
@@ -304,20 +303,30 @@ pub struct LinePipeline {
     values_layout: BindGroupLayoutDescriptor,
 }
 
-impl FromWorld for LinePipeline {
-    fn from_world(world: &mut bevy::prelude::World) -> Self {
-        Self {
-            mesh_pipeline: world.resource::<MeshPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().descriptor.clone(),
-            index_layout: world.resource::<LineIndexLayout>().descriptor.clone(),
-            values_layout: world.resource::<LineValuesLayout>().descriptor.clone(),
-        }
-    }
+/// `MeshPipeline` is created in a `RenderStartup` system since Bevy 0.19, so
+/// the line pipeline must be built there too (after `MeshPipelineSystems`)
+/// instead of via `FromWorld` in plugin `finish`.
+fn init_line_pipeline_3d(
+    mut commands: Commands,
+    mesh_pipeline: Res<MeshPipeline>,
+    uniform_layout: Res<UniformLayout>,
+    index_layout: Res<LineIndexLayout>,
+    values_layout: Res<LineValuesLayout>,
+) {
+    commands.insert_resource(LinePipeline {
+        mesh_pipeline: mesh_pipeline.clone(),
+        uniform_layout: uniform_layout.descriptor.clone(),
+        index_layout: index_layout.descriptor.clone(),
+        values_layout: values_layout.descriptor.clone(),
+    });
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
     view_key: MeshPipelineKey,
+    /// The view's color target format (Bevy 0.19 removed the
+    /// `MeshPipelineKey::HDR` bit in favor of `ExtractedView::target_format`).
+    target_format: TextureFormat,
 }
 
 impl SpecializedRenderPipeline for LinePipeline {
@@ -345,11 +354,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             self.index_layout.clone(),
         ];
 
-        let format = if key.view_key.contains(MeshPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
+        let format = key.target_format;
 
         RenderPipelineDescriptor {
             vertex: VertexState {
@@ -372,8 +377,8 @@ impl SpecializedRenderPipeline for LinePipeline {
             primitive: PrimitiveState::default(),
             depth_stencil: Some(DepthStencilState {
                 format: CORE_3D_DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Greater,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(CompareFunction::Greater),
                 stencil: StencilState::default(),
                 bias: DepthBiasState::default(),
             }),
@@ -383,7 +388,7 @@ impl SpecializedRenderPipeline for LinePipeline {
                 alpha_to_coverage_enabled: false,
             },
             label: Some("Plot Line Pipeline 3d".into()),
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         }
     }
@@ -545,7 +550,8 @@ fn resolve_line_frame(geo_pos: Option<&GeoPosition>, line: Option<&Line3d>) -> G
     line.and_then(|l| l.frame).unwrap_or_default()
 }
 
-/// First sample of the line (full recording), in the line's own frame.
+/// First sample currently in the LineTree (visible window), in frame coords.
+/// Must match the entity `GeoPosition` written by `sync_line_3d_anchor`.
 fn line_first_point_frame(
     line_assets: &Assets<Line>,
     handles: &[Handle<Line>; 3],
@@ -650,7 +656,7 @@ fn extract_lines(
             current_timestamp,
             timeline_settings,
             latest_follow,
-        ) = cached_state.state.get_mut(world);
+        ) = cached_state.state.params_mut(world);
         let selected_range = if crate::is_short_accuracy_window(&selected_time_range.0) {
             selected_time_range.0.clone()
         } else {
@@ -921,71 +927,46 @@ fn extract_lines(
     })
 }
 
-type ViewQuery = (
-    &'static ExtractedView,
-    &'static Msaa,
-    Option<&'static RenderLayers>,
-    (
-        Has<NormalPrepass>,
-        Has<DepthPrepass>,
-        Has<MotionVectorPrepass>,
-        Has<DeferredPrepass>,
-    ),
-);
-
 #[allow(clippy::too_many_arguments)]
 fn queue_line(
     draw_functions: Res<DrawFunctions<Transparent3d>>,
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
+    view_key_cache: Res<ViewKeyCache>,
     lines: Query<(Entity, &MainEntity, &LineHandles, &LineConfig)>,
-    mut views: Query<ViewQuery>,
+    mut views: Query<(&ExtractedView, Option<&RenderLayers>)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawLineData>().unwrap();
 
-    for (
-        view,
-        msaa,
-        render_layers,
-        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
-    ) in &mut views
-    {
+    for (view, render_layers) in &mut views {
         let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
         else {
             continue;
         };
+        // Canonical per-view MeshPipelineKey (MSAA, prepass, tonemap, …) filled
+        // by bevy_pbr in PrepareAssets — same source wireframe/materials use.
+        let Some(&view_key) = view_key_cache.get(&view.retained_view_entity) else {
+            continue;
+        };
         let render_layers = render_layers.cloned().unwrap_or_default();
-
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
-            | MeshPipelineKey::from_hdr(view.hdr);
-
-        if normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-
-        if depth_prepass {
-            view_key |= MeshPipelineKey::DEPTH_PREPASS;
-        }
-
-        if motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-
-        if deferred_prepass {
-            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
-        }
 
         for (entity, main_entity, _handle, config) in &lines {
             if !config.render_layers.intersects(&render_layers) {
                 continue;
             }
 
-            let pipeline =
-                pipelines.specialize(&pipeline_cache, &pipeline, LinePipelineKey { view_key });
+            let pipeline = pipelines.specialize(
+                &pipeline_cache,
+                &pipeline,
+                LinePipelineKey {
+                    view_key,
+                    target_format: view.target_format,
+                },
+            );
 
-            transparent_phase.add(Transparent3d {
+            transparent_phase.add_transient(Transparent3d {
                 entity: (entity, *main_entity),
                 draw_function,
                 pipeline,
@@ -993,6 +974,7 @@ fn queue_line(
                 batch_range: 0..1,
                 extra_index: PhaseItemExtraIndex::None,
                 indexed: true,
+                sorting_info: TransparentSortingInfo3d::AlwaysOnTop,
             });
         }
     }

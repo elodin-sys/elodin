@@ -7,6 +7,7 @@ use crate::ui::tiles::WindowState;
 use crate::ui::widgets::WidgetSystem;
 
 use super::{CurrentSchematic, SchematicBindings};
+use crate::ui::widgets::SystemStateExt;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Component, Query, ResMut};
@@ -51,7 +52,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
             mut state,
             mut window_states,
             bindings,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok(mut window_state) = window_states.get_mut(target_window) else {
             return;
         };

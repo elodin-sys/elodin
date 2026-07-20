@@ -1,7 +1,6 @@
 use crate::ui::schematic::CurrentSchematic;
 use bevy::asset::{AssetPath, AssetServer};
 use bevy::prelude::*;
-use impeller2_bevy::DbMessage;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
 use impeller2_kdl::{FromKdl, ToKdl};
@@ -30,7 +29,7 @@ pub fn sync_document_skybox(
         // Keep the in-memory document in sync for save, but suppress the asset
         // Modified event so skybox-only edits do not reload the full schematic.
         current_document.suppress_ids.insert(handle.id());
-        if let Some(document) = document_assets.get_mut(handle) {
+        if let Some(mut document) = document_assets.get_mut(handle) {
             document.root.skybox = skybox;
         }
     }
@@ -432,32 +431,86 @@ fn put_db_asset(
     Ok(())
 }
 
-/// Applies `InitialKdlPath` to `DbConfig` so that document sync can load that file.
-/// Runs before `sync_document_from_config`. Re-applies when the path is missing or different (e.g.
-/// after the connection overwrote DbConfig with metadata) so the schematic loads.
-pub fn apply_initial_kdl_path(
-    mut reader: MessageReader<DbMessage>,
-    mut initial: ResMut<InitialKdlPath>,
-    current_document: Res<CurrentDocument>,
-) -> Option<PathBuf> {
-    // If the user passed `--kdl`, we want to open that file exactly once.
-    //
-    // Historically this was only triggered by a DB config update message, but
-    // that prevents using `elodin editor --kdl <file>` in offline / no-DB
-    // scenarios.
-    let path = initial.0.take()?;
+/// Feeds `InitialKdlPath` into `sync_document_from_config` as an explicit path
+/// override. Sticky for the session: every sync receives the CLI path while it
+/// remains set, so later `DbConfig` / `schematic.active` updates cannot fall
+/// through and replace the local file. `current_document_matches_path` in
+/// `sync_document_from_config` prevents re-open spam once loaded.
+pub fn apply_initial_kdl_path(initial: Res<InitialKdlPath>) -> Option<PathBuf> {
+    initial.0.clone()
+}
 
-    // Only apply when either:
-    // - a DB config update arrived (normal flow), OR
-    // - there is no current document loaded yet (offline flow).
-    let db_updated = reader.read().any(|m| matches!(m, DbMessage::UpdateConfig));
-    if db_updated || current_document.handle.is_none() {
-        Some(path)
-    } else {
-        // Put it back; we'll try again on the next config update.
-        initial.0 = Some(path);
-        None
+/// Settle time after the EQL component fingerprint last changes before a sticky
+/// `--kdl` reopen. Metadata dumps often arrive in several packets; reloading on
+/// the first non-empty context still leaves graphs with `ComponentNotFound`.
+const STICKY_KDL_EQL_SETTLE_SECS: f64 = 0.35;
+
+/// Topology fingerprint of leaf components in an EQL context. Ignores
+/// timestamp-range updates so sticky-KDL reloads only run when the component
+/// set changes.
+fn eql_component_fingerprint(ctx: &eql::Context) -> u64 {
+    fn walk(parts: &std::collections::BTreeMap<String, eql::ComponentPart>, ids: &mut Vec<u64>) {
+        for part in parts.values() {
+            if let Some(component) = &part.component {
+                ids.push(component.id.0);
+            }
+            walk(&part.children, ids);
+        }
     }
+    let mut ids = Vec::new();
+    walk(&ctx.component_parts, &mut ids);
+    ids.sort_unstable();
+    let mut hash = ids.len() as u64;
+    for id in ids {
+        hash = hash.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(id);
+    }
+    hash
+}
+
+/// When CLI `--kdl` is sticky and the EQL component set changes (then settles),
+/// reopen the local schematic so panels that hit `ComponentNotFound` on an
+/// empty/partial first open can compile against the real component set.
+pub fn reload_sticky_kdl_when_eql_ready(
+    eql: Res<crate::EqlContext>,
+    initial: Res<InitialKdlPath>,
+    time: Res<Time>,
+    mut open: MessageWriter<OpenDocumentRequest>,
+    mut last_fingerprint: Local<u64>,
+    mut pending_since: Local<Option<f64>>,
+    mut last_reloaded_fp: Local<u64>,
+) {
+    let Some(path) = initial.0.clone() else {
+        *last_fingerprint = 0;
+        *pending_since = None;
+        *last_reloaded_fp = 0;
+        return;
+    };
+    if eql.0.component_parts.is_empty() {
+        return;
+    }
+    let fingerprint = eql_component_fingerprint(&eql.0);
+    let now = time.elapsed_secs_f64();
+    if fingerprint != *last_fingerprint {
+        *last_fingerprint = fingerprint;
+        *pending_since = Some(now);
+    }
+    let Some(since) = *pending_since else {
+        return;
+    };
+    if now - since < STICKY_KDL_EQL_SETTLE_SECS {
+        return;
+    }
+    *pending_since = None;
+    if fingerprint == *last_reloaded_fp {
+        return;
+    }
+    *last_reloaded_fp = fingerprint;
+    info!(
+        path = %path.display(),
+        fingerprint,
+        "Reloading --kdl schematic after EQL metadata settled"
+    );
+    open.write(OpenDocumentRequest(path));
 }
 
 fn current_document_matches_path(current_document: &CurrentDocument, path: &Path) -> bool {

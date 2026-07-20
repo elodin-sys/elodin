@@ -13,6 +13,8 @@ mod logical_key;
 pub mod navigation_gizmo;
 pub mod render_layer_alloc;
 #[cfg(not(target_family = "wasm"))]
+pub(crate) mod screenshot;
+#[cfg(not(target_family = "wasm"))]
 pub mod thruster_particles;
 pub mod view_cube;
 mod web_asset;

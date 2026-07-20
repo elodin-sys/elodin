@@ -374,12 +374,10 @@ fn spawn_planar_fallback_grid(
 ) -> Entity {
     commands
         .spawn((
-            bevy_infinite_grid::InfiniteGridBundle {
-                settings: fallback_grid_settings(world_mesh.frame),
-                transform: world_mesh_transform(world_mesh),
-                visibility: world_mesh_visibility(world_mesh),
-                ..default()
-            },
+            bevy::dev_tools::infinite_grid::InfiniteGrid,
+            fallback_grid_settings(world_mesh.frame),
+            world_mesh_transform(world_mesh),
+            world_mesh_visibility(world_mesh),
             WorldMeshTerrain,
             Name::new(format!("world_mesh fallback grid ({region})")),
         ))
@@ -388,14 +386,14 @@ fn spawn_planar_fallback_grid(
 
 fn fallback_grid_settings(
     frame: Option<bevy_geo_frames::GeoFrame>,
-) -> bevy_infinite_grid::InfiniteGridSettings {
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
     let (x_axis_color, z_axis_color) = if frame == Some(bevy_geo_frames::GeoFrame::NED) {
         (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
     } else {
         (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
     };
 
-    bevy_infinite_grid::InfiniteGridSettings {
+    bevy::dev_tools::infinite_grid::InfiniteGridSettings {
         minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
         major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
         z_axis_color,

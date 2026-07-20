@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use super::{
     inspector::search, schematic::Branch, tiles::sidebar::sidebar_content_ui, widgets::WidgetSystem,
 };
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w, 's> {
@@ -48,7 +49,7 @@ impl WidgetSystem for HierarchyContent<'_, '_> {
             mut window_states,
             eql_ctx,
             entity_map,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok(mut window_state) = window_states.get_mut(target_window) else {
             return;
         };

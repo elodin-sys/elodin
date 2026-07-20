@@ -16,15 +16,11 @@ use crate::terrain::{
 use bevy::{
     prelude::*,
     render::{
-        render_graph::{self, RenderLabel},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
     },
     shader::ShaderDefVal,
 };
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct TilingPrepassLabel;
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -192,7 +188,7 @@ impl SpecializedComputePipeline for TilingPrepassPipelines {
         ComputePipelineDescriptor {
             label: Some("tiling_prepass_pipeline".into()),
             layout,
-            push_constant_ranges: default(),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
             shader,
             shader_defs,
@@ -201,81 +197,69 @@ impl SpecializedComputePipeline for TilingPrepassPipelines {
     }
 }
 
-pub struct TilingPrepassNode;
+/// Dispatches the tiling prepass compute passes. Runs in the root
+/// [`bevy::render::renderer::RenderGraph`] schedule before
+/// [`bevy::core_pipeline::schedule::camera_driver`] so the indirect buffers
+/// consumed by the terrain draw commands are filled first (previously a
+/// render-graph node with an edge to `CameraDriverLabel`).
+pub(crate) fn dispatch_tiling_prepass(
+    prepass_items: Res<TerrainViewComponents<TilingPrepassItem>>,
+    pipeline_cache: Res<PipelineCache>,
+    terrain_data: Res<TerrainComponents<TerrainData>>,
+    terrain_view_data: Res<TerrainViewComponents<TerrainViewData>>,
+    culling_bind_groups: Res<TerrainViewComponents<CullingBindGroup>>,
+    debug: Option<Res<DebugTerrain>>,
+    mut context: RenderContext,
+) {
+    if debug.map(|debug| debug.freeze).unwrap_or(false) {
+        return;
+    }
 
-impl render_graph::Node for TilingPrepassNode {
-    fn run<'w>(
-        &self,
-        _graph: &mut render_graph::RenderGraphContext,
-        context: &mut RenderContext<'w>,
-        world: &'w World,
-    ) -> Result<(), render_graph::NodeRunError> {
-        let prepass_items = world.resource::<TerrainViewComponents<TilingPrepassItem>>();
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let terrain_data = world.resource::<TerrainComponents<TerrainData>>();
-        let terrain_view_data = world.resource::<TerrainViewComponents<TerrainViewData>>();
-        let culling_bind_groups = world.resource::<TerrainViewComponents<CullingBindGroup>>();
-        let debug = world.get_resource::<DebugTerrain>();
+    let command_encoder = context.command_encoder();
+    let mut compute_pass = command_encoder.begin_compute_pass(&ComputePassDescriptor::default());
 
-        if debug.map(|debug| debug.freeze).unwrap_or(false) {
-            return Ok(());
+    for (&(terrain, view), prepass_item) in prepass_items.iter() {
+        let Some((
+            refine_tiles_pipeline,
+            prepare_root_pipeline,
+            prepare_next_pipeline,
+            prepare_render_pipeline,
+        )) = prepass_item.pipelines(&pipeline_cache)
+        else {
+            continue;
+        };
+
+        let Some(culling_bind_group) = culling_bind_groups.get(&(terrain, view)) else {
+            continue;
+        };
+        let Some(terrain_data) = terrain_data.get(&terrain) else {
+            continue;
+        };
+        let Some(view_data) = terrain_view_data.get(&(terrain, view)) else {
+            continue;
+        };
+
+        compute_pass.set_bind_group(0, &**culling_bind_group, &[]);
+        compute_pass.set_bind_group(1, &terrain_data.terrain_bind_group, &[]);
+        compute_pass.set_bind_group(2, &view_data.refine_tiles_bind_group, &[]);
+        compute_pass.set_bind_group(3, &view_data.prepare_indirect_bind_group, &[]);
+
+        compute_pass.set_pipeline(prepare_root_pipeline);
+        compute_pass.dispatch_workgroups(1, 1, 1);
+
+        for _ in 0..view_data.refinement_count() {
+            compute_pass.set_pipeline(refine_tiles_pipeline);
+            compute_pass.dispatch_workgroups_indirect(&view_data.indirect_buffer, 0);
+
+            compute_pass.set_pipeline(prepare_next_pipeline);
+            compute_pass.dispatch_workgroups(1, 1, 1);
         }
 
-        context.add_command_buffer_generation_task(move |device| {
-            let mut command_encoder =
-                device.create_command_encoder(&CommandEncoderDescriptor::default());
-            let mut compute_pass =
-                command_encoder.begin_compute_pass(&ComputePassDescriptor::default());
+        compute_pass.set_pipeline(refine_tiles_pipeline);
+        compute_pass.dispatch_workgroups_indirect(&view_data.indirect_buffer, 0);
 
-            for (&(terrain, view), prepass_item) in prepass_items.iter() {
-                let Some((
-                    refine_tiles_pipeline,
-                    prepare_root_pipeline,
-                    prepare_next_pipeline,
-                    prepare_render_pipeline,
-                )) = prepass_item.pipelines(pipeline_cache)
-                else {
-                    continue;
-                };
-
-                let Some(culling_bind_group) = culling_bind_groups.get(&(terrain, view)) else {
-                    continue;
-                };
-                let Some(terrain_data) = terrain_data.get(&terrain) else {
-                    continue;
-                };
-                let Some(view_data) = terrain_view_data.get(&(terrain, view)) else {
-                    continue;
-                };
-
-                compute_pass.set_bind_group(0, &**culling_bind_group, &[]);
-                compute_pass.set_bind_group(1, &terrain_data.terrain_bind_group, &[]);
-                compute_pass.set_bind_group(2, &view_data.refine_tiles_bind_group, &[]);
-                compute_pass.set_bind_group(3, &view_data.prepare_indirect_bind_group, &[]);
-
-                compute_pass.set_pipeline(prepare_root_pipeline);
-                compute_pass.dispatch_workgroups(1, 1, 1);
-
-                for _ in 0..view_data.refinement_count() {
-                    compute_pass.set_pipeline(refine_tiles_pipeline);
-                    compute_pass.dispatch_workgroups_indirect(&view_data.indirect_buffer, 0);
-
-                    compute_pass.set_pipeline(prepare_next_pipeline);
-                    compute_pass.dispatch_workgroups(1, 1, 1);
-                }
-
-                compute_pass.set_pipeline(refine_tiles_pipeline);
-                compute_pass.dispatch_workgroups_indirect(&view_data.indirect_buffer, 0);
-
-                compute_pass.set_pipeline(prepare_render_pipeline);
-                compute_pass.dispatch_workgroups(1, 1, 1);
-            }
-
-            drop(compute_pass);
-            command_encoder.finish()
-        });
-
-        Ok(())
+        compute_pass.set_pipeline(prepare_render_pipeline);
+        compute_pass.dispatch_workgroups(1, 1, 1);
     }
 }
 

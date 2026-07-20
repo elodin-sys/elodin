@@ -30,6 +30,7 @@ use crate::{
 };
 
 use super::{InspectorIcons, empty_inspector};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
@@ -66,7 +67,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             path_reg,
             mut render_layer_alloc,
             mut filter,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         let (icons, pair) = args;
 

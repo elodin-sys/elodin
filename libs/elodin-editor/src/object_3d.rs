@@ -1,13 +1,13 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
+use bevy::material::AlphaMode;
 use bevy::math::{DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
-use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
+use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
 use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
-use bevy_render::alpha::AlphaMode;
 use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
@@ -32,7 +32,7 @@ type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<Mai
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 type GlbSceneQuery<'w, 's> =
-    Query<'w, 's, (Entity, &'static ChildOf), (With<Object3DMeshChild>, With<SceneRoot>)>;
+    Query<'w, 's, (Entity, &'static ChildOf), (With<Object3DMeshChild>, With<WorldAssetRoot>)>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
 
@@ -909,11 +909,11 @@ fn find_entities<'a, T>(
 /// least one scene is ready, false otherwise.
 pub fn on_scene_ready(
     mut scene_queue: Local<HashSet<Entity>>,
-    added_scenes: Query<Entity, Added<SceneRoot>>,
-    scene_instances: Query<&SceneInstance>,
-    scene_roots: Query<&SceneRoot>,
+    added_scenes: Query<Entity, Added<WorldAssetRoot>>,
+    scene_instances: Query<&WorldInstance>,
+    scene_roots: Query<&WorldAssetRoot>,
     names: Query<&Name>,
-    scene_spawner: Res<SceneSpawner>,
+    scene_spawner: Res<WorldInstanceSpawner>,
 ) -> Option<Entity> {
     // Add newly added scenes to the queue.
     for entity in added_scenes.iter() {
@@ -935,7 +935,7 @@ pub fn on_scene_ready(
                 true // Keep in queue since it's not ready yet.
             }
         } else {
-            // SceneInstance not found yet; keep in queue.
+            // WorldInstance not found yet; keep in queue.
             true
         }
     });
@@ -948,7 +948,7 @@ pub fn on_scene_ready(
         let scene_info = scene_roots
             .get(*entity)
             .map(|r| format!("handle id={:?}", r.0.id()))
-            .unwrap_or_else(|_| "<no SceneRoot>".to_string());
+            .unwrap_or_else(|_| "<no WorldAssetRoot>".to_string());
         info!(
             entity = ?entity,
             name = %name,
@@ -1034,7 +1034,7 @@ pub fn update_object_3d_system(
                 if let Some(child) = mesh_child
                     && let Ok(mut params) = mat3_params.get_mut(child)
                 {
-                    params.linear = linear;
+                    params.set_if_neq(Mat3Params { linear });
                 }
                 let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
                 ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
@@ -1678,7 +1678,7 @@ pub fn spawn_mesh(
             };
 
             commands.spawn((
-                SceneRoot(scene),
+                WorldAssetRoot(scene),
                 offset_transform,
                 GlobalTransform::default(),
                 Visibility::default(),
@@ -1975,7 +1975,7 @@ pub fn update_object_3d_billboard_system(
                 };
 
                 if let Ok(mat_handle) = billboard_materials_query.get(*bb_entity)
-                    && let Some(mat) = materials.get_mut(mat_handle)
+                    && let Some(mut mat) = materials.get_mut(mat_handle)
                 {
                     let mut c = mat.base_color;
                     c.set_alpha(base_alpha * alpha);
@@ -2165,6 +2165,7 @@ mod joint_eql_cast_tests {
     use nox::{Array, ArrayBuf};
 
     use super::compile_eql_expr;
+    use crate::ui::widgets::SystemStateExt;
 
     #[test]
     fn joint_rotation_vector_string_with_cast_evaluates_like_kdl_example() {
@@ -2189,7 +2190,7 @@ mod joint_eql_cast_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (q,) = system_state.get(&world);
+        let (q,) = system_state.params(&world);
         let out = compiled
             .expect("compiled expr")
             .execute(&entity_map, &q)
@@ -2220,6 +2221,7 @@ mod ellipsoid_scale_eql_tests {
     use nox::Array;
 
     use super::{compile_scale_eql, component_value_to_vec3};
+    use crate::ui::widgets::SystemStateExt;
 
     fn pos_std_var_component(name: &str) -> Arc<eql::Component> {
         f64_component(name, &[3])
@@ -2283,7 +2285,7 @@ mod ellipsoid_scale_eql_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (component_values,) = system_state.get(&world);
+        let (component_values,) = system_state.params(&world);
         let compiled = compile_scale_eql("left + right", &ctx).expect("expression should compile");
 
         let err = compiled
@@ -2315,7 +2317,7 @@ mod ellipsoid_scale_eql_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (component_values,) = system_state.get(&world);
+        let (component_values,) = system_state.params(&world);
 
         for (scale_expr, expected) in [
             (

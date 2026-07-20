@@ -135,7 +135,7 @@ impl TerrainData {
         let atlas_sampler = device.create_sampler(&SamplerDescriptor {
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
-            mipmap_filter: FilterMode::Linear,
+            mipmap_filter: MipmapFilterMode::Linear,
             anisotropy_clamp: 16, // Todo: make this customisable
             ..default()
         });
@@ -205,11 +205,11 @@ impl TerrainData {
     ) {
         for (terrain, transform, previous_transform) in terrains.iter() {
             let mesh_transforms = MeshTransforms {
-                world_from_local: (&transform.affine()).into(),
+                world_from_local: transform.affine().into(),
                 flags: 0,
-                previous_world_from_local: (&previous_transform
+                previous_world_from_local: previous_transform
                     .map(|t| t.0)
-                    .unwrap_or(transform.affine()))
+                    .unwrap_or(transform.affine())
                     .into(),
             };
             let mesh_uniform = MeshUniform::new(
@@ -218,6 +218,7 @@ impl TerrainData {
                 default(), // material_bind_group_slot: MaterialBindGroupSlot
                 None,      // lightmap
                 None,      // current_skin_index
+                None,      // morph_descriptor_index
                 None,      // tag
             );
 

@@ -11,6 +11,7 @@ use bevy::{
 use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
+use std::time::{Duration, Instant};
 
 use crate::ui::{
     colors::get_scheme,
@@ -19,6 +20,7 @@ use crate::ui::{
 };
 
 use super::RootWidgetSystem;
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct StatusBar<'w, 's> {
@@ -40,7 +42,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.params_mut(world);
         let Ok(target_window) = state_mut.primary_window.single() else {
             return;
         };
@@ -50,13 +52,14 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         let skybox_ui = &state_mut.skybox_ui;
         let skybox_cache = &state_mut.skybox_cache;
 
-        let panel = egui::TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame {
+        let panel = super::utils::show_panel(
+            egui::Panel::bottom("status_bar").frame(egui::Frame {
                 fill: get_scheme().bg_primary,
                 inner_margin: egui::Margin::symmetric(16, 4),
                 ..Default::default()
-            })
-            .show(ctx, |ui| {
+            }),
+            ctx,
+            |ui| {
                 ui.horizontal(|ui| {
                     let style = ui.style_mut();
                     style.spacing.item_spacing = [20.0, 8.0].into();
@@ -103,7 +106,8 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
 
                     super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
                 });
-            });
+            },
+        );
 
         register_window_input_blocker(
             world,
@@ -113,6 +117,125 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
             PointerOwnerPriority::Panel,
         );
     }
+}
+
+/// Process resident set size in GiB. Cached briefly — the status bar paints every frame.
+///
+/// Intentionally does **not** use Bevy's `SystemInformationDiagnosticsPlugin`:
+/// on macOS that plugin's `sysinfo` build enables `apple-app-store`, which
+/// cannot observe the current process and always reports 0 GiB.
+fn process_resident_memory_gb() -> Option<f64> {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<(Instant, f64)>> = Mutex::new(None);
+    const TTL: Duration = Duration::from_millis(500);
+
+    let mut guard = CACHE.lock().ok()?;
+    if let Some((at, gb)) = *guard
+        && at.elapsed() < TTL
+    {
+        return Some(gb);
+    }
+    let gb = process_resident_memory_bytes()? as f64 / (1024.0 * 1024.0 * 1024.0);
+    *guard = Some((Instant::now(), gb));
+    Some(gb)
+}
+
+#[cfg(target_os = "linux")]
+fn process_resident_memory_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        let Some(rest) = line.strip_prefix("VmRSS:") else {
+            continue;
+        };
+        let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+        return Some(kb.saturating_mul(1024));
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn process_resident_memory_bytes() -> Option<u64> {
+    // MACH_TASK_BASIC_INFO — current resident size (not ru_maxrss peak).
+    #[repr(C)]
+    #[derive(Default)]
+    struct MachTaskBasicInfo {
+        virtual_size: u64,
+        resident_size: u64,
+        resident_size_max: u64,
+        user_time: [u32; 2],
+        system_time: [u32; 2],
+        policy: i32,
+        suspend_count: i32,
+    }
+    const MACH_TASK_BASIC_INFO: i32 = 20;
+    const MACH_TASK_BASIC_INFO_COUNT: u32 =
+        (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<u32>()) as u32;
+
+    unsafe extern "C" {
+        fn mach_task_self() -> u32;
+        fn task_info(
+            target_task: u32,
+            flavor: i32,
+            task_info_out: *mut MachTaskBasicInfo,
+            task_info_outCnt: *mut u32,
+        ) -> i32;
+    }
+
+    let mut info = MachTaskBasicInfo::default();
+    let mut count = MACH_TASK_BASIC_INFO_COUNT;
+    let kr = unsafe {
+        task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            &mut info,
+            &mut count,
+        )
+    };
+    if kr == 0 {
+        Some(info.resident_size)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn process_resident_memory_bytes() -> Option<u64> {
+    use std::mem::{size_of, zeroed};
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut core::ffi::c_void;
+        fn GetProcessMemoryInfo(
+            process: *mut core::ffi::c_void,
+            ppsmemCounters: *mut ProcessMemoryCounters,
+            cb: u32,
+        ) -> i32;
+    }
+    unsafe {
+        let mut counters: ProcessMemoryCounters = zeroed();
+        counters.cb = size_of::<ProcessMemoryCounters>() as u32;
+        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) != 0 {
+            Some(counters.working_set_size as u64)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn process_resident_memory_bytes() -> Option<u64> {
+    None
 }
 
 fn editor_status_label_ui(ui: &mut egui::Ui, status: ConnectionStatus) -> egui::Response {
@@ -168,24 +291,4 @@ fn editor_status_label_ui(ui: &mut egui::Ui, status: ConnectionStatus) -> egui::
 
 pub fn editor_status_label(status: ConnectionStatus) -> impl egui::Widget {
     move |ui: &mut egui::Ui| editor_status_label_ui(ui, status)
-}
-
-/// Process resident set size in GiB (Linux `/proc/self/status` VmRSS).
-fn process_resident_memory_gb() -> Option<f64> {
-    #[cfg(target_os = "linux")]
-    {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        for line in status.lines() {
-            let Some(rest) = line.strip_prefix("VmRSS:") else {
-                continue;
-            };
-            let kb: f64 = rest.split_whitespace().next()?.parse().ok()?;
-            return Some(kb / (1024.0 * 1024.0));
-        }
-        None
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
 }
