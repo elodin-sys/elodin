@@ -1503,6 +1503,15 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.content_gen
     }
 
+    /// Earliest sample value in the tree (first point of the first chunk by time).
+    pub fn first_sample(&self) -> Option<D>
+    where
+        D: Copy,
+    {
+        let (_, chunk) = self.tree.first_key_value()?;
+        chunk.data.cpu().first().copied()
+    }
+
     pub fn chunk_count(&self) -> usize {
         self.tree.iter().count()
     }
@@ -1879,6 +1888,61 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         written_u32s
     }
 
+    /// Collect CPU sample values for the same visible strip that
+    /// [`Self::write_to_index_buffer_with_step`] would index (same step / clip).
+    ///
+    /// Does not require GPU-resident chunks — used by `line_3d` to build
+    /// floating-origin-local XYZ buffers.
+    pub fn collect_strip_values(&self, line_visible_range: Range<Timestamp>, step: usize) -> Vec<D>
+    where
+        D: Copy,
+    {
+        let step = step.max(1);
+        let mut out = Vec::new();
+        for chunk in self.range_iter(line_visible_range.clone()) {
+            let Some((start_offset, end_offset)) =
+                chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+            else {
+                continue;
+            };
+            let vis_len = end_offset.saturating_sub(start_offset);
+            if vis_len == 0 {
+                continue;
+            }
+            let values = chunk.data.cpu();
+            let index_chunk = IndexChunk {
+                range: 0..u32::MAX,
+                len: vis_len,
+            };
+            let end = index_chunk.clone().into_index_iter().last();
+            let mut index_iter = index_chunk.into_index_iter();
+            let mut last_written: Option<u32> = None;
+            if let Some(index) = index_iter.next() {
+                let i = start_offset + index as usize;
+                if let Some(&v) = values.get(i) {
+                    out.push(v);
+                }
+                last_written = Some(index);
+            }
+            for index in index_iter.step_by(step) {
+                let i = start_offset + index as usize;
+                if let Some(&v) = values.get(i) {
+                    out.push(v);
+                }
+                last_written = Some(index);
+            }
+            if let Some(end) = end
+                && last_written != Some(end)
+            {
+                let i = start_offset + end as usize;
+                if let Some(&v) = values.get(i) {
+                    out.push(v);
+                }
+            }
+        }
+        out
+    }
+
     pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
         let first_half =
             nodit::interval::ii(i64::MIN, line_visible_range.start.0.saturating_sub(1));
@@ -2097,7 +2161,7 @@ fn recent_tail_keep_count(n: usize, keep_recent_fraction: f32) -> usize {
     keep.min(n.saturating_sub(1))
 }
 
-fn chunk_visible_offsets(
+pub(crate) fn chunk_visible_offsets(
     timestamps: &[Timestamp],
     range: &Range<Timestamp>,
 ) -> Option<(usize, usize)> {
@@ -2373,6 +2437,38 @@ mod tests {
     }
 
     #[test]
+    fn short_window_step_one_despite_full_recording_extent() {
+        // Replay: line_3d derives chunk/index stats from the full recording, but
+        // step selection must follow the selected trailing window (last_5s).
+        let full_hour_index_count = 3_600_000;
+        assert_eq!(
+            index_sampling_step_for_selection(
+                5_000_000,
+                500,
+                full_hour_index_count,
+                crate::ui::plot::gpu::INDEX_BUFFER_LEN,
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn collect_strip_values_matches_step_sampling() {
+        let mut tree = LineTree::<f32>::default();
+        let n = 10;
+        let ts: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64 * 1_000)).collect();
+        let vals: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.iter().copied()).expect("chunk");
+        tree.insert(chunk);
+        let range = Timestamp(0)..Timestamp(9_000);
+        let step1 = tree.collect_strip_values(range.clone(), 1);
+        assert_eq!(step1, vals);
+        let step3 = tree.collect_strip_values(range, 3);
+        // first, then step_by(3) on remainder, then last if needed
+        assert_eq!(step3, vec![0.0, 1.0, 4.0, 7.0, 9.0]);
+    }
+
+    #[test]
     fn long_window_sampling_step_uses_visible_clip() {
         let zoomed_step = index_sampling_step(1, 200, 400);
         let long = index_sampling_step_for_selection(60_000_000, 1, 200, 400);
@@ -2415,6 +2511,52 @@ mod tests {
             index_sampling_step_for_selection(5_000_000, 1, 1_000, 400),
             1
         );
+    }
+
+    #[test]
+    fn short_window_over_budget_step_doubles_to_fit() {
+        // Short-window selection still starts at step 1, but when sample count
+        // exceeds INDEX_BUFFER_LEN the extract path must double the step rather
+        // than silently truncating the newest tip (line_3d FO-local path).
+        let mut tree = LineTree::<f32>::default();
+        // INDEX_BUFFER_LEN + 1 samples so step-1 strip indices exceed the budget.
+        let n = INDEX_BUFFER_LEN + 1;
+        let ts: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64)).collect();
+        let vals: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let mut offset = 0;
+        while offset < n {
+            let end = (offset + CHUNK_LEN).min(n);
+            let chunk = Chunk::from_iter(
+                &ts[offset..end],
+                Timestamp(0),
+                vals[offset..end].iter().copied(),
+            )
+            .expect("chunk");
+            tree.insert(chunk);
+            offset = end;
+        }
+        let range = Timestamp(0)..Timestamp(n as i64);
+        assert_eq!(
+            index_sampling_step_for_selection(5_000_000, 1, n, INDEX_BUFFER_LEN),
+            1,
+            "short selection must still request step 1"
+        );
+        let mut step = 1usize;
+        let mut fitted = false;
+        for _ in 0..26 {
+            let needed = tree.count_strip_index_u32s(range.clone(), step);
+            if needed <= INDEX_BUFFER_LEN as u32 {
+                fitted = true;
+                break;
+            }
+            step = step.saturating_mul(2).max(2);
+        }
+        assert!(fitted, "step doubling must fit within INDEX_BUFFER_LEN");
+        assert!(
+            step > 1,
+            "over-budget short window must raise step, got {step}"
+        );
+        assert!(tree.count_strip_index_u32s(range, step) <= INDEX_BUFFER_LEN as u32);
     }
 
     #[test]

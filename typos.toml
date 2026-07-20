@@ -26,6 +26,7 @@
 "iy" = "iy"
 "PNGs" = "PNGs"
 "PN" = "PN"
+"FO" = "FO"
 
 [files]
 extend-exclude = [

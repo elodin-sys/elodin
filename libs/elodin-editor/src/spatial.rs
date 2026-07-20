@@ -17,13 +17,16 @@
 //!   development ergonomics during the Bevy migration; it is **not
 //!   intended to be shipped**.
 //!
-//! Note: spawning the editor's `FloatingOriginPlugin` registers a
-//! [`attach_parentless_grid_cells`] system. Any entity that holds a
-//! [`GridCell`] and no [`ChildOf`] will be reparented to the
-//! [`BigSpaceRoot`] automatically. Call sites can therefore spawn
-//! grid-aware entities without explicitly setting their parent.
+//! Prefer parenting `GridCell` entities under [`BigSpaceRoot`] at spawn
+//! (via [`BigSpaceRootEntity`]). Insert-time observers cover impeller path
+//! leaves that become spatial after hierarchy wiring, so we do not need
+//! per-frame janitor systems.
 
-use bevy::{math::DVec3, prelude::*, transform::TransformSystems};
+use bevy::{
+    ecs::lifecycle::{Add, Insert},
+    math::DVec3,
+    prelude::*,
+};
 
 pub use big_space::prelude::{BigSpace, CellCoord as GridCell, FloatingOrigin, Grid};
 
@@ -72,12 +75,14 @@ impl FloatingOriginSettings {
 }
 
 /// Marker for the unique `BigSpace` root entity spawned by
-/// [`FloatingOriginPlugin`]. Lets [`attach_parentless_grid_cells`] adopt
-/// any new grid-bearing entity without having to look up the root by name.
+/// [`FloatingOriginPlugin`].
 #[derive(Component)]
 pub struct BigSpaceRoot;
 
-type ParentlessGridCellFilter = (With<GridCell>, Without<ChildOf>, Without<BigSpaceRoot>);
+/// Handle to the unique [`BigSpaceRoot`] entity. Inserted at startup so
+/// spawn sites can parent grid-bearing entities without a query.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct BigSpaceRootEntity(pub Entity);
 
 pub struct FloatingOriginPlugin {
     settings: FloatingOriginSettings,
@@ -99,15 +104,8 @@ impl Plugin for FloatingOriginPlugin {
         app.insert_resource(self.settings.clone())
             .add_plugins(big_space::prelude::BigSpaceDefaultPlugins)
             .add_systems(Startup, setup_floating_origin)
-            .add_systems(PreUpdate, attach_parentless_grid_cells)
-            // Also adopt right before transform propagation (and big_space's
-            // PostUpdate hierarchy validation) so entities that gained a
-            // `GridCell` during this frame never cross a validation pass
-            // parentless.
-            .add_systems(
-                PostUpdate,
-                attach_parentless_grid_cells.before(TransformSystems::Propagate),
-            );
+            .add_observer(on_grid_cell_added)
+            .add_observer(on_child_of_inserted_for_grid_cell);
     }
 }
 
@@ -121,6 +119,8 @@ pub fn setup_floating_origin(mut commands: Commands, settings: Res<FloatingOrigi
         ))
         .id();
 
+    commands.insert_resource(BigSpaceRootEntity(root));
+
     commands.spawn((
         FloatingOrigin,
         GridCell::default(),
@@ -130,21 +130,67 @@ pub fn setup_floating_origin(mut commands: Commands, settings: Res<FloatingOrigi
     ));
 }
 
-/// PreUpdate system that adopts every entity carrying a [`GridCell`] but
-/// no [`ChildOf`] under the unique [`BigSpaceRoot`]. This keeps callers
-/// free from having to know about the root entity when they spawn
-/// grid-aware entities. Runs before transform propagation as well so entities
-/// spawned by schematic reloads do not spend a frame as invalid root nodes.
-fn attach_parentless_grid_cells(
+/// Parent a grid-bearing entity under the BigSpace root when the root is known.
+pub fn parent_under_big_space(entity: &mut EntityCommands, root: Option<&BigSpaceRootEntity>) {
+    if let Some(root) = root {
+        entity.insert(ChildOf(root.0));
+    }
+}
+
+type SpatialParentFilter = Or<(With<Grid>, With<GridCell>, With<BigSpace>)>;
+
+fn parent_is_spatial(
+    parent: Entity,
+    root: Entity,
+    spatial_parents: &Query<Entity, SpatialParentFilter>,
+) -> bool {
+    parent == root || spatial_parents.contains(parent)
+}
+
+/// When a [`GridCell`] is added, ensure the entity is under a valid big_space
+/// parent (root if parentless or under a non-spatial impeller path segment).
+fn on_grid_cell_added(
+    add: On<Add, GridCell>,
     mut commands: Commands,
-    roots: Query<Entity, With<BigSpaceRoot>>,
-    entities: Query<Entity, ParentlessGridCellFilter>,
+    root: Option<Res<BigSpaceRootEntity>>,
+    child_of: Query<&ChildOf>,
+    spatial_parents: Query<Entity, SpatialParentFilter>,
 ) {
-    let Some(root) = roots.iter().next() else {
+    let Some(root) = root else {
         return;
     };
-
-    for entity in &entities {
-        commands.entity(entity).insert(ChildOf(root));
+    let entity = add.entity;
+    if entity == root.0 {
+        return;
     }
+    match child_of.get(entity) {
+        Ok(c) if parent_is_spatial(c.parent(), root.0, &spatial_parents) => {}
+        _ => {
+            commands.entity(entity).insert(ChildOf(root.0));
+        }
+    }
+}
+
+/// If a [`GridCell`] entity is (re)parented under a non-spatial entity, move it
+/// to the BigSpace root. Safe against recursion: the second trigger sees
+/// `parent == root` and returns.
+fn on_child_of_inserted_for_grid_cell(
+    insert: On<Insert, ChildOf>,
+    mut commands: Commands,
+    root: Option<Res<BigSpaceRootEntity>>,
+    cells: Query<&ChildOf, With<GridCell>>,
+    spatial_parents: Query<Entity, SpatialParentFilter>,
+) {
+    let Some(root) = root else {
+        return;
+    };
+    let entity = insert.entity;
+    let Ok(child_of) = cells.get(entity) else {
+        return;
+    };
+    let parent = child_of.parent();
+    if parent_is_spatial(parent, root.0, &spatial_parents) {
+        return;
+    }
+    commands.entity(entity).insert(ChildOf(root.0));
 }

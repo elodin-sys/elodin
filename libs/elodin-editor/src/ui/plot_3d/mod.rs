@@ -1,23 +1,23 @@
 use bevy::{
-    app::Update,
-    asset::Handle,
+    app::{PreUpdate, Update},
+    asset::{Assets, Handle},
     camera::visibility::RenderLayers,
     ecs::{
         entity::Entity,
-        query::{With, Without},
-        system::{Commands, Query, Res, ResMut},
+        query::{Added, With, Without},
+        system::{Commands, Local, Query, Res, ResMut},
     },
-    math::{DQuat, Mat4, Vec4},
-    prelude::{Color, warn_once},
+    math::{DVec3, Vec4},
+    prelude::{Color, GlobalTransform, IntoScheduleConfigs, Transform, warn_once},
 };
-use bevy_geo_frames::GeoRotation;
+use bevy_geo_frames::GeoPosition;
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::Line3d;
 
 use gpu::{LineConfig, LineUniform};
 
 use super::plot::{CollectedGraphData, Line, PlotDataComponent};
-use crate::{EqlContext, ui::schematic::EqlExt};
+use crate::{EqlContext, PositionSync, ui::schematic::EqlExt};
 
 pub mod gpu;
 
@@ -41,6 +41,51 @@ fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
     }
 }
 
+/// Write the line's first sample into `GeoPosition` (frame coords). The geo
+/// pipeline then owns Transform/GridCell; GPU vertices stay frame-relative to
+/// that same first point.
+///
+/// Entities are queued when their `gpu::LineHandles` are added and stay queued
+/// until all three line assets have a first sample, so the anchor is written
+/// exactly once per handle insertion.
+fn sync_line_3d_anchor(
+    added: Query<Entity, (Added<gpu::LineHandles>, With<Line3d>)>,
+    mut queue: Local<Vec<Entity>>,
+    mut lines: Query<(&gpu::LineHandles, &mut GeoPosition), With<Line3d>>,
+    line_assets: Res<Assets<Line>>,
+) {
+    queue.extend(&added);
+    queue.retain(|&entity| {
+        let Ok((handles, mut geo)) = lines.get_mut(entity) else {
+            // Entity despawned or lost its components; drop it from the queue.
+            return false;
+        };
+        let Some(x) = line_assets
+            .get(&handles.0[0])
+            .and_then(|l| l.data.first_sample())
+        else {
+            return true;
+        };
+        let Some(y) = line_assets
+            .get(&handles.0[1])
+            .and_then(|l| l.data.first_sample())
+        else {
+            return true;
+        };
+        let Some(z) = line_assets
+            .get(&handles.0[2])
+            .and_then(|l| l.data.first_sample())
+        else {
+            return true;
+        };
+        let first = DVec3::new(x as f64, y as f64, z as f64);
+        if geo.1 != first {
+            geo.1 = first;
+        }
+        false
+    });
+}
+
 pub fn sync_line_plot_3d(
     line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
     mut uniforms: Query<
@@ -56,6 +101,7 @@ pub fn sync_line_plot_3d(
     eql_ctx: Res<EqlContext>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     metadata_store: Res<ComponentMetadataRegistry>,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (entity, line_plot) in line_plot_3d_query.iter() {
         // Parse and compile the EQL expression
@@ -100,13 +146,15 @@ pub fn sync_line_plot_3d(
 
         let trail = line_trail_colors(line_plot);
         if let Ok(mut entity) = commands.get_entity(entity) {
+            // Pose comes from GeoPosition(first sample) + GeoRotation::absolute;
+            // vertices are frame-relative to that first point.
             entity.try_insert((
                 gpu::LineHandles([x, y, z]),
                 LineUniform {
                     line_width: line_plot.line_width,
                     color: trail.played.unwrap_or(Vec4::ZERO),
                     depth_bias: 0.0,
-                    model: Mat4::IDENTITY,
+                    model: bevy::math::Mat4::IDENTITY,
                     perspective: if line_plot.perspective { 1 } else { 0 },
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),
@@ -115,12 +163,13 @@ pub fn sync_line_plot_3d(
                 LineConfig {
                     render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
                 },
+                Transform::default(),
+                GlobalTransform::default(),
+                #[cfg(feature = "big_space")]
+                crate::spatial::GridCell::default(),
             ));
-            if let Some(frame) = line_plot.frame {
-                // Absolute: the line's vertex data is raw frame coordinates, so
-                // its transform must carry the frame -> Bevy basis change.
-                entity.try_insert(GeoRotation::absolute(frame, DQuat::IDENTITY));
-            }
+            #[cfg(feature = "big_space")]
+            crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
         }
     }
     for (entity, line_plot, mut uniform, trail) in uniforms.iter_mut() {
@@ -148,7 +197,8 @@ impl bevy::app::Plugin for LinePlot3dPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<CollectedGraphData>()
             .add_plugins(gpu::Plot3dGpuPlugin)
-            .add_systems(Update, sync_line_plot_3d);
+            .add_systems(Update, sync_line_plot_3d)
+            .add_systems(PreUpdate, sync_line_3d_anchor.before(PositionSync));
     }
 }
 
