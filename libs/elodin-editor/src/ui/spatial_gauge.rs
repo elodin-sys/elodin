@@ -4,7 +4,7 @@ use bevy::{
     prelude::*,
 };
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Vec2};
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, ecef_to_lla_deg};
+use bevy_geo_frames::{GeoContext, GeoFrame, ecef_to_lla_deg};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
@@ -314,24 +314,26 @@ impl WidgetSystem for SpatialGaugeWidget<'_, '_> {
                     });
 
                     // Attitude from the same SpatialTransform (quat head); optional if the
-                    // EQL is a bare 3-vector. LLA has no Cartesian frame — use NED so the
-                    // sphere's local-level axes match `sphere_axis_dirs`.
+                    // EQL is a bare 3-vector.
                     // Read `display` after the ComboBox so a change applies immediately.
                     let display = data.display;
                     let reference = data.reference;
-                    let att_display = value.as_ref().and_then(|v| v.as_world_pos()).map(|wp| {
-                        // Attitude change since the neutral pose, expressed in
-                        // `source` (right-multiplied so a world-frame pitch
-                        // still reads as pitch when the neutral is rotated).
-                        // Identity reference ⇒ raw component attitude.
-                        let q_rel = wp.att() * reference.inverse();
-                        GeoRotation::relative(source, q_rel)
-                            .as_frame(attitude_frame(display), &geo_context)
-                            .1
-                    });
+                    let att_source = value
+                        .as_ref()
+                        .and_then(|v| v.as_world_pos())
+                        .and_then(|wp| {
+                            let q = wp.att();
+                            // Telemetry quats can drift off unit length, and
+                            // `DQuat::inverse` assumes normalized.
+                            (q.length_squared() > 1e-12).then(|| {
+                                // Attitude change since the neutral pose
+                                // (identity reference ⇒ raw component attitude).
+                                q.normalize() * reference.inverse()
+                            })
+                        });
                     // Frame sphere needs a WorldPos quaternion. Position-only EQL
                     // (bare 3-vector) must not paint identity as wings-level.
-                    paint_frame_sphere(ui, display, att_display);
+                    paint_frame_sphere(ui, display, source, &geo_context, att_source);
                 });
             });
     }
@@ -432,14 +434,33 @@ fn sphere_axis_dirs(display: DisplayFrame) -> [DVec3; 3] {
     }
 }
 
-/// Local "up" in the display frame (sky direction for the AI horizon).
-fn display_up(display: DisplayFrame) -> DVec3 {
-    sphere_axis_dirs(display)[0]
+/// Numeric triad (up, east, north — or Z, Y, X for ECEF) of a source frame,
+/// expressed in that frame's own coordinates. Used to build the gauge camera.
+fn frame_triad(frame: GeoFrame) -> [DVec3; 3] {
+    match frame {
+        GeoFrame::NED => sphere_axis_dirs(DisplayFrame::NED),
+        GeoFrame::ENU => sphere_axis_dirs(DisplayFrame::ENU),
+        GeoFrame::ECEF => sphere_axis_dirs(DisplayFrame::ECEF),
+    }
 }
 
-/// Fixed orthographic camera for the gauge sphere, built from the display
-/// frame's own triad so U is near screen-top for every frame (ENU's up is +Z
-/// but NED's is −Z — a hardcoded world-up would render NED upside down).
+/// The display triad expressed in `source` coordinates — the *physical* axes
+/// the gauge draws. Keeping everything in source coordinates (instead of
+/// conjugating the attitude into the display frame) means an ECEF gauge shows
+/// the true tilt between the body and the Earth axes (~lat-dependent), rather
+/// than treating "aligned with ECEF" as level.
+fn display_triad_in_source(
+    display: DisplayFrame,
+    source: GeoFrame,
+    ctx: &GeoContext,
+) -> [DVec3; 3] {
+    let r = source._R_(&attitude_frame(display), ctx);
+    sphere_axis_dirs(display).map(|d| r * d)
+}
+
+/// Fixed orthographic camera for the gauge sphere, built from a frame's
+/// numeric triad so U is near screen-top (ENU's up is +Z but NED's is −Z —
+/// a hardcoded world-up would render NED upside down).
 ///
 /// The eye sits at an elevated diagonal so all three axes are visible at
 /// identity (U near top, the other two on the rim).
@@ -450,8 +471,8 @@ struct SphereCamera {
 }
 
 impl SphereCamera {
-    fn new(display: DisplayFrame) -> Self {
-        let [u, e, n] = sphere_axis_dirs(display);
+    fn new(triad: [DVec3; 3]) -> Self {
+        let [u, e, n] = triad;
         let eye = (e * 0.75 + n * 0.55 + u * 0.35).normalize();
         let right = (-eye).cross(u).normalize();
         let up = right.cross(-eye).normalize();
@@ -545,12 +566,22 @@ fn horizon_cap_boundary(pole: DVec3, front_arc: &[Vec2]) -> Vec<Vec2> {
 }
 
 /// Paint a circular frame sphere with an AI-style tilting horizon and three
-/// axis labels. When `att_display` is set (body→display), the black ground
-/// banks with roll and slides with pitch under the white sky, and the U/E/N
-/// triad tracks attitude (back-facing tips stay visible, dimmed, through the
-/// sphere). Without attitude (no sample, or position-only 3-vector), draw a
-/// muted empty rim — never treat missing attitude as identity / wings-level.
-fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Option<DQuat>) {
+/// axis labels. When `att_source` is set (body→source), the black ground
+/// banks with roll and slides with pitch under the white sky, and the
+/// display-frame triad tracks attitude (back-facing tips stay visible,
+/// dimmed, through the sphere). All math stays in source coordinates: the
+/// drawn axes are the display triad's *physical* directions, so an ECEF gauge
+/// shows the body's absolute tilt against the Earth axes while NED/ENU/LLA
+/// (whose triads are physically identical) render the same local-level view.
+/// Without attitude (no sample, or position-only 3-vector), draw a muted
+/// empty rim — never treat missing attitude as identity / wings-level.
+fn paint_frame_sphere(
+    ui: &mut egui::Ui,
+    display: DisplayFrame,
+    source: GeoFrame,
+    geo_context: &GeoContext,
+    att_source: Option<DQuat>,
+) {
     let scheme = get_scheme();
     // Respect the tile's actual available space — do not invent a floor that
     // can overflow short panels. Centre the sphere in the remaining width.
@@ -567,7 +598,7 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     let center = rect.center();
     let radius = size * 0.42;
 
-    let Some(q) = att_display else {
+    let Some(q) = att_source else {
         painter.circle_stroke(
             center,
             radius,
@@ -583,13 +614,16 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
         return;
     };
 
-    // Everything below derives from the display-frame "up" expressed in body
-    // coordinates: the horizon is the true 3D great circle ⊥ up, so any
+    // Everything below derives from the display triad's "up" expressed in
+    // body coordinates: the horizon is the true 3D great circle ⊥ up, so any
     // attitude (including inverted flight) renders continuously — no
-    // asin-clamped pitch/roll intermediate.
-    let cam = SphereCamera::new(display);
+    // asin-clamped pitch/roll intermediate. The camera is anchored to the
+    // source frame, so "level in source" always reads U-near-top while the
+    // drawn triad keeps its physical (possibly tilted) direction.
+    let triad = display_triad_in_source(display, source, geo_context);
+    let cam = SphereCamera::new(frame_triad(source));
     let q_inv = q.inverse();
-    let u_cam = cam.project(q_inv * display_up(display));
+    let u_cam = cam.project(q_inv * triad[0]);
     let to_screen = |p: Vec2| Pos2::new(center.x + radius * p.x, center.y - radius * p.y);
 
     // Classic artificial-horizon shading: light above the horizon (sky/up),
@@ -679,15 +713,22 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     // The display frame's coordinate planes as attitude-driven great circles;
     // back halves stay visible, dimmed, "through" the sphere.
     let curve = Color32::from_gray(128).gamma_multiply(0.8);
-    for axis in sphere_axis_dirs(display) {
-        if let Some((front_c, back_c)) = great_circle_arcs(cam.project(q_inv * axis)) {
-            let back: Vec<Pos2> = back_c.iter().map(|&p| to_screen(p)).collect();
-            painter.add(Shape::line(
-                back,
-                Stroke::new(1.0, curve.gamma_multiply(0.4)),
-            ));
-            let front: Vec<Pos2> = front_c.iter().map(|&p| to_screen(p)).collect();
-            painter.add(Shape::line(front, Stroke::new(1.0, curve)));
+    for axis in triad {
+        match great_circle_arcs(cam.project(q_inv * axis)) {
+            Some((front_c, back_c)) => {
+                let back: Vec<Pos2> = back_c.iter().map(|&p| to_screen(p)).collect();
+                painter.add(Shape::line(
+                    back,
+                    Stroke::new(1.0, curve.gamma_multiply(0.4)),
+                ));
+                let front: Vec<Pos2> = front_c.iter().map(|&p| to_screen(p)).collect();
+                painter.add(Shape::line(front, Stroke::new(1.0, curve)));
+            }
+            // Plane parallel to the screen: the circle coincides with the rim.
+            // Stroke it there instead of blinking out for a frame.
+            None => {
+                painter.circle_stroke(center, radius, Stroke::new(1.0, curve));
+            }
         }
     }
 
@@ -724,21 +765,17 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     );
     painter.circle_stroke(center, 3.5, Stroke::new(1.5, wing));
 
-    // Display-frame axes in body coordinates (identity ⇒ body aligns with frame).
-    // Drawn last so back-facing tips remain visible "through" the sphere.
+    // Display-triad axes in body coordinates (source identity ⇒ physical
+    // directions). Drawn last so back-facing tips remain visible "through"
+    // the sphere. Unit vectors project inside the disc, no rim clamp needed.
     let labels = sphere_axis_labels(display);
-    let mut tips: Vec<(f32, &'static str, Pos2, f32)> = sphere_axis_dirs(display)
+    let mut tips: Vec<(f32, &'static str, Pos2, f32)> = triad
         .into_iter()
         .zip(labels)
         .map(|(dir, label)| {
             let c = cam.project(q_inv * dir);
             let (sx, sy, depth) = (c.x as f32, c.y as f32, c.z as f32);
-            let len = (sx * sx + sy * sy).sqrt().max(1e-4);
-            let scale = (1.0_f32).min(1.0 / len);
-            let pos = Pos2::new(
-                center.x + radius * sx * scale,
-                center.y - radius * sy * scale,
-            );
+            let pos = Pos2::new(center.x + radius * sx, center.y - radius * sy);
             let alpha = if depth >= 0.0 { 1.0 } else { 0.45 };
             (depth, label, pos, alpha)
         })
@@ -748,7 +785,14 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
     for &(_depth, label, pos, alpha) in &tips {
         painter.line_segment([center, pos], Stroke::new(1.0, curve.gamma_multiply(alpha)));
         painter.circle_filled(pos, 3.0, Color32::from_gray(160).gamma_multiply(alpha));
-        let offset = (pos - center).normalized() * 9.0;
+        // Axis toward the camera projects onto the centre: keep the label
+        // offset finite instead of normalizing a zero vector.
+        let dir = pos - center;
+        let offset = if dir.length() > 1e-3 {
+            dir.normalized() * 9.0
+        } else {
+            Vec2::new(0.0, -9.0)
+        };
         // White text with a black halo stays readable over both halves.
         text_with_halo(
             &painter,
@@ -901,21 +945,17 @@ mod tests {
 
     #[test]
     fn identity_attitude_puts_up_near_top() {
-        for display in [
-            DisplayFrame::ENU,
-            DisplayFrame::NED,
-            DisplayFrame::ECEF,
-            DisplayFrame::LLA,
-        ] {
-            let cam = SphereCamera::new(display);
-            let u = cam.project(display_up(display));
+        // Each frame's own camera puts its triad "up" near screen-top.
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            let cam = SphereCamera::new(frame_triad(frame));
+            let u = cam.project(frame_triad(frame)[0]);
             assert!(
                 u.y > 0.6,
-                "{display:?} up should project near screen-top, got {u:?}"
+                "{frame:?} up should project near screen-top, got {u:?}"
             );
         }
         // A yaw of 90° about Up should move East toward where North was.
-        let cam = SphereCamera::new(DisplayFrame::ENU);
+        let cam = SphereCamera::new(frame_triad(GeoFrame::ENU));
         let q = DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
         let e0 = cam.project(DVec3::X);
         let e1 = cam.project(q.inverse() * DVec3::X);
@@ -925,9 +965,11 @@ mod tests {
         );
     }
 
-    /// Camera-space up for a body→display quaternion (what the painter uses).
+    /// Camera-space up for a body→source quaternion, `display == source` (what
+    /// the painter uses for the same-frame gauges in these tests).
     fn up_cam(display: DisplayFrame, q: DQuat) -> DVec3 {
-        SphereCamera::new(display).project(q.inverse() * display_up(display))
+        let cam = SphereCamera::new(frame_triad(attitude_frame(display)));
+        cam.project(q.inverse() * sphere_axis_dirs(display)[0])
     }
 
     #[test]
@@ -974,7 +1016,7 @@ mod tests {
 
     #[test]
     fn great_circle_arcs_split_front_and_back() {
-        let normal = SphereCamera::new(DisplayFrame::ENU).project(DVec3::Z);
+        let normal = SphereCamera::new(frame_triad(GeoFrame::ENU)).project(DVec3::Z);
         let (front, back) = great_circle_arcs(normal).expect("tilted normal has arcs");
         assert!(!front.is_empty() && !back.is_empty());
         // Arc endpoints sit on the silhouette (unit circle) and every sample
@@ -1041,5 +1083,37 @@ mod tests {
         // Identity in the NED triad still puts local-level sky at screen top.
         let u = up_cam(DisplayFrame::LLA, DQuat::IDENTITY);
         assert!(u.y > 0.6, "LLA identity up should be near top, got {u:?}");
+    }
+
+    #[test]
+    fn ecef_gauge_shows_absolute_tilt_but_local_frames_stay_level() {
+        let lat = 28.6084_f64.to_radians();
+        let ctx = GeoContext::from(GeoOrigin::new_from_degrees(28.6084, -80.6043, 3.0));
+
+        // NED display of an ENU source keeps the physical local-level triad:
+        // same picture as the ENU gauge (up stays up).
+        let ned = display_triad_in_source(DisplayFrame::NED, GeoFrame::ENU, &ctx);
+        let enu = display_triad_in_source(DisplayFrame::ENU, GeoFrame::ENU, &ctx);
+        for (a, b) in ned.iter().zip(enu.iter()) {
+            assert!((*a - *b).length() < 1e-9, "NED triad {a:?} != ENU {b:?}");
+        }
+
+        // ECEF display: the Earth axis is tilted by the colatitude, so a
+        // source-identity ("flat") body must NOT read as Earth-aligned.
+        let ecef = display_triad_in_source(DisplayFrame::ECEF, GeoFrame::ENU, &ctx);
+        let up_component = ecef[0].dot(DVec3::Z); // Earth Z vs local up
+        assert!(
+            (up_component - lat.sin()).abs() < 1e-9,
+            "Earth axis should tilt by colatitude, got dot {up_component}"
+        );
+
+        // Rendered: the Z tip of a flat body sits well off screen-top.
+        let cam = SphereCamera::new(frame_triad(GeoFrame::ENU));
+        let z_tip = cam.project(DQuat::IDENTITY.inverse() * ecef[0]);
+        let u_tip = cam.project(enu[0]);
+        assert!(
+            (z_tip - u_tip).length() > 0.3,
+            "ECEF Z tip should be visibly tilted away from local up"
+        );
     }
 }
