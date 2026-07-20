@@ -132,9 +132,12 @@ pub(crate) fn plugin(app: &mut App) {
         .add_systems(Update, sync_editor_cam_zoom_limits);
 }
 
-fn spawn_viewport_grids(mut commands: Commands) {
+fn spawn_viewport_grids(
+    mut commands: Commands,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+) {
     for (frame, layer) in GRID_RENDER_LAYERS {
-        commands.spawn((
+        let mut entity = commands.spawn((
             bevy::dev_tools::infinite_grid::InfiniteGrid,
             viewport_grid_settings(frame),
             Visibility::Visible,
@@ -148,6 +151,8 @@ fn spawn_viewport_grids(mut commands: Commands) {
                 bevy::math::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2),
             ),
         ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
     }
 }
 

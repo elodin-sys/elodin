@@ -924,13 +924,13 @@ fn try_insert_entity<'a, 'w, 's>(
     metadata_reg: &mut ComponentMetadataRegistry,
     commands: &'a mut Commands<'w, 's>,
     component_path: &ComponentPart,
-) -> Option<EntityCommands<'a>> {
+) -> Option<(EntityCommands<'a>, bool)> {
     let component_id = component_path.id;
     if let Some(entity) = entity_map.get(&component_id) {
         let Ok(e) = commands.get_entity(*entity) else {
             return None;
         };
-        Some(e)
+        Some((e, false))
     } else {
         let mut e = commands.spawn((component_id, ComponentValueMap::default()));
         let metadata = metadata_reg
@@ -944,7 +944,7 @@ fn try_insert_entity<'a, 'w, 's>(
         e.insert(metadata.clone());
 
         entity_map.insert(component_id, e.id());
-        Some(e)
+        Some((e, true))
     }
 }
 
@@ -972,10 +972,12 @@ impl Decomponentize for WorldSink<'_, '_> {
             part,
         );
 
-        // Build parent-child hierarchy.
+        // Wire parent-child hierarchy only for newly created path segments.
+        // Re-inserting ChildOf every packet would undo editor reparenting of
+        // spatial leaves (GridCell under BigSpaceRoot).
         let mut last_entity: Option<Entity> = None;
         for parent in path.path.iter() {
-            let Some(mut e) = try_insert_entity(
+            let Some((mut e, newly_created)) = try_insert_entity(
                 &mut self.entity_map,
                 &mut self.metadata_reg,
                 &mut self.commands,
@@ -983,7 +985,7 @@ impl Decomponentize for WorldSink<'_, '_> {
             ) else {
                 continue;
             };
-            if let Some(last_entity) = last_entity {
+            if newly_created && let Some(last_entity) = last_entity {
                 e.insert(ChildOf(last_entity));
             }
             last_entity = Some(e.id());

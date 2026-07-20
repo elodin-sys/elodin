@@ -234,6 +234,8 @@ pub struct LoadSchematicParams<'w, 's> {
     /// refetch can tell a window-only remote save apart from an unrelated
     /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
     last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
+    #[cfg(feature = "big_space")]
+    big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -904,7 +906,12 @@ impl LoadSchematicParams<'_, '_> {
         );
         match result {
             Ok(entity) => {
-                self.commands.entity(entity).insert(SchematicSpawned);
+                {
+                    let mut e = self.commands.entity(entity);
+                    e.insert(SchematicSpawned);
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
+                }
                 if let Some(icon) = &icon {
                     crate::object_3d::spawn_billboard_icon(
                         &mut self.commands,
@@ -927,25 +934,22 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
-        let frame = line_3d.frame;
+        let frame = line_3d.frame.or_default().unwrap_or_default();
         let mut spawn = self.commands.spawn(line_3d);
         spawn.insert((
             Name::new("line_3d"),
             Transform::default(),
             GlobalTransform::default(),
+            // Absolute: vertex data is frame-relative; GeoRotation carries
+            // the frame → Bevy basis. GeoPosition is the first sample (synced
+            // once LineHandles have data).
+            bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
         ));
-
-        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
-        // The rotation is Absolute: the line's vertex data is raw frame
-        // coordinates, so its transform must carry the frame -> Bevy basis change.
-        if let Some(frame) = frame.or_default() {
-            spawn.insert((
-                bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
-                bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-            ));
-        }
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
         spawn.insert(SchematicSpawned);
     }
 
@@ -1000,9 +1004,10 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.world_mesh_materials,
             &world_mesh,
         );
-        self.commands
-            .entity(entity)
-            .insert((SchematicSpawned, world_mesh));
+        let mut e = self.commands.entity(entity);
+        e.insert((SchematicSpawned, world_mesh));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
     }
 
     fn spawn_panel(
@@ -1034,7 +1039,10 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
                 if let Some(parent) = pane.parent {
-                    self.commands.entity(parent).insert(SchematicSpawned);
+                    let mut e = self.commands.entity(parent);
+                    e.insert(SchematicSpawned);
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
                 if let Some(grid) = pane.grid {
                     self.commands.entity(grid).insert(SchematicSpawned);
