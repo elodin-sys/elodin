@@ -9,7 +9,7 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
 use nox::ArrayBuf;
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::TAU;
 
 use crate::EqlContext;
 use crate::WorldPosExt;
@@ -408,29 +408,111 @@ fn display_up(display: DisplayFrame) -> DVec3 {
     sphere_axis_dirs(display)[0]
 }
 
-/// Pitch / roll of the body relative to display-frame level, looking along body +X.
-/// Pitch nose-up and roll right-wing-down are positive (aircraft convention).
+/// Fixed orthographic camera for the gauge sphere, built from the display
+/// frame's own triad so U is near screen-top for every frame (ENU's up is +Z
+/// but NED's is −Z — a hardcoded world-up would render NED upside down).
 ///
-/// Uses display-frame sky (`up_display`) so NED (−Z up) and ENU (+Z up) both
-/// read wings-level at identity, unlike a body-+Z atan2 that flips for NED.
-fn ai_pitch_roll(q_body_to_display: DQuat, up_display: DVec3) -> (f32, f32) {
-    let forward = q_body_to_display * DVec3::X;
-    let right = q_body_to_display * DVec3::Y;
-    let pitch = forward.dot(up_display).asin() as f32;
-    let roll = (-right.dot(up_display)).asin() as f32;
-    (pitch, roll)
+/// The eye sits at an elevated diagonal so all three axes are visible at
+/// identity (U near top, the other two on the rim).
+struct SphereCamera {
+    right: DVec3,
+    up: DVec3,
+    fwd: DVec3,
 }
 
-/// Project a body-frame unit vector onto the gauge sphere view.
-/// Returns `(screen_x, screen_y, depth)` with `+y` up and `depth > 0` in front.
-fn project_body_axis(v: DVec3) -> (f32, f32, f32) {
-    // Camera looks from a south-west elevated angle so U / E / N are all visible
-    // at identity (U near top, E/N on the rim).
-    let look = -DVec3::new(0.75, 0.55, 0.35).normalize();
-    let world_up = DVec3::Z;
-    let right = look.cross(world_up).normalize();
-    let up = right.cross(look).normalize();
-    (v.dot(right) as f32, v.dot(up) as f32, v.dot(-look) as f32)
+impl SphereCamera {
+    fn new(display: DisplayFrame) -> Self {
+        let [u, e, n] = sphere_axis_dirs(display);
+        let eye = (e * 0.75 + n * 0.55 + u * 0.35).normalize();
+        let right = (-eye).cross(u).normalize();
+        let up = right.cross(-eye).normalize();
+        Self {
+            right,
+            up,
+            fwd: eye,
+        }
+    }
+
+    /// Camera-space coordinates of a body-frame vector: `x` right, `y` up,
+    /// `z` depth toward the viewer (`z > 0` = front hemisphere).
+    fn project(&self, v: DVec3) -> DVec3 {
+        DVec3::new(v.dot(self.right), v.dot(self.up), v.dot(self.fwd))
+    }
+}
+
+/// Two unit vectors spanning the plane perpendicular to `u` (assumed unit).
+fn basis_perp(u: DVec3) -> (DVec3, DVec3) {
+    let helper = if u.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+    let e1 = u.cross(helper).normalize();
+    let e2 = u.cross(e1);
+    (e1, e2)
+}
+
+/// True when the front-hemisphere sphere point projecting to `p` (unit-disk
+/// coords, `+y` up) is on the sky side of the horizon plane ⊥ `u_cam`.
+fn front_point_is_sky(p: Vec2, u_cam: DVec3) -> bool {
+    let r2 = (p.x * p.x + p.y * p.y) as f64;
+    let z = (1.0 - r2).max(0.0).sqrt();
+    p.x as f64 * u_cam.x + p.y as f64 * u_cam.y + z * u_cam.z >= 0.0
+}
+
+/// Great circle ⊥ `normal_cam` split into the front and back polylines, in
+/// unit-disk coords (`+y` up). `None` when `normal_cam` is (anti)parallel to
+/// the view axis — the circle then coincides with the rim.
+fn great_circle_arcs(normal_cam: DVec3) -> Option<(Vec<Vec2>, Vec<Vec2>)> {
+    if (normal_cam.x * normal_cam.x + normal_cam.y * normal_cam.y).sqrt() < 1e-6 {
+        return None;
+    }
+    let (e1, e2) = basis_perp(normal_cam);
+    const N: usize = 96;
+    let pts: Vec<DVec3> = (0..N)
+        .map(|i| {
+            let a = std::f64::consts::TAU * (i as f64 / N as f64);
+            e1 * a.cos() + e2 * a.sin()
+        })
+        .collect();
+    // A great circle crosses the silhouette exactly twice; the front samples
+    // form one contiguous run (mod N). Find its start.
+    let front = |v: &DVec3| v.z >= 0.0;
+    let start = (0..N).find(|&i| front(&pts[i]) && !front(&pts[(i + N - 1) % N]))?;
+    let mut front_arc = Vec::new();
+    let mut back_arc = Vec::new();
+    for k in 0..N {
+        let v = &pts[(start + k) % N];
+        let p = Vec2::new(v.x as f32, v.y as f32);
+        if front(v) {
+            front_arc.push(p);
+        } else {
+            back_arc.push(p);
+        }
+    }
+    Some((front_arc, back_arc))
+}
+
+/// Closed boundary (unit-disk coords) of the convex screen region covered by
+/// the front hemisphere around `pole` (unit, camera space, `pole.z >= 0`):
+/// front horizon arc plus the rim arc on the pole side.
+fn horizon_cap_boundary(pole: DVec3, front_arc: &[Vec2]) -> Vec<Vec2> {
+    let mut boundary: Vec<Vec2> = front_arc.to_vec();
+    let (Some(first), Some(last)) = (front_arc.first(), front_arc.last()) else {
+        return Vec::new();
+    };
+    // Rim arc from the arc's end back to its start, through the pole's screen
+    // direction (the side where rim points satisfy r·pole > 0).
+    let a_start = first.y.atan2(first.x);
+    let a_end = last.y.atan2(last.x);
+    let phi_pole = (pole.y as f32).atan2(pole.x as f32);
+    let mut delta = (a_start - a_end).rem_euclid(TAU);
+    let mid = a_end + delta * 0.5;
+    if (mid - phi_pole).cos() < 0.0 {
+        delta -= TAU; // go the other way round, through the pole side
+    }
+    let steps = ((delta.abs() / 0.08).ceil() as usize).max(1);
+    for i in 1..steps {
+        let a = a_end + delta * (i as f32 / steps as f32);
+        boundary.push(Vec2::new(a.cos(), a.sin()));
+    }
+    boundary
 }
 
 /// Paint a circular frame sphere with an AI-style tilting horizon and three
@@ -472,7 +554,14 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
         return;
     };
 
-    let (pitch, roll) = ai_pitch_roll(q, display_up(display));
+    // Everything below derives from the display-frame "up" expressed in body
+    // coordinates: the horizon is the true 3D great circle ⊥ up, so any
+    // attitude (including inverted flight) renders continuously — no
+    // asin-clamped pitch/roll intermediate.
+    let cam = SphereCamera::new(display);
+    let q_inv = q.inverse();
+    let u_cam = cam.project(q_inv * display_up(display));
+    let to_screen = |p: Vec2| Pos2::new(center.x + radius * p.x, center.y - radius * p.y);
 
     // Classic artificial-horizon shading: light above the horizon (sky/up),
     // dark below (ground/down). In light mode the sky is toned down so the disc
@@ -494,34 +583,95 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
         )
     };
 
-    paint_ai_horizon(
-        &painter,
-        center,
-        radius,
-        pitch,
-        roll,
-        [ground, sky, hatch, horizon],
-    );
+    // Fill: the hemisphere whose pole faces the camera projects to a convex
+    // cap; the other hemisphere wraps around the rim. Paint the wrapping one
+    // over the whole disc, then the convex cap on top.
+    let arcs = great_circle_arcs(u_cam);
+    match &arcs {
+        // Up is (anti)parallel to the view axis: all sky or all ground.
+        None => {
+            let fill = if u_cam.z >= 0.0 { sky } else { ground };
+            painter.circle_filled(center, radius, fill);
+        }
+        Some((front_arc, _)) => {
+            let (base, cap, pole) = if u_cam.z >= 0.0 {
+                (ground, sky, u_cam)
+            } else {
+                (sky, ground, -u_cam)
+            };
+            painter.circle_filled(center, radius, base);
+            let boundary = horizon_cap_boundary(pole, front_arc);
+            if boundary.len() >= 3 {
+                let pts: Vec<Pos2> = boundary.iter().map(|&p| to_screen(p)).collect();
+                painter.add(Shape::convex_polygon(pts, cap, Stroke::NONE));
+            }
+        }
+    }
 
-    // Meridian / equator curves for a bit of sphere depth. Mid-gray reads on
-    // both the white and black halves.
+    // Hatch the ground, lines parallel to the projected horizon. Each sample
+    // is tested against the true front-hemisphere surface, so the hatching
+    // hugs the curved horizon instead of a straight approximation.
+    if !(arcs.is_none() && u_cam.z >= 0.0) {
+        let s = Vec2::new(u_cam.x as f32, u_cam.y as f32);
+        let (s_hat, t_hat) = if s.length() > 1e-6 {
+            let sh = s.normalized();
+            (sh, Vec2::new(-sh.y, sh.x))
+        } else {
+            (Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0))
+        };
+        const HATCH_LINES: usize = 9;
+        const SAMPLES: usize = 32;
+        for i in 0..HATCH_LINES {
+            let d = -1.0 + 2.0 * (i as f32 + 0.5) / HATCH_LINES as f32;
+            let half = (1.0 - d * d).max(0.0).sqrt() * 0.98;
+            let mut run_start: Option<Vec2> = None;
+            let mut run_end = Vec2::ZERO;
+            for k in 0..=SAMPLES {
+                let t = -half + 2.0 * half * (k as f32 / SAMPLES as f32);
+                let p = s_hat * d + t_hat * t;
+                let on_ground = !front_point_is_sky(p, u_cam);
+                if on_ground {
+                    if run_start.is_none() {
+                        run_start = Some(p);
+                    }
+                    run_end = p;
+                }
+                if (!on_ground || k == SAMPLES)
+                    && let Some(a) = run_start.take()
+                    && (run_end - a).length() > 1e-3
+                {
+                    painter
+                        .line_segment([to_screen(a), to_screen(run_end)], Stroke::new(1.0, hatch));
+                }
+            }
+        }
+    }
+
+    // The display frame's coordinate planes as attitude-driven great circles;
+    // back halves stay visible, dimmed, "through" the sphere.
     let curve = Color32::from_gray(128).gamma_multiply(0.8);
-    draw_ellipse_arc(
-        &painter,
-        center,
-        radius * 0.95,
-        radius * 0.35,
-        -FRAC_PI_2 * 0.2,
-        Stroke::new(1.0, curve),
-    );
-    draw_ellipse_arc(
-        &painter,
-        center,
-        radius * 0.35,
-        radius * 0.95,
-        0.0,
-        Stroke::new(1.0, curve),
-    );
+    for axis in sphere_axis_dirs(display) {
+        if let Some((front_c, back_c)) = great_circle_arcs(cam.project(q_inv * axis)) {
+            let back: Vec<Pos2> = back_c.iter().map(|&p| to_screen(p)).collect();
+            painter.add(Shape::line(
+                back,
+                Stroke::new(1.0, curve.gamma_multiply(0.4)),
+            ));
+            let front: Vec<Pos2> = front_c.iter().map(|&p| to_screen(p)).collect();
+            painter.add(Shape::line(front, Stroke::new(1.0, curve)));
+        }
+    }
+
+    // Horizon line: bright front arc, dimmed back arc through the sphere.
+    if let Some((front_arc, back_arc)) = &arcs {
+        let back: Vec<Pos2> = back_arc.iter().map(|&p| to_screen(p)).collect();
+        painter.add(Shape::line(
+            back,
+            Stroke::new(1.0, horizon.gamma_multiply(0.35)),
+        ));
+        let front: Vec<Pos2> = front_arc.iter().map(|&p| to_screen(p)).collect();
+        painter.add(Shape::line(front, Stroke::new(1.5, horizon)));
+    }
 
     // Outer rim, over the fills so the disc has a crisp edge.
     painter.circle_stroke(center, radius, Stroke::new(1.5, scheme.border_primary));
@@ -547,13 +697,13 @@ fn paint_frame_sphere(ui: &mut egui::Ui, display: DisplayFrame, att_display: Opt
 
     // Display-frame axes in body coordinates (identity ⇒ body aligns with frame).
     // Drawn last so back-facing tips remain visible "through" the sphere.
-    let q_inv = q.inverse();
     let labels = sphere_axis_labels(display);
     let mut tips: Vec<(f32, &'static str, Pos2, f32)> = sphere_axis_dirs(display)
         .into_iter()
         .zip(labels)
         .map(|(dir, label)| {
-            let (sx, sy, depth) = project_body_axis(q_inv * dir);
+            let c = cam.project(q_inv * dir);
+            let (sx, sy, depth) = (c.x as f32, c.y as f32, c.z as f32);
             let len = (sx * sx + sy * sy).sqrt().max(1e-4);
             let scale = (1.0_f32).min(1.0 / len);
             let pos = Pos2::new(
@@ -602,167 +752,6 @@ fn text_with_halo(
         );
     }
     painter.text(pos, Align2::CENTER_CENTER, text, font, color);
-}
-
-/// Artificial-horizon fill: hatched ground / sky banked by `roll`, shifted by `pitch`.
-/// `colors` = `[ground, sky, hatch, horizon]`.
-fn paint_ai_horizon(
-    painter: &egui::Painter,
-    center: Pos2,
-    radius: f32,
-    pitch: f32,
-    roll: f32,
-    colors: [Color32; 4],
-) {
-    let [ground, sky, hatch, horizon_stroke] = colors;
-    let (sr, cr) = roll.sin_cos();
-    // Sky direction in math coords (+y up); egui y grows downward.
-    let sky_math = Vec2::new(sr, cr);
-    let sky_egui = Vec2::new(sky_math.x, -sky_math.y);
-    let along_egui = Vec2::new(cr, sr); // horizon tangent in egui
-
-    let pitch_c = pitch.clamp(-FRAC_PI_2 * 0.95, FRAC_PI_2 * 0.95);
-    // Nose up → horizon moves down (opposite sky).
-    let offset = -pitch_c.sin() * radius;
-    let h_center = center + sky_egui * offset;
-
-    let ground_poly = clip_disk_half_plane(
-        center, radius, h_center, sky_egui, /*keep_sky=*/ false, 64,
-    );
-    let sky_poly = clip_disk_half_plane(
-        center, radius, h_center, sky_egui, /*keep_sky=*/ true, 64,
-    );
-
-    if sky_poly.len() >= 3 {
-        painter.add(Shape::convex_polygon(sky_poly, sky, Stroke::NONE));
-    }
-    if ground_poly.len() >= 3 {
-        painter.add(Shape::convex_polygon(
-            ground_poly.clone(),
-            ground,
-            Stroke::NONE,
-        ));
-        // Hatch lines parallel to the horizon, on the ground side only.
-        for i in 1..8 {
-            let t = i as f32 / 8.0;
-            let mid = h_center - sky_egui * (t * radius * 1.15);
-            let half = radius * 1.2;
-            let a = mid - along_egui * half;
-            let b = mid + along_egui * half;
-            if let Some((ca, cb)) = clip_segment_to_disk(a, b, center, radius) {
-                // Keep segments that sit on the ground side of the horizon.
-                let mid_seg = Pos2::new((ca.x + cb.x) * 0.5, (ca.y + cb.y) * 0.5);
-                let toward_sky = (mid_seg - h_center).dot(sky_egui);
-                if toward_sky < 0.0 {
-                    painter.line_segment([ca, cb], Stroke::new(1.0, hatch));
-                }
-            }
-        }
-    }
-
-    // Horizon line clipped to the rim.
-    let h0 = h_center - along_egui * radius * 1.2;
-    let h1 = h_center + along_egui * radius * 1.2;
-    if let Some((a, b)) = clip_segment_to_disk(h0, h1, center, radius) {
-        painter.line_segment([a, b], Stroke::new(1.5, horizon_stroke));
-    }
-}
-
-/// Polygon covering the disk ∩ half-plane on the sky (`keep_sky`) or ground side
-/// of the horizon through `h_center` with sky normal `sky_egui`.
-fn clip_disk_half_plane(
-    center: Pos2,
-    radius: f32,
-    h_center: Pos2,
-    sky_egui: Vec2,
-    keep_sky: bool,
-    n: usize,
-) -> Vec<Pos2> {
-    let mut pts = Vec::with_capacity(n + 3);
-    let mut prev_in: Option<bool> = None;
-    let mut prev_p = Pos2::ZERO;
-    for i in 0..=n {
-        let a = TAU * (i as f32 / n as f32);
-        let p = Pos2::new(center.x + radius * a.cos(), center.y + radius * a.sin());
-        let toward_sky = (p - h_center).dot(sky_egui);
-        let inside = if keep_sky {
-            toward_sky >= 0.0
-        } else {
-            toward_sky < 0.0
-        };
-        #[allow(clippy::collapsible_if)]
-        if let Some(was_in) = prev_in {
-            if was_in != inside {
-                // Edge crosses the horizon — insert intersection.
-                if let Some(x) = line_intersect_horizon(prev_p, p, h_center, sky_egui) {
-                    pts.push(x);
-                }
-            }
-        }
-        if inside {
-            pts.push(p);
-        }
-        prev_in = Some(inside);
-        prev_p = p;
-    }
-    pts
-}
-
-fn line_intersect_horizon(a: Pos2, b: Pos2, h_center: Pos2, sky_egui: Vec2) -> Option<Pos2> {
-    let da = (a - h_center).dot(sky_egui);
-    let db = (b - h_center).dot(sky_egui);
-    if (da - db).abs() < 1e-6 {
-        return None;
-    }
-    let t = da / (da - db);
-    Some(Pos2::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t))
-}
-
-fn clip_segment_to_disk(a: Pos2, b: Pos2, center: Pos2, radius: f32) -> Option<(Pos2, Pos2)> {
-    // Liang–Barsky style in radial form via quadratic intersection.
-    let d = b - a;
-    let f = a - center;
-    let a_c = d.dot(d);
-    let b_c = 2.0 * f.dot(d);
-    let c_c = f.dot(f) - radius * radius;
-    let disc = b_c * b_c - 4.0 * a_c * c_c;
-    if disc < 0.0 || a_c < 1e-12 {
-        let mid = Pos2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-        return ((mid - center).length() <= radius).then_some((a, b));
-    }
-    let s = disc.sqrt();
-    let t0 = ((-b_c - s) / (2.0 * a_c)).clamp(0.0, 1.0);
-    let t1 = ((-b_c + s) / (2.0 * a_c)).clamp(0.0, 1.0);
-    if t1 < t0 {
-        return None;
-    }
-    let p0 = Pos2::new(a.x + d.x * t0, a.y + d.y * t0);
-    let p1 = Pos2::new(a.x + d.x * t1, a.y + d.y * t1);
-    Some((p0, p1))
-}
-
-fn draw_ellipse_arc(
-    painter: &egui::Painter,
-    center: Pos2,
-    rx: f32,
-    ry: f32,
-    rotation: f32,
-    stroke: Stroke,
-) {
-    let n = 48;
-    let mut pts = Vec::with_capacity(n + 1);
-    let (sr, cr) = rotation.sin_cos();
-    for i in 0..=n {
-        let a = TAU * (i as f32 / n as f32);
-        let (s, c) = a.sin_cos();
-        let x = rx * c;
-        let y = ry * s;
-        pts.push(Pos2::new(
-            center.x + x * cr - y * sr,
-            center.y + x * sr + y * cr,
-        ));
-    }
-    painter.add(Shape::line(pts, stroke));
 }
 
 #[cfg(test)]
@@ -883,32 +872,109 @@ mod tests {
 
     #[test]
     fn identity_attitude_puts_up_near_top() {
-        let (_, sy, _) = project_body_axis(DVec3::Z);
-        assert!(sy > 0.6, "ENU up should project near screen-top, sy={sy}");
+        for display in [
+            DisplayFrame::ENU,
+            DisplayFrame::NED,
+            DisplayFrame::ECEF,
+            DisplayFrame::LLA,
+        ] {
+            let cam = SphereCamera::new(display);
+            let u = cam.project(display_up(display));
+            assert!(
+                u.y > 0.6,
+                "{display:?} up should project near screen-top, got {u:?}"
+            );
+        }
         // A yaw of 90° about Up should move East toward where North was.
+        let cam = SphereCamera::new(DisplayFrame::ENU);
         let q = DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
-        let (e0x, e0y, _) = project_body_axis(DVec3::X);
-        let (e1x, e1y, _) = project_body_axis(q.inverse() * DVec3::X);
+        let e0 = cam.project(DVec3::X);
+        let e1 = cam.project(q.inverse() * DVec3::X);
         assert!(
-            (e0x - e1x).abs() > 0.3 || (e0y - e1y).abs() > 0.3,
+            (e0.x - e1.x).abs() > 0.3 || (e0.y - e1.y).abs() > 0.3,
             "yaw should move the E tip on the sphere"
         );
     }
 
-    #[test]
-    fn ai_horizon_identity_is_level() {
-        let (pitch, roll) = ai_pitch_roll(DQuat::IDENTITY, DVec3::Z);
-        assert!(pitch.abs() < 1e-5, "pitch {pitch}");
-        assert!(roll.abs() < 1e-5, "roll {roll}");
+    /// Camera-space up for a body→display quaternion (what the painter uses).
+    fn up_cam(display: DisplayFrame, q: DQuat) -> DVec3 {
+        SphereCamera::new(display).project(q.inverse() * display_up(display))
     }
 
     #[test]
-    fn ai_horizon_nose_up_positive_pitch() {
-        // Body→display = Ry(-θ): body +X (nose) tips toward display +Z (up).
-        let q = DQuat::from_rotation_y(-0.4);
-        let (pitch, roll) = ai_pitch_roll(q, DVec3::Z);
-        assert!(pitch > 0.3, "expected nose-up pitch, got {pitch}");
-        assert!(roll.abs() < 1e-4, "roll should stay ~0, got {roll}");
+    fn ai_horizon_identity_sky_on_top() {
+        let u = up_cam(DisplayFrame::ENU, DQuat::IDENTITY);
+        assert!(u.y > 0.6, "up should project near screen-top, got {u:?}");
+        assert!(front_point_is_sky(Vec2::new(0.0, 0.9), u), "top is sky");
+        assert!(
+            !front_point_is_sky(Vec2::new(0.0, -0.9), u),
+            "bottom is ground"
+        );
+    }
+
+    #[test]
+    fn ai_horizon_inverted_flight_flips_sky() {
+        // 180° roll about body X: the old asin-based horizon rocked back to
+        // level here; the quaternion-driven one must show ground on top.
+        let q = DQuat::from_rotation_x(std::f64::consts::PI);
+        let u = up_cam(DisplayFrame::ENU, q);
+        assert!(!front_point_is_sky(Vec2::new(0.0, 0.9), u), "top is ground");
+        assert!(front_point_is_sky(Vec2::new(0.0, -0.9), u), "bottom is sky");
+    }
+
+    #[test]
+    fn ai_horizon_continuous_through_full_roll() {
+        // Sweep a full 360° roll: the projected sky direction must rotate
+        // continuously (no snap-back at ±90° like the old asin clamp).
+        let n = 360;
+        let mut prev: Option<f64> = None;
+        for i in 0..=n {
+            let theta = std::f64::consts::TAU * (i as f64 / n as f64);
+            let u = up_cam(DisplayFrame::ENU, DQuat::from_rotation_x(theta));
+            let angle = u.y.atan2(u.x);
+            if let Some(p) = prev {
+                let mut d = (angle - p).abs();
+                if d > std::f64::consts::PI {
+                    d = std::f64::consts::TAU - d;
+                }
+                assert!(d < 0.1, "sky direction jumped {d:.3} rad at step {i}");
+            }
+            prev = Some(angle);
+        }
+    }
+
+    #[test]
+    fn great_circle_arcs_split_front_and_back() {
+        let normal = SphereCamera::new(DisplayFrame::ENU).project(DVec3::Z);
+        let (front, back) = great_circle_arcs(normal).expect("tilted normal has arcs");
+        assert!(!front.is_empty() && !back.is_empty());
+        // Arc endpoints sit on the silhouette (unit circle) and every sample
+        // stays inside the disc.
+        for p in front.iter().chain(back.iter()) {
+            assert!(p.length() <= 1.0 + 1e-3, "sample outside disc: {p:?}");
+        }
+        assert!(front.first().unwrap().length() > 0.98);
+        assert!(front.last().unwrap().length() > 0.98);
+        // A view-axis-aligned normal has no arcs (circle == rim).
+        assert!(great_circle_arcs(DVec3::new(0.0, 0.0, 1.0)).is_none());
+    }
+
+    #[test]
+    fn horizon_cap_boundary_stays_in_disc_and_closes() {
+        let u = up_cam(DisplayFrame::ENU, DQuat::from_rotation_x(0.7));
+        let pole = if u.z >= 0.0 { u } else { -u };
+        let (front, _) = great_circle_arcs(u).expect("arcs");
+        let boundary = horizon_cap_boundary(pole, &front);
+        assert!(boundary.len() > front.len(), "rim arc appended");
+        for p in &boundary {
+            assert!(p.length() <= 1.0 + 1e-3, "boundary outside disc: {p:?}");
+        }
+        // The rim closure passes on the pole's side of the screen.
+        let rim_mid = boundary[front.len() + (boundary.len() - front.len()) / 2];
+        assert!(
+            rim_mid.x as f64 * pole.x + rim_mid.y as f64 * pole.y > 0.0,
+            "rim arc must close on the sky side"
+        );
     }
 
     #[test]
@@ -924,8 +990,8 @@ mod tests {
             sphere_axis_dirs(DisplayFrame::LLA),
             sphere_axis_dirs(DisplayFrame::NED)
         );
-        let (pitch, roll) = ai_pitch_roll(DQuat::IDENTITY, display_up(DisplayFrame::LLA));
-        assert!(pitch.abs() < 1e-5, "LLA identity pitch {pitch}");
-        assert!(roll.abs() < 1e-5, "LLA identity roll {roll}");
+        // Identity in the NED triad still puts local-level sky at screen top.
+        let u = up_cam(DisplayFrame::LLA, DQuat::IDENTITY);
+        assert!(u.y > 0.6, "LLA identity up should be near top, got {u:?}");
     }
 }
