@@ -8,7 +8,7 @@ use bevy_egui::egui;
 use egui::CornerRadius;
 use smallvec::SmallVec;
 
-use super::widgets::{WidgetSystem, WidgetSystemExt};
+use super::widgets::{SystemStateExt, WidgetSystem, WidgetSystemExt};
 use crate::ui::tiles::WindowState;
 use crate::ui::{
     SelectedObject,
@@ -76,7 +76,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let mut state_mut = state.get_mut(world).expect("system params invalid");
+        let mut state_mut = state.params_mut(world);
 
         let (icons, is_side_panel, target_window) = args;
         let selected_object = {

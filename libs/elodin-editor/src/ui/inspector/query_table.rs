@@ -7,6 +7,7 @@ use impeller2::types::Timestamp;
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryType, SQLQuery};
 
+use crate::ui::widgets::SystemStateExt;
 use crate::{
     EqlContext, SelectedTimeRange,
     ui::{
@@ -45,7 +46,7 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
             earliest_timestamp,
             last_updated,
             mut commands,
-        } = state.get_mut(world).expect("system params invalid");
+        } = state.params_mut(world);
         let Ok(mut table) = tables.get_mut(entity) else {
             return;
         };

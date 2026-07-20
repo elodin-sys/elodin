@@ -1034,7 +1034,7 @@ pub fn update_object_3d_system(
                 if let Some(child) = mesh_child
                     && let Ok(mut params) = mat3_params.get_mut(child)
                 {
-                    params.linear = linear;
+                    params.set_if_neq(Mat3Params { linear });
                 }
                 let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
                 ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
@@ -2165,6 +2165,7 @@ mod joint_eql_cast_tests {
     use nox::{Array, ArrayBuf};
 
     use super::compile_eql_expr;
+    use crate::ui::widgets::SystemStateExt;
 
     #[test]
     fn joint_rotation_vector_string_with_cast_evaluates_like_kdl_example() {
@@ -2189,7 +2190,7 @@ mod joint_eql_cast_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (q,) = system_state.get(&world).expect("system params invalid");
+        let (q,) = system_state.params(&world);
         let out = compiled
             .expect("compiled expr")
             .execute(&entity_map, &q)
@@ -2220,6 +2221,7 @@ mod ellipsoid_scale_eql_tests {
     use nox::Array;
 
     use super::{compile_scale_eql, component_value_to_vec3};
+    use crate::ui::widgets::SystemStateExt;
 
     fn pos_std_var_component(name: &str) -> Arc<eql::Component> {
         f64_component(name, &[3])
@@ -2283,7 +2285,7 @@ mod ellipsoid_scale_eql_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (component_values,) = system_state.get(&world).expect("system params invalid");
+        let (component_values,) = system_state.params(&world);
         let compiled = compile_scale_eql("left + right", &ctx).expect("expression should compile");
 
         let err = compiled
@@ -2315,7 +2317,7 @@ mod ellipsoid_scale_eql_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (component_values,) = system_state.get(&world).expect("system params invalid");
+        let (component_values,) = system_state.params(&world);
 
         for (scale_expr, expected) in [
             (

@@ -92,6 +92,7 @@ use crate::ui::{
 use bevy::prelude::*;
 
 use super::{RootWidgetSystem, WidgetSystemExt, button::EButton, label, widgets::WidgetSystem};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct ModalWithSettings<'w, 's> {
@@ -131,7 +132,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         root_window: Self::Args,
     ) {
         let Some((setting_modal_state, modal_rect, close_icon)) = ({
-            let state_mut = state.get_mut(world).expect("system params invalid");
+            let state_mut = state.params_mut(world);
 
             let mut contexts = state_mut.contexts;
             let images = state_mut.images;
@@ -232,7 +233,7 @@ impl WidgetSystem for ModalDialog<'_, '_> {
         ui: &mut egui::Ui,
         args: <Self as WidgetSystem>::Args,
     ) {
-        let mut state_mut = state.get_mut(world).expect("system params invalid");
+        let mut state_mut = state.params_mut(world);
         let (close_icon, dialog) = args;
 
         let title_margin = egui::Margin::same(8).bottom(16.0);

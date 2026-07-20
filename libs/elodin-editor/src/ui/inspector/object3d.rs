@@ -32,6 +32,7 @@ use crate::{
 };
 
 use super::{InspectorIcons, empty_inspector, inspector_text_field};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct InspectorObject3D<'w, 's> {
@@ -74,7 +75,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             ellipse_visuals,
             children_query,
             mesh_child_markers,
-        } = state.get_mut(world).expect("system params invalid");
+        } = state.params_mut(world);
 
         let (_icons, entity) = args;
 

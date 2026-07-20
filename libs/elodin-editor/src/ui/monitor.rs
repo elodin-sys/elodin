@@ -7,6 +7,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentMetadata, CurrentTimestamp};
 
 use super::{PaneName, colors::get_scheme, widgets::WidgetSystem};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Clone)]
 pub struct MonitorPane {
@@ -53,7 +54,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
             entity_map,
             telemetry_cache,
             current_timestamp,
-        } = state.get_mut(world).expect("system params invalid");
+        } = state.params_mut(world);
         let Ok(monitor) = monitors.get(pane.entity) else {
             return;
         };

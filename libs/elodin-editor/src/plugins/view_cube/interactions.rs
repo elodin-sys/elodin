@@ -1287,6 +1287,7 @@ pub fn on_arrow_hover_start(
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
         && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+        && mat.base_color != colors.arrow_hover
     {
         mat.base_color = colors.arrow_hover;
     }
@@ -1308,6 +1309,7 @@ pub fn on_arrow_hover_end(
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
         && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+        && mat.base_color != colors.arrow_normal
     {
         mat.base_color = colors.arrow_normal;
     }
@@ -1329,6 +1331,7 @@ pub fn on_action_button_hover_start(
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
         && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+        && mat.base_color != colors.arrow_hover
     {
         mat.base_color = colors.arrow_hover;
     }
@@ -1350,6 +1353,7 @@ pub fn on_action_button_hover_end(
     let colors = ViewCubeColors::default();
     if let Ok(mat_handle) = materials_query.get(entity)
         && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+        && mat.base_color != colors.arrow_normal
     {
         mat.base_color = colors.arrow_normal;
     }
@@ -1712,6 +1716,7 @@ fn corner_local_direction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::widgets::SystemStateExt;
     use bevy::camera::Viewport;
     use bevy::ecs::system::SystemState;
 
@@ -1850,9 +1855,7 @@ mod tests {
                 With<ViewCubeCamera>,
             >,
         )> = SystemState::new(app.world_mut());
-        let (windows, overlay_cameras) = system_state
-            .get(app.world())
-            .expect("system params invalid");
+        let (windows, overlay_cameras) = system_state.params(app.world());
         let owners = UiInputOwners::default();
 
         assert!(permits_view_cube_interaction(

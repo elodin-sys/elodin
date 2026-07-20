@@ -29,6 +29,7 @@ use super::{
 };
 
 // Re-export for use in component collection
+use crate::ui::widgets::SystemStateExt;
 use eql;
 
 /// Maximum number of points per series in each sparkline
@@ -248,7 +249,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         ui: &mut egui::Ui,
         (mut pane, target_window): Self::Args,
     ) -> Self::Output {
-        let mut params = state.get_mut(world).expect("system params invalid");
+        let mut params = state.params_mut(world);
         let Ok(mut window_state) = params.window_states.get_mut(target_window) else {
             return pane;
         };

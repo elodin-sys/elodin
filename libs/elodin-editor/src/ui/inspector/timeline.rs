@@ -10,6 +10,7 @@ use crate::ui::{label::ELabel, utils::MarginSides};
 
 use super::line3d::line3d_controls;
 use super::node_color_picker;
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct InspectorTimeline<'w, 's> {
@@ -31,7 +32,7 @@ impl WidgetSystem for InspectorTimeline<'_, '_> {
         let InspectorTimeline {
             mut timeline_settings,
             mut lines,
-        } = state.get_mut(world).expect("system params invalid");
+        } = state.params_mut(world);
 
         ui.spacing_mut().item_spacing.y = 8.0;
 

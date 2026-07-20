@@ -22,6 +22,7 @@ use super::{
     colors::{ColorExt, get_scheme},
     widgets::WidgetSystem,
 };
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Clone)]
 pub struct QueryTablePane {
@@ -166,7 +167,7 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
             earliest_timestamp,
             last_updated,
             mut commands,
-        } = state.get_mut(world).expect("system params invalid");
+        } = state.params_mut(world);
         let Ok(mut table) = states.get_mut(entity) else {
             return;
         };

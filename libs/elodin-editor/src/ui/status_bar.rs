@@ -8,10 +8,10 @@ use bevy::{
     prelude::Entity,
     window::PrimaryWindow,
 };
-use std::time::{Duration, Instant};
 use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
+use std::time::{Duration, Instant};
 
 use crate::ui::{
     colors::get_scheme,
@@ -20,6 +20,7 @@ use crate::ui::{
 };
 
 use super::RootWidgetSystem;
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct StatusBar<'w, 's> {
@@ -41,7 +42,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world).expect("system params invalid");
+        let state_mut = state.params_mut(world);
         let Ok(target_window) = state_mut.primary_window.single() else {
             return;
         };
@@ -51,14 +52,14 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         let skybox_ui = &state_mut.skybox_ui;
         let skybox_cache = &state_mut.skybox_cache;
 
-        #[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
-        let panel = egui::Panel::bottom("status_bar")
-            .frame(egui::Frame {
+        let panel = super::utils::show_panel(
+            egui::Panel::bottom("status_bar").frame(egui::Frame {
                 fill: get_scheme().bg_primary,
                 inner_margin: egui::Margin::symmetric(16, 4),
                 ..Default::default()
-            })
-            .show(ctx, |ui| {
+            }),
+            ctx,
+            |ui| {
                 ui.horizontal(|ui| {
                     let style = ui.style_mut();
                     style.spacing.item_spacing = [20.0, 8.0].into();
@@ -105,7 +106,8 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
 
                     super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
                 });
-            });
+            },
+        );
 
         register_window_input_blocker(
             world,
@@ -181,7 +183,14 @@ fn process_resident_memory_bytes() -> Option<u64> {
 
     let mut info = MachTaskBasicInfo::default();
     let mut count = MACH_TASK_BASIC_INFO_COUNT;
-    let kr = unsafe { task_info(mach_task_self(), MACH_TASK_BASIC_INFO, &mut info, &mut count) };
+    let kr = unsafe {
+        task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            &mut info,
+            &mut count,
+        )
+    };
     if kr == 0 {
         Some(info.resident_size)
     } else {

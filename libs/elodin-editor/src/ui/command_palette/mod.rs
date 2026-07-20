@@ -28,6 +28,7 @@ use super::{
     FocusedWindow, RootWidgetSystem,
     widgets::{WidgetSystem, WidgetSystemExt},
 };
+use crate::ui::widgets::SystemStateExt;
 
 pub mod palette_items;
 
@@ -155,7 +156,7 @@ impl RootWidgetSystem for CommandPalette<'_, '_> {
         _args: Self::Args,
     ) {
         let (auto_open_item, filter) = {
-            let state_mut = state.get_mut(world).expect("system params invalid");
+            let state_mut = state.params_mut(world);
 
             let focused_window = state_mut.focused_window.0;
             let primary_window = state_mut.primary_window.iter().next();
@@ -194,7 +195,7 @@ impl RootWidgetSystem for CommandPalette<'_, '_> {
         if let Some(mut item) = auto_open_item {
             item.system.initialize(world);
             let event = item.system.run(filter, world).expect("Missing event");
-            let mut state_mut = state.get_mut(world).expect("system params invalid");
+            let mut state_mut = state.params_mut(world);
             state_mut.command_palette_state.handle_event(event);
         }
     }
@@ -228,7 +229,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         };
 
         let (command_palette_icons, auto_open_none, just_opened) = {
-            let state_mut = state.get_mut(world).expect("system params invalid");
+            let state_mut = state.params_mut(world);
             let command_palette_state = state_mut.command_palette_state;
 
             if command_palette_state.target_window != Some(target_window) {
@@ -302,13 +303,13 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             });
 
         if cmd_modal.backdrop_response.clicked() && auto_open_none && !just_opened {
-            let state_mut = state.get_mut(world).expect("system params invalid");
+            let state_mut = state.params_mut(world);
             let mut command_palette_state = state_mut.command_palette_state;
             command_palette_state.show = false;
             command_palette_state.target_window = None;
         }
 
-        let state_mut = state.get_mut(world).expect("system params invalid");
+        let state_mut = state.params_mut(world);
         let mut command_palette_state = state_mut.command_palette_state;
         command_palette_state.just_opened = false;
 
@@ -331,7 +332,7 @@ impl WidgetSystem for PaletteSearch<'_> {
         ui: &mut egui::Ui,
         _args: Self::Args,
     ) -> Self::Output {
-        let state_mut = state.get_mut(world).expect("system params invalid");
+        let state_mut = state.params_mut(world);
 
         let mut command_palette_state = state_mut.command_palette_state;
 
@@ -470,7 +471,7 @@ impl WidgetSystem for PaletteItems<'_> {
         args: Self::Args,
     ) {
         let (icons, up_pressed, down_pressed) = args;
-        let state_mut = state.get_mut(world).expect("system params invalid");
+        let state_mut = state.params_mut(world);
         let mut command_palette_state = state_mut.command_palette_state;
         let kbd = state_mut.key_state;
         let mut selected_index = command_palette_state.selected_index;
@@ -550,7 +551,7 @@ impl WidgetSystem for PaletteItems<'_> {
                 ui.add_space(row_height * 0.5);
                 ui.colored_label(get_scheme().highlight, format!("Error: {}", err_msg));
             }
-            let mut state_mut = state.get_mut(world).expect("system params invalid");
+            let mut state_mut = state.params_mut(world);
             state_mut.command_palette_state.page_stack.push(page);
             if let Some(event) = res.inner {
                 state_mut.command_palette_state.handle_event(event);
@@ -558,7 +559,7 @@ impl WidgetSystem for PaletteItems<'_> {
                 state_mut.command_palette_state.selected_index = selected_index;
             }
         } else {
-            let mut state_mut = state.get_mut(world).expect("system params invalid");
+            let mut state_mut = state.params_mut(world);
             state_mut.command_palette_state.page_stack.push(page);
             egui::Frame::NONE.inner_margin(row_margin).show(ui, |ui| {
                 ui.label(

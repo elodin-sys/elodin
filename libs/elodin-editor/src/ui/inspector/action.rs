@@ -4,6 +4,7 @@ use bevy::{
 };
 use egui::{Color32, CornerRadius, RichText, Stroke};
 
+use crate::ui::widgets::SystemStateExt;
 use crate::ui::{actions::ActionTile, colors::get_scheme, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
@@ -22,7 +23,7 @@ impl WidgetSystem for InspectorAction<'_, '_> {
         ui: &mut egui::Ui,
         entity: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world).expect("system params invalid");
+        let mut state = state.params_mut(world);
         let Ok(mut tile) = state.action_tiles.get_mut(entity) else {
             return;
         };

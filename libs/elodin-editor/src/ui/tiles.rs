@@ -77,6 +77,7 @@ use crate::{
 
 pub(crate) mod sidebar;
 
+use crate::ui::widgets::SystemStateExt;
 use sidebar::tab_add_visible;
 
 pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
@@ -1146,8 +1147,7 @@ impl Pane {
                             &impeller2_bevy::ComponentValue,
                         )>,
                     )>::new(world);
-                    let (configs, component_values) =
-                        state.get(world).expect("system params invalid");
+                    let (configs, component_values) = state.params(world);
                     {
                         let monitor_enabled = configs
                             .get(cam)
@@ -2016,7 +2016,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         let mut query = SystemState::<Query<&GraphState>>::new(self.world);
-        let graphs = query.get(self.world).expect("system params invalid");
+        let graphs = query.params(self.world);
         pane.title(&graphs).into()
     }
 
@@ -2433,7 +2433,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
             let mut layout = SystemState::<TileLayout>::new(self.world);
-            let mut layout = layout.get_mut(self.world).expect("system params invalid");
+            let mut layout = layout.params_mut(self.world);
             layout
                 .cmd_palette_state
                 .open_page_for_window(Some(self.target_window), move || {
@@ -2458,7 +2458,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         target: Option<Entity>,
     ) -> Option<(TileIcons, bool, bool)> {
         let read_only = false;
-        let params = state.get_mut(world).expect("system params invalid");
+        let params = state.params_mut(world);
         let mut contexts = params.contexts;
         let images = params.images;
         let target_id = target.unwrap_or_else(|| *params.primary_window);
@@ -2751,8 +2751,7 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
 
         let central = egui::CentralPanel::default().frame(frame);
 
-        #[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
-        central.show(ctx, |ui| {
+        super::utils::show_central_panel(central, ctx, |ui| {
             Self::render_panel_contents(
                 world,
                 ui,
@@ -2821,7 +2820,7 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
         let button_width = max_button_width.min(base_button_width);
         let desired_size = egui::vec2(button_width * 3.0 + button_spacing * 2.0, button_height);
 
-        let mut state_mut = state.get_mut(world).expect("system params invalid");
+        let mut state_mut = state.params_mut(world);
         let target_window = window.or_else(|| state_mut.primary_window.iter().next());
 
         ui.scope_builder(
@@ -2920,13 +2919,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
         } = args;
 
         let target_window = {
-            let state_mut = state.get_mut(world).expect("system params invalid");
+            let state_mut = state.params_mut(world);
             window.unwrap_or(*state_mut.primary_window)
         };
 
         let (tree, mut tree_actions, empty_overlay_rect, overlay_icons) = {
             let (tab_diffs, container_titles, mut tree, inspector_visible) = {
-                let mut state_mut = state.get_mut(world).expect("system params invalid");
+                let mut state_mut = state.params_mut(world);
                 let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
                 else {
                     return;
@@ -2984,7 +2983,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
         };
 
         {
-            let mut state_mut = state.get_mut(world).expect("system params invalid");
+            let mut state_mut = state.params_mut(world);
             let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
             else {
                 return;

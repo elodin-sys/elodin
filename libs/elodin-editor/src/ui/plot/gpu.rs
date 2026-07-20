@@ -30,7 +30,6 @@ use bevy::{
     ecs::{
         component::Component,
         system::lifetimeless::{Read, SRes},
-        world::FromWorld,
     },
     prelude::{Color, Resource},
     render::{
@@ -52,6 +51,7 @@ use std::ops::Range;
 use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
 
 use super::BufferShardAlloc;
+use crate::ui::widgets::SystemStateExt;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
 const POINT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
@@ -250,13 +250,17 @@ impl LineHandle {
         lines: &'m mut Assets<Line>,
         xy_lines: &'m mut Assets<XYLine>,
     ) -> Option<LineMut<'m>> {
+        // Untracked: the only caller (`extract_lines`) mutates GPU buffers every
+        // frame; marking `AssetEvent::Modified` here would dirty every visible
+        // line each extract. CPU-side Line/XYLine edits use `Assets::get_mut`
+        // directly and stay change-tracked.
         match self {
             Self::Timeseries(handle) => lines
                 .get_mut(handle)
-                .map(|line| LineMut::Timeseries(line.into_inner())),
+                .map(|line| LineMut::Timeseries(line.into_inner_untracked())),
             Self::XY(handle) => xy_lines
                 .get_mut(handle)
-                .map(|line| LineMut::XY(line.into_inner())),
+                .map(|line| LineMut::XY(line.into_inner_untracked())),
         }
     }
 }
@@ -336,16 +340,6 @@ pub struct LinePipeline {
     mesh_pipeline: Mesh2dPipeline,
     uniform_layout: BindGroupLayoutDescriptor,
     storage_layout: BindGroupLayoutDescriptor,
-}
-
-impl FromWorld for LinePipeline {
-    fn from_world(world: &mut bevy::prelude::World) -> Self {
-        Self {
-            mesh_pipeline: world.resource::<Mesh2dPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().descriptor.clone(),
-            storage_layout: world.resource::<LineValuesLayout>().descriptor.clone(),
-        }
-    }
 }
 
 fn init_line_pipeline(
@@ -554,9 +548,8 @@ fn extract_lines(
         ResMut<'static, Assets<XYLine>>,
         Res<'static, crate::SelectedTimeRange>,
     )>::new(&mut main_world);
-    let (mut lines, mut line_assets, mut xy_lines, selected_range) = state
-        .get_mut(&mut main_world)
-        .expect("system params invalid");
+    let (mut lines, mut line_assets, mut xy_lines, selected_range) =
+        state.params_mut(&mut main_world);
     let selected = selected_range.0.clone();
     let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
     let short_window = crate::is_short_accuracy_window(&selected);

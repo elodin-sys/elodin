@@ -1,3 +1,4 @@
+use crate::ui::widgets::SystemStateExt;
 use crate::{
     SelectedTimeRange,
     ui::plot::{
@@ -12,14 +13,10 @@ use bevy::{
     app::{Plugin, PostUpdate},
     asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
     color::ColorToComponents,
-    core_pipeline::{
-        core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d, TransparentSortingInfo3d},
-        prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
-    },
+    core_pipeline::core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d, TransparentSortingInfo3d},
     ecs::{
         component::Component,
         entity::Entity,
-        query::Has,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
             Commands, Query, Res, ResMut, SystemState,
@@ -29,7 +26,7 @@ use bevy::{
     },
     math::{DVec3, Mat4, Vec4},
     mesh::VertexBufferLayout,
-    pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
+    pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup, ViewKeyCache},
     prelude::{Color, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
@@ -40,7 +37,7 @@ use bevy::{
         },
         render_resource::{binding_types::uniform_buffer, *},
         renderer::{RenderDevice, RenderQueue},
-        view::{ExtractedView, Msaa},
+        view::ExtractedView,
     },
     transform::{
         TransformSystems,
@@ -553,7 +550,8 @@ fn resolve_line_frame(geo_pos: Option<&GeoPosition>, line: Option<&Line3d>) -> G
     line.and_then(|l| l.frame).unwrap_or_default()
 }
 
-/// First sample of the line (full recording), in the line's own frame.
+/// First sample currently in the LineTree (visible window), in frame coords.
+/// Must match the entity `GeoPosition` written by `sync_line_3d_anchor`.
 fn line_first_point_frame(
     line_assets: &Assets<Line>,
     handles: &[Handle<Line>; 3],
@@ -658,10 +656,7 @@ fn extract_lines(
             current_timestamp,
             timeline_settings,
             latest_follow,
-        ) = cached_state
-            .state
-            .get_mut(world)
-            .expect("system params invalid");
+        ) = cached_state.state.params_mut(world);
         let selected_range = if crate::is_short_accuracy_window(&selected_time_range.0) {
             selected_time_range.0.clone()
         } else {
@@ -932,81 +927,30 @@ fn extract_lines(
     })
 }
 
-type ViewQuery = (
-    &'static ExtractedView,
-    &'static bevy::render::camera::ExtractedCamera,
-    &'static Msaa,
-    Option<&'static RenderLayers>,
-    (
-        Has<NormalPrepass>,
-        Has<DepthPrepass>,
-        Has<MotionVectorPrepass>,
-        Has<DeferredPrepass>,
-    ),
-    (
-        Option<&'static bevy::core_pipeline::tonemapping::Tonemapping>,
-        Option<&'static bevy::core_pipeline::tonemapping::DebandDither>,
-    ),
-);
-
 #[allow(clippy::too_many_arguments)]
 fn queue_line(
     draw_functions: Res<DrawFunctions<Transparent3d>>,
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
+    view_key_cache: Res<ViewKeyCache>,
     lines: Query<(Entity, &MainEntity, &LineHandles, &LineConfig)>,
-    mut views: Query<ViewQuery>,
+    mut views: Query<(&ExtractedView, Option<&RenderLayers>)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawLineData>().unwrap();
 
-    for (
-        view,
-        camera,
-        msaa,
-        render_layers,
-        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
-        (tonemapping, dither),
-    ) in &mut views
-    {
+    for (view, render_layers) in &mut views {
         let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
         else {
             continue;
         };
+        // Canonical per-view MeshPipelineKey (MSAA, prepass, tonemap, …) filled
+        // by bevy_pbr in PrepareAssets — same source wireframe/materials use.
+        let Some(&view_key) = view_key_cache.get(&view.retained_view_entity) else {
+            continue;
+        };
         let render_layers = render_layers.cloned().unwrap_or_default();
-
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples());
-
-        if normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-
-        if depth_prepass {
-            view_key |= MeshPipelineKey::DEPTH_PREPASS;
-        }
-
-        if motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-
-        if deferred_prepass {
-            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
-        }
-
-        // Mirror bevy_pbr's view specialization: LDR views with tonemapping
-        // bind the LUT entries in the mesh view bind group layout, so the
-        // pipeline layout must carry the same key bits or the bind group is
-        // incompatible at draw time.
-        if !camera.hdr {
-            if let Some(tonemapping) = tonemapping {
-                view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
-                view_key |= bevy::pbr::tonemapping_pipeline_key(*tonemapping);
-            }
-            if let Some(bevy::core_pipeline::tonemapping::DebandDither::Enabled) = dither {
-                view_key |= MeshPipelineKey::DEBAND_DITHER;
-            }
-        }
 
         for (entity, main_entity, _handle, config) in &lines {
             if !config.render_layers.intersects(&render_layers) {

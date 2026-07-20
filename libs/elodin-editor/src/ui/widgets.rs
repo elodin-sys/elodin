@@ -1,7 +1,7 @@
 use bevy::{
     ecs::{
         query::{QueryFilter, With},
-        system::{SystemParam, SystemState},
+        system::{ReadOnlySystemParam, SystemParam, SystemParamItem, SystemState},
         world::{Mut, World},
     },
     prelude::{Entity, Resource},
@@ -9,6 +9,32 @@ use bevy::{
 };
 use bevy_egui::{EguiContext, egui};
 use std::collections::HashMap;
+
+/// [`SystemState::get`] / [`SystemState::get_mut`] became fallible in Bevy 0.19.
+/// Invalid params are a bug in widget/system wiring — unwrap once here instead
+/// of repeating `.expect("system params invalid")` at every call site.
+pub trait SystemStateExt<P: SystemParam + 'static> {
+    fn params<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, P>
+    where
+        P: ReadOnlySystemParam;
+
+    fn params_mut<'w, 's>(&'s mut self, world: &'w mut World) -> SystemParamItem<'w, 's, P>;
+}
+
+impl<P: SystemParam + 'static> SystemStateExt<P> for SystemState<P> {
+    #[inline]
+    fn params<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, P>
+    where
+        P: ReadOnlySystemParam,
+    {
+        self.get(world).expect("system params invalid")
+    }
+
+    #[inline]
+    fn params_mut<'w, 's>(&'s mut self, world: &'w mut World) -> SystemParamItem<'w, 's, P> {
+        self.get_mut(world).expect("system params invalid")
+    }
+}
 
 pub trait RootWidgetSystemExt {
     fn add_root_widget<S: RootWidgetSystem<Args = ()> + 'static>(&mut self, id: &str) -> S::Output {

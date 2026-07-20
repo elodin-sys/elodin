@@ -34,6 +34,7 @@ use crate::{
 };
 
 use super::InspectorIcons;
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Default)]
 struct AddComponentState {
@@ -61,7 +62,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world).expect("system params invalid");
+        let state_mut = state.params_mut(world);
 
         let (icons, graph_id) = args;
 

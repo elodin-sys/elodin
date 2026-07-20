@@ -32,6 +32,7 @@ use super::{
     PaneName,
     colors::{ColorExt, get_scheme},
 };
+use crate::ui::widgets::SystemStateExt;
 
 // ---------------------------------------------------------------------------
 // Public pane types (unchanged API)
@@ -883,7 +884,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         ui: &mut egui::Ui,
         VideoStreamWidgetArgs { entity, window }: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world).expect("system params invalid");
+        let mut state = state.params_mut(world);
 
         let Ok(WidgetQueryItem {
             mut stream,

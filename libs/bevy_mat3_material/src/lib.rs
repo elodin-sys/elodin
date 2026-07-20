@@ -45,7 +45,9 @@ fn sync_mat3_params_from_component(
 
         if let Some(mesh_material) = maybe_mesh_material {
             if let Some(mut material) = materials.get_mut(&mesh_material.0) {
-                material.extension.params = params;
+                if material.extension.params != params {
+                    material.extension.params = params;
+                }
             }
         }
 
@@ -53,7 +55,9 @@ fn sync_mat3_params_from_component(
             for descendant in children_query.iter_descendants(entity) {
                 if let Ok(mesh_material) = child_mesh_materials.get(descendant) {
                     if let Some(mut material) = materials.get_mut(&mesh_material.0) {
-                        material.extension.params = params;
+                        if material.extension.params != params {
+                            material.extension.params = params;
+                        }
                     }
                 }
             }
@@ -66,7 +70,7 @@ fn sync_mat3_params_from_component(
 /// - `linear`: linear transform of points in the mesh.
 /// - `normal_matrix`: inverse-transpose of the `linear` Mat3, to correctly
 ///   transform mesh normals.
-#[derive(ShaderType, Copy, Clone, Debug, Reflect)]
+#[derive(ShaderType, Copy, Clone, Debug, Reflect, PartialEq)]
 pub struct Mat3Uniforms {
     /// The linear transformation
     pub linear: Mat3, // 48 bytes, 3 * 16 bytes
@@ -126,7 +130,7 @@ pub type Mat3Material = bevy::pbr::ExtendedMaterial<StandardMaterial, Mat3Transf
 /// Edit `linear` in the inspector; it is synced to the material when changed and the normal matrix
 /// is derived automatically. Attach this to any entity with `MeshMaterial3d<Mat3Material>`
 /// that uses a material handle unique to that entity (or shared only with its grid child).
-#[derive(Default, Component, Debug, Reflect)]
+#[derive(Default, Component, Debug, Reflect, PartialEq)]
 #[reflect(Component)]
 pub struct Mat3Params {
     /// The 3×3 linear transform applied in the vertex shader (lower-triangular convention).

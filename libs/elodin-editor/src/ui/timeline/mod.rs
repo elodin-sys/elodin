@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-use super::widgets::{WidgetSystem, WidgetSystemExt};
+use super::widgets::{SystemStateExt, WidgetSystem, WidgetSystemExt};
 
 pub mod timeline_controls;
 pub mod timeline_slider;
@@ -428,7 +428,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         ui: &mut egui::Ui,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world).expect("system params invalid");
+        let state_mut = state.params_mut(world);
         let Ok(target_window) = state_mut.primary_window.single() else {
             return;
         };
