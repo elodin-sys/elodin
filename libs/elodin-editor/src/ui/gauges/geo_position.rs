@@ -13,7 +13,7 @@ use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
 use super::{EqlBinding, GaugePane};
-use crate::ui::{monitor::render_value_cards, widgets::WidgetSystem};
+use crate::ui::{monitor::render_value_cards, theme, widgets::WidgetSystem};
 
 /// Backing data for a geo-position gauge pane; the EQL lives in the sibling
 /// [`EqlBinding`] component.
@@ -42,7 +42,7 @@ impl GeoPositionGaugeData {
 
 #[derive(SystemParam)]
 pub struct GeoPositionGaugeWidget<'w, 's> {
-    gauges: Query<'w, 's, (&'static GeoPositionGaugeData, &'static EqlBinding)>,
+    gauges: Query<'w, 's, (&'static mut GeoPositionGaugeData, &'static EqlBinding)>,
     entity_map: Res<'w, EntityMap>,
     values: Query<'w, 's, &'static ComponentValue>,
     telemetry_cache: Res<'w, TelemetryCache>,
@@ -62,7 +62,7 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
         pane: Self::Args,
     ) -> Self::Output {
         let GeoPositionGaugeWidget {
-            gauges,
+            mut gauges,
             entity_map,
             values,
             telemetry_cache,
@@ -70,7 +70,7 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
             geo_context,
             coordinate,
         } = state.get_mut(world);
-        let Ok((data, binding)) = gauges.get(pane.entity) else {
+        let Ok((mut data, binding)) = gauges.get_mut(pane.entity) else {
             return;
         };
 
@@ -78,28 +78,55 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
         let value = binding.resolve(&entity_map, &values, &telemetry_cache, ts);
         // Keep inherit (`source = None`) live against `Coordinate` changes.
         let source = data.effective_source(coordinate.0);
-        let display = data.display;
+        let combo_id = egui::Id::new(("geo_position_gauge_display", pane.entity));
 
-        let labels = display_labels(display);
-        let out = value
-            .as_ref()
-            .and_then(component_value_to_position)
-            .map(|pos_src| convert(pos_src, source, display, &geo_context));
-        let cards: Vec<(String, String)> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, label)| {
-                let value = out
-                    .map(|v| fmt_val(v[i]))
-                    .unwrap_or_else(|| "—".to_string());
-                ((*label).to_string(), value)
-            })
-            .collect();
-
-        // Same chrome as the component monitor: just the cards.
+        // Value cards read like the component monitor; the in-panel display
+        // dropdown mirrors the orientation gauge so the frame can be switched
+        // without opening the inspector.
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
+                {
+                    let style = ui.style_mut();
+                    theme::configure_input_with_border(style);
+                    style
+                        .text_styles
+                        .iter_mut()
+                        .for_each(|(_, font)| font.size = 10.0);
+                }
+                egui::ComboBox::from_id_salt(combo_id)
+                    .selected_text(data.display.as_str())
+                    .width(86.0)
+                    .show_ui(ui, |ui| {
+                        for frame in [
+                            DisplayFrame::NED,
+                            DisplayFrame::ENU,
+                            DisplayFrame::ECEF,
+                            DisplayFrame::LLA,
+                        ] {
+                            ui.selectable_value(&mut data.display, frame, frame.as_str());
+                        }
+                    });
+
+                // Read `display` after the ComboBox so a change applies this frame.
+                let display = data.display;
+                let labels = display_labels(display);
+                let out = value
+                    .as_ref()
+                    .and_then(component_value_to_position)
+                    .map(|pos_src| convert(pos_src, source, display, &geo_context));
+                let cards: Vec<(String, String)> = labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| {
+                        let value = out
+                            .map(|v| fmt_val(v[i]))
+                            .unwrap_or_else(|| "—".to_string());
+                        ((*label).to_string(), value)
+                    })
+                    .collect();
+
+                ui.add_space(4.0);
                 render_value_cards(ui, &cards);
             });
     }
