@@ -12,6 +12,7 @@ pub(crate) mod kdl_document;
 mod logical_key;
 pub mod navigation_gizmo;
 pub mod render_layer_alloc;
+pub mod scene_environment;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod screenshot;
 #[cfg(not(target_family = "wasm"))]

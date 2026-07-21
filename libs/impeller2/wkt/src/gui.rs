@@ -60,9 +60,87 @@ pub struct Schematic {
     pub origin: Option<GeoOriginConfig>,
     #[serde(default)]
     pub skybox: Option<SkyboxConfig>,
+    /// Cinematic scene environment: sun light + shadows, ambient scaling, sky
+    /// color. Absent = the editor's default look.
+    #[serde(default)]
+    pub environment: Option<EnvironmentConfig>,
     /// When true, enable dense telemetry presentation (locked graphs, compact chrome).
     #[serde(default)]
     pub telemetry_mode: bool,
+}
+
+/// Contents of the top-level `environment` schematic node
+/// (see docs/design-thruster-effects-port.md §4.2).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct EnvironmentConfig {
+    /// Directional sun light; absent = no sun (editor's IBL-only default).
+    #[serde(default)]
+    pub sun: Option<SunConfig>,
+    /// Multiplier on the editor's baked image-based lighting intensity
+    /// (`1.0` = unchanged). Airless-body scenes want near-zero so shadows
+    /// stay black.
+    #[serde(default = "EnvironmentConfig::default_ambient_scale")]
+    pub ambient_scale: f32,
+    /// Viewport clear color (e.g. black for space). Absent = theme background.
+    #[serde(default)]
+    pub sky_color: Option<Color>,
+}
+
+impl Default for EnvironmentConfig {
+    fn default() -> Self {
+        Self {
+            sun: None,
+            ambient_scale: Self::default_ambient_scale(),
+            sky_color: None,
+        }
+    }
+}
+
+impl EnvironmentConfig {
+    pub fn default_ambient_scale() -> f32 {
+        1.0
+    }
+}
+
+/// `sun` child of the `environment` node. Angles are degrees in the rendered
+/// (Bevy, Y-up) world frame; the same convention pyrotechnique scenes use, so
+/// values transcribe directly.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct SunConfig {
+    #[serde(default)]
+    pub azimuth_deg: f32,
+    #[serde(default = "SunConfig::default_elevation_deg")]
+    pub elevation_deg: f32,
+    /// Direct sunlight is ~100k lux.
+    #[serde(default = "SunConfig::default_illuminance")]
+    pub illuminance: f32,
+    #[serde(default = "SunConfig::default_shadows")]
+    pub shadows: bool,
+}
+
+impl Default for SunConfig {
+    fn default() -> Self {
+        Self {
+            azimuth_deg: 0.0,
+            elevation_deg: Self::default_elevation_deg(),
+            illuminance: Self::default_illuminance(),
+            shadows: Self::default_shadows(),
+        }
+    }
+}
+
+impl SunConfig {
+    pub fn default_elevation_deg() -> f32 {
+        45.0
+    }
+
+    pub fn default_illuminance() -> f32 {
+        100_000.0
+    }
+
+    pub fn default_shadows() -> bool {
+        true
+    }
 }
 
 /// Geographic origin in degrees/meters, as written in the schematic's
@@ -276,9 +354,18 @@ pub struct Viewport {
     pub frustums_thickness: f32,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
+    /// When true (default), this viewport's camera includes the thruster
+    /// particle render layer. Set `#false` to hide Hanabi thruster effects in
+    /// this viewport only (shared simulation; draw is per-camera).
+    #[serde(default = "default_true")]
+    pub effects: bool,
     pub hdr: bool,
     #[serde(default)]
     pub bloom: Option<BloomConfig>,
+    /// Camera exposure (EV100). Sunny-16 daylight is ~14-15. Absent = the
+    /// editor's default physical-camera exposure (~EV 8.6).
+    #[serde(default)]
+    pub ev100: Option<f32>,
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
@@ -308,8 +395,10 @@ impl Default for Viewport {
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
+            effects: true,
             hdr: false,
             bloom: None,
+            ev100: None,
             name: None,
             pos: None,
             look_at: None,
@@ -848,16 +937,70 @@ pub struct Thruster {
     #[serde(default)]
     pub direction: Option<(f32, f32, f32)>,
     pub intensity: String,
-    /// Built-in particle preset: `plume` (default) or `cold_gas`.
+    /// Built-in particle preset (`plume`, default, or `cold_gas`) — or a hanabi
+    /// `.effect` asset path (detected by the `.effect` suffix), resolved like
+    /// GLB paths (`db:` keys via the DB Asset Server).
     #[serde(default = "Thruster::default_effect")]
     pub effect: String,
-    #[serde(default = "Thruster::default_emission_rate")]
-    pub emission_rate: f32,
+    /// Additional stacked effect layers rendered from the same emitter
+    /// (KDL: repeated `effect "path"` child nodes). The standard use is a
+    /// camera-facing halo layer over a velocity-stretched core so the plume
+    /// keeps its volume from every viewing angle — one thruster node instead
+    /// of duplicate emitters. `emission_rate`/`light` apply to the primary
+    /// `effect` only; layers always use their authored rates.
+    #[serde(default)]
+    pub extra_effects: Vec<String>,
+    /// Particles/second at intensity 1.0. For preset effects, absent means
+    /// [`Thruster::default_emission_rate`]; for `.effect` files, absent means
+    /// "use the rate authored inside the effect file" and a value overrides it.
+    #[serde(default)]
+    pub emission_rate: Option<f32>,
     #[serde(default = "Thruster::default_cutoff")]
     pub cutoff: f32,
     /// Vector-mode only: maps the EQL vector's magnitude onto the `0..1` intensity range.
     #[serde(default = "Thruster::default_scale")]
     pub scale: f32,
+    /// Optional dynamic light at the nozzle, scaled by the same intensity
+    /// signal as the particle spawn rate. Additive plume particles emit no
+    /// light of their own, so this is what illuminates the nozzle, structure,
+    /// and ground. Emitter-level config — not part of the `.effect` file
+    /// (that is a pure bevy_hanabi asset).
+    #[serde(default)]
+    pub light: Option<ThrusterLight>,
+}
+
+/// Bevy light attached to a thruster: a point light, or — when `spot_angle`
+/// is set — a spot light aimed down the exhaust axis. Mirrors pyrotechnique's
+/// `LightConfig` so tuned values port 1:1.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ThrusterLight {
+    /// Linear RGB, 0-1 per channel.
+    pub color: (f32, f32, f32),
+    /// Peak luminous power in lumens (at intensity = 1). Illuminance at
+    /// distance d is `lm / (4 pi d^2)` lux; megalumens are normal for an
+    /// engine that must read against a ~100 klx sun.
+    pub intensity: f32,
+    /// Range in meters beyond which the light has no effect.
+    #[serde(default = "ThrusterLight::default_range")]
+    pub range: f32,
+    /// Meters down the exhaust axis from the thruster position. Emitters
+    /// usually sit inside the nozzle; the light wants to hang at/below the
+    /// exit plane so it does not blast the bell interior at point-blank range.
+    #[serde(default)]
+    pub offset: f32,
+    /// Full cone angle in degrees for a spot light down the exhaust axis;
+    /// absent = omnidirectional point light.
+    #[serde(default)]
+    pub spot_angle: Option<f32>,
+    /// Cast shadows (expensive — keep to one or two lights per scene).
+    #[serde(default)]
+    pub shadows: bool,
+}
+
+impl ThrusterLight {
+    pub fn default_range() -> f32 {
+        30.0
+    }
 }
 
 impl Thruster {
@@ -879,6 +1022,21 @@ impl Thruster {
 
     pub fn vector_intensity(&self) -> bool {
         self.direction.is_none()
+    }
+
+    /// All effect layers, primary first.
+    pub fn effect_layers(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.effect.as_str()).chain(self.extra_effects.iter().map(String::as_str))
+    }
+
+    /// True when `effect` names a hanabi `.effect` asset file rather than a
+    /// built-in preset.
+    pub fn effect_is_file(&self) -> bool {
+        Self::effect_path_is_file(&self.effect)
+    }
+
+    pub fn effect_path_is_file(effect: &str) -> bool {
+        effect.ends_with(".effect")
     }
 }
 

@@ -168,6 +168,16 @@ RcsThrusterViz = ty.Annotated[
     jax.Array,
     el.Component("rcs_thruster_viz", el.ComponentType(el.PrimitiveType.F64, (16,))),
 ]
+# Regolith ground-effect level (0..1) for the world-fixed dust emitter in the
+# editor: plume impingement on the surface, i.e. throttle scaled by proximity
+# below DUST_ONSET_ALT_M. Cuts off with the engine, like the real thing.
+DustViz = ty.Annotated[
+    jax.Array,
+    el.Component("dust_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+# Altitude below which the DPS plume starts scouring the surface (Apollo crews
+# reported dust from ~30 m; visible sheets thicken in the last ~10 m).
+DUST_ONSET_ALT_M = 12.0
 RCS_THRUSTER_AXIS = jnp.array(RCS_THRUSTER_AXIS_TABLE, dtype=jnp.int32)
 RCS_THRUSTER_SIGN = jnp.array(RCS_THRUSTER_SIGN_TABLE, dtype=jnp.float64)
 Landed = ty.Annotated[
@@ -296,6 +306,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             el.C(MainThrustViz, jnp.zeros(3, dtype=jnp.float64)),
             el.C(RcsTorqueViz, jnp.zeros(3, dtype=jnp.float64)),
             el.C(RcsThrusterViz, jnp.zeros(16, dtype=jnp.float64)),
+            el.C(DustViz, jnp.zeros(1, dtype=jnp.float64)),
             el.C(Landed, jnp.array([0.0], dtype=jnp.float64)),
             el.C(TouchdownSpeed, jnp.array([0.0], dtype=jnp.float64)),
             el.C(TouchdownHorizontalSpeed, jnp.array([0.0], dtype=jnp.float64)),
@@ -444,8 +455,8 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
 
     @el.map
     def thrust_visualization(
-        thrust: Thrust, torque: RcsTorque
-    ) -> tuple[MainThrustViz, RcsTorqueViz, RcsThrusterViz]:
+        thrust: Thrust, torque: RcsTorque, pos: el.WorldPos
+    ) -> tuple[MainThrustViz, RcsTorqueViz, RcsThrusterViz, DustViz]:
         torque_norm = torque / RCS_AXIS_TORQUE_LIMIT_NM
         raw_per_thruster = jnp.maximum(0.0, torque_norm[RCS_THRUSTER_AXIS] * RCS_THRUSTER_SIGN)
         # Particle visibility is nonlinear: keep the physics torque unchanged,
@@ -455,10 +466,18 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             jnp.sqrt(raw_per_thruster),
             0.0,
         )
+        throttle_fraction = thrust[0] / DPS_MAX_THRUST_N
+        # Ground-effect dust: plume impingement = throttle x proximity to the
+        # surface. Zero above the onset altitude and the instant the engine
+        # stops (no air to keep grains aloft).
+        altitude = pos.linear()[2]
+        proximity = jnp.clip((DUST_ONSET_ALT_M - altitude) / DUST_ONSET_ALT_M, 0.0, 1.0)
+        dust = jnp.sqrt(proximity) * throttle_fraction
         return (
-            jnp.array([0.0, 0.0, thrust[0] / DPS_MAX_THRUST_N], dtype=jnp.float64),
+            jnp.array([0.0, 0.0, throttle_fraction], dtype=jnp.float64),
             torque_norm,
             per_thruster,
+            jnp.array([dust], dtype=jnp.float64),
         )
 
     ref_time = jnp.asarray(REF_TIME_S)

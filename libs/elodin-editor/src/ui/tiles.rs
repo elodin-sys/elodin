@@ -63,8 +63,8 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         render_layer_alloc::{
-            GRID_RENDER_LAYERS, RenderLayerAllocator, RenderLayerLease, grid_render_layer,
-            view_cube_render_layer,
+            GRID_RENDER_LAYERS, RenderLayerAllocator, RenderLayerLease,
+            THRUSTER_PARTICLES_RENDER_LAYER, grid_render_layer, view_cube_render_layer,
         },
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
@@ -1545,6 +1545,9 @@ impl ViewportPane {
         let mut main_camera_layers = RenderLayers::default()
             .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER);
+        if viewport.effects {
+            main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
+        }
         let grid_layer = grid_render_layer(viewport.frame);
         if viewport.show_grid {
             main_camera_layers = main_camera_layers.with(grid_layer);
@@ -1698,12 +1701,18 @@ impl ViewportPane {
             },
             Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
-            Exposure::from_physical_camera(PhysicalCameraParameters {
-                aperture_f_stops: 2.8,
-                shutter_speed_s: 1.0 / 200.0,
-                sensitivity_iso: 400.0,
-                sensor_height: 24.0 / 1000.0,
-            }),
+            // KDL `ev100` overrides the default physical-camera exposure
+            // (~EV 8.6) — required when a schematic `environment` adds a real
+            // sun (100k+ lux would blow out at the default exposure).
+            match viewport.ev100 {
+                Some(ev100) => Exposure { ev100 },
+                None => Exposure::from_physical_camera(PhysicalCameraParameters {
+                    aperture_f_stops: 2.8,
+                    shutter_speed_s: 1.0 / 200.0,
+                    sensitivity_iso: 400.0,
+                    sensor_height: 24.0 / 1000.0,
+                }),
+            },
             main_camera_layers,
             MainCamera,
             #[cfg(feature = "big_space")]

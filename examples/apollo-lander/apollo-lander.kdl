@@ -1,9 +1,23 @@
 coordinate frame=ENU
 theme mode=dark scheme=default
+// Cinematic lunar lighting (ported from the pyrotechnique apollo-lander
+// project): harsh low sun with shadows, near-zero ambient fill, black sky.
+// Angles/illuminance/EV transcribe 1:1 from the pyrotechnique scene.
+environment {
+    // Azimuth chosen for the follow camera at translate_world(10,10,4): key
+    // light ~55 degrees off the view axis so the camera-facing side is lit
+    // (320 backlit it). Elevation/illuminance match the pyrotechnique scene.
+    sun azimuth=280.0 elevation=32.0 illuminance=130000.0 shadows=#true
+    ambient scale=0.02
+    sky color="black"
+}
 timeline
 hsplit {
-    viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true show_grid=#false share=0.463842 {
-        bloom preset="old_school" intensity=0.45 threshold=0.65 threshold_softness=0.15 
+    // ev100 14.2: the landing-site GLB is high-albedo, so it needs ~1 stop
+    // less exposure than the pyrotechnique scene's 0.185-albedo ground to
+    // keep the regolith light-gray instead of blown out.
+    viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true ev100=14.2 show_grid=#false share=0.463842 {
+        bloom preset="old_school" intensity=0.22 threshold=0.78 threshold_softness=0.12
         // bloom preset="natural" intensity=0.25
     }
     vsplit share=0.536157 {
@@ -60,50 +74,78 @@ hsplit {
     }
 }
 object_3d surface.world_pos frame=ENU {
-    glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)" emissivity=0.1 glow=0.5
+    // No self-illumination: the environment sun + shadows light the terrain.
+    // (The old emissivity/glow values predate the `environment` node and wash
+    // the frame out under a 130 klx sun + bloom.)
+    glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)"
 }
 // All thruster exhaust is declared here in KDL and driven by EQL viz channels.
-// DPS: vector intensity (direction + magnitude from lander.main_thrust_viz).
-// RCS: 16 cold-gas jets, scalar intensity from lander.rcs_thruster_viz[i].
+// Effects are hanabi `.effect` files authored in pyrotechnique (see
+// pyrotechnique/assets/effects/apollo-lander/); spawn rates come from the
+// files and scale with intensity. Assets resolve through the DB Asset Server
+// after ingest, like the GLBs.
+// DPS: scalar intensity = thrust fraction from lander.main_thrust_viz[2].
+// RCS: 16 vacuum jets, scalar intensity from lander.rcs_thruster_viz[i].
 // RCS index order must match RCS_THRUSTER_AXIS / RCS_THRUSTER_SIGN in rcs_geometry.py.
 // Positions are in the visible object frame after the GLB translate below.
 // The Apollo LM GLB has four RCS quads; each quad has four perpendicular yellow nozzles.
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
-    thruster name="DPS" effect="plume" body_frame=#true position="(0, -0.55, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" emission_rate=180.0
-    thruster name="rcs_0" effect="cold_gas" body_frame=#true position="(1.089, 0.870, -1.506)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[0]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_1" effect="cold_gas" body_frame=#true position="(1.388, 0.874, -1.361)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[1]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_2" effect="cold_gas" body_frame=#true position="(-1.180, 0.527, -1.369)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[2]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_3" effect="cold_gas" body_frame=#true position="(-1.360, 0.855, -1.361)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[3]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_4" effect="cold_gas" body_frame=#true position="(-1.062, 0.858, -1.507)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[4]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_5" effect="cold_gas" body_frame=#true position="(-1.249, 1.127, 1.230)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[5]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_6" effect="cold_gas" body_frame=#true position="(-1.429, 0.916, 1.280)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[6]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_7" effect="cold_gas" body_frame=#true position="(-1.232, 0.912, 1.428)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[7]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_8" effect="cold_gas" body_frame=#true position="(1.297, 1.127, 1.243)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[8]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_9" effect="cold_gas" body_frame=#true position="(1.296, 0.694, 1.243)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[9]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_10" effect="cold_gas" body_frame=#true position="(1.484, 0.905, 1.260)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[10]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_11" effect="cold_gas" body_frame=#true position="(1.314, 0.908, 1.442)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[11]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_12" effect="cold_gas" body_frame=#true position="(1.207, 1.201, -1.369)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[12]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_13" effect="cold_gas" body_frame=#true position="(1.207, 0.527, -1.369)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[13]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_14" effect="cold_gas" body_frame=#true position="(-1.249, 0.694, 1.230)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[14]" emission_rate=1100.0 cutoff=0.006
-    thruster name="rcs_15" effect="cold_gas" body_frame=#true position="(-1.180, 1.200, -1.369)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[15]" emission_rate=1100.0 cutoff=0.006
+    // Inside the DPS bell, measured from the GLB: exit plane y=-2.09, throat
+    // y=-1.38, inner radius 0.45 m at the exit. The spawn cone (base at this
+    // point, extending up the bell) stays behind the nozzle wall so the
+    // plume emerges from the opening instead of clipping through the skin.
+    // One node, two stacked effect layers: the velocity-stretched core column
+    // plus a camera-facing halo (`effect` child node; descent_glow offsets
+    // its own spawn volume below the exit plane) so the plume keeps its
+    // volume from every viewing angle. The light hangs 0.8 m down the
+    // exhaust axis and tracks throttle: additive particles emit no light, so
+    // this is what anchors the plume to the bell on the shadow side and
+    // pools on the ground late in the descent. Values tuned in pyrotechnique.
+    thruster name="DPS" effect="effects/apollo-lander/descent_plume.effect" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+        effect "effects/apollo-lander/descent_glow.effect"
+        light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
+    }
+    thruster name="rcs_0" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.089, 0.870, -1.506)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[0]" cutoff=0.006
+    thruster name="rcs_1" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.388, 0.874, -1.361)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[1]" cutoff=0.006
+    thruster name="rcs_2" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.180, 0.527, -1.369)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[2]" cutoff=0.006
+    thruster name="rcs_3" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.360, 0.855, -1.361)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[3]" cutoff=0.006
+    thruster name="rcs_4" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.062, 0.858, -1.507)" direction="(0, 0, -1)" intensity="lander.rcs_thruster_viz[4]" cutoff=0.006
+    thruster name="rcs_5" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.249, 1.127, 1.230)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[5]" cutoff=0.006
+    thruster name="rcs_6" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.429, 0.916, 1.280)" direction="(-1, 0, 0)" intensity="lander.rcs_thruster_viz[6]" cutoff=0.006
+    thruster name="rcs_7" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.232, 0.912, 1.428)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[7]" cutoff=0.006
+    thruster name="rcs_8" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.297, 1.127, 1.243)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[8]" cutoff=0.006
+    thruster name="rcs_9" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.296, 0.694, 1.243)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[9]" cutoff=0.006
+    thruster name="rcs_10" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.484, 0.905, 1.260)" direction="(1, 0, 0)" intensity="lander.rcs_thruster_viz[10]" cutoff=0.006
+    thruster name="rcs_11" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.314, 0.908, 1.442)" direction="(0, 0, 1)" intensity="lander.rcs_thruster_viz[11]" cutoff=0.006
+    thruster name="rcs_12" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.207, 1.201, -1.369)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[12]" cutoff=0.006
+    thruster name="rcs_13" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(1.207, 0.527, -1.369)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[13]" cutoff=0.006
+    thruster name="rcs_14" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.249, 0.694, 1.230)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[14]" cutoff=0.006
+    thruster name="rcs_15" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.180, 1.200, -1.369)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[15]" cutoff=0.006
+}
+// Regolith ground effect: a world-fixed emitter at the touchdown point (the
+// landing site is the world origin). Local-space particles on a static
+// emitter are world-fixed in practice, so the sheet stays put as the lander
+// settles onto it. Intensity is physics-driven: lander.dust_viz = throttle x
+// surface proximity, computed in sim.py. The tiny sphere is the required
+// object_3d mesh anchor; it is invisible at scene scale.
+object_3d "(0,0,0,1, 0,0,0)" frame=ENU {
+    sphere radius=0.02
+    // emission_rate overrides the authored 4000/s: the follow camera sits
+    // inside the sheet at ~15 m, where full density reads as fog.
+    thruster name="ground_dust" effect="effects/apollo-lander/ground_dust.effect" body_frame=#true position="(0, 0, 0)" direction="(0, -1, 0)" intensity="lander.dust_viz[0]" emission_rate=2200.0 cutoff=0.01
 }
 // Moon sphere as the curved horizon backdrop. With this rotation/scale the
 // LRO mesh surface directly under the site sits ~1,725,022 m above the sphere
 // center; seat it ~1.2 km below z=0 so it stays under the landing-site tile's
 // 60x-exaggerated valleys (deepest ~-1,116 m) and never pokes through.
 object_3d "(0,0,0,1, 0,0,-1726250)" frame=ENU {
-    glb path=moon.glb rotate="(25.32, 21.2, 79.59)" scale=1798000.0 emissivity=0.2 glow=1.0
+    // Sun-lit like everything else (was emissive/glow for the pre-sun look).
+    glb path=moon.glb rotate="(25.32, 21.2, 79.59)" scale=1798000.0
 }
 line_3d lander.world_pos frame=ENU {
     color 20 97 209 220
 }
 line_3d lander_truth.world_pos frame=ENU {
     color 0 255 0 220
-}
-vector_arrow lander.main_thrust_viz origin=lander.world_pos scale=2.0 name="DPS thrust" body_frame=#true frame=ENU {
-    color 255 128 0 220
-}
-vector_arrow lander.rcs_torque_viz origin=lander.world_pos scale=1.5 name="RCS torque" body_frame=#true frame=ENU {
-    color white
 }

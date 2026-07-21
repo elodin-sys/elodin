@@ -295,6 +295,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(GizmoPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
+        app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
         app.add_plugins(ui::UiPlugin)

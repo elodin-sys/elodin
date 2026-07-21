@@ -691,7 +691,7 @@ Elodin describes its 3D scene and dashboards declaratively in **KDL**
 - three **`object_3d`** GLB models: the landing site, the simulated LM, and a
   full Moon sphere used as the curved horizon backdrop;
 - **`line_3d`** trajectory trails (blue = simulated, green = truth);
-- **`vector_arrow`** overlays for DPS thrust (orange) and RCS torque (white).
+- DPS / RCS exhaust via KDL `thruster` particles (no vector-arrow overlays).
 
 The whole layout uses `coordinate frame="ENU"`, so what you see matches the math.
 

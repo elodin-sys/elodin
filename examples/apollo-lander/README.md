@@ -288,14 +288,33 @@ Use `--dry-run` to only write the narrowed specs.
 - The Moon-sphere backdrop is seated ~1.2 km below the touchdown plane so its
   LRO topography stays under the tile's exaggerated valleys (see the
   whitepaper's visualization section for the measured numbers).
-- Orange (DPS thrust) and white (RCS torque) vector arrows show effector
-  activity in the body frame.
-- **Editor preview (experimental, native only):** GPU exhaust particles fully
-  declared in KDL and driven by EQL viz channels. The DPS plume uses a vector
-  `intensity` from `main_thrust_viz` (`effect="plume"`); the 16 cold-gas RCS
-  jets each bind `rcs_thruster_viz[i]` with `effect="cold_gas"`. RCS jet
-  activity follows the body-frame RCS torque command, not the DPS throttle.
-  Nozzle geometry and presets live in `apollo-lander.kdl`; RCS emitter
-  positions are tuned to the visible four-quad Apollo LM nozzle layout after
-  the GLB mesh translate. Small real RCS torques are boosted only for particle
-  visibility, leaving the physics torque unchanged.
+- **Editor preview (native only):** GPU exhaust particles fully declared in
+
+  KDL and driven by EQL viz channels, rendering hanabi `.effect` files
+  authored in **pyrotechnique** (`pyrotechnique/assets/effects/apollo-lander/`,
+  tuned against Apollo film/sim reference imagery — see
+  `docs/design-thruster-effects-port.md`):
+  - `descent_plume.effect` + `descent_glow.effect` stacked on the DPS as one
+    thruster node with an `effect` layer child (solid core column +
+    camera-facing halo that keeps the plume volumetric from every angle,
+    matched to the First Man close-up), scalar intensity =
+    `lander.main_thrust_viz[2]` (thrust fraction).
+    The DPS also carries a throttle-tracked `light` (3 Mlm point light 0.8 m
+    below the exit plane, shadows on) — additive particles emit no light, so
+    this is what anchors the plume to the bell on the shadow side and pools
+    on the regolith late in the descent;
+  - `rcs_puff.effect` on the 16 RCS jets, per-nozzle intensity from
+    `rcs_thruster_viz[i]` (follows the body-frame RCS torque command, not the
+    DPS throttle; small real torques are boosted only for particle
+    visibility);
+  - `ground_dust.effect` on a world-fixed emitter at the landing site,
+    intensity from `lander.dust_viz` (throttle × surface proximity) — the
+    regolith sheet ramps in below ~12 m and dies at engine cutoff.
+  Spawn rates come from the effect files and scale with intensity; nozzle
+  geometry lives in `apollo-lander.kdl` (RCS positions tuned to the visible
+  four-quad layout after the GLB mesh translate). The schematic
+  `environment` node (harsh sun + shadows, near-zero ambient, black sky) and
+  the viewport's `hdr`/`ev100`/`bloom` reproduce the pyrotechnique lighting;
+  effect assets are ingested into the DB and served like the GLBs. Reference
+  frames from the descent (braking burn, low gate, touchdown) live in
+  [`shots/`](./shots/).
