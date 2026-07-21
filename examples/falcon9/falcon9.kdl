@@ -1,0 +1,106 @@
+// Falcon 9 launch-to-landing SITL — ECEF scene (WHITEPAPER 2, README).
+// World frame IS rotating WGS84 ECEF: Earth GLB at the origin, booster and
+// truth ghost at real geodetic coordinates. Blue = simulated, green = truth.
+
+coordinate frame="ECEF"
+
+hsplit {
+    vsplit share=0.62 {
+        tabs {
+            viewport name="Booster" near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(120.0, 120.0, 60.0)" look_at=booster.world_pos up="(0,0,1)" hdr=#true show_grid=#false active=#true
+            viewport name="Earth" near=1000.0 far=90000000.0 pos="booster.world_pos.translate_world(900000.0, -1200000.0, 500000.0)" look_at=booster.world_pos up="(0,0,1)" hdr=#true show_grid=#false
+            inspector
+            hierarchy
+        }
+        tabs share=0.38 {
+            graph "booster.fsw_phase[0]" name="Mission phase (0..11)" {
+                color yellow
+            }
+            graph "booster.thrust_total[0]" name="Cluster thrust (N)" {
+                color orange
+            }
+        }
+    }
+    vsplit {
+        tabs {
+            graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
+                color blue
+                color green
+            }
+            graph "booster.display_speed[0]" name="Display speed (webcast space, m/s)" {
+                color 100 149 237
+            }
+        }
+        tabs {
+            graph "booster.altitude_geodetic[0], booster_truth.altitude_geodetic[0]" name="Altitude vs recorded (m)" {
+                color blue
+                color green
+            }
+            graph "booster.qbar[0]" name="Dynamic pressure (Pa)" {
+                color red
+            }
+            graph "booster.mach[0]" name="Mach" {
+                color white
+            }
+        }
+        tabs {
+            graph "booster.propellant_lox[0], booster.propellant_rp1[0]" name="Propellant (kg)" {
+                color cyan
+                color orange
+            }
+            graph "booster.tank_pressure_lox[0], booster.tank_pressure_rp1[0], booster.inlet_pressure_lox[0], booster.inlet_pressure_rp1[0]" name="Tank + inlet pressures (Pa)" {
+                color cyan
+                color orange
+                color blue
+                color red
+            }
+            graph "booster.nitrogen_kg[0]" name="RCS nitrogen (kg)" {
+                color white
+            }
+        }
+        tabs {
+            graph "booster.engine_spool" name="Engine spool (9)" {
+            }
+            graph "booster.fin_state" name="Grid fins (rad)" {
+            }
+            graph "booster.rcs_levels" name="RCS thrusters (8)" {
+            }
+            graph "booster.tvc_state" name="TVC gimbal (rad)" {
+            }
+        }
+    }
+}
+
+object_3d frame="ECEF" orientation=absolute earth.world_pos {
+    glb path="earth.glb"
+    icon builtin="public" size=48 {
+        color 255 255 255
+    }
+}
+
+// Booster: body +X is the long axis (47 m stage).
+object_3d booster.world_pos {
+    box x=47.0 y=3.7 z=3.7 {
+        color 70 130 240
+    }
+    icon builtin="rocket_launch" size=40 {
+        color 70 130 240
+    }
+}
+
+// Truth ghost replaying the recorded CRS-12 profile along the ascent track.
+object_3d booster_truth.world_pos {
+    box x=47.0 y=3.7 z=3.7 {
+        color 60 200 90
+    }
+    icon builtin="flag" size=32 {
+        color 60 200 90
+    }
+}
+
+line_3d booster.world_pos line_width=3.0 {
+    color 70 130 240
+}
+line_3d booster_truth.world_pos line_width=3.0 {
+    color 60 200 90
+}

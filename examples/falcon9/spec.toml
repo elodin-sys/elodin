@@ -1,0 +1,44 @@
+# Falcon 9 CRS-12 parity campaign: every EST-flagged quantity from the
+# WHITEPAPER as a sampled calibration parameter. Ranges are priors; the
+# calibration loop narrows them around best-fit runs (fixed seed while
+# iterating so campaign deltas reflect changes, not resampling).
+
+[monte_carlo]
+n_samples = 24
+seed = 20170814
+method = "lhs"
+
+[monte_carlo.variables]
+# Vehicle
+lox_kg = { dist = "uniform", min = 272000.0, max = 285000.0 }
+rp1_kg = { dist = "uniform", min = 116000.0, max = 123000.0 }
+# Block 4 flew "incremental engine thrust upgrades" between the 760 kN Block 3
+# and 845 kN Block 5 ratings — the upper half of this range is genuinely open.
+thrust_scale = { dist = "uniform", min = 0.98, max = 1.14 }
+isp_scale = { dist = "uniform", min = 0.97, max = 1.03 }
+ca_scale = { dist = "uniform", min = 0.6, max = 1.5 }
+cn_scale = { dist = "uniform", min = 0.6, max = 1.5 }
+# Webcast display latency (data/README.md audit: ~1-2 s).
+display_lag_s = { dist = "uniform", min = 0.0, max = 2.5 }
+# Ascent guidance
+kick_deg = { dist = "uniform", min = 2.5, max = 6.5 }
+kick_start_s = { dist = "uniform", min = 6.0, max = 12.0 }
+kick_ramp_s = { dist = "uniform", min = 5.0, max = 12.0 }
+ascent_throttle = { dist = "uniform", min = 0.97, max = 1.0 }
+bucket_throttle = { dist = "uniform", min = 0.62, max = 0.85 }
+bucket_q_on_pa = { dist = "uniform", min = 14000.0, max = 24000.0 }
+meco_fpa_deg = { dist = "uniform", min = 34.0, max = 46.0 }
+pitch_exp = { dist = "uniform", min = 0.4, max = 0.75 }
+meco_speed_mps = { dist = "uniform", min = 1630.0, max = 1680.0 }
+azimuth_deg = { dist = "uniform", min = 40.0, max = 50.0 }
+# Recovery guidance
+boostback_overshoot_m = { dist = "uniform", min = -2000.0, max = 4000.0 }
+entry_ignite_speed_mps = { dist = "uniform", min = 1220.0, max = 1380.0 }
+entry_ignite_alt_m = { dist = "uniform", min = 46000.0, max = 56000.0 }
+entry_dv_mps = { dist = "uniform", min = 320.0, max = 430.0 }
+entry_throttle = { dist = "uniform", min = 0.57, max = 0.8 }
+landing_arm_alt_m = { dist = "uniform", min = 5000.0, max = 8000.0 }
+landing_accel_margin = { dist = "uniform", min = 1.05, max = 1.45 }
+fsw_cd_s_m2 = { dist = "uniform", min = 15.0, max = 45.0 }
+# Recorded boostback decel ~27 m/s^2 implies a throttled 3-engine burn.
+boostback_throttle = { dist = "uniform", min = 0.57, max = 0.85 }
