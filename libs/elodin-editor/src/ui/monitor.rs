@@ -185,77 +185,42 @@ fn render_component_value_cards(
         })
         .collect();
 
-    render_value_cards(ui, &cards, &CardStyle::DEFAULT);
+    render_value_cards(ui, &cards);
 }
 
-/// Sizing for [`render_value_cards`] cells.
-pub struct CardStyle {
-    pub card_size: egui::Vec2,
-    pub outer_margin: i8,
-    pub value_size: f32,
-    pub label_size: f32,
-    pub pad: f32,
-}
-
-impl CardStyle {
-    /// Component-monitor cards (historical dimensions).
-    pub const DEFAULT: Self = Self {
-        card_size: egui::Vec2::new(130.0, 60.0),
-        outer_margin: 8,
-        value_size: 18.0,
-        label_size: 13.0,
-        pad: 8.0,
-    };
-
-    /// Dense variant for panels meant to tile many times on screen
-    /// (e.g. the spatial gauge).
-    pub const COMPACT: Self = Self {
-        card_size: egui::Vec2::new(104.0, 42.0),
-        outer_margin: 3,
-        value_size: 12.0,
-        label_size: 9.0,
-        pad: 4.0,
-    };
-}
-
-/// Render a row of labelled value cards (shared by the component monitor and
-/// the spatial gauge).
-pub fn render_value_cards(ui: &mut egui::Ui, cards: &[(String, String)], style: &CardStyle) {
+/// Render a horizontally wrapping row of labelled value cards (shared by the
+/// component monitor and the geo-position gauge, so both panels read the same).
+pub fn render_value_cards(ui: &mut egui::Ui, cards: &[(String, String)]) {
     let width = ui.max_rect().width();
     ui.horizontal_wrapped(|ui| {
         ui.set_width(width);
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.spacing_mut().item_spacing.y = 0.0;
 
-        let inner_width = style.card_size.x - 2.0 * style.outer_margin as f32 - 2.0;
-        let inner_height = style.card_size.y - 2.0 * style.outer_margin as f32 + 6.0;
         for (label, value) in cards {
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
 
-            ui.allocate_ui_with_layout(style.card_size, layout, |ui| {
+            ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
                 Frame::NONE
                     .stroke(Stroke::new(1.0, get_scheme().border_primary))
-                    .outer_margin(egui::Margin::symmetric(
-                        style.outer_margin,
-                        style.outer_margin,
-                    ))
-                    .inner_margin(egui::Margin::symmetric(style.outer_margin, 0))
+                    .outer_margin(egui::Margin::symmetric(8, 8))
+                    .inner_margin(egui::Margin::symmetric(8, 0))
                     .show(ui, |ui| {
-                        ui.set_width(inner_width);
-                        ui.set_height(inner_height);
+                        ui.set_width(120. - 8.);
+                        ui.set_height(50.);
                         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                            ui.add_space(style.pad);
+                            ui.add_space(8.0);
                             let scheme = get_scheme();
                             let value = RichText::new(value)
                                 .monospace()
-                                .size(style.value_size)
+                                .size(18.)
                                 .color(scheme.text_primary);
                             ui.label(value);
                             let label = RichText::new(label)
-                                .size(style.label_size)
+                                .size(13.0)
                                 .monospace()
                                 .color(scheme.text_secondary);
-                            ui.add_space(style.pad);
+                            ui.add_space(8.0);
                             ui.label(label);
                         });
                     })

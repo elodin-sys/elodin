@@ -24,7 +24,8 @@ fn eql_and_source_ui(
     source: &mut Option<GeoFrame>,
     eql_hint: &str,
 ) {
-    ui.label(egui::RichText::new("EQL").color(get_scheme().text_secondary));
+    // Same field header as the component monitor inspector.
+    ui.label(egui::RichText::new("COMPONENT").color(get_scheme().text_secondary));
     ui.add_space(8.0);
     theme::configure_input_with_border(ui.style_mut());
     let res = ui.add(inspector_text_field(&mut binding.eql, eql_hint));
@@ -74,7 +75,7 @@ impl WidgetSystem for InspectorGeoPositionGauge<'_, '_> {
                     &eql_context,
                     &mut binding,
                     &mut gauge.source,
-                    "Position EQL (i.e a.world_pos)",
+                    "Component name (i.e a.world_pos)",
                 );
 
                 ui.add_space(12.0);

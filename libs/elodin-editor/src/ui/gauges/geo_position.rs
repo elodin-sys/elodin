@@ -12,13 +12,8 @@ use nox::ArrayBuf;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
-use super::{EqlBinding, GaugePane, gauge_title};
-use crate::ui::{
-    colors::get_scheme,
-    monitor::{CardStyle, render_value_cards},
-    theme,
-    widgets::WidgetSystem,
-};
+use super::{EqlBinding, GaugePane};
+use crate::ui::{monitor::render_value_cards, widgets::WidgetSystem};
 
 /// Backing data for a geo-position gauge pane; the EQL lives in the sibling
 /// [`EqlBinding`] component.
@@ -47,7 +42,7 @@ impl GeoPositionGaugeData {
 
 #[derive(SystemParam)]
 pub struct GeoPositionGaugeWidget<'w, 's> {
-    gauges: Query<'w, 's, (&'static mut GeoPositionGaugeData, &'static EqlBinding)>,
+    gauges: Query<'w, 's, (&'static GeoPositionGaugeData, &'static EqlBinding)>,
     entity_map: Res<'w, EntityMap>,
     values: Query<'w, 's, &'static ComponentValue>,
     telemetry_cache: Res<'w, TelemetryCache>,
@@ -67,7 +62,7 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
         pane: Self::Args,
     ) -> Self::Output {
         let GeoPositionGaugeWidget {
-            mut gauges,
+            gauges,
             entity_map,
             values,
             telemetry_cache,
@@ -75,75 +70,40 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
             geo_context,
             coordinate,
         } = state.get_mut(world);
-        let Ok((mut data, binding)) = gauges.get_mut(pane.entity) else {
+        let Ok((data, binding)) = gauges.get(pane.entity) else {
             return;
         };
 
         let ts = current_timestamp.0;
         let value = binding.resolve(&entity_map, &values, &telemetry_cache, ts);
-        let title = gauge_title(&binding.eql, &pane.name);
         // Keep inherit (`source = None`) live against `Coordinate` changes.
         let source = data.effective_source(coordinate.0);
-        let combo_id = egui::Id::new(("geo_position_gauge_display", pane.entity));
+        let display = data.display;
 
+        let labels = display_labels(display);
+        let out = value
+            .as_ref()
+            .and_then(component_value_to_position)
+            .map(|pos_src| convert(pos_src, source, display, &geo_context));
+        let cards: Vec<(String, String)> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                let value = out
+                    .map(|v| fmt_val(v[i]))
+                    .unwrap_or_else(|| "—".to_string());
+                ((*label).to_string(), value)
+            })
+            .collect();
+
+        // Same chrome as the component monitor: just the cards.
         egui::Frame::NONE
-            .inner_margin(egui::Margin::same(4))
+            .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                let scheme = get_scheme();
-                ui.label(
-                    egui::RichText::new(title)
-                        .monospace()
-                        .size(10.0)
-                        .color(scheme.text_secondary),
-                );
-                ui.add_space(3.0);
-
-                // In-panel display-frame dropdown (source stays in the inspector).
-                theme::configure_input_with_border(ui.style_mut());
-                ui.style_mut()
-                    .text_styles
-                    .iter_mut()
-                    .for_each(|(_, font)| font.size = 10.0);
-                egui::ComboBox::from_id_salt(combo_id)
-                    .selected_text(data.display.as_str())
-                    .width(CARD_COLUMN_WIDTH - 12.0)
-                    .show_ui(ui, |ui| {
-                        for frame in [
-                            DisplayFrame::NED,
-                            DisplayFrame::ENU,
-                            DisplayFrame::ECEF,
-                            DisplayFrame::LLA,
-                        ] {
-                            ui.selectable_value(&mut data.display, frame, frame.as_str());
-                        }
-                    });
-
-                // Read `display` after the ComboBox so a change applies immediately.
-                let display = data.display;
-                let labels = display_labels(display);
-                let out = value
-                    .as_ref()
-                    .and_then(component_value_to_position)
-                    .map(|pos_src| convert(pos_src, source, display, &geo_context));
-                let cards: Vec<(String, String)> = labels
-                    .iter()
-                    .enumerate()
-                    .map(|(i, label)| {
-                        let value = out
-                            .map(|v| fmt_val(v[i]))
-                            .unwrap_or_else(|| "—".to_string());
-                        ((*label).to_string(), value)
-                    })
-                    .collect();
-
-                ui.add_space(2.0);
-                render_value_cards(ui, &cards, &CardStyle::COMPACT);
+                render_value_cards(ui, &cards);
             });
     }
 }
-
-/// Width of the display dropdown: matches one compact value card.
-const CARD_COLUMN_WIDTH: f32 = 110.0;
 
 /// Extract a position (metres) from a component value for the position gauge.
 ///
