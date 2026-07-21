@@ -399,7 +399,7 @@ world.run(
     simulation_rate=SIM_RATE_HZ,
     # Hanabi trails/pad clouds integrate in render time → 1x by default.
     # Monte Carlo workers inject ELODIN_MONTE_CARLO_CONTEXT and run flat out.
-    generate_real_time=os.environ.get("ELODIN_MONTE_CARLO_CONTEXT") is None,
+    # generate_real_time=os.environ.get("ELODIN_MONTE_CARLO_CONTEXT") is None,
     max_ticks=max_ticks,
     optimize=True,
     db_path=params.db_path or os.environ.get("ELODIN_DB_PATH"),

@@ -239,30 +239,31 @@ The scene renders the pyrotechnique-authored falcon9 effects live from sim
 telemetry (design record: `docs/design-thruster-effects-port.md` §10):
 
 - **Merlin cluster plume** — `merlin_core` + `merlin_flame` layers on one
-  `thruster` node, intensity from `booster.thrust_viz` (cluster thrust /
-  9-engine sea-level max). Both declare the `intensity` property, so the
-  1-3-engine recovery burns render short, dim plumes instead of thin
-  full-length ones.
+  `thruster` node (bell-exit emitter at −1.2 m), intensity from
+  `booster.thrust_viz`. Tuned in pyrotechnique against `ascent.jpeg` for a
+  near-parallel body-aligned column.
 - **Persistent exhaust trail** — `exhaust_smoke` uses the anchored-trail
-  contract (`spawn_origin`/`spawn_axis` properties on a world-fixed anchor):
-  the column hangs in the sky as the booster climbs, floating-origin-safe,
-  thinning with air density via `booster.smoke_viz`.
-- **Pad + landing clouds** — world-fixed `pad_smoke` emitters at LC-39A and
-  LZ-1 driven by thrust x proximity (`pad_smoke_viz` / `landing_smoke_viz`).
-- **RCS darts** — 8 interstage cold-gas jets from `booster.rcs_levels`,
-  visible through the flip and coast.
-- **Environment** — physical sun (pyro's values converted into the ECEF
-  scene), Bevy procedural atmosphere with the inner radius at LC-39A's
-  geocentric radius, HDR viewports at pyro's EV100 + bloom, the same
-  Sketchfab GLB at the same 70 m metric height, and ground discs tangent at
-  both sites.
+  contract (`spawn_origin`/`spawn_axis` on a world-fixed anchor).
+- **Pad + landing clouds** — world-fixed `pad_smoke` at LC-39A / LZ-1.
+- **RCS darts** — falcon9 `rcs_dart` (8 jets from `booster.rcs_levels`).
+- **Environment** — sun + Bevy atmosphere, single Chase viewport (multi-view
+  atmosphere is a Bevy 0.19 limit), ASDS barge GLB at LZ-1, pad disc at LC-39A.
 
-Wall-clock pacing is on by default so particle trails and pad clouds accumulate
-in render time. Monte Carlo campaign workers set `ELODIN_MONTE_CARLO_CONTEXT`
-and run flat out.
+Wall-clock pacing is on by default. Monte Carlo sets `ELODIN_MONTE_CARLO_CONTEXT`
+and runs flat out. Particle integration follows the editor playhead when
+replaying (`Time<EffectSimulation>`).
 
 ```sh
 elodin editor examples/falcon9/main.py
+
+# Lean kinematic visual checks (no FSW); screenshots under /tmp.
+# Delay must be on the editor process; scenarios start at mission t0.
+ELODIN_VIZCHECK_SCENARIO=plume-close ELODIN_SCREENSHOT_DELAY=10 \
+  elodin editor examples/falcon9/visual_check.py
+ELODIN_VIZCHECK_SCENARIO=rcs-flip ELODIN_SCREENSHOT_DELAY=8 \
+  elodin editor examples/falcon9/visual_check.py
+ELODIN_VIZCHECK_SCENARIO=barge ELODIN_SCREENSHOT_DELAY=10 \
+  elodin editor examples/falcon9/visual_check.py
 ```
 
 ## Layout
@@ -283,6 +284,8 @@ examples/falcon9/
   sensors.py         # IMU/GPS/altimeter/pressure + webcast display model
   controller/        # flight software (Rust): estimator, phases, guidance
   falcon9.kdl        # cinematic ECEF schematic (GLB booster, effects, atmosphere, graphs)
+  visual_check.py    # lean kinematic visual checks (plume / rcs / barge)
+  visual_check.kdl   # schematic for visual_check.py
   spec.toml          # calibration priors     campaign.toml   # campaign config
   spec.ci.toml       # CI single sample       campaign.ci.toml
   calibrate.py       # rank / narrow / best-json calibration loop tooling

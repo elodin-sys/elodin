@@ -73,15 +73,15 @@
           keys: [
             (
               ratio: 0.0,
-              value: (5.0, 3.4, 3.4),
+              value: (5.0, 1.9, 1.9),
             ),
             (
               ratio: 0.35,
-              value: (8.5, 5.2, 5.2),
+              value: (8.5, 2.9, 2.9),
             ),
             (
               ratio: 1.0,
-              value: (5.5, 3.6, 3.6),
+              value: (5.5, 2.0, 2.0),
             ),
           ],
         ),
@@ -119,9 +119,9 @@
   module: (
     expressions: [
       Literal(Scalar(Float(1.5))),
-      Literal(Scalar(Float(1.1))),
-      Literal(Scalar(Float(1.5))),
-      Literal(Vector(Vec3((0.0, 9.0, 0.0)))),
+      Literal(Scalar(Float(0.7))),
+      Literal(Scalar(Float(0.8))),
+      Literal(Vector(Vec3((0.0, 26.0, 0.0)))),
       Literal(Scalar(Float(70.0))),
       Literal(Scalar(Float(110.0))),
       Binary(

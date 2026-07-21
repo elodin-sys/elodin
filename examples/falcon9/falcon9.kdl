@@ -12,7 +12,7 @@ coordinate frame="ECEF"
 // Trailing window keeps live graph redraw bounded — the full-range view of a
 // 500 s, 1000 Hz mission grinds the editor to a few FPS by MECO, which also
 // starves the render-time particle effects.
-timeline follow_latest=#true range="last_30s"
+timeline follow_latest=#true range="last_5s"
 telemetry_mode #true
 
 // Sun + sky: pyrotechnique falcon9 environment values (100 klx, azimuth 300 /
@@ -28,21 +28,11 @@ environment {
 }
 
 hsplit {
-    // Hero chase view: dominant, cinematic. The camera hangs off the booster
-    // with a fixed ECEF offset (the pyrotechnique tracker_close framing
-    // converted to the pad launch frame at LC-39A).
+    // Single hero chase view — Bevy 0.19 can only put AtmosphereSettings on
+    // one active main camera, so extra viewports lose the sky halo.
     vsplit share=0.70 {
         tabs share=0.78 {
             viewport name="Chase" fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false active=#true {
-                bloom preset="old_school" intensity=0.28
-            }
-            viewport name="Pad" fov=42.0 near=1.0 far=40000000.0 pos="pad.world_pos.translate_world(90.048, -89.394, -100.941)" look_at="pad.world_pos.translate_world(9.746, -58.897, 32.560)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false {
-                bloom preset="old_school" intensity=0.28
-            }
-            viewport name="Tracker" fov=10.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(221.706, -213.682, -912.352)" look_at="booster.world_pos.translate_world(-8.599, 51.968, -28.729)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=14.2 show_grid=#false {
-                bloom preset="old_school" intensity=0.28
-            }
-            viewport name="Space" fov=40.0 near=10.0 far=90000000.0 pos="pad.world_pos.translate_world(-798648.0, -371170.0, 611877.0)" look_at=pad.world_pos up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false {
                 bloom preset="old_school" intensity=0.28
             }
         }
@@ -125,13 +115,10 @@ object_3d orientation=absolute booster.world_pos {
     icon builtin="rocket_launch" size=32 {
         color 70 130 240
     }
-    // Merlin cluster plume (pyrotechnique falcon9 port): one node, two
-    // stacked layers — the blinding AlongVelocity core plus the divergent
-    // orange flame cone. Both declare the `intensity` property, so the
-    // recovery burns (1-3 engines, thrust_viz ~0.1-0.35) render short dim
-    // plumes instead of thin full-length ones. The light anchors the plume
-    // glow onto the pad and smoke.
-    thruster name="merlin" effect="effects/falcon9/merlin_core.effect" body_frame=#true position="(0.3, 0, 0)" direction="(-1, 0, 0)" intensity="booster.thrust_viz[0]" {
+    // Merlin cluster plume: near-parallel column tuned in pyrotechnique
+    // against ascent.jpeg. Emitter at the bell-exit plane (−1.2 m along body
+    // +X / pyro −Y) so the root is not born inside the octaweb.
+    thruster name="merlin" effect="effects/falcon9/merlin_core.effect" body_frame=#true position="(-1.2, 0, 0)" direction="(-1, 0, 0)" intensity="booster.thrust_viz[0]" {
         effect "effects/falcon9/merlin_flame.effect"
         light color="(1.0, 0.83, 0.58)" intensity=30000000.0 range=120.0 offset=6.0
     }
@@ -140,46 +127,36 @@ object_3d orientation=absolute booster.world_pos {
     // the column hangs in the sky as the booster climbs
     // (floating-origin-safe). Intensity thins with air density.
     thruster name="exhaust_smoke" effect="effects/falcon9/exhaust_smoke.effect" body_frame=#true position="(-8, 0, 0)" direction="(-1, 0, 0)" intensity="booster.smoke_viz[0]" cutoff=0.01
-    // Cold-gas RCS: 8 nitrogen jets in two interstage pods at station 46 m
-    // (rcs.py RCS_POS; exhaust direction = -RCS_FORCE_DIR). Visible during
-    // the flip, coast and entry attitude work.
-    thruster name="rcs_0" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[0]" cutoff=0.006
-    thruster name="rcs_1" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[1]" cutoff=0.006
-    thruster name="rcs_2" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[2]" cutoff=0.006
-    thruster name="rcs_3" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[3]" cutoff=0.006
-    thruster name="rcs_4" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[4]" cutoff=0.006
-    thruster name="rcs_5" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[5]" cutoff=0.006
-    thruster name="rcs_6" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[6]" cutoff=0.006
-    thruster name="rcs_7" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[7]" cutoff=0.006
+    // Cold-gas RCS: falcon9-sized darts (rcs_dart) at interstage station 46 m.
+    thruster name="rcs_0" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[0]" cutoff=0.003
+    thruster name="rcs_1" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[1]" cutoff=0.003
+    thruster name="rcs_2" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[2]" cutoff=0.003
+    thruster name="rcs_3" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[3]" cutoff=0.003
+    thruster name="rcs_4" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[4]" cutoff=0.003
+    thruster name="rcs_5" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[5]" cutoff=0.003
+    thruster name="rcs_6" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[6]" cutoff=0.003
+    thruster name="rcs_7" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[7]" cutoff=0.003
 }
 
-// Launch pad anchor: world-fixed pad-smoke emitter (pyrotechnique pad_smoke,
-// attach="world") + the pad camera. Local-space particles on this static
-// entity are world-fixed in practice, so the lift-off clouds keep churning
-// as the rocket climbs away. The tiny sphere is the required mesh anchor.
+// Launch pad: world-fixed pad-smoke emitter. Local-space particles on this
+// static entity are world-fixed in practice.
 object_3d orientation=absolute pad.world_pos {
     sphere radius=0.02
     thruster name="pad_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.pad_smoke_viz[0]" cutoff=0.01
 }
 
-// Landing Zone 1: dust kicked up by the landing burn in the final ~300 m.
+// Landing Zone 1: dust + ASDS barge visual (~96×52 m). Physics touchdown
+// target remains LZ1 lat/lon/alt; the barge is the landing pad mesh.
 object_3d orientation=absolute lz1.world_pos {
-    sphere radius=0.02
+    // Cleaned Sketchfab ASDS: empty barge only (no 2nd hull / Falcon), Y-up,
+    // deck centered at origin (~52×96 m). Matches surface_attitude (+Y up).
+    glb path="spacex_drone_barge.glb"
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
 }
 
-// Local ground: discs tangent at LC-39A (12 km, reaches the horizon in pad
-// shots) and LZ-1 (3 km) — the earth GLB texture is far too coarse up close.
-// Separate discs because the tangent plane departs the ellipsoid by ~14 m
-// over the 13.6 km between the sites (the booster would land 12 m deep in a
-// single flat sheet).
+// Local ground: pad disc at LC-39A only (barge is the LZ-1 surface).
 object_3d orientation=absolute ground.world_pos {
     cylinder radius=10000.0 height=4.0 {
-        color 51 56 46
-    }
-}
-object_3d orientation=absolute lz1_ground.world_pos {
-    cylinder radius=3000.0 height=4.0 {
         color 51 56 46
     }
 }

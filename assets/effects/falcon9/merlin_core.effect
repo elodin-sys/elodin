@@ -119,8 +119,8 @@
   module: (
     expressions: [
       Literal(Scalar(Float(1.2))),
-      Literal(Scalar(Float(0.8))),
-      Literal(Scalar(Float(0.55))),
+      Literal(Scalar(Float(0.5))),
+      Literal(Scalar(Float(0.4))),
       Literal(Scalar(Float(90.0))),
       Literal(Scalar(Float(130.0))),
       Binary(

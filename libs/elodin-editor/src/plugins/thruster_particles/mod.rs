@@ -5,6 +5,12 @@
 //! DPS plumes are authored this way in the lander schematic; this plugin only
 //! evaluates the nodes and drives the particle effects.
 //!
+//! Particle integration uses hanabi `Time<EffectSimulation>`, synced each
+//! frame to the Impeller playhead (`CurrentTimestamp` / `Paused`): pause freezes
+//! trails, playback speed scales spawn/integration, and backward seeks rebuild
+//! thruster rigs so particles do not integrate in reverse. Live 1x viewing does
+//! not require paced sim ticks for trail correctness under timeline replay.
+//!
 //! Effects come from two sources:
 //! - built-in Rust presets (`plume`, `cold_gas`), or
 //! - hanabi `.effect` RON files (`effect="db:effects/<project>/<name>.effect"`),
@@ -27,7 +33,8 @@ use bevy::transform::TransformSystems;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{
     AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectProperties, EffectSpawner,
-    Gradient, HanabiPlugin, Module, ParticleEffect, SimulationSpace, SpawnerSettings,
+    EffectSimulation, EffectSimulationTime, Gradient, HanabiPlugin, Module, ParticleEffect,
+    SimulationSpace, SpawnerSettings,
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
@@ -41,12 +48,13 @@ use bevy_hanabi::{
     },
 };
 use impeller2_bevy::{ConnectionAddr, EntityMap};
-use impeller2_wkt::{ComponentValue as WktComponentValue, Thruster, WorldPos};
+use impeller2_wkt::{ComponentValue as WktComponentValue, CurrentTimestamp, Thruster, WorldPos};
 
 use crate::EqlContext;
 use crate::WorldPosExt;
 use crate::object_3d::{CompiledExpr, Object3DState, compile_eql_expr, resolve_db_asset_url};
 use crate::plugins::render_layer_alloc::THRUSTER_PARTICLES_RENDER_LAYER;
+use crate::ui::Paused;
 use crate::vector_arrow::component_value_tail_to_vec3;
 
 /// Reference exhaust axis used to build each emitter's local orientation (Bevy Y-up).
@@ -160,7 +168,14 @@ pub struct ThrusterParticlesPlugin;
 impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(HanabiPlugin)
+            .init_resource::<EffectPlayheadClock>()
             .add_systems(Startup, setup_thruster_effects)
+            // Drive hanabi's EffectSimulation clock from the Impeller playhead
+            // before TimeSystems advances it from Virtual.
+            .add_systems(
+                First,
+                sync_effect_simulation_clock.before(bevy::time::TimeSystems),
+            )
             .add_systems(
                 PostUpdate,
                 (
@@ -175,6 +190,68 @@ impl Plugin for ThrusterParticlesPlugin {
                     .after(TransformSystems::Propagate),
             );
     }
+}
+
+/// Tracks the last Impeller playhead sample so we can derive sim-time Δt and
+/// detect backward seeks (which reset thruster instances).
+#[derive(Resource, Default)]
+struct EffectPlayheadClock {
+    last_playhead_us: Option<i64>,
+    last_wall: Option<std::time::Instant>,
+}
+
+/// Max sim-time advance applied to particles in one render frame (avoids
+/// spawn bursts / capacity clamps at high playback speeds).
+const MAX_EFFECT_DT_S: f64 = 0.25;
+
+/// Sync `Time<EffectSimulation>` to the editor playhead: pause when the
+/// timeline is paused or the playhead stalls; set `relative_speed` so particle
+/// integration tracks sim time; on backward seek, tear down thruster rigs so
+/// they rebuild empty (no reverse integration).
+fn sync_effect_simulation_clock(
+    mut effect_time: ResMut<Time<EffectSimulation>>,
+    current: Res<CurrentTimestamp>,
+    paused: Res<Paused>,
+    mut clock: ResMut<EffectPlayheadClock>,
+    mut commands: Commands,
+    rigs: Query<(Entity, &KdlThrusterRig)>,
+) {
+    let now = std::time::Instant::now();
+    let playhead = current.0.0;
+    let (Some(last_ph), Some(last_wall)) = (clock.last_playhead_us, clock.last_wall) else {
+        clock.last_playhead_us = Some(playhead);
+        clock.last_wall = Some(now);
+        effect_time.pause();
+        return;
+    };
+
+    let wall_dt = now.saturating_duration_since(last_wall).as_secs_f64().max(1e-6);
+    let sim_dt = (playhead - last_ph) as f64 * 1e-6;
+
+    if sim_dt < -0.05 {
+        for (object, rig) in &rigs {
+            for &jet in &rig.jets {
+                commands.entity(jet).despawn();
+            }
+            commands.entity(object).remove::<KdlThrusterRig>();
+        }
+        effect_time.pause();
+        clock.last_playhead_us = Some(playhead);
+        clock.last_wall = Some(now);
+        return;
+    }
+
+    if paused.0 || sim_dt <= 1e-9 {
+        effect_time.pause();
+    } else {
+        effect_time.unpause();
+        let speed = (sim_dt / wall_dt).clamp(0.0, 64.0);
+        let max_speed = MAX_EFFECT_DT_S / wall_dt;
+        effect_time.set_relative_speed_f64(speed.min(max_speed));
+    }
+
+    clock.last_playhead_us = Some(playhead);
+    clock.last_wall = Some(now);
 }
 
 fn setup_thruster_effects(
