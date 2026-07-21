@@ -20,13 +20,13 @@ use crate::ui::{
 pub mod action;
 pub mod data_overview;
 pub mod entity;
+pub mod gauges;
 pub mod graph;
 pub mod line3d;
 pub mod monitor;
 pub mod object3d;
 pub mod query_table;
 pub mod sensor_camera;
-pub mod spatial_gauge;
 pub mod timeline;
 pub mod viewport;
 
@@ -34,10 +34,16 @@ mod widgets;
 pub use widgets::*;
 
 use self::{
-    data_overview::InspectorDataOverview, entity::InspectorEntity, graph::InspectorGraph,
-    monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
-    sensor_camera::InspectorSensorCamera, spatial_gauge::InspectorSpatialGauge,
-    timeline::InspectorTimeline, viewport::InspectorViewport,
+    data_overview::InspectorDataOverview,
+    entity::InspectorEntity,
+    gauges::{InspectorGeoPositionGauge, InspectorOrientationGauge},
+    graph::InspectorGraph,
+    monitor::InspectorMonitor,
+    object3d::InspectorObject3D,
+    query_table::InspectorQueryTable,
+    sensor_camera::InspectorSensorCamera,
+    timeline::InspectorTimeline,
+    viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -163,10 +169,18 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                     );
                                     Default::default()
                                 }
-                                SelectedObject::SpatialGauge { gauge_id } => {
-                                    ui.add_widget_with::<InspectorSpatialGauge>(
+                                SelectedObject::GeoPositionGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorGeoPositionGauge>(
                                         world,
-                                        "inspector_spatial_gauge",
+                                        "inspector_geo_position_gauge",
+                                        gauge_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::OrientationGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorOrientationGauge>(
+                                        world,
+                                        "inspector_orientation_gauge",
                                         gauge_id,
                                     );
                                     Default::default()

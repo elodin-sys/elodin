@@ -627,21 +627,48 @@ fn monitor_parts(
         .collect()
 }
 
-pub fn create_spatial_gauge(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_geo_position_gauge(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
-        "Create Spatial Gauge",
+        "Create Geo Position Gauge",
         TILES_LABEL,
         move |_: In<String>, eql: Res<EqlContext>| {
-            PalettePage::new(spatial_gauge_parts(&eql.0.component_parts, tile_id))
-                .prompt("Select a position component to monitor")
-                .into_event()
+            PalettePage::new(gauge_parts(
+                &eql.0.component_parts,
+                tile_id,
+                GaugeKind::Position,
+            ))
+            .prompt("Select a position component to monitor")
+            .into_event()
         },
     )
 }
 
-fn spatial_gauge_parts(
+pub fn create_orientation_gauge(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Orientation Gauge",
+        TILES_LABEL,
+        move |_: In<String>, eql: Res<EqlContext>| {
+            PalettePage::new(gauge_parts(
+                &eql.0.component_parts,
+                tile_id,
+                GaugeKind::Orientation,
+            ))
+            .prompt("Select an attitude component to monitor")
+            .into_event()
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+enum GaugeKind {
+    Position,
+    Orientation,
+}
+
+fn gauge_parts(
     parts: &BTreeMap<String, eql::ComponentPart>,
     tile_id: Option<TileId>,
+    kind: GaugeKind,
 ) -> Vec<PaletteItem> {
     parts
         .iter()
@@ -658,10 +685,15 @@ fn spatial_gauge_parts(
                         return PaletteEvent::Error("Secondary window unavailable".to_string());
                     };
                     if let Some(component) = &part.component {
-                        tile_state.create_spatial_gauge_tile(component.name.clone(), tile_id);
+                        match kind {
+                            GaugeKind::Position => tile_state
+                                .create_geo_position_gauge_tile(component.name.clone(), tile_id),
+                            GaugeKind::Orientation => tile_state
+                                .create_orientation_gauge_tile(component.name.clone(), tile_id),
+                        }
                         PaletteEvent::Exit
                     } else {
-                        PalettePage::new(spatial_gauge_parts(&part.children, tile_id)).into()
+                        PalettePage::new(gauge_parts(&part.children, tile_id, kind)).into()
                     }
                 },
             )
@@ -2131,7 +2163,8 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_graph(Some(tile_id)),
         create_action(Some(tile_id)),
         create_monitor(Some(tile_id)),
-        create_spatial_gauge(Some(tile_id)),
+        create_geo_position_gauge(Some(tile_id)),
+        create_orientation_gauge(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
@@ -2202,7 +2235,8 @@ impl Default for PalettePage {
             create_graph(None),
             create_action(None),
             create_monitor(None),
-            create_spatial_gauge(None),
+            create_geo_position_gauge(None),
+            create_orientation_gauge(None),
             create_viewport(None),
             create_query_table(None),
             create_query_plot(None),

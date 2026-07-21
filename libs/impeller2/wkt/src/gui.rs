@@ -312,7 +312,8 @@ pub enum Panel {
     HSplit(Split),
     Graph(Graph),
     ComponentMonitor(ComponentMonitor),
-    SpatialGauge(SpatialGauge),
+    GeoPositionGauge(GeoPositionGauge),
+    OrientationGauge(OrientationGauge),
     ActionPane(ActionPane),
     QueryTable(QueryTable),
     QueryPlot(QueryPlot),
@@ -336,7 +337,8 @@ impl Panel {
             Panel::ComponentMonitor(monitor) => {
                 monitor.name.as_deref().unwrap_or(&monitor.component_name)
             }
-            Panel::SpatialGauge(monitor) => monitor.name.as_deref().unwrap_or("Spatial Gauge"),
+            Panel::GeoPositionGauge(gauge) => gauge.name.as_deref().unwrap_or("Position Gauge"),
+            Panel::OrientationGauge(gauge) => gauge.name.as_deref().unwrap_or("Orientation Gauge"),
             Panel::ActionPane(action_pane) => action_pane.name.as_str(),
             Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
             Panel::QueryPlot(query_plot) => &query_plot.name,
@@ -1209,11 +1211,12 @@ pub struct ComponentMonitor {
     pub name: Option<String>,
 }
 
-/// A monitor for a spatial position: reads an EQL-bound position expressed in
-/// `source` and displays it, converted, in `display` (a spatial frame or LLA).
+/// A gauge for a geographic position: reads an EQL-bound position expressed
+/// in `source` and displays it, converted, in `display` (a spatial frame or
+/// LLA) as three labelled values.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct SpatialGauge {
+pub struct GeoPositionGauge {
     /// EQL expression yielding a position (a 3-vector), or a pose whose tail 3
     /// elements are the position (e.g. a `world_pos` 7-vector).
     pub eql: String,
@@ -1224,15 +1227,36 @@ pub struct SpatialGauge {
     pub source: Option<bevy_geo_frames::GeoFrame>,
     /// Coordinate system to display the position in (a spatial frame or LLA).
     pub display: DisplayFrame,
-    /// Attitude quaternion (`[x, y, z, w]`, body→`source`) that the gauge's
-    /// gimbal shows as neutral: the displayed attitude is `reference⁻¹ · q`.
-    /// `None` means identity (raw component attitude).
+    pub name: Option<String>,
+}
+
+/// A gauge for an attitude: reads an EQL-bound quaternion (a bare `[x,y,z,w]`
+/// 4-vector, or the head of a `world_pos`-style 7-vector) expressed relative
+/// to `source` and renders it as a 3D gimbal against the `display` triad.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct OrientationGauge {
+    /// EQL expression yielding a quaternion (4-vector), or a pose whose head 4
+    /// elements are the quaternion (e.g. a `world_pos` 7-vector).
+    pub eql: String,
+    /// Coordinate frame the quaternion rotates from (body→`source`).
+    ///
+    /// When `None`, inherits the schematic global `coordinate` frame; if that
+    /// is also unset, the editor falls back to ENU.
+    pub source: Option<bevy_geo_frames::GeoFrame>,
+    /// Frame whose triad (axis labels / physical directions) the gimbal draws.
+    /// `None` defaults to NED. LLA is geodetic, not a rotation frame, so only
+    /// the Cartesian frames are valid here.
+    pub display: Option<bevy_geo_frames::GeoFrame>,
+    /// Attitude quaternion (`[x, y, z, w]`, body→`source`) shown as neutral:
+    /// the displayed attitude is `q · reference⁻¹`. `None` means identity
+    /// (raw component attitude).
     #[serde(default)]
     pub reference: Option<[f64; 4]>,
     pub name: Option<String>,
 }
 
-/// Display coordinate choice for a [`SpatialGauge`]: the spatial
+/// Display coordinate choice for a [`GeoPositionGauge`]: the spatial
 /// [`bevy_geo_frames::GeoFrame`]s plus geodetic latitude/longitude/altitude.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DisplayFrame {

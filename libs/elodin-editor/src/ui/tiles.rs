@@ -44,6 +44,7 @@ use super::{
     colors::{self, EColor, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     data_overview::{DataOverviewPane, DataOverviewWidget},
+    gauges::{GaugePane, GeoPositionGaugeWidget, OrientationGaugeWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
     input_owner::{PointerOwner, PointerOwnerPriority, UiBlocker, UiInputOwners},
@@ -53,7 +54,6 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
-    spatial_gauge::{SpatialGaugePane, SpatialGaugeWidget},
     video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
@@ -747,9 +747,14 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddMonitor(tile_id, eql));
     }
 
-    pub fn create_spatial_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+    pub fn create_geo_position_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
         self.tree_actions
-            .push(TreeAction::AddSpatialGauge(tile_id, eql));
+            .push(TreeAction::AddGeoPositionGauge(tile_id, eql));
+    }
+
+    pub fn create_orientation_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddOrientationGauge(tile_id, eql));
     }
 
     pub fn create_action_tile(
@@ -820,7 +825,12 @@ impl TileState {
                             Pane::Viewport(viewport) => ("Viewport", viewport.name.as_str()),
                             Pane::Graph(graph) => ("Graph", graph.name.as_str()),
                             Pane::Monitor(monitor) => ("Monitor", monitor.name.as_str()),
-                            Pane::SpatialGauge(monitor) => ("SpatialGauge", monitor.name.as_str()),
+                            Pane::GeoPositionGauge(gauge) => {
+                                ("GeoPositionGauge", gauge.name.as_str())
+                            }
+                            Pane::OrientationGauge(gauge) => {
+                                ("OrientationGauge", gauge.name.as_str())
+                            }
                             Pane::QueryTable(table) => ("QueryTable", table.name.as_str()),
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
                             Pane::ActionTile(action) => ("Action", action.name.as_str()),
@@ -941,8 +951,8 @@ impl TileState {
                         e.despawn();
                     }
                 }
-                Tile::Pane(Pane::SpatialGauge(monitor)) => {
-                    if let Ok(mut e) = commands.get_entity(monitor.entity) {
+                Tile::Pane(Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge)) => {
+                    if let Ok(mut e) = commands.get_entity(gauge.entity) {
                         e.despawn();
                     }
                 }
@@ -1010,7 +1020,8 @@ pub enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
     Monitor(MonitorPane),
-    SpatialGauge(SpatialGaugePane),
+    GeoPositionGauge(GaugePane),
+    OrientationGauge(GaugePane),
     QueryTable(QueryTablePane),
     QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
@@ -1037,7 +1048,8 @@ impl Pane {
             Pane::VideoStream(pane) => out.push_ui_node(pane.entity),
             Pane::SensorView(pane) => out.push_ui_node(pane.entity),
             Pane::Monitor(_)
-            | Pane::SpatialGauge(_)
+            | Pane::GeoPositionGauge(_)
+            | Pane::OrientationGauge(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
             | Pane::LogStream(_)
@@ -1056,7 +1068,7 @@ impl Pane {
             }
             Pane::Viewport(viewport) => viewport.name.to_string(),
             Pane::Monitor(monitor) => monitor.name.to_string(),
-            Pane::SpatialGauge(monitor) => monitor.name.to_string(),
+            Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge) => gauge.name.to_string(),
             Pane::QueryTable(table) => table.name.to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
@@ -1086,8 +1098,8 @@ impl Pane {
             Pane::Monitor(monitor) => {
                 monitor.name = title.to_string();
             }
-            Pane::SpatialGauge(monitor) => {
-                monitor.name = title.to_string();
+            Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge) => {
+                gauge.name = title.to_string();
             }
             Pane::QueryTable(table) => {
                 table.name = title.to_string();
@@ -1369,7 +1381,7 @@ impl Pane {
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
                 egui_tiles::UiResponse::None
             }
-            Pane::SpatialGauge(pane) => {
+            Pane::GeoPositionGauge(pane) => {
                 register_ui_blocker(
                     world,
                     ui,
@@ -1378,7 +1390,27 @@ impl Pane {
                     UiBlocker::OtherPanel,
                     PointerOwnerPriority::Panel,
                 );
-                ui.add_widget_with::<SpatialGaugeWidget>(world, "spatial_gauge", pane.clone());
+                ui.add_widget_with::<GeoPositionGaugeWidget>(
+                    world,
+                    "geo_position_gauge",
+                    pane.clone(),
+                );
+                egui_tiles::UiResponse::None
+            }
+            Pane::OrientationGauge(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
+                ui.add_widget_with::<OrientationGaugeWidget>(
+                    world,
+                    "orientation_gauge",
+                    pane.clone(),
+                );
                 egui_tiles::UiResponse::None
             }
             Pane::QueryTable(pane) => {
@@ -1973,7 +2005,8 @@ pub enum TreeAction {
     AddViewport(Option<TileId>),
     AddGraph(Option<TileId>, Box<Option<GraphBundle>>),
     AddMonitor(Option<TileId>, PaneName),
-    AddSpatialGauge(Option<TileId>, PaneName),
+    AddGeoPositionGauge(Option<TileId>, PaneName),
+    AddOrientationGauge(Option<TileId>, PaneName),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
@@ -2911,17 +2944,31 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                             .open_for_window(target_window, palette_items::create_monitor(None));
                     }
 
-                    let create_spatial_gauge_btn = ui.add(
-                        ETileButton::new("Spatial Gauge", icons.add)
-                            .description("Spatial Gauge")
+                    let create_geo_position_gauge_btn = ui.add(
+                        ETileButton::new("Position Gauge", icons.add)
+                            .description("Geo Position Gauge")
                             .width(button_width)
                             .height(160.0),
                     );
 
-                    if create_spatial_gauge_btn.clicked() {
+                    if create_geo_position_gauge_btn.clicked() {
                         state_mut.cmd_palette_state.open_for_window(
                             target_window,
-                            palette_items::create_spatial_gauge(None),
+                            palette_items::create_geo_position_gauge(None),
+                        );
+                    }
+
+                    let create_orientation_gauge_btn = ui.add(
+                        ETileButton::new("Orientation Gauge", icons.add)
+                            .description("Orientation Gauge")
+                            .width(button_width)
+                            .height(160.0),
+                    );
+
+                    if create_orientation_gauge_btn.clicked() {
+                        state_mut.cmd_palette_state.open_for_window(
+                            target_window,
+                            palette_items::create_orientation_gauge(None),
                         );
                     }
                 });
@@ -3083,7 +3130,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
-                        if let egui_tiles::Tile::Pane(Pane::SpatialGauge(pane)) = tile {
+                        if let egui_tiles::Tile::Pane(
+                            Pane::GeoPositionGauge(pane) | Pane::OrientationGauge(pane),
+                        ) = tile
+                        {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
@@ -3229,27 +3279,47 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddSpatialGauge(parent_tile_id, eql) => {
+                    TreeAction::AddGeoPositionGauge(parent_tile_id, eql) => {
                         if read_only {
                             continue;
                         }
                         // Inherit schematic `coordinate` (same as omitting KDL `source`).
                         let entity = state_mut
                             .commands
-                            .spawn(super::spatial_gauge::SpatialGaugeData::new(
-                                eql.clone(),
-                                None,
-                                impeller2_wkt::DisplayFrame::default(),
+                            .spawn((
+                                super::gauges::GeoPositionGaugeData::new(
+                                    None,
+                                    impeller2_wkt::DisplayFrame::default(),
+                                ),
+                                super::gauges::EqlBinding::new(eql.clone()),
                             ))
                             .id();
-                        let monitor = SpatialGaugePane::new(entity, eql.clone());
-
-                        let pane = Pane::SpatialGauge(monitor);
+                        let pane = Pane::GeoPositionGauge(GaugePane::new(entity, eql.clone()));
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
                             ui_state.selected_object =
-                                SelectedObject::SpatialGauge { gauge_id: entity };
+                                SelectedObject::GeoPositionGauge { gauge_id: entity };
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
+                    TreeAction::AddOrientationGauge(parent_tile_id, eql) => {
+                        if read_only {
+                            continue;
+                        }
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::gauges::OrientationGaugeData::new(None, None),
+                                super::gauges::EqlBinding::new(eql.clone()),
+                            ))
+                            .id();
+                        let pane = Pane::OrientationGauge(GaugePane::new(entity, eql.clone()));
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.selected_object =
+                                SelectedObject::OrientationGauge { gauge_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -3335,8 +3405,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         monitor_id: monitor.entity,
                                     };
                                 }
-                                Pane::SpatialGauge(gauge) => {
-                                    ui_state.selected_object = SelectedObject::SpatialGauge {
+                                Pane::GeoPositionGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::GeoPositionGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::OrientationGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::OrientationGauge {
                                         gauge_id: gauge.entity,
                                     };
                                 }
@@ -3387,8 +3462,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         monitor_id: monitor.entity,
                                     };
                                 }
-                                Pane::SpatialGauge(gauge) => {
-                                    ui_state.selected_object = SelectedObject::SpatialGauge {
+                                Pane::GeoPositionGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::GeoPositionGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::OrientationGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::OrientationGauge {
                                         gauge_id: gauge.entity,
                                     };
                                 }
@@ -3568,7 +3648,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     Pane::Monitor(_) => {}
-                    Pane::SpatialGauge(_) => {}
+                    Pane::GeoPositionGauge(_) | Pane::OrientationGauge(_) => {}
                     Pane::QueryTable(_) => {}
                     Pane::QueryPlot(query_plot) => {
                         if visible {

@@ -23,15 +23,16 @@ w.schematic(
     // Geodetic origin so ENU world_pos maps to real lat/lon/alt for the gauges.
     coordinate frame=ENU lat=28.6084 lon=-80.6043 alt=3.0
     hsplit {
-        // Same ENU world_pos shown in the four frames as a compact 2x2 grid.
+        // Position values (top) and attitude gimbals (bottom) from the same
+        // ENU world_pos, shown in different display frames.
         vsplit share=0.28 {
             hsplit {
-                spatial_gauge name="NED" eql="cube.world_pos" source="ENU" display="NED"
-                spatial_gauge name="ENU" eql="cube.world_pos" source="ENU" display="ENU"
+                geo_position_gauge name="NED" eql="cube.world_pos" source="ENU" display="NED"
+                geo_position_gauge name="LLA" eql="cube.world_pos" source="ENU" display="LLA"
             }
             hsplit {
-                spatial_gauge name="ECEF" eql="cube.world_pos" source="ENU" display="ECEF"
-                spatial_gauge name="LLA" eql="cube.world_pos" source="ENU" display="LLA"
+                orientation_gauge name="ATT NED" eql="cube.world_pos" source="ENU" display="NED"
+                orientation_gauge name="ATT ECEF" eql="cube.world_pos" source="ENU" display="ECEF"
             }
         }
         tabs share=0.5 {

@@ -363,7 +363,7 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                ui::spatial_gauge::compile_spatial_gauge_exprs.after(update_eql_context),
+                ui::gauges::compile_gauge_exprs.after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)

@@ -514,16 +514,16 @@ w.schematic(
     // meaningful for the spatial gauge below.
     coordinate frame=ENU lat=28.6084 lon=-80.6043 alt=3.0
     hsplit {
-        // Spatial Gauge (#738): same ENU world_pos shown in the four frames as a
-        // compact 2x2 grid on the left.
+        // Gauges (#738): position values (top) and attitude gimbals (bottom)
+        // from the same ENU world_pos, as a compact 2x2 grid on the left.
         vsplit share=0.22 {
             hsplit {
-                spatial_gauge name="NED" eql="rocket.world_pos" source="ENU" display="NED"
-                spatial_gauge name="ENU" eql="rocket.world_pos" source="ENU" display="ENU"
+                geo_position_gauge name="NED" eql="rocket.world_pos" source="ENU" display="NED"
+                geo_position_gauge name="LLA" eql="rocket.world_pos" source="ENU" display="LLA"
             }
             hsplit {
-                spatial_gauge name="ECEF" eql="rocket.world_pos" source="ENU" display="ECEF"
-                spatial_gauge name="LLA" eql="rocket.world_pos" source="ENU" display="LLA"
+                orientation_gauge name="ATT NED" eql="rocket.world_pos" source="ENU" display="NED"
+                orientation_gauge name="ATT ECEF" eql="rocket.world_pos" source="ENU" display="ECEF"
             }
         }
         tabs share=0.5 {
