@@ -215,8 +215,9 @@ fn component_value_to_quat(value: &ComponentValue) -> Option<DQuat> {
     ((q.length_squared() - 1.0).abs() <= BARE_QUAT_UNIT_TOLERANCE).then(|| q.normalize())
 }
 
-/// Unit axes of a frame's display triad: up-ish first (the horizon pole),
-/// then the two rim axes, matching [`sphere_axis_labels`].
+/// Unit axes of a frame's display triad: up-ish first (the horizon pole, used
+/// for camera framing and sky/ground shading), then the two rim axes. For the
+/// labelled axes the gauge *draws*, see [`frame_axes`].
 fn sphere_axis_dirs(frame: GeoFrame) -> [DVec3; 3] {
     match frame {
         GeoFrame::NED => [
@@ -233,11 +234,18 @@ fn sphere_axis_dirs(frame: GeoFrame) -> [DVec3; 3] {
     }
 }
 
-/// Labels drawn on the sphere rim, matching [`sphere_axis_dirs`].
-fn sphere_axis_labels(frame: GeoFrame) -> [&'static str; 3] {
+/// Canonical positive axes of a frame with their labels, in the frame's own
+/// numeric coordinates. Unlike [`sphere_axis_dirs`] (which lists the vertical
+/// pole first, for camera framing and shading), these are the axes the gauge
+/// actually *draws*: a NED gauge shows **Down** pointing down (not Up), ENU
+/// shows Up, and ECEF shows X/Y/Z.
+fn frame_axes(frame: GeoFrame) -> [(DVec3, &'static str); 3] {
     match frame {
-        GeoFrame::NED | GeoFrame::ENU => ["U", "E", "N"],
-        GeoFrame::ECEF => ["Z", "Y", "X"],
+        // NED coords: X=N, Y=E, Z=D — Down (+Z) projects toward screen-bottom.
+        GeoFrame::NED => [(DVec3::X, "N"), (DVec3::Y, "E"), (DVec3::Z, "D")],
+        // ENU coords: X=E, Y=N, Z=U.
+        GeoFrame::ENU => [(DVec3::X, "E"), (DVec3::Y, "N"), (DVec3::Z, "U")],
+        GeoFrame::ECEF => [(DVec3::X, "X"), (DVec3::Y, "Y"), (DVec3::Z, "Z")],
     }
 }
 
@@ -249,6 +257,19 @@ fn sphere_axis_labels(frame: GeoFrame) -> [&'static str; 3] {
 fn display_triad_in_source(display: GeoFrame, source: GeoFrame, ctx: &GeoContext) -> [DVec3; 3] {
     let r = source._R_(&display, ctx);
     sphere_axis_dirs(display).map(|d| r * d)
+}
+
+/// The drawn labelled axes ([`frame_axes`]) expressed in `source` coordinates,
+/// so a NED gauge draws its Down axis downward while the sphere stays anchored
+/// to the source frame. Same source-coordinate rationale as
+/// [`display_triad_in_source`].
+fn display_axes_in_source(
+    display: GeoFrame,
+    source: GeoFrame,
+    ctx: &GeoContext,
+) -> [(DVec3, &'static str); 3] {
+    let r = source._R_(&display, ctx);
+    frame_axes(display).map(|(d, label)| (r * d, label))
 }
 
 /// Fixed orthographic camera for the gauge sphere, built from a frame's
@@ -457,10 +478,15 @@ fn paint_frame_sphere(
     // boundary is the true 3D great circle ⊥ up, so any attitude renders
     // continuously; the camera is anchored to the source frame, so "level in
     // source" reads U-near-top while the triad keeps its physical direction.
-    let triad = display_triad_in_source(display, source, geo_context);
+    //
+    // Shading tracks the display frame's *up* (so the sky stays up), but the
+    // drawn axes are the display frame's canonical positive axes — hence NED
+    // shows Down pointing down, decoupled from the up pole.
+    let up_source = display_triad_in_source(display, source, geo_context)[0];
+    let axes = display_axes_in_source(display, source, geo_context);
     let cam = SphereCamera::new(sphere_axis_dirs(source));
     let q_draw = q;
-    let u_cam = cam.project(q_draw * triad[0]);
+    let u_cam = cam.project(q_draw * up_source);
     let to_screen = |p: Vec2| Pos2::new(center.x + radius * p.x, center.y - radius * p.y);
 
     // Two-tone hemispheres: light for the up half, a muted gray for the down
@@ -496,7 +522,7 @@ fn paint_frame_sphere(
     // The display frame's coordinate planes as attitude-driven great circles;
     // back halves stay visible, dimmed, "through" the sphere.
     let curve = Color32::from_gray(128).gamma_multiply(0.8);
-    for axis in triad {
+    for (axis, _) in axes {
         match great_circle_arcs(cam.project(q_draw * axis)) {
             Some((front_c, back_c)) => {
                 let back: Vec<Pos2> = back_c.iter().map(|&p| to_screen(p)).collect();
@@ -551,10 +577,8 @@ fn paint_frame_sphere(
     // Display-triad axes rotated by the body attitude (source identity ⇒
     // physical directions). Drawn last so back-facing tips remain visible
     // "through" the sphere. Unit vectors project inside the disc, no clamp.
-    let labels = sphere_axis_labels(display);
-    let mut tips: Vec<(f32, &'static str, Pos2, f32)> = triad
+    let mut tips: Vec<(f32, &'static str, Pos2, f32)> = axes
         .into_iter()
-        .zip(labels)
         .map(|(dir, label)| {
             let c = cam.project(q_draw * dir);
             let (sx, sy, depth) = (c.x as f32, c.y as f32, c.z as f32);
@@ -691,6 +715,46 @@ mod tests {
         assert!(
             (e0.x - e1.x).abs() > 0.3 || (e0.y - e1.y).abs() > 0.3,
             "yaw should move the E tip on the sphere"
+        );
+    }
+
+    #[test]
+    fn drawn_axes_follow_frame_convention() {
+        let ctx = GeoContext::from(GeoOrigin::new_from_degrees(0.0, 0.0, 0.0));
+
+        // NED draws N, E, D — with Down pointing toward screen-bottom, which is
+        // the reported expectation (see the "D vector, not the up vector" note).
+        let cam = SphereCamera::new(sphere_axis_dirs(GeoFrame::NED));
+        let ned = display_axes_in_source(GeoFrame::NED, GeoFrame::NED, &ctx);
+        assert_eq!(
+            ned.iter().map(|(_, l)| *l).collect::<Vec<_>>(),
+            ["N", "E", "D"]
+        );
+        let (d_dir, _) = ned.iter().find(|(_, l)| *l == "D").unwrap();
+        assert!(
+            cam.project(*d_dir).y < -0.5,
+            "NED Down tip must project below centre, got {:?}",
+            cam.project(*d_dir)
+        );
+
+        // ENU still draws Up upward.
+        let cam = SphereCamera::new(sphere_axis_dirs(GeoFrame::ENU));
+        let enu = display_axes_in_source(GeoFrame::ENU, GeoFrame::ENU, &ctx);
+        assert_eq!(
+            enu.iter().map(|(_, l)| *l).collect::<Vec<_>>(),
+            ["E", "N", "U"]
+        );
+        let (u_dir, _) = enu.iter().find(|(_, l)| *l == "U").unwrap();
+        assert!(
+            cam.project(*u_dir).y > 0.5,
+            "ENU Up tip must project above centre"
+        );
+
+        // ECEF keeps X/Y/Z labels.
+        let ecef = display_axes_in_source(GeoFrame::ECEF, GeoFrame::ECEF, &ctx);
+        assert_eq!(
+            ecef.iter().map(|(_, l)| *l).collect::<Vec<_>>(),
+            ["X", "Y", "Z"]
         );
     }
 
