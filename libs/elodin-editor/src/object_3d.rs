@@ -6,7 +6,6 @@ use bevy::math::{DMat3, DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
-use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bitvec::prelude::*;
