@@ -22,12 +22,16 @@ import sensors as sn
 from constants import (
     ENGINE_SHUTDOWN_TAU_S,
     ENGINE_SPINUP_TAU_S,
+    ENGINE_T_SL_N,
     ENGINE_THROTTLE_TAU_S,
     FIN_MAX_DEG,
     FIN_RATE_DPS,
     FIN_TAU_S,
     G0,
     LOX_LOAD_KG,
+    LZ1_ALT_M,
+    LZ1_LAT_DEG,
+    LZ1_LON_DEG,
     N_ENGINES,
     PAD_ALT_M,
     PAD_LAT_DEG,
@@ -234,6 +238,29 @@ FswPhase = ty.Annotated[
 Landed = ty.Annotated[
     jax.Array,
     el.Component("landed", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+# --- Exhaust-effect viz channels (pre-normalized 0..1, KDL thruster inputs) ------
+# The schematic binds these to the pyrotechnique-authored effects; all unit
+# math stays sim-side (the apollo-lander convention). thrust_viz drives the
+# Merlin plume (fraction of full-cluster sea-level thrust), smoke_viz thins
+# the persistent exhaust trail with air density, pad_smoke_viz drives the
+# world-fixed launch-pad clouds, and landing_smoke_viz the LZ-1 dust as the
+# landing burn scours the pad.
+ThrustViz = ty.Annotated[
+    jax.Array,
+    el.Component("thrust_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+SmokeViz = ty.Annotated[
+    jax.Array,
+    el.Component("smoke_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+PadSmokeViz = ty.Annotated[
+    jax.Array,
+    el.Component("pad_smoke_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+LandingSmokeViz = ty.Annotated[
+    jax.Array,
+    el.Component("landing_smoke_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
 # Attached stage-2 + payload mass; the bridge zeroes it at the FSW separation
 # command (the plant models the mass event, WHITEPAPER 15).
@@ -823,8 +850,51 @@ def derive_geodetic_telemetry(
     )
 
 
+# Exhaust plume scours pads/kicks smoke while the booster is within this
+# range of the surface point (matched to the pyrotechnique pad_smoke activity
+# window, which dies as the pad falls ~300 m behind).
+PLUME_GROUND_EFFECT_RANGE_M = 300.0
+
+
+@el.map
+def effect_visualization(
+    pos: el.WorldPos, thrust: ThrustTotal
+) -> tuple[ThrustViz, SmokeViz, PadSmokeViz, LandingSmokeViz]:
+    """Physics-driven exhaust-effect intensities (0..1) for the schematic.
+
+    - thrust_viz: cluster thrust / full 9-engine sea-level thrust. Full during
+      ascent, ~0.1-0.35 during the 1-3 engine recovery burns, where the
+      property-driven effects render a shorter, dimmer plume.
+    - smoke_viz: thrust x ambient density ratio — the persistent trail thins
+      and vanishes as the booster leaves the dense atmosphere (and its
+      condensation regime), like the webcast footage.
+    - pad_smoke_viz / landing_smoke_viz: thrust x proximity to LC-39A / LZ-1;
+      ground clouds churn only while the plume actually reaches the pad.
+    """
+    r = pos.linear()
+    _, _, alt = ecef_to_geodetic(r)
+    thrust_fraction = jnp.clip(thrust[0] / (N_ENGINES * ENGINE_T_SL_N), 0.0, 1.0)
+    density_ratio = jnp.clip(atmosphere.density(jnp.maximum(alt, 0.0)) / 1.225, 0.0, 1.0)
+
+    def ground_effect(site_ecef):
+        distance = jnp.linalg.norm(r - site_ecef)
+        proximity = jnp.clip(1.0 - distance / PLUME_GROUND_EFFECT_RANGE_M, 0.0, 1.0)
+        return thrust_fraction * jnp.sqrt(proximity)
+
+    return (
+        jnp.array([thrust_fraction]),
+        jnp.array([thrust_fraction * density_ratio]),
+        jnp.array([ground_effect(pad_ecef())]),
+        jnp.array([ground_effect(lz1_ecef())]),
+    )
+
+
 def pad_ecef() -> jnp.ndarray:
     return geodetic_to_ecef(math.radians(PAD_LAT_DEG), math.radians(PAD_LON_DEG), PAD_ALT_M)
+
+
+def lz1_ecef() -> jnp.ndarray:
+    return geodetic_to_ecef(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG), LZ1_ALT_M)
 
 
 # Pad-local basis for the truth-ghost track and initial attitude.
@@ -843,6 +913,18 @@ def upright_attitude() -> el.Quaternion:
     axis = jnp.cross(x, up)
     axis = axis / jnp.linalg.norm(axis)
     angle = jnp.arccos(jnp.clip(jnp.dot(x, up), -1.0, 1.0))
+    return el.Quaternion.from_axis_angle(axis, angle)
+
+
+def surface_attitude(lat_deg: float, lon_deg: float) -> el.Quaternion:
+    """Body +Y along local geodetic up: the pose for surface-fixed scene
+    anchors (ground discs, pad-smoke emitters), matching the effects'
+    authored Y-up frame."""
+    up = ellipsoid_up(math.radians(lat_deg), math.radians(lon_deg))
+    y = jnp.array([0.0, 1.0, 0.0])
+    axis = jnp.cross(y, up)
+    axis = axis / jnp.linalg.norm(axis)
+    angle = jnp.arccos(jnp.clip(jnp.dot(y, up), -1.0, 1.0))
     return el.Quaternion.from_axis_angle(axis, angle)
 
 
@@ -1024,6 +1106,10 @@ def booster_propulsion_components(lox_kg: float = LOX_LOAD_KG, rp1_kg: float = R
         el.C(CtrlEnable, jnp.zeros(2)),
         el.C(FswPhase, jnp.array([0.0])),
         el.C(Landed, jnp.array([0.0])),
+        el.C(ThrustViz, jnp.array([0.0])),
+        el.C(SmokeViz, jnp.array([0.0])),
+        el.C(PadSmokeViz, jnp.array([0.0])),
+        el.C(LandingSmokeViz, jnp.array([0.0])),
         *sn.sensor_components(),
     ]
 
@@ -1104,7 +1190,7 @@ def build_powered(
         | ground_contact
     )
     system = (extra_systems | plant) if extra_systems is not None else plant
-    return world, system | derive_geodetic_telemetry | sensor_systems()
+    return world, system | derive_geodetic_telemetry | effect_visualization | sensor_systems()
 
 
 def build_mission(
@@ -1140,6 +1226,31 @@ def build_mission(
     world.spawn(
         StaticSceneObject(el.WorldPos(linear=jnp.zeros(3))),
         name="earth",
+    )
+    # Surface-fixed scene anchors for the cinematic schematic: the launch pad
+    # (world-fixed pad-smoke emitter + pad cameras), Landing Zone 1 (landing
+    # dust), and local ground discs tangent at each site (the earth GLB's
+    # texture is far too coarse for pad-level shots). Disc anchors sit 2 m
+    # below their site so the 4 m cylinder mesh tops out at ground level.
+    pad_att = surface_attitude(PAD_LAT_DEG, PAD_LON_DEG)
+    pad_up = ellipsoid_up(math.radians(PAD_LAT_DEG), math.radians(PAD_LON_DEG))
+    lz1_att = surface_attitude(LZ1_LAT_DEG, LZ1_LON_DEG)
+    lz1_up = ellipsoid_up(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG))
+    world.spawn(
+        StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad_ecef())),
+        name="pad",
+    )
+    world.spawn(
+        StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad_ecef() - pad_up * 2.0)),
+        name="ground",
+    )
+    world.spawn(
+        StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef())),
+        name="lz1",
+    )
+    world.spawn(
+        StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef() - lz1_up * 2.0)),
+        name="lz1_ground",
     )
     schematic_path = Path(__file__).with_name("falcon9.kdl")
     world.schematic(schematic_path.read_text(), schematic_path.name)

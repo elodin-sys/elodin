@@ -226,9 +226,44 @@ recorded flight is reproduced within thresholds.
 - Engine transient model (ignition ramp, shutdown, throttle response)
 - Flight-computer interface definition (message set, rates, units)
 - Launch-day atmosphere (standard atmosphere vs. sounding data)
-- Second-stage representation after separation (mass event vs. ghost entity)
+- Second-stage representation after separation (mass event vs. ghost entity —
+  the booster GLB renders as a full stack throughout; a visual split at MECO
+  is future work)
 - Touchdown envelope thresholds (derive from truth-data uncertainty)
-- Booster / pad / landing-zone GLB assets
+- ~~Booster / pad / landing-zone GLB assets~~ booster GLB + tangent ground
+  discs landed with the cinematic port; a modeled pad/LZ remains open
+
+## Cinematic Visuals (pyrotechnique port)
+
+The scene renders the pyrotechnique-authored falcon9 effects live from sim
+telemetry (design record: `docs/design-thruster-effects-port.md` §10):
+
+- **Merlin cluster plume** — `merlin_core` + `merlin_flame` layers on one
+  `thruster` node, intensity from `booster.thrust_viz` (cluster thrust /
+  9-engine sea-level max). Both declare the `intensity` property, so the
+  1-3-engine recovery burns render short, dim plumes instead of thin
+  full-length ones.
+- **Persistent exhaust trail** — `exhaust_smoke` uses the anchored-trail
+  contract (`spawn_origin`/`spawn_axis` properties on a world-fixed anchor):
+  the column hangs in the sky as the booster climbs, floating-origin-safe,
+  thinning with air density via `booster.smoke_viz`.
+- **Pad + landing clouds** — world-fixed `pad_smoke` emitters at LC-39A and
+  LZ-1 driven by thrust x proximity (`pad_smoke_viz` / `landing_smoke_viz`).
+- **RCS darts** — 8 interstage cold-gas jets from `booster.rcs_levels`,
+  visible through the flip and coast.
+- **Environment** — physical sun (pyro's values converted into the ECEF
+  scene), Bevy procedural atmosphere with the inner radius at LC-39A's
+  geocentric radius, HDR viewports at pyro's EV100 + bloom, the same
+  Sketchfab GLB at the same 70 m metric height, and ground discs tangent at
+  both sites.
+
+Wall-clock pacing is on by default so particle trails and pad clouds accumulate
+in render time. Monte Carlo campaign workers set `ELODIN_MONTE_CARLO_CONTEXT`
+and run flat out.
+
+```sh
+elodin editor examples/falcon9/main.py
+```
 
 ## Layout
 
@@ -247,12 +282,12 @@ examples/falcon9/
   reference.py       # truth profiles from data/ (stdlib only; sanity_check)
   sensors.py         # IMU/GPS/altimeter/pressure + webcast display model
   controller/        # flight software (Rust): estimator, phases, guidance
-  falcon9.kdl        # ECEF editor schematic (Earth GLB, trails, graphs)
+  falcon9.kdl        # cinematic ECEF schematic (GLB booster, effects, atmosphere, graphs)
   spec.toml          # calibration priors     campaign.toml   # campaign config
   spec.ci.toml       # CI single sample       campaign.ci.toml
   calibrate.py       # rank / narrow / best-json calibration loop tooling
   hooks/             # score, report, ci_score, ci_gate, shared mc_metrics
-  test_*.py          # frames, ladder, propulsion, aero, sensors, mission (slow)
+  test_*.py          # frames, ladder, propulsion, aero, sensors
   data/              # vendored truth data + provenance README
 ```
 
@@ -281,9 +316,8 @@ python examples/falcon9/calibrate.py rank dbs/falcon9-campaign
 python examples/falcon9/calibrate.py narrow dbs/falcon9-campaign \
   examples/falcon9/spec.toml /tmp/spec-next.toml
 
-# Unit + physics-ladder tests (fast), full closed-loop tests (slow)
+# Unit + physics-ladder tests
 uv run python -m pytest -q examples/falcon9/
-uv run python -m pytest -q examples/falcon9/ -m slow
 
 # CI smoke (one truncated deterministic campaign)
 scripts/test-falcon9-monte-carlo.sh

@@ -138,6 +138,37 @@ fn serialize_environment(environment: &EnvironmentConfig) -> KdlNode {
             .push(KdlEntry::new_prop("color", color_to_kdl_string(sky_color)));
         children.nodes_mut().push(sky_node);
     }
+    if let Some(atmosphere) = &environment.atmosphere {
+        let mut atmosphere_node = KdlNode::new("atmosphere");
+        if atmosphere.origin != (0.0, 0.0, 0.0) {
+            let (x, y, z) = atmosphere.origin;
+            atmosphere_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("origin", format!("({x}, {y}, {z})")));
+        }
+        if atmosphere.inner_radius != AtmosphereConfig::default_inner_radius() {
+            push_rounded_float_prop(
+                &mut atmosphere_node,
+                "inner_radius",
+                f64::from(atmosphere.inner_radius),
+            );
+        }
+        if atmosphere.outer_radius != AtmosphereConfig::default_outer_radius() {
+            push_rounded_float_prop(
+                &mut atmosphere_node,
+                "outer_radius",
+                f64::from(atmosphere.outer_radius),
+            );
+        }
+        if atmosphere.ground_albedo != AtmosphereConfig::default_ground_albedo() {
+            let (r, g, b) = atmosphere.ground_albedo;
+            atmosphere_node.entries_mut().push(KdlEntry::new_prop(
+                "ground_albedo",
+                format!("({r}, {g}, {b})"),
+            ));
+        }
+        children.nodes_mut().push(atmosphere_node);
+    }
     node.set_children(children);
     node
 }
@@ -1270,6 +1301,12 @@ mod tests {
                 }),
                 ambient_scale: 0.02,
                 sky_color: Some(Color::BLACK),
+                atmosphere: Some(AtmosphereConfig {
+                    origin: (10.0, -20.0, 30.0),
+                    inner_radius: 6_373_200.0,
+                    outer_radius: 6_473_200.0,
+                    ground_albedo: (0.2, 0.25, 0.3),
+                }),
             }),
             ..Default::default()
         };
@@ -1285,6 +1322,39 @@ mod tests {
         assert!(sun.shadows);
         assert!((environment.ambient_scale - 0.02).abs() < 1e-6);
         assert_eq!(environment.sky_color, Some(Color::BLACK));
+        let atmosphere = environment.atmosphere.expect("atmosphere should roundtrip");
+        assert_eq!(atmosphere.origin, (10.0, -20.0, 30.0));
+        assert_eq!(atmosphere.inner_radius, 6_373_200.0);
+        assert_eq!(atmosphere.outer_radius, 6_473_200.0);
+        assert_eq!(atmosphere.ground_albedo, (0.2, 0.25, 0.3));
+    }
+
+    #[test]
+    fn test_environment_atmosphere_defaults_roundtrip() {
+        // A bare `atmosphere` node keeps Bevy's earth defaults and serializes
+        // without redundant properties.
+        let parsed = parse_schematic("environment {\n    atmosphere\n}").unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        let atmosphere = environment.atmosphere.expect("atmosphere parsed");
+        assert_eq!(atmosphere, AtmosphereConfig::default());
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(environment),
+            ..Default::default()
+        });
+        assert!(serialized.contains("atmosphere"));
+        assert!(!serialized.contains("inner_radius"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().atmosphere,
+            Some(AtmosphereConfig::default())
+        );
+    }
+
+    #[test]
+    fn test_environment_atmosphere_rejects_inverted_radii() {
+        let kdl = "environment {\n    atmosphere inner_radius=100.0 outer_radius=50.0\n}";
+        assert!(parse_schematic(kdl).is_err());
     }
 
     #[test]

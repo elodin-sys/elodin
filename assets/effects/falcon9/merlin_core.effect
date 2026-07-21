@@ -1,0 +1,211 @@
+(
+  name: "merlin_core",
+  capacity: 16384,
+  spawner: (
+    count: Single(2200.0),
+    spawn_duration: Single(1.0),
+    period: Single(1.0),
+    cycle_count: 0,
+    starts_active: true,
+    emit_on_start: true,
+  ),
+  z_layer_2d: 0.0,
+  simulation_space: Local,
+  simulation_condition: WhenVisible,
+  prng_seed: 0,
+  init_modifiers: [
+    {
+      "bevy_hanabi::modifier::position::SetPositionCone3dModifier": (
+        height: "#1",
+        base_radius: "#2",
+        top_radius: "#3",
+        dimension: Volume,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "velocity",
+        value: "#14",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "age",
+        value: "#15",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "lifetime",
+        value: "#18",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "color",
+        value: "#27",
+      ),
+    },
+  ],
+  update_modifiers: [
+    {
+      "bevy_hanabi::modifier::force::LinearDragModifier": (
+        drag: "#28",
+      ),
+    },
+  ],
+  render_modifiers: [
+    {
+      "bevy_hanabi::modifier::output::OrientModifier": (
+        mode: AlongVelocity,
+        rotation: None,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ParticleTextureModifier": (
+        texture_slot: "#29",
+        sample_mapping: ModulateOpacityFromR,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::SizeOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (4.0, 1.0, 1.0),
+            ),
+            (
+              ratio: 0.4,
+              value: (6.0, 1.4, 1.4),
+            ),
+            (
+              ratio: 1.0,
+              value: (3.0, 0.75, 0.75),
+            ),
+          ],
+        ),
+        screen_space_size: false,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ColorOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (32.0, 28.235298, 20.705883, 1.0),
+            ),
+            (
+              ratio: 0.22,
+              value: (26.0, 12.0, 2.4, 1.0),
+            ),
+            (
+              ratio: 0.6,
+              value: (12.0, 3.6, 0.55, 0.6),
+            ),
+            (
+              ratio: 1.0,
+              value: (3.0, 0.8, 0.1, 0.0),
+            ),
+          ],
+        ),
+        blend: Modulate,
+        mask: (15),
+      ),
+    },
+  ],
+  motion_integration: PostUpdate,
+  module: (
+    expressions: [
+      Literal(Scalar(Float(1.2))),
+      Literal(Scalar(Float(0.8))),
+      Literal(Scalar(Float(0.55))),
+      Literal(Scalar(Float(90.0))),
+      Literal(Scalar(Float(130.0))),
+      Binary(
+        op: UniformRand,
+        left: "#4",
+        right: "#5",
+      ),
+      Literal(Scalar(Float(0.35))),
+      Literal(Scalar(Float(0.65))),
+      Property(1),
+      Binary(
+        op: Mul,
+        left: "#8",
+        right: "#9",
+      ),
+      Binary(
+        op: Add,
+        left: "#7",
+        right: "#10",
+      ),
+      Binary(
+        op: Mul,
+        left: "#6",
+        right: "#11",
+      ),
+      Literal(Vector(Vec3((0.0, -1.0, 0.0)))),
+      Binary(
+        op: Mul,
+        left: "#13",
+        right: "#12",
+      ),
+      Literal(Scalar(Float(0.0))),
+      Literal(Scalar(Float(0.12))),
+      Literal(Scalar(Float(0.3))),
+      Binary(
+        op: UniformRand,
+        left: "#16",
+        right: "#17",
+      ),
+      Literal(Scalar(Float(0.4))),
+      Literal(Scalar(Float(0.6))),
+      Property(1),
+      Binary(
+        op: Mul,
+        left: "#20",
+        right: "#21",
+      ),
+      Binary(
+        op: Add,
+        left: "#19",
+        right: "#22",
+      ),
+      Ternary(
+        op: Vec3,
+        first: "#23",
+        second: "#23",
+        third: "#23",
+      ),
+      Literal(Scalar(Float(1.0))),
+      Binary(
+        op: Vec4XyzW,
+        left: "#24",
+        right: "#25",
+      ),
+      Unary(
+        op: Pack4x8unorm,
+        expr: "#26",
+      ),
+      Literal(Scalar(Float(0.4))),
+      Literal(Scalar(Uint(0))),
+    ],
+    properties: [
+      (
+        name: "intensity",
+        default_value: Scalar(Float(1.0)),
+      ),
+    ],
+    texture_layout: (
+      layout: [
+        (
+          name: "mask",
+        ),
+      ],
+    ),
+  ),
+  alpha_mode: Add,
+  mesh: None,
+)

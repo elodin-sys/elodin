@@ -7,9 +7,13 @@
 
 use bevy::camera::ClearColorConfig;
 use bevy::light::SunDisk;
+use bevy::light::atmosphere::ScatteringMedium;
+use bevy::math::{DQuat, DVec3};
+use bevy::pbr::AtmosphereSettings;
 // EnvironmentMapLight comes in via the prelude (bevy_light).
 use bevy::prelude::*;
-use impeller2_wkt::{EnvironmentConfig, SunConfig};
+use bevy_geo_frames::{GeoPosition, GeoRotation};
+use impeller2_wkt::{AtmosphereConfig, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
 
@@ -26,12 +30,17 @@ pub const BASE_ENVIRONMENT_MAP_INTENSITY: f32 = 2000.0;
 #[derive(Component)]
 struct SchematicSun;
 
+/// Marker + source config for the atmosphere spawned from the schematic
+/// `environment` node; the stored config detects edits (hot reload).
+#[derive(Component)]
+struct SchematicAtmosphere(AtmosphereConfig);
+
 pub struct SceneEnvironmentPlugin;
 
 impl Plugin for SceneEnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SceneEnvironment>()
-            .add_systems(Update, (sync_sun, sync_camera_environment));
+            .add_systems(Update, (sync_sun, sync_atmosphere, sync_camera_environment));
     }
 }
 
@@ -86,6 +95,62 @@ fn sync_sun(
     }
 }
 
+/// Spawns/despawns the planetary atmosphere declared by the schematic. The
+/// entity lives in the same high-precision space as world objects (GeoPosition
+/// in the schematic frame + big_space grid cell), so the planet center stays
+/// put through floating-origin rebases whether the scene is a local ENU pad or
+/// full ECEF Earth.
+fn sync_atmosphere(
+    mut commands: Commands,
+    environment: Res<SceneEnvironment>,
+    coordinate: Res<crate::Coordinate>,
+    mut media: ResMut<Assets<ScatteringMedium>>,
+    existing: Query<(Entity, &SchematicAtmosphere)>,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+) {
+    let config = environment.0.as_ref().and_then(|env| env.atmosphere);
+    let current = existing.iter().next();
+    match (config, current) {
+        (Some(config), Some((entity, spawned))) if spawned.0 == config => {
+            let _ = entity;
+        }
+        (Some(config), current) => {
+            if let Some((entity, _)) = current {
+                commands.entity(entity).despawn();
+            }
+            let frame = coordinate.0.unwrap_or_default();
+            let medium = media.add(ScatteringMedium::earth(256, 256));
+            let (r, g, b) = config.ground_albedo;
+            let mut entity = commands.spawn((
+                SchematicAtmosphere(config),
+                Name::new("environment atmosphere"),
+                bevy::light::Atmosphere {
+                    inner_radius: config.inner_radius,
+                    outer_radius: config.outer_radius,
+                    ground_albedo: Vec3::new(r, g, b),
+                    medium,
+                },
+                Transform::default(),
+                GlobalTransform::default(),
+                #[cfg(feature = "big_space")]
+                crate::spatial::GridCell::default(),
+                GeoPosition(
+                    frame,
+                    DVec3::new(config.origin.0, config.origin.1, config.origin.2),
+                ),
+                GeoRotation::relative(frame, DQuat::IDENTITY),
+            ));
+            #[cfg(feature = "big_space")]
+            crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
+            let _ = &mut entity;
+        }
+        (None, Some((entity, _))) => {
+            commands.entity(entity).despawn();
+        }
+        (None, None) => {}
+    }
+}
+
 fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -> bool {
     match (current, desired) {
         (ClearColorConfig::Default, ClearColorConfig::Default) => true,
@@ -95,27 +160,75 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
 }
 
 /// Keeps main viewport cameras in sync with the environment: IBL intensity
-/// scaling and sky (clear) color. Runs every frame because cameras can spawn
-/// at any time; writes are change-gated.
+/// scaling, sky (clear) color, and the per-camera `AtmosphereSettings` that
+/// activates the schematic atmosphere. Runs every frame because cameras can
+/// spawn at any time; writes are change-gated.
 fn sync_camera_environment(
+    mut commands: Commands,
     environment: Res<SceneEnvironment>,
-    mut cameras: Query<(&mut Camera, &mut EnvironmentMapLight), With<MainCamera>>,
+    mut cameras: Query<
+        (
+            Entity,
+            &mut Camera,
+            &mut EnvironmentMapLight,
+            Has<AtmosphereSettings>,
+        ),
+        With<MainCamera>,
+    >,
 ) {
-    let (ambient_scale, sky_color) = match &environment.0 {
-        Some(config) => (config.ambient_scale.max(0.0), config.sky_color),
-        None => (1.0, None),
+    let (ambient_scale, sky_color, atmosphere) = match &environment.0 {
+        Some(config) => (
+            config.ambient_scale.max(0.0),
+            config.sky_color,
+            config.atmosphere,
+        ),
+        None => (1.0, None, None),
     };
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
     let clear = match sky_color {
         Some(color) => ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a)),
         None => ClearColorConfig::Default,
     };
-    for (mut camera, mut light) in &mut cameras {
+    // The atmosphere entity is scene-global; Bevy still requires per-camera
+    // `AtmosphereSettings` to render it. Putting settings on several active
+    // views in one frame trips wgpu bind-group validation and the editor's
+    // fatal render-error handler. Pick the lowest-id active main camera —
+    // deterministic across frames; tab switches hand the sky over a frame
+    // later. Multi-viewport layouts get the procedural sky in one pane only.
+    let active: Vec<Entity> = cameras
+        .iter()
+        .filter(|(_, camera, _, _)| camera.is_active)
+        .map(|(entity, ..)| entity)
+        .collect();
+    if atmosphere.is_some() && active.len() > 1 {
+        warn_once!(
+            "schematic atmosphere renders on only one active main viewport \
+             (Bevy 0.19: several cameras with AtmosphereSettings trip wgpu \
+             bind-group validation and quit the editor). Other viewports keep \
+             clear-color/IBL; switch tabs to move the sky to another pane."
+        );
+    }
+    let chosen = atmosphere.and(active.into_iter().min());
+    for (entity, mut camera, mut light, has_atmosphere) in &mut cameras {
         if light.intensity != intensity {
             light.intensity = intensity;
         }
         if !clear_color_matches(&camera.clear_color, &clear) {
             camera.clear_color = clear;
+        }
+        // `AtmosphereSettings` requires `Hdr`, which main viewport cameras get
+        // from the global HDR toggle; cinematic schematics declare hdr=#true.
+        let wants_atmosphere = chosen == Some(entity);
+        if wants_atmosphere && !has_atmosphere {
+            commands.entity(entity).insert(AtmosphereSettings {
+                // The default 3.2e4 m aerial-view span is tuned for ground
+                // scenes; rocket chase cams watch plumes and terrain tens of
+                // kilometers deep.
+                aerial_view_lut_max_distance: 3.2e5,
+                ..AtmosphereSettings::default()
+            });
+        } else if !wants_atmosphere && has_atmosphere {
+            commands.entity(entity).remove::<AtmosphereSettings>();
         }
     }
 }

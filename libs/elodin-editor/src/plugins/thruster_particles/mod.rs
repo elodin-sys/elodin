@@ -19,15 +19,15 @@
 //!   `db:textures/soft_circle.png`.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::RenderLayers;
-use bevy::math::{DVec3, Quat, Vec4};
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::math::{DQuat, DVec3, Quat, Vec4};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::transform::TransformSystems;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{
-    AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectSpawner, Gradient,
-    HanabiPlugin, Module, ParticleEffect, SimulationSpace, SpawnerSettings,
+    AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectProperties, EffectSpawner,
+    Gradient, HanabiPlugin, Module, ParticleEffect, SimulationSpace, SpawnerSettings,
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
@@ -52,6 +52,22 @@ use crate::vector_arrow::component_value_tail_to_vec3;
 /// Reference exhaust axis used to build each emitter's local orientation (Bevy Y-up).
 const DPS_EXHAUST_BODY: Vec3 = Vec3::NEG_Y;
 const MIN_THRUST_VECTOR_LENGTH_SQUARED: f32 = 1e-12;
+
+/// Property names of the anchored-trail contract, shared with pyrotechnique
+/// (see its `builders::exhaust_smoke`): a `.effect` declaring these vec3
+/// properties runs `SimulationSpace::Local` on a **world-fixed anchor entity**
+/// and receives the live nozzle pose (in the anchor's frame) through them
+/// every frame. Particles hang in world space — a persistent smoke trail —
+/// while surviving big_space floating-origin rebases, which
+/// `SimulationSpace::Global` cannot.
+pub const SPAWN_ORIGIN_PROPERTY: &str = "spawn_origin";
+pub const SPAWN_AXIS_PROPERTY: &str = "spawn_axis";
+
+/// Optional throttle property (shared convention with pyrotechnique): effects
+/// declaring `intensity` receive the live 0..1 signal as a shader uniform
+/// every frame, next to the spawner-rate scaling, so throttle can drive plume
+/// length/brightness instead of only particle density.
+pub const INTENSITY_PROPERTY: &str = "intensity";
 
 #[derive(Resource)]
 struct ThrusterEffectAssets {
@@ -96,6 +112,20 @@ struct KdlThrusterLight {
     peak_lm: f32,
 }
 
+/// Jet re-homed onto a world-fixed anchor because its `.effect` declares the
+/// anchored-trail properties. The jet rides the anchor with an identity
+/// transform; `sync_kdl_thruster_transforms` writes the nozzle pose into the
+/// effect properties instead of moving the jet.
+#[derive(Component)]
+struct TrailAnchoredJet {
+    anchor: Entity,
+}
+
+/// World-fixed anchor entity of an anchored-trail jet (back-reference for
+/// cleanup when the jet despawns).
+#[derive(Component)]
+struct KdlTrailAnchorOf(Entity);
+
 #[derive(Component)]
 struct KdlThrusterJet {
     body_offset: Vec3,
@@ -115,6 +145,8 @@ struct KdlThrusterJet {
     pending_effect: Option<Handle<EffectAsset>>,
     /// Spawner settings authored in the loaded `.effect` (file effects only).
     authored_settings: Option<SpawnerSettings>,
+    /// The loaded `.effect` declares the `intensity` throttle property.
+    has_intensity_property: bool,
     cutoff: f32,
 }
 
@@ -133,6 +165,7 @@ impl Plugin for ThrusterParticlesPlugin {
                 PostUpdate,
                 (
                     refresh_kdl_thrusters,
+                    sweep_trail_anchors,
                     ensure_kdl_thrusters,
                     bind_file_effect_assets,
                     sync_kdl_thruster_transforms,
@@ -349,6 +382,21 @@ fn refresh_kdl_thrusters(
     }
 }
 
+/// Sweeps trail anchors whose jet has despawned (rig teardown, live reload).
+/// Runs separately from `refresh_kdl_thrusters` so the jet despawn commands
+/// from the previous frame have applied.
+fn sweep_trail_anchors(
+    mut commands: Commands,
+    anchors: Query<(Entity, &KdlTrailAnchorOf)>,
+    jets: Query<(), With<KdlThrusterJet>>,
+) {
+    for (anchor, of) in &anchors {
+        if jets.get(of.0).is_err() {
+            commands.entity(anchor).despawn();
+        }
+    }
+}
+
 fn ensure_kdl_thrusters(
     mut commands: Commands,
     objects: Query<(Entity, &Object3DState), Without<KdlThrusterRig>>,
@@ -514,20 +562,71 @@ fn slot_image(
     }
 }
 
+/// True when a loaded `.effect` declares the anchored-trail properties.
+fn is_anchored_trail(asset: &EffectAsset) -> bool {
+    asset
+        .properties()
+        .iter()
+        .any(|p| p.name() == SPAWN_ORIGIN_PROPERTY)
+}
+
+/// "Up" in a geo frame's own coordinates, for orienting trail anchors so the
+/// effect's authored +Y (buoyancy, kill planes) points away from the ground.
+fn frame_up(frame: GeoFrame, position_in_frame: DVec3) -> DVec3 {
+    match frame {
+        GeoFrame::ENU => DVec3::Z,
+        GeoFrame::NED => DVec3::NEG_Z,
+        // Geocentric up: within 0.2 deg of geodetic up, invisible at trail scale.
+        GeoFrame::ECEF => position_in_frame.try_normalize().unwrap_or(DVec3::Z),
+    }
+}
+
+/// Spawns the world-fixed anchor for an anchored-trail jet: a regular
+/// high-precision world entity (GeoPosition + grid cell) frozen at the owning
+/// object's position at bind time, oriented so anchor-local +Y is up.
+fn spawn_trail_anchor(
+    commands: &mut Commands,
+    jet_entity: Entity,
+    frame: Option<GeoFrame>,
+    world_pos: Option<&WorldPos>,
+) -> Entity {
+    let frame = frame.unwrap_or_default();
+    let position = world_pos.map(|wp| wp.pos()).unwrap_or_default();
+    let up = frame_up(frame, position);
+    let rotation = DQuat::from_rotation_arc(DVec3::Y, up);
+    commands
+        .spawn((
+            KdlTrailAnchorOf(jet_entity),
+            Name::new("thruster_trail_anchor"),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+            // The `GridCell` add hook parents this under the big_space root.
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+            GeoPosition(frame, position),
+            GeoRotation::absolute(frame, rotation),
+        ))
+        .id()
+}
+
 /// Completes file-effect jets whose `.effect` asset has finished loading:
 /// captures the authored spawner settings and inserts `ParticleEffect` +
 /// `EffectMaterial` in one command so hanabi compiles the effect with its
-/// texture slots already bound.
+/// texture slots already bound. Effects declaring the anchored-trail
+/// properties are additionally re-homed from the vehicle onto a world-fixed
+/// anchor entity.
 fn bind_file_effect_assets(
     mut commands: Commands,
-    mut jets: Query<(Entity, &mut KdlThrusterJet)>,
+    mut jets: Query<(Entity, &mut KdlThrusterJet, &KdlThrusterJetOf)>,
+    objects: Query<&WorldPos, With<Object3DState>>,
     effects: Res<Assets<EffectAsset>>,
     assets: Res<ThrusterEffectAssets>,
     asset_server: Res<AssetServer>,
     connection_addr: Option<Res<ConnectionAddr>>,
 ) {
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
-    for (entity, mut jet) in &mut jets {
+    for (entity, mut jet, owner) in &mut jets {
         let Some(handle) = jet.pending_effect.clone() else {
             continue;
         };
@@ -541,6 +640,27 @@ fn bind_file_effect_assets(
             .iter()
             .map(|slot| slot_image(&slot.name, &assets, &asset_server, connection_addr))
             .collect();
+        jet.has_intensity_property = asset
+            .properties()
+            .iter()
+            .any(|p| p.name() == INTENSITY_PROPERTY);
+        let anchored = is_anchored_trail(asset);
+        if anchored {
+            let anchor =
+                spawn_trail_anchor(&mut commands, entity, jet.frame, objects.get(owner.0).ok());
+            commands.entity(entity).insert((
+                TrailAnchoredJet { anchor },
+                EffectProperties::default(),
+                // The trail spans kilometers away from the anchor entity;
+                // entity-AABB culling would freeze/hide it whenever the anchor
+                // leaves the frustum.
+                NoFrustumCulling,
+                ChildOf(anchor),
+                Transform::IDENTITY,
+            ));
+        } else if jet.has_intensity_property {
+            commands.entity(entity).insert(EffectProperties::default());
+        }
         let mut entity = commands.entity(entity);
         if images.is_empty() {
             entity.insert(ParticleEffect::new(handle));
@@ -582,6 +702,7 @@ impl KdlThrusterJet {
             base_rate,
             pending_effect: None,
             authored_settings: None,
+            has_intensity_property: false,
             cutoff: config.cutoff.max(0.0),
         }
     }
@@ -732,14 +853,37 @@ type LightTransformQuery<'w, 's> = Query<
     (With<KdlThrusterLight>, Without<KdlThrusterJet>),
 >;
 
+/// Anchor transforms are read-only here; disjoint from the jets' mutable
+/// `GlobalTransform` access via the marker filters.
+type TrailAnchorQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static GlobalTransform,
+    (
+        With<KdlTrailAnchorOf>,
+        Without<KdlThrusterJet>,
+        Without<KdlThrusterLight>,
+    ),
+>;
+
+/// Jet mutation set for the transform sync (kept as a `type` for clippy).
+type JetTransformQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static KdlThrusterJet,
+        &'static mut Transform,
+        &'static mut GlobalTransform,
+        Option<&'static Children>,
+        Option<&'static TrailAnchoredJet>,
+        Option<&'static mut EffectProperties>,
+    ),
+>;
+
 fn sync_kdl_thruster_transforms(
     objects: RigObjectQuery,
-    mut jets: Query<(
-        &KdlThrusterJet,
-        &mut Transform,
-        &mut GlobalTransform,
-        Option<&Children>,
-    )>,
+    mut jets: JetTransformQuery,
+    anchors: TrailAnchorQuery,
     mut lights: LightTransformQuery,
     entity_map: Res<EntityMap>,
     component_values: Query<&'static WktComponentValue>,
@@ -747,7 +891,8 @@ fn sync_kdl_thruster_transforms(
 ) {
     for (rig, world_pos, object_global_transform) in &objects {
         for &entity in &rig.jets {
-            let Ok((jet, mut transform, mut global_transform, children)) = jets.get_mut(entity)
+            let Ok((jet, mut transform, mut global_transform, children, anchored, properties)) =
+                jets.get_mut(entity)
             else {
                 continue;
             };
@@ -801,19 +946,39 @@ fn sync_kdl_thruster_transforms(
                     Quat::from_rotation_arc(DPS_EXHAUST_BODY, local_dir.normalize_or_zero())
                 }
             };
-            *transform = Transform {
+            let nozzle_local = Transform {
                 translation: jet.body_offset,
                 rotation: local_rotation,
                 scale: Vec3::ONE,
             };
+            let nozzle_global = *object_global_transform * nozzle_local;
+
+            if let (Some(anchored), Some(mut properties)) = (anchored, properties) {
+                // Anchored-trail jet: the jet entity stays put on its anchor
+                // (identity transform, normal propagation); the moving nozzle
+                // pose flows through the effect properties in anchor-local
+                // coordinates. Both globals live in the same render space, so
+                // the relative pose is invariant under floating-origin
+                // rebases; f32 is exact to ~2 mm at the trail's 20 km reach.
+                let Ok(anchor_global) = anchors.get(anchored.anchor) else {
+                    continue;
+                };
+                let relative = anchor_global.affine().inverse() * nozzle_global.affine();
+                let origin = Vec3::from(relative.translation);
+                let axis = (relative.matrix3 * DPS_EXHAUST_BODY).normalize_or(DPS_EXHAUST_BODY);
+                properties.set(SPAWN_ORIGIN_PROPERTY, origin.into());
+                properties.set(SPAWN_AXIS_PROPERTY, axis.into());
+                continue;
+            }
+
+            *transform = nozzle_local;
             // Sync runs after Propagate, so write globals manually (same for
             // light children) or they lag one frame — meters at descent speeds.
-            let jet_global = *object_global_transform * *transform;
-            *global_transform = jet_global;
+            *global_transform = nozzle_global;
             if let Some(children) = children {
                 for &child in children {
                     if let Ok((light_local, mut light_global)) = lights.get_mut(child) {
-                        *light_global = jet_global * *light_local;
+                        *light_global = nozzle_global * *light_local;
                     }
                 }
             }
@@ -821,14 +986,23 @@ fn sync_kdl_thruster_transforms(
     }
 }
 
+/// Jet mutation set for the spawner/visibility sync (kept as a `type` for
+/// clippy).
+type JetSpawnerQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static KdlThrusterJet,
+        &'static mut EffectSpawner,
+        &'static mut Visibility,
+        Option<&'static Children>,
+        Option<&'static mut EffectProperties>,
+    ),
+>;
+
 fn sync_kdl_thruster_particles(
     rig_objects: Query<(&KdlThrusterRig, &WorldPos)>,
-    mut jets: Query<(
-        &KdlThrusterJet,
-        &mut EffectSpawner,
-        &mut Visibility,
-        Option<&Children>,
-    )>,
+    mut jets: JetSpawnerQuery,
     mut lights: Query<(
         &KdlThrusterLight,
         Option<&mut PointLight>,
@@ -840,7 +1014,8 @@ fn sync_kdl_thruster_particles(
 ) {
     for (rig, world_pos) in &rig_objects {
         for &entity in &rig.jets {
-            let Ok((jet, mut spawner, mut visibility, children)) = jets.get_mut(entity) else {
+            let Ok((jet, mut spawner, mut visibility, children, properties)) = jets.get_mut(entity)
+            else {
                 continue;
             };
             let intensity = evaluate_kdl_thruster(
@@ -854,6 +1029,11 @@ fn sync_kdl_thruster_particles(
             .map(|eval| eval.intensity)
             .unwrap_or(0.0);
             apply_kdl_spawner(&mut spawner, &mut visibility, intensity, jet);
+            if jet.has_intensity_property
+                && let Some(mut properties) = properties
+            {
+                properties.set(INTENSITY_PROPERTY, intensity.clamp(0.0, 1.0).into());
+            }
             // Light luminous power tracks the same signal (0 below cutoff).
             if let Some(children) = children {
                 let lm = if intensity <= jet.cutoff {

@@ -118,6 +118,31 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
                         }
                     })?);
             }
+            "atmosphere" => {
+                let mut atmosphere = AtmosphereConfig::default();
+                if let Some(origin) = parse_tuple3::<f64>(child, "origin") {
+                    atmosphere.origin = origin;
+                }
+                if let Some(inner) = float_prop(child, "inner_radius") {
+                    atmosphere.inner_radius = inner;
+                }
+                if let Some(outer) = float_prop(child, "outer_radius") {
+                    atmosphere.outer_radius = outer;
+                }
+                if let Some(albedo) = parse_tuple3::<f32>(child, "ground_albedo") {
+                    atmosphere.ground_albedo = albedo;
+                }
+                if atmosphere.outer_radius <= atmosphere.inner_radius {
+                    return Err(KdlSchematicError::InvalidValue {
+                        property: "outer_radius".to_string(),
+                        node: "atmosphere".to_string(),
+                        expected: "outer_radius must be greater than inner_radius".to_string(),
+                        src: src.to_string(),
+                        span: child.span(),
+                    });
+                }
+                config.atmosphere = Some(atmosphere);
+            }
             other => {
                 return Err(KdlSchematicError::UnknownNode {
                     node_type: format!("environment.{other}"),

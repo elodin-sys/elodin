@@ -63,6 +63,11 @@ order = 6
   - `shadows`: `#true`/`#false`, default `#true`. Enables shadow maps on the sun.
 - `ambient` child (optional): `scale` (required) multiplies the editor's baked image-based lighting intensity. `1.0` = unchanged; near-zero (e.g. `0.02`) keeps shadows black on airless bodies.
 - `sky` child (optional): `color` (named color or tuple string) sets the main viewport clear color — `"black"` for space scenes. Omit to keep the theme background. An active `skybox` draws over it.
+- `atmosphere` child (optional): Bevy's procedural planetary atmosphere (earth scattering medium) — physical blue sky, horizon haze, aerial perspective, altitude darkening, and the limb from space. Requires an active `sun` and an HDR viewport with a sunlit `ev100` (~13-15).
+  - `origin`: tuple string, planet center in the schematic coordinate frame [m]. Default `(0, 0, 0)` — the Earth's center in an ECEF scene. In local ENU/NED scenes leave it at the origin and the default radii place the surface `inner_radius` below.
+  - `inner_radius` / `outer_radius`: meters from the planet center; default Bevy's earth values (`6360000` / `6460000`). In an ECEF scene set `inner_radius` to the launch site's geocentric radius (the WGS84 radius varies with latitude) so the horizon haze sits at the actual local surface.
+  - `ground_albedo`: tuple string, average surface color for multiscattering. Default `(0.3, 0.3, 0.3)`.
+  - Sun, atmosphere entity, ambient IBL scale, and sky clear color are scene-global. Bevy still opts each camera into atmosphere rendering via `AtmosphereSettings`; Elodin attaches that to **one** active main viewport at a time (Bevy 0.19 fatally fails wgpu validation when several views carry it). The sky hands off when you switch tabs; a side-by-side multi-viewport layout gets the procedural sky in one pane only (warn once). The atmosphere entity is grid-cell anchored so it survives floating-origin rebases.
 - Example (lunar scene):
 
 ```kdl
@@ -70,6 +75,16 @@ environment {
     sun azimuth=320.0 elevation=32.0 illuminance=130000.0 shadows=#true
     ambient scale=0.02
     sky color="black"
+}
+```
+
+- Example (Earth launch site, ECEF):
+
+```kdl
+environment {
+    sun azimuth=146.6 elevation=55.4 illuminance=100000.0 shadows=#true
+    ambient scale=0.05
+    atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
 }
 ```
 
@@ -208,6 +223,9 @@ object_3d "(0,0,0,1, 0,0,0)" frame=ENU {
              intensity="lander.dust_viz[0]" cutoff=0.01
 }
 ```
+
+  - **Anchored trails** (persistent smoke columns behind a moving vehicle): a `.effect` that declares the vec3 properties `spawn_origin` and `spawn_axis` is automatically re-homed from the vehicle onto a **world-fixed anchor entity** frozen at the vehicle's position when the effect loads; every frame the runtime feeds the live nozzle pose through those properties, so particles spawn at the moving nozzle but hang in world space — the launch-trail look — while remaining floating-origin-safe (`SimulationSpace::Global` is not, and is never used). Authoring lives in pyrotechnique (`exhaust_smoke` is the reference); declare the thruster on the vehicle like any other, and the anchor management is automatic. Don't put a `light` child on a trail node — it would stay at the anchor, not the nozzle.
+  - **Throttle-driven visuals**: a `.effect` that declares a scalar `intensity` property receives the node's live 0..1 intensity as a shader uniform each frame (in addition to the spawn-rate scaling every effect gets). Authors wire it into velocity/color expressions so throttle changes plume *length and brightness*, not just particle density — the falcon9 `merlin_core`/`merlin_flame` effects are the reference (a 1-engine landing burn renders a short dim plume, not a thin full-length one).
 
 ```kdl
 object_3d "(0,0,0,1, vehicle.position[0], 0, 0)" {

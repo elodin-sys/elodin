@@ -84,6 +84,10 @@ pub struct EnvironmentConfig {
     /// Viewport clear color (e.g. black for space). Absent = theme background.
     #[serde(default)]
     pub sky_color: Option<Color>,
+    /// Procedural planetary atmosphere (sky + aerial perspective); absent =
+    /// no atmosphere.
+    #[serde(default)]
+    pub atmosphere: Option<AtmosphereConfig>,
 }
 
 impl Default for EnvironmentConfig {
@@ -92,6 +96,7 @@ impl Default for EnvironmentConfig {
             sun: None,
             ambient_scale: Self::default_ambient_scale(),
             sky_color: None,
+            atmosphere: None,
         }
     }
 }
@@ -99,6 +104,59 @@ impl Default for EnvironmentConfig {
 impl EnvironmentConfig {
     pub fn default_ambient_scale() -> f32 {
         1.0
+    }
+}
+
+/// `atmosphere` child of the `environment` node: Bevy's procedural
+/// atmosphere (earth scattering medium) centered on a planet.
+///
+/// `origin` is the planet center expressed in the schematic's coordinate
+/// frame (meters) — `(0, 0, 0)` is the ECEF Earth center in an ECEF scene and
+/// the local origin in ENU/NED scenes. For local scenes the default radii
+/// place the surface `inner_radius` below the origin, matching Bevy's
+/// convention of "ground at y = 0".
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct AtmosphereConfig {
+    /// Planet center in the schematic coordinate frame [m].
+    #[serde(default)]
+    pub origin: (f64, f64, f64),
+    /// Planet surface radius [m]. In an ECEF scene with a real launch site,
+    /// set this to the site's geocentric radius so the horizon/haze sit at
+    /// the actual surface (the WGS84 radius varies with latitude).
+    #[serde(default = "AtmosphereConfig::default_inner_radius")]
+    pub inner_radius: f32,
+    /// Top of the atmosphere [m from planet center].
+    #[serde(default = "AtmosphereConfig::default_outer_radius")]
+    pub outer_radius: f32,
+    /// Average surface albedo used for multiscattering.
+    #[serde(default = "AtmosphereConfig::default_ground_albedo")]
+    pub ground_albedo: (f32, f32, f32),
+}
+
+impl Default for AtmosphereConfig {
+    fn default() -> Self {
+        Self {
+            origin: (0.0, 0.0, 0.0),
+            inner_radius: Self::default_inner_radius(),
+            outer_radius: Self::default_outer_radius(),
+            ground_albedo: Self::default_ground_albedo(),
+        }
+    }
+}
+
+impl AtmosphereConfig {
+    /// Bevy's `Atmosphere::earth` inner radius.
+    pub fn default_inner_radius() -> f32 {
+        6_360_000.0
+    }
+
+    /// Bevy's `Atmosphere::earth` outer radius (inner + 100 km).
+    pub fn default_outer_radius() -> f32 {
+        6_460_000.0
+    }
+
+    pub fn default_ground_albedo() -> (f32, f32, f32) {
+        (0.3, 0.3, 0.3)
     }
 }
 
