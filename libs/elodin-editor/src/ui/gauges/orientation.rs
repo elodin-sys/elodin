@@ -12,12 +12,9 @@ use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Sense, Shape, Stroke,
 use bevy_geo_frames::{GeoContext, GeoFrame};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp};
-use nox::ArrayBuf;
 use std::f32::consts::TAU;
 
 use super::{EqlBinding, GaugePane, gauge_title};
-use crate::WorldPosExt;
-use crate::object_3d::ComponentArrayExt;
 use crate::ui::{
     colors::get_scheme,
     theme,
@@ -191,11 +188,29 @@ fn frame_label(frame: GeoFrame) -> &'static str {
 
 /// Two-decimal `x y z w` readout of the drawn attitude, or a placeholder when
 /// there is no valid quaternion sample.
+///
+/// `q` and `-q` are the same rotation, so the sample's raw sign can flip between
+/// ticks even during smooth motion. Canonicalize to a single hemisphere so the
+/// printed numbers stay continuous.
 fn quat_readout(att: Option<DQuat>) -> String {
-    match att {
+    match att.map(canonical_hemisphere) {
         Some(q) => format!("x {:+.2}  y {:+.2}  z {:+.2}  w {:+.2}", q.x, q.y, q.z, q.w),
         None => "x —  y —  z —  w —".to_string(),
     }
+}
+
+/// Pick the representative of `{q, -q}` with a non-negative leading component
+/// (`w`, then `z`, `y`, `x`), so equivalent attitudes always print identically.
+fn canonical_hemisphere(q: DQuat) -> DQuat {
+    for c in [q.w, q.z, q.y, q.x] {
+        if c > 0.0 {
+            return q;
+        }
+        if c < 0.0 {
+            return DQuat::from_xyzw(-q.x, -q.y, -q.z, -q.w);
+        }
+    }
+    q
 }
 
 /// Max deviation of a bare 4-vector's length² from 1 to still count as a
@@ -205,9 +220,9 @@ const BARE_QUAT_UNIT_TOLERANCE: f64 = 0.1;
 
 /// Extract an attitude quaternion from a component value.
 ///
-/// Accepts only:
-/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (`F64`, ≥7
-///   elements whose head 4 are the quaternion), or
+/// Accepts only (in `F32` or `F64`):
+/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (≥7 elements
+///   whose head 4 are the quaternion `[x, y, z, w]`), or
 /// - a bare, (approximately) unit-length 4-vector `[x, y, z, w]`.
 ///
 /// A bare 4-vector must already be near unit length: a genuine attitude
@@ -219,21 +234,19 @@ const BARE_QUAT_UNIT_TOLERANCE: f64 = 0.1;
 /// Telemetry quats can still drift slightly off unit length (and
 /// `DQuat::inverse` assumes normalized), so accepted quats are re-normalized.
 fn component_value_to_quat(value: &ComponentValue) -> Option<DQuat> {
-    // A world_pos-style pose: reuse the shared WorldPos parser so only genuine
-    // poses (≥7 elements) feed the gimbal, exactly as the position gauge does.
-    if let Some(wp) = value.as_world_pos() {
-        let q = wp.att();
+    let data = super::component_buf_f64(value)?;
+    // A world_pos-style pose: the head 4 elements are the quaternion. Genuine
+    // poses are ≥7 elements, so only these (never a bare 4-vector) take this path.
+    if data.len() >= 7 {
+        let q = DQuat::from_xyzw(data[0], data[1], data[2], data[3]);
         return (q.length_squared() > 1e-12).then(|| q.normalize());
     }
-    let ComponentValue::F64(array) = value else {
-        return None;
-    };
-    let data = array.buf.as_buf();
-    if data.len() != 4 {
-        return None;
+    if data.len() == 4 {
+        let q = DQuat::from_xyzw(data[0], data[1], data[2], data[3]);
+        return ((q.length_squared() - 1.0).abs() <= BARE_QUAT_UNIT_TOLERANCE)
+            .then(|| q.normalize());
     }
-    let q = DQuat::from_xyzw(data[0], data[1], data[2], data[3]);
-    ((q.length_squared() - 1.0).abs() <= BARE_QUAT_UNIT_TOLERANCE).then(|| q.normalize())
+    None
 }
 
 /// Unit axes of a frame's display triad: up-ish first (the horizon pole, used
@@ -667,6 +680,29 @@ mod tests {
         )
     }
 
+    fn f32_value(values: &[f32]) -> ComponentValue {
+        ComponentValue::F32(
+            Array::<f32, Dyn>::from_shape_vec(smallvec::smallvec![values.len()], values.to_vec())
+                .expect("f32 buffer"),
+        )
+    }
+
+    #[test]
+    fn f32_bare_quat_and_pose_parse_like_f64() {
+        // Bare F32 [x,y,z,w] quaternion.
+        let q = component_value_to_quat(&f32_value(&[0.0, 0.0, 0.0, 1.0])).unwrap();
+        assert!(q.abs_diff_eq(DQuat::IDENTITY, 1e-6));
+
+        // F32 world_pos-style pose: head 4 elements are the quaternion.
+        let q = component_value_to_quat(&f32_value(&[0.0, 0.0, 2.0, 2.0, 10.0, 20.0, 30.0]))
+            .expect("f32 pose head quat");
+        assert!((q.length() - 1.0).abs() < 1e-6);
+        assert!((q.z - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+
+        // Non-pose F32 lengths are still rejected.
+        assert_eq!(component_value_to_quat(&f32_value(&[1.0, 2.0, 3.0])), None);
+    }
+
     #[test]
     fn quat_from_bare_4_vector_and_pose_head() {
         // Bare [x,y,z,w] quaternion.
@@ -744,6 +780,16 @@ mod tests {
         let q = DQuat::from_xyzw(0.123, -0.456, 0.0, 0.881);
         assert_eq!(quat_readout(Some(q)), "x +0.12  y -0.46  z +0.00  w +0.88");
         assert_eq!(quat_readout(None), "x —  y —  z —  w —");
+    }
+
+    #[test]
+    fn quat_readout_is_sign_flip_invariant() {
+        // q and -q are the same rotation; the readout must not flip signs.
+        let q = DQuat::from_xyzw(0.123, -0.456, 0.0, 0.881);
+        assert_eq!(quat_readout(Some(q)), quat_readout(Some(-q)));
+        // Tie on w falls through to the next component (here z) for the sign.
+        let q = DQuat::from_xyzw(0.6, -0.8, 0.0, 0.0);
+        assert_eq!(quat_readout(Some(q)), quat_readout(Some(-q)));
     }
 
     #[test]

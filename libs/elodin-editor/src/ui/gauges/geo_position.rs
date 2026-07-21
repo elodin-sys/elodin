@@ -7,10 +7,6 @@ use bevy_egui::egui;
 use bevy_geo_frames::{GeoContext, GeoFrame, ecef_to_lla_deg};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
-use nox::ArrayBuf;
-
-use crate::WorldPosExt;
-use crate::object_3d::ComponentArrayExt;
 
 use super::{EqlBinding, GaugePane};
 use crate::ui::{
@@ -182,28 +178,20 @@ fn position_card(ui: &mut egui::Ui, label: &str, value: &str) {
 
 /// Extract a position (metres) from a component value for the position gauge.
 ///
-/// Accepts only:
-/// - a bare 3-vector (`F32`/`F64` with exactly three elements), or
-/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (`F64`, ≥7
-///   elements: quat + position).
+/// Accepts only (in `F32` or `F64`):
+/// - a bare 3-vector (exactly three elements), or
+/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (≥7 elements:
+///   quat `[x, y, z, w]` + position `[x, y, z]`).
 ///
 /// Rejects other lengths (e.g. 4-element fin deflections) so the gauge does not
 /// treat arbitrary trailing floats as coordinates and invent NED/LLA values.
 fn component_value_to_position(value: &ComponentValue) -> Option<DVec3> {
-    if let Some(wp) = value.as_world_pos() {
-        return Some(wp.pos());
+    let data = super::component_buf_f64(value)?;
+    // world_pos-style pose: position is elements 4..7 (after the head quaternion).
+    if data.len() >= 7 {
+        return Some(DVec3::new(data[4], data[5], data[6]));
     }
-    match value {
-        ComponentValue::F32(array) => {
-            let data = array.buf.as_buf();
-            (data.len() == 3).then(|| DVec3::new(data[0] as f64, data[1] as f64, data[2] as f64))
-        }
-        ComponentValue::F64(array) => {
-            let data = array.buf.as_buf();
-            (data.len() == 3).then(|| DVec3::new(data[0], data[1], data[2]))
-        }
-        _ => None,
-    }
+    (data.len() == 3).then(|| DVec3::new(data[0], data[1], data[2]))
 }
 
 /// Convert a position from `source` into the `display` coordinate system.
@@ -262,6 +250,27 @@ mod tests {
             Array::<f64, Dyn>::from_shape_vec(smallvec::smallvec![values.len()], values.to_vec())
                 .expect("f64 buffer"),
         )
+    }
+
+    fn f32_value(values: &[f32]) -> ComponentValue {
+        ComponentValue::F32(
+            Array::<f32, Dyn>::from_shape_vec(smallvec::smallvec![values.len()], values.to_vec())
+                .expect("f32 buffer"),
+        )
+    }
+
+    #[test]
+    fn position_from_f32_vector_and_pose() {
+        // Bare F32 3-vector.
+        assert_eq!(
+            component_value_to_position(&f32_value(&[1.0, 2.0, 3.0])),
+            Some(DVec3::new(1.0, 2.0, 3.0))
+        );
+        // F32 world_pos-style pose: position is elements 4..7.
+        assert_eq!(
+            component_value_to_position(&f32_value(&[0.0, 0.0, 0.0, 1.0, 10.0, 20.0, 30.0])),
+            Some(DVec3::new(10.0, 20.0, 30.0))
+        );
     }
 
     #[test]

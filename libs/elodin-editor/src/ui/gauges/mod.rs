@@ -20,6 +20,18 @@ use super::PaneName;
 pub use geo_position::{GeoPositionGaugeData, GeoPositionGaugeWidget};
 pub use orientation::{OrientationGaugeData, OrientationGaugeWidget};
 
+/// Read a numeric component buffer as `f64`, accepting both `F32` and `F64`
+/// telemetry so gauges treat single- and double-precision poses identically.
+/// Returns `None` for non-float component types.
+pub(crate) fn component_buf_f64(value: &ComponentValue) -> Option<Vec<f64>> {
+    use nox::ArrayBuf;
+    match value {
+        ComponentValue::F32(array) => Some(array.buf.as_buf().iter().map(|&x| x as f64).collect()),
+        ComponentValue::F64(array) => Some(array.buf.as_buf().to_vec()),
+        _ => None,
+    }
+}
+
 /// Tile pane for either gauge: points at the entity carrying the gauge data
 /// and its [`EqlBinding`].
 #[derive(Clone)]
