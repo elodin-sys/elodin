@@ -65,6 +65,11 @@ os.environ.setdefault("ELODIN_SCREENSHOT_EXIT", "1")
 ThrustViz = ty.Annotated[
     jax.Array, el.Component("thrust_viz", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
+# Thrust-direction × intensity (editor flips to exhaust). Default +X with a
+# small yaw gimbal so TVC vector mode is exercised in plume-close.
+PlumeViz = ty.Annotated[
+    jax.Array, el.Component("plume_viz", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]
 SmokeViz = ty.Annotated[
     jax.Array, el.Component("smoke_viz", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
@@ -118,8 +123,23 @@ ascent_att = upright_attitude()
 landing_att = engines_toward_deck_attitude()
 
 
+def _plume_from_thrust(thrust: jax.Array, yaw_gimbal_rad: float = 0.0) -> jax.Array:
+    """Body-frame thrust vector for the Merlin vector thruster (editor → −exhaust)."""
+    d = jnp.array([1.0, yaw_gimbal_rad, 0.0])
+    d = d / jnp.linalg.norm(d)
+    return d * thrust
+
+
 def make_advance():
-    out_tys = (el.WorldPos, ThrustViz, SmokeViz, PadSmokeViz, LandingSmokeViz, RcsLevels)
+    out_tys = (
+        el.WorldPos,
+        ThrustViz,
+        PlumeViz,
+        SmokeViz,
+        PadSmokeViz,
+        LandingSmokeViz,
+        RcsLevels,
+    )
 
     if SCENARIO == "barge":
 
@@ -128,15 +148,23 @@ def make_advance():
             tick: el.Query[el.SimulationTick],
             boosters: el.Query[BoosterMarker],
         ) -> el.Query[
-            el.WorldPos, ThrustViz, SmokeViz, PadSmokeViz, LandingSmokeViz, RcsLevels
+            el.WorldPos,
+            ThrustViz,
+            PlumeViz,
+            SmokeViz,
+            PadSmokeViz,
+            LandingSmokeViz,
+            RcsLevels,
         ]:
             _ = tick[0]
             # ~35 m above deck; keep landing smoke low so the barge stays visible.
             r = lz1 + jnp.asarray(LZ1_UP) * 35.0
             pose = el.SpatialTransform(angular=landing_att, linear=r)
+            thrust = 0.12
             vals = (
                 pose,
-                jnp.array([0.12]),
+                jnp.array([thrust]),
+                _plume_from_thrust(thrust, yaw_gimbal_rad=0.05),
                 jnp.array([0.05]),
                 jnp.array([0.0]),
                 jnp.array([0.08]),
@@ -152,7 +180,15 @@ def make_advance():
     def advance_ascent(
         tick: el.Query[el.SimulationTick],
         boosters: el.Query[BoosterMarker],
-    ) -> el.Query[el.WorldPos, ThrustViz, SmokeViz, PadSmokeViz, LandingSmokeViz, RcsLevels]:
+    ) -> el.Query[
+        el.WorldPos,
+        ThrustViz,
+        PlumeViz,
+        SmokeViz,
+        PadSmokeViz,
+        LandingSmokeViz,
+        RcsLevels,
+    ]:
         t = T0 + tick[0] * SIM_DT
         alt = jnp.interp(t, ref_t, ref_alt)
         dr = jnp.interp(t, ref_t, ref_dr)
@@ -172,9 +208,12 @@ def make_advance():
         # Only the rcs-flip scenario pulses jets (plume-close keeps them dark).
         rcs = jnp.where((dim_for_rcs > 0.5) & rcs_on, pulse, jnp.zeros(8))
         pose = el.SpatialTransform(angular=ascent_att, linear=r)
+        # ~3° yaw gimbal in plume-close so vector mode is visibly exercised.
+        gimbal = jnp.where(SCENARIO == "plume-close", 0.05, 0.0)
         vals = (
             pose,
             jnp.array([thrust]),
+            _plume_from_thrust(thrust, yaw_gimbal_rad=gimbal),
             jnp.array([smoke]),
             jnp.array([pad_smoke]),
             jnp.array([land_smoke]),
@@ -202,6 +241,7 @@ world.spawn(
     [
         StaticSceneObject(el.WorldPos(angular=init_att, linear=init_r)),
         el.C(ThrustViz, jnp.array([0.0])),
+        el.C(PlumeViz, jnp.zeros(3)),
         el.C(SmokeViz, jnp.array([0.0])),
         el.C(PadSmokeViz, jnp.array([0.0])),
         el.C(LandingSmokeViz, jnp.array([0.0])),

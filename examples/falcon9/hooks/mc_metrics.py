@@ -11,11 +11,13 @@ import json
 import math
 from pathlib import Path
 
-# Soft-landing acceptance (mirrors main.py).
+# Soft-landing acceptance (mirrors main.py / constants.py).
 SOFT_VERTICAL_MPS = 2.0
-SOFT_LATERAL_MPS = 4.0
-SOFT_TILT_DEG = 10.0
-SOFT_POS_ERR_M = 500.0
+SOFT_IMPACT_MPS = 2.0  # Falcon 9 landing-leg design limit
+SOFT_LATERAL_MPS = 1.5
+SOFT_TILT_DEG = 2.0
+SOFT_POS_ERR_M = 5.0
+SOFT_RATE_DPS = 1.0
 
 # Descent smoothness targets (below 30 km during entry/aero/landing).
 SOFT_MAX_RATE_DPS = 10.0
@@ -55,17 +57,25 @@ def soft_landing(result: dict) -> bool:
     if "soft_landing" in result:
         return bool(result["soft_landing"])
     vertical = to_float(result.get("touchdown_vertical_mps"))
+    impact = to_float(result.get("touchdown_impact_mps"), vertical)
     lateral = to_float(result.get("touchdown_lateral_mps"))
     tilt = to_float(result.get("touchdown_tilt_deg"))
     pos = to_float(result.get("touchdown_pos_err_m"))
+    rate = to_float(result.get("touchdown_rate_dps"), 0.0)
     prop = to_float(result.get("prop_remaining_kg"), 0.0)
     if None in (vertical, lateral, tilt, pos):
         return False
+    on_deck = result.get("landed_on_deck", True)
+    tipped = result.get("tipped_over", False)
     return (
         bool(result.get("landed", False))
+        and bool(on_deck)
+        and not bool(tipped)
         and vertical <= SOFT_VERTICAL_MPS
+        and impact <= SOFT_IMPACT_MPS
         and lateral <= SOFT_LATERAL_MPS
         and tilt <= SOFT_TILT_DEG
+        and rate <= SOFT_RATE_DPS
         and pos <= SOFT_POS_ERR_M
         and prop > 0.0
     )
@@ -95,15 +105,19 @@ def fit_score(result: dict) -> float | None:
     ev = event_errors(result)
     ev_term = sum(abs(e) / PARITY_EVENT_ERR_S for e in ev.values()) / len(ev) if ev else 10.0
     vert = to_float(result.get("touchdown_vertical_mps"), 1e3)
+    impact = to_float(result.get("touchdown_impact_mps"), vert)
     lat = to_float(result.get("touchdown_lateral_mps"), 1e3)
     tilt = to_float(result.get("touchdown_tilt_deg"), 180.0)
     pos = to_float(result.get("touchdown_pos_err_m"), 1e6)
+    rate = to_float(result.get("touchdown_rate_dps"), 1e3)
     landing_term = (
         vert / SOFT_VERTICAL_MPS
+        + impact / SOFT_IMPACT_MPS
         + lat / SOFT_LATERAL_MPS
         + tilt / SOFT_TILT_DEG
         + pos / SOFT_POS_ERR_M
-    ) / 4.0
+        + rate / SOFT_RATE_DPS
+    ) / 6.0
     # Smoothness: violent aero/fin limit cycles must not out-rank soft landings.
     rate = to_float(result.get("descent_max_rate_dps"), 1e3)
     aoa = to_float(result.get("descent_max_aoa_deg"), 1e3)

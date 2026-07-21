@@ -92,8 +92,19 @@ VALVE_TAU_S = 0.015  # EST solenoid open/close response
 PURGE_DURATION_S = 5.0  # EST nitrogen purge after every cutoff
 
 # --- Landing legs / contact (WHITEPAPER 11.5, 15) ------------------------------
-LANDING_MASS_EST_KG = 27_000.0  # EST: dry + landing propellant reserve
+LANDING_MASS_EST_KG = 27_000.0  # EST: dry + remaining propellant reserve
+# Published Falcon 9 landing-leg design limit (~2 m/s impact).
 TOUCHDOWN_SOFT_VERTICAL_MPS = 2.0
-# Lateral 1 m/s is pad-legs territory; this fidelity (point-mass contact,
-# no landing-leg model) scores soft at 4 m/s with near-upright tilt.
-TOUCHDOWN_SOFT_LATERAL_MPS = 4.0
+TOUCHDOWN_SOFT_IMPACT_MPS = 2.0
+TOUCHDOWN_SOFT_LATERAL_MPS = 1.5
+TOUCHDOWN_SOFT_TILT_DEG = 2.0
+TOUCHDOWN_SOFT_POS_ERR_M = 5.0
+TOUCHDOWN_SOFT_RATE_DPS = 1.0
+# 4-pad contact model (ASDS deck ~52×96 m; legs ~10 m radius, ~90° spacing).
+LEG_RADIUS_M = 10.0
+LEG_STROKE_M = 0.55
+LEG_STIFFNESS_NPM = 4.0e5
+LEG_DAMPING_NS_PM = 8.0e4
+LEG_FRICTION_MU = 0.55
+DECK_HALF_ALONG_M = 26.0  # 52 m barge length / 2 (along-track)
+DECK_HALF_CROSS_M = 48.0  # 96 m barge width / 2

@@ -866,18 +866,24 @@ fn evaluate_kdl_thruster(
 
     if jet.vector_intensity {
         let thrust = component_value_tail_to_vec3(&value)?;
-        // Vector thrusters carry their visual direction in telemetry, so keep
-        // the original world-pos attitude path. Fixed-direction scalar jets use
-        // the rendered object transform below to line up with GLB nozzle meshes.
-        let thrust = jet.scale
-            * vector_to_bevy(
-                thrust.as_vec3(),
-                jet.body_frame,
-                jet.frame,
-                body_att,
-                None,
-                geo_context,
-            );
+        // Body-frame vector intensity is parent-local thrust — same space as
+        // scalar `direction=`. Keep exhaust in that frame so sync can aim
+        // with `from_rotation_arc` directly; converting through world with a
+        // mismatched WorldPos vs GlobalTransform attitude was the Falcon 9
+        // Merlin ~90° plume bug.
+        let thrust = if jet.body_frame {
+            jet.scale * thrust.as_vec3()
+        } else {
+            jet.scale
+                * vector_to_bevy(
+                    thrust.as_vec3(),
+                    false,
+                    jet.frame,
+                    body_att,
+                    body_transform,
+                    geo_context,
+                )
+        };
         Some(evaluate_vector_thruster(thrust, jet.cutoff))
     } else {
         let intensity = component_value_scalar(&value)?.clamp(0.0, 1.0);
@@ -1002,12 +1008,18 @@ fn sync_kdl_thruster_transforms(
             };
             // Jets are `ChildOf` the object_3d: write LOCAL pose so big_space /
             // GridCell propagation stays consistent with the mesh. Body-frame
-            // scalar jets compose mesh-relative -Y → authored direction (for
-            // direction=(0,-1,0) that is identity). World-space exhaust (vector
-            // thrusters / non-body-frame) is converted into the parent's frame.
+            // jets (scalar `direction=` or vector intensity) aim in parent-
+            // local space: mesh-relative -Y → authored/exhaust direction.
+            // World-space exhaust (non-body-frame) is converted into the
+            // parent's frame.
             let parent_rot = object_global_transform.to_scale_rotation_translation().1;
-            let local_rotation = if jet.body_frame && !jet.vector_intensity {
-                let local_dir = jet.fixed_exhaust.normalize_or_zero();
+            let local_rotation = if jet.body_frame {
+                let local_dir = if jet.vector_intensity {
+                    // evaluate_vector_thruster already returns −thrust (body).
+                    exhaust.normalize_or_zero()
+                } else {
+                    jet.fixed_exhaust.normalize_or_zero()
+                };
                 if local_dir.length_squared() < 1e-12 {
                     Quat::IDENTITY
                 } else {
@@ -1244,6 +1256,17 @@ mod tests {
 
         assert_vec3_near(via_attitude, Vec3::Y);
         assert!((via_render_transform - via_attitude).length() > 0.5);
+    }
+
+    #[test]
+    fn body_frame_vector_thrust_plus_x_aims_exhaust_aft() {
+        // Falcon 9 plume_viz ≈ (1, 0, 0) · throttle: thrust along body +X,
+        // exhaust must be body −X (same as scalar direction=(-1,0,0)).
+        let eval = evaluate_vector_thruster(Vec3::X, 0.0);
+        assert_vec3_near(eval.exhaust, Vec3::NEG_X);
+        let local_rot = Quat::from_rotation_arc(DPS_EXHAUST_BODY, eval.exhaust);
+        let aimed = local_rot * DPS_EXHAUST_BODY;
+        assert_vec3_near(aimed, Vec3::NEG_X);
     }
 
     #[test]

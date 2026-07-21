@@ -17,3 +17,6 @@ fsw_cd_s_m2 = { dist = "uniform", min = 35.0, max = 45.0 }
 fin_wn = { dist = "uniform", min = 1.1, max = 1.9 }
 divert_speed_cap = { dist = "uniform", min = 28.0, max = 42.0 }
 steer_tilt_cap = { dist = "uniform", min = 0.16, max = 0.24 }
+wind_north_mps = { dist = "uniform", min = -6.0, max = 6.0 }
+wind_east_mps = { dist = "uniform", min = -6.0, max = 6.0 }
+gust_sigma_mps = { dist = "uniform", min = 0.0, max = 1.5 }

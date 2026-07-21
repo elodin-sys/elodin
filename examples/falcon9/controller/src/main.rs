@@ -35,6 +35,14 @@ const V_PURGE: usize = 7;
 const THROTTLE_MIN: f64 = 0.57;
 const T_VAC_PER_ENGINE: f64 = 829_000.0; // matches plant constants
 const A_E_M2: f64 = 0.681;
+/// ZEM/ZEV terminal guidance (Guo/Hawkins/Wie) — LandingBurn.
+const ZEM_WAYPOINT_ALT_M: f64 = 150.0;
+const ZEM_WAYPOINT_VDOWN_MPS: f64 = 25.0;
+const ZEM_V_TD_MPS: f64 = 1.2;
+const ZEM_TILT_CAP_RAD: f64 = 0.25;
+const ZEM_COMMIT_ALT_M: f64 = 50.0;
+const ZEM_COMMIT_TGO_S: f64 = 5.0;
+const ZEM_A_LAND_TGO: f64 = 12.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Phase {
@@ -112,7 +120,9 @@ struct GuidanceParams {
     /// Fin attitude-loop natural frequency (rad/s); torque is divided by
     /// q̄·effectiveness so closed-loop bandwidth is q̄-invariant.
     fin_wn: f64,
-    /// Landing-burn lateral approach-speed cap (m/s) while alt > 1 km.
+    /// Landing-burn lateral approach-speed cap (m/s); retained for MC packet
+    /// layout (ZEM/ZEV no longer reads it).
+    #[allow(dead_code)]
     divert_speed_cap: f64,
     /// Aero-descent cross-track tilt cap (rad) at low q̄; scheduled down as q̄ rises.
     steer_tilt_cap: f64,
@@ -194,6 +204,10 @@ struct Navigator {
     last_gps_count: f64,
     last_t: f64,
     initialized: bool,
+    /// Steady wind estimate (ECEF m/s) from GPS–IMU innovation.
+    wind_est: V3,
+    /// Radar-smoothed altitude (m); <0 when invalid.
+    radar_alt_m: f64,
 }
 
 impl Navigator {
@@ -205,6 +219,8 @@ impl Navigator {
             last_gps_count: 0.0,
             last_t: 0.0,
             initialized: false,
+            wind_est: [0.0; 3],
+            radar_alt_m: -1.0,
         }
     }
 
@@ -218,6 +234,8 @@ impl Navigator {
         self.last_gps_count = s.gps_count;
         self.last_t = s.t;
         self.initialized = true;
+        self.wind_est = [0.0; 3];
+        self.radar_alt_m = -1.0;
     }
 
     fn step(&mut self, s: &SensorPacket) {
@@ -239,16 +257,40 @@ impl Navigator {
         let a = add(add(f_e, gravity(self.pos)), frame_accel(self.pos, self.vel));
         self.vel = add(self.vel, scale(a, dt));
         self.pos = add(self.pos, scale(self.vel, dt));
-        // GPS update: trust fresh fixes outright (meter-class beats drift).
+        // Complementary GPS blend (no snap) — kills metre-class steps into
+        // terminal guidance. Position gain ~0.2/fix, velocity ~0.5/fix.
         if s.gps_count > self.last_gps_count {
-            self.pos = s.gps_pos;
-            self.vel = s.gps_vel;
+            let innov_v = sub(s.gps_vel, self.vel);
+            self.wind_est = add(scale(self.wind_est, 0.95), scale(innov_v, 0.05));
+            self.pos = add(self.pos, scale(sub(s.gps_pos, self.pos), 0.20));
+            self.vel = add(self.vel, scale(sub(s.gps_vel, self.vel), 0.50));
             self.last_gps_count = s.gps_count;
+        }
+        // Radar altimeter below 500 m for h / t_go (when valid).
+        if s.radar_range >= 0.0 && s.radar_range < 500.0 {
+            let geo_alt = ecef_to_geodetic(self.pos).2;
+            if self.radar_alt_m < 0.0 {
+                self.radar_alt_m = s.radar_range;
+            } else {
+                self.radar_alt_m = 0.7 * self.radar_alt_m + 0.3 * s.radar_range;
+            }
+            let (lat, lon, _) = ecef_to_geodetic(self.pos);
+            let up = scale(ned_basis(lat, lon)[2], -1.0);
+            let dh = self.radar_alt_m - geo_alt;
+            if dh.abs() < 50.0 {
+                self.pos = add(self.pos, scale(up, 0.35 * dh));
+            }
+        } else {
+            self.radar_alt_m = -1.0;
         }
     }
 
     fn altitude(&self) -> f64 {
-        ecef_to_geodetic(self.pos).2
+        if self.radar_alt_m >= 0.0 {
+            self.radar_alt_m
+        } else {
+            ecef_to_geodetic(self.pos).2
+        }
     }
 
     fn speed(&self) -> f64 {
@@ -270,6 +312,8 @@ struct Fsw {
     /// 1-3-1 landing-burn engine latch: (escalated to 3, back down to 1).
     landing_escalated: bool,
     landing_deescalated: bool,
+    /// Commit-to-vertical latch (freeze lateral ZEM below ~50 m / short t_go).
+    landing_vertical_commit: bool,
     /// The designed ascent reference: the recorded webcast profile.
     ascent_profile: Option<AscentProfile>,
     t_liftoff: f64,
@@ -294,6 +338,7 @@ impl Fsw {
             track_dir: [1.0, 0.0, 0.0],
             landing_escalated: false,
             landing_deescalated: false,
+            landing_vertical_commit: false,
             ascent_profile: std::env::var("ELODIN_F9_PROFILE")
                 .ok()
                 .and_then(|p| AscentProfile::load(&p)),
@@ -601,19 +646,8 @@ impl Fsw {
                 cmd.valves[V_TEATEB] = 1.0;
                 cmd.tvc_enable = 1.0;
                 cmd.rcs_enable = 1.0;
-                let desired = self.landing_attitude(up_here, s);
-                cmd.attitude = self.slew_attitude(desired, 0.01);
-                // TVC owns pitch/yaw; fins are rate-damping only (no dual PD).
-                let body_x = quat_rotate(cmd.attitude, [1.0, 0.0, 0.0]);
-                cmd.fins = self.fin_attitude_pd(body_x, s, true);
-                // Descent-rate profile follower (WHITEPAPER 11.5): track
-                // v_des(h) = sqrt(2 a_land h) + v_td; a rate loop turns the
-                // error into thrust. Never tries to hover (T_min/W > 1).
-                //
-                // 3-1 engine profile with the TEA-TEB budget in mind: the
-                // burn OPENS on three engines (their last charges), then
-                // hands over to the center engine once a single-engine
-                // profile can finish the letdown. De-escalation is one-way.
+                // 3→1 engine profile (TEA-TEB): open on three, hand over to
+                // the center engine once a single-engine profile can finish.
                 let mass = 25_600.0 + s.lox_kg + s.rp1_kg;
                 let vdown = -dot(self.nav.vel, up_here);
                 let h = (alt - 2.0).max(0.5);
@@ -633,19 +667,62 @@ impl Fsw {
                 } else {
                     (1.0, a_mid)
                 };
-                let v_des = (2.0 * a_land * h).sqrt() + 1.2;
-                let a_cmd = (9.81 + 3.2 * (vdown - v_des)).max(0.0);
-                // The rate loop demands VERTICAL acceleration; divide by the
-                // commanded tilt's cosine so a diverting attitude does not
-                // starve the vertical channel.
-                let cos_tilt = dot(quat_rotate(cmd.attitude, [1.0, 0.0, 0.0]), up_here).max(0.6);
-                let u = ((mass * a_cmd / cos_tilt / n + 101_325.0 * A_E_M2) / T_VAC_PER_ENGINE)
+                // Continuous hoverslam vertical (WHITEAPER 11.5): T_min/W > 1
+                // so we never coast mid-burn — the rate loop keeps vdown on the
+                // suicide curve. ZEM/ZEV only shapes the thrust *direction*.
+                let v_des = (2.0 * a_land * h).sqrt() + ZEM_V_TD_MPS;
+                // Slightly higher rate gain in the last 200 m to keep impact ≤ 2 m/s.
+                let kv = if alt < 200.0 { 4.0 } else { 3.2 };
+                let a_up = (9.81 + kv * (vdown - v_des)).max(0.0);
+
+                let (t_go, t_raw) = Self::t_go_hoverslam(h, vdown.max(1.0));
+                let miss_h = {
+                    let d = sub(self.lz1_pos, self.nav.pos);
+                    norm(sub(d, scale(up_here, dot(d, up_here))))
+                };
+                // Commit-to-vertical once near the pad *and* the divert is
+                // mostly closed — don't freeze lateral with a large miss left.
+                if !self.landing_vertical_commit {
+                    let time_gate = t_raw > 0.0 && t_raw < ZEM_COMMIT_TGO_S && alt < 200.0;
+                    let alt_gate = alt < ZEM_COMMIT_ALT_M;
+                    if (alt_gate || time_gate) && (miss_h < 25.0 || alt < 25.0) {
+                        self.landing_vertical_commit = true;
+                    }
+                }
+                let a_zem = self.zem_zev_accel(up_here, t_go, self.landing_vertical_commit);
+                let a_lat = if self.landing_vertical_commit {
+                    [0.0; 3]
+                } else {
+                    let a_up_zem = dot(a_zem, up_here);
+                    sub(a_zem, scale(up_here, a_up_zem))
+                };
+                let lat_mag = norm(a_lat);
+                let max_lat = (a_up.max(9.81)) * ZEM_TILT_CAP_RAD.tan();
+                let a_lat = if lat_mag > max_lat && lat_mag > 1e-6 {
+                    scale(normalize(a_lat), max_lat)
+                } else {
+                    a_lat
+                };
+                let a_cmd = add(scale(up_here, a_up.max(9.81)), a_lat);
+                let dir = normalize(a_cmd);
+                let desired = quat_between([1.0, 0.0, 0.0], dir);
+                cmd.attitude = self.slew_attitude(desired, 0.01);
+                let body_x = quat_rotate(cmd.attitude, [1.0, 0.0, 0.0]);
+                cmd.fins = self.fin_attitude_pd(body_x, s, true);
+
+                let cos_tilt = dot(body_x, up_here).max(0.6);
+                let u = ((mass * a_up / cos_tilt / n + 101_325.0 * A_E_M2) / T_VAC_PER_ENGINE)
                     .clamp(THROTTLE_MIN, 1.0);
                 let mut engines = [0.0; N_ENGINES];
-                engines[0] = u;
-                if three {
-                    engines[1] = u;
-                    engines[2] = u;
+                // If min-throttle has lofted us (T_min/W > 1), cut until we
+                // are descending again — otherwise we climb away from the pad.
+                let lofting = alt < 100.0 && vdown < -0.5;
+                if !lofting {
+                    engines[0] = u;
+                    if three {
+                        engines[1] = u;
+                        engines[2] = u;
+                    }
                 }
                 cmd.engines = engines;
                 if s.landed > 0.5 || (alt < 2.0 && speed < 1.5) {
@@ -825,56 +902,47 @@ impl Fsw {
         (thrust / mass - 9.81).max(1.0)
     }
 
-    /// Landing-burn thrust direction: velocity-retrograde while fast (a
-    /// retro burn brakes every component together), blending to vertical
-    /// with a lateral PD tilt for the letdown. Approach-speed cap is higher
-    /// early (alt > 1 km) so a kilometer-class miss can still be nullified;
-    /// position authority fades below 400 m for a soft touchdown.
-    fn landing_attitude(&self, up: V3, s: &SensorPacket) -> Quat {
-        let miss = sub(self.lz1_pos, self.nav.pos);
-        let miss_h = sub(miss, scale(up, dot(miss, up)));
-        let v_lat = sub(self.nav.vel, scale(up, dot(self.nav.vel, up)));
-        let alt = ecef_to_geodetic(self.nav.pos).2;
-        let a_axial: f64 = 15.0;
-        let tilt_cap: f64 = 0.25;
-        let a_avail = a_axial * tilt_cap.tan();
-        let miss_mag = norm(miss_h);
-        let pos_fade = (alt / 400.0).clamp(0.0, 1.0);
-        // Finish the divert higher up while thrust is high; last 400 m only
-        // damps residual lateral (gentle gain — high kd bang-bangs through 0
-        // and rebuilds v_lat the other way).
-        let speed_cap = if alt > 1_000.0 {
-            s.params.divert_speed_cap
-        } else if alt > 400.0 {
-            s.params.divert_speed_cap.min(18.0)
-        } else {
-            0.0
-        };
-        let v_des_mag = (0.7 * (2.0 * a_avail * miss_mag).sqrt()).min(speed_cap) * pos_fade;
-        let v_des = if miss_mag > 1.0 {
-            scale(normalize(miss_h), v_des_mag)
-        } else {
-            [0.0; 3]
-        };
-        let kd_lat = if alt < 400.0 { 0.9 } else { 0.8 };
-        let mut a_lat_cmd = scale(sub(v_des, v_lat), kd_lat);
-        // Deadband once lateral is soft — high kd bang-bangs through zero and
-        // rebuilds v_lat the other way in the last 100 m.
-        if speed_cap <= 0.0 && norm(v_lat) < 1.2 {
-            a_lat_cmd = [0.0; 3];
+    /// Hoverslam-consistent time-to-go: `(t_go_clamped, t_raw)`.
+    fn t_go_hoverslam(h: f64, vdown: f64) -> (f64, f64) {
+        let h = h.max(0.5);
+        let vdown = vdown.max(0.1);
+        let a_req = (vdown * vdown - ZEM_V_TD_MPS * ZEM_V_TD_MPS).max(0.0) / (2.0 * h);
+        let a_use = a_req.clamp(0.5, ZEM_A_LAND_TGO);
+        let t_raw = (vdown - ZEM_V_TD_MPS) / a_use;
+        (t_raw.clamp(0.5, 80.0), t_raw)
+    }
+
+    /// ZEM/ZEV thrust-acceleration command (ECEF). Target is LZ-1 with a
+    /// 150 m / −25 m/s waypoint until crossed, then pad / −1.5 m/s.
+    fn zem_zev_accel(&self, up: V3, t_go: f64, commit: bool) -> V3 {
+        if commit {
+            let vdown = -dot(self.nav.vel, up);
+            let a_up = 9.81 + 3.0 * (vdown - ZEM_V_TD_MPS);
+            return scale(up, a_up);
         }
-        let a_lat_capped = if norm(a_lat_cmd) > a_avail {
-            scale(normalize(a_lat_cmd), a_avail)
+        // Wind-bias the aim point upwind by the expected terminal drift.
+        let wind_h = sub(self.nav.wind_est, scale(up, dot(self.nav.wind_est, up)));
+        let aim = sub(self.lz1_pos, scale(wind_h, t_go.min(25.0)));
+        let r = sub(self.nav.pos, aim);
+        let v = self.nav.vel;
+        let alt = self.nav.altitude();
+        let g_vec = scale(up, -9.81);
+        let (r_tgt, v_tgt) = if alt > ZEM_WAYPOINT_ALT_M {
+            (scale(up, ZEM_WAYPOINT_ALT_M), scale(up, -ZEM_WAYPOINT_VDOWN_MPS))
         } else {
-            a_lat_cmd
+            ([0.0; 3], scale(up, -ZEM_V_TD_MPS))
         };
-        let tilt_vec = scale(a_lat_capped, 1.0 / a_axial);
-        let speed = self.nav.speed();
-        let w = ((90.0 - speed) / 50.0).clamp(0.0, 1.0);
-        let retro = normalize(add(scale(normalize(self.nav.vel), -1.0), tilt_vec));
-        let vertical = normalize(add(up, tilt_vec));
-        let dir = normalize(add(scale(retro, 1.0 - w), scale(vertical, w)));
-        quat_between([1.0, 0.0, 0.0], dir)
+        let t2 = t_go * t_go;
+        let zem = sub(
+            r_tgt,
+            add(add(r, scale(v, t_go)), scale(g_vec, 0.5 * t2)),
+        );
+        let zev = sub(v_tgt, add(v, scale(g_vec, t_go)));
+        // a_cmd = 6 ZEM/t² − 2 ZEV/t − g  (thrust accel; plant adds gravity)
+        sub(
+            add(scale(zem, 6.0 / t2), scale(zev, -2.0 / t_go)),
+            g_vec,
+        )
     }
 }
 

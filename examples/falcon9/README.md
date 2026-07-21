@@ -332,13 +332,10 @@ falcon9-fsw` if a campaign refuses to start.
 ## Calibration Results
 
 Vehicle physics were calibrated over seventeen 24-run LHS rounds (fixed seed,
-`calibrate.py` narrow-around-best) against CRS-12. A later landing-controller
-pass added pitch/yaw aero damping (`Cmq` on body length), a q̄-invariant fin
-loop, landing-burn TVC/fin coordination, and a two-leg truth-ghost track to
-LZ-1; recovery tunables (`boostback_overshoot_m`, `fin_wn`,
-`divert_speed_cap`, `steer_tilt_cap`) were re-frozen against nominal + a
-focused landing MC (`spec.landing.toml`). Defaults in `main.py` fly that
-vehicle. Nominal run vs targets:
+`calibrate.py` narrow-around-best) against CRS-12. Landing precision then
+added ZEM/ZEV terminal guidance, commit-to-vertical, TVC-accurate plume viz,
+and 2 m/s leg-impact gates (see `docs/falcon9-final-landing-improvements.md`).
+Defaults in `main.py` fly that vehicle. Nominal run vs targets:
 
 | Metric | Target | Achieved (calibrated nominal) |
 |---|---:|---:|
@@ -347,15 +344,17 @@ vehicle. Nominal run vs targets:
 | Event: landing-burn ignition | ±3 s | **~+1 s** |
 | Event: touchdown | ±3 s | **~+1 s** |
 | Speed RMSE (display space) | ≤ 15 m/s | ~48 m/s (display-lag ascent still dominates residual) |
-| Altitude RMSE (display space) | ≤ 150 m | ~1,375 m |
-| Touchdown vertical / lateral | ≤ 2 / ≤ 4 m/s | **~1.0 / ~3.8 m/s** (`soft_landing: true`) |
-| Touchdown position error | ≤ ~30 m (on deck) | **~28 m** |
+| Altitude RMSE (display space) | ≤ 150 m | ~1,410 m |
+| Touchdown vertical / lateral / impact | ≤ 2 / ≤ 1.5 / ≤ 2 m/s | **~1.5 / ~1.2 / ~1.9 m/s** (`soft_landing: true`) |
+| Touchdown tilt / \|ω\| | ≤ 2° / ≤ 1°/s | **~0.6° / ~0.4°/s** |
+| Touchdown position error | ≤ 5 m (bullseye) | **~4.9 m** |
 | Descent max \|ω_yz\| / AoA (aero, &lt;30 km) | &lt; 10°/s / &lt; 12° | **~4.2°/s / ~12°** |
 | Purge after every cutoff | 4 | **4** |
 | Descent q̄ peak (recon ~60 kPa) | 40–120 kPa | **~78 kPa** |
 
-The green truth ghost now lerps from boostback reversal to LZ-1 so it sets
-down on the barge with the booster. Remaining RMSE is still in the recovery
-energy/shape gates (boostback / entry), not the fin limit cycle — that was
-killed by length-referenced `Cmq` damping plus the torque-based fin schedule.
-Focused landing campaigns: `spec.landing.toml` + `calibrate.py rank`.
+Terminal guidance is ZEM/ZEV with a 150 m waypoint and commit-to-vertical
+below ~50 m; 4-pad spring-damper legs settle the booster flat on the deck;
+nav uses complementary GPS + radar `h` below 500 m; NED wind/gusts feed
+`WindEcef` with FSW aim-point bias. Merlin thruster intensity is the
+gimbaled `plume_viz` vector. Focused landing campaigns:
+`spec.landing.toml` + `calibrate.py rank` (includes wind variables).

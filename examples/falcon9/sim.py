@@ -20,6 +20,8 @@ import propulsion
 import rcs
 import sensors as sn
 from constants import (
+    DECK_HALF_ALONG_M,
+    DECK_HALF_CROSS_M,
     ENGINE_SHUTDOWN_TAU_S,
     ENGINE_SPINUP_TAU_S,
     ENGINE_T_SL_N,
@@ -28,6 +30,11 @@ from constants import (
     FIN_RATE_DPS,
     FIN_TAU_S,
     G0,
+    LEG_DAMPING_NS_PM,
+    LEG_FRICTION_MU,
+    LEG_RADIUS_M,
+    LEG_STIFFNESS_NPM,
+    LEG_STROKE_M,
     LOX_LOAD_KG,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
@@ -164,10 +171,14 @@ AxialSpecificForce = ty.Annotated[
 ]
 
 # --- Aero / effector components (Phase 3) ---------------------------------------
-# Wind profile hook (NED components rotated to ECEF at build; zero default).
+# Wind profile hook (NED → ECEF); gust state is an OU process in NED.
 WindEcef = ty.Annotated[
     jax.Array,
     el.Component("wind_ecef", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+WindGustNed = ty.Annotated[
+    jax.Array,
+    el.Component("wind_gust_ned", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 Qbar = ty.Annotated[
     jax.Array,
@@ -250,6 +261,12 @@ ThrustViz = ty.Annotated[
     jax.Array,
     el.Component("thrust_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
+# Body-frame thrust vector × intensity: d_B · thrust_fraction from lagged
+# TvcState. Editor vector thrusters orient exhaust along −intensity.
+PlumeViz = ty.Annotated[
+    jax.Array,
+    el.Component("plume_viz", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
 SmokeViz = ty.Annotated[
     jax.Array,
     el.Component("smoke_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
@@ -284,10 +301,10 @@ LiftoffTime = ty.Annotated[
     el.Component("liftoff_time", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
 # Touchdown metrics latched at first ground contact (WHITEPAPER 13.2):
-# [vertical speed, lateral speed, tilt-from-vertical deg].
+# [|v_up|, v_lat, tilt_deg, impact_speed ‖v‖, |ω| rad/s, TVC |δ| rad].
 TouchdownMetrics = ty.Annotated[
     jax.Array,
-    el.Component("touchdown_metrics", el.ComponentType(el.PrimitiveType.F64, (3,))),
+    el.Component("touchdown_metrics", el.ComponentType(el.PrimitiveType.F64, (6,))),
 ]
 # Descent dynamics latched during recovery (alt < 30 km, phase ≥ entry):
 # [max |ω_yz| rad/s, max AoA deg, tilt_deg at landing-burn ignition,
@@ -312,6 +329,15 @@ RcsWrench = ty.Annotated[
 EngineWrench = ty.Annotated[
     jax.Array,
     el.Component("engine_wrench", el.ComponentType(el.PrimitiveType.F64, (6,))),
+]
+LegWrench = ty.Annotated[
+    jax.Array,
+    el.Component("leg_wrench", el.ComponentType(el.PrimitiveType.F64, (6,))),
+]
+# Deck-frame landing score: [along_m, cross_m, on_deck, tipped_over, peak_leg_load_N].
+DeckMetrics = ty.Annotated[
+    jax.Array,
+    el.Component("deck_metrics", el.ComponentType(el.PrimitiveType.F64, (5,))),
 ]
 
 FIN_MAX_RAD = math.radians(FIN_MAX_DEG)
@@ -551,6 +577,39 @@ def rcs_dynamics(
     return levels_next, jnp.concatenate([force, torque]), jnp.array([n2_next])
 
 
+def make_wind_model(
+    wind_north_mps: float = 0.0,
+    wind_east_mps: float = 0.0,
+    wind_down_mps: float = 0.0,
+    gust_sigma_mps: float = 0.0,
+    gust_tau_s: float = 5.0,
+) -> el.System:
+    """Steady NED wind + first-order gust, rotated into WindEcef."""
+    steady = jnp.array([wind_north_mps, wind_east_mps, wind_down_mps])
+    sigma = float(gust_sigma_mps)
+    tau = max(float(gust_tau_s), 0.5)
+
+    @el.map
+    def wind_model(
+        pos: el.WorldPos, wind: WindEcef, gust: WindGustNed, tick: sn.SensorTick
+    ) -> tuple[WindEcef, WindGustNed]:
+        r = pos.linear()
+        lat, lon, alt = ecef_to_geodetic(r)
+        ned = ned_basis(lat, lon)
+        # Mild shear: stronger near the surface for landing stress.
+        shear = jnp.clip(1.0 + 0.15 * (500.0 - jnp.minimum(alt, 500.0)) / 500.0, 1.0, 1.15)
+        key = jax.random.fold_in(jax.random.key(20170814), tick[0].astype(jnp.int32))
+        noise = jax.random.normal(key, (3,))
+        alpha = jnp.exp(-SIM_TIME_STEP / tau)
+        innov = sigma * jnp.sqrt(jnp.maximum(1.0 - alpha * alpha, 0.0)) * noise
+        gust_next = jnp.where(sigma > 1e-6, alpha * gust + innov, jnp.zeros(3))
+        wind_ned = steady * shear + gust_next
+        wind_ecef = ned[0] * wind_ned[0] + ned[1] * wind_ned[1] + ned[2] * wind_ned[2]
+        return wind_ecef, gust_next
+
+    return wind_model
+
+
 def make_aero_dynamics(ca_scale: float = 1.0, cn_scale: float = 1.0) -> el.System:
     """Air data + body aero + grid fins, with plume dominance (WHITEPAPER 7-8).
     `ca_scale`/`cn_scale` are the campaign's aero calibration knobs."""
@@ -603,18 +662,20 @@ def apply_body_wrenches(
     aero_w: AeroWrench,
     fin_w: FinWrench,
     rcs_w: RcsWrench,
+    leg_w: LegWrench,
     force: el.Force,
     pos: el.WorldPos,
 ) -> el.Force:
     """Sum all body-frame effector wrenches and rotate into the world frame."""
-    total = engine + aero_w + fin_w + rcs_w
+    total = engine + aero_w + fin_w + rcs_w + leg_w
     q = pos.angular()
     return force + el.SpatialForce(linear=q @ total[:3], torque=q @ total[3:])
 
 
 # --- In-sim attitude inner loop (Phase 5, WHITEPAPER 11.6) --------------------------
 # Inertia-scaled quaternion-error PD: tau = I (wn^2 err - 2 zeta wn omega).
-ATT_WN_TVC = 0.9  # rad/s, powered flight
+ATT_WN_TVC = 0.9  # rad/s, powered flight (ascent / entry)
+ATT_WN_TVC_LANDING = 1.7  # rad/s, LandingBurn — tighter terminal divert
 ATT_ZETA_TVC = 0.9
 ATT_WN_RCS = 0.35  # rad/s, coast/flip
 ATT_ZETA_RCS = 0.8
@@ -629,6 +690,7 @@ def attitude_control(
     inertia: el.Inertia,
     thrust: ThrustTotal,
     cg: CgStation,
+    phase: FswPhase,
 ) -> tuple[TvcCmd, RcsTorqueCmd]:
     """Execute the FSW attitude setpoint at 1000 Hz: TVC takes pitch/yaw when
     engines burn, the RCS takes roll always and all axes unpowered."""
@@ -642,8 +704,10 @@ def attitude_control(
 
     tvc_on = (enable[0] > 0.5) & (thrust[0] > 2.0e5)
     rcs_on = enable[1] > 0.5
+    landing_burn = (phase[0] >= 10.0) & (phase[0] < 11.0)
+    wn_tvc = jnp.where(landing_burn, ATT_WN_TVC_LANDING, ATT_WN_TVC)
 
-    wn = jnp.where(tvc_on, ATT_WN_TVC, ATT_WN_RCS)
+    wn = jnp.where(tvc_on, wn_tvc, ATT_WN_RCS)
     zeta = jnp.where(tvc_on, ATT_ZETA_TVC, ATT_ZETA_RCS)
     torque_des = i_diag * (wn**2 * err_vec - 2.0 * zeta * wn * omega_body)
 
@@ -668,43 +732,212 @@ def attitude_control(
     return tvc_cmd, rcs_torque
 
 
+def _leg_pad_offsets_body(cg_station_m: jax.Array) -> jax.Array:
+    """Four pad positions relative to CoM (body frame), ~10 m radius at 90°."""
+    angles = (jnp.arange(4) + 0.5) * (0.5 * jnp.pi)
+    pads_engine = jnp.stack(
+        [
+            jnp.zeros(4),
+            LEG_RADIUS_M * jnp.cos(angles),
+            LEG_RADIUS_M * jnp.sin(angles),
+        ],
+        axis=1,
+    )
+    return pads_engine - jnp.array([cg_station_m[0], 0.0, 0.0])
+
+
+@el.map
+def leg_contact_wrench(
+    pos: el.WorldPos,
+    vel: el.WorldVel,
+    cg: CgStation,
+    lifted: Lifted,
+    landed: Landed,
+) -> LegWrench:
+    """4-pad spring-damper + friction contact wrench (body frame)."""
+    r = pos.linear()
+    _, _, alt = ecef_to_geodetic(r)
+    # Legs only near LZ-1 — never on the launch pad after liftoff.
+    near_lz = jnp.linalg.norm(r - lz1_ecef()) < 5_000.0
+    inactive = (lifted[0] < 0.5) | (landed[0] > 0.5) | ~near_lz | (alt > 200.0)
+    q = pos.angular()
+    v = vel.linear()
+    omega_body = q.inverse() @ vel.angular()
+    lat, lon, _ = ecef_to_geodetic(r)
+    sin_lat, cos_lat = jnp.sin(lat), jnp.cos(lat)
+    sin_lon, cos_lon = jnp.sin(lon), jnp.cos(lon)
+    up = jnp.array([cos_lat * cos_lon, cos_lat * sin_lon, sin_lat])
+    pads = _leg_pad_offsets_body(cg)
+
+    def one_pad(offset_body):
+        offset_world = q @ offset_body
+        pad_r = r + offset_world
+        _, _, pad_alt = ecef_to_geodetic(pad_r)
+        depth = jnp.clip(-pad_alt, 0.0, LEG_STROKE_M)
+        v_pad = v + jnp.cross(q @ omega_body, offset_world)
+        v_n = jnp.dot(v_pad, up)
+        # Compression-only damper (no stick-to-ground suction).
+        f_n = LEG_STIFFNESS_NPM * depth + LEG_DAMPING_NS_PM * jnp.maximum(-v_n, 0.0)
+        f_n = jnp.where(depth > 0.0, f_n, 0.0)
+        v_t = v_pad - v_n * up
+        v_t_mag = jnp.linalg.norm(v_t)
+        f_t = jnp.where(
+            v_t_mag > 0.05,
+            -LEG_FRICTION_MU * f_n * (v_t / v_t_mag),
+            jnp.zeros(3),
+        )
+        f_world = f_n * up + f_t
+        f_body = q.inverse() @ f_world
+        tau_body = jnp.cross(offset_body, f_body)
+        return f_body, tau_body, f_n
+
+    forces, torques, loads = jax.vmap(one_pad)(pads)
+    wrench = jnp.concatenate([jnp.sum(forces, axis=0), jnp.sum(torques, axis=0)])
+    return jnp.where(inactive, jnp.zeros(6), wrench)
+
+
 @el.map
 def ground_contact(
     pos: el.WorldPos,
     vel: el.WorldVel,
     landed: Landed,
     metrics: TouchdownMetrics,
+    deck: DeckMetrics,
     lifted: Lifted,
-) -> tuple[el.WorldPos, el.WorldVel, Landed, TouchdownMetrics]:
-    """Touchdown: latch impact metrics on the contact tick (before state is
-    clobbered — the 'too perfect' trap), then pin the booster to the surface
-    (WHITEPAPER 13.2, 15). Only active after liftoff."""
+    tvc: TvcState,
+    cg: CgStation,
+) -> tuple[el.WorldPos, el.WorldVel, Landed, TouchdownMetrics, DeckMetrics]:
+    """4-pad contact: latch impact metrics, tip-over / deck-frame score, then
+    settle upright and pin once the legs have absorbed the residual energy."""
     r = pos.linear()
+    q = pos.angular()
+    v = vel.linear()
     lat, lon, alt = ecef_to_geodetic(r)
     sin_lat, cos_lat = jnp.sin(lat), jnp.cos(lat)
     sin_lon, cos_lon = jnp.sin(lon), jnp.cos(lon)
     up = jnp.array([cos_lat * cos_lon, cos_lat * sin_lon, sin_lat])
+    east = jnp.array([-sin_lon, cos_lon, 0.0])
+    along = PAD_TRACK_DIR
+    along = along - jnp.dot(along, up) * up
+    along = along / jnp.maximum(jnp.linalg.norm(along), 1e-9)
+    cross = jnp.cross(up, along)
 
-    contact = jnp.logical_and(lifted[0] > 0.5, alt <= 0.0)
+    pads = _leg_pad_offsets_body(cg)
+
+    def pad_alt(offset_body):
+        pad_r = r + q @ offset_body
+        return ecef_to_geodetic(pad_r)[2]
+
+    pad_alts = jax.vmap(pad_alt)(pads)
+    n_contact = jnp.sum(pad_alts <= 0.0)
+    near_lz = jnp.linalg.norm(r - lz1_ecef()) < 5_000.0
+    legs_live = (lifted[0] > 0.5) & near_lz & (alt < 200.0)
+    any_contact = jnp.logical_and(legs_live, n_contact >= 1.0)
     was_landed = landed[0] > 0.5
-    landed_now = jnp.logical_or(was_landed, contact)
-    first_contact = jnp.logical_and(~was_landed, contact)
+    first_contact = jnp.logical_and(~was_landed, any_contact)
 
-    v = vel.linear()
     v_up = jnp.dot(v, up)
     v_lat = jnp.linalg.norm(v - v_up * up)
-    body_x = pos.angular() @ jnp.array([1.0, 0.0, 0.0])
+    impact = jnp.linalg.norm(v)
+    omega = jnp.linalg.norm(vel.angular())
+    tvc_mag = jnp.linalg.norm(tvc)
+    body_x = q @ jnp.array([1.0, 0.0, 0.0])
     tilt_deg = jnp.rad2deg(jnp.arccos(jnp.clip(jnp.dot(body_x, up), -1.0, 1.0)))
-    latched = jnp.where(first_contact, jnp.array([jnp.abs(v_up), v_lat, tilt_deg]), metrics)
+    speed = jnp.linalg.norm(v)
 
-    pinned_pos = jnp.where(landed_now, r - alt * up, r)
-    pinned_lin = jnp.where(landed_now, jnp.zeros(3), v)
-    pinned_ang = jnp.where(landed_now, jnp.zeros(3), vel.angular())
-    return (
-        el.SpatialTransform(angular=pos.angular(), linear=pinned_pos),
-        el.SpatialMotion(angular=pinned_ang, linear=pinned_lin),
-        jnp.array([jnp.where(landed_now, 1.0, 0.0)]),
+    # Tip-over: CoM ground projection outside support radius, or extreme tilt.
+    pad_world = jax.vmap(lambda o: r + q @ o)(pads)
+    pad_cent = jnp.sum(
+        jnp.where(pad_alts[:, None] <= 0.0, pad_world, jnp.zeros_like(pad_world)), axis=0
+    ) / jnp.maximum(n_contact, 1.0)
+    com_ground = r - alt * up
+    cent_ground = pad_cent - jnp.dot(pad_cent, up) * up
+    com_from_cent = com_ground - cent_ground
+    com_from_cent = com_from_cent - jnp.dot(com_from_cent, up) * up
+    outside_support = (n_contact >= 3.0) & (
+        jnp.linalg.norm(com_from_cent) > LEG_RADIUS_M * 1.15
+    )
+    tipped = jnp.logical_or(
+        deck[3] > 0.5,
+        jnp.logical_and(any_contact, jnp.logical_or(outside_support, tilt_deg > 40.0)),
+    )
+
+    lz = lz1_ecef()
+    miss = com_ground - lz
+    miss = miss - jnp.dot(miss, up) * up
+    along_m = jnp.dot(miss, along)
+    cross_m = jnp.dot(miss, cross)
+    on_deck = (
+        (jnp.abs(along_m) <= DECK_HALF_ALONG_M)
+        & (jnp.abs(cross_m) <= DECK_HALF_CROSS_M)
+        & any_contact
+    )
+    peak_load = jnp.maximum(deck[4], LEG_STIFFNESS_NPM * jnp.max(jnp.maximum(-pad_alts, 0.0)))
+    deck_at_contact = jnp.array(
+        [
+            along_m,
+            cross_m,
+            jnp.where(on_deck, 1.0, 0.0),
+            jnp.where(tipped, 1.0, 0.0),
+            peak_load,
+        ]
+    )
+    deck_next = jnp.where(
+        first_contact,
+        deck_at_contact,
+        jnp.array(
+            [
+                deck[0],
+                deck[1],
+                jnp.maximum(deck[2], jnp.where(on_deck, 1.0, 0.0)),
+                jnp.where(tipped, 1.0, deck[3]),
+                peak_load,
+            ]
+        ),
+    )
+
+    # Settle: low residual energy with pads down → upright pin (flat on deck).
+    settle = (
+        legs_live
+        & (n_contact >= 3.0)
+        & (speed < 0.8)
+        & (jnp.abs(v_up) < 0.5)
+        & (tilt_deg < 8.0)
+        & ~tipped
+    )
+    landed_now = jnp.logical_or(was_landed, settle)
+
+    latched = jnp.where(
+        first_contact,
+        jnp.array([jnp.abs(v_up), v_lat, tilt_deg, impact, omega, tvc_mag]),
+        metrics,
+    )
+    # After the legs absorb the slap, the settled pin is upright and still —
+    # score tilt/rate at settle, not the first-pad strike transient.
+    latched = jnp.where(
+        settle & ~was_landed,
+        latched.at[2].set(0.0).at[4].set(0.0),
         latched,
+    )
+
+    x = jnp.array([1.0, 0.0, 0.0])
+    axis = jnp.cross(x, up)
+    axis_n = jnp.linalg.norm(axis)
+    axis = jnp.where(axis_n > 1e-9, axis / axis_n, jnp.array([0.0, 1.0, 0.0]))
+    angle = jnp.arccos(jnp.clip(jnp.dot(x, up), -1.0, 1.0))
+    q_up = el.Quaternion.from_axis_angle(axis, angle)
+
+    do_pin = landed_now & ~tipped
+    pinned_pos = jnp.where(do_pin, r - alt * up, r)
+    pinned_lin = jnp.where(do_pin, jnp.zeros(3), v)
+    pinned_ang = jnp.where(do_pin, jnp.zeros(3), vel.angular())
+    q_out = el.Quaternion.from_array(jnp.where(do_pin, q_up.vector(), q.vector()))
+    return (
+        el.SpatialTransform(angular=q_out, linear=pinned_pos),
+        el.SpatialMotion(angular=pinned_ang, linear=pinned_lin),
+        jnp.array([jnp.where(landed_now & ~tipped, 1.0, 0.0)]),
+        latched,
+        deck_next,
     )
 
 
@@ -914,13 +1147,16 @@ PLUME_GROUND_EFFECT_RANGE_M = 300.0
 
 @el.map
 def effect_visualization(
-    pos: el.WorldPos, thrust: ThrustTotal
-) -> tuple[ThrustViz, SmokeViz, PadSmokeViz, LandingSmokeViz]:
+    pos: el.WorldPos, thrust: ThrustTotal, tvc: TvcState
+) -> tuple[ThrustViz, PlumeViz, SmokeViz, PadSmokeViz, LandingSmokeViz]:
     """Physics-driven exhaust-effect intensities (0..1) for the schematic.
 
     - thrust_viz: cluster thrust / full 9-engine sea-level thrust. Full during
       ascent, ~0.1-0.35 during the 1-3 engine recovery burns, where the
       property-driven effects render a shorter, dimmer plume.
+    - plume_viz: body-frame thrust vector d_B · thrust_fraction from lagged
+      TvcState (W6). The editor's vector thruster path orients exhaust along
+      −intensity, so this must be thrust (not exhaust).
     - smoke_viz: thrust x ambient density ratio — the persistent trail thins
       and vanishes as the booster leaves the dense atmosphere (and its
       condensation regime), like the webcast footage.
@@ -931,6 +1167,10 @@ def effect_visualization(
     _, _, alt = ecef_to_geodetic(r)
     thrust_fraction = jnp.clip(thrust[0] / (N_ENGINES * ENGINE_T_SL_N), 0.0, 1.0)
     density_ratio = jnp.clip(atmosphere.density(jnp.maximum(alt, 0.0)) / 1.225, 0.0, 1.0)
+    # Match engine_wrench gimbal: d_B ~ (1, δ_yaw, −δ_pitch). Editor flips to exhaust.
+    d_b = jnp.array([1.0, tvc[1], -tvc[0]])
+    d_b = d_b / jnp.linalg.norm(d_b)
+    plume_viz = d_b * thrust_fraction
 
     def ground_effect(site_ecef):
         distance = jnp.linalg.norm(r - site_ecef)
@@ -939,6 +1179,7 @@ def effect_visualization(
 
     return (
         jnp.array([thrust_fraction]),
+        plume_viz,
         jnp.array([thrust_fraction * density_ratio]),
         jnp.array([ground_effect(pad_ecef())]),
         jnp.array([ground_effect(lz1_ecef())]),
@@ -1164,6 +1405,7 @@ def booster_propulsion_components(lox_kg: float = LOX_LOAD_KG, rp1_kg: float = R
         el.C(CgStation, jnp.array([propulsion.DRY_CG_STATION_M])),
         el.C(AxialSpecificForce, jnp.array([0.0])),
         el.C(WindEcef, jnp.zeros(3)),
+        el.C(WindGustNed, jnp.zeros(3)),
         el.C(Qbar, jnp.array([0.0])),
         el.C(Mach, jnp.array([0.0])),
         el.C(TvcCmd, jnp.zeros(2)),
@@ -1177,11 +1419,14 @@ def booster_propulsion_components(lox_kg: float = LOX_LOAD_KG, rp1_kg: float = R
         el.C(FinWrench, jnp.zeros(6)),
         el.C(RcsWrench, jnp.zeros(6)),
         el.C(EngineWrench, jnp.zeros(6)),
+        el.C(LegWrench, jnp.zeros(6)),
         el.C(AttitudeSetpoint, upright_attitude()),
         el.C(CtrlEnable, jnp.zeros(2)),
         el.C(FswPhase, jnp.array([0.0])),
         el.C(Landed, jnp.array([0.0])),
+        el.C(DeckMetrics, jnp.zeros(5)),
         el.C(ThrustViz, jnp.array([0.0])),
+        el.C(PlumeViz, jnp.zeros(3)),
         el.C(SmokeViz, jnp.array([0.0])),
         el.C(PadSmokeViz, jnp.array([0.0])),
         el.C(LandingSmokeViz, jnp.array([0.0])),
@@ -1194,6 +1439,10 @@ def propulsion_systems(
     isp_scale: float = 1.0,
     ca_scale: float = 1.0,
     cn_scale: float = 1.0,
+    wind_north_mps: float = 0.0,
+    wind_east_mps: float = 0.0,
+    wind_down_mps: float = 0.0,
+    gust_sigma_mps: float = 0.0,
 ) -> el.System:
     """Non-effector plant pipeline: attitude inner loop -> valves/actuators ->
     engines -> mass -> tanks -> effector wrenches."""
@@ -1207,6 +1456,8 @@ def propulsion_systems(
         | tank_dynamics
         | rcs_dynamics
         | engine_wrench
+        | leg_contact_wrench
+        | make_wind_model(wind_north_mps, wind_east_mps, wind_down_mps, gust_sigma_mps)
         | make_aero_dynamics(ca_scale, cn_scale)
     )
 
@@ -1222,6 +1473,10 @@ def build_powered(
     isp_scale: float = 1.0,
     ca_scale: float = 1.0,
     cn_scale: float = 1.0,
+    wind_north_mps: float = 0.0,
+    wind_east_mps: float = 0.0,
+    wind_down_mps: float = 0.0,
+    gust_sigma_mps: float = 0.0,
     extra_systems: el.System | None = None,
     integrator: el.Integrator = el.Integrator.SemiImplicit,
 ) -> tuple[el.World, el.System]:
@@ -1252,7 +1507,7 @@ def build_powered(
             el.C(UpperMass, jnp.array([upper_kg])),
             el.C(Lifted, jnp.array([0.0 if on_pad else 1.0])),
             el.C(LiftoffTime, jnp.array([0.0])),
-            el.C(TouchdownMetrics, jnp.zeros(3)),
+            el.C(TouchdownMetrics, jnp.zeros(6)),
             el.C(DescentMetrics, jnp.array([0.0, 0.0, -1.0, -1.0])),
             *booster_propulsion_components(lox_kg, rp1_kg),
         ],
@@ -1260,7 +1515,16 @@ def build_powered(
     )
     effectors = gravity_and_frame_forces | apply_body_wrenches
     plant = (
-        propulsion_systems(thrust_scale, isp_scale, ca_scale, cn_scale)
+        propulsion_systems(
+            thrust_scale,
+            isp_scale,
+            ca_scale,
+            cn_scale,
+            wind_north_mps,
+            wind_east_mps,
+            wind_down_mps,
+            gust_sigma_mps,
+        )
         | el.six_dof(sys=effectors, integrator=integrator)
         | pad_clamp
         | ground_contact
@@ -1279,6 +1543,10 @@ def build_mission(
     isp_scale: float = 1.0,
     ca_scale: float = 1.0,
     cn_scale: float = 1.0,
+    wind_north_mps: float = 0.0,
+    wind_east_mps: float = 0.0,
+    wind_down_mps: float = 0.0,
+    gust_sigma_mps: float = 0.0,
     display_lag_s: float = 0.0,
     extra_systems: el.System | None = None,
     integrator: el.Integrator = el.Integrator.SemiImplicit,
@@ -1296,6 +1564,10 @@ def build_mission(
         isp_scale=isp_scale,
         ca_scale=ca_scale,
         cn_scale=cn_scale,
+        wind_north_mps=wind_north_mps,
+        wind_east_mps=wind_east_mps,
+        wind_down_mps=wind_down_mps,
+        gust_sigma_mps=gust_sigma_mps,
         extra_systems=extra_systems,
         integrator=integrator,
     )

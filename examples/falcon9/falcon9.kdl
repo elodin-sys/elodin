@@ -118,7 +118,7 @@ object_3d orientation=absolute booster.world_pos {
     // Merlin cluster plume: near-parallel column tuned in pyrotechnique
     // against ascent.jpeg. Emitter at the bell-exit plane (−1.2 m along body
     // +X / pyro −Y) so the root is not born inside the octaweb.
-    thruster name="merlin" effect="effects/falcon9/merlin_core.effect" body_frame=#true position="(-1.2, 0, 0)" direction="(-1, 0, 0)" intensity="booster.thrust_viz[0]" {
+    thruster name="merlin" effect="effects/falcon9/merlin_core.effect" body_frame=#true position="(-1.2, 0, 0)" intensity="booster.plume_viz" {
         effect "effects/falcon9/merlin_flame.effect"
         light color="(1.0, 0.83, 0.58)" intensity=30000000.0 range=120.0 offset=6.0
     }

@@ -29,7 +29,11 @@ from constants import (
     SIM_RATE_HZ,
     STAGE2_WET_KG,
     START_TIMESTAMP_US,
+    TOUCHDOWN_SOFT_IMPACT_MPS,
     TOUCHDOWN_SOFT_LATERAL_MPS,
+    TOUCHDOWN_SOFT_POS_ERR_M,
+    TOUCHDOWN_SOFT_RATE_DPS,
+    TOUCHDOWN_SOFT_TILT_DEG,
     TOUCHDOWN_SOFT_VERTICAL_MPS,
 )
 from frames import ecef_to_geodetic, geodetic_to_ecef, ned_basis
@@ -88,6 +92,11 @@ PARAMS = el.monte_carlo.params_spec(
     fin_wn=el.monte_carlo.Param(float, default=1.5, min=0.8, max=2.5),
     divert_speed_cap=el.monte_carlo.Param(float, default=34.0, min=18.0, max=50.0),
     steer_tilt_cap=el.monte_carlo.Param(float, default=0.21, min=0.10, max=0.25),
+    # Surface wind (NED) + gust σ for landing dispersion campaigns.
+    wind_north_mps=el.monte_carlo.Param(float, default=0.0, min=-8.0, max=8.0),
+    wind_east_mps=el.monte_carlo.Param(float, default=0.0, min=-8.0, max=8.0),
+    wind_down_mps=el.monte_carlo.Param(float, default=0.0, min=-1.0, max=1.0),
+    gust_sigma_mps=el.monte_carlo.Param(float, default=0.0, min=0.0, max=2.5),
 )
 
 params = el.monte_carlo.params(PARAMS)
@@ -164,6 +173,10 @@ world, system = build_mission(
     isp_scale=float(get_param("isp_scale", 1.0)),
     ca_scale=float(get_param("ca_scale", 1.0)),
     cn_scale=float(get_param("cn_scale", 1.0)),
+    wind_north_mps=float(get_param("wind_north_mps", 0.0)),
+    wind_east_mps=float(get_param("wind_east_mps", 0.0)),
+    wind_down_mps=float(get_param("wind_down_mps", 0.0)),
+    gust_sigma_mps=float(get_param("gust_sigma_mps", 0.0)),
     display_lag_s=float(get_param("display_lag_s", 1.0)),
 )
 
@@ -262,6 +275,7 @@ READS = [
     "booster.nitrogen_kg",
     "booster.fsw_phase",
     "booster.touchdown_metrics",
+    "booster.deck_metrics",
     "booster.descent_metrics",
     "booster.qbar",
 ]
@@ -369,6 +383,7 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         # every landing as perfect).
         metrics = np.asarray(reads["booster.touchdown_metrics"])
         descent = np.asarray(reads["booster.descent_metrics"])
+        deck = np.asarray(reads["booster.deck_metrics"])
         pos_err = float(np.linalg.norm(pos - LZ1_ECEF))
         result = {
             "landed": landed,
@@ -378,9 +393,17 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             "touchdown_vertical_mps": float(metrics[0]),
             "touchdown_lateral_mps": float(metrics[1]),
             "touchdown_tilt_deg": float(metrics[2]),
+            "touchdown_impact_mps": float(metrics[3]),
+            "touchdown_rate_dps": float(np.degrees(max(metrics[4], 0.0))),
+            "touchdown_tvc_deg": float(np.degrees(max(metrics[5], 0.0))),
             "touchdown_pos_err_m": (touchdown_state or {}).get("pos_err_m", pos_err),
             "miss_north_m": (touchdown_state or {}).get("miss_north_m", 0.0),
             "miss_east_m": (touchdown_state or {}).get("miss_east_m", 0.0),
+            "deck_along_m": float(deck[0]),
+            "deck_cross_m": float(deck[1]),
+            "landed_on_deck": bool(deck[2] > 0.5),
+            "tipped_over": bool(deck[3] > 0.5),
+            "peak_leg_load_n": float(deck[4]),
             "prop_remaining_kg": float(
                 reads["booster.propellant_lox"][0] + reads["booster.propellant_rp1"][0]
             ),
@@ -399,10 +422,14 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             result[f"phase_{int(pid)}_t_s"] = ev["t"]
         result["soft_landing"] = bool(
             landed
+            and result["landed_on_deck"]
+            and not result["tipped_over"]
             and result["touchdown_vertical_mps"] <= TOUCHDOWN_SOFT_VERTICAL_MPS
+            and result["touchdown_impact_mps"] <= TOUCHDOWN_SOFT_IMPACT_MPS
             and result["touchdown_lateral_mps"] <= TOUCHDOWN_SOFT_LATERAL_MPS
-            and result["touchdown_tilt_deg"] <= 10.0
-            and result["touchdown_pos_err_m"] <= 500.0
+            and result["touchdown_tilt_deg"] <= TOUCHDOWN_SOFT_TILT_DEG
+            and result["touchdown_rate_dps"] <= TOUCHDOWN_SOFT_RATE_DPS
+            and result["touchdown_pos_err_m"] <= TOUCHDOWN_SOFT_POS_ERR_M
             and result["prop_remaining_kg"] > 0.0
         )
         if os.environ.get("ELODIN_MONTE_CARLO_CONTEXT"):

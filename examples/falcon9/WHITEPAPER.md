@@ -908,7 +908,7 @@ the downstream q̄ peak (~60 kPa reconstructed) and heating. A predictor-based
 cutoff — integrate the no-thrust descent forward, cut when predicted peak q̄
 drops below the limit — is the stretch goal; the Δv gate is the baseline.
 
-### 11.5 Landing burn: the hoverslam
+### 11.5 Landing burn: ZEM/ZEV + hoverslam
 
 The booster cannot hover: at landing mass `m ≈ 27 t` (*est.*), even minimum
 single-engine throttle gives
@@ -917,32 +917,39 @@ single-engine throttle gives
 T_min/W ≈ 0.57 × 760 kN / (27e3 × 9.81) ≈ 1.6  > 1
 ```
 
-so the burn must be timed to reach v = 0 exactly at h = 0 — the *hoverslam*
-(suicide burn). Constant-deceleration kinematics give the ignition condition
-and the in-burn guidance:
+so the burn must be timed to reach a soft touchdown at h = 0 — the *hoverslam*
+(suicide burn). Constant-deceleration kinematics still arm ignition and own
+the vertical rate loop:
 
 ```text
 ignite when   h ≤ v² / (2 a_net) + h_margin,       a_net = T/m − g_eff
-in-burn:      a_cmd = v² / (2 (h − h_target))       (deceleration to a stop at h_target)
+in-burn:      v_des(h) = √(2 a_land h) + v_td,     a_up = g + k (v↓ − v_des)
 ```
 
-Recorded CRS-12 numbers make the worked example: ignition at h = 4.6 km,
-v = 318 m/s ⇒ required `a_net = 318²/(2×4600) ≈ 11.0 m/s²`, i.e.
-`T/m ≈ 11.0 + 9.8 ≈ 20.8 m/s² ≈ 2.1 g`; the recorded mean `dv/dt` during the
-33 s burn is ≈ 9.6 m/s² ⇒ `T/m ≈ 19.4 m/s²` — a single engine at ~65–75%
-throttle on a ~27 t stage. Model and data agree before we have tuned
-anything, which is what a faithful parameter set looks like. The vertical
-channel tracks `a_cmd` through throttle; lateral velocity is nulled by small
-TVC tilts (the same tilt-budget idea as apollo-lander's terminal phase); legs
-deploy on an altitude gate; touchdown targets ≤ 2 m/s vertical / ≤ 4 m/s
-lateral at this fidelity (point-mass contact, no leg model).
+**Lateral / attitude** uses Guo/Hawkins/Wie ZEM/ZEV feedback with a 150 m /
+−25 m/s waypoint above LZ-1, then pad / −1.2 m/s:
+
+```text
+ZEM = r_tgt − (r + v t_go + ½ g t_go²)
+ZEV = v_tgt − (v + g t_go)
+a_cmd = 6 ZEM/t_go² − 2 ZEV/t_go − g
+```
+
+Attitude = direction of `a_cmd` (tilt ≤ 0.25 rad); throttle stays on the
+hoverslam vertical channel so the no-hover constraint is not violated.
+**Commit-to-vertical** latches once alt < 50 m (or short t_go) *and* the
+horizontal miss is already < 25 m — freeze lateral ZEM, finish upright.
+If min-throttle lofting starts below 100 m, engines cut until descending
+again. Legs are rated **2 m/s** impact (vertical and total contact speed);
+soft-landing gates also require tilt ≤ 2°, |ω| ≤ 1°/s, lateral ≤ 1.5 m/s,
+miss ≤ 5 m.
 
 Landing-burn coordination: TVC owns pitch/yaw while fins run
-**rate-damping only** (no dual-PD fight). Divert approach-speed cap is higher
-above 1 km (~34 m/s) so a few-hundred-metre ignition miss can still be closed,
-then fades; a lateral deadband stops tilt chatter from rebuilding `v_lat` in
-the last 100 m. Attitude setpoints are slew-limited across the
-AeroDescent → LandingBurn handoff.
+**rate-damping only**. Attitude setpoints are slew-limited across the
+AeroDescent → LandingBurn handoff. Plant `ATT_WN_TVC` steps up to
+~1.7 rad/s during LandingBurn for tighter divert tracking. Merlin plume
+viz follows lagged `TvcState` (`plume_viz = d_B · thrust_fraction`; editor
+exhaust is −intensity).
 
 ### 11.6 Attitude control: quaternion-error PD
 
@@ -955,7 +962,8 @@ q_err = q⁻¹ ⊗ q_setpoint,   sign = +1 if q_err.w ≥ 0 else −1
 
 allocated to TVC when engines run (pitch/yaw) and to RCS otherwise (always
 roll). Gains are per-phase (the plant's inertia changes by 10× and authority
-changes by 100× between phases) and are Monte Carlo parameters.
+changes by 100× between phases) and are Monte Carlo parameters. LandingBurn
+uses a higher TVC bandwidth (~1.7 rad/s) than ascent/entry (~0.9 rad/s).
 
 Aero descent adds a **q̄-invariant fin loop**: the FSW commands desired
 angular acceleration from attitude/rate error (`ω_n ≈ 1.5 rad/s`), then
