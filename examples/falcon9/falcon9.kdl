@@ -27,75 +27,65 @@ environment {
     atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
 }
 
-hsplit {
-    // Single hero chase view — Bevy 0.19 can only put AtmosphereSettings on
-    // one active main camera, so extra viewports lose the sky halo.
-    vsplit share=0.70 {
-        tabs share=0.78 {
-            viewport name="Chase" fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false active=#true {
-                bloom preset="old_school" intensity=0.28
-            }
+// Layout: chase viewport (5×3) with a 2-column telemetry strip on the right
+// and a full-width actuator/status strip along the bottom — all graphs visible
+// at once (no tabs). Bevy 0.19 can only put AtmosphereSettings on one active
+// main camera, so keep a single viewport.
+vsplit {
+    hsplit share=0.75 {
+        viewport name="Chase" share=0.72 fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false active=#true {
+            bloom preset="old_school" intensity=0.28
         }
-        tabs share=0.22 {
-            graph "booster.fsw_phase[0]" name="Mission phase (0..11)" {
-                color yellow
+        vsplit share=0.28 {
+            hsplit {
+                graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
+                    color blue
+                    color green
+                }
+                graph "booster.mach[0]" name="Mach" {
+                    color white
+                }
             }
-            graph "booster.thrust_viz[0], booster.smoke_viz[0]" name="Effect intensities (0..1)" {
-                color orange
-                color white
+            hsplit {
+                graph "booster.altitude_geodetic[0], booster_truth.altitude_geodetic[0]" name="Altitude vs recorded (m)" {
+                    color blue
+                    color green
+                }
+                graph "booster.tank_pressure_lox[0], booster.tank_pressure_rp1[0], booster.inlet_pressure_lox[0], booster.inlet_pressure_rp1[0]" name="Tank + inlet pressures (Pa)" {
+                    color cyan
+                    color orange
+                    color blue
+                    color red
+                }
             }
-            graph "booster.thrust_total[0]" name="Cluster thrust (N)" {
-                color orange
+            hsplit {
+                graph "booster.propellant_lox[0], booster.propellant_rp1[0]" name="Propellant (kg)" {
+                    color cyan
+                    color orange
+                }
+                graph "booster.nitrogen_kg[0]" name="RCS nitrogen (kg)" {
+                    color white
+                }
             }
         }
     }
-    // Telemetry column: the validation story, compact.
-    vsplit share=0.30 {
-        tabs {
-            graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
-                color blue
-                color green
-            }
-            graph "booster.display_speed[0]" name="Display speed (webcast space, m/s)" {
-                color 100 149 237
-            }
+    hsplit share=0.25 {
+        graph "booster.fsw_phase[0]" name="Mission phase (0..11)" {
+            color yellow
         }
-        tabs {
-            graph "booster.altitude_geodetic[0], booster_truth.altitude_geodetic[0]" name="Altitude vs recorded (m)" {
-                color blue
-                color green
-            }
-            graph "booster.qbar[0]" name="Dynamic pressure (Pa)" {
-                color red
-            }
-            graph "booster.mach[0]" name="Mach" {
-                color white
-            }
+        graph "booster.thrust_total[0]" name="Cluster thrust (N)" {
+            color orange
         }
-        tabs {
-            graph "booster.propellant_lox[0], booster.propellant_rp1[0]" name="Propellant (kg)" {
-                color cyan
-                color orange
-            }
-            graph "booster.tank_pressure_lox[0], booster.tank_pressure_rp1[0], booster.inlet_pressure_lox[0], booster.inlet_pressure_rp1[0]" name="Tank + inlet pressures (Pa)" {
-                color cyan
-                color orange
-                color blue
-                color red
-            }
-            graph "booster.nitrogen_kg[0]" name="RCS nitrogen (kg)" {
-                color white
-            }
+        graph "booster.qbar[0]" name="Dynamic pressure (Pa)" {
+            color red
         }
-        tabs {
-            graph "booster.engine_spool" name="Engine spool (9)" {
-            }
-            graph "booster.fin_state" name="Grid fins (rad)" {
-            }
-            graph "booster.rcs_levels" name="RCS thrusters (8)" {
-            }
-            graph "booster.tvc_state" name="TVC gimbal (rad)" {
-            }
+        graph "booster.fin_state" name="Grid fins (rad)" {
+        }
+        graph "booster.rcs_levels" name="RCS thrusters (8)" {
+        }
+        graph "booster.engine_spool" name="Engine spool (%)" {
+        }
+        graph "booster.tvc_state" name="TVC gimbal (rad)" {
         }
     }
 }
