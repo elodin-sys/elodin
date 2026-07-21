@@ -868,6 +868,40 @@ mod tests {
     }
 
     #[test]
+    fn grid_circles_never_snap_to_rim_during_roll() {
+        // Bugbot "Great circles snap to rim" claims a display-axis grid circle's
+        // normal goes parallel to the view axis during roll, so
+        // `great_circle_arcs` returns `None` and the painter strokes the full
+        // rim (the alleged "pop"). But the camera eye keeps an East component
+        // while a roll about East holds every triad axis in the
+        // East-perpendicular plane, so no axis can align with the view axis:
+        // `|n.z|` stays well under 1 and `great_circle_arcs` never returns
+        // `None`. Sweep a full roll for the rotating-cube camera and assert it.
+        let source = GeoFrame::ENU;
+        let ctx = GeoContext::from(GeoOrigin::new_from_degrees(28.6084, -80.6043, 3.0));
+        let cam = SphereCamera::new(sphere_axis_dirs(source));
+        let triad = display_triad_in_source(GeoFrame::NED, source, &ctx);
+        let mut max_depth = 0.0_f64;
+        for i in 0..2000 {
+            let theta = std::f64::consts::TAU * (i as f64 / 2000.0);
+            let q = DQuat::from_rotation_x(theta); // roll about East (ENU +X)
+            for axis in triad {
+                let normal = cam.project(q * axis);
+                max_depth = max_depth.max(normal.z.abs());
+                assert!(
+                    great_circle_arcs(normal).is_some(),
+                    "grid circle collapsed to rim at roll {theta:.4} for axis {axis:?}"
+                );
+            }
+        }
+        // Nowhere near the view axis (|n.z| = 1), let alone the 1e-6 threshold.
+        assert!(
+            max_depth < 0.9,
+            "grid normals approached the view axis: max |n.z| = {max_depth}"
+        );
+    }
+
+    #[test]
     fn horizon_cap_boundary_stays_in_disc_and_closes() {
         let u = up_cam(GeoFrame::ENU, DQuat::from_rotation_x(0.7));
         let pole = if u.z >= 0.0 { u } else { -u };
