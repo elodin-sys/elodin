@@ -13,7 +13,11 @@ use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
 use super::{EqlBinding, GaugePane};
-use crate::ui::{monitor::render_value_cards, theme, widgets::WidgetSystem};
+use crate::ui::{
+    monitor::render_value_cards,
+    theme,
+    widgets::{SystemStateExt, WidgetSystem},
+};
 
 /// Backing data for a geo-position gauge pane; the EQL lives in the sibling
 /// [`EqlBinding`] component.
@@ -69,7 +73,7 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
             current_timestamp,
             geo_context,
             coordinate,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok((mut data, binding)) = gauges.get_mut(pane.entity) else {
             return;
         };

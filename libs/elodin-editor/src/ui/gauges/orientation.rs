@@ -18,7 +18,11 @@ use std::f32::consts::TAU;
 use super::{EqlBinding, GaugePane, gauge_title};
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
-use crate::ui::{colors::get_scheme, theme, widgets::WidgetSystem};
+use crate::ui::{
+    colors::get_scheme,
+    theme,
+    widgets::{SystemStateExt, WidgetSystem},
+};
 
 /// Backing data for an orientation gauge pane; the EQL lives in the sibling
 /// [`EqlBinding`] component.
@@ -106,7 +110,7 @@ impl WidgetSystem for OrientationGaugeWidget<'_, '_> {
             current_timestamp,
             geo_context,
             coordinate,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok((mut data, binding)) = gauges.get_mut(pane.entity) else {
             return;
         };

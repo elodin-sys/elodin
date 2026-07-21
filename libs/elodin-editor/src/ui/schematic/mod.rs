@@ -314,6 +314,8 @@ impl SchematicParam<'_, '_> {
                     Pane::GeoPositionGauge(gauge) => {
                         let data = self.geo_position_gauges.get(gauge.entity).ok()?;
                         let binding = self.eql_bindings.get(gauge.entity).ok()?;
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, gauge.entity);
                         Some(Panel::GeoPositionGauge(GeoPositionGauge {
                             eql: binding.eql.clone(),
                             // Keep None so save omits `source=` and inheritance
@@ -321,12 +323,15 @@ impl SchematicParam<'_, '_> {
                             source: data.source,
                             display: data.display,
                             name: pane_name,
+                            node_id,
                         }))
                     }
 
                     Pane::OrientationGauge(gauge) => {
                         let data = self.orientation_gauges.get(gauge.entity).ok()?;
                         let binding = self.eql_bindings.get(gauge.entity).ok()?;
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, gauge.entity);
                         Some(Panel::OrientationGauge(OrientationGauge {
                             eql: binding.eql.clone(),
                             source: data.source,
@@ -334,6 +339,7 @@ impl SchematicParam<'_, '_> {
                             // None when identity so the default stays implicit.
                             reference: data.reference_kdl(),
                             name: pane_name,
+                            node_id,
                         }))
                     }
 

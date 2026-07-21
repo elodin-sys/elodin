@@ -173,6 +173,16 @@ fn panel(
                     *selected_object = SelectedObject::Graph { graph_id };
                 }
             }
+            Panel::GeoPositionGauge(gauge) => {
+                if let Some(gauge_id) = bindings.get(gauge.node_id) {
+                    *selected_object = SelectedObject::GeoPositionGauge { gauge_id };
+                }
+            }
+            Panel::OrientationGauge(gauge) => {
+                if let Some(gauge_id) = bindings.get(gauge.node_id) {
+                    *selected_object = SelectedObject::OrientationGauge { gauge_id };
+                }
+            }
             _ => {}
         }
     }

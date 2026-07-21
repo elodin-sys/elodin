@@ -12,7 +12,7 @@ use crate::{
         gauges::{EqlBinding, GeoPositionGaugeData, OrientationGaugeData},
         inspector::{eql_autocomplete, inspector_text_field},
         theme,
-        widgets::WidgetSystem,
+        widgets::{SystemStateExt, WidgetSystem},
     },
 };
 
@@ -62,7 +62,7 @@ impl WidgetSystem for InspectorGeoPositionGauge<'_, '_> {
         let InspectorGeoPositionGauge {
             mut gauges,
             eql_context,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok((mut gauge, mut binding)) = gauges.get_mut(entity) else {
             return;
         };
@@ -114,7 +114,7 @@ impl WidgetSystem for InspectorOrientationGauge<'_, '_> {
         let InspectorOrientationGauge {
             mut gauges,
             eql_context,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok((mut gauge, mut binding)) = gauges.get_mut(entity) else {
             return;
         };

@@ -1119,6 +1119,7 @@ fn parse_geo_position_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchem
         source,
         display,
         name,
+        node_id: NodeId::default(),
     }))
 }
 
@@ -1156,6 +1157,7 @@ fn parse_orientation_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
         display,
         reference,
         name,
+        node_id: NodeId::default(),
     }))
 }
 

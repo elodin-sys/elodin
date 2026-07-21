@@ -381,6 +381,8 @@ impl Panel {
             Panel::Graph(graph) => Some(graph.node_id),
             Panel::QueryPlot(query_plot) => Some(query_plot.node_id),
             Panel::Viewport(v) => Some(v.node_id),
+            Panel::GeoPositionGauge(gauge) => Some(gauge.node_id),
+            Panel::OrientationGauge(gauge) => Some(gauge.node_id),
             _ => None,
         }
     }
@@ -1228,6 +1230,10 @@ pub struct GeoPositionGauge {
     /// Coordinate system to display the position in (a spatial frame or LLA).
     pub display: DisplayFrame,
     pub name: Option<String>,
+    /// Ephemeral runtime id bound to the gauge entity (schematic tree
+    /// selection); not persisted in KDL. See [`crate::NodeId`].
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 /// A gauge for an attitude: reads an EQL-bound quaternion (a bare `[x,y,z,w]`
@@ -1254,6 +1260,10 @@ pub struct OrientationGauge {
     #[serde(default)]
     pub reference: Option<[f64; 4]>,
     pub name: Option<String>,
+    /// Ephemeral runtime id bound to the gauge entity (schematic tree
+    /// selection); not persisted in KDL. See [`crate::NodeId`].
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 /// Display coordinate choice for a [`GeoPositionGauge`]: the spatial
