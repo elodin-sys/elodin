@@ -821,6 +821,30 @@ fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<
     }
 }
 
+fn collect_object_3d_mesh_component_ids(
+    mesh: &impeller2_wkt::Object3DMesh,
+    eql_ctx: &EqlContext,
+    out: &mut HashSet<ComponentId>,
+) {
+    let impeller2_wkt::Object3DMesh::Ellipsoid {
+        scale,
+        error_covariance_cholesky,
+        error_covariance,
+        ..
+    } = mesh
+    else {
+        return;
+    };
+
+    if let Some(cholesky) = error_covariance_cholesky {
+        collect_eql_component_ids(cholesky, eql_ctx, out);
+    } else if let Some(covariance) = error_covariance {
+        collect_eql_component_ids(covariance, eql_ctx, out);
+    } else {
+        collect_eql_component_ids(scale, eql_ctx, out);
+    }
+}
+
 /// Component IDs for plot LineTree sync / visible-window prefetch
 /// (graphs + Line3d + object_3d only).
 fn plot_fetch_component_ids(
@@ -840,6 +864,7 @@ fn plot_fetch_component_ids(
     }
     for obj in object_3ds.iter() {
         collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
         // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
         for thruster in &obj.data.thrusters {
             collect_eql_component_ids(&thruster.intensity, eql_ctx, &mut ids);
@@ -2349,6 +2374,70 @@ mod tests {
         let adapter = ComponentId(7);
         let ids = build_series_store_allowlist(HashSet::new(), [adapter]);
         assert_eq!(ids, [adapter].into_iter().collect());
+    }
+
+    #[test]
+    fn ellipsoid_covariance_eql_components_are_allowlisted() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+        use impeller2_wkt::{
+            Object3DMesh, default_ellipsoid_color, default_ellipsoid_confidence_interval,
+            default_ellipsoid_grid_color,
+        };
+
+        let components = ["shape.scale", "shape.cholesky", "shape.covariance"].map(|name| {
+            Arc::new(eql::Component::new(
+                name.to_string(),
+                ComponentId::new(name),
+                Schema::new(PrimType::F64, vec![6_u64]).expect("valid schema"),
+            ))
+        });
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            components,
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mut mesh = Object3DMesh::Ellipsoid {
+            scale: "shape.scale".into(),
+            color: default_ellipsoid_color(),
+            error_covariance_cholesky: Some("shape.cholesky".into()),
+            error_covariance: Some("shape.covariance".into()),
+            error_confidence_interval: default_ellipsoid_confidence_interval(),
+            show_grid: false,
+            grid_color: default_ellipsoid_grid_color(),
+        };
+
+        let mut ids = HashSet::new();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+
+        assert_eq!(
+            ids,
+            [ComponentId::new("shape.cholesky")].into_iter().collect()
+        );
+
+        if let Object3DMesh::Ellipsoid {
+            error_covariance_cholesky,
+            ..
+        } = &mut mesh
+        {
+            *error_covariance_cholesky = None;
+        }
+        ids.clear();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert_eq!(
+            ids,
+            [ComponentId::new("shape.covariance")].into_iter().collect()
+        );
+
+        if let Object3DMesh::Ellipsoid {
+            error_covariance, ..
+        } = &mut mesh
+        {
+            *error_covariance = None;
+        }
+        ids.clear();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert_eq!(ids, [ComponentId::new("shape.scale")].into_iter().collect());
     }
 
     #[test]
