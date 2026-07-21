@@ -2885,13 +2885,39 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
             _ => max_rect,
         };
 
-        let button_height = 160.0;
-        let base_button_width: f32 = 240.0;
+        // Creatable panels shown on the empty layout, laid out as a centred
+        // grid (rows of PER_ROW) so the list can grow without overflowing.
+        type ItemFactory = fn(Option<TileId>) -> palette_items::PaletteItem;
+        const BUTTONS: [(&str, &str, ItemFactory); 5] = [
+            ("Viewport", "3D Output", palette_items::create_viewport),
+            ("Graph", "Point Graph", palette_items::create_graph),
+            ("Monitor", "Component Values", palette_items::create_monitor),
+            (
+                "Position Gauge",
+                "Geo Position",
+                palette_items::create_geo_position_gauge,
+            ),
+            (
+                "Orientation Gauge",
+                "Attitude Gimbal",
+                palette_items::create_orientation_gauge,
+            ),
+        ];
+        const PER_ROW: usize = 3;
+        let rows = BUTTONS.len().div_ceil(PER_ROW);
+
+        let button_height = 130.0;
+        let base_button_width: f32 = 210.0;
         let base_button_spacing: f32 = 20.0;
         let button_spacing = base_button_spacing.min((layout_rect.width() / 6.0).max(0.0));
-        let max_button_width = ((layout_rect.width() - 2.0 * button_spacing) / 3.0).max(0.0);
+        let max_button_width = ((layout_rect.width() - 2.0 * button_spacing) / PER_ROW as f32
+            - button_spacing)
+            .max(0.0);
         let button_width = max_button_width.min(base_button_width);
-        let desired_size = egui::vec2(button_width * 3.0 + button_spacing * 2.0, button_height);
+        let desired_size = egui::vec2(
+            button_width * PER_ROW as f32 + button_spacing * (PER_ROW - 1) as f32,
+            button_height * rows as f32 + button_spacing * (rows - 1) as f32,
+        );
 
         let mut state_mut = state.params_mut(world);
         let target_window = window.or_else(|| state_mut.primary_window.iter().next());
@@ -2902,74 +2928,29 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                 desired_size,
             )),
             |ui| {
-                ui.horizontal(|ui| {
-                    ui.style_mut().spacing.item_spacing = egui::vec2(button_spacing, 0.0);
-
-                    let create_viewport_btn = ui.add(
-                        ETileButton::new("Viewport", icons.add)
-                            .description("3D Output")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_viewport_btn.clicked() {
-                        state_mut
-                            .cmd_palette_state
-                            .open_for_window(target_window, palette_items::create_viewport(None));
-                    }
-
-                    let create_graph_btn = ui.add(
-                        ETileButton::new("Graph", icons.add)
-                            .description("Point Graph")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_graph_btn.clicked() {
-                        state_mut
-                            .cmd_palette_state
-                            .open_for_window(target_window, palette_items::create_graph(None));
-                    }
-
-                    let create_monitor_btn = ui.add(
-                        ETileButton::new("Monitor", icons.add)
-                            .description("Monitor")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_monitor_btn.clicked() {
-                        state_mut
-                            .cmd_palette_state
-                            .open_for_window(target_window, palette_items::create_monitor(None));
-                    }
-
-                    let create_geo_position_gauge_btn = ui.add(
-                        ETileButton::new("Position Gauge", icons.add)
-                            .description("Geo Position Gauge")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_geo_position_gauge_btn.clicked() {
-                        state_mut.cmd_palette_state.open_for_window(
-                            target_window,
-                            palette_items::create_geo_position_gauge(None),
-                        );
-                    }
-
-                    let create_orientation_gauge_btn = ui.add(
-                        ETileButton::new("Orientation Gauge", icons.add)
-                            .description("Orientation Gauge")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_orientation_gauge_btn.clicked() {
-                        state_mut.cmd_palette_state.open_for_window(
-                            target_window,
-                            palette_items::create_orientation_gauge(None),
-                        );
+                ui.vertical(|ui| {
+                    ui.style_mut().spacing.item_spacing =
+                        egui::vec2(button_spacing, button_spacing);
+                    for row in BUTTONS.chunks(PER_ROW) {
+                        ui.horizontal(|ui| {
+                            // Centre a shorter last row under the full ones.
+                            let row_width = button_width * row.len() as f32
+                                + button_spacing * (row.len() - 1) as f32;
+                            ui.add_space((desired_size.x - row_width) / 2.0);
+                            for (title, description, factory) in row {
+                                let btn = ui.add(
+                                    ETileButton::new(*title, icons.add)
+                                        .description(*description)
+                                        .width(button_width)
+                                        .height(button_height),
+                                );
+                                if btn.clicked() {
+                                    state_mut
+                                        .cmd_palette_state
+                                        .open_for_window(target_window, factory(None));
+                                }
+                            }
+                        });
                     }
                 });
             },
