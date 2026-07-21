@@ -229,10 +229,26 @@ fn display_labels(display: DisplayFrame) -> [&'static str; 3] {
     }
 }
 
+/// Format a coordinate compactly without ever dropping integer digits.
+///
+/// Truncating a fixed-precision string (the previous approach) silently lost
+/// significant digits for larger magnitudes; instead pick the decimal count
+/// from the magnitude so the string stays short while the value stays correct.
 fn fmt_val(v: f64) -> String {
-    let mut s = format!("{v:.8}");
-    s.truncate(10);
-    s
+    if !v.is_finite() {
+        return "—".to_string();
+    }
+    let mag = v.abs();
+    let decimals = if mag >= 100_000.0 {
+        1 // large metres (e.g. ECEF): sub-metre precision is noise here
+    } else if mag >= 1_000.0 {
+        3
+    } else if mag >= 1.0 {
+        5 // degrees (lat/lon) keep ~1 m; local metres keep mm
+    } else {
+        6
+    };
+    format!("{v:.decimals$}")
 }
 
 #[cfg(test)]
@@ -312,6 +328,20 @@ mod tests {
             (ned_back - ned_in).length() < 1e-6,
             "round-trip mismatch: {ned_back:?} vs {ned_in:?}"
         );
+    }
+
+    #[test]
+    fn fmt_val_never_drops_integer_digits() {
+        // Negative longitude used to lose trailing digits via string truncation;
+        // now it keeps every integer digit and the sign.
+        assert_eq!(fmt_val(-80.6043), "-80.60430");
+        assert_eq!(fmt_val(28.6084), "28.60840");
+        // Large ECEF magnitudes keep all integer digits (no mid-number loss).
+        assert_eq!(fmt_val(6378137.0), "6378137.0");
+        assert_eq!(fmt_val(-6378137.0), "-6378137.0");
+        // Small values keep fine precision.
+        assert_eq!(fmt_val(0.123456789), "0.123457");
+        assert_eq!(fmt_val(f64::NAN), "—");
     }
 
     #[test]
