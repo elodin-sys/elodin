@@ -312,6 +312,11 @@ struct ExportArgs {
         help = "Include components whose metadata has `private: true`. Off by default \u{2014} those components are skipped."
     )]
     include_private: bool,
+    #[clap(
+        long,
+        help = "MCAP-only: attach every file under {db}/assets/ instead of only schematic-referenced assets"
+    )]
+    all_assets: bool,
 }
 
 #[cfg(feature = "video-export")]
@@ -720,9 +725,32 @@ async fn main() -> miette::Result<()> {
             mono_ns,
             mono_us,
             include_private,
+            all_assets,
         }) => {
             // Install signal handlers only for Export command which uses check_cancelled()
             elodin_db::cancellation::install_signal_handlers();
+
+            if matches!(format, elodin_db::export::ExportFormat::Mcap) {
+                if flatten || join || csv_fast_floats || mono_ns || mono_us {
+                    return Err(miette::miette!(
+                        "--flatten, --join, --csv-fast-floats, --mono-ns, and --mono-us do not apply to --format mcap"
+                    ));
+                }
+                #[cfg(feature = "mcap-export")]
+                {
+                    let options = elodin_db::export_mcap::McapExportOptions {
+                        pattern,
+                        include_private,
+                        all_assets,
+                    };
+                    return elodin_db::export_mcap::run(path, output, options).into_diagnostic();
+                }
+                #[cfg(not(feature = "mcap-export"))]
+                return Err(miette::miette!(
+                    "this build of elodin-db was compiled without the `mcap-export` feature"
+                ));
+            }
+            let _ = all_assets;
 
             // clap's `conflicts_with` ensures these aren't both set.
             let time_format = match (mono_ns, mono_us) {

@@ -218,6 +218,25 @@ elodin-db merge -o merged --prefix1 sitl --prefix2 real \
 
 Use `--from-playback-start` when alignment timestamps come from the Editor's playback timeline (relative to recording start). Without it, `--align1`/`--align2` are absolute timestamps.
 
+## Exporting a Database
+
+Offline export to analysis formats or a Foxglove-ready MCAP recording:
+
+```bash
+# Parquet / arrow-ipc / csv (one file per component)
+elodin-db export --format parquet --output ./out ./my-db
+
+# Foxglove-compatible MCAP + generated Foxglove layout JSON
+elodin-db export --format mcap --output ./out ./my-db
+```
+
+The MCAP export maps components to JSON channels (`/drone/world_pos.q0` message
+paths), emits `/tf` from `*.world_pos` poses, embeds schematic GLBs in a
+`/scene` `foxglove.SceneUpdate`, attaches schematic KDLs/assets, and generates
+`{db}.foxglove-layout.json` mirroring the schematic (tabs, graphs → Plot
+panels, viewport → 3D panel). Upload via `POST /v1/data/upload` + `PUT`, then
+`POST /v1/layouts`. See [elodin-cli.md](../../../docs/public/content/reference/elodin-cli.md) `Foxglove MCAP Export`.
+
 ## Trimming a Database
 
 Remove data from the beginning or end of a recording. Values are in microseconds. Without `--output`, modifies in place.

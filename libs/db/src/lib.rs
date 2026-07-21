@@ -71,6 +71,8 @@ pub mod compact;
 pub mod drop;
 mod error;
 pub mod export;
+#[cfg(feature = "mcap-export")]
+pub mod export_mcap;
 #[cfg(feature = "video-export")]
 pub mod export_videos;
 pub mod fix_timestamps;

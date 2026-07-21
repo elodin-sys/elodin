@@ -846,7 +846,7 @@ elodin-db query --eql "rocket.world_pos" --limit 1000 -f parquet ./my-database >
 
 ## `elodin-db export`
 
-Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.
+Export database contents to parquet, arrow-ipc, csv, or a Foxglove-compatible mcap file without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks, or for reviewing and sharing recordings in [Foxglove](https://foxglove.dev).
 
 The export runs in parallel across components and is dramatically faster than the historical single-threaded path; on a 20-core machine the customer's ~3 GB CSV export went from ~32 s (default formatting) to ~2.2 s (`--csv-fast-floats`), a 14× speedup.
 
@@ -864,7 +864,7 @@ The export runs in parallel across components and is dramatically faster than th
 
   Default value: `parquet`
 
-  Possible values: `parquet`, `arrow-ipc`, `csv`
+  Possible values: `parquet`, `arrow-ipc`, `csv`, `mcap` (alias: `foxglove`)
 
 * `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned.x`, `vel_ned.y`, `vel_ned.z`)
 
@@ -880,6 +880,8 @@ The export runs in parallel across components and is dramatically faster than th
 
 * `--include-private` — Include components whose metadata has `private: true`. Off by default — those components are skipped (see [Private Components](#private-components) below).
 
+* `--all-assets` — MCAP-only: attach every file under `{db}/assets/` instead of only schematic-referenced assets.
+
 ###### **Export Formats**
 
 | Format | Extension | Description |
@@ -887,6 +889,35 @@ The export runs in parallel across components and is dramatically faster than th
 | `parquet` | `.parquet` | Columnar format with compression. Best for large datasets and analytics tools. |
 | `arrow-ipc` | `.arrow` | Arrow IPC format. Fast to read/write, good for streaming data between processes. |
 | `csv` | `.csv` | Plain text format. Universal compatibility but larger file sizes. |
+| `mcap` | `.mcap` | Foxglove-compatible MCAP recording (single file, zstd-compressed JSON channels). See [Foxglove MCAP Export](#foxglove-mcap-export) below. |
+
+###### **Foxglove MCAP Export**
+
+`--format mcap` (alias `--format foxglove`) writes a single `{db_name}.mcap` plus a generated `{db_name}.foxglove-layout.json`, ready to open in [Foxglove](https://app.foxglove.dev) or upload to the Foxglove Data Platform:
+
+- Every component becomes a JSON channel (`drone.world_pos` → `/drone/world_pos`) with fields named after the component's `element_names`; dotted names nest (`e.r` → `.e.r`).
+- Pose components (`*.world_pos`, 7 elements) additionally publish `foxglove.FrameTransforms` on `/tf` (`world` → entity), driving the Foxglove 3D panel.
+- Schematic `object_3d` GLBs are embedded in a one-shot `foxglove.SceneUpdate` on `/scene`, so the 3D panel shows the vehicle model; constant body-frame `vector_arrow`s become arrow primitives.
+- Message logs export as `foxglove.CompressedVideo` (H.264 streams), `foxglove.RawImage` (sensor cameras), `foxglove.Log` (LogEntry streams), or base64 JSON (other).
+- Schematic KDL files and referenced GLB assets travel along as MCAP attachments; DB and component metadata as MCAP metadata records.
+- The generated layout mirrors the Elodin schematic: tabs/splits map to Foxglove tabs/splits, `graph` EQL expressions expand to Plot panel series, `viewport` becomes a 3D panel following the vehicle, `component_monitor` becomes Raw Messages.
+
+```bash
+# Export and open locally (drag into app.foxglove.dev or the desktop app)
+elodin-db export --format mcap --output ./fg ./my-database
+
+# Upload to the Foxglove Data Platform
+LINK=$(curl -s -X POST https://api.foxglove.dev/v1/data/upload \
+  -H "Authorization: Bearer $FOXGLOVE_API_KEY" -H "content-type: application/json" \
+  -d '{"filename":"my-recording.mcap","deviceName":"my-device","projectId":"prj_..."}' | jq -r .link)
+curl -X PUT -H "Content-Type: application/octet-stream" --data-binary @./fg/my-database.mcap "$LINK"
+
+# Create the layout (org-shared)
+jq -n --slurpfile d ./fg/my-database.foxglove-layout.json \
+  '{name:"My Layout", permission:"ORG_WRITE", data:$d[0]}' | \
+  curl -s -X POST https://api.foxglove.dev/v1/layouts \
+    -H "Authorization: Bearer $FOXGLOVE_API_KEY" -H "content-type: application/json" --data-binary @-
+```
 
 ###### **Vector Column Handling**
 
