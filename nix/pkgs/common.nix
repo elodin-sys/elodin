@@ -27,8 +27,25 @@
 
     mode="''${ELODIN_GPU:-auto}"
 
+    nvidia_icd_file() {
+      # NVIDIA packages use different filenames and locations across NixOS,
+      # Debian/Ubuntu, Arch, and RPM-based distributions.
+      for icd in \
+        "''${ELODIN_NVIDIA_ICD:-}" \
+        /run/opengl-driver/share/vulkan/icd.d/nvidia_icd*.json \
+        /etc/vulkan/icd.d/nvidia_icd*.json \
+        /usr/local/share/vulkan/icd.d/nvidia_icd*.json \
+        /usr/share/vulkan/icd.d/nvidia_icd*.json; do
+        if [ -n "$icd" ] && [ -e "$icd" ]; then
+          printf '%s\n' "$icd"
+          return 0
+        fi
+      done
+      return 1
+    }
+
     nvidia_present() {
-      [ -e /proc/driver/nvidia/version ] && [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]
+      [ -e /proc/driver/nvidia/version ] && nvidia_icd_file >/dev/null
     }
 
     # A Mesa-capable GPU (Intel 0x8086 / AMD 0x1002) means the editor has a
@@ -64,17 +81,49 @@
 
     [ "$use_nvidia" = 1 ] || exit 0
 
+    nvidia_icd="$(nvidia_icd_file)" || exit 0
     nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
     mkdir -p "$nvidia_lib_dir"
+
+    multiarch=""
+    case "$(uname -m)" in
+      x86_64) multiarch=x86_64-linux-gnu ;;
+      aarch64) multiarch=aarch64-linux-gnu ;;
+    esac
+
+    # Prefer conventional host paths first and /run/opengl-driver last so its
+    # NixOS driver links win when both happen to exist. nullglob prevents
+    # missing distro-specific paths from becoming literal strings.
+    nvidia_lib_dirs=(
+      /usr/lib
+      /lib
+      /usr/lib64
+      /lib64
+      /usr/lib/nvidia
+      /usr/lib/nvidia/current
+      /usr/lib64/nvidia
+    )
+    if [ -n "$multiarch" ]; then
+      nvidia_lib_dirs+=("/usr/lib/$multiarch" "/lib/$multiarch")
+    fi
+    nvidia_lib_dirs+=(/run/opengl-driver/lib)
+
     have_glx=0
-    for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
-      /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
-      /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
-      [ -e "$lib" ] || continue
-      ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
-      case "$lib" in
-        */libGLX_nvidia.so*) have_glx=1 ;;
-      esac
+    for lib_dir in "''${nvidia_lib_dirs[@]}"; do
+      [ -d "$lib_dir" ] || continue
+      for lib in \
+        "$lib_dir"/libGLX_nvidia.so* \
+        "$lib_dir"/libEGL_nvidia.so* \
+        "$lib_dir"/libnvidia-*.so* \
+        "$lib_dir"/libcuda.so* \
+        "$lib_dir"/libnvcuvid.so* \
+        "$lib_dir"/libnvoptix.so*; do
+        [ -e "$lib" ] || continue
+        ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+        case "$lib" in
+          */libGLX_nvidia.so*) have_glx=1 ;;
+        esac
+      done
     done
 
     # libGLX_nvidia provides both the NVIDIA Vulkan ICD (per nvidia_icd.json) and
@@ -83,8 +132,8 @@
     # defaults when the host driver libraries are not present.
     [ "$have_glx" = 1 ] || exit 0
 
-    printf 'export VK_ICD_FILENAMES=%s\n' /usr/share/vulkan/icd.d/nvidia_icd.json
-    printf 'export VK_DRIVER_FILES=%s\n' /usr/share/vulkan/icd.d/nvidia_icd.json
+    printf 'export VK_ICD_FILENAMES=%s\n' "$nvidia_icd"
+    printf 'export VK_DRIVER_FILES=%s\n' "$nvidia_icd"
     printf 'export __GLX_VENDOR_LIBRARY_NAME=nvidia\n'
     printf 'export LD_LIBRARY_PATH="%s''${LD_LIBRARY_PATH:+:''${LD_LIBRARY_PATH}}"\n' "$nvidia_lib_dir"
     printf 'unset LIBGL_ALWAYS_SOFTWARE\n'

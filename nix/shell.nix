@@ -98,6 +98,8 @@ with pkgs; let
           # Additional Linux-specific tools not in common
           alsa-oss
           alsa-utils
+          gamescope # Headless compositor and PipeWire source for editor capture
+          wireplumber # Session manager for isolated headless capture sessions
           gtk3
           fontconfig
           lldb
@@ -128,15 +130,20 @@ with pkgs; let
     # the surplus so Python can import the extension without ENOMEM.
     GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
 
-    # GStreamer plugin path for elodinsink
-    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
-      gst_all_1.gstreamer
-      gst_all_1.gst-plugins-base
-      gst_all_1.gst-plugins-good
-      gst_all_1.gst-plugins-bad
-      gst_all_1.gst-plugins-ugly
-      config.packages.elodinsink
-    ];
+    # GStreamer plugin path for Elodin streaming and headless capture
+    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+      [
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        gst_all_1.gst-plugins-bad
+        gst_all_1.gst-plugins-ugly
+        config.packages.elodinsink
+      ]
+      # PipeWire provides pipewiresrc/pipewiresink on Linux. Including it here
+      # makes Gamescope's capture node visible to GStreamer in the Nix shell.
+      ++ lib.optionals pkgs.stdenv.isLinux [pipewire]
+    );
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
@@ -204,6 +211,9 @@ with pkgs; let
       CXX = "clang++";
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "clang";
+      # Use this explicitly for private capture sessions so WirePlumber does
+      # not accidentally load an incompatible host configuration.
+      ELODIN_WIREPLUMBER_CONFIG = "${wireplumber}/share/wireplumber/wireplumber.conf";
     }
   );
 in {
