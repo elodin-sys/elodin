@@ -360,6 +360,47 @@ fn horizon_cap_boundary(pole: DVec3, front_arc: &[Vec2]) -> Vec<Vec2> {
     boundary
 }
 
+/// Two-tone fill plan for the attitude disc: the whole disc is painted `base`,
+/// then (optionally) the pole-facing hemisphere is painted on top as a convex
+/// `cap`. Only the pole-facing hemisphere projects to a convex region, so the
+/// base/cap roles swap with `u_cam.z` — the swap is paired with the rim-closure
+/// side in [`horizon_cap_boundary`] so the rendered split stays continuous as
+/// `u_cam` crosses the silhouette (`u_cam.z = 0`). `fill_is_sky` verifies this
+/// against the ground-truth oracle.
+struct HorizonFill {
+    /// Colour under the whole disc (true = sky, false = ground).
+    base_is_sky: bool,
+    /// Convex pole-facing cap drawn over the base: `(boundary, cap_is_sky)`.
+    /// `None` when up is (anti)parallel to the view axis (all one tone).
+    cap: Option<(Vec<Vec2>, bool)>,
+}
+
+/// Resolve the two-tone fill for camera-space up `u_cam`, reusing the horizon
+/// `arcs` already computed by the caller.
+fn horizon_fill(u_cam: DVec3, arcs: &Option<(Vec<Vec2>, Vec<Vec2>)>) -> HorizonFill {
+    match arcs {
+        // Up (anti)parallel to the view axis: the whole disc is one tone.
+        None => HorizonFill {
+            base_is_sky: u_cam.z >= 0.0,
+            cap: None,
+        },
+        Some((front_arc, _)) => {
+            // The pole facing the camera projects to the convex cap; the other
+            // hemisphere wraps around the rim and is painted as the base.
+            let (base_is_sky, cap_is_sky, pole) = if u_cam.z >= 0.0 {
+                (false, true, u_cam)
+            } else {
+                (true, false, -u_cam)
+            };
+            let boundary = horizon_cap_boundary(pole, front_arc);
+            HorizonFill {
+                base_is_sky,
+                cap: (boundary.len() >= 3).then_some((boundary, cap_is_sky)),
+            }
+        }
+    }
+}
+
 /// Paint a circular attitude sphere: two-tone up/down shading and three axis
 /// labels. When `att_source` is set (body→source), the shading and the
 /// display-frame triad track attitude (back-facing tips stay visible, dimmed,
@@ -444,25 +485,12 @@ fn paint_frame_sphere(
     // cap; the other hemisphere wraps around the rim. Paint the wrapping one
     // over the whole disc, then the convex cap on top.
     let arcs = great_circle_arcs(u_cam);
-    match &arcs {
-        // Up is (anti)parallel to the view axis: all sky or all ground.
-        None => {
-            let fill = if u_cam.z >= 0.0 { sky } else { ground };
-            painter.circle_filled(center, radius, fill);
-        }
-        Some((front_arc, _)) => {
-            let (base, cap, pole) = if u_cam.z >= 0.0 {
-                (ground, sky, u_cam)
-            } else {
-                (sky, ground, -u_cam)
-            };
-            painter.circle_filled(center, radius, base);
-            let boundary = horizon_cap_boundary(pole, front_arc);
-            if boundary.len() >= 3 {
-                let pts: Vec<Pos2> = boundary.iter().map(|&p| to_screen(p)).collect();
-                painter.add(Shape::convex_polygon(pts, cap, Stroke::NONE));
-            }
-        }
+    let tone = |is_sky: bool| if is_sky { sky } else { ground };
+    let fill = horizon_fill(u_cam, &arcs);
+    painter.circle_filled(center, radius, tone(fill.base_is_sky));
+    if let Some((boundary, cap_is_sky)) = &fill.cap {
+        let pts: Vec<Pos2> = boundary.iter().map(|&p| to_screen(p)).collect();
+        painter.add(Shape::convex_polygon(pts, tone(*cap_is_sky), Stroke::NONE));
     }
 
     // The display frame's coordinate planes as attitude-driven great circles;
@@ -778,6 +806,65 @@ mod tests {
         assert!(front.last().unwrap().length() > 0.98);
         // A view-axis-aligned normal has no arcs (circle == rim).
         assert!(great_circle_arcs(DVec3::new(0.0, 0.0, 1.0)).is_none());
+    }
+
+    /// Ray-cast point-in-polygon for a simple (here convex) boundary.
+    fn point_in_polygon(p: Vec2, poly: &[Vec2]) -> bool {
+        let n = poly.len();
+        let mut inside = false;
+        let mut j = n - 1;
+        for i in 0..n {
+            let a = poly[i];
+            let b = poly[j];
+            if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
+
+    /// Sky/ground a disc point resolves to under the actual [`horizon_fill`]
+    /// plan the painter uses (base tone, overpainted by the convex cap).
+    fn fill_is_sky(p: Vec2, u_cam: DVec3) -> bool {
+        let arcs = great_circle_arcs(u_cam);
+        let fill = horizon_fill(u_cam, &arcs);
+        match &fill.cap {
+            Some((boundary, cap_is_sky)) if point_in_polygon(p, boundary) => *cap_is_sky,
+            _ => fill.base_is_sky,
+        }
+    }
+
+    #[test]
+    fn fill_matches_sky_oracle_across_silhouette() {
+        // The claim behind "sky/ground flips" and "rim jumps" is that the fill
+        // becomes wrong as `u_cam.z` crosses 0. Sweep a full roll (so up passes
+        // edge-on to the camera twice) and assert the painted fill matches the
+        // ground-truth front-hemisphere oracle everywhere except a thin band
+        // around the horizon (polygon discretisation) and the rim.
+        for i in 0..1440 {
+            let theta = std::f64::consts::TAU * (i as f64 / 1440.0);
+            let u = up_cam(GeoFrame::ENU, DQuat::from_rotation_x(theta));
+            for gy in -9..=9 {
+                for gx in -9..=9 {
+                    let p = Vec2::new(gx as f32 * 0.1, gy as f32 * 0.1);
+                    let r2 = (p.x * p.x + p.y * p.y) as f64;
+                    if r2 > 0.9 * 0.9 {
+                        continue; // avoid rim ambiguity
+                    }
+                    let z = (1.0 - r2).sqrt();
+                    let signed = p.x as f64 * u.x + p.y as f64 * u.y + z * u.z;
+                    if signed.abs() < 0.08 {
+                        continue; // horizon band: polygon vs exact arc differ
+                    }
+                    assert_eq!(
+                        fill_is_sky(p, u),
+                        signed >= 0.0,
+                        "fill disagrees with oracle at theta={theta:.4}, p={p:?}, u={u:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
