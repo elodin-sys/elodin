@@ -16,6 +16,8 @@ use nox::ArrayBuf;
 use std::f32::consts::TAU;
 
 use super::{EqlBinding, GaugePane, gauge_title};
+use crate::WorldPosExt;
+use crate::object_3d::ComponentArrayExt;
 use crate::ui::{colors::get_scheme, theme, widgets::WidgetSystem};
 
 /// Backing data for an orientation gauge pane; the EQL lives in the sibling
@@ -171,25 +173,42 @@ fn frame_label(frame: GeoFrame) -> &'static str {
     }
 }
 
+/// Max deviation of a bare 4-vector's length² from 1 to still count as a
+/// quaternion. Loose enough for telemetry drift / un-renormalized integration,
+/// tight enough that arbitrary 4-vectors (e.g. fin deflections) are rejected.
+const BARE_QUAT_UNIT_TOLERANCE: f64 = 0.1;
+
 /// Extract an attitude quaternion from a component value.
 ///
 /// Accepts only:
-/// - a bare 4-vector (`F64` with exactly four elements, `[x, y, z, w]`), or
 /// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (`F64`, ≥7
-///   elements whose head 4 are the quaternion).
+///   elements whose head 4 are the quaternion), or
+/// - a bare, (approximately) unit-length 4-vector `[x, y, z, w]`.
 ///
-/// Telemetry quats can drift off unit length (and `DQuat::inverse` assumes
-/// normalized), so the result is normalized; zero-length is rejected.
+/// A bare 4-vector must already be near unit length: a genuine attitude
+/// quaternion is normalized, whereas an arbitrary 4-vector (e.g. fin
+/// deflections) is not — blindly normalizing one would invent a misleading
+/// gimbal instead of the empty "—" state. This mirrors the geo-position
+/// gauge, which likewise refuses to treat a non-pose 4-vector as data.
+///
+/// Telemetry quats can still drift slightly off unit length (and
+/// `DQuat::inverse` assumes normalized), so accepted quats are re-normalized.
 fn component_value_to_quat(value: &ComponentValue) -> Option<DQuat> {
+    // A world_pos-style pose: reuse the shared WorldPos parser so only genuine
+    // poses (≥7 elements) feed the gimbal, exactly as the position gauge does.
+    if let Some(wp) = value.as_world_pos() {
+        let q = wp.att();
+        return (q.length_squared() > 1e-12).then(|| q.normalize());
+    }
     let ComponentValue::F64(array) = value else {
         return None;
     };
     let data = array.buf.as_buf();
-    let q = match data.len() {
-        4 | 7 => DQuat::from_xyzw(data[0], data[1], data[2], data[3]),
-        _ => return None,
-    };
-    (q.length_squared() > 1e-12).then(|| q.normalize())
+    if data.len() != 4 {
+        return None;
+    }
+    let q = DQuat::from_xyzw(data[0], data[1], data[2], data[3]);
+    ((q.length_squared() - 1.0).abs() <= BARE_QUAT_UNIT_TOLERANCE).then(|| q.normalize())
 }
 
 /// Unit axes of a frame's display triad: up-ish first (the horizon pole),
@@ -597,6 +616,28 @@ mod tests {
             component_value_to_quat(&f64_value(&[0.0, 0.0, 0.0, 0.0])),
             None
         );
+    }
+
+    #[test]
+    fn non_unit_4_vector_is_not_an_attitude() {
+        // A 4-element component that is not near unit length (e.g. fin
+        // deflections) must not be normalized into a misleading gimbal — it
+        // should read as the empty "—" state, matching the position gauge's
+        // refusal to treat a non-pose 4-vector as data.
+        assert_eq!(
+            component_value_to_quat(&f64_value(&[0.1, 0.2, 0.3, 0.4])),
+            None
+        );
+        assert_eq!(
+            component_value_to_quat(&f64_value(&[2.0, 0.0, 0.0, 0.0])),
+            None
+        );
+
+        // A genuine unit quaternion that has drifted slightly is still accepted
+        // and re-normalized.
+        let drifted = component_value_to_quat(&f64_value(&[0.0, 0.0, 0.02, 1.0]))
+            .expect("near-unit quat accepted");
+        assert!((drifted.length() - 1.0).abs() < 1e-12);
     }
 
     #[test]
