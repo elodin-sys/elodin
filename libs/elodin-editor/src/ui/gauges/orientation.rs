@@ -165,6 +165,18 @@ impl WidgetSystem for OrientationGaugeWidget<'_, '_> {
                 // Missing / non-quaternion samples draw a muted empty rim —
                 // never treat missing attitude as identity / wings-level.
                 paint_frame_sphere(ui, display, source, &geo_context, att_source);
+
+                // Numeric attitude below the gimbal, 2 dp (or "—" when there's
+                // no valid quaternion sample).
+                ui.add_space(3.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(quat_readout(att_source))
+                            .monospace()
+                            .size(10.0)
+                            .color(scheme.text_secondary),
+                    );
+                });
             });
     }
 }
@@ -174,6 +186,15 @@ fn frame_label(frame: GeoFrame) -> &'static str {
         GeoFrame::ECEF => "ECEF",
         GeoFrame::NED => "NED",
         GeoFrame::ENU => "ENU",
+    }
+}
+
+/// Two-decimal `x y z w` readout of the drawn attitude, or a placeholder when
+/// there is no valid quaternion sample.
+fn quat_readout(att: Option<DQuat>) -> String {
+    match att {
+        Some(q) => format!("x {:+.2}  y {:+.2}  z {:+.2}  w {:+.2}", q.x, q.y, q.z, q.w),
+        None => "x —  y —  z —  w —".to_string(),
     }
 }
 
@@ -716,6 +737,13 @@ mod tests {
             (e0.x - e1.x).abs() > 0.3 || (e0.y - e1.y).abs() > 0.3,
             "yaw should move the E tip on the sphere"
         );
+    }
+
+    #[test]
+    fn quat_readout_two_decimals_and_placeholder() {
+        let q = DQuat::from_xyzw(0.123, -0.456, 0.0, 0.881);
+        assert_eq!(quat_readout(Some(q)), "x +0.12  y -0.46  z +0.00  w +0.88");
+        assert_eq!(quat_readout(None), "x —  y —  z —  w —");
     }
 
     #[test]

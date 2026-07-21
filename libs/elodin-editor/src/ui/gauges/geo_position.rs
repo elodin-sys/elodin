@@ -14,7 +14,7 @@ use crate::object_3d::ComponentArrayExt;
 
 use super::{EqlBinding, GaugePane};
 use crate::ui::{
-    monitor::render_value_cards,
+    colors::get_scheme,
     theme,
     widgets::{SystemStateExt, WidgetSystem},
 };
@@ -131,9 +131,53 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
                     .collect();
 
                 ui.add_space(4.0);
-                render_value_cards(ui, &cards);
+                render_position_cards(ui, &cards);
             });
     }
+}
+
+/// Lay the coordinate values out as cards: a single horizontal row that fills
+/// the width when the pane is expanded, stacking vertically when it is too
+/// narrow to read a row.
+fn render_position_cards(ui: &mut egui::Ui, cards: &[(String, String)]) {
+    if cards.is_empty() {
+        return;
+    }
+    // Below ~90px per card a horizontal row gets too cramped to read; stack.
+    let cols_n = if ui.available_width() >= 90.0 * cards.len() as f32 {
+        cards.len()
+    } else {
+        1
+    };
+    ui.columns(cols_n, |cols| {
+        for (i, (label, value)) in cards.iter().enumerate() {
+            position_card(&mut cols[i % cols_n], label, value);
+        }
+    });
+}
+
+/// A single labelled value card (component-monitor styling, gauge sizing).
+fn position_card(ui: &mut egui::Ui, label: &str, value: &str) {
+    let scheme = get_scheme();
+    egui::Frame::NONE
+        .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .outer_margin(egui::Margin::same(2))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(label)
+                    .size(11.0)
+                    .monospace()
+                    .color(scheme.text_secondary),
+            );
+            ui.label(
+                egui::RichText::new(value)
+                    .size(15.0)
+                    .monospace()
+                    .color(scheme.text_primary),
+            );
+        });
 }
 
 /// Extract a position (metres) from a component value for the position gauge.
