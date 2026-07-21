@@ -11,10 +11,18 @@ use math::*;
 use profile::AscentProfile;
 use std::net::UdpSocket;
 
-const STATE_FLOATS: usize = 46;
+const STATE_FLOATS: usize = 49;
 const CMD_FLOATS: usize = 27;
 const N_ENGINES: usize = 9;
 const N_VALVES: usize = 8;
+/// Max attitude-setpoint slew (rad/s) — smooths AeroDescent→LandingBurn handoff.
+/// Fast enough that a ~20° ignition step settles in <1 s (avoids a long AoA spike).
+const ATT_SLEW_RADPS: f64 = 0.70;
+/// Fin effectiveness priors matching aero.py (EST).
+const FIN_S_M2: f64 = 1.5;
+const FIN_CN_DELTA: f64 = 1.2;
+const FIN_LEVER_M: f64 = 22.0;
+const FIN_I_TRANS: f64 = 1.5e7; // kg·m² pitch/yaw inertia proxy at landing mass
 
 // Valve indices (mirror sim.py).
 const V_HE_LOX: usize = 0;
@@ -101,6 +109,13 @@ struct GuidanceParams {
     /// Boostback three-engine throttle (the recorded burn decelerates at
     /// ~27 m/s^2 — a throttled burn, not full thrust).
     boostback_throttle: f64,
+    /// Fin attitude-loop natural frequency (rad/s); torque is divided by
+    /// q̄·effectiveness so closed-loop bandwidth is q̄-invariant.
+    fin_wn: f64,
+    /// Landing-burn lateral approach-speed cap (m/s) while alt > 1 km.
+    divert_speed_cap: f64,
+    /// Aero-descent cross-track tilt cap (rad) at low q̄; scheduled down as q̄ rises.
+    steer_tilt_cap: f64,
 }
 
 impl SensorPacket {
@@ -137,6 +152,9 @@ impl SensorPacket {
                 entry_ignite_alt_m: v[39],
                 fsw_cd_s_m2: v[40],
                 boostback_throttle: v[41],
+                fin_wn: if v[46] > 0.1 { v[46] } else { 1.4 },
+                divert_speed_cap: if v[47] > 1.0 { v[47] } else { 35.0 },
+                steer_tilt_cap: if v[48] > 0.01 { v[48] } else { 0.15 },
             },
             landed: v[43],
         }
@@ -255,6 +273,9 @@ struct Fsw {
     /// The designed ascent reference: the recorded webcast profile.
     ascent_profile: Option<AscentProfile>,
     t_liftoff: f64,
+    /// Previous attitude command (for slew limiting).
+    att_cmd: Quat,
+    att_cmd_init: bool,
 }
 
 impl Fsw {
@@ -277,7 +298,29 @@ impl Fsw {
                 .ok()
                 .and_then(|p| AscentProfile::load(&p)),
             t_liftoff: -1.0,
+            att_cmd: QUAT_IDENT,
+            att_cmd_init: false,
         }
+    }
+
+    /// Slew-limit the attitude setpoint toward `desired` (max ATT_SLEW_RADPS).
+    fn slew_attitude(&mut self, desired: Quat, dt: f64) -> Quat {
+        if !self.att_cmd_init {
+            self.att_cmd = desired;
+            self.att_cmd_init = true;
+            return desired;
+        }
+        // Angle of the relative quaternion q_err = conj(prev) * desired.
+        let q_err = quat_mul(quat_conj(self.att_cmd), desired);
+        let (axis, angle) = quat_to_axis_angle(q_err);
+        let max_step = ATT_SLEW_RADPS * dt.max(1e-3);
+        if angle <= max_step {
+            self.att_cmd = desired;
+        } else {
+            self.att_cmd = quat_mul(self.att_cmd, quat_from_axis_angle(axis, max_step));
+            self.att_cmd = quat_normalize(self.att_cmd);
+        }
+        self.att_cmd
     }
 
     fn set_phase(&mut self, p: Phase, t: f64) {
@@ -524,8 +567,9 @@ impl Fsw {
                 // Retrograde, tilted to steer the drag vector toward LZ-1.
                 let steer = self.descent_steer(s, up_here);
                 let retro = normalize(add(scale(normalize(self.nav.vel), -1.0), steer));
-                cmd.attitude = quat_between([1.0, 0.0, 0.0], retro);
-                cmd.fins = self.fin_attitude_pd(retro, s);
+                let desired = quat_between([1.0, 0.0, 0.0], retro);
+                cmd.attitude = self.slew_attitude(desired, 0.01);
+                cmd.fins = self.fin_attitude_pd(retro, s, false);
                 // Hoverslam ignition (WHITEPAPER 11.5): ignite when the
                 // descent rate reaches the three-engine opening profile,
                 // charging ~2.5 s of spool-up distance against the altitude.
@@ -557,8 +601,11 @@ impl Fsw {
                 cmd.valves[V_TEATEB] = 1.0;
                 cmd.tvc_enable = 1.0;
                 cmd.rcs_enable = 1.0;
-                cmd.attitude = self.landing_attitude(up_here);
-                cmd.fins = self.fin_attitude_pd(quat_rotate(cmd.attitude, [1.0, 0.0, 0.0]), s);
+                let desired = self.landing_attitude(up_here, s);
+                cmd.attitude = self.slew_attitude(desired, 0.01);
+                // TVC owns pitch/yaw; fins are rate-damping only (no dual PD).
+                let body_x = quat_rotate(cmd.attitude, [1.0, 0.0, 0.0]);
+                cmd.fins = self.fin_attitude_pd(body_x, s, true);
                 // Descent-rate profile follower (WHITEPAPER 11.5): track
                 // v_des(h) = sqrt(2 a_land h) + v_td; a rate loop turns the
                 // error into thrust. Never tries to hover (T_min/W > 1).
@@ -586,7 +633,7 @@ impl Fsw {
                 } else {
                     (1.0, a_mid)
                 };
-                let v_des = (2.0 * a_land * h).sqrt() + 1.6;
+                let v_des = (2.0 * a_land * h).sqrt() + 1.2;
                 let a_cmd = (9.81 + 3.2 * (vdown - v_des)).max(0.0);
                 // The rate loop demands VERTICAL acceleration; divide by the
                 // commanded tilt's cosine so a diverting attitude does not
@@ -695,12 +742,10 @@ impl Fsw {
         (along, cross_sign * norm(cross_vec))
     }
 
-    /// Cross-course steering tilt (drag-vector steering; WHITEPAPER 11.4).
-    /// CROSS-COURSE ONLY: with the engines-first tables (C_A > C_N), any
-    /// angle of attack lowers total deceleration, so "steering" along the
-    /// course always lands longer — the along-course error is owned by the
-    /// boostback aim bias instead. Tilt is capped at ~8.5 deg, the AoA the
-    /// fins can statically hold against the body's restoring moment.
+    /// Drag-vector steering during aero descent (WHITEPAPER 11.4).
+    /// Cross-track PD plus along-track AoA modulation. Engines-first CA > CN
+    /// so any AoA lowers total deceleration (stretches the IIP). Tilt cap is
+    /// scheduled down at high q̄ so Max-Q passes near zero AoA.
     fn descent_steer(&self, s: &SensorPacket, up: V3) -> V3 {
         let iip = self.impact_point(s);
         let miss = sub(self.lz1_pos, iip);
@@ -708,40 +753,67 @@ impl Fsw {
         let v_h = sub(self.nav.vel, scale(up, dot(self.nav.vel, up)));
         let course = normalize(v_h);
         let cross_err = sub(miss_h, scale(course, dot(miss_h, course)));
-        // PD in tilt space: position term plus damping on the cross-course
-        // velocity the steering itself builds (an undamped position-only
-        // steer overshoots and hands the landing burn a lateral drift).
-        // Rate of the cross error: the vehicle's own cross-course velocity.
         let cross_vel = sub(v_h, scale(course, dot(v_h, course)));
         let pd = sub(
-            scale(cross_err, 1.0 / 4_000.0),
-            scale(cross_vel, 1.0 / 60.0),
+            scale(cross_err, 1.0 / 2_500.0),
+            scale(cross_vel, 1.0 / 50.0),
         );
         let mag = norm(pd);
-        if norm(cross_err) < 100.0 && norm(cross_vel) < 2.0 {
-            return [0.0; 3];
-        }
-        let tilt = mag.min(0.15);
-        scale(normalize(pd), -tilt)
+        let speed = self.nav.speed();
+        let qbar = 0.5 * density(self.nav.altitude()) * speed * speed;
+        // Full steer_tilt_cap below ~25 kPa; fade toward ~0.03 rad by 60 kPa+.
+        let base_cap = s.params.steer_tilt_cap;
+        // Full authority below ~30 kPa; fade toward 0.04 rad by 70 kPa+.
+        let tilt_cap = (base_cap * (30_000.0 / qbar.max(5_000.0))).clamp(0.04, base_cap);
+        let (along, _) = self.iip_miss_components(s, up);
+        let cross_quiet = norm(cross_err) < 80.0 && norm(cross_vel) < 2.0;
+        let tilt = if cross_quiet { 0.0 } else { mag.min(tilt_cap) };
+        // Positive tilt along the PD direction deflects the drag vector toward
+        // the target (fins have the correct plant sign on pitch).
+        let cross_dir = if tilt > 1e-6 {
+            scale(normalize(pd), tilt)
+        } else {
+            [0.0; 3]
+        };
+        // Along-track drag modulation: only add AoA when undershooting
+        // (stretch range). Overshoot → 0 (max CA drag).
+        let aoa_along = (along / 8_000.0).clamp(0.0, 0.10);
+        let retro = scale(normalize(self.nav.vel), -1.0);
+        let lift_dir = normalize(sub(course, scale(retro, dot(course, retro))));
+        let along_tilt = scale(lift_dir, aoa_along);
+        add(cross_dir, along_tilt)
     }
 
-    /// FSW-side fin PD: hold the commanded body-axis direction with the grid
-    /// fins (pitch/yaw from the pointing error, roll damped from the gyro).
-    fn fin_attitude_pd(&self, desired_dir: V3, s: &SensorPacket) -> [f64; 3] {
+    /// Torque-based fin PD: desired angular acceleration → deflection via
+    /// q̄·effectiveness, so closed-loop bandwidth stays near `fin_wn` across
+    /// the descent q̄ range. `rate_only` drops the attitude term (LandingBurn
+    /// under TVC — fins damp residual rates only).
+    fn fin_attitude_pd(&self, desired_dir: V3, s: &SensorPacket, rate_only: bool) -> [f64; 3] {
         let x_body = quat_rotate(self.nav.att, [1.0, 0.0, 0.0]);
-        let err_world = cross(x_body, desired_dir); // rotation axis * sin(err)
+        let err_world = cross(x_body, desired_dir);
         let err_body = quat_rotate_inv(self.nav.att, err_world);
-        let kp = 1.2;
-        let kd = 0.8;
-        // err about body Y drives pitch fins; about body Z drives yaw fins.
-        let pitch = kp * err_body[1] - kd * s.imu_gyro[1];
-        let yaw = kp * err_body[2] - kd * s.imu_gyro[2];
-        let roll = -kd * s.imu_gyro[0];
-        [
-            pitch.clamp(-0.35, 0.35),
-            yaw.clamp(-0.35, 0.35),
-            roll.clamp(-0.35, 0.35),
-        ]
+        let wn = s.params.fin_wn;
+        let zeta = 0.85;
+        let err = if rate_only {
+            [0.0, 0.0, 0.0]
+        } else {
+            err_body
+        };
+        let alpha = [
+            wn * wn * err[0] - 2.0 * zeta * wn * s.imu_gyro[0],
+            wn * wn * err[1] - 2.0 * zeta * wn * s.imu_gyro[1],
+            wn * wn * err[2] - 2.0 * zeta * wn * s.imu_gyro[2],
+        ];
+        let speed = self.nav.speed().max(1.0);
+        let qbar = 0.5 * density(self.nav.altitude()) * speed * speed;
+        // Floor keeps authority in thin air; pair of fins × lever.
+        let q_eff = qbar.max(2_000.0);
+        // Plant mapping (aero.fin_mix / fin_wrench): +pitch → −My, +yaw → +Mz.
+        let k_defl = 2.0 * q_eff * FIN_S_M2 * FIN_CN_DELTA * FIN_LEVER_M;
+        let pitch = (-FIN_I_TRANS * alpha[1] / k_defl).clamp(-0.35, 0.35);
+        let yaw = (FIN_I_TRANS * alpha[2] / k_defl).clamp(-0.35, 0.35);
+        let roll = (FIN_I_TRANS * alpha[0] / k_defl).clamp(-0.35, 0.35);
+        [pitch, yaw, roll]
     }
 
     fn landing_accel_net(&self, s: &SensorPacket, n_engines: f64) -> f64 {
@@ -755,54 +827,50 @@ impl Fsw {
 
     /// Landing-burn thrust direction: velocity-retrograde while fast (a
     /// retro burn brakes every component together), blending to vertical
-    /// with a lateral PD tilt for the letdown. The PD is critically damped
-    /// in acceleration space, its position gain fades below 250 m (null
-    /// drift and land where you are), and both segments carry the tilt so
-    /// the divert never steps at the blend.
-    fn landing_attitude(&self, up: V3) -> Quat {
+    /// with a lateral PD tilt for the letdown. Approach-speed cap is higher
+    /// early (alt > 1 km) so a kilometer-class miss can still be nullified;
+    /// position authority fades below 400 m for a soft touchdown.
+    fn landing_attitude(&self, up: V3, s: &SensorPacket) -> Quat {
         let miss = sub(self.lz1_pos, self.nav.pos);
         let miss_h = sub(miss, scale(up, dot(miss, up)));
         let v_lat = sub(self.nav.vel, scale(up, dot(self.nav.vel, up)));
         let alt = ecef_to_geodetic(self.nav.pos).2;
-        // Authority-aware lateral guidance: the tilt cap (~14 deg) at the
-        // burn's ~1.5 g axial acceleration buys only ~3.5 m/s^2 laterally,
-        // so a plain PD would saturate and never converge. Instead fly a
-        // braking-limited approach-speed profile toward the target,
-        //   |v_des| = 0.8 sqrt(2 a_avail |miss|)  (capped),
-        // and command lateral acceleration against that profile. Position
-        // authority fades below 150 m: null drift, land where you are.
         let a_axial: f64 = 15.0;
         let tilt_cap: f64 = 0.25;
         let a_avail = a_axial * tilt_cap.tan();
         let miss_mag = norm(miss_h);
-        // Approach speed stays gentle (<= 18 m/s) and fades from 400 m so
-        // the drift-null has time to finish: a hot lateral approach would
-        // trade miss distance for lateral impact speed one-for-one.
         let pos_fade = (alt / 400.0).clamp(0.0, 1.0);
-        let v_des_mag = (0.7 * (2.0 * a_avail * miss_mag).sqrt()).min(18.0) * pos_fade;
+        // Finish the divert higher up while thrust is high; last 400 m only
+        // damps residual lateral (gentle gain — high kd bang-bangs through 0
+        // and rebuilds v_lat the other way).
+        let speed_cap = if alt > 1_000.0 {
+            s.params.divert_speed_cap
+        } else if alt > 400.0 {
+            s.params.divert_speed_cap.min(18.0)
+        } else {
+            0.0
+        };
+        let v_des_mag = (0.7 * (2.0 * a_avail * miss_mag).sqrt()).min(speed_cap) * pos_fade;
         let v_des = if miss_mag > 1.0 {
             scale(normalize(miss_h), v_des_mag)
         } else {
             [0.0; 3]
         };
-        // Drift-null gain doubles for the final letdown (large tilt is safe
-        // once vertical speed is small, and touchdown lateral is scored
-        // against a 1 m/s target).
-        let kd_lat = if alt < 120.0 { 1.6 } else { 0.8 };
-        let a_lat_cmd = scale(sub(v_des, v_lat), kd_lat);
+        let kd_lat = if alt < 400.0 { 0.9 } else { 0.8 };
+        let mut a_lat_cmd = scale(sub(v_des, v_lat), kd_lat);
+        // Deadband once lateral is soft — high kd bang-bangs through zero and
+        // rebuilds v_lat the other way in the last 100 m.
+        if speed_cap <= 0.0 && norm(v_lat) < 1.2 {
+            a_lat_cmd = [0.0; 3];
+        }
         let a_lat_capped = if norm(a_lat_cmd) > a_avail {
             scale(normalize(a_lat_cmd), a_avail)
         } else {
             a_lat_cmd
         };
         let tilt_vec = scale(a_lat_capped, 1.0 / a_axial);
-        // Stay retrograde down to ~60 m/s: retro braking removes lateral
-        // velocity in proportion to the total (and gravity steepens the
-        // path); the letdown then inherits ~15 m/s of drift, which the PD
-        // authority (~4 m/s^2 over the remaining ~20 s) comfortably nulls,
-        // and the vehicle arrives upright for touchdown.
         let speed = self.nav.speed();
-        let w = ((60.0 - speed) / 40.0).clamp(0.0, 1.0);
+        let w = ((90.0 - speed) / 50.0).clamp(0.0, 1.0);
         let retro = normalize(add(scale(normalize(self.nav.vel), -1.0), tilt_vec));
         let vertical = normalize(add(up, tilt_vec));
         let dir = normalize(add(scale(retro, 1.0 - w), scale(vertical, w)));

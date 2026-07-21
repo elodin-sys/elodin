@@ -32,7 +32,7 @@ pitch_exp = { dist = "uniform", min = 0.4, max = 0.75 }
 meco_speed_mps = { dist = "uniform", min = 1630.0, max = 1680.0 }
 azimuth_deg = { dist = "uniform", min = 40.0, max = 50.0 }
 # Recovery guidance
-boostback_overshoot_m = { dist = "uniform", min = -2000.0, max = 4000.0 }
+boostback_overshoot_m = { dist = "uniform", min = -2500.0, max = -500.0 }
 entry_ignite_speed_mps = { dist = "uniform", min = 1220.0, max = 1380.0 }
 entry_ignite_alt_m = { dist = "uniform", min = 46000.0, max = 56000.0 }
 entry_dv_mps = { dist = "uniform", min = 320.0, max = 430.0 }
@@ -42,3 +42,7 @@ landing_accel_margin = { dist = "uniform", min = 1.05, max = 1.45 }
 fsw_cd_s_m2 = { dist = "uniform", min = 15.0, max = 45.0 }
 # Recorded boostback decel ~27 m/s^2 implies a throttled 3-engine burn.
 boostback_throttle = { dist = "uniform", min = 0.57, max = 0.85 }
+# Descent controller (q̄-invariant fin loop + divert / steer authority).
+fin_wn = { dist = "uniform", min = 0.9, max = 2.2 }
+divert_speed_cap = { dist = "uniform", min = 22.0, max = 45.0 }
+steer_tilt_cap = { dist = "uniform", min = 0.14, max = 0.24 }

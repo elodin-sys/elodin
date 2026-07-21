@@ -331,33 +331,31 @@ falcon9-fsw` if a campaign refuses to start.
 
 ## Calibration Results
 
-Seventeen 24-run LHS campaign rounds (fixed seed, narrow-around-best loop via
-`calibrate.py`) against the recorded CRS-12 flight. The calibrated best-fit
-parameters are baked into `main.py` as the defaults, so a plain run flies the
-calibrated vehicle. Nominal calibrated run vs the parity targets:
+Vehicle physics were calibrated over seventeen 24-run LHS rounds (fixed seed,
+`calibrate.py` narrow-around-best) against CRS-12. A later landing-controller
+pass added pitch/yaw aero damping (`Cmq` on body length), a q̄-invariant fin
+loop, landing-burn TVC/fin coordination, and a two-leg truth-ghost track to
+LZ-1; recovery tunables (`boostback_overshoot_m`, `fin_wn`,
+`divert_speed_cap`, `steer_tilt_cap`) were re-frozen against nominal + a
+focused landing MC (`spec.landing.toml`). Defaults in `main.py` fly that
+vehicle. Nominal run vs targets:
 
 | Metric | Target | Achieved (calibrated nominal) |
 |---|---:|---:|
 | Event: MECO | ±3 s | **+0.2 s** |
 | Event: entry-burn ignition | ±3 s | **+2.7 s** |
-| Event: landing-burn ignition | ±3 s | −7.2 s |
-| Event: touchdown | ±3 s | **−0.4 s** |
-| Speed RMSE (display space) | ≤ 15 m/s | 51 m/s (3.1% of peak; best run 42) |
-| Altitude RMSE (display space) | ≤ 150 m | 1,355 m (best run 310) |
-| Touchdown vertical / lateral | ≤ 2 / ≤ 1 m/s | 3.3 / 4.7 m/s |
-| Touchdown position error | ≤ 500 m | 1.53 km (best campaign run 66 m) |
+| Event: landing-burn ignition | ±3 s | **~+1 s** |
+| Event: touchdown | ±3 s | **~+1 s** |
+| Speed RMSE (display space) | ≤ 15 m/s | ~48 m/s (display-lag ascent still dominates residual) |
+| Altitude RMSE (display space) | ≤ 150 m | ~1,375 m |
+| Touchdown vertical / lateral | ≤ 2 / ≤ 4 m/s | **~1.0 / ~3.8 m/s** (`soft_landing: true`) |
+| Touchdown position error | ≤ ~30 m (on deck) | **~28 m** |
+| Descent max \|ω_yz\| / AoA (aero, &lt;30 km) | &lt; 10°/s / &lt; 12° | **~4.2°/s / ~12°** |
 | Purge after every cutoff | 4 | **4** |
-| Descent q̄ peak (recon ~60 kPa) | 40–120 kPa | **82 kPa** |
+| Descent q̄ peak (recon ~60 kPa) | 40–120 kPa | **~78 kPa** |
 
-Where the remaining residual lives (measured per segment): ascent tracks the
-recorded profile at ~8 m/s RMSE; the recovery segments (boostback shaping,
-coast arc, entry-burn placement) carry ~45–75 m/s and dominate. The **CRS-11
-holdout** (frozen vehicle, mission gates re-derived from its own profile)
-completes the full mission and lands intact ~1 km from LZ-1 with all event
-structure preserved, but its trajectory RMSE degrades ~4× — the recovery
-*guidance shape* is partially overfit to CRS-12's loft. Both honest gaps
-point at the same next lever: replace the parametric boostback/entry gates
-with recovery-profile tracking (the ascent already does this), and refine the
-engines-first aero tables. The campaign report
-(`post_campaign/falcon9_report.txt`) and `calibrate.py` make each iteration a
-five-minute loop.
+The green truth ghost now lerps from boostback reversal to LZ-1 so it sets
+down on the barge with the booster. Remaining RMSE is still in the recovery
+energy/shape gates (boostback / entry), not the fin limit cycle — that was
+killed by length-referenced `Cmq` damping plus the torque-based fin schedule.
+Focused landing campaigns: `spec.landing.toml` + `calibrate.py rank`.

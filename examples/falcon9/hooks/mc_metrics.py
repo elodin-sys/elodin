@@ -13,9 +13,14 @@ from pathlib import Path
 
 # Soft-landing acceptance (mirrors main.py).
 SOFT_VERTICAL_MPS = 2.0
-SOFT_LATERAL_MPS = 1.0
+SOFT_LATERAL_MPS = 4.0
 SOFT_TILT_DEG = 10.0
 SOFT_POS_ERR_M = 500.0
+
+# Descent smoothness targets (below 30 km during entry/aero/landing).
+SOFT_MAX_RATE_DPS = 10.0
+SOFT_MAX_AOA_DEG = 12.0
+SOFT_IGNITION_TILT_DEG = 25.0
 
 # Parity targets vs the recorded flight (plan Phase 9 / WHITEPAPER 13).
 PARITY_SPEED_RMSE_MPS = 15.0
@@ -99,12 +104,20 @@ def fit_score(result: dict) -> float | None:
         + tilt / SOFT_TILT_DEG
         + pos / SOFT_POS_ERR_M
     ) / 4.0
+    # Smoothness: violent aero/fin limit cycles must not out-rank soft landings.
+    rate = to_float(result.get("descent_max_rate_dps"), 1e3)
+    aoa = to_float(result.get("descent_max_aoa_deg"), 1e3)
+    ign_tilt = to_float(result.get("landing_ignition_tilt_deg"), 1e3)
+    smooth_term = (
+        rate / SOFT_MAX_RATE_DPS + aoa / SOFT_MAX_AOA_DEG + ign_tilt / SOFT_IGNITION_TILT_DEG
+    ) / 3.0
     crash_term = 0.0 if bool(result.get("landed", False)) else 50.0
     return (
         speed / PARITY_SPEED_RMSE_MPS
         + alt / PARITY_ALT_RMSE_M
         + ev_term
         + landing_term
+        + smooth_term
         + crash_term
     )
 

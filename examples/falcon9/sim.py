@@ -289,6 +289,13 @@ TouchdownMetrics = ty.Annotated[
     jax.Array,
     el.Component("touchdown_metrics", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
+# Descent dynamics latched during recovery (alt < 30 km, phase ≥ entry):
+# [max |ω_yz| rad/s, max AoA deg, tilt_deg at landing-burn ignition,
+#  lateral speed m/s when first crossing 100 m].
+DescentMetrics = ty.Annotated[
+    jax.Array,
+    el.Component("descent_metrics", el.ComponentType(el.PrimitiveType.F64, (4,))),
+]
 # Wrench audits: [force_body(3), torque_body(3)] per effector (WHITEPAPER 5.3).
 AeroWrench = ty.Annotated[
     jax.Array,
@@ -563,11 +570,18 @@ def make_aero_dynamics(ca_scale: float = 1.0, cn_scale: float = 1.0) -> el.Syste
         a_sound = atmosphere.speed_of_sound(alt)
         v_air_ecef = vel.linear() - wind
         v_air_body = pos.angular().inverse() @ v_air_ecef
+        omega_body = pos.angular().inverse() @ vel.angular()
         speed = jnp.linalg.norm(v_air_body)
         qbar = 0.5 * rho * speed**2
         mach = speed / a_sound
         f_aero, t_aero = aero.body_aero_wrench(
-            v_air_body, mach, qbar, cg[0], ca_scale=ca_scale, cn_scale=cn_scale
+            v_air_body,
+            mach,
+            qbar,
+            cg[0],
+            omega_body=omega_body,
+            ca_scale=ca_scale,
+            cn_scale=cn_scale,
         )
         kappa = aero.plume_dominance(thrust[0], qbar)
         f_aero = f_aero * (1.0 - kappa)
@@ -692,6 +706,48 @@ def ground_contact(
         jnp.array([jnp.where(landed_now, 1.0, 0.0)]),
         latched,
     )
+
+
+@el.map
+def descent_metrics_latch(
+    pos: el.WorldPos,
+    vel: el.WorldVel,
+    phase: FswPhase,
+    metrics: DescentMetrics,
+) -> DescentMetrics:
+    """Latch recovery smoothness / divert metrics for MC scoring."""
+    r = pos.linear()
+    lat, lon, alt = ecef_to_geodetic(r)
+    sin_lat, cos_lat = jnp.sin(lat), jnp.cos(lat)
+    sin_lon, cos_lon = jnp.sin(lon), jnp.cos(lon)
+    up = jnp.array([cos_lat * cos_lon, cos_lat * sin_lon, sin_lat])
+    v = vel.linear()
+    body_x = pos.angular() @ jnp.array([1.0, 0.0, 0.0])
+    omega_body = pos.angular().inverse() @ vel.angular()
+    omega_yz = jnp.linalg.norm(omega_body[1:])
+    speed = jnp.linalg.norm(v)
+    v_hat = v / jnp.maximum(speed, 1e-6)
+    # Engines-first AoA: angle between body +X and −velocity (retrograde).
+    aoa_deg = jnp.rad2deg(jnp.arccos(jnp.clip(jnp.dot(body_x, -v_hat), -1.0, 1.0)))
+    tilt_deg = jnp.rad2deg(jnp.arccos(jnp.clip(jnp.dot(body_x, up), -1.0, 1.0)))
+    v_up = jnp.dot(v, up)
+    v_lat = jnp.linalg.norm(v - v_up * up)
+
+    # metrics[0]/[1] seed at 0; [2]/[3] use -1 as "not yet latched".
+    # Smoothness window: aero descent below 30 km (the fin/aero limit-cycle
+    # regime). Landing-burn divert AoA is intentional and scored via ignition
+    # tilt + touchdown metrics instead.
+    in_aero = (phase[0] >= 9.0) & (phase[0] < 10.0) & (alt < 30_000.0) & (speed > 1.0)
+    max_omega = jnp.maximum(jnp.maximum(metrics[0], 0.0), jnp.where(in_aero, omega_yz, 0.0))
+    max_aoa = jnp.maximum(jnp.maximum(metrics[1], 0.0), jnp.where(in_aero, aoa_deg, 0.0))
+
+    entering_burn = (phase[0] >= 10.0) & (phase[0] < 11.0) & (metrics[2] < 0.0)
+    ign_tilt = jnp.where(entering_burn, tilt_deg, metrics[2])
+
+    cross_100 = (alt <= 100.0) & (alt > 0.0) & (phase[0] >= 10.0) & (metrics[3] < 0.0)
+    vlat_100 = jnp.where(cross_100, v_lat, metrics[3])
+
+    return jnp.array([max_omega, max_aoa, ign_tilt, vlat_100])
 
 
 @el.system
@@ -960,6 +1016,11 @@ def make_truth_playback(ref, display_lag_s: float = 0.0) -> el.System:
     `display_lag_s` models the webcast overlay latency (WHITEPAPER 12.3):
     the recorded series lags reality, so reality at liftoff-relative time t
     corresponds to data sample (t + lag).
+
+    Two-leg ground track (viz aid): the webcast gives only a signed 1-D
+    downrange scalar. Ascent is plotted along the ascent azimuth; after the
+    boostback reversal the horizontal position lerps from the reversal
+    ground point to LZ-1 so the ghost touches down on the barge.
     """
     lag = float(display_lag_s)
     ref_t = jnp.asarray(ref.time_s)
@@ -967,9 +1028,16 @@ def make_truth_playback(ref, display_lag_s: float = 0.0) -> el.System:
     ref_alt = jnp.asarray(ref.altitude_m)
     ref_dr = jnp.asarray(ref.downrange_m)
     pad = pad_ecef()
+    lz1 = lz1_ecef()
     up = jnp.asarray(PAD_UP)
     track = jnp.asarray(PAD_TRACK_DIR)
     ghost_att = upright_attitude()
+    dr_peak = float(jnp.max(ref_dr))
+    dr_final = float(ref_dr[-1])
+    # Horizontal pad→LZ-1 (drop the local-up component).
+    lz1_delta = lz1 - pad
+    lz1_horiz = lz1_delta - up * jnp.dot(lz1_delta, up)
+    reversal_horiz = track * dr_peak
 
     @el.system
     def truth_playback(
@@ -986,7 +1054,14 @@ def make_truth_playback(ref, display_lag_s: float = 0.0) -> el.System:
         alt = jnp.interp(t_ref, ref_t, ref_alt)
         speed = jnp.interp(t_ref, ref_t, ref_speed)
         downrange = jnp.interp(t_ref, ref_t, ref_dr)
-        pose = el.SpatialTransform(angular=ghost_att, linear=pad + up * alt + track * downrange)
+        # After reversal (downrange falling from its peak), lerp to LZ-1.
+        denom = jnp.maximum(dr_peak - dr_final, 1.0)
+        progress = jnp.clip((dr_peak - downrange) / denom, 0.0, 1.0)
+        after = downrange < (dr_peak - 1.0)
+        horiz_ascent = track * downrange
+        horiz_return = (1.0 - progress) * reversal_horiz + progress * lz1_horiz
+        horiz = jnp.where(after, horiz_return, horiz_ascent)
+        pose = el.SpatialTransform(angular=ghost_att, linear=pad + up * alt + horiz)
         return truth.map(
             (el.WorldPos, AltitudeGeodetic, GroundSpeed),
             lambda _m: (pose, jnp.array([alt]), jnp.array([speed])),
@@ -1178,6 +1253,7 @@ def build_powered(
             el.C(Lifted, jnp.array([0.0 if on_pad else 1.0])),
             el.C(LiftoffTime, jnp.array([0.0])),
             el.C(TouchdownMetrics, jnp.zeros(3)),
+            el.C(DescentMetrics, jnp.array([0.0, 0.0, -1.0, -1.0])),
             *booster_propulsion_components(lox_kg, rp1_kg),
         ],
         name="booster",
@@ -1188,6 +1264,7 @@ def build_powered(
         | el.six_dof(sys=effectors, integrator=integrator)
         | pad_clamp
         | ground_contact
+        | descent_metrics_latch
     )
     system = (extra_systems | plant) if extra_systems is not None else plant
     return world, system | derive_geodetic_telemetry | effect_visualization | sensor_systems()

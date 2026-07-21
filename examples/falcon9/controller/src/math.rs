@@ -93,6 +93,21 @@ pub fn quat_from_axis_angle(axis: V3, angle: f64) -> Quat {
     [a[0] * s, a[1] * s, a[2] * s, c]
 }
 
+/// Axis-angle of a unit quaternion (shortest arc, angle in [0, π]).
+pub fn quat_to_axis_angle(q: Quat) -> (V3, f64) {
+    let q = if q[3] < 0.0 {
+        [-q[0], -q[1], -q[2], -q[3]]
+    } else {
+        q
+    };
+    let sin_half = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt();
+    if sin_half < 1e-12 {
+        return ([1.0, 0.0, 0.0], 0.0);
+    }
+    let angle = 2.0 * sin_half.atan2(q[3]);
+    ([q[0] / sin_half, q[1] / sin_half, q[2] / sin_half], angle)
+}
+
 /// Integrate body-frame angular rate over dt: q <- q * exp(omega dt / 2).
 pub fn quat_integrate(q: Quat, omega_body: V3, dt: f64) -> Quat {
     let angle = norm(omega_body) * dt;

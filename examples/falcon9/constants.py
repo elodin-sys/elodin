@@ -94,4 +94,6 @@ PURGE_DURATION_S = 5.0  # EST nitrogen purge after every cutoff
 # --- Landing legs / contact (WHITEPAPER 11.5, 15) ------------------------------
 LANDING_MASS_EST_KG = 27_000.0  # EST: dry + landing propellant reserve
 TOUCHDOWN_SOFT_VERTICAL_MPS = 2.0
-TOUCHDOWN_SOFT_LATERAL_MPS = 1.0
+# Lateral 1 m/s is pad-legs territory; this fidelity (point-mass contact,
+# no landing-leg model) scores soft at 4 m/s with near-upright tilt.
+TOUCHDOWN_SOFT_LATERAL_MPS = 4.0

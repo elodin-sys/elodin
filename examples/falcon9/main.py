@@ -36,7 +36,7 @@ from frames import ecef_to_geodetic, geodetic_to_ecef, ned_basis
 from reference import build_reference
 from sim import SIM_TIME_STEP, build_mission
 
-STATE_FLOATS = 46
+STATE_FLOATS = 49
 CMD_FLOATS = 27
 DEFAULT_STATE_PORT = 9114
 DEFAULT_COMMAND_PORT = 9115
@@ -71,7 +71,7 @@ PARAMS = el.monte_carlo.params_spec(
     azimuth_deg=el.monte_carlo.Param(float, default=47.67, min=35.0, max=55.0),
     # Boostback aim bias along the approach course (positive aims past
     # LZ-1; the descent system lands short of the ballistic aim).
-    boostback_overshoot_m=el.monte_carlo.Param(float, default=-407.0, min=-4_000.0, max=6_000.0),
+    boostback_overshoot_m=el.monte_carlo.Param(float, default=-1_450.0, min=-4_000.0, max=6_000.0),
     entry_ignite_speed_mps=el.monte_carlo.Param(float, default=1_297.2, min=1_100.0, max=1_400.0),
     entry_dv_mps=el.monte_carlo.Param(float, default=350.0, min=280.0, max=450.0),
     landing_accel_margin=el.monte_carlo.Param(float, default=1.273, min=1.0, max=1.6),
@@ -84,6 +84,10 @@ PARAMS = el.monte_carlo.params_spec(
     # Full-throttle boostback fit the recorded profile best (a throttled burn
     # lengthens the reversal and degrades every downstream segment).
     boostback_throttle=el.monte_carlo.Param(float, default=1.0, min=0.85, max=1.0),
+    # Descent controller (q̄-invariant fin loop + divert authority).
+    fin_wn=el.monte_carlo.Param(float, default=1.5, min=0.8, max=2.5),
+    divert_speed_cap=el.monte_carlo.Param(float, default=34.0, min=18.0, max=50.0),
+    steer_tilt_cap=el.monte_carlo.Param(float, default=0.21, min=0.10, max=0.25),
 )
 
 params = el.monte_carlo.params(PARAMS)
@@ -140,7 +144,12 @@ GUIDANCE_KEYS = (
     "fsw_cd_s_m2",
     "boostback_throttle",
 )
-guidance_values = [float(get_param(k)) for k in GUIDANCE_KEYS]
+# Contiguous UDP block (indices 22..41). New descent tunables ride at 46..48.
+GUIDANCE_KEYS_CORE = GUIDANCE_KEYS
+guidance_values = [float(get_param(k)) for k in GUIDANCE_KEYS_CORE]
+fin_wn = float(get_param("fin_wn", 1.4))
+divert_speed_cap = float(get_param("divert_speed_cap", 35.0))
+steer_tilt_cap = float(get_param("steer_tilt_cap", 0.15))
 
 lox_kg = float(get_param("lox_kg", LOX_LOAD_KG))
 rp1_kg = float(get_param("rp1_kg", RP1_LOAD_KG))
@@ -253,6 +262,7 @@ READS = [
     "booster.nitrogen_kg",
     "booster.fsw_phase",
     "booster.touchdown_metrics",
+    "booster.descent_metrics",
     "booster.qbar",
 ]
 
@@ -279,6 +289,9 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
     state[21] = reads["booster.propellant_rp1"][0]
     state[22 : 22 + len(guidance_values)] = guidance_values
     state[43] = reads["booster.landed"][0]
+    state[46] = fin_wn
+    state[47] = divert_speed_cap
+    state[48] = steer_tilt_cap
 
     if bridge is None:
         bridge = Bridge()
@@ -355,6 +368,7 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         # read post-contact state for these (the zeroed velocity would score
         # every landing as perfect).
         metrics = np.asarray(reads["booster.touchdown_metrics"])
+        descent = np.asarray(reads["booster.descent_metrics"])
         pos_err = float(np.linalg.norm(pos - LZ1_ECEF))
         result = {
             "landed": landed,
@@ -374,6 +388,11 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             "purge_events": purge_events,
             "qbar_peak_descent_kpa": qbar_peak_descent / 1000.0,
             "final_phase": float(reads["booster.fsw_phase"][0]),
+            # Descent smoothness (rad/s → deg/s for readability in reports).
+            "descent_max_rate_dps": float(np.degrees(max(descent[0], 0.0))),
+            "descent_max_aoa_deg": float(max(descent[1], 0.0)),
+            "landing_ignition_tilt_deg": float(max(descent[2], 0.0)),
+            "vlat_at_100m_mps": float(max(descent[3], 0.0)),
         }
         # Phase entry times as scalar metrics (phase id -> seconds).
         for pid, ev in phase_events.items():

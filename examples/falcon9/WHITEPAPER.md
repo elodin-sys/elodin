@@ -521,7 +521,18 @@ with `S_ref = π D²/4 ≈ 10.5 m²` (D = 3.66 m) and `L_ref = D`. We decompose
 `C_F` into an axial coefficient `C_A(M)` along −X (drag at α = 0) and a
 normal-force slope `C_Nα(M)` perpendicular to the body axis, the standard
 slender-body split. The static moment follows from the center-of-pressure
-location: `C_M = C_N (x_CP − x_CG)/L_ref`.
+location: `C_M = C_N (x_CP − x_CG)/L_ref`. Pitch/yaw damping is modeled as
+
+```text
+M_damp,B = q̄ S_ref L_body² / (2 V) · Cmq · ω_⊥
+```
+
+with `Cmq < 0` (stable) and `L_body` the stage length (dynamic derivatives
+are length-referenced so EST `|Cmq| ~ O(10)` numbers produce a damped
+short-period mode). Config-blended priors: ascent `Cmq ≈ −2.5`,
+engines-first + fins `Cmq ≈ −12` (EST). Without this term the short-period
+mode stiffens with q̄ but has no physical damping — an unphysical limit
+cycle under fixed-gain fin control.
 
 Three configurations, because the vehicle's shape effectively changes:
 
@@ -923,7 +934,15 @@ throttle on a ~27 t stage. Model and data agree before we have tuned
 anything, which is what a faithful parameter set looks like. The vertical
 channel tracks `a_cmd` through throttle; lateral velocity is nulled by small
 TVC tilts (the same tilt-budget idea as apollo-lander's terminal phase); legs
-deploy on an altitude gate; touchdown targets ≤ 2 m/s vertical.
+deploy on an altitude gate; touchdown targets ≤ 2 m/s vertical / ≤ 4 m/s
+lateral at this fidelity (point-mass contact, no leg model).
+
+Landing-burn coordination: TVC owns pitch/yaw while fins run
+**rate-damping only** (no dual-PD fight). Divert approach-speed cap is higher
+above 1 km (~34 m/s) so a few-hundred-metre ignition miss can still be closed,
+then fades; a lateral deadband stops tilt chatter from rebuilding `v_lat` in
+the last 100 m. Attitude setpoints are slew-limited across the
+AeroDescent → LandingBurn handoff.
 
 ### 11.6 Attitude control: quaternion-error PD
 
@@ -937,6 +956,13 @@ q_err = q⁻¹ ⊗ q_setpoint,   sign = +1 if q_err.w ≥ 0 else −1
 allocated to TVC when engines run (pitch/yaw) and to RCS otherwise (always
 roll). Gains are per-phase (the plant's inertia changes by 10× and authority
 changes by 100× between phases) and are Monte Carlo parameters.
+
+Aero descent adds a **q̄-invariant fin loop**: the FSW commands desired
+angular acceleration from attitude/rate error (`ω_n ≈ 1.5 rad/s`), then
+divides by fin effectiveness `q̄ S_fin C_{Nδ} ℓ` so deflection (and closed-loop
+bandwidth) stay consistent from 5–80 kPa. Cross-track drag-vector tilt is
+scheduled down at high q̄ so Max-Q passes near zero AoA. Pitch fin sign
+matches the plant (`+δ_pitch → −M_y`).
 
 ---
 

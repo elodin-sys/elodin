@@ -119,6 +119,19 @@ def test_qbar_reconstruction_matches_whitepaper():
     assert 400.0 < t_descent_peak < 425.0
 
 
+def test_pitch_damping_opposes_rate():
+    """Cmq < 0: a positive pitch rate produces a restoring (negative) My."""
+    cg = 22.5
+    qbar = 40_000.0
+    v = jnp.array([-400.0, 0.0, 0.0])  # engines-first
+    omega = jnp.array([0.0, 0.5, 0.0])  # +pitch rate
+    _f, t0 = aero.body_aero_wrench(v, 1.5, qbar, cg, omega_body=jnp.zeros(3))
+    _f, t1 = aero.body_aero_wrench(v, 1.5, qbar, cg, omega_body=omega)
+    t0, t1 = np.asarray(t0), np.asarray(t1)
+    # Damping contribution is negative along +ω_y.
+    assert t1[1] < t0[1] - 1e3, f"expected damping My, got {t0[1]} -> {t1[1]}"
+
+
 def test_plume_dominance():
     assert float(aero.plume_dominance(jnp.array(0.0), jnp.array(30_000.0))) == 0.0
     # Entry-burn class: 3 engines ~2.3 MN against 30 kPa.

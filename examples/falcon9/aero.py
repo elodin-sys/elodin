@@ -8,7 +8,7 @@ priors; the Monte Carlo campaign owns their scale factors.
 
 import jax
 import jax.numpy as jnp
-from constants import S_REF_M2, STAGE1_LENGTH_M
+from constants import S_REF_M2, STAGE1_DIAMETER_M, STAGE1_LENGTH_M
 
 jax.config.update("jax_enable_x64", True)
 
@@ -29,6 +29,17 @@ CN_CROSS = jnp.array([1.20, 1.20, 1.25, 1.35, 1.30, 1.25, 1.20, 1.15, 1.10])
 # fins deployed puts it downstream of the CG (stable). EST.
 X_CP_ASCENT_M = 28.0
 X_CP_DESCENT_M = 26.0
+
+# Pitch/yaw damping derivatives Cmq (∂Cm/∂(q L/2V)), negative = stable.
+# Engines-first + fins is much more heavily damped than the slender ascent
+# stack. EST priors; WHITEPAPER §8.1.
+#
+# Dynamic derivatives are nondimensionalized on body length (not diameter):
+# with L=D the same Cmq numbers under-damp the short-period mode by ~L_body²/D²
+# and re-enable the fin/aero limit cycle at max-q̄.
+CMQ_ASCENT = -2.5
+CMQ_DESCENT = -12.0
+L_REF_DAMP_M = STAGE1_LENGTH_M
 
 # Plume-dominance blend kappa(C_T) = C_T / (C_T + C_T0) (WHITEPAPER 8.3). EST.
 PLUME_CT0 = 1.0
@@ -77,11 +88,20 @@ def plume_dominance(thrust_n: jnp.ndarray, qbar_pa: jnp.ndarray) -> jnp.ndarray:
     return ct / (ct + PLUME_CT0)
 
 
-def body_aero_wrench(v_air_body, mach, qbar_pa, cg_station_m, ca_scale=1.0, cn_scale=1.0):
+def body_aero_wrench(
+    v_air_body,
+    mach,
+    qbar_pa,
+    cg_station_m,
+    omega_body=None,
+    ca_scale=1.0,
+    cn_scale=1.0,
+):
     """Continuous all-attitude body aero force + moment (body frame).
 
     F = -qbar S [C_ax (v_hat . x) x_hat + C_n (v_hat - (v_hat . x) x_hat)]
-    applied at the config-blended CP station.
+    applied at the config-blended CP station, plus pitch/yaw damping
+    M = q̄ S L²/(2V) Cmq ω_⊥ (WHITEPAPER §8.1).
     """
     speed = jnp.linalg.norm(v_air_body)
     v_hat = v_air_body / jnp.maximum(speed, 1e-6)
@@ -98,6 +118,19 @@ def body_aero_wrench(v_air_body, mach, qbar_pa, cg_station_m, ca_scale=1.0, cn_s
     x_cp = blend * X_CP_ASCENT_M + (1.0 - blend) * X_CP_DESCENT_M
     lever = (x_cp - cg_station_m) * x_hat
     torque = jnp.cross(lever, force)
+    # Rotational damping on pitch/yaw (roll neglected — slender axisymmetric).
+    if omega_body is None:
+        omega_body = jnp.zeros(3)
+    cmq = blend * CMQ_ASCENT + (1.0 - blend) * CMQ_DESCENT
+    damp = (
+        qbar_pa
+        * S_REF_M2
+        * (L_REF_DAMP_M**2)
+        / (2.0 * jnp.maximum(speed, 1.0))
+        * cmq
+    )
+    omega_perp = jnp.array([0.0, omega_body[1], omega_body[2]])
+    torque = torque + damp * omega_perp
     return force, torque
 
 
