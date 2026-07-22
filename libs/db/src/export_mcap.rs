@@ -411,11 +411,16 @@ fn is_annex_b(payload: &[u8]) -> bool {
 
 fn classify_msg_log(
     log: &MsgLog,
+    packet_id: PacketId,
     name: &str,
     sensor_by_msg_id: &HashMap<PacketId, SensorCameraConfig>,
     video_names: &HashSet<String>,
 ) -> MsgLogKind {
-    if let Some(cfg) = sensor_by_msg_id.get(&msg_id(name)) {
+    // Key by the log's PacketId (same as export_videos), not msg_id(name):
+    // MsgMetadata.name can disagree with sensor_cameras.camera_name while the
+    // packet id still matches — name-based lookup would miss and fall through
+    // to H.264/raw while the layout still points at a video topic.
+    if let Some(cfg) = sensor_by_msg_id.get(&packet_id) {
         return MsgLogKind::SensorCamera(Box::new(cfg.clone()));
     }
     if let Some(metadata) = log.metadata()
@@ -2352,7 +2357,7 @@ pub fn run(
                         .map(|camera| camera.camera_name.clone())
                 })
                 .unwrap_or_else(|| format!("msg-{}", u16::from_le_bytes(packet_id)));
-            let kind = classify_msg_log(&log, &name, &sensor_by_msg_id, &video_names);
+            let kind = classify_msg_log(&log, packet_id, &name, &sensor_by_msg_id, &video_names);
             let topic = match kind {
                 MsgLogKind::H264Video => format!("/video/{name}"),
                 MsgLogKind::SensorCamera(_) => {
