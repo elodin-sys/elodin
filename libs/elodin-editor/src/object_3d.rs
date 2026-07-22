@@ -1080,7 +1080,7 @@ pub fn update_object_3d_system(
                     if let Some(child) = mesh_child
                         && let Ok(mut params) = mat3_params.get_mut(child)
                     {
-                        params.linear = linear;
+                        params.set_if_neq(Mat3Params { linear });
                     }
                     ellipse.max_extent = max_linear_extent(&linear);
                     ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
