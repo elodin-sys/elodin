@@ -11,7 +11,7 @@ process plays a minimal Lunar Guidance Computer (LGC): it receives telemetry
 over UDP and sends back throttle and attitude commands.
 
 The example also replays real Apollo 11 LM telemetry as a kinematic truth
-profile. In the editor, the simulated LM flies over the landing-site asset while
+profile. In the editor, the simulated LM flies over the landing-site while
 graphs and the green truth trail compare it against the reconstructed descent.
 
 > For a full educational walkthrough — the data sources, the flight-dynamics and
@@ -35,7 +35,7 @@ graphs and the green truth trail compare it against the reconstructed descent.
 - A software-in-the-loop campaign with an external Rust FSW process
   (`controller/`) that flies the Apollo descent as a reference-trajectory
   follower, including the DPS throttle-erosion-band logic.
-- A real KDL schematic: LM GLB, landing-site GLB, viewport-follow, blue/green
+- A real KDL schematic: LM GLB, moon GLB, viewport-follow, blue/green
   trajectory trails, body-frame attitude arrows, and graphs for altitude (vs
   real + radar slant), descent rate, horizontal speed, pitch, throttle, and
   propellant.
