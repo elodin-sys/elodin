@@ -128,14 +128,22 @@ fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(Startup, spawn_viewport_grids)
         .add_systems(Startup, setup_primary_window_state)
         .add_systems(Update, sync_editor_cam_zoom_limits);
+    // Must run after the BigSpace root exists; otherwise grids stay unparented
+    // and shimmer from float-origin precision loss.
+    #[cfg(feature = "big_space")]
+    app.add_systems(
+        Startup,
+        spawn_viewport_grids.after(crate::spatial::setup_floating_origin),
+    );
+    #[cfg(not(feature = "big_space"))]
+    app.add_systems(Startup, spawn_viewport_grids);
 }
 
 fn spawn_viewport_grids(
     mut commands: Commands,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    #[cfg(feature = "big_space")] root: Res<crate::spatial::BigSpaceRootEntity>,
 ) {
     for (frame, layer) in GRID_RENDER_LAYERS {
         let mut entity = commands.spawn((
@@ -153,7 +161,7 @@ fn spawn_viewport_grids(
             ),
         ));
         #[cfg(feature = "big_space")]
-        crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
+        crate::spatial::parent_under_big_space(&mut entity, Some(&root));
     }
 }
 
