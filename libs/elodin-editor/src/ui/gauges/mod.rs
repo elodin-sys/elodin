@@ -8,6 +8,7 @@ pub mod geo_position;
 pub mod orientation;
 
 use bevy::prelude::*;
+use bevy_egui::egui;
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::ComponentValue;
@@ -171,4 +172,31 @@ fn gauge_title(eql: &str, name: &PaneName) -> String {
     } else {
         eql.to_ascii_uppercase()
     }
+}
+
+/// Uniform inner padding for both gauge panels, so sibling gauges line up.
+pub(crate) const GAUGE_PANEL_MARGIN: i8 = 6;
+
+/// Panel header shared by both gauges: the [`gauge_title`] in muted 10px mono,
+/// followed by a small gap before the panel body.
+pub(crate) fn gauge_header(ui: &mut egui::Ui, title: &str) {
+    ui.label(
+        egui::RichText::new(title)
+            .monospace()
+            .size(10.0)
+            .color(crate::ui::colors::get_scheme().text_secondary),
+    );
+    ui.add_space(3.0);
+}
+
+/// Style the in-panel display ComboBox identically in both gauges: bordered
+/// input styling with 10px text. Scoped to the calling `ui`, so it does not
+/// leak into sibling panels.
+pub(crate) fn style_gauge_combo(ui: &mut egui::Ui) {
+    let style = ui.style_mut();
+    crate::ui::theme::configure_input_with_border(style);
+    style
+        .text_styles
+        .iter_mut()
+        .for_each(|(_, font)| font.size = 10.0);
 }

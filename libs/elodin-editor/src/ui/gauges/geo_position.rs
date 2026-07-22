@@ -11,7 +11,6 @@ use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
 use super::{EqlBinding, GaugePane};
 use crate::ui::{
     colors::get_scheme,
-    theme,
     widgets::{SystemStateExt, WidgetSystem},
 };
 
@@ -76,6 +75,7 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
 
         let ts = current_timestamp.0;
         let value = binding.resolve(&entity_map, &values, &telemetry_cache, ts);
+        let title = super::gauge_title(&binding.eql, &pane.name);
         // Keep inherit (`source = None`) live against `Coordinate` changes.
         let source = data.effective_source(coordinate.0);
         let combo_id = egui::Id::new(("geo_position_gauge_display", pane.entity));
@@ -84,16 +84,11 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
         // dropdown mirrors the orientation gauge so the frame can be switched
         // without opening the inspector.
         egui::Frame::NONE
-            .inner_margin(egui::Margin::same(8))
+            .inner_margin(egui::Margin::same(super::GAUGE_PANEL_MARGIN))
             .show(ui, |ui| {
-                {
-                    let style = ui.style_mut();
-                    theme::configure_input_with_border(style);
-                    style
-                        .text_styles
-                        .iter_mut()
-                        .for_each(|(_, font)| font.size = 10.0);
-                }
+                super::gauge_header(ui, &title);
+
+                super::style_gauge_combo(ui);
                 egui::ComboBox::from_id_salt(combo_id)
                     .selected_text(data.display.as_str())
                     .width(86.0)

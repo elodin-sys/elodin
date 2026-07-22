@@ -17,7 +17,6 @@ use std::f32::consts::TAU;
 use super::{EqlBinding, GaugePane, gauge_title};
 use crate::ui::{
     colors::get_scheme,
-    theme,
     widgets::{SystemStateExt, WidgetSystem},
 };
 
@@ -120,26 +119,13 @@ impl WidgetSystem for OrientationGaugeWidget<'_, '_> {
         let combo_id = egui::Id::new(("orientation_gauge_display", pane.entity));
 
         egui::Frame::NONE
-            .inner_margin(egui::Margin::same(4))
+            .inner_margin(egui::Margin::same(super::GAUGE_PANEL_MARGIN))
             .show(ui, |ui| {
                 let scheme = get_scheme();
-                ui.label(
-                    egui::RichText::new(title)
-                        .monospace()
-                        .size(10.0)
-                        .color(scheme.text_secondary),
-                );
-                ui.add_space(3.0);
+                super::gauge_header(ui, &title);
 
                 // In-panel display-frame dropdown (source stays in the inspector).
-                {
-                    let style = ui.style_mut();
-                    theme::configure_input_with_border(style);
-                    style
-                        .text_styles
-                        .iter_mut()
-                        .for_each(|(_, font)| font.size = 10.0);
-                }
+                super::style_gauge_combo(ui);
                 let display = data.effective_display();
                 egui::ComboBox::from_id_salt(combo_id)
                     .selected_text(frame_label(display))
