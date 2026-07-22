@@ -131,6 +131,11 @@ pub struct AtmosphereConfig {
     /// Average surface albedo used for multiscattering.
     #[serde(default = "AtmosphereConfig::default_ground_albedo")]
     pub ground_albedo: (f32, f32, f32),
+    /// Prefer Bevy `AtmosphereMode::Raymarched` (accurate for space /
+    /// long-range views of a distant planet). Default `#false` keeps the
+    /// faster LookupTexture path used by ground ECEF scenes (falcon9).
+    #[serde(default)]
+    pub raymarched: bool,
 }
 
 impl Default for AtmosphereConfig {
@@ -140,6 +145,7 @@ impl Default for AtmosphereConfig {
             inner_radius: Self::default_inner_radius(),
             outer_radius: Self::default_outer_radius(),
             ground_albedo: Self::default_ground_albedo(),
+            raymarched: false,
         }
     }
 }

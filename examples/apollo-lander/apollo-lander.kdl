@@ -1,24 +1,30 @@
+// Apollo 11 descent SITL — ENU scene at Tranquility Base.
+// Sky geometry from the NASA ALSJ ephemeris at landing
+// (1969-07-20 20:17:39 UTC, 0.6875°N 23.4333°E):
+//   Sun  az=88.81° el=10.65°   Earth az=272.16° el=59.43°
+//   Earth–Moon distance 393,309 km (ALSJ / calendar-canada).
+
 coordinate frame=ENU
 theme mode=dark scheme=default
-// Cinematic lunar lighting (ported from the pyrotechnique apollo-lander
-// project): harsh low sun with shadows, near-zero ambient fill, black sky.
-// Angles/illuminance/EV transcribe 1:1 from the pyrotechnique scene.
+timeline range="last_30s"
+telemetry_mode #true
+
 environment {
-    // Azimuth chosen for the follow camera at translate_world(10,10,4): key
-    // light ~55 degrees off the view axis so the camera-facing side is lit
-    // (320 backlit it). Elevation/illuminance match the pyrotechnique scene.
-    sun azimuth=280.0 elevation=32.0 illuminance=130000.0 shadows=#true
+    // KDL sun azimuth = compass azimuth + 180 (editor Bevy convention; see
+    // scene_environment.rs). Compass 88.81 → KDL 268.81. Low east sun for
+    // long westward shadows matching the target stills.
+    sun azimuth=268.81 elevation=10.65 illuminance=130000.0 shadows=#true
     ambient scale=0.02
     sky color="black"
+    // Earth atmosphere at the real Earth center (ENU from site). Raymarched
+    // so the blue limb + sun disk render from lunar distance (~3.9e8 m).
+    atmosphere origin="(-199014543, 7506228, 337157270)" inner_radius=6378140.0 outer_radius=6478140.0 ground_albedo="(0.20, 0.22, 0.18)" raymarched=#true
 }
-timeline
+
+// Single viewport: Bevy atmosphere supports one active atmosphere camera.
 hsplit {
-    // ev100 14.2: the landing-site GLB is high-albedo, so it needs ~1 stop
-    // less exposure than the pyrotechnique scene's 0.185-albedo ground to
-    // keep the regolith light-gray instead of blown out.
-    viewport name="Tranquility Base" near=1.0 far=200000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true ev100=14.2 show_grid=#false share=0.463842 {
+    viewport name="Tranquility Base" near=1.0 far=1000000000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true ev100=13.2 show_grid=#false active=#true {
         bloom preset="old_school" intensity=0.22 threshold=0.78 threshold_softness=0.12
-        // bloom preset="natural" intensity=0.25
     }
     vsplit share=0.536157 {
         hsplit {
@@ -53,18 +59,9 @@ hsplit {
             }
         }
         hsplit {
-            // Engine thrust as a fraction of max: this is the quantity bound to
-            // the exhaust plume (the plume is drawn along its opposite, pointing
-            // down). The plume's intensity is proportional to this, so the curve
-            // explains the burn you see (mostly pinned at the fixed throttle
-            // point during braking).
             graph "lander.main_thrust_viz[2]" name="Engine thrust (fraction of max)" {
                 color 255 128 0
             }
-            // RCS attitude-control torque command (N·m, roll/pitch/yaw): the
-            // criterion that fires the cold-gas jets. Each nozzle is tied to one
-            // axis and sign, so the signed value on each axis decides which jets
-            // light and how hard.
             graph "lander.rcs_torque" name="RCS torque command (roll/pitch/yaw, N·m)" {
                 color 106 155 165
                 color 196 160 70
@@ -73,35 +70,10 @@ hsplit {
         }
     }
 }
-object_3d surface.world_pos frame=ENU {
-    // No self-illumination: the environment sun + shadows light the terrain.
-    // (The old emissivity/glow values predate the `environment` node and wash
-    // the frame out under a 130 klx sun + bloom.)
-    glb path=apollo11-landing-site.glb scale=117.416801 rotate="(-90, 0, 0)"
-}
-// All thruster exhaust is declared here in KDL and driven by EQL viz channels.
-// Effects are hanabi `.effect` files authored in pyrotechnique (see
-// pyrotechnique/assets/effects/apollo-lander/); spawn rates come from the
-// files and scale with intensity. Assets resolve through the DB Asset Server
-// after ingest, like the GLBs.
-// DPS: scalar intensity = thrust fraction from lander.main_thrust_viz[2].
-// RCS: 16 vacuum jets, scalar intensity from lander.rcs_thruster_viz[i].
-// RCS index order must match RCS_THRUSTER_AXIS / RCS_THRUSTER_SIGN in rcs_geometry.py.
-// Positions are in the visible object frame after the GLB translate below.
-// The Apollo LM GLB has four RCS quads; each quad has four perpendicular yellow nozzles.
+
+// Thruster exhaust: hanabi .effect files from pyrotechnique, driven by EQL.
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, -2.5, 0)"
-    // Inside the DPS bell, measured from the GLB: exit plane y=-2.09, throat
-    // y=-1.38, inner radius 0.45 m at the exit. The spawn cone (base at this
-    // point, extending up the bell) stays behind the nozzle wall so the
-    // plume emerges from the opening instead of clipping through the skin.
-    // One node, two stacked effect layers: the velocity-stretched core column
-    // plus a camera-facing halo (`effect` child node; descent_glow offsets
-    // its own spawn volume below the exit plane) so the plume keeps its
-    // volume from every viewing angle. The light hangs 0.8 m down the
-    // exhaust axis and tracks throttle: additive particles emit no light, so
-    // this is what anchors the plume to the bell on the shadow side and
-    // pools on the ground late in the descent. Values tuned in pyrotechnique.
     thruster name="DPS" effect="effects/apollo-lander/descent_plume.effect" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
         effect "effects/apollo-lander/descent_glow.effect"
         light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
@@ -123,29 +95,28 @@ object_3d lander.world_pos frame=ENU {
     thruster name="rcs_14" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.249, 0.694, 1.230)" direction="(0, -1, 0)" intensity="lander.rcs_thruster_viz[14]" cutoff=0.006
     thruster name="rcs_15" effect="effects/apollo-lander/rcs_puff.effect" body_frame=#true position="(-1.180, 1.200, -1.369)" direction="(0, 1, 0)" intensity="lander.rcs_thruster_viz[15]" cutoff=0.006
 }
-// Regolith ground effect: a world-fixed emitter at the touchdown point (the
-// landing site is the world origin). Local-space particles on a static
-// emitter are world-fixed in practice, so the sheet stays put as the lander
-// settles onto it. Intensity is physics-driven: lander.dust_viz = throttle x
-// surface proximity, computed in sim.py. The tiny sphere is the required
-// object_3d mesh anchor; it is invisible at scene scale.
+
 object_3d "(0,0,0,1, 0,0,0)" frame=ENU {
     sphere radius=0.02
-    // emission_rate overrides the authored 4000/s: the follow camera sits
-    // inside the sheet at ~15 m, where full density reads as fog.
-    thruster name="ground_dust" effect="effects/apollo-lander/ground_dust.effect" body_frame=#true position="(0, 0, 0)" direction="(0, -1, 0)" intensity="lander.dust_viz[0]" emission_rate=2200.0 cutoff=0.01
+    thruster name="ground_dust" effect="effects/apollo-lander/ground_dust.effect" body_frame=#true position="(0, 0, 0)" direction="(0, -1, 0)" intensity="lander.dust_viz[0]" emission_rate=2800.0 cutoff=0.005
 }
-// Moon sphere as the curved horizon backdrop. With this rotation/scale the
-// LRO mesh surface directly under the site sits ~1,725,022 m above the sphere
-// center; seat it ~1.2 km below z=0 so it stays under the landing-site tile's
-// 60x-exaggerated valleys (deepest ~-1,116 m) and never pokes through.
-object_3d "(0,0,0,1, 0,0,-1726250)" frame=ENU {
-    // Sun-lit like everything else (was emissive/glow for the pre-sun look).
+
+// Moon LRO mesh: under-site surface h = 1,724,837.623 m above center.
+// Seat at -h so the surface is at ENU z = 0.
+object_3d "(0,0,0,1, 0,0,-1724837.623)" frame=ENU {
     glb path=moon.glb rotate="(25.32, 21.2, 79.59)" scale=1798000.0
 }
-line_3d lander.world_pos frame=ENU {
-    color 20 97 209 220
+
+// Real Earth at ALSJ az/el / distance (scale=1 = true Earth radius).
+// Rotate so the sun-lit hemisphere faces the site (approximate terminator).
+object_3d "(0,0,0,1, -199014543, 7506228, 337157270)" frame=ENU {
+    glb path=earth.glb scale=1.0 rotate="(0, 90, 0)"
 }
-line_3d lander_truth.world_pos frame=ENU {
-    color 0 255 0 220
+
+// Constant screen-pixel trails (falcon9 fix: perspective=#false).
+line_3d lander.world_pos frame=ENU line_width=2.0 perspective=#false {
+    color 70 130 240 200
+}
+line_3d lander_truth.world_pos frame=ENU line_width=2.0 perspective=#false {
+    color 60 200 90 200
 }

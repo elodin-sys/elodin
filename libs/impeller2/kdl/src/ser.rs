@@ -167,6 +167,11 @@ fn serialize_environment(environment: &EnvironmentConfig) -> KdlNode {
                 format!("({r}, {g}, {b})"),
             ));
         }
+        if atmosphere.raymarched {
+            atmosphere_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("raymarched", true));
+        }
         children.nodes_mut().push(atmosphere_node);
     }
     node.set_children(children);
@@ -1306,6 +1311,7 @@ mod tests {
                     inner_radius: 6_373_200.0,
                     outer_radius: 6_473_200.0,
                     ground_albedo: (0.2, 0.25, 0.3),
+                    raymarched: false,
                 }),
             }),
             ..Default::default()
@@ -1327,6 +1333,32 @@ mod tests {
         assert_eq!(atmosphere.inner_radius, 6_373_200.0);
         assert_eq!(atmosphere.outer_radius, 6_473_200.0);
         assert_eq!(atmosphere.ground_albedo, (0.2, 0.25, 0.3));
+        assert!(!atmosphere.raymarched);
+    }
+
+    #[test]
+    fn test_environment_atmosphere_raymarched_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    atmosphere origin="(1, 2, 3)" raymarched=#true
+}"#,
+        )
+        .unwrap();
+        let environment = parsed.environment.expect("environment");
+        let atmosphere = environment.atmosphere.expect("atmosphere");
+        assert!(atmosphere.raymarched);
+        assert_eq!(atmosphere.origin, (1.0, 2.0, 3.0));
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                atmosphere: Some(atmosphere),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(serialized.contains("raymarched=#true") || serialized.contains("raymarched=true"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert!(reparsed.environment.unwrap().atmosphere.unwrap().raymarched);
     }
 
     #[test]

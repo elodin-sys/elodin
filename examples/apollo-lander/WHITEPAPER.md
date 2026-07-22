@@ -195,16 +195,19 @@ of [`sim.py`](sim.py#L20-L35).
 
 ### 3.3 3D assets
 
-Three official NASA glTF models are rendered in the editor:
+Models rendered in the editor:
 
 - **Lunar Module** — [science.nasa.gov/3d-resources/apollo-lunar-module](https://science.nasa.gov/3d-resources/apollo-lunar-module/)
-- **Apollo 11 landing site** — [science.nasa.gov/3d-resources/apollo-11-landing-site](https://science.nasa.gov/3d-resources/apollo-11-landing-site/)
-  (a 30 km × 30 km height map of the Sea of Tranquility, vertical exaggeration 60×).
 - **Moon sphere** — [NASA SVS Moon 3D Models for Web, AR, and Animation](https://svs.gsfc.nasa.gov/14959/)
-  (a Lunar Reconnaissance Orbiter imagery/topography model used as the surrounding
-  curved lunar ground and horizon).
+  (LRO topography; sole ground mesh, seated so the under-site surface is at
+  physics plane `z = 0`).
+- **Earth** — `earth.glb` at true radius and ALSJ sky position (az 272.16°,
+  el 59.43°, ~391,584 km site-to-center), with a Bevy raymarched atmosphere
+  for the blue limb.
 
-How we recovered their units and chose the right scale is covered in
+Sky angles come from the NASA ALSJ ephemeris for Tranquility Base at landing
+(1969-07-20 20:17:39 UTC): Sun az 88.81° / el 10.65°, Earth as above. How we
+seat the moon and place Earth is covered in
 [Section 8](#8-visualization-the-kdl-schematic-and-model-scaling).
 
 ### 3.4 From noisy telemetry to a clean reference
@@ -297,7 +300,8 @@ the math behind it.
 ### 4.1 Coordinate frame and state
 
 The world uses an **ENU** frame (East, North, Up). Altitude is the world `+Z`
-component, so the ground is the plane `z = 0`. The vehicle's body `+Z` axis is its
+component, so the ground is the plane `z = 0` (pads contact when the entity is at
+`FOOTPAD_HEIGHT_M`). The vehicle's body `+Z` axis is its
 thrust ("up") axis; tilting the body steers the engine.
 
 The vehicle is an [`el.Body`](sim.py#L253-L292), which carries the standard 6-DOF
@@ -412,14 +416,17 @@ Monte Carlo `attitude_gain` parameter.
 
 ### 4.6 Ground contact
 
-[`ground_contact`](sim.py#L388-L418) latches a landing the first time altitude
-crosses zero. On that contact tick — *before* the velocity is zeroed — it records
-the vertical impact speed `|v_z|` as `touchdown_speed` and the horizontal impact
-speed `‖v_xy‖` as `touchdown_horizontal_speed`, then pins the vehicle: position
-`z = 0`, linear and angular velocity zeroed. This is a simple "perfectly
-inelastic" stop — enough to score the landing without modeling gear mechanics.
-(Latching at contact matters: one tick later the zeroed velocity would score
-every landing as a perfect `0 m/s` touchdown.)
+[`ground_contact`](sim.py) latches a landing the first time the entity altitude
+drops to `FOOTPAD_HEIGHT_M` (≈ 2.40 m). The LM GLB uses
+`translate="(0, -2.5, 0)"`, so pad bottoms sit that far below the entity origin;
+pinning at this height puts the pads on the moon mesh at `z ≈ 0`. On that contact
+tick — *before* the velocity is zeroed — it records the vertical impact speed
+`|v_z|` as `touchdown_speed` and the horizontal impact speed `‖v_xy‖` as
+`touchdown_horizontal_speed`, then pins the vehicle: position
+`z = FOOTPAD_HEIGHT_M`, linear and angular velocity zeroed. This is a simple
+"perfectly inelastic" stop — enough to score the landing without modeling gear
+mechanics. (Latching at contact matters: one tick later the zeroed velocity
+would score every landing as a perfect `0 m/s` touchdown.)
 
 ### 4.7 Derived telemetry
 
@@ -680,89 +687,59 @@ The same Rust program is launched two ways via an `s10` recipe
 
 Elodin describes its 3D scene and dashboards declaratively in **KDL**
 ([`apollo-lander.kdl`](apollo-lander.kdl), registered by the
-[`world.schematic`](sim.py#L483) call). The schematic lays out:
+[`world.schematic`](sim.py) call). The schematic lays out:
 
-- a **viewport** ("Tranquility Base") that follows the lander
-  (`pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at="lander.world_pos"`);
-- six live **graphs** comparing the simulated vehicle to truth — altitude (sim
-  vs real vs radar slant range), descent rate, horizontal speed (sim vs the
-  reconstructed profile), pitch (sim vs the gimbal-derived trend), throttle,
-  and propellant;
-- three **`object_3d`** GLB models: the landing site, the simulated LM, and a
-  full Moon sphere used as the curved horizon backdrop;
-- **`line_3d`** trajectory trails (blue = simulated, green = truth);
-- DPS / RCS exhaust via KDL `thruster` particles (no vector-arrow overlays).
+- one **viewport** ("Tranquility Base" follow cam — Bevy allows a single
+  atmosphere camera); `timeline range="last_30s"`;
+- six live **graphs** comparing the simulated vehicle to truth;
+- **`object_3d`** GLBs: LM, LRO Moon (sole ground), true-scale Earth;
+- **`line_3d`** trails with `line_width=2.0 perspective=#false` (falcon9-style
+  constant screen width);
+- DPS / RCS exhaust via KDL `thruster` particles.
 
-The whole layout uses `coordinate frame="ENU"`, so what you see matches the math.
+ENU frame; `ev100=13.2`; ALSJ sun with Bevy `SunDisk::EARTH` (visible once the
+Earth atmosphere is active); raymarched Earth atmosphere for the blue limb.
 
 ### 8.1 Figuring out the model units
 
-The GLB models ship with no documented units, and a wrong scale made the lander
-visually sink through the terrain. We recovered the real units by reading the glTF
-geometry directly (walking the node graph and reading each mesh's `POSITION`
-accessor bounding box):
+- **Lunar Module** — meters, Y-up; `LANDER_GLB_SCALE = 1.0`. KDL
+  `translate="(0, -2.5, 0)"` puts pads ≈ `FOOTPAD_HEIGHT_M` (2.40 m) below the
+  entity origin; `ground_contact` pins there.
+- **Moon** — native radius ≈ 0.97, KDL `scale = 1,798,000` → lunar scale.
+- **Earth** — `earth.glb` is already Earth radius at `scale=1`.
 
-- **Lunar Module** — bounding box ≈ 6.4 m wide, 5.0 m tall, **Y-up**. That is
-  glTF's default *meters*, and it matches the real LM (~7 m tall, ~9.4 m gear
-  span) to within model fidelity. So [`LANDER_GLB_SCALE = 1.0`](sim.py#L54-L57)
-  renders it ~life-size.
-- **Landing site** — bounding box 255.5 × 255.5 native units (a ~256-sample
-  height-map grid), **Z-up**, with relief spanning ~18.7 units. NASA documents the
-  tile as 30 km × 30 km with elevation exaggerated 60×, so **255.5 units ↔
-  30,000 m** (≈ 117.4 m/unit). Hence:
+### 8.2 Moon as the sole ground
 
-  ```text
-  TERRAIN_GLB_SCALE = 30000 / 255.5 ≈ 117.4
-  ```
-- **Moon sphere** — bounding box ≈ 1.94 native units across, centered near the
-  origin. We render it at lunar scale using the Moon's mean radius, `1,737.4 km`.
-  Since its native radius is ≈ 0.97 units, the KDL uses `scale ≈ 1.8e6`.
+The Sea of Tranquility height-map tile was removed (60× exaggeration / hard
+edge). Physics stays a flat contact plane; LRO is the visual ground.
 
-### 8.2 Seating the terrain at the ground plane
-
-The height-map's center (the landing point) sits at native elevation ≈ 10.63
-units. At the old `scale = 1000` that put the rendered surface ~10,630 m above the
-origin — which is exactly why the lander appeared to pass through it while still
-kilometers up. The fix ([`sim.py#L58-L68`](sim.py#L58-L68)) is to scale to the
-true size **and** lower the whole terrain entity so the landing-point surface sits
-at world `z = 0`:
+Under-site surface height (ray–triangle along Bevy +Y through the editor GLB
+transform) is:
 
 ```text
-TERRAIN_SEAT_Z = − TERRAIN_GLB_SCALE × TERRAIN_CENTER_NATIVE_Z ≈ −1248 m
+h = 1,724,837.623 m
+moon_center_z = -1,724,837.623 m   → surface at ENU z ≈ 0
 ```
 
-The `rotate="(-90, 0, 0)"` in the schematic stands the natively Z-up tile upright
-in the editor's Y-up render space. Because Elodin's GLB `scale` is a single
-uniform factor, the 60× vertical exaggeration cannot be undone here — distant
-relief renders too tall — but the immediate landing zone is flat and correctly
-seated. (See the [README](README.md) for the knob to tighten the scene.)
+Pads at `FOOTPAD_HEIGHT_M` then sit on the regolith. The digitized altitude
+chart bottoms out near ~4.6 m; [`reference.py`](reference.py) extends a
+0.5 m/s let-down to footpad height so guidance does not hover above contact.
 
-> **Lesson:** never trust an asset's scale by eye. A few minutes reading the
-> bounding box turns "it looks about right" into a number you can defend.
+### 8.3 Real sun and Earth
 
-### 8.3 Adding the Moon-scale horizon
-
-The 30 km landing-site tile provides the local surface detail, but it ends before
-the horizon. To give the scene lunar curvature and distant ground, the KDL also
-places NASA SVS's LRO Moon GLB around the landing area.
-
-Seating it takes care: the mesh is *not* a perfect sphere — it carries real LRO
-topography (vertex radius 0.960–0.973 native units, ±12 km at lunar scale), so
-"one mean radius down" can leave the local surface kilometers high or low.
-Measuring the transformed mesh directly (the triangle that the world `z` axis
-pierces, with the KDL's rotation and `scale = 1,798,000`) puts the under-site
-surface ≈ 1,725,022 m above the sphere center. The KDL therefore uses:
+ALSJ at landing (compass):
 
 ```text
-moon_center_z = -1,726,250 m
-→ local moon surface ≈ −1,228 m
+Sun   az = 88.81°   el = 10.65°
+Earth az = 272.16°  el = 59.43°   Δ = 393,309 km (centers)
 ```
 
-i.e. about 1.2 km *below* the touchdown plane — safely beneath the landing-site
-tile's 60×-exaggerated valleys (deepest ≈ −1,116 m), so the emissive Moon never
-pokes through the near-field terrain. The landing-site GLB remains the precise
-near-field surface; the full Moon GLB is the surrounding curved horizon and
-visual backdrop.
+KDL sun azimuth = compass + 180 → `azimuth=268.81 elevation=10.65` (long
+westward shadows). Earth ENU position uses site-to-Earth-center distance
+`393,309 km − h` along (az, el); atmosphere `origin` matches, with
+`raymarched=#true` so Bevy draws the blue limb and the solar disk from lunar
+range. Viewport `far = 1e9`. True angular diameter from the surface is ~2° —
+telephoto stills that fill the frame are a crop, not a larger Earth.
 
 ---
 
@@ -905,9 +882,9 @@ realism for clarity, and here is exactly where:
 - **Fixed center of mass.** The real LM's CoM shifted as spherical tanks drained,
   and the DPS gimbaled to follow it. We hold the CoM fixed and let RCS provide
   control torque. We do scale the inertia tensor with mass.
-- **No terrain collision.** Touchdown is detected at the flat plane `z = 0`; the
-  rendered terrain relief is cosmetic (and 60× vertically exaggerated by the
-  source asset).
+- **No terrain collision.** Touchdown pins the entity at `z = FOOTPAD_HEIGHT_M`
+  on a flat plane; LRO moon relief is cosmetic (true scale, not the old 60×
+  tile).
 - **Idealized sensing.** The controller receives clean state with no sensor noise,
   bias, or latency beyond the guidance-rate quantization. Adding a noisy IMU or a
   radar model is a natural next step (see below).

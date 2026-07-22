@@ -58,17 +58,11 @@ DEFAULT_MAX_TICKS = int(math.ceil((REFERENCE.t_end + 20.0) * SIMULATION_RATE_HZ)
 # The Apollo LM GLB is modeled in meters (world AABB ~6.4 m footprint, ~5.0 m
 # tall, Y-up), so render it at its modeled scale to be ~life-size.
 LANDER_GLB_SCALE = 1.0
-# The landing-site GLB is a 256-sample heightmap of a 30 km x 30 km region: its
-# 255.5 native units span 30 km (~117.4 m/unit), it is Z-up, and elevation is
-# exaggerated 60x. Scale to the true horizontal extent; the -90 deg X rotation in
-# the schematic stands the Z-up tile upright in the editor's Y-up render space.
-TERRAIN_NATIVE_SPAN = 255.5
-TERRAIN_REGION_M = 30_000.0
-TERRAIN_GLB_SCALE = TERRAIN_REGION_M / TERRAIN_NATIVE_SPAN  # ~117.4
-# Tile-center (landing point) elevation in native units, sampled from the mesh.
-# Seat the rendered surface at world z = 0 so the lander meets it at touchdown.
-TERRAIN_CENTER_NATIVE_Z = 10.63
-TERRAIN_SEAT_Z = -TERRAIN_GLB_SCALE * TERRAIN_CENTER_NATIVE_Z
+# KDL translate="(0, -2.5, 0)" puts footpads ≈ 2.40 m below the entity origin
+# (raw ymin≈0.10). Physics contact pins the origin at this height so pads sit
+# on the moon mesh at z ≈ 0. The Sea of Tranquility tile was removed; moon.glb
+# is seated with under-site surface at z = 0 (see apollo-lander.kdl).
+FOOTPAD_HEIGHT_M = 2.40
 
 PARAMS = el.monte_carlo.params_spec(
     # Radar-corrected altitude at landing-radar lock-on (~38,700 ft). The
@@ -175,9 +169,10 @@ DustViz = ty.Annotated[
     jax.Array,
     el.Component("dust_viz", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
-# Altitude below which the DPS plume starts scouring the surface (Apollo crews
-# reported dust from ~30 m; visible sheets thicken in the last ~10 m).
-DUST_ONSET_ALT_M = 12.0
+# Height above the surface (pad AGL) at which the DPS plume starts scouring
+# regolith. Apollo crews reported dust from ~30 m; sheets thicken in the last
+# ~10 m. Measured as entity altitude minus FOOTPAD_HEIGHT_M.
+DUST_ONSET_AGL_M = 30.0
 RCS_THRUSTER_AXIS = jnp.array(RCS_THRUSTER_AXIS_TABLE, dtype=jnp.int32)
 RCS_THRUSTER_SIGN = jnp.array(RCS_THRUSTER_SIGN_TABLE, dtype=jnp.float64)
 Landed = ty.Annotated[
@@ -335,13 +330,6 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
         ],
         name="lander_truth",
     )
-    world.spawn(
-        StaticSceneObject(
-            el.WorldPos(linear=jnp.array([0.0, 0.0, TERRAIN_SEAT_Z], dtype=jnp.float64))
-        ),
-        name="surface",
-    )
-
     @el.map
     def engine_response(
         throttle: Throttle, throttle_cmd: ThrottleCmd, prop: Propellant, landed: Landed
@@ -418,7 +406,8 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     ) -> tuple[el.WorldPos, el.WorldVel, Landed, TouchdownSpeed, TouchdownHorizontalSpeed]:
         altitude = pos.linear()[2]
         vertical_speed = vel.linear()[2]
-        contact = altitude <= 0.0
+        # Pad bottoms are FOOTPAD_HEIGHT_M below the entity origin (KDL translate).
+        contact = altitude <= FOOTPAD_HEIGHT_M
         was_landed = landed[0] > 0.5
         landed_now = jnp.logical_or(was_landed, contact)
         # Latch impact speeds on the contact tick, before velocity is zeroed.
@@ -429,7 +418,9 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             jnp.linalg.norm(vel.linear()[:2]),
             touchdown_horizontal_speed[0],
         )
-        linear_pos = jnp.where(landed_now, pos.linear().at[2].set(0.0), pos.linear())
+        linear_pos = jnp.where(
+            landed_now, pos.linear().at[2].set(FOOTPAD_HEIGHT_M), pos.linear()
+        )
         linear_vel = jnp.where(landed_now, jnp.zeros(3, dtype=jnp.float64), vel.linear())
         angular_vel = jnp.where(landed_now, jnp.zeros(3, dtype=jnp.float64), vel.angular())
         return (
@@ -467,12 +458,13 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             0.0,
         )
         throttle_fraction = thrust[0] / DPS_MAX_THRUST_N
-        # Ground-effect dust: plume impingement = throttle x proximity to the
-        # surface. Zero above the onset altitude and the instant the engine
-        # stops (no air to keep grains aloft).
-        altitude = pos.linear()[2]
-        proximity = jnp.clip((DUST_ONSET_ALT_M - altitude) / DUST_ONSET_ALT_M, 0.0, 1.0)
-        dust = jnp.sqrt(proximity) * throttle_fraction
+        # Ground-effect dust: plume impingement = throttle × proximity of the
+        # pads to the surface. Zero above onset AGL; once landed, hold a brief
+        # residual so the sheet is visible at contact (engine may already be
+        # near idle).
+        pad_agl = jnp.maximum(pos.linear()[2] - FOOTPAD_HEIGHT_M, 0.0)
+        proximity = jnp.clip((DUST_ONSET_AGL_M - pad_agl) / DUST_ONSET_AGL_M, 0.0, 1.0)
+        dust = jnp.sqrt(proximity) * jnp.maximum(throttle_fraction, 0.15 * proximity)
         return (
             jnp.array([0.0, 0.0, throttle_fraction], dtype=jnp.float64),
             torque_norm,

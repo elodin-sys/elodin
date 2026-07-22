@@ -24,6 +24,8 @@
 //!   `db:textures/smoke_puff.png`, anything else ->
 //!   `db:textures/soft_circle.png`.
 
+use std::collections::HashMap;
+
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::math::{DQuat, DVec3, Quat, Vec4};
@@ -92,6 +94,29 @@ impl ThrusterEffectAssets {
             "cold_gas" => self.cold_gas.clone(),
             _ => self.plume.clone(),
         }
+    }
+}
+
+/// Retained strong handles for hanabi `.effect` files loaded from the DB /
+/// asset root. Seek rebuilds and schematic refresh despawn jet entities (and
+/// their `pending_effect` / `ParticleEffect` handles); without this map Bevy
+/// unloads the asset and the next `ensure_kdl_thrusters` re-enters
+/// `AssetReader::read` (another HTTP GET). Presets already live forever in
+/// [`ThrusterEffectAssets`]; file effects need the same residency.
+#[derive(Resource, Default)]
+struct FileEffectAssets {
+    /// Keyed by the resolved load path (`db:…` → `http://…` URL, or bare path).
+    handles: HashMap<String, Handle<EffectAsset>>,
+}
+
+impl FileEffectAssets {
+    fn get_or_load(&mut self, path: String, asset_server: &AssetServer) -> Handle<EffectAsset> {
+        if let Some(handle) = self.handles.get(&path) {
+            return handle.clone();
+        }
+        let handle = asset_server.load::<EffectAsset>(path.clone());
+        self.handles.insert(path, handle.clone());
+        handle
     }
 }
 
@@ -169,6 +194,7 @@ impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(HanabiPlugin)
             .init_resource::<EffectPlayheadClock>()
+            .init_resource::<FileEffectAssets>()
             .add_systems(Startup, setup_thruster_effects)
             // Drive hanabi's EffectSimulation clock from the Impeller playhead
             // before TimeSystems advances it from Virtual.
@@ -478,6 +504,7 @@ fn ensure_kdl_thrusters(
     mut commands: Commands,
     objects: Query<(Entity, &Object3DState), Without<KdlThrusterRig>>,
     assets: Res<ThrusterEffectAssets>,
+    mut file_effects: ResMut<FileEffectAssets>,
     asset_server: Res<AssetServer>,
     connection_addr: Option<Res<ConnectionAddr>>,
     eql: Res<EqlContext>,
@@ -515,9 +542,10 @@ fn ensure_kdl_thrusters(
                 if effect_is_file {
                     // Resolved like GLBs: `db:` keys hit the DB Asset Server;
                     // bare paths fall back to the Bevy asset root (offline
-                    // --kdl dev).
+                    // --kdl dev). Retained in FileEffectAssets so seek/schematic
+                    // rebuilds clone the same strong handle instead of unloading.
                     let url = resolve_db_asset_url(effect, connection_addr);
-                    jet.pending_effect = Some(asset_server.load::<EffectAsset>(url));
+                    jet.pending_effect = Some(file_effects.get_or_load(url, &asset_server));
                 }
                 let base_name = config
                     .name
@@ -1409,5 +1437,49 @@ mod tests {
             app.world().get_entity(jet).is_err(),
             "jets orphaned by schematic reload must despawn"
         );
+    }
+
+    /// Seek rebuilds despawn jets (and their EffectAsset handles). The file
+    /// cache must keep a strong handle so Bevy does not unload the asset and
+    /// the next ensure reuses the same handle id.
+    #[test]
+    fn file_effect_cache_survives_seek_teardown() {
+        let mut effects = Assets::<EffectAsset>::default();
+        let mut cache = FileEffectAssets::default();
+        let path = "http://127.0.0.1:2240/assets/effects/apollo-lander/rcs_puff.effect"
+            .to_string();
+
+        let loaded = effects.add(build_rcs_jet());
+        cache.handles.insert(path.clone(), loaded.clone());
+
+        // First ensure: jet takes a clone (pending_effect / ParticleEffect).
+        let jet_handle = cache
+            .handles
+            .get(&path)
+            .cloned()
+            .expect("cache populated on first load");
+        assert_eq!(jet_handle.id(), loaded.id());
+
+        // Backward seek: despawn jets → drop jet-held handles only.
+        drop(jet_handle);
+        drop(loaded);
+
+        let retained = cache
+            .handles
+            .get(&path)
+            .expect("FileEffectAssets must retain across seek rebuild");
+        assert!(
+            effects.get(retained).is_some(),
+            "EffectAsset must stay resident while the cache holds a strong handle"
+        );
+
+        // Second ensure: same path returns the same handle (no new load).
+        let again = cache.handles.get(&path).cloned().unwrap();
+        assert_eq!(
+            retained.id(),
+            again.id(),
+            "rebuild must clone the retained handle, not allocate a new asset"
+        );
+        assert_eq!(cache.handles.len(), 1);
     }
 }

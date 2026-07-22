@@ -9,7 +9,7 @@ use bevy::camera::ClearColorConfig;
 use bevy::light::SunDisk;
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::math::{DQuat, DVec3};
-use bevy::pbr::AtmosphereSettings;
+use bevy::pbr::{AtmosphereMode, AtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
 use bevy::prelude::*;
 use bevy_geo_frames::{GeoPosition, GeoRotation};
@@ -163,6 +163,28 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
 /// scaling, sky (clear) color, and the per-camera `AtmosphereSettings` that
 /// activates the schematic atmosphere. Runs every frame because cameras can
 /// spawn at any time; writes are change-gated.
+fn atmosphere_settings_for(config: AtmosphereConfig) -> AtmosphereSettings {
+    if config.raymarched {
+        // Distant planet views (apollo Earth-from-Moon, ~2° disk): raymarch
+        // with a larger sky-view LUT so the blue limb stays resolvable.
+        AtmosphereSettings {
+            aerial_view_lut_max_distance: 3.2e5,
+            rendering_method: AtmosphereMode::Raymarched,
+            sky_max_samples: 48,
+            sky_view_lut_samples: 32,
+            sky_view_lut_size: UVec2::new(800, 400),
+            ..AtmosphereSettings::default()
+        }
+    } else {
+        AtmosphereSettings {
+            // Ground ECEF scenes (falcon9): default LookupTexture; longer
+            // aerial-view span for chase cams watching multi-km plumes.
+            aerial_view_lut_max_distance: 3.2e5,
+            ..AtmosphereSettings::default()
+        }
+    }
+}
+
 fn sync_camera_environment(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
@@ -171,7 +193,7 @@ fn sync_camera_environment(
             Entity,
             &mut Camera,
             &mut EnvironmentMapLight,
-            Has<AtmosphereSettings>,
+            Option<&AtmosphereSettings>,
         ),
         With<MainCamera>,
     >,
@@ -209,7 +231,7 @@ fn sync_camera_environment(
         );
     }
     let chosen = atmosphere.and(active.into_iter().min());
-    for (entity, mut camera, mut light, has_atmosphere) in &mut cameras {
+    for (entity, mut camera, mut light, current_settings) in &mut cameras {
         if light.intensity != intensity {
             light.intensity = intensity;
         }
@@ -219,15 +241,22 @@ fn sync_camera_environment(
         // `AtmosphereSettings` requires `Hdr`, which main viewport cameras get
         // from the global HDR toggle; cinematic schematics declare hdr=#true.
         let wants_atmosphere = chosen == Some(entity);
-        if wants_atmosphere && !has_atmosphere {
-            commands.entity(entity).insert(AtmosphereSettings {
-                // The default 3.2e4 m aerial-view span is tuned for ground
-                // scenes; rocket chase cams watch plumes and terrain tens of
-                // kilometers deep.
-                aerial_view_lut_max_distance: 3.2e5,
-                ..AtmosphereSettings::default()
-            });
-        } else if !wants_atmosphere && has_atmosphere {
+        if wants_atmosphere {
+            let desired = atmosphere_settings_for(atmosphere.unwrap());
+            // AtmosphereMode is not PartialEq; compare the fields we set.
+            let needs_write = match current_settings {
+                None => true,
+                Some(s) => {
+                    !std::mem::discriminant(&s.rendering_method)
+                        .eq(&std::mem::discriminant(&desired.rendering_method))
+                        || s.sky_max_samples != desired.sky_max_samples
+                        || s.aerial_view_lut_max_distance != desired.aerial_view_lut_max_distance
+                }
+            };
+            if needs_write {
+                commands.entity(entity).insert(desired);
+            }
+        } else if current_settings.is_some() {
             commands.entity(entity).remove::<AtmosphereSettings>();
         }
     }

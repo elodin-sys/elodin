@@ -272,22 +272,13 @@ Use `--dry-run` to only write the narrowed specs.
   origin.
 - The truth trajectory is offset laterally in the scene so the blue simulated
   trajectory and green truth trail are easy to compare.
-- GLB model scaling (derived from the NASA assets, see `sim.py` constants):
-  - `apollo-lunar-module.glb` is modeled in **meters** (~6.4 m footprint, ~5.0 m
-    tall, Y-up), so `LANDER_GLB_SCALE = 1.0` renders it ~life-size.
-  - `apollo11-landing-site.glb` is a 256-sample heightmap of the 30 km × 30 km
-    Sea of Tranquility tile: 255.5 native units span 30 km (~117.4 m/unit), it is
-    Z-up, and elevation is exaggerated 60×. `TERRAIN_GLB_SCALE = 30000 / 255.5`
-    gives the true horizontal extent, the `rotate="(-90,0,0)"` stands the Z-up
-    tile upright, and the `surface` entity is seated at `TERRAIN_SEAT_Z` so the
-    tile-center surface lands at world z = 0 (the lander's touchdown plane).
-    Because the scale is uniform, the 60× elevation exaggeration cannot be undone
-    here, so distant relief renders ~60× too tall; the immediate landing zone is
-    near z = 0. Reduce `TERRAIN_REGION_M` for a tighter scene.
-- If an object disappears at long range, tune the viewport `near`/`far` clips.
-- The Moon-sphere backdrop is seated ~1.2 km below the touchdown plane so its
-  LRO topography stays under the tile's exaggerated valleys (see the
-  whitepaper's visualization section for the measured numbers).
+- GLB / sky (see `sim.py`, WHITEPAPER §8):
+  - LM pads at `FOOTPAD_HEIGHT_M = 2.40` m; contact pins there onto the moon.
+  - `moon.glb` seated at `center_z = -1,724,837.623 m` (measured under-site height).
+  - ALSJ sun (`KDL az=268.81 el=10.65`) with shadows; true-scale Earth at
+    ALSJ az/el/distance with raymarched atmosphere (blue limb + sun disk).
+  - Trails: `line_width=2.0 perspective=#false` (falcon9-style).
+- Single viewport "Tranquility Base" (`far=1e9`, `ev100=13.2`); `timeline range="last_30s"`.
 - **Editor preview (native only):** GPU exhaust particles fully declared in
 
   KDL and driven by EQL viz channels, rendering hanabi `.effect` files

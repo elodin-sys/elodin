@@ -40,7 +40,18 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         let elem = parse_schematic_elem(node, input)?;
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
-            SchematicElem::Timeline(timeline) => schematic.timeline = Some(timeline),
+            SchematicElem::Timeline(timeline) => {
+                if schematic.timeline.is_some() {
+                    return Err(KdlSchematicError::InvalidValue {
+                        property: "timeline".to_string(),
+                        node: "timeline".to_string(),
+                        expected: "at most one timeline node per schematic".to_string(),
+                        src: input.to_string(),
+                        span: node.span(),
+                    });
+                }
+                schematic.timeline = Some(timeline);
+            }
             SchematicElem::Coordinate(coordinate) => {
                 schematic.frame = Some(coordinate.frame);
                 schematic.origin = coordinate.origin;
@@ -131,6 +142,9 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
                 }
                 if let Some(albedo) = parse_tuple3::<f32>(child, "ground_albedo") {
                     atmosphere.ground_albedo = albedo;
+                }
+                if let Some(raymarched) = child.get("raymarched").and_then(|v| v.as_bool()) {
+                    atmosphere.raymarched = raymarched;
                 }
                 if atmosphere.outer_radius <= atmosphere.inner_radius {
                     return Err(KdlSchematicError::InvalidValue {
@@ -2257,6 +2271,22 @@ telemetry_mode #true
             .expect("timeline config should be parsed");
         assert_eq!(timeline.range.as_deref(), Some("last_5s"));
         assert!(schematic.telemetry_mode);
+    }
+
+    #[test]
+    fn test_duplicate_timeline_nodes_are_rejected() {
+        let err = parse_schematic(
+            r#"
+timeline range="last_30s"
+timeline
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("at most one timeline") || msg.contains("timeline"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]
