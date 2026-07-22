@@ -33,6 +33,12 @@ fn build_fixture(path: PathBuf) -> DB {
             &[7],
             Some("q0,q1,q2,q3,x,y,z"),
         ),
+        (
+            "drone.world_vel",
+            PrimType::F64,
+            &[6],
+            Some("wx,wy,wz,vx,vy,vz"),
+        ),
         ("drone.gyro", PrimType::F64, &[3], Some("x,y,z")),
         ("drone.thrust", PrimType::F64, &[], None),
         ("Globals.tick", PrimType::U64, &[], None),
@@ -67,6 +73,12 @@ fn build_fixture(path: PathBuf) -> DB {
                 .iter()
                 .flat_map(|v: &f64| v.to_le_bytes())
                 .collect();
+            // Angular part deliberately huge: if the exporter reads elements
+            // 0..3 instead of the schematic's [3],[4],[5], the arrow length blows up.
+            let vel: Vec<u8> = [9.0, 9.0, 9.0, 2.0, 0.0, 0.0]
+                .iter()
+                .flat_map(|v: &f64| v.to_le_bytes())
+                .collect();
             let gyro: Vec<u8> = [t, -t, 0.5 * t]
                 .iter()
                 .flat_map(|v: &f64| v.to_le_bytes())
@@ -75,6 +87,7 @@ fn build_fixture(path: PathBuf) -> DB {
             let tick = (step as u64).to_le_bytes().to_vec();
             for (name, buf) in [
                 ("drone.world_pos", pose),
+                ("drone.world_vel", vel),
                 ("drone.gyro", gyro),
                 ("drone.thrust", thrust),
                 ("Globals.tick", tick),
@@ -134,6 +147,9 @@ fn build_fixture(path: PathBuf) -> DB {
 vector_arrow "(1, 0, 0)" origin=drone.world_pos name="Drone X" body_frame=#true {
     color white
 }
+vector_arrow "drone.world_vel[3],drone.world_vel[4],drone.world_vel[5]" origin=drone.world_pos scale=1.0 name="Velocity" {
+    color white
+}
 object_3d drone.world_pos {
     glb path=db:drone.glb
 }"#,
@@ -174,6 +190,7 @@ fn mcap_export_roundtrip() {
         "/tf",
         "/scene/drone-model",
         "/scene/drone-arrows",
+        "/scene_dynamic/Velocity",
         "/log/fsw.log",
     ] {
         assert!(
@@ -222,6 +239,9 @@ fn mcap_export_roundtrip() {
     let mut last_log_time = 0u64;
     let mut world_pos_first: Option<serde_json::Value> = None;
     let mut tf_first: Option<serde_json::Value> = None;
+    let mut log_first: Option<serde_json::Value> = None;
+    let mut scene_first: Option<serde_json::Value> = None;
+    let mut arrow_first: Option<serde_json::Value> = None;
     for message in mcap::MessageStream::new(&mapped).expect("stream") {
         let message = message.expect("message");
         assert!(
@@ -236,6 +256,15 @@ fn mcap_export_roundtrip() {
         }
         if message.channel.topic == "/tf" && tf_first.is_none() {
             tf_first = Some(serde_json::from_slice(&message.data).unwrap());
+        }
+        if message.channel.topic == "/log/fsw.log" && log_first.is_none() {
+            log_first = Some(serde_json::from_slice(&message.data).unwrap());
+        }
+        if message.channel.topic == "/scene/drone-model" && scene_first.is_none() {
+            scene_first = Some(serde_json::from_slice(&message.data).unwrap());
+        }
+        if message.channel.topic == "/scene_dynamic/Velocity" && arrow_first.is_none() {
+            arrow_first = Some(serde_json::from_slice(&message.data).unwrap());
         }
     }
     assert_eq!(counts["/drone/world_pos"], NUM_ROWS);
@@ -253,6 +282,43 @@ fn mcap_export_roundtrip() {
     assert_eq!(tf["transforms"][0]["child_frame_id"], "drone");
     assert_eq!(tf["transforms"][0]["translation"]["z"], 2.0);
     assert_eq!(tf["transforms"][0]["rotation"]["w"], 1.0);
+
+    // foxglove.Log requires file/line alongside timestamp/level/message/name.
+    let log = log_first.unwrap();
+    assert_eq!(log["message"], "log line 0");
+    assert_eq!(log["file"], "");
+    assert_eq!(log["line"], 0);
+
+    // Scene entities carry every schema-required primitive array.
+    let scene_entity = &scene_first.unwrap()["entities"][0];
+    for key in [
+        "metadata",
+        "arrows",
+        "cubes",
+        "spheres",
+        "cylinders",
+        "lines",
+        "triangles",
+        "texts",
+        "models",
+    ] {
+        assert!(
+            scene_entity[key].is_array(),
+            "scene entity missing required array {key}"
+        );
+    }
+
+    // The dynamic arrow reads the schematic's [3],[4],[5] elements (linear
+    // velocity (2,0,0)), not elements 0..3 (angular, (9,9,9)).
+    let arrow_entity = &arrow_first.unwrap()["entities"][0];
+    let arrow = &arrow_entity["arrows"][0];
+    let shaft = arrow["shaft_length"].as_f64().unwrap();
+    assert!(
+        (shaft - 2.0 * 0.8).abs() < 1e-9,
+        "shaft_length {shaft} should come from |(2,0,0)| * scale 1.0 * 0.8"
+    );
+    // Direction +X -> identity quaternion.
+    assert!((arrow["pose"]["orientation"]["w"].as_f64().unwrap() - 1.0).abs() < 1e-9);
 
     // --- attachments: schematic + referenced GLB ---
     let attachment_names: Vec<String> = summary
@@ -336,7 +402,8 @@ fn mcap_export_pattern_filters_components() {
         db_path.clone(),
         out.clone(),
         McapExportOptions {
-            pattern: Some("drone.*".to_string()),
+            // Uppercase on purpose: matching is case-insensitive.
+            pattern: Some("Drone.*".to_string()),
             ..Default::default()
         },
     )

@@ -464,6 +464,9 @@ fn msg_log_json(kind: &MsgLogKind, name: &str, payload: &[u8], ts_ns: u64) -> Ve
                 "level": level,
                 "message": entry.message,
                 "name": name,
+                // Required by foxglove.Log; Elodin LogEntry carries no source location.
+                "file": "",
+                "line": 0,
             })
         }
         MsgLogKind::Raw => json!({"data": BASE64.encode(payload)}),
@@ -832,8 +835,25 @@ fn should_embed_glb(size_bytes: u64, max_embed_bytes: u64, force_embed: bool) ->
     force_embed || size_bytes <= max_embed_bytes
 }
 
-/// Wrap a single scene entity in a SceneUpdate message body.
-fn scene_update_message(entity: Value) -> Vec<u8> {
+/// Wrap a single scene entity in a SceneUpdate message body, filling in the
+/// `metadata` and primitive arrays the foxglove.SceneUpdate schema requires
+/// on every entity (schema-validating consumers reject partial entities).
+fn scene_update_message(mut entity: Value) -> Vec<u8> {
+    if let Value::Object(map) = &mut entity {
+        for key in [
+            "metadata",
+            "arrows",
+            "cubes",
+            "spheres",
+            "cylinders",
+            "lines",
+            "triangles",
+            "texts",
+            "models",
+        ] {
+            map.entry(key).or_insert_with(|| Value::Array(Vec::new()));
+        }
+    }
     serde_json::to_vec(&json!({"deletions": [], "entities": [entity]})).expect("json serialize")
 }
 
@@ -985,12 +1005,11 @@ fn build_line_entity(
 }
 
 /// Resolve earth.glb: first check DB assets, then `assets/earth.glb` relative
-/// to working dir, then the repo fallback.
+/// to the working directory (repo-root workflows).
 fn find_earth_glb(assets_dir: &Path) -> Option<PathBuf> {
     let candidates = [
         assets_dir.join("earth.glb"),
         PathBuf::from("assets/earth.glb"),
-        PathBuf::from("/home/dan/dual/elodin/assets/earth.glb"),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -1859,6 +1878,36 @@ fn build_layout(
 /// Maximum output rate for dynamic vector arrows (Hz).
 const DYNAMIC_ARROW_MAX_HZ: f64 = 30.0;
 
+/// Element indices carrying a dynamic arrow's xyz vector. Explicit element
+/// tuples like `ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]` use
+/// their own indices; bare component references use the trailing 3 elements,
+/// matching the editor (`component_value_tail_to_vec3` reads the value tail).
+fn vector_element_indices(expr: &eql::Expr, comp_name: &str, flat_count: usize) -> [usize; 3] {
+    fn collect(expr: &eql::Expr, comp_name: &str, out: &mut Vec<usize>) -> bool {
+        match expr {
+            eql::Expr::ArrayAccess(inner, idx) => match inner.as_ref() {
+                eql::Expr::ComponentPart(part)
+                    if part.component.is_some() && part.name == comp_name =>
+                {
+                    out.push(*idx);
+                    true
+                }
+                _ => false,
+            },
+            eql::Expr::Tuple(items) => items.iter().all(|item| collect(item, comp_name, out)),
+            _ => false,
+        }
+    }
+    let mut indices = Vec::new();
+    if collect(expr, comp_name, &mut indices)
+        && indices.len() == 3
+        && indices.iter().all(|&i| i < flat_count)
+    {
+        return [indices[0], indices[1], indices[2]];
+    }
+    [flat_count - 3, flat_count - 2, flat_count - 1]
+}
+
 /// Build precomputed dynamic arrow SceneUpdate messages. These are vector_arrows
 /// whose `vector` EQL references a data component rather than a literal tuple.
 /// Returns one `(topic, sorted (timestamp_us, payload) stream)` per arrow —
@@ -1892,13 +1941,13 @@ fn build_dynamic_arrows(
             Some(e) => e,
             None => continue,
         };
+        let vec_expr = match ctx.parse_str(&arrow.vector) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         let vec_comp_name = {
-            let expr = match ctx.parse_str(&arrow.vector) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
             let mut names = Vec::new();
-            collect_component_names(&expr, &mut names);
+            collect_component_names(&vec_expr, &mut names);
             match names.into_iter().next() {
                 Some(n) => n,
                 None => continue,
@@ -1920,6 +1969,7 @@ fn build_dynamic_arrows(
         if flat_count < 3 {
             continue;
         }
+        let [ix, iy, iz] = vector_element_indices(&vec_expr, &vec_comp_name, flat_count);
 
         let frame = if arrow.body_frame {
             arrow
@@ -1985,9 +2035,9 @@ fn build_dynamic_arrows(
             last_emitted_us = Some(ts.0);
             let ts_ns = us_to_ns(*ts, epoch_offset_us);
             let buf = &cursor.data[i * cursor.sample_size..(i + 1) * cursor.sample_size];
-            let vx = read_f64(prim, buf, 0);
-            let vy = read_f64(prim, buf, 1);
-            let vz = read_f64(prim, buf, 2);
+            let vx = read_f64(prim, buf, ix);
+            let vy = read_f64(prim, buf, iy);
+            let vz = read_f64(prim, buf, iz);
             let len = (vx * vx + vy * vy + vz * vz).sqrt();
             if len < 1e-12 {
                 continue;
@@ -2007,18 +2057,15 @@ fn build_dynamic_arrows(
                 "head_diameter": (total * 0.06f64).max(0.02),
                 "color": color_json(&arrow.color),
             });
-            let msg = json!({
-                "deletions": [],
-                "entities": [{
-                    "timestamp": timestamp_json(ts_ns),
-                    "frame_id": frame,
-                    "id": arrow_id,
-                    "lifetime": {"sec": 0, "nsec": 0},
-                    "frame_locked": true,
-                    "arrows": [primitive],
-                }],
+            let entity = json!({
+                "timestamp": timestamp_json(ts_ns),
+                "frame_id": frame,
+                "id": arrow_id,
+                "lifetime": {"sec": 0, "nsec": 0},
+                "frame_locked": true,
+                "arrows": [primitive],
             });
-            entries.push((ts.0, serde_json::to_vec(&msg).expect("json serialize")));
+            entries.push((ts.0, scene_update_message(entity)));
         }
         if !entries.is_empty() {
             entries.sort_by_key(|(ts, _)| *ts);
@@ -2107,10 +2154,12 @@ pub fn run(
         return Err(Error::MissingDbState(db_state_path));
     }
 
+    // Component names are matched lowercased (same as the parquet/csv exporter);
+    // lowercase the pattern too so e.g. `--pattern 'Drone.*'` still matches.
     let glob_pattern = options
         .pattern
         .as_ref()
-        .map(|p| Pattern::new(p))
+        .map(|p| Pattern::new(&p.to_lowercase()))
         .transpose()
         .map_err(|e| {
             Error::Io(std::io::Error::new(
@@ -3121,6 +3170,73 @@ mod tests {
         assert_eq!(v["entities"].as_array().unwrap().len(), 1);
         assert_eq!(v["entities"][0]["id"], "a");
         assert!(v["deletions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn scene_update_message_fills_required_arrays() {
+        let msg = scene_update_message(json!({"id": "a", "models": [{"url": ""}]}));
+        let v: Value = serde_json::from_slice(&msg).unwrap();
+        let entity = &v["entities"][0];
+        // Present arrays are preserved; the rest of the schema-required
+        // entity arrays are filled with empty defaults.
+        assert_eq!(entity["models"].as_array().unwrap().len(), 1);
+        for key in [
+            "metadata",
+            "arrows",
+            "cubes",
+            "spheres",
+            "cylinders",
+            "lines",
+            "triangles",
+            "texts",
+        ] {
+            assert!(
+                entity[key].as_array().is_some_and(|a| a.is_empty()),
+                "{key} must be an empty array"
+            );
+        }
+    }
+
+    #[test]
+    fn vector_element_indices_explicit_tuple() {
+        let component = Arc::new(eql::Component::new(
+            "ball.world_vel".into(),
+            impeller2::types::ComponentId::new("ball.world_vel"),
+            impeller2::schema::Schema::new(PrimType::F64, [6usize]).unwrap(),
+        ));
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000));
+        let expr = ctx
+            .parse_str("ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]")
+            .unwrap();
+        assert_eq!(
+            vector_element_indices(&expr, "ball.world_vel", 6),
+            [3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn vector_element_indices_bare_component_uses_tail() {
+        // Bare component references read the trailing 3 elements, matching the
+        // editor's `component_value_tail_to_vec3` (6-elem spatial vector ->
+        // linear part; plain 3-vector -> all of it).
+        let vel = Arc::new(eql::Component::new(
+            "ball.world_vel".into(),
+            impeller2::types::ComponentId::new("ball.world_vel"),
+            impeller2::schema::Schema::new(PrimType::F64, [6usize]).unwrap(),
+        ));
+        let wind = Arc::new(eql::Component::new(
+            "ball.wind".into(),
+            impeller2::types::ComponentId::new("ball.wind"),
+            impeller2::schema::Schema::new(PrimType::F64, [3usize]).unwrap(),
+        ));
+        let ctx = eql::Context::from_leaves([vel, wind], Timestamp(0), Timestamp(1_000_000));
+        let expr = ctx.parse_str("ball.world_vel").unwrap();
+        assert_eq!(
+            vector_element_indices(&expr, "ball.world_vel", 6),
+            [3, 4, 5]
+        );
+        let expr = ctx.parse_str("ball.wind").unwrap();
+        assert_eq!(vector_element_indices(&expr, "ball.wind", 3), [0, 1, 2]);
     }
 
     #[test]
