@@ -215,6 +215,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
+    /// Optional: absent in minimal test apps (no SceneEnvironmentPlugin).
+    pub scene_environment: Option<ResMut<'w, crate::plugins::scene_environment::SceneEnvironment>>,
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub time_range_behavior: ResMut<'w, TimeRangeBehavior>,
     pub telemetry_mode: ResMut<'w, TelemetryMode>,
@@ -629,6 +631,10 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.current_schematic.0.skybox = schematic.skybox.clone();
+        self.current_schematic.0.environment = schematic.environment.clone();
+        if let Some(scene_environment) = self.scene_environment.as_mut() {
+            scene_environment.0 = schematic.environment.clone();
+        }
     }
 
     /// Spawns windows whose remote sub-schematic fetch (queued by

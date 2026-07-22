@@ -239,8 +239,15 @@ impl SchematicParam<'_, '_> {
                             projection_color,
                             frustums_thickness,
                             show_view_cube,
+                            // ViewportConfig does not yet track `effects`; default
+                            // on so schematic dumps keep thruster particles visible.
+                            effects: true,
                             hdr: self.hdr_enabled.0,
                             bloom: None,
+                            // Like bloom, exposure is not read back from the
+                            // live camera; hand-authored ev100 survives via
+                            // CurrentSchematic, not this dump.
+                            ev100: None,
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
                             look_at: Some(viewport_data.look_at.eql.clone()),

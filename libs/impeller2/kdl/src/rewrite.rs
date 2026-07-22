@@ -1,10 +1,18 @@
 use impeller2_wkt::{
-    Object3DIcon, Object3DIconSource, Object3DMesh, Panel, Schematic, SchematicElem,
+    Object3DIcon, Object3DIconSource, Object3DMesh, Panel, Schematic, SchematicElem, Thruster,
 };
 use serde::Deserialize;
 use std::path::{Component, Path};
 
 pub const SKYBOX_MANIFEST_ASSET_NAME: &str = "skyboxes/manifest.ron";
+
+/// Sprite textures that hanabi `.effect` files bind by texture-slot-name
+/// convention (`smoke` -> smoke_puff, everything else -> soft_circle) rather
+/// than by an explicit KDL reference. Any schematic using a file effect
+/// implicitly depends on them, so asset sync mirrors them alongside the
+/// `.effect` files.
+pub const EFFECT_TEXTURE_ASSET_NAMES: [&str; 2] =
+    ["textures/soft_circle.png", "textures/smoke_puff.png"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum SkyboxManifestError {
@@ -138,6 +146,22 @@ where
         SchematicElem::Object3d(obj) => {
             rewrite_glb_mesh(&mut obj.mesh, map);
             rewrite_icon_path(&mut obj.icon, map);
+            for thruster in &mut obj.thrusters {
+                // Preset names (`plume`, `cold_gas`) are not asset paths.
+                // Extra layers are always file paths, same treatment.
+                if Thruster::effect_path_is_file(&thruster.effect)
+                    && let Some(new_path) = map(&thruster.effect)
+                {
+                    thruster.effect = new_path;
+                }
+                for effect in &mut thruster.extra_effects {
+                    if Thruster::effect_path_is_file(effect)
+                        && let Some(new_path) = map(effect)
+                    {
+                        *effect = new_path;
+                    }
+                }
+            }
         }
         SchematicElem::Panel(panel) => rewrite_panel(panel, map),
         SchematicElem::Window(window) => {
@@ -244,6 +268,18 @@ fn collect_elem_db_asset_names(elem: &SchematicElem, names: &mut Vec<String>) {
             {
                 names.push(name);
             }
+            for thruster in &obj.thrusters {
+                for effect in thruster.effect_layers() {
+                    if Thruster::effect_path_is_file(effect)
+                        && let Some(name) = db_asset_name(effect)
+                    {
+                        names.push(name);
+                        // File effects bind sprite textures by slot-name
+                        // convention; mirror them too (dedup happens upstream).
+                        names.extend(EFFECT_TEXTURE_ASSET_NAMES.map(str::to_string));
+                    }
+                }
+            }
         }
         SchematicElem::Panel(panel) => collect_panel_db_asset_names(panel, names),
         SchematicElem::Window(window) => {
@@ -287,6 +323,13 @@ fn collect_elem_paths(elem: &SchematicElem, paths: &mut Vec<String>) {
                 && is_local_asset_path(path)
             {
                 paths.push(path.clone());
+            }
+            for thruster in &obj.thrusters {
+                for effect in thruster.effect_layers() {
+                    if Thruster::effect_path_is_file(effect) && is_local_asset_path(effect) {
+                        paths.push(effect.to_string());
+                    }
+                }
             }
         }
         SchematicElem::Panel(panel) => collect_panel_paths(panel, paths),
@@ -354,6 +397,148 @@ mod tests {
             panic!("expected glb");
         };
         assert_eq!(path, "db:path/to/rocket.glb");
+    }
+
+    fn thruster_with_effect(effect: &str) -> Thruster {
+        Thruster {
+            name: None,
+            body_frame: true,
+            position: (0.0, 0.0, 0.0),
+            direction: Some((0.0, -1.0, 0.0)),
+            intensity: "lander.main_thrust_viz[2]".to_string(),
+            effect: effect.to_string(),
+            extra_effects: Vec::new(),
+            emission_rate: None,
+            cutoff: Thruster::default_cutoff(),
+            scale: Thruster::default_scale(),
+            light: None,
+        }
+    }
+
+    fn thruster_with_layers(primary: &str, extras: &[&str]) -> Thruster {
+        Thruster {
+            extra_effects: extras.iter().map(|e| e.to_string()).collect(),
+            ..thruster_with_effect(primary)
+        }
+    }
+
+    fn object_with_thrusters(effects: &[&str]) -> Object3D {
+        Object3D {
+            eql: "lander.world_pos".into(),
+            mesh: Object3DMesh::glb("models/lander.glb"),
+            frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
+            icon: None,
+            thrusters: effects.iter().map(|e| thruster_with_effect(e)).collect(),
+            mesh_visibility_range: None,
+            node_id: Default::default(),
+        }
+    }
+
+    #[test]
+    fn rewrite_thruster_file_effects_to_db_scheme_keeps_presets() {
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(object_with_thrusters(&[
+                "effects/apollo-lander/descent_plume.effect",
+                "cold_gas",
+            ]))],
+            ..Default::default()
+        };
+
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
+        });
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        assert_eq!(
+            obj.thrusters[0].effect,
+            "db:effects/apollo-lander/descent_plume.effect"
+        );
+        // Preset names are not asset paths and must never be rewritten.
+        assert_eq!(obj.thrusters[1].effect, "cold_gas");
+    }
+
+    #[test]
+    fn rewrite_and_collect_cover_extra_effect_layers() {
+        let object = Object3D {
+            thrusters: vec![thruster_with_layers(
+                "effects/apollo-lander/descent_plume.effect",
+                &["effects/apollo-lander/descent_glow.effect"],
+            )],
+            ..object_with_thrusters(&[])
+        };
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(object)],
+            ..Default::default()
+        };
+
+        let paths = collect_local_asset_paths(&schematic);
+        assert!(paths.contains(&"effects/apollo-lander/descent_glow.effect".to_string()));
+
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
+        });
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        assert_eq!(
+            obj.thrusters[0].extra_effects,
+            vec!["db:effects/apollo-lander/descent_glow.effect".to_string()]
+        );
+
+        let names = collect_db_asset_names(&schematic);
+        assert!(names.contains(&"effects/apollo-lander/descent_glow.effect".to_string()));
+    }
+
+    #[test]
+    fn collect_db_asset_names_includes_file_effects_and_slot_textures() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(object_with_thrusters(&[
+                "db:effects/apollo-lander/descent_plume.effect",
+                "db:effects/apollo-lander/rcs_puff.effect",
+                "plume",
+            ]))],
+            ..Default::default()
+        };
+
+        let names = collect_db_asset_names(&schematic);
+        assert!(names.contains(&"effects/apollo-lander/descent_plume.effect".to_string()));
+        assert!(names.contains(&"effects/apollo-lander/rcs_puff.effect".to_string()));
+        // Slot-convention textures ride along exactly once each.
+        assert_eq!(
+            names
+                .iter()
+                .filter(|n| n.as_str() == "textures/soft_circle.png")
+                .count(),
+            1
+        );
+        assert!(names.contains(&"textures/smoke_puff.png".to_string()));
+        // The preset contributes nothing.
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.contains("plume") && !n.contains(".effect"))
+        );
+    }
+
+    #[test]
+    fn collect_local_asset_paths_includes_thruster_file_effects() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(object_with_thrusters(&[
+                "effects/apollo-lander/ground_dust.effect",
+                "db:effects/already-in-db.effect",
+                "cold_gas",
+            ]))],
+            ..Default::default()
+        };
+
+        let paths = collect_local_asset_paths(&schematic);
+        assert!(paths.contains(&"effects/apollo-lander/ground_dust.effect".to_string()));
+        assert!(!paths.iter().any(|p| p.contains("already-in-db")));
+        assert!(!paths.iter().any(|p| p == "cold_gas"));
     }
 
     #[test]

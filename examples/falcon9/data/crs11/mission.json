@@ -1,0 +1,34 @@
+{
+  "mission": "SpaceX CRS-11",
+  "spacex_flight_number": 41,
+  "launch_utc": "2017-06-03T21:07:38Z",
+  "launch_pad": {
+    "name": "Kennedy Space Center LC-39A",
+    "lat_deg": 28.60839,
+    "lon_deg": -80.60433
+  },
+  "landing_zone": {
+    "name": "Landing Zone 1, Cape Canaveral",
+    "lat_deg": 28.48580,
+    "lon_deg": -80.54440,
+    "outcome": "success"
+  },
+  "booster": {
+    "serial": "B1035",
+    "flight": 1,
+    "version": "Falcon 9 Full Thrust (v1.2)"
+  },
+  "payload": {
+    "spacecraft": "Dragon 1 C106 (first Dragon reuse, previously CRS-4)",
+    "dragon_dry_mass_kg_est": 4200,
+    "cargo_total_kg": 2708,
+    "cargo_pressurized_kg": 1665,
+    "cargo_unpressurized_kg": 1002
+  },
+  "sources": {
+    "launch_utc": "https://en.wikipedia.org/wiki/SpaceX_CRS-11",
+    "pad_and_landing": "https://www.nasaspaceflight.com/2017/06/spacex-falcon-9-crs-11-dragon-iss-100th-39a/",
+    "cargo_masses": "https://www.nasa.gov/wp-content/uploads/2018/07/spacex_crs-11_mission_overview.pdf",
+    "dragon_dry_mass": "https://en.wikipedia.org/wiki/SpaceX_CRS-11"
+  }
+}

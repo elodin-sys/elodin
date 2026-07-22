@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`, `window`.
+- Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `environment`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 - Booleans: KDL booleans are `#true`/`#false`. A bare `True` is a *string*, not a boolean — most flags silently fall back to their default if given one. Viewport flags (`hdr`, `show_grid`, `active`, ...) leniently accept `True`/`"true"` (case-insensitive), but prefer the `#` forms everywhere.
@@ -55,6 +55,39 @@ order = 6
 - Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.
 - Example: `skybox name="desert_night"`.
 
+### environment
+- Optional top-level node for cinematic scene lighting. Without it the editor renders as always (baked image-based lighting, no sun, theme background).
+- `sun` child (optional): spawns a real directional sun with a visible sun disk.
+  - `azimuth` (degrees, default `0.0`) and `elevation` (degrees, default `45.0`): sun direction in the rendered Y-up world frame. These transcribe 1:1 from pyrotechnique scene values.
+  - `illuminance`: lux, default `100000` (direct sunlight). Pair with a viewport `ev100` — at the editor's default exposure a full sun blows out the frame.
+  - `shadows`: `#true`/`#false`, default `#true`. Enables shadow maps on the sun.
+- `ambient` child (optional): `scale` (required) multiplies the editor's baked image-based lighting intensity. `1.0` = unchanged; near-zero (e.g. `0.02`) keeps shadows black on airless bodies.
+- `sky` child (optional): `color` (named color or tuple string) sets the main viewport clear color — `"black"` for space scenes. Omit to keep the theme background. An active `skybox` draws over it.
+- `atmosphere` child (optional): Bevy's procedural planetary atmosphere (earth scattering medium) — physical blue sky, horizon haze, aerial perspective, altitude darkening, and the limb from space. Requires an active `sun` and an HDR viewport with a sunlit `ev100` (~13-15).
+  - `origin`: tuple string, planet center in the schematic coordinate frame [m]. Default `(0, 0, 0)` — the Earth's center in an ECEF scene. In local ENU/NED scenes leave it at the origin and the default radii place the surface `inner_radius` below.
+  - `inner_radius` / `outer_radius`: meters from the planet center; default Bevy's earth values (`6360000` / `6460000`). In an ECEF scene set `inner_radius` to the launch site's geocentric radius (the WGS84 radius varies with latitude) so the horizon haze sits at the actual local surface.
+  - `ground_albedo`: tuple string, average surface color for multiscattering. Default `(0.3, 0.3, 0.3)`.
+  - Sun, atmosphere entity, ambient IBL scale, and sky clear color are scene-global. Bevy still opts each camera into atmosphere rendering via `AtmosphereSettings`; Elodin attaches that to **one** active main viewport at a time (Bevy 0.19 fatally fails wgpu validation when several views carry it). The sky hands off when you switch tabs; a side-by-side multi-viewport layout gets the procedural sky in one pane only (warn once). The atmosphere entity is grid-cell anchored so it survives floating-origin rebases.
+- Example (lunar scene):
+
+```kdl
+environment {
+    sun azimuth=320.0 elevation=32.0 illuminance=130000.0 shadows=#true
+    ambient scale=0.02
+    sky color="black"
+}
+```
+
+- Example (Earth launch site, ECEF):
+
+```kdl
+environment {
+    sun azimuth=146.6 elevation=55.4 illuminance=100000.0 shadows=#true
+    ambient scale=0.05
+    atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
+}
+```
+
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
 - `title`/`display`: optional window title.
@@ -66,7 +99,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `projection_color` (default `white`; colors this viewport's source frustum 2D projection in target viewports), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false; enables the HDR render path and is required for bloom), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors). An optional `bloom` child node tunes the glow post-process — see [viewport bloom](#viewport-bloom).
+- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `projection_color` (default `white`; colors this viewport's source frustum 2D projection in target viewports), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `effects` (bool, default true; when true the viewport camera includes the thruster-particle render layer so KDL `thruster` jets are visible — set `effects=#false` to hide particles in that pane without cloning emitters), `hdr` (default false; enables the HDR render path and is required for bloom), `ev100` (optional camera exposure in EV100; sunny daylight is ~13-15 — required to balance an [`environment`](#environment) sun, since the default physical-camera exposure is ~EV 8.6), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors). An optional `bloom` child node tunes the glow post-process — see [viewport bloom](#viewport-bloom).
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
@@ -158,11 +191,41 @@ viewport hdr=#true {
     - **Vector mode** (no `direction`): a single 3-component EQL vector drives **both** the exhaust direction (opposite the vector) **and** the intensity (its length × `scale`, clamped to `0..1`). Accepts any vector expression, e.g. `lander.main_thrust_viz`, `(0, 0, lander.main_thrust_viz[2])`, or `k * (0, 0, -1)`.
     - **Scalar mode** (with `direction`): a single number, clamped to `0..1`; `direction` fixes where the plume points. Use opposite-signed expressions on paired nozzles for forward/reverse, or for thrust-vector-control attach the thruster to an animated mesh and drive a scalar.
   - `name`: optional debug/display name.
-  - `effect`: built-in particle preset: `plume` (default; large hot exhaust) or `cold_gas` (small attitude-jet puff).
+  - `effect`: which particle effect to render. Either a built-in preset — `plume` (default; large hot exhaust) or `cold_gas` (small attitude-jet puff) — or a **hanabi `.effect` asset path** (detected by the `.effect` suffix), e.g. `effect="effects/apollo-lander/descent_plume.effect"`. File effects are authored/tuned externally (e.g. in pyrotechnique) and resolve exactly like `glb` paths: on DB record, local paths are rewritten to `db:…` and served by the [DB Asset Server](/reference/db-asset-server). Texture slots inside the effect bind by slot-name convention: `mask` uses a built-in soft-circle sprite, `smoke` loads `db:textures/smoke_puff.png`, anything else loads `db:textures/soft_circle.png`.
   - `body_frame`: bool, default `#false`. Rotates `direction` or the vector with the object.
   - `scale`: vector-mode multiplier mapping the EQL vector's magnitude onto `0..1` (default `1.0`).
-  - `emission_rate`: particles per second at intensity `1.0`, default `400.0`.
+  - `emission_rate`: particles per second at intensity `1.0`. For presets, defaults to `400.0`. For `.effect` files, omit it to use the spawn rate authored inside the file (recommended — the tuning already happened in the authoring tool); setting it overrides the authored rate.
   - `cutoff`: intensity threshold below which the emitter is hidden, default `0.02`.
+  - `effect` child nodes (optional, repeated): additional **effect layers** rendered from the same emitter — `effect "<path>.effect"` with a positional path. All layers share the node's position/direction/intensity, so one thruster node replaces duplicate emitter declarations. The standard recipe for volumetric plumes is a velocity-stretched core (the `effect=` property) plus a camera-facing halo layer: stretched sprites foreshorten into a flat fan wherever their divergence points at the viewer, and the billboarded halo is what holds the plume's volume from every angle. `emission_rate` overrides and the `light` child apply to the primary effect only; layers always use the rates authored in their files.
+  - `light` child node (optional): a dynamic light at the nozzle whose luminous power tracks the same intensity signal as the particles. Additive plume particles emit no light of their own, so this is what illuminates the nozzle, vehicle structure, and ground. It is emitter-level configuration, deliberately **not** part of the `.effect` file (that is a pure bevy_hanabi asset) — the schema mirrors pyrotechnique's `LightConfig` so tuned values port 1:1.
+    - `color`: required `(r, g, b)` linear RGB, 0-1 per channel.
+    - `intensity`: required peak luminous power in **lumens** at intensity `1.0`. Illuminance at distance d is `lm / (4π d²)` lux; megalumens are normal for an engine that must read against a ~100 klx sun.
+    - `range`: meters beyond which the light has no effect (default `30.0`).
+    - `offset`: meters down the exhaust axis from the thruster `position` (default `0.0`). Emitters usually sit inside the nozzle; hang the light at/below the exit plane so it doesn't blast the bell interior at point-blank range.
+    - `spot_angle`: full cone angle in degrees for a spot light aimed down the exhaust axis; omit for an omnidirectional point light.
+    - `shadows`: bool, default `#false`. Shadow-casting is expensive — keep it to one or two lights per scene.
+
+```kdl
+thruster name="DPS" effect="effects/apollo-lander/descent_plume.effect" body_frame=#true \
+         position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+    effect "effects/apollo-lander/descent_glow.effect"
+    light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
+}
+```
+
+  - World-fixed effects (ground dust, pad smoke): attach the thruster to an `object_3d` with a fixed pose. The particles simulate in the emitter's local frame, so a static emitter gives world-fixed particles that survive floating-origin rebasing:
+
+```kdl
+object_3d "(0,0,0,1, 0,0,0)" frame=ENU {
+    sphere radius=0.02
+    thruster name="ground_dust" effect="effects/apollo-lander/ground_dust.effect" \
+             body_frame=#true position="(0, 0, 0)" direction="(0, -1, 0)" \
+             intensity="lander.dust_viz[0]" cutoff=0.01
+}
+```
+
+  - **Anchored trails** (persistent smoke columns behind a moving vehicle): a `.effect` that declares the vec3 properties `spawn_origin` and `spawn_axis` is automatically re-homed from the vehicle onto a **world-fixed anchor entity** frozen at the vehicle's position when the effect loads; every frame the runtime feeds the live nozzle pose through those properties, so particles spawn at the moving nozzle but hang in world space — the launch-trail look — while remaining floating-origin-safe (`SimulationSpace::Global` is not, and is never used). Authoring lives in pyrotechnique (`exhaust_smoke` is the reference); declare the thruster on the vehicle like any other, and the anchor management is automatic. Don't put a `light` child on a trail node — it would stay at the anchor, not the nozzle.
+  - **Throttle-driven visuals**: a `.effect` that declares a scalar `intensity` property receives the node's live 0..1 intensity as a shader uniform each frame (in addition to the spawn-rate scaling every effect gets). Authors wire it into velocity/color expressions so throttle changes plume *length and brightness*, not just particle density — the falcon9 `merlin_core`/`merlin_flame` effects are the reference (a 1-engine landing burn renders a short dim plume, not a thin full-length one).
 
 ```kdl
 object_3d "(0,0,0,1, vehicle.position[0], 0, 0)" {
@@ -245,6 +308,11 @@ telemetry_mode = "telemetry_mode" bool
 skybox = "skybox"
        name=string
 
+environment = "environment"
+            { [sun [azimuth=float] [elevation=float] [illuminance=float] [shadows=bool]]
+              [ambient scale=float]
+              [sky color=color_name_or_tuple] }
+
 window = "window"
        [path|file|name=string]
        [title=string]
@@ -287,6 +355,7 @@ viewport = "viewport"
          [projection_color=color_name_or_tuple]
          [frustums_thickness=float]
          [hdr=bool]
+         [ev100=float]
          [name=string]
          [frame=ENU|NED|ECEF]
          [pos=eql]
@@ -371,11 +440,20 @@ thruster = "thruster"
           [direction=tuple3]
           intensity=eql
           [name=string]
-          [effect=("plume"|"cold_gas")]
+          [effect=("plume"|"cold_gas"|"<path>.effect")]
           [body_frame=bool]
           [scale=float]
           [emission_rate=float]
           [cutoff=float]
+          { ("effect" string)* [light] }
+
+light = "light"
+      color=tuple3
+      intensity=float
+      [range=float]
+      [offset=float]
+      [spot_angle=float]
+      [shadows=bool]
 
 visibility_range = "visibility_range"
                  [min=float]

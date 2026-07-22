@@ -896,10 +896,14 @@ fn warn_camera_order_ambiguities(
     }
 }
 
+/// Main viewport cameras only: sensor cameras (Tonemapping::None) and the
+/// view-cube/nav-gizmo overlays must not be switched to HDR targets.
+type MainViewportCameraFilter = (With<Camera>, With<MainCamera>);
+
 fn sync_hdr(
     hdr_enabled: Res<HdrEnabled>,
     mut commands: Commands,
-    cameras: Query<(Entity, Has<Hdr>), With<Camera>>,
+    cameras: Query<(Entity, Has<Hdr>), MainViewportCameraFilter>,
 ) {
     for (entity, has_hdr) in cameras.iter() {
         if hdr_enabled.0 && !has_hdr {

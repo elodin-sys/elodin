@@ -30,6 +30,9 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
     if let Some(skybox) = schematic.skybox.as_ref() {
         doc.nodes_mut().push(serialize_skybox(skybox));
     }
+    if let Some(environment) = schematic.environment.as_ref() {
+        doc.nodes_mut().push(serialize_environment(environment));
+    }
 
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
@@ -100,6 +103,78 @@ fn serialize_world_mesh(world_mesh: &WorldMesh) -> KdlNode {
             .push(KdlEntry::new_prop("visible", false));
     }
 
+    node
+}
+
+fn serialize_environment(environment: &EnvironmentConfig) -> KdlNode {
+    let mut node = KdlNode::new("environment");
+    let mut children = KdlDocument::new();
+    if let Some(sun) = &environment.sun {
+        let mut sun_node = KdlNode::new("sun");
+        push_rounded_float_prop(&mut sun_node, "azimuth", f64::from(sun.azimuth_deg));
+        push_rounded_float_prop(&mut sun_node, "elevation", f64::from(sun.elevation_deg));
+        push_rounded_float_prop(&mut sun_node, "illuminance", f64::from(sun.illuminance));
+        if sun.shadows != SunConfig::default_shadows() {
+            sun_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("shadows", sun.shadows));
+        }
+        children.nodes_mut().push(sun_node);
+    }
+    if (environment.ambient_scale - EnvironmentConfig::default_ambient_scale()).abs() > f32::EPSILON
+    {
+        let mut ambient_node = KdlNode::new("ambient");
+        push_rounded_float_prop(
+            &mut ambient_node,
+            "scale",
+            f64::from(environment.ambient_scale),
+        );
+        children.nodes_mut().push(ambient_node);
+    }
+    if let Some(sky_color) = &environment.sky_color {
+        let mut sky_node = KdlNode::new("sky");
+        sky_node
+            .entries_mut()
+            .push(KdlEntry::new_prop("color", color_to_kdl_string(sky_color)));
+        children.nodes_mut().push(sky_node);
+    }
+    if let Some(atmosphere) = &environment.atmosphere {
+        let mut atmosphere_node = KdlNode::new("atmosphere");
+        if atmosphere.origin != (0.0, 0.0, 0.0) {
+            let (x, y, z) = atmosphere.origin;
+            atmosphere_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("origin", format!("({x}, {y}, {z})")));
+        }
+        if atmosphere.inner_radius != AtmosphereConfig::default_inner_radius() {
+            push_rounded_float_prop(
+                &mut atmosphere_node,
+                "inner_radius",
+                f64::from(atmosphere.inner_radius),
+            );
+        }
+        if atmosphere.outer_radius != AtmosphereConfig::default_outer_radius() {
+            push_rounded_float_prop(
+                &mut atmosphere_node,
+                "outer_radius",
+                f64::from(atmosphere.outer_radius),
+            );
+        }
+        if atmosphere.ground_albedo != AtmosphereConfig::default_ground_albedo() {
+            let (r, g, b) = atmosphere.ground_albedo;
+            atmosphere_node.entries_mut().push(KdlEntry::new_prop(
+                "ground_albedo",
+                format!("({r}, {g}, {b})"),
+            ));
+        }
+        if atmosphere.raymarched {
+            atmosphere_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("raymarched", true));
+        }
+        children.nodes_mut().push(atmosphere_node);
+    }
+    node.set_children(children);
     node
 }
 
@@ -289,6 +364,10 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
     }
 
+    if let Some(ev100) = viewport.ev100 {
+        push_rounded_float_prop(&mut node, "ev100", f64::from(ev100));
+    }
+
     if let Some(bloom) = &viewport.bloom {
         let mut bloom_node = KdlNode::new("bloom");
         if bloom.preset != BloomPreset::Natural {
@@ -389,6 +468,11 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
     if !viewport.show_view_cube {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_view_cube", false));
+    }
+
+    if !viewport.effects {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("effects", false));
     }
 
     if viewport.active {
@@ -720,15 +804,47 @@ fn serialize_thruster(thruster: &Thruster) -> KdlNode {
     if (thruster.scale - Thruster::default_scale()).abs() > f32::EPSILON {
         push_rounded_float_prop(&mut node, "scale", f64::from(thruster.scale));
     }
-    if (thruster.emission_rate - Thruster::default_emission_rate()).abs() > f32::EPSILON {
-        push_rounded_float_prop(
-            &mut node,
-            "emission_rate",
-            f64::from(thruster.emission_rate),
-        );
+    if let Some(emission_rate) = thruster.emission_rate {
+        push_rounded_float_prop(&mut node, "emission_rate", f64::from(emission_rate));
     }
     if (thruster.cutoff - Thruster::default_cutoff()).abs() > f32::EPSILON {
         push_rounded_float_prop(&mut node, "cutoff", f64::from(thruster.cutoff));
+    }
+    if !thruster.extra_effects.is_empty() || thruster.light.is_some() {
+        let mut children = KdlDocument::new();
+        for effect in &thruster.extra_effects {
+            let mut effect_node = KdlNode::new("effect");
+            effect_node
+                .entries_mut()
+                .push(KdlEntry::new(effect.clone()));
+            children.nodes_mut().push(effect_node);
+        }
+        if let Some(light) = &thruster.light {
+            children.nodes_mut().push(serialize_thruster_light(light));
+        }
+        node.set_children(children);
+    }
+    node
+}
+
+fn serialize_thruster_light(light: &ThrusterLight) -> KdlNode {
+    let mut node = KdlNode::new("light");
+    node.entries_mut().push(KdlEntry::new_prop(
+        "color",
+        tuple3_to_kdl_string(light.color),
+    ));
+    push_rounded_float_prop(&mut node, "intensity", f64::from(light.intensity));
+    if (light.range - ThrusterLight::default_range()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "range", f64::from(light.range));
+    }
+    if light.offset.abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "offset", f64::from(light.offset));
+    }
+    if let Some(spot_angle) = light.spot_angle {
+        push_rounded_float_prop(&mut node, "spot_angle", f64::from(spot_angle));
+    }
+    if light.shadows {
+        node.entries_mut().push(KdlEntry::new_prop("shadows", true));
     }
     node
 }
@@ -1179,6 +1295,140 @@ mod tests {
     }
 
     #[test]
+    fn test_serialize_environment_roundtrip() {
+        let schematic = Schematic {
+            environment: Some(EnvironmentConfig {
+                sun: Some(SunConfig {
+                    azimuth_deg: 320.0,
+                    elevation_deg: 32.0,
+                    illuminance: 130_000.0,
+                    shadows: true,
+                }),
+                ambient_scale: 0.02,
+                sky_color: Some(Color::BLACK),
+                atmosphere: Some(AtmosphereConfig {
+                    origin: (10.0, -20.0, 30.0),
+                    inner_radius: 6_373_200.0,
+                    outer_radius: 6_473_200.0,
+                    ground_albedo: (0.2, 0.25, 0.3),
+                    raymarched: false,
+                }),
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        let environment = parsed.environment.expect("environment should roundtrip");
+        let sun = environment.sun.expect("sun should roundtrip");
+        assert_eq!(sun.azimuth_deg, 320.0);
+        assert_eq!(sun.elevation_deg, 32.0);
+        assert_eq!(sun.illuminance, 130_000.0);
+        assert!(sun.shadows);
+        assert!((environment.ambient_scale - 0.02).abs() < 1e-6);
+        assert_eq!(environment.sky_color, Some(Color::BLACK));
+        let atmosphere = environment.atmosphere.expect("atmosphere should roundtrip");
+        assert_eq!(atmosphere.origin, (10.0, -20.0, 30.0));
+        assert_eq!(atmosphere.inner_radius, 6_373_200.0);
+        assert_eq!(atmosphere.outer_radius, 6_473_200.0);
+        assert_eq!(atmosphere.ground_albedo, (0.2, 0.25, 0.3));
+        assert!(!atmosphere.raymarched);
+    }
+
+    #[test]
+    fn test_environment_atmosphere_raymarched_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    atmosphere origin="(1, 2, 3)" raymarched=#true
+}"#,
+        )
+        .unwrap();
+        let environment = parsed.environment.expect("environment");
+        let atmosphere = environment.atmosphere.expect("atmosphere");
+        assert!(atmosphere.raymarched);
+        assert_eq!(atmosphere.origin, (1.0, 2.0, 3.0));
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                atmosphere: Some(atmosphere),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(serialized.contains("raymarched=#true") || serialized.contains("raymarched=true"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert!(reparsed.environment.unwrap().atmosphere.unwrap().raymarched);
+    }
+
+    #[test]
+    fn test_environment_atmosphere_defaults_roundtrip() {
+        // A bare `atmosphere` node keeps Bevy's earth defaults and serializes
+        // without redundant properties.
+        let parsed = parse_schematic("environment {\n    atmosphere\n}").unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        let atmosphere = environment.atmosphere.expect("atmosphere parsed");
+        assert_eq!(atmosphere, AtmosphereConfig::default());
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(environment),
+            ..Default::default()
+        });
+        assert!(serialized.contains("atmosphere"));
+        assert!(!serialized.contains("inner_radius"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().atmosphere,
+            Some(AtmosphereConfig::default())
+        );
+    }
+
+    #[test]
+    fn test_environment_atmosphere_rejects_inverted_radii() {
+        let kdl = "environment {\n    atmosphere inner_radius=100.0 outer_radius=50.0\n}";
+        assert!(parse_schematic(kdl).is_err());
+    }
+
+    #[test]
+    fn test_parse_environment_defaults_and_shadows_off() {
+        let kdl = r#"
+environment {
+    sun azimuth=10.0 shadows=#false
+}
+"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        let sun = environment.sun.expect("sun parsed");
+        assert_eq!(sun.azimuth_deg, 10.0);
+        assert_eq!(sun.elevation_deg, SunConfig::default_elevation_deg());
+        assert_eq!(sun.illuminance, SunConfig::default_illuminance());
+        assert!(!sun.shadows);
+        assert_eq!(
+            environment.ambient_scale,
+            EnvironmentConfig::default_ambient_scale()
+        );
+        assert_eq!(environment.sky_color, None);
+    }
+
+    #[test]
+    fn test_viewport_ev100_roundtrip() {
+        let kdl = r#"viewport name="main" hdr=#true ev100=13.2"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert_eq!(viewport.ev100, Some(13.2));
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(serialized.contains("ev100=13.2"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert_eq!(viewport.ev100, Some(13.2));
+    }
+
+    #[test]
     fn test_serialize_simple_viewport() {
         let mut schematic = Schematic::default();
         schematic
@@ -1198,8 +1448,10 @@ mod tests {
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
+                effects: true,
                 hdr: false,
                 bloom: None,
+                ev100: None,
                 pos: None,
                 look_at: None,
                 frame: None,
@@ -1218,6 +1470,7 @@ mod tests {
             assert!(viewport.active);
             assert!(viewport.show_grid);
             assert!(viewport.show_view_cube);
+            assert!(viewport.effects);
         } else {
             panic!("Expected viewport panel");
         }
@@ -1243,8 +1496,10 @@ mod tests {
                 projection_color: Color::MINT,
                 frustums_thickness: 0.012,
                 show_view_cube: false,
+                effects: true,
                 hdr: true,
                 bloom: None,
+                ev100: None,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 frame: None,
@@ -1485,7 +1740,98 @@ object_3d "vehicle.world_pos" {
         assert_eq!(thruster.position, (-0.35, 0.0, 0.0));
         assert_eq!(thruster.direction, Some((-1.0, 0.0, 0.0)));
         assert_eq!(thruster.intensity, "vehicle.specific_force[0] / 20.0");
-        assert_eq!(thruster.emission_rate, 420.0);
+        assert_eq!(thruster.emission_rate, Some(420.0));
+    }
+
+    #[test]
+    fn test_serialize_thruster_light_round_trip() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+        light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        let light = thruster.light.as_ref().expect("light survives round trip");
+        assert_eq!(light.color, (1.0, 0.95, 0.88));
+        assert_eq!(light.intensity, 3000000.0);
+        assert_eq!(light.range, 40.0);
+        assert_eq!(light.offset, 0.8);
+        assert_eq!(light.spot_angle, None);
+        assert!(light.shadows);
+    }
+
+    #[test]
+    fn test_serialize_thruster_effect_layers_round_trip() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" effect="effects/apollo-lander/descent_plume.effect" {
+        effect "effects/apollo-lander/descent_glow.effect"
+        light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert_eq!(
+            thruster.effect,
+            "effects/apollo-lander/descent_plume.effect"
+        );
+        assert_eq!(
+            thruster.extra_effects,
+            vec!["effects/apollo-lander/descent_glow.effect".to_string()]
+        );
+        assert_eq!(
+            thruster.effect_layers().collect::<Vec<_>>(),
+            vec![
+                "effects/apollo-lander/descent_plume.effect",
+                "effects/apollo-lander/descent_glow.effect",
+            ]
+        );
+        assert!(thruster.light.is_some(), "light coexists with layers");
+    }
+
+    #[test]
+    fn test_serialize_thruster_spot_light_round_trip() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+        light color="(1.0, 0.9, 0.8)" intensity=5000000.0 spot_angle=120.0
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let light = obj.thrusters[0]
+            .light
+            .as_ref()
+            .expect("spot light survives round trip");
+        assert_eq!(light.spot_angle, Some(120.0));
+        assert_eq!(light.range, ThrusterLight::default_range());
+        assert_eq!(light.offset, 0.0);
+        assert!(!light.shadows);
     }
 
     #[test]
@@ -1747,6 +2093,29 @@ object_3d lander.world_pos {
     }
 
     #[test]
+    fn test_serialize_viewport_effects_false() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                effects: false,
+                ..Default::default()
+            })));
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("effects=#false") || serialized.contains("effects=false"),
+            "expected effects=#false in:\n{serialized}"
+        );
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert!(!viewport.effects);
+        } else {
+            panic!("Expected viewport");
+        }
+    }
+
+    #[test]
     fn test_serialize_viewport_with_frame() {
         let mut schematic = Schematic::default();
         schematic
@@ -1839,8 +2208,10 @@ object_3d lander.world_pos {
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
+                effects: true,
                 hdr: false,
                 bloom: None,
+                ev100: None,
                 pos: None,
                 look_at: None,
                 frame: None,

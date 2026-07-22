@@ -11,7 +11,7 @@ process plays a minimal Lunar Guidance Computer (LGC): it receives telemetry
 over UDP and sends back throttle and attitude commands.
 
 The example also replays real Apollo 11 LM telemetry as a kinematic truth
-profile. In the editor, the simulated LM flies over the landing-site asset while
+profile. In the editor, the simulated LM flies over the landing-site while
 graphs and the green truth trail compare it against the reconstructed descent.
 
 > For a full educational walkthrough — the data sources, the flight-dynamics and
@@ -35,7 +35,7 @@ graphs and the green truth trail compare it against the reconstructed descent.
 - A software-in-the-loop campaign with an external Rust FSW process
   (`controller/`) that flies the Apollo descent as a reference-trajectory
   follower, including the DPS throttle-erosion-band logic.
-- A real KDL schematic: LM GLB, landing-site GLB, viewport-follow, blue/green
+- A real KDL schematic: LM GLB, moon GLB, viewport-follow, blue/green
   trajectory trails, body-frame attitude arrows, and graphs for altitude (vs
   real + radar slant), descent rate, horizontal speed, pitch, throttle, and
   propellant.
@@ -272,30 +272,40 @@ Use `--dry-run` to only write the narrowed specs.
   origin.
 - The truth trajectory is offset laterally in the scene so the blue simulated
   trajectory and green truth trail are easy to compare.
-- GLB model scaling (derived from the NASA assets, see `sim.py` constants):
-  - `apollo-lunar-module.glb` is modeled in **meters** (~6.4 m footprint, ~5.0 m
-    tall, Y-up), so `LANDER_GLB_SCALE = 1.0` renders it ~life-size.
-  - `apollo11-landing-site.glb` is a 256-sample heightmap of the 30 km × 30 km
-    Sea of Tranquility tile: 255.5 native units span 30 km (~117.4 m/unit), it is
-    Z-up, and elevation is exaggerated 60×. `TERRAIN_GLB_SCALE = 30000 / 255.5`
-    gives the true horizontal extent, the `rotate="(-90,0,0)"` stands the Z-up
-    tile upright, and the `surface` entity is seated at `TERRAIN_SEAT_Z` so the
-    tile-center surface lands at world z = 0 (the lander's touchdown plane).
-    Because the scale is uniform, the 60× elevation exaggeration cannot be undone
-    here, so distant relief renders ~60× too tall; the immediate landing zone is
-    near z = 0. Reduce `TERRAIN_REGION_M` for a tighter scene.
-- If an object disappears at long range, tune the viewport `near`/`far` clips.
-- The Moon-sphere backdrop is seated ~1.2 km below the touchdown plane so its
-  LRO topography stays under the tile's exaggerated valleys (see the
-  whitepaper's visualization section for the measured numbers).
-- Orange (DPS thrust) and white (RCS torque) vector arrows show effector
-  activity in the body frame.
-- **Editor preview (experimental, native only):** GPU exhaust particles fully
-  declared in KDL and driven by EQL viz channels. The DPS plume uses a vector
-  `intensity` from `main_thrust_viz` (`effect="plume"`); the 16 cold-gas RCS
-  jets each bind `rcs_thruster_viz[i]` with `effect="cold_gas"`. RCS jet
-  activity follows the body-frame RCS torque command, not the DPS throttle.
-  Nozzle geometry and presets live in `apollo-lander.kdl`; RCS emitter
-  positions are tuned to the visible four-quad Apollo LM nozzle layout after
-  the GLB mesh translate. Small real RCS torques are boosted only for particle
-  visibility, leaving the physics torque unchanged.
+- GLB / sky (see `sim.py`, WHITEPAPER §8):
+  - LM pads at `FOOTPAD_HEIGHT_M = 2.40` m; contact pins there onto the moon.
+  - `moon.glb` seated at `center_z = -1,724,837.623 m` (measured under-site height).
+  - ALSJ sun (`KDL az=268.81 el=10.65`) with shadows; true-scale Earth at
+    ALSJ az/el/distance with raymarched atmosphere (blue limb + sun disk).
+  - Trails: `line_width=2.0 perspective=#false` (falcon9-style).
+- Single viewport "Tranquility Base" (`far=1e9`, `ev100=13.2`); `timeline range="last_30s"`.
+- **Editor preview (native only):** GPU exhaust particles fully declared in
+
+  KDL and driven by EQL viz channels, rendering hanabi `.effect` files
+  authored in **pyrotechnique** (`pyrotechnique/assets/effects/apollo-lander/`,
+  tuned against Apollo film/sim reference imagery — see
+  `docs/design-thruster-effects-port.md`):
+  - `descent_plume.effect` + `descent_glow.effect` stacked on the DPS as one
+    thruster node with an `effect` layer child (solid core column +
+    camera-facing halo that keeps the plume volumetric from every angle,
+    matched to the First Man close-up), scalar intensity =
+    `lander.main_thrust_viz[2]` (thrust fraction).
+    The DPS also carries a throttle-tracked `light` (3 Mlm point light 0.8 m
+    below the exit plane, shadows on) — additive particles emit no light, so
+    this is what anchors the plume to the bell on the shadow side and pools
+    on the regolith late in the descent;
+  - `rcs_puff.effect` on the 16 RCS jets, per-nozzle intensity from
+    `rcs_thruster_viz[i]` (follows the body-frame RCS torque command, not the
+    DPS throttle; small real torques are boosted only for particle
+    visibility);
+  - `ground_dust.effect` on a world-fixed emitter at the landing site,
+    intensity from `lander.dust_viz` (throttle × surface proximity) — the
+    regolith sheet ramps in below ~12 m and dies at engine cutoff.
+  Spawn rates come from the effect files and scale with intensity; nozzle
+  geometry lives in `apollo-lander.kdl` (RCS positions tuned to the visible
+  four-quad layout after the GLB mesh translate). The schematic
+  `environment` node (harsh sun + shadows, near-zero ambient, black sky) and
+  the viewport's `hdr`/`ev100`/`bloom` reproduce the pyrotechnique lighting;
+  effect assets are ingested into the DB and served like the GLBs. Reference
+  frames from the descent (braking burn, low gate, touchdown) live in
+  [`shots/`](./shots/).

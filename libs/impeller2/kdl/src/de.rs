@@ -28,6 +28,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
             schematic.skybox = Some(parse_skybox(node, input)?);
             continue;
         }
+        if node.name().value() == "environment" {
+            schematic.environment = Some(parse_environment(node, input)?);
+            continue;
+        }
         if node.name().value() == "telemetry_mode" {
             schematic.telemetry_mode = parse_telemetry_mode(node, input)?;
             continue;
@@ -36,7 +40,18 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         let elem = parse_schematic_elem(node, input)?;
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
-            SchematicElem::Timeline(timeline) => schematic.timeline = Some(timeline),
+            SchematicElem::Timeline(timeline) => {
+                if schematic.timeline.is_some() {
+                    return Err(KdlSchematicError::InvalidValue {
+                        property: "timeline".to_string(),
+                        node: "timeline".to_string(),
+                        expected: "at most one timeline node per schematic".to_string(),
+                        src: input.to_string(),
+                        span: node.span(),
+                    });
+                }
+                schematic.timeline = Some(timeline);
+            }
             SchematicElem::Coordinate(coordinate) => {
                 schematic.frame = Some(coordinate.frame);
                 schematic.origin = coordinate.origin;
@@ -52,6 +67,106 @@ fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicE
     Ok(SkyboxConfig {
         name: require_name(node, src)?,
     })
+}
+
+/// Parses the top-level `environment` node:
+///
+/// ```kdl
+/// environment {
+///     sun azimuth=320.0 elevation=32.0 illuminance=130000.0 shadows=#true
+///     ambient scale=0.02
+///     sky color="black"
+/// }
+/// ```
+fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, KdlSchematicError> {
+    let mut config = EnvironmentConfig::default();
+    let Some(children) = node.children() else {
+        return Ok(config);
+    };
+    let float_prop = |child: &KdlNode, prop: &str| -> Option<f32> {
+        child
+            .get(prop)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+    };
+    for child in children.nodes() {
+        match child.name().value() {
+            "sun" => {
+                let mut sun = SunConfig::default();
+                if let Some(azimuth) = float_prop(child, "azimuth") {
+                    sun.azimuth_deg = azimuth;
+                }
+                if let Some(elevation) = float_prop(child, "elevation") {
+                    sun.elevation_deg = elevation;
+                }
+                if let Some(illuminance) = float_prop(child, "illuminance") {
+                    sun.illuminance = illuminance;
+                }
+                if let Some(shadows) = bool_prop(child, "shadows") {
+                    sun.shadows = shadows;
+                }
+                config.sun = Some(sun);
+            }
+            "ambient" => {
+                config.ambient_scale = float_prop(child, "scale").ok_or_else(|| {
+                    KdlSchematicError::MissingProperty {
+                        property: "scale".to_string(),
+                        node: "ambient".to_string(),
+                        src: src.to_string(),
+                        span: child.span(),
+                    }
+                })?;
+            }
+            "sky" => {
+                config.sky_color =
+                    Some(parse_named_color_field(child, "color").ok_or_else(|| {
+                        KdlSchematicError::InvalidValue {
+                            property: "color".to_string(),
+                            node: "sky".to_string(),
+                            expected: "a named color or tuple string like \"(0,0,0)\"".to_string(),
+                            src: src.to_string(),
+                            span: child.span(),
+                        }
+                    })?);
+            }
+            "atmosphere" => {
+                let mut atmosphere = AtmosphereConfig::default();
+                if let Some(origin) = parse_tuple3::<f64>(child, "origin") {
+                    atmosphere.origin = origin;
+                }
+                if let Some(inner) = float_prop(child, "inner_radius") {
+                    atmosphere.inner_radius = inner;
+                }
+                if let Some(outer) = float_prop(child, "outer_radius") {
+                    atmosphere.outer_radius = outer;
+                }
+                if let Some(albedo) = parse_tuple3::<f32>(child, "ground_albedo") {
+                    atmosphere.ground_albedo = albedo;
+                }
+                if let Some(raymarched) = child.get("raymarched").and_then(|v| v.as_bool()) {
+                    atmosphere.raymarched = raymarched;
+                }
+                if atmosphere.outer_radius <= atmosphere.inner_radius {
+                    return Err(KdlSchematicError::InvalidValue {
+                        property: "outer_radius".to_string(),
+                        node: "atmosphere".to_string(),
+                        expected: "outer_radius must be greater than inner_radius".to_string(),
+                        src: src.to_string(),
+                        span: child.span(),
+                    });
+                }
+                config.atmosphere = Some(atmosphere);
+            }
+            other => {
+                return Err(KdlSchematicError::UnknownNode {
+                    node_type: format!("environment.{other}"),
+                    src: src.to_string(),
+                    span: child.span(),
+                });
+            }
+        }
+    }
+    Ok(config)
 }
 
 fn parse_telemetry_mode(node: &KdlNode, src: &str) -> Result<bool, KdlSchematicError> {
@@ -717,9 +832,14 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
     }
 
     let show_view_cube = bool_prop(node, "show_view_cube").unwrap_or(true);
+    let effects = bool_prop(node, "effects").unwrap_or(true);
 
     let hdr = bool_prop(node, "hdr").unwrap_or(false);
     let bloom = parse_viewport_bloom(node, kdl_src)?;
+    let ev100 = node
+        .get("ev100")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
 
     let pos = node
         .get("pos")
@@ -787,8 +907,10 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         projection_color,
         frustums_thickness,
         show_view_cube,
+        effects,
         hdr,
         bloom,
+        ev100,
         name,
         pos,
         look_at,
@@ -1311,6 +1433,40 @@ fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicErr
         }
     };
 
+    let light = node
+        .children()
+        .and_then(|children| {
+            children
+                .nodes()
+                .iter()
+                .find(|child| child.name().value() == "light")
+        })
+        .map(|child| parse_thruster_light(child, src))
+        .transpose()?;
+
+    // Repeated `effect "path"` child nodes: stacked layers rendered from the
+    // same emitter (e.g. a camera-facing halo over a streaked core).
+    let mut extra_effects = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() != "effect" {
+                continue;
+            }
+            let path = child
+                .entries()
+                .iter()
+                .find(|entry| entry.name().is_none())
+                .and_then(|entry| entry.value().as_string())
+                .ok_or_else(|| KdlSchematicError::MissingProperty {
+                    property: "effect path (positional string)".to_string(),
+                    node: "effect".to_string(),
+                    src: src.to_string(),
+                    span: child.span(),
+                })?;
+            extra_effects.push(path.to_string());
+        }
+    }
+
     Ok(Thruster {
         name: parse_name(node),
         body_frame: bool_prop(node, "body_frame").unwrap_or(false),
@@ -1322,17 +1478,47 @@ fn parse_thruster(node: &KdlNode, src: &str) -> Result<Thruster, KdlSchematicErr
             .and_then(|v| v.as_string())
             .map(|s| s.to_string())
             .unwrap_or_else(Thruster::default_effect),
+        extra_effects,
         emission_rate: node
             .get("emission_rate")
             .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-            .map(|v| v as f32)
-            .unwrap_or_else(Thruster::default_emission_rate),
+            .map(|v| v as f32),
         cutoff: node
             .get("cutoff")
             .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
             .map(|v| v as f32)
             .unwrap_or_else(Thruster::default_cutoff),
         scale,
+        light,
+    })
+}
+
+fn parse_thruster_light(node: &KdlNode, src: &str) -> Result<ThrusterLight, KdlSchematicError> {
+    let float_prop = |name: &str| {
+        node.get(name)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+    };
+    let color =
+        parse_tuple3::<f32>(node, "color").ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "color".to_string(),
+            node: "light".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?;
+    let intensity = float_prop("intensity").ok_or_else(|| KdlSchematicError::MissingProperty {
+        property: "intensity".to_string(),
+        node: "light".to_string(),
+        src: src.to_string(),
+        span: node.span(),
+    })?;
+    Ok(ThrusterLight {
+        color,
+        intensity,
+        range: float_prop("range").unwrap_or_else(ThrusterLight::default_range),
+        offset: float_prop("offset").unwrap_or(0.0),
+        spot_angle: float_prop("spot_angle"),
+        shadows: bool_prop(node, "shadows").unwrap_or(false),
     })
 }
 
@@ -2088,6 +2274,22 @@ telemetry_mode #true
     }
 
     #[test]
+    fn test_duplicate_timeline_nodes_are_rejected() {
+        let err = parse_schematic(
+            r#"
+timeline range="last_30s"
+timeline
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("at most one timeline") || msg.contains("timeline"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
     fn test_parse_timeline_unknown_range_is_rejected() {
         let err = parse_schematic(r#"timeline range="last_3days""#).unwrap_err();
         let msg = err.to_string();
@@ -2219,6 +2421,20 @@ timeline follow_latest=#true {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
             assert!(!viewport.show_view_cube);
+            assert!(viewport.effects);
+        } else {
+            panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_effects_disabled() {
+        let kdl = r#"viewport effects=#false"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
+            assert!(!viewport.effects);
         } else {
             panic!("Expected viewport panel");
         }
