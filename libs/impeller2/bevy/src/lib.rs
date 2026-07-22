@@ -1935,7 +1935,9 @@ mod db_components_hierarchy_tests {
 
         let leaf_id = ComponentPath::from_name("solo").id;
         let leaf = *app.world().resource::<EntityMap>().get(&leaf_id).unwrap();
-        app.world_mut().entity_mut(leaf).insert(ChildOf(other_parent));
+        app.world_mut()
+            .entity_mut(leaf)
+            .insert(ChildOf(other_parent));
 
         let path = ComponentPath::from_name("solo");
         app.world_mut()
