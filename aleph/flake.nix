@@ -171,12 +171,25 @@
           ];
         };
       });
-      apps = forAllSystems (pkgs: {
-        deploy = {
-          type = "app";
-          program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
+      apps = let
+        baseApps = forAllSystems (pkgs: {
+          deploy = {
+            type = "app";
+            program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
+          };
+        });
+      in
+        baseApps
+        // {
+          x86_64-linux =
+            baseApps.x86_64-linux
+            // {
+              flash-initrd = {
+                type = "app";
+                program = "${self.packages.x86_64-linux.flash-initrd}/flash-initrd";
+              };
+            };
         };
-      });
     }
     // rec {
       nixosModules = baseModules // fswModules // stmModules // stmConfigurationModules // devModules // configurationPresets;
@@ -198,18 +211,63 @@
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;
       };
       packages.x86_64-linux = let
+        flash-initrd-app-partition = "nvme0n1p2";
         flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
           modules = [
             {nixpkgs.buildPlatform.system = "x86_64-linux";}
             {nixpkgs.overlays = [secureBzip2Overlay];}
           ];
         };
+        flash-initrd-cross = nixosConfigurations.base.extendModules {
+          modules = [
+            {nixpkgs.buildPlatform.system = "x86_64-linux";}
+            {nixpkgs.overlays = [secureBzip2Overlay];}
+            ({
+              lib,
+              pkgs,
+              ...
+            }: {
+              hardware.nvidia-jetpack.flashScriptOverrides = {
+                partitionTemplate = pkgs.runCommand "aleph-t234-qspi-nvme.xml" {nativeBuildInputs = [pkgs.buildPackages.xmlstarlet];} ''
+                  xmlstarlet ed \
+                    -d '//device[@type="nvme"]/partition[not(@name="master_boot_record" or @name="primary_gpt" or @name="esp" or @name="APP" or @name="secondary_gpt")]' \
+                    -i '//device[@type="nvme"]/partition[@name="esp" and not(@id)]' -t attr -n id -v 1 \
+                    -u '//device[@type="nvme"]/partition[@name="esp"]/size' -v 536870912 \
+                    -u '//device[@type="nvme"]/partition[@name="APP"]/@id' -v 2 \
+                    ${pkgs.nvidia-jetpack.bspSrc}/bootloader/generic/cfg/flash_t234_qspi_nvme.xml \
+                    >$out
+                '';
+                flashArgs = lib.mkForce [
+                  "--external-device"
+                  flash-initrd-app-partition
+                  "jetson-orin-nano-devkit"
+                  flash-initrd-app-partition
+                ];
+                postPatch = ''
+                  cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts
+                '';
+              };
+            })
+          ];
+        };
+        flash-initrd-bin-name = "initrd-flash-${flash-initrd-cross.config.hardware.nvidia-jetpack.name}";
       in {
         flash-uefi = nixpkgs.legacyPackages.x86_64-linux.runCommand "flash-uefi" {} ''
           mkdir -p $out
           cp ${flash-cross.config.system.build.legacyFlashScript}/bin/flash-orin-nx-devkit $out/flash-uefi
           sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
+        '';
+        flash-initrd = nixpkgs.legacyPackages.x86_64-linux.runCommand "flash-initrd" {
+          passthru = {
+            appPartition = flash-initrd-app-partition;
+            flashArgs = flash-initrd-cross.config.hardware.nvidia-jetpack.flashScriptOverrides.flashArgs;
+            partitionTemplate = flash-initrd-cross.config.hardware.nvidia-jetpack.flashScriptOverrides.partitionTemplate;
+          };
+        } ''
+          mkdir -p $out
+          cp ${flash-initrd-cross.config.system.build.initrdFlashScript}/bin/${flash-initrd-bin-name} $out/flash-initrd
+          chmod +x $out/flash-initrd
         '';
       };
       lib.installerSystem = installerSystem;
