@@ -996,10 +996,12 @@ impl Decomponentize for WorldSink<'_, '_> {
             ) else {
                 continue;
             };
-            if newly_created && let Some(last_entity) = last_entity {
-                e.insert(ChildOf(last_entity));
-            } else {
-                e.insert(ChildOf(*self.db_components_root));
+            if newly_created {
+                if let Some(last_entity) = last_entity {
+                    e.insert(ChildOf(last_entity));
+                } else {
+                    e.insert(ChildOf(*self.db_components_root));
+                }
             }
             last_entity = Some(e.id());
         }

@@ -911,15 +911,14 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
                 node.entries_mut()
                     .push(KdlEntry::new_prop("scale", scale.clone()));
             }
-            if uses_covariance {
-                if *error_confidence_interval
+            if uses_covariance
+                && *error_confidence_interval
                     != impeller2_wkt::default_ellipsoid_confidence_interval()
-                {
-                    node.entries_mut().push(KdlEntry::new_prop(
-                        "error_confidence_interval",
-                        *error_confidence_interval as f64,
-                    ));
-                }
+            {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "error_confidence_interval",
+                    *error_confidence_interval as f64,
+                ));
             }
             if *show_grid {
                 node.entries_mut()

@@ -1482,11 +1482,7 @@ fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
 }
 
 fn resolve_covariance_frame(object: &Object3D, coordinate: &Coordinate) -> GeoFrame {
-    object
-        .frame_orientation
-        .or(object.frame)
-        .or(coordinate.0)
-        .unwrap_or(GeoFrame::ENU)
+    object.frame.or(coordinate.0).unwrap_or(GeoFrame::ENU)
 }
 
 /// Build symmetric covariance P from 6-pack (a,b,c,d,e,f) -> [[a,b,c],[b,d,e],[c,e,f]].
@@ -2523,12 +2519,12 @@ mod ellipsoid_covariance_tests {
     }
 
     #[test]
-    fn resolve_covariance_frame_inherits_object_frame() {
+    fn resolve_covariance_frame_uses_position_frame() {
         let object = Object3D {
             eql: "x".to_string(),
             mesh: Object3DMesh::glb("m.glb"),
             frame: Some(GeoFrame::NED),
-            frame_orientation: None,
+            frame_orientation: Some(GeoFrame::ECEF),
             orientation: Default::default(),
             icon: None,
             thrusters: Vec::new(),

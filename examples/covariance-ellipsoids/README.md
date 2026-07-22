@@ -7,8 +7,8 @@ Displays the same positive-definite covariance as two ellipsoids:
 
 The Cholesky factor varies continuously over an eight-second cycle, while the
 direct covariance is recomputed as `P = LLᵀ` every simulation tick. Their
-principal extents should remain synchronized. The direct covariance side uses
-the example's explicit ECEF frame, while the Cholesky side inherits ENU.
+principal extents and orientation should remain synchronized because both use
+the same ENU frame.
 
 Run from the repository root:
 

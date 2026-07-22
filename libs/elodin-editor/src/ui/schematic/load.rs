@@ -1637,7 +1637,7 @@ pub fn show_document_load_failures(
 
 #[cfg(test)]
 mod tests {
-    use super::LoadSchematicParams;
+    use super::{LoadSchematicParams, MonitorsRoot};
     use crate::ui::widgets::SystemStateExt;
     use crate::{
         Coordinate, EqlContext,
@@ -1701,6 +1701,7 @@ mod tests {
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut().spawn((MonitorsRoot, Name::new("monitors")));
         settle(&mut app);
         app
     }
