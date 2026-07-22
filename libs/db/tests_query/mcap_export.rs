@@ -359,9 +359,8 @@ fn mcap_export_epoch_offset_auto() {
     let out = tmp_dir("out_offset_auto");
     let db = DB::create(db_path.clone()).expect("DB::create");
 
-    let specs: &[(&str, PrimType, &[usize], Option<&str>)] = &[
-        ("sat.alt", PrimType::F64, &[], None),
-    ];
+    let specs: &[(&str, PrimType, &[usize], Option<&str>)] =
+        &[("sat.alt", PrimType::F64, &[], None)];
 
     db.with_state_mut(|s| {
         for (name, prim, dim, element_names) in specs {
@@ -388,7 +387,9 @@ fn mcap_export_epoch_offset_auto() {
         let ts = Timestamp(-100_000 + step as i64 * 10_000);
         db.with_state(|s| {
             let val = (step as f64 * 100.0).to_le_bytes().to_vec();
-            let c = s.get_component(ComponentId::new("sat.alt")).expect("component");
+            let c = s
+                .get_component(ComponentId::new("sat.alt"))
+                .expect("component");
             c.time_series.push_buf(ts, &val).expect("push_buf");
         });
     }
@@ -408,7 +409,10 @@ fn mcap_export_epoch_offset_auto() {
     assert_eq!(min_log_time, 0, "auto-rebased earliest should be 0 ns");
 
     let summary = mcap::Summary::read(&mapped).unwrap().unwrap();
-    let db_state_meta = summary.metadata_indexes.iter().find(|m| m.name == "elodin.db_state");
+    let db_state_meta = summary
+        .metadata_indexes
+        .iter()
+        .find(|m| m.name == "elodin.db_state");
     assert!(db_state_meta.is_some(), "db_state metadata should exist");
 
     let _ = std::fs::remove_dir_all(&db_path);
@@ -421,9 +425,8 @@ fn mcap_export_epoch_offset_manual() {
     let out = tmp_dir("out_offset_manual");
     let db = DB::create(db_path.clone()).expect("DB::create");
 
-    let specs: &[(&str, PrimType, &[usize], Option<&str>)] = &[
-        ("sat.alt", PrimType::F64, &[], None),
-    ];
+    let specs: &[(&str, PrimType, &[usize], Option<&str>)] =
+        &[("sat.alt", PrimType::F64, &[], None)];
 
     db.with_state_mut(|s| {
         for (name, prim, dim, element_names) in specs {
@@ -450,7 +453,9 @@ fn mcap_export_epoch_offset_manual() {
         let ts = Timestamp(1000 + step as i64 * 1000);
         db.with_state(|s| {
             let val = (step as f64).to_le_bytes().to_vec();
-            let c = s.get_component(ComponentId::new("sat.alt")).expect("component");
+            let c = s
+                .get_component(ComponentId::new("sat.alt"))
+                .expect("component");
             c.time_series.push_buf(ts, &val).expect("push_buf");
         });
     }

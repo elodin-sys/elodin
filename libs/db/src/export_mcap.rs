@@ -559,12 +559,18 @@ fn entity_for_eql(eql_src: &str, ctx: &eql::Context) -> Option<String> {
 fn parse_literal_pose(eql_src: &str, ctx: &eql::Context) -> Option<[f64; 7]> {
     let vals = parse_literal_tuple(eql_src)?;
     if vals.len() == 7 {
-        Some([vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]])
+        Some([
+            vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6],
+        ])
     } else {
         let expr = ctx.parse_str(eql_src).ok()?;
         let mut flat = Vec::new();
         flatten_literals_full(&expr, &mut flat);
-        (flat.len() == 7).then(|| [flat[0], flat[1], flat[2], flat[3], flat[4], flat[5], flat[6]])
+        (flat.len() == 7).then(|| {
+            [
+                flat[0], flat[1], flat[2], flat[3], flat[4], flat[5], flat[6],
+            ]
+        })
     }
 }
 
@@ -842,7 +848,13 @@ fn scene_topic(entity_id: &str) -> String {
 
 fn sanitize_topic_segment(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
@@ -864,12 +876,13 @@ struct SceneBuild {
 const MAX_LINE_POINTS: usize = 2000;
 
 /// Extract XYZ trajectory from a 7-element world_pos component.
-fn extract_trajectory(
-    comp: &ExportComponent,
-    cursor: &ComponentCursor,
-) -> Vec<[f64; 3]> {
+fn extract_trajectory(comp: &ExportComponent, cursor: &ComponentCursor) -> Vec<[f64; 3]> {
     let n = cursor.timestamps.len();
-    let step = if n > MAX_LINE_POINTS { n.div_ceil(MAX_LINE_POINTS) } else { 1 };
+    let step = if n > MAX_LINE_POINTS {
+        n.div_ceil(MAX_LINE_POINTS)
+    } else {
+        1
+    };
     let prim = comp.component.schema.prim_type;
     let mut points = Vec::with_capacity(n.min(MAX_LINE_POINTS + 1));
     for i in (0..n).step_by(step) {
@@ -880,7 +893,7 @@ fn extract_trajectory(
             read_f64(prim, buf, 6),
         ]);
     }
-    if n > 1 && (n - 1) % step != 0 {
+    if n > 1 && !(n - 1).is_multiple_of(step) {
         let buf = &cursor.data[(n - 1) * cursor.sample_size..n * cursor.sample_size];
         points.push([
             read_f64(prim, buf, 4),
@@ -892,7 +905,12 @@ fn extract_trajectory(
 }
 
 fn default_line_color() -> Color {
-    Color { r: 0.2, g: 0.6, b: 1.0, a: 1.0 }
+    Color {
+        r: 0.2,
+        g: 0.6,
+        b: 1.0,
+        a: 1.0,
+    }
 }
 
 /// Build a LinePrimitive entity from a Line3d schematic element.
@@ -906,12 +924,18 @@ fn build_line_entity(
 ) -> Option<Value> {
     let entity = entity_for_eql(&line.eql, ctx)?;
     let pose_name = format!("{entity}.world_pos");
-    let (comp_idx, comp) = components.iter().enumerate().find(|(_, c)| c.name == pose_name)?;
+    let (comp_idx, comp) = components
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.name == pose_name)?;
     let cursor = component_cursors[comp_idx].as_ref()?;
 
     let flat_count: usize = comp.component.schema.dim.iter().product::<usize>().max(1);
     if flat_count != 7 {
-        eprintln!("Warning: line_3d '{}' references a non-pose component ({}), skipping", line.eql, comp.name);
+        eprintln!(
+            "Warning: line_3d '{}' references a non-pose component ({}), skipping",
+            line.eql, comp.name
+        );
         return None;
     }
 
@@ -920,7 +944,11 @@ fn build_line_entity(
         return None;
     }
 
-    let color = line.color.as_ref().copied().unwrap_or_else(default_line_color);
+    let color = line
+        .color
+        .as_ref()
+        .copied()
+        .unwrap_or_else(default_line_color);
     let point_values: Vec<Value> = points
         .iter()
         .map(|[x, y, z]| json!({"x": x, "y": y, "z": z}))
@@ -1040,6 +1068,7 @@ fn resolve_follow_entity(schematics: &LoadedSchematics, ctx: &eql::Context) -> O
 /// SceneUpdate message per entity (`/scene/<id>`), so latest-per-topic
 /// backfill can never drop entities. Dynamic arrows are handled separately
 /// on `/scene_dynamic`.
+#[allow(clippy::too_many_arguments)]
 fn build_scene(
     schematics: &LoadedSchematics,
     ctx: &eql::Context,
@@ -1091,14 +1120,25 @@ fn build_scene(
                     Err(err) => eprintln!("Warning: skipping object_3d ({}): {err}", object.eql),
                 }
             }
-            SchematicElem::VectorArrow(arrow) => match build_arrow(arrow, ctx) {
-                Some((frame, primitive)) => arrow_groups.entry(frame).or_default().push(primitive),
-                None => {}
-            },
+            SchematicElem::VectorArrow(arrow) => {
+                if let Some((frame, primitive)) = build_arrow(arrow, ctx) {
+                    arrow_groups.entry(frame).or_default().push(primitive);
+                }
+            }
             SchematicElem::Line3d(line) => {
-                match build_line_entity(line, ctx, components, component_cursors, ts_ns, geo_frames_active) {
+                match build_line_entity(
+                    line,
+                    ctx,
+                    components,
+                    component_cursors,
+                    ts_ns,
+                    geo_frames_active,
+                ) {
                     Some(entity) => push(&mut messages, entity),
-                    None => eprintln!("Warning: skipping line_3d '{}' (pose not found or empty)", line.eql),
+                    None => eprintln!(
+                        "Warning: skipping line_3d '{}' (pose not found or empty)",
+                        line.eql
+                    ),
                 }
             }
             SchematicElem::WorldMesh(wm) => {
@@ -1114,7 +1154,10 @@ fn build_scene(
                         None => eprintln!("Warning: earth.glb not found for world_mesh globe"),
                     }
                 } else {
-                    eprintln!("Note: skipping world_mesh region '{}' (only 'globe' is exported)", wm.region);
+                    eprintln!(
+                        "Note: skipping world_mesh region '{}' (only 'globe' is exported)",
+                        wm.region
+                    );
                 }
             }
             _ => {}
@@ -1122,14 +1165,17 @@ fn build_scene(
     }
 
     for (frame, arrows) in arrow_groups {
-        push(&mut messages, json!({
-            "timestamp": timestamp_json(ts_ns),
-            "frame_id": frame,
-            "id": format!("{frame}-arrows"),
-            "lifetime": {"sec": 0, "nsec": 0},
-            "frame_locked": true,
-            "arrows": arrows,
-        }));
+        push(
+            &mut messages,
+            json!({
+                "timestamp": timestamp_json(ts_ns),
+                "frame_id": frame,
+                "id": format!("{frame}-arrows"),
+                "lifetime": {"sec": 0, "nsec": 0},
+                "frame_locked": true,
+                "arrows": arrows,
+            }),
+        );
     }
 
     if messages.is_empty() && referenced_assets.is_empty() {
@@ -1148,6 +1194,7 @@ fn build_scene(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_object_entity(
     object: &Object3D,
     ctx: &eql::Context,
@@ -1816,14 +1863,17 @@ const DYNAMIC_ARROW_MAX_HZ: f64 = 30.0;
 /// whose `vector` EQL references a data component rather than a literal tuple.
 /// Returns one `(topic, sorted (timestamp_us, payload) stream)` per arrow —
 /// separate topics so latest-per-topic backfill keeps every arrow alive.
+type TimedPayloadStream = Vec<(i64, Vec<u8>)>;
+type NamedTimedStreams = Vec<(String, TimedPayloadStream)>;
+
 fn build_dynamic_arrows(
     schematics: &LoadedSchematics,
     ctx: &eql::Context,
     components: &[ExportComponent],
     component_cursors: &[Option<ComponentCursor>],
     epoch_offset_us: i64,
-) -> Vec<(String, Vec<(i64, Vec<u8>)>)> {
-    let mut streams: Vec<(String, Vec<(i64, Vec<u8>)>)> = Vec::new();
+) -> NamedTimedStreams {
+    let mut streams: NamedTimedStreams = Vec::new();
 
     let all_elems = schematics
         .primary
@@ -1854,7 +1904,11 @@ fn build_dynamic_arrows(
                 None => continue,
             }
         };
-        let (comp_idx, comp) = match components.iter().enumerate().find(|(_, c)| c.name == vec_comp_name) {
+        let (comp_idx, comp) = match components
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.name == vec_comp_name)
+        {
             Some(pair) => pair,
             None => continue,
         };
@@ -1868,12 +1922,16 @@ fn build_dynamic_arrows(
         }
 
         let frame = if arrow.body_frame {
-            arrow.origin.as_deref()
+            arrow
+                .origin
+                .as_deref()
                 .and_then(|o| entity_for_eql(o, ctx))
                 .unwrap_or_else(|| vec_entity.clone())
         } else {
-            arrow.origin.as_deref()
-                .and_then(|o| parse_literal_tuple(o))
+            arrow
+                .origin
+                .as_deref()
+                .and_then(parse_literal_tuple)
                 .map(|_| "world".to_string())
                 .or_else(|| arrow.origin.as_deref().and_then(|o| entity_for_eql(o, ctx)))
                 .unwrap_or_else(|| "world".to_string())
@@ -1882,25 +1940,35 @@ fn build_dynamic_arrows(
         // Literal origins may be a 3-tuple position or a 7-tuple pose
         // `(qx,qy,qz,qw, x,y,z)` — take the trailing xyz in either case.
         let origin_pos = if !arrow.body_frame {
-            arrow.origin.as_deref().and_then(parse_literal_tuple).and_then(|v| {
-                if v.len() >= 7 {
-                    Some([v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]])
-                } else if v.len() >= 3 {
-                    Some([v[0], v[1], v[2]])
-                } else {
-                    None
-                }
-            })
+            arrow
+                .origin
+                .as_deref()
+                .and_then(parse_literal_tuple)
+                .and_then(|v| {
+                    if v.len() >= 7 {
+                        Some([v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]])
+                    } else if v.len() >= 3 {
+                        Some([v[0], v[1], v[2]])
+                    } else {
+                        None
+                    }
+                })
         } else {
             None
         };
 
-        let arrow_id = arrow.name.clone().unwrap_or_else(|| format!("{vec_comp_name}-arrow"));
+        let arrow_id = arrow
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("{vec_comp_name}-arrow"));
         let mut topic = format!("/scene_dynamic/{}", sanitize_topic_segment(&arrow_id));
         let mut ordinal = 1u32;
         while streams.iter().any(|(t, _)| *t == topic) {
             ordinal += 1;
-            topic = format!("/scene_dynamic/{}-{ordinal}", sanitize_topic_segment(&arrow_id));
+            topic = format!(
+                "/scene_dynamic/{}-{ordinal}",
+                sanitize_topic_segment(&arrow_id)
+            );
         }
         let prim = comp.component.schema.prim_type;
         let mut entries: Vec<(i64, Vec<u8>)> = Vec::new();
@@ -1979,11 +2047,20 @@ fn encode_sensor_frame(
         crate::export_videos::SensorEncoder::new(cfg.width, cfg.height, fps)
             .expect("openh264 encoder init")
     });
-    let yuv = match crate::export_videos::rgba_to_i420(raw_payload, cfg.width as usize, cfg.height as usize) {
+    let yuv = match crate::export_videos::rgba_to_i420(
+        raw_payload,
+        cfg.width as usize,
+        cfg.height as usize,
+    ) {
         Ok(yuv) => yuv,
         Err(e) => {
             eprintln!("Warning: sensor frame encode skip for {name}: {e}");
-            return msg_log_json(&MsgLogKind::SensorCamera(Box::new(cfg.clone())), name, raw_payload, ts_ns);
+            return msg_log_json(
+                &MsgLogKind::SensorCamera(Box::new(cfg.clone())),
+                name,
+                raw_payload,
+                ts_ns,
+            );
         }
     };
     match encoder.encode_frame(&yuv) {
@@ -1999,7 +2076,12 @@ fn encode_sensor_frame(
         Ok(_) => Vec::new(),
         Err(e) => {
             eprintln!("Warning: sensor frame encode error for {name}: {e}");
-            msg_log_json(&MsgLogKind::SensorCamera(Box::new(cfg.clone())), name, raw_payload, ts_ns)
+            msg_log_json(
+                &MsgLogKind::SensorCamera(Box::new(cfg.clone())),
+                name,
+                raw_payload,
+                ts_ns,
+            )
         }
     }
 }
@@ -2226,9 +2308,13 @@ pub fn run(
                 MsgLogKind::H264Video => format!("/video/{name}"),
                 MsgLogKind::SensorCamera(_) => {
                     #[cfg(feature = "video-export")]
-                    { format!("/video/{name}") }
+                    {
+                        format!("/video/{name}")
+                    }
                     #[cfg(not(feature = "video-export"))]
-                    { format!("/camera/{name}") }
+                    {
+                        format!("/camera/{name}")
+                    }
                 }
                 MsgLogKind::LogEntries => format!("/log/{name}"),
                 MsgLogKind::Raw => format!("/msg/{name}"),
@@ -2292,9 +2378,13 @@ pub fn run(
             MsgLogKind::H264Video => ("foxglove.CompressedVideo", SCHEMA_COMPRESSED_VIDEO),
             MsgLogKind::SensorCamera(_) => {
                 #[cfg(feature = "video-export")]
-                { ("foxglove.CompressedVideo", SCHEMA_COMPRESSED_VIDEO) }
+                {
+                    ("foxglove.CompressedVideo", SCHEMA_COMPRESSED_VIDEO)
+                }
                 #[cfg(not(feature = "video-export"))]
-                { ("foxglove.RawImage", SCHEMA_RAW_IMAGE) }
+                {
+                    ("foxglove.RawImage", SCHEMA_RAW_IMAGE)
+                }
             }
             MsgLogKind::LogEntries => ("foxglove.Log", SCHEMA_LOG),
             MsgLogKind::Raw => ("elodin.RawMessage", SCHEMA_RAW_BYTES),
@@ -2397,21 +2487,24 @@ pub fn run(
 
     // ---- dynamic vector arrows on /scene_dynamic ----------------------------
     let dynamic_arrows = build_dynamic_arrows(
-        &schematics, &ctx, &snapshot.components, &component_cursors, epoch_offset_us,
+        &schematics,
+        &ctx,
+        &snapshot.components,
+        &component_cursors,
+        epoch_offset_us,
     );
 
     let mut referenced_assets: Vec<String> = Vec::new();
-    let scene_schema_id = if scene.as_ref().is_some_and(|s| !s.messages.is_empty())
-        || !dynamic_arrows.is_empty()
-    {
-        Some(writer.add_schema(
-            "foxglove.SceneUpdate",
-            "jsonschema",
-            SCHEMA_SCENE_UPDATE.as_bytes(),
-        )?)
-    } else {
-        None
-    };
+    let scene_schema_id =
+        if scene.as_ref().is_some_and(|s| !s.messages.is_empty()) || !dynamic_arrows.is_empty() {
+            Some(writer.add_schema(
+                "foxglove.SceneUpdate",
+                "jsonschema",
+                SCHEMA_SCENE_UPDATE.as_bytes(),
+            )?)
+        } else {
+            None
+        };
 
     if let Some(scene) = &scene {
         referenced_assets.extend(scene.referenced_assets.iter().cloned());
@@ -2438,8 +2531,12 @@ pub fn run(
     let mut dynamic_arrow_channels: Vec<u16> = Vec::with_capacity(dynamic_arrows.len());
     if let Some(schema_id) = scene_schema_id {
         for (topic, _) in &dynamic_arrows {
-            dynamic_arrow_channels
-                .push(writer.add_channel(schema_id, topic, "json", &empty_metadata)?);
+            dynamic_arrow_channels.push(writer.add_channel(
+                schema_id,
+                topic,
+                "json",
+                &empty_metadata,
+            )?);
         }
     }
 
@@ -2534,8 +2631,12 @@ pub fn run(
                 {
                     if let MsgLogKind::SensorCamera(cfg) = &log.kind {
                         encode_sensor_frame(
-                            cfg, raw_payload, ts_ns, &log.name,
-                            &mut sensor_encoders, idx,
+                            cfg,
+                            raw_payload,
+                            ts_ns,
+                            &log.name,
+                            &mut sensor_encoders,
+                            idx,
                         )
                     } else {
                         msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
@@ -2878,9 +2979,9 @@ mod tests {
             topic: topic_for_component(name),
             element_paths: vec![],
             metadata: Default::default(),
-            pose_entity: name.ends_with(".world_pos").then(|| {
-                name.trim_end_matches(".world_pos").to_string()
-            }),
+            pose_entity: name
+                .ends_with(".world_pos")
+                .then(|| name.trim_end_matches(".world_pos").to_string()),
         }
     }
 
@@ -2942,7 +3043,12 @@ mod tests {
         eql::Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000))
     }
 
-    fn test_glb_object(eql: &str, path: &str, translate: (f32, f32, f32), rotate: (f32, f32, f32)) -> Object3D {
+    fn test_glb_object(
+        eql: &str,
+        path: &str,
+        translate: (f32, f32, f32),
+        rotate: (f32, f32, f32),
+    ) -> Object3D {
         Object3D {
             eql: eql.to_string(),
             mesh: Object3DMesh::Glb {
@@ -3025,7 +3131,12 @@ mod tests {
         // 2 KiB payload with a tiny max-embed so the guard trips.
         std::fs::write(&glb_path, vec![0u8; 2048]).unwrap();
         let ctx = empty_eql_ctx();
-        let object = test_glb_object("(0, 0, 0, 1, 1, 2, 3)", "big.glb", (0.0, 0.0, 0.0), (0.0, 0.0, 45.0));
+        let object = test_glb_object(
+            "(0, 0, 0, 1, 1, 2, 3)",
+            "big.glb",
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 45.0),
+        );
         let mut lit = 0u32;
         let mut counts = HashMap::new();
         let (entity, assets) = build_object_entity(
@@ -3039,7 +3150,10 @@ mod tests {
             &mut counts,
         )
         .unwrap();
-        assert!(entity.is_none(), "oversized GLB must not emit a model entity");
+        assert!(
+            entity.is_none(),
+            "oversized GLB must not emit a model entity"
+        );
         assert_eq!(assets, vec!["big.glb".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3057,7 +3171,12 @@ mod tests {
             impeller2::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
         ));
         let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000));
-        let object = test_glb_object("lander.world_pos", "big.glb", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0));
+        let object = test_glb_object(
+            "lander.world_pos",
+            "big.glb",
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+        );
         let mut lit = 0u32;
         let mut counts = HashMap::new();
         let (entity, _) = build_object_entity(
@@ -3105,9 +3224,24 @@ mod tests {
         .unwrap();
         let entity = entity.unwrap();
         // Literal (100,0,0) + local translate (1,0,0); local 90° Z is orientation-only.
-        assert!((entity["models"][0]["pose"]["position"]["x"].as_f64().unwrap() - 101.0).abs() < 1e-6);
-        assert!(entity["models"][0]["pose"]["position"]["y"].as_f64().unwrap().abs() < 1e-6);
-        let qz = entity["models"][0]["pose"]["orientation"]["z"].as_f64().unwrap();
+        assert!(
+            (entity["models"][0]["pose"]["position"]["x"]
+                .as_f64()
+                .unwrap()
+                - 101.0)
+                .abs()
+                < 1e-6
+        );
+        assert!(
+            entity["models"][0]["pose"]["position"]["y"]
+                .as_f64()
+                .unwrap()
+                .abs()
+                < 1e-6
+        );
+        let qz = entity["models"][0]["pose"]["orientation"]["z"]
+            .as_f64()
+            .unwrap();
         assert!((qz - (std::f64::consts::FRAC_PI_4).sin()).abs() < 1e-6);
         assert_eq!(entity["frame_id"], "world");
         let _ = std::fs::remove_dir_all(&dir);
@@ -3150,9 +3284,7 @@ mod tests {
     #[test]
     fn camera_offset_literal_tuple_still_works() {
         let ctx = ctx_with_pose("drone.world_pos");
-        let expr = ctx
-            .parse_str("drone.world_pos + (0,0,0,0, 2,2,2)")
-            .unwrap();
+        let expr = ctx.parse_str("drone.world_pos + (0,0,0,0, 2,2,2)").unwrap();
         assert_eq!(camera_offset_from_pos(&expr), Some([2.0, 2.0, 2.0]));
     }
 
@@ -3186,9 +3318,13 @@ mod tests {
         };
         let ctx = ctx_with_pose("jet.world_pos");
         let comps = vec![comp];
-        let entity = build_line_entity(&line, &ctx, &comps, &cursors, 0, false).expect("line entity");
+        let entity =
+            build_line_entity(&line, &ctx, &comps, &cursors, 0, false).expect("line entity");
         let l = &entity["lines"][0];
-        assert_eq!(l["scale_invariant"], true, "pixel-width lines must be scale invariant");
+        assert_eq!(
+            l["scale_invariant"], true,
+            "pixel-width lines must be scale invariant"
+        );
         assert_eq!(l["thickness"], 3.0);
     }
 
@@ -3225,7 +3361,18 @@ mod tests {
             windows: vec![],
             raw: Vec::new(),
         };
-        let scene = build_scene(&schematics, &ctx, &dir, 0, &[], &[], 1024 * 1024, None, false).unwrap();
+        let scene = build_scene(
+            &schematics,
+            &ctx,
+            &dir,
+            0,
+            &[],
+            &[],
+            1024 * 1024,
+            None,
+            false,
+        )
+        .unwrap();
         assert_eq!(scene.messages.len(), 2);
         // Each entity gets its own topic (latest-per-topic backfill safety).
         assert_eq!(scene.messages[0].0, "/scene/literal-1-model");
@@ -3233,7 +3380,12 @@ mod tests {
         for (_, msg) in &scene.messages {
             let v: Value = serde_json::from_slice(msg).unwrap();
             assert_eq!(v["entities"].as_array().unwrap().len(), 1);
-            assert!(!v["entities"][0]["models"][0]["data"].as_str().unwrap().is_empty());
+            assert!(
+                !v["entities"][0]["models"][0]["data"]
+                    .as_str()
+                    .unwrap()
+                    .is_empty()
+            );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
