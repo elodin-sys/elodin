@@ -509,34 +509,19 @@ rocket = w.spawn(
 )
 w.schematic(
     """
-    // Geodetic origin (Cape Canaveral LC-39A) so the ENU world maps to real
-    // lat/lon/alt; ENU physics is unchanged, but LLA/ECEF conversions become
-    // meaningful for the spatial gauge below.
-    coordinate frame=ENU lat=28.6084 lon=-80.6043 alt=3.0
+    coordinate frame=ENU
     hsplit {
-        // Gauges (#738): position values (top) and attitude gimbals (bottom)
-        // from the same ENU world_pos, as a compact 2x2 grid on the left.
-        vsplit share=0.22 {
-            hsplit {
-                geo_position_gauge name="NED" eql="rocket.world_pos" source="ENU" display="NED"
-                geo_position_gauge name="LLA" eql="rocket.world_pos" source="ENU" display="LLA"
-            }
-            hsplit {
-                orientation_gauge name="ATT NED" eql="rocket.world_pos" source="ENU" display="NED"
-                orientation_gauge name="ATT ECEF" eql="rocket.world_pos" source="ENU" display="ECEF"
-            }
-        }
-        tabs share=0.5 {
+        tabs share=0.8 {
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }
-        vsplit share=0.28 {
-            vsplit share=0.6 {
+        vsplit share=0.4 {
+            vsplit {
                 graph "rocket.fin_control_trim" name="Trim Control"
                 graph "rocket.fin_deflect" name="Fin Deflection"
                 graph "rocket.aero_coefs" name="Aero Coefficients"
             }
             vsplit {
-                // EQL-derived aerodynamic angles and velocity magnitude
+                // EQL-derived aerodynamic angles and velocity magnitude 
                 query_plot name="Angle-of-Attack-EQL" query="((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()" type="eql" auto_refresh=#true
 
                 // Velocity magnitude using norm() formula
