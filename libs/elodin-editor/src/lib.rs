@@ -580,7 +580,7 @@ fn run_egui_inspector(world: &mut World) {
     };
     let mut egui_context = egui_context.clone();
 
-    egui::CentralPanel::default().show(egui_context.get_mut(), |ui| {
+    egui::CentralPanel::default().show_inside(egui_context.get_mut(), |ui| {
         egui::ScrollArea::both().show(ui, |ui| {
             bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
             ui.allocate_space(ui.available_size());
