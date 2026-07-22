@@ -54,7 +54,9 @@ use impeller2_wkt::{ComponentValue as WktComponentValue, CurrentTimestamp, Thrus
 
 use crate::EqlContext;
 use crate::WorldPosExt;
-use crate::object_3d::{CompiledExpr, Object3DState, compile_eql_expr, resolve_db_asset_url};
+use crate::object_3d::{
+    CompiledExpr, Object3DState, WorldPosReceived, compile_eql_expr, resolve_db_asset_url,
+};
 use crate::plugins::render_layer_alloc::THRUSTER_PARTICLES_RENDER_LAYER;
 use crate::ui::Paused;
 use crate::vector_arrow::component_value_tail_to_vec3;
@@ -691,15 +693,19 @@ fn frame_up(frame: GeoFrame, position_in_frame: DVec3) -> DVec3 {
 
 /// Spawns the world-fixed anchor for an anchored-trail jet: a regular
 /// high-precision world entity (GeoPosition + grid cell) frozen at the owning
-/// object's position at bind time, oriented so anchor-local +Y is up.
+/// object's telemetry pose, oriented so anchor-local +Y is up.
+///
+/// Caller must pass a pose that has already been set from telemetry
+/// (`WorldPosReceived`); default/missing `(0,0,0)` would pin ECEF trails at
+/// Earth's center for the whole flight.
 fn spawn_trail_anchor(
     commands: &mut Commands,
     jet_entity: Entity,
     frame: Option<GeoFrame>,
-    world_pos: Option<&WorldPos>,
+    world_pos: &WorldPos,
 ) -> Entity {
     let frame = frame.unwrap_or_default();
-    let position = world_pos.map(|wp| wp.pos()).unwrap_or_default();
+    let position = world_pos.pos();
     let up = frame_up(frame, position);
     let rotation = DQuat::from_rotation_arc(DVec3::Y, up);
     commands
@@ -723,11 +729,13 @@ fn spawn_trail_anchor(
 /// `EffectMaterial` in one command so hanabi compiles the effect with its
 /// texture slots already bound. Effects declaring the anchored-trail
 /// properties are additionally re-homed from the vehicle onto a world-fixed
-/// anchor entity.
+/// anchor entity — but only once the owner has a telemetry `WorldPos`
+/// (`WorldPosReceived`), so the freeze does not capture the spawn default
+/// at ECEF origin.
 fn bind_file_effect_assets(
     mut commands: Commands,
     mut jets: Query<(Entity, &mut KdlThrusterJet, &KdlThrusterJetOf)>,
-    objects: Query<&WorldPos, With<Object3DState>>,
+    objects: Query<&WorldPos, (With<Object3DState>, With<WorldPosReceived>)>,
     effects: Res<Assets<EffectAsset>>,
     assets: Res<ThrusterEffectAssets>,
     asset_server: Res<AssetServer>,
@@ -741,6 +749,18 @@ fn bind_file_effect_assets(
         let Some(asset) = effects.get(&handle) else {
             continue;
         };
+        let anchored = is_anchored_trail(asset);
+        // Anchored trails freeze a world pose at bind time. Object3D spawns
+        // with `WorldPos::default()` (zero); binding before the first
+        // telemetry sample would pin ECEF trails at Earth's center forever.
+        let owner_pose = if anchored {
+            let Some(pose) = objects.get(owner.0).ok() else {
+                continue;
+            };
+            Some(pose)
+        } else {
+            None
+        };
         jet.authored_settings = Some(asset.spawner);
         let images: Vec<Handle<Image>> = asset
             .texture_layout()
@@ -752,10 +772,8 @@ fn bind_file_effect_assets(
             .properties()
             .iter()
             .any(|p| p.name() == INTENSITY_PROPERTY);
-        let anchored = is_anchored_trail(asset);
-        if anchored {
-            let anchor =
-                spawn_trail_anchor(&mut commands, entity, jet.frame, objects.get(owner.0).ok());
+        if let Some(world_pos) = owner_pose {
+            let anchor = spawn_trail_anchor(&mut commands, entity, jet.frame, world_pos);
             commands.entity(entity).insert((
                 TrailAnchoredJet { anchor },
                 EffectProperties::default(),
@@ -1445,6 +1463,33 @@ mod tests {
     /// Seek rebuilds despawn jets (and their EffectAsset handles). The file
     /// cache must keep a strong handle so Bevy does not unload the asset and
     /// the next ensure reuses the same handle id.
+    #[test]
+    fn trail_anchor_freezes_telemetry_pose_not_default_origin() {
+        let mut world = World::new();
+        let jet = world.spawn_empty().id();
+        let world_pos = WorldPos {
+            att: Default::default(),
+            pos: nox::Vector3::new(916_000.0, -5_540_000.0, 3_040_000.0),
+        };
+        let anchor = {
+            let mut commands = world.commands();
+            spawn_trail_anchor(&mut commands, jet, Some(GeoFrame::ECEF), &world_pos)
+        };
+        world.flush();
+
+        let geo = world.get::<GeoPosition>(anchor).expect("anchor GeoPosition");
+        assert_eq!(geo.0, GeoFrame::ECEF);
+        assert_eq!(
+            geo.1,
+            DVec3::new(916_000.0, -5_540_000.0, 3_040_000.0),
+            "anchor must freeze the telemetry ECEF pose, not (0,0,0)"
+        );
+        assert!(
+            world.get::<KdlTrailAnchorOf>(anchor).is_some(),
+            "anchor must back-reference its jet"
+        );
+    }
+
     #[test]
     fn file_effect_cache_survives_seek_teardown() {
         let mut effects = Assets::<EffectAsset>::default();

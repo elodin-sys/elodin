@@ -816,7 +816,7 @@ def ground_contact(
     sin_lat, cos_lat = jnp.sin(lat), jnp.cos(lat)
     sin_lon, cos_lon = jnp.sin(lon), jnp.cos(lon)
     up = jnp.array([cos_lat * cos_lon, cos_lat * sin_lon, sin_lat])
-    east = jnp.array([-sin_lon, cos_lon, 0.0])
+
     along = PAD_TRACK_DIR
     along = along - jnp.dot(along, up) * up
     along = along / jnp.maximum(jnp.linalg.norm(along), 1e-9)

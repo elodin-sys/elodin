@@ -8,7 +8,7 @@ priors; the Monte Carlo campaign owns their scale factors.
 
 import jax
 import jax.numpy as jnp
-from constants import S_REF_M2, STAGE1_DIAMETER_M, STAGE1_LENGTH_M
+from constants import S_REF_M2, STAGE1_LENGTH_M
 
 jax.config.update("jax_enable_x64", True)
 
