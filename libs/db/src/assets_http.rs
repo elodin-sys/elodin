@@ -614,7 +614,9 @@ async fn get_asset(
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
         Ok(Ok(bytes)) => {
             let etag = asset_etag(&bytes);
-            if let Some(inm) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+            if let Some(inm) = headers
+                .get(header::IF_NONE_MATCH)
+                .and_then(|v| v.to_str().ok())
                 && inm
                     .split(',')
                     .map(str::trim)

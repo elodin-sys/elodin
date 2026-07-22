@@ -330,6 +330,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
         ],
         name="lander_truth",
     )
+
     @el.map
     def engine_response(
         throttle: Throttle, throttle_cmd: ThrottleCmd, prop: Propellant, landed: Landed
@@ -418,9 +419,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             jnp.linalg.norm(vel.linear()[:2]),
             touchdown_horizontal_speed[0],
         )
-        linear_pos = jnp.where(
-            landed_now, pos.linear().at[2].set(FOOTPAD_HEIGHT_M), pos.linear()
-        )
+        linear_pos = jnp.where(landed_now, pos.linear().at[2].set(FOOTPAD_HEIGHT_M), pos.linear())
         linear_vel = jnp.where(landed_now, jnp.zeros(3, dtype=jnp.float64), vel.linear())
         angular_vel = jnp.where(landed_now, jnp.zeros(3, dtype=jnp.float64), vel.angular())
         return (

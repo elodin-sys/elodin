@@ -854,9 +854,7 @@ def ground_contact(
     cent_ground = pad_cent - jnp.dot(pad_cent, up) * up
     com_from_cent = com_ground - cent_ground
     com_from_cent = com_from_cent - jnp.dot(com_from_cent, up) * up
-    outside_support = (n_contact >= 3.0) & (
-        jnp.linalg.norm(com_from_cent) > LEG_RADIUS_M * 1.15
-    )
+    outside_support = (n_contact >= 3.0) & (jnp.linalg.norm(com_from_cent) > LEG_RADIUS_M * 1.15)
     tipped = jnp.logical_or(
         deck[3] > 0.5,
         jnp.logical_and(any_contact, jnp.logical_or(outside_support, tilt_deg > 40.0)),

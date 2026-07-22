@@ -34,9 +34,9 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::transform::TransformSystems;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{
-    AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectProperties, EffectSpawner,
-    EffectSimulation, EffectSimulationTime, Gradient, HanabiPlugin, Module, ParticleEffect,
-    SimulationSpace, SpawnerSettings,
+    AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectProperties,
+    EffectSimulation, EffectSimulationTime, EffectSpawner, Gradient, HanabiPlugin, Module,
+    ParticleEffect, SimulationSpace, SpawnerSettings,
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
@@ -251,7 +251,10 @@ fn sync_effect_simulation_clock(
         return;
     };
 
-    let wall_dt = now.saturating_duration_since(last_wall).as_secs_f64().max(1e-6);
+    let wall_dt = now
+        .saturating_duration_since(last_wall)
+        .as_secs_f64()
+        .max(1e-6);
     let sim_dt = (playhead - last_ph) as f64 * 1e-6;
 
     if sim_dt < -0.05 {
@@ -1446,8 +1449,7 @@ mod tests {
     fn file_effect_cache_survives_seek_teardown() {
         let mut effects = Assets::<EffectAsset>::default();
         let mut cache = FileEffectAssets::default();
-        let path = "http://127.0.0.1:2240/assets/effects/apollo-lander/rcs_puff.effect"
-            .to_string();
+        let path = "http://127.0.0.1:2240/assets/effects/apollo-lander/rcs_puff.effect".to_string();
 
         let loaded = effects.add(build_rcs_jet());
         cache.handles.insert(path.clone(), loaded.clone());

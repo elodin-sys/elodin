@@ -122,13 +122,7 @@ def body_aero_wrench(
     if omega_body is None:
         omega_body = jnp.zeros(3)
     cmq = blend * CMQ_ASCENT + (1.0 - blend) * CMQ_DESCENT
-    damp = (
-        qbar_pa
-        * S_REF_M2
-        * (L_REF_DAMP_M**2)
-        / (2.0 * jnp.maximum(speed, 1.0))
-        * cmq
-    )
+    damp = qbar_pa * S_REF_M2 * (L_REF_DAMP_M**2) / (2.0 * jnp.maximum(speed, 1.0)) * cmq
     omega_perp = jnp.array([0.0, omega_body[1], omega_body[2]])
     torque = torque + damp * omega_perp
     return force, torque

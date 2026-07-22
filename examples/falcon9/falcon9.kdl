@@ -152,7 +152,7 @@ object_3d orientation=absolute ground.world_pos {
 }
 
 // Truth ghost replaying the recorded CRS-12 profile along the ascent track:
-// icon + trail only (the old box read as a mis-oriented vehicle).
+// icon + trail only (the old box read as a miss-oriented vehicle).
 object_3d booster_truth.world_pos {
     sphere radius=0.5 {
         color 60 200 90 160

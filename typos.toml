@@ -27,6 +27,8 @@
 "PNGs" = "PNGs"
 "PN" = "PN"
 "FO" = "FO"
+"Iz" = "Iz"
+"Trak" = "Trak"
 
 [files]
 extend-exclude = [

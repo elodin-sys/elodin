@@ -174,7 +174,7 @@ def test_ignition_gating_and_relight_budget():
     assert float(get("thrust_total")[0]) == 0.0
     np.testing.assert_allclose(get("teateb_charges"), [4, 4, 4, 1, 1, 1, 1, 1, 1])
 
-    # Light all 9, cut at t=2 s, recommand all at t=4 s: only the three
+    # Light all 9, cut at t=2 s, re-command all at t=4 s: only the three
     # relight-capable engines (one charge spent at liftoff) come back.
     def engines(t):
         on = jnp.ones(N_ENGINES)

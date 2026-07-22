@@ -77,8 +77,7 @@ def simulate_from_ignition(
     e0 = np.array([1.0, 0.0, 0.0])  # toward-target horizontal
     r = np.array([-miss_m, 0.0, alt_m])
     v_h = vlat_mps * (
-        toward * e0
-        + math.sqrt(max(1.0 - toward * toward, 0.0)) * np.array([0.0, 1.0, 0.0])
+        toward * e0 + math.sqrt(max(1.0 - toward * toward, 0.0)) * np.array([0.0, 1.0, 0.0])
     )
     v = v_h - vdown_mps * up
 

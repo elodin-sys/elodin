@@ -198,12 +198,8 @@ def make_advance():
         thrust = jnp.where((dim_for_rcs > 0.5) & rcs_on, 0.12, thrust)
         density = jnp.clip(jnp.exp(-alt / 8500.0), 0.0, 1.0)
         smoke = thrust * density
-        pad_smoke = thrust * jnp.sqrt(
-            jnp.clip(1.0 - jnp.linalg.norm(r - pad) / 300.0, 0.0, 1.0)
-        )
-        land_smoke = thrust * jnp.sqrt(
-            jnp.clip(1.0 - jnp.linalg.norm(r - lz1) / 300.0, 0.0, 1.0)
-        )
+        pad_smoke = thrust * jnp.sqrt(jnp.clip(1.0 - jnp.linalg.norm(r - pad) / 300.0, 0.0, 1.0))
+        land_smoke = thrust * jnp.sqrt(jnp.clip(1.0 - jnp.linalg.norm(r - lz1) / 300.0, 0.0, 1.0))
         pulse = jnp.array([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0])
         # Only the rcs-flip scenario pulses jets (plume-close keeps them dark).
         rcs = jnp.where((dim_for_rcs > 0.5) & rcs_on, pulse, jnp.zeros(8))
