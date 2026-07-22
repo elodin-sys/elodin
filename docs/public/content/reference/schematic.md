@@ -141,7 +141,8 @@ viewport hdr=#true {
         | c e f |
         The editor Cholesky-decomposes P at runtime. When both
         `error_covariance_cholesky` and `error_covariance` are set, Cholesky
-        takes precedence.
+        takes precedence based on field presence (even if the Cholesky
+        expression fails to compile).
       - `error_confidence_interval` (default `70`) the percentage that if this
         were repeated 100 times, we would expect that in 70 cases, the true
         value would be within the bounds. In practice this means that the

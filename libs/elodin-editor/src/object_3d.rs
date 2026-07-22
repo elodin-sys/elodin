@@ -886,6 +886,30 @@ fn compile_6float_eql(
     ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
 
+/// Ellipsoid shape driver selected by field presence.
+/// Cholesky takes precedence over symmetric covariance when both are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EllipsoidShapeMode {
+    Scale,
+    Cholesky,
+    Covariance,
+}
+
+fn ellipsoid_shape_mode(mesh: &impeller2_wkt::Object3DMesh) -> Option<EllipsoidShapeMode> {
+    match mesh {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky: Some(_),
+            ..
+        } => Some(EllipsoidShapeMode::Cholesky),
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance: Some(_),
+            ..
+        } => Some(EllipsoidShapeMode::Covariance),
+        impeller2_wkt::Object3DMesh::Ellipsoid { .. } => Some(EllipsoidShapeMode::Scale),
+        _ => None,
+    }
+}
+
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
 /// Chi-squared quantile for 3 degrees of freedom (confidence as fraction 0..1).
@@ -1024,6 +1048,10 @@ pub fn update_object_3d_system(
             continue;
         };
 
+        let Some(shape_mode) = ellipsoid_shape_mode(&object_3d.data.mesh) else {
+            continue;
+        };
+
         let covariance_frame = resolve_covariance_frame(&object_3d.data, &coordinate);
 
         let mesh_child = children_maybe.and_then(|children| {
@@ -1047,30 +1075,14 @@ pub fn update_object_3d_system(
             first
         });
 
-        if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr {
-            if let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
-                && let Ok(l) = component_value_to_6floats(&cv)
-            {
-                let linear = covariance_linear_from_l(
-                    &l,
-                    *error_confidence_interval,
-                    covariance_frame,
-                    &geo_context,
-                );
-                if let Some(child) = mesh_child
-                    && let Ok(mut params) = mat3_params.get_mut(child)
+        // Branch on field presence (not successful compile) so a failed Cholesky/covariance
+        // compile stays on the Mat3 path instead of falling through to scale / the other mode.
+        match shape_mode {
+            EllipsoidShapeMode::Cholesky => {
+                if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr
+                    && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
+                    && let Ok(l) = component_value_to_6floats(&cv)
                 {
-                    params.set_if_neq(Mat3Params { linear });
-                }
-                ellipse.max_extent = max_linear_extent(&linear);
-                ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-            }
-        } else if let Some(ref covariance_expr) = object_3d.error_covariance_expr {
-            if let Ok(cv) = covariance_expr.execute(&entity_map, &component_value_maps)
-                && let Ok(p) = component_value_to_6floats(&cv)
-            {
-                let p_mat = symmetric_6_to_mat3(&p);
-                if let Some(l) = cholesky_3x3_spd(&p_mat) {
                     let linear = covariance_linear_from_l(
                         &l,
                         *error_confidence_interval,
@@ -1084,34 +1096,58 @@ pub fn update_object_3d_system(
                     }
                     ellipse.max_extent = max_linear_extent(&linear);
                     ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                } else {
-                    warn_once!(
-                        entity = ?entity,
-                        "ellipsoid error_covariance is not positive-definite; skipping update"
-                    );
                 }
             }
-        } else {
-            match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
-                Ok(scale) => {
-                    let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
-                    let scale = enu_scale_to_bevy(scale_enu);
-                    if let Some(child) = mesh_child {
-                        if let Ok(mut child_transform) = transforms.get_mut(child) {
-                            child_transform.scale = scale;
-                            child_transform.translation = Vec3::ZERO;
+            EllipsoidShapeMode::Covariance => {
+                if let Some(ref covariance_expr) = object_3d.error_covariance_expr
+                    && let Ok(cv) = covariance_expr.execute(&entity_map, &component_value_maps)
+                    && let Ok(p) = component_value_to_6floats(&cv)
+                {
+                    let p_mat = symmetric_6_to_mat3(&p);
+                    if let Some(l) = cholesky_3x3_spd(&p_mat) {
+                        let linear = covariance_linear_from_l(
+                            &l,
+                            *error_confidence_interval,
+                            covariance_frame,
+                            &geo_context,
+                        );
+                        if let Some(child) = mesh_child
+                            && let Ok(mut params) = mat3_params.get_mut(child)
+                        {
+                            params.set_if_neq(Mat3Params { linear });
                         }
-                        ellipse.max_extent = scale.max_element();
+                        ellipse.max_extent = max_linear_extent(&linear);
                         ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                        if object_3d.scale_expr.is_some() {
-                            object_3d.scale_error = None;
-                        }
+                    } else {
+                        warn_once!(
+                            entity = ?entity,
+                            "ellipsoid error_covariance is not positive-definite; skipping update"
+                        );
                     }
                 }
-                Err(err) => {
-                    object_3d.scale_error = Some(err.into());
-                    ellipse.oversized = false;
-                    ellipse.max_extent = 0.0;
+            }
+            EllipsoidShapeMode::Scale => {
+                match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
+                    Ok(scale) => {
+                        let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
+                        let scale = enu_scale_to_bevy(scale_enu);
+                        if let Some(child) = mesh_child {
+                            if let Ok(mut child_transform) = transforms.get_mut(child) {
+                                child_transform.scale = scale;
+                                child_transform.translation = Vec3::ZERO;
+                            }
+                            ellipse.max_extent = scale.max_element();
+                            ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                            if object_3d.scale_expr.is_some() {
+                                object_3d.scale_error = None;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        object_3d.scale_error = Some(err.into());
+                        ellipse.oversized = false;
+                        ellipse.max_extent = 0.0;
+                    }
                 }
             }
         }
@@ -1598,32 +1634,39 @@ pub fn create_object_3d_entity(
     geo_context: &GeoContext,
     connection_addr: Option<SocketAddr>,
 ) -> Result<Entity, CompileError> {
-    let (scale_expr, scale_error) = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid {
-            scale,
-            error_covariance_cholesky: None,
-            error_covariance: None,
-            ..
-        } => match compile_scale_eql(scale, ctx) {
-            Ok(compiled) => (Some(compiled), None),
-            Err(err) => (None, Some(err)),
-        },
-        _ => (None, None),
-    };
-    let error_covariance_cholesky_expr = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid {
-            error_covariance_cholesky: Some(cholesky),
-            ..
-        } => compile_cholesky_eql(cholesky, ctx).ok(),
-        _ => None,
-    };
-    let error_covariance_expr = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid {
-            error_covariance: Some(covariance),
-            ..
-        } => compile_covariance_eql(covariance, ctx).ok(),
-        _ => None,
-    };
+    // Compile only the field-selected driver. Failed Cholesky/covariance compiles leave the
+    // expr as None but keep Mat3 spawning (spawn_mesh keys off field presence); update must
+    // not fall through to scale or the other covariance mode.
+    let (scale_expr, scale_error, error_covariance_cholesky_expr, error_covariance_expr) =
+        match (&data.mesh, ellipsoid_shape_mode(&data.mesh)) {
+            (
+                impeller2_wkt::Object3DMesh::Ellipsoid {
+                    error_covariance_cholesky: Some(cholesky),
+                    ..
+                },
+                Some(EllipsoidShapeMode::Cholesky),
+            ) => (None, None, compile_cholesky_eql(cholesky, ctx).ok(), None),
+            (
+                impeller2_wkt::Object3DMesh::Ellipsoid {
+                    error_covariance: Some(covariance),
+                    ..
+                },
+                Some(EllipsoidShapeMode::Covariance),
+            ) => (
+                None,
+                None,
+                None,
+                compile_covariance_eql(covariance, ctx).ok(),
+            ),
+            (
+                impeller2_wkt::Object3DMesh::Ellipsoid { scale, .. },
+                Some(EllipsoidShapeMode::Scale),
+            ) => match compile_scale_eql(scale, ctx) {
+                Ok(compiled) => (Some(compiled), None, None, None),
+                Err(err) => (None, Some(err), None, None),
+            },
+            _ => (None, None, None, None),
+        };
 
     let joint_animations = match &data.mesh {
         impeller2_wkt::Object3DMesh::Glb {
@@ -2476,15 +2519,58 @@ mod ellipsoid_covariance_tests {
     use crate::Coordinate;
 
     use super::{
-        cholesky_3x3_spd, covariance_linear_from_l, lower_cholesky_pack_to_mat3,
-        resolve_covariance_frame, symmetric_6_to_mat3,
+        EllipsoidShapeMode, cholesky_3x3_spd, covariance_linear_from_l, ellipsoid_shape_mode,
+        lower_cholesky_pack_to_mat3, resolve_covariance_frame, symmetric_6_to_mat3,
     };
-    use impeller2_wkt::{Object3D, Object3DMesh};
+    use impeller2_wkt::{
+        Object3D, Object3DMesh, default_ellipsoid_color, default_ellipsoid_confidence_interval,
+        default_ellipsoid_grid_color, default_ellipsoid_scale_expr, default_ellipsoid_show_grid,
+    };
 
     fn assert_mat3_close(actual: Mat3, expected: Mat3) {
         let delta = (actual - expected).to_cols_array();
         let max = delta.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
         assert!(max < 1e-4, "expected {expected:?}, got {actual:?}");
+    }
+
+    fn ellipsoid_mesh(cholesky: Option<&str>, covariance: Option<&str>) -> Object3DMesh {
+        Object3DMesh::Ellipsoid {
+            scale: default_ellipsoid_scale_expr(),
+            color: default_ellipsoid_color(),
+            error_covariance_cholesky: cholesky.map(str::to_string),
+            error_covariance: covariance.map(str::to_string),
+            error_confidence_interval: default_ellipsoid_confidence_interval(),
+            show_grid: default_ellipsoid_show_grid(),
+            grid_color: default_ellipsoid_grid_color(),
+        }
+    }
+
+    #[test]
+    fn shape_mode_prefers_cholesky_field_over_covariance() {
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(
+                Some("(1,0,1,0,0,1)"),
+                Some("(1,0,0,1,0,1)")
+            )),
+            Some(EllipsoidShapeMode::Cholesky)
+        );
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(None, Some("(1,0,0,1,0,1)"))),
+            Some(EllipsoidShapeMode::Covariance)
+        );
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(None, None)),
+            Some(EllipsoidShapeMode::Scale)
+        );
+    }
+
+    #[test]
+    fn shape_mode_keeps_cholesky_when_expression_is_invalid() {
+        // Field presence alone selects the driver; a failed compile must not fall through.
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(Some(""), Some("(1,0,0,1,0,1)"))),
+            Some(EllipsoidShapeMode::Cholesky)
+        );
     }
 
     #[test]
