@@ -52,7 +52,7 @@ use super::{
     plot::{GraphBundle, GraphState, PlotWidget},
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
-    schematic::{graph_label, viewport_label},
+    schematic::{MonitorsRoot, graph_label, viewport_label},
     video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
@@ -2891,6 +2891,7 @@ pub struct TileLayout<'w, 's> {
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     query_tables: Query<'w, 's, &'static mut QueryTableData>,
     action_tiles: Query<'w, 's, &'static mut ActionTile>,
+    monitor_root: Single<'w, 's, Entity, With<MonitorsRoot>>,
 }
 
 #[derive(Clone)]
@@ -3161,6 +3162,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     component_name: eql.clone(),
                                 },
                                 Name::new(eql.clone()),
+                                ChildOf(*state_mut.monitor_root),
                             ))
                             .id();
                         let monitor = MonitorPane::new(entity, eql.clone());
