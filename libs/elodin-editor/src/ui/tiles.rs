@@ -143,7 +143,10 @@ pub(crate) fn plugin(app: &mut App) {
 
 fn spawn_viewport_grids(
     mut commands: Commands,
-    #[cfg(feature = "big_space")] root: Res<crate::spatial::BigSpaceRootEntity>,
+    // Optional so headless/test apps without the spatial plugin don't panic;
+    // grids simply stay un-parented there. In the editor the root always exists
+    // because this runs after `setup_floating_origin`.
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (frame, layer) in GRID_RENDER_LAYERS {
         let mut entity = commands.spawn((
@@ -161,7 +164,7 @@ fn spawn_viewport_grids(
             ),
         ));
         #[cfg(feature = "big_space")]
-        crate::spatial::parent_under_big_space(&mut entity, Some(&root));
+        crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
     }
 }
 
