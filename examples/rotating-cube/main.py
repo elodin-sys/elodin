@@ -23,24 +23,21 @@ w.schematic(
     // Geodetic origin so ENU world_pos maps to real lat/lon/alt for the gauges.
     coordinate frame=ENU lat=28.6084 lon=-80.6043 alt=3.0
     hsplit {
-        // Position values (top) and attitude gimbals (bottom) from the same
-        // ENU world_pos, shown in different display frames.
-        vsplit share=0.28 {
-            hsplit {
-                geo_position_gauge name="NED" eql="cube.world_pos" source="ENU" display="NED"
-                geo_position_gauge name="LLA" eql="cube.world_pos" source="ENU" display="LLA"
-            }
-            hsplit {
-                orientation_gauge name="ATT NED" eql="cube.world_pos" source="ENU" display="NED"
-                orientation_gauge name="ATT ECEF" eql="cube.world_pos" source="ENU" display="ECEF"
-            }
+        // Left column: geo-position gauge stacked directly above a component
+        // monitor on the same data. Drag the divider between this column and the
+        // viewport to widen/narrow both at once — the gauge value cards should
+        // reflow (row -> wrap) exactly like the monitor's number cards.
+        vsplit share=0.32 {
+            geo_position_gauge name="GEO NED" eql="cube.world_pos" source="ENU" display="NED"
+            component_monitor name="MONITOR world_pos" component_name="cube.world_pos"
         }
-        tabs share=0.5 {
+        tabs share=0.44 {
             viewport name=Viewport pos="cube.world_pos + (0.0,0.0,0.0,0.0, 3.0, 0.0, 1.5)" look_at="cube.world_pos" hdr=#true show_grid=#true
         }
-        vsplit share=0.22 {
-            graph "cube.world_pos" name="World Pos"
-            graph "cube.world_vel" name="World Vel"
+        // Attitude gimbals from the same ENU world_pos, in two display frames.
+        vsplit share=0.24 {
+            orientation_gauge name="ATT NED" eql="cube.world_pos" source="ENU" display="NED"
+            orientation_gauge name="ATT ECEF" eql="cube.world_pos" source="ENU" display="ECEF"
         }
     }
 
