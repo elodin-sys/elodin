@@ -1862,6 +1862,9 @@ pub fn spawn_mesh(
             if matches!(mesh, impeller2_wkt::Mesh::Plane { .. }) {
                 material.double_sided = true;
                 material.cull_mode = None;
+                // Prefer losing depth tests against the editor infinite grid so
+                // coplanar ground planes (ball example) do not shimmer.
+                material.depth_bias = 2.0;
             }
             let material = material_assets.add(material);
             let mesh = mesh.clone().into_bevy();
