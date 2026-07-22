@@ -482,6 +482,18 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                     .as_ref()
                                     .and_then(|e| compile_cholesky_eql(e, &eql_context.0).ok()),
                             );
+                            // Field presence selects the driver. Clearing Cholesky must compile
+                            // a dormant covariance expr (or scale); create_object_3d_entity only
+                            // compiled Cholesky while both fields were set.
+                            if error_covariance_cholesky.is_none() {
+                                if let Some(cov) = error_covariance.as_ref() {
+                                    covariance_expr_update =
+                                        Some(compile_covariance_eql(cov, &eql_context.0).ok());
+                                } else {
+                                    scale_expr_update =
+                                        Some(compile_scale_eql(scale, &eql_context.0));
+                                }
+                            }
                             changed = true;
                         }
                     } else if uses_covariance {
@@ -499,6 +511,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                     .as_ref()
                                     .and_then(|e| compile_covariance_eql(e, &eql_context.0).ok()),
                             );
+                            if error_covariance.is_none() {
+                                scale_expr_update = Some(compile_scale_eql(scale, &eql_context.0));
+                            }
                             changed = true;
                         }
                     } else {
