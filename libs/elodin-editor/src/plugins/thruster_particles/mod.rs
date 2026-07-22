@@ -1477,7 +1477,9 @@ mod tests {
         };
         world.flush();
 
-        let geo = world.get::<GeoPosition>(anchor).expect("anchor GeoPosition");
+        let geo = world
+            .get::<GeoPosition>(anchor)
+            .expect("anchor GeoPosition");
         assert_eq!(geo.0, GeoFrame::ECEF);
         assert_eq!(
             geo.1,
