@@ -8,8 +8,10 @@
 //! - each component -> `/<name with '.' replaced by '/'>` (JSON object keyed by
 //!   element names, nested at `.` boundaries)
 //! - pose components (`*.world_pos`, 7 elements) -> `/tf` (`foxglove.FrameTransforms`)
-//! - schematic `object_3d` / `vector_arrow` -> `/scene` (`foxglove.SceneUpdate`,
-//!   GLBs embedded as base64 glTF binary)
+//! - schematic `object_3d` / static `vector_arrow` / `line_3d` -> `/scene`
+//!   (`foxglove.SceneUpdate`, one message per entity; GLBs embedded as base64)
+//! - dynamic `vector_arrow` (EQL-backed) -> `/scene_dynamic` (separate topic so
+//!   seeks do not drop static entities under latest-per-topic backfill)
 //! - message logs -> `foxglove.CompressedVideo` (H.264), `foxglove.RawImage`
 //!   (sensor cameras), `foxglove.Log` (LogEntry streams), or raw base64 JSON
 //! - DB / component / msg metadata -> MCAP metadata records; schematics and
@@ -27,8 +29,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use glob::Pattern;
 use impeller2::types::{PacketId, PrimType, Timestamp, msg_id};
 use impeller2_wkt::{
-    Color, LogEntry, Object3D, Object3DMesh, Panel, Schematic, SchematicElem, SensorCameraConfig,
-    VectorArrow3d, log_entry_msg_schema,
+    Color, Line3d, LogEntry, Object3D, Object3DMesh, Panel, Schematic, SchematicElem,
+    SensorCameraConfig, VectorArrow3d, log_entry_msg_schema,
 };
 use mcap::records::MessageHeader;
 use serde_json::{Map, Value, json};
@@ -40,7 +42,7 @@ use crate::{Component, DB, Error};
 const FILE_BUF_CAP: usize = 1 << 20;
 
 /// Options for the MCAP export.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct McapExportOptions {
     /// Glob pattern over component names; non-matching components are skipped.
     pub pattern: Option<String>,
@@ -48,6 +50,27 @@ pub struct McapExportOptions {
     pub include_private: bool,
     /// Attach every file under `{db}/assets/` instead of only schematic-referenced ones.
     pub all_assets: bool,
+    /// Microsecond offset added to all timestamps before conversion to MCAP
+    /// nanoseconds. When `None` and the earliest DB timestamp is negative,
+    /// the offset is auto-computed so the earliest sample maps to t = 0.
+    pub epoch_offset_us: Option<i64>,
+    /// Maximum GLB size (MiB) to base64-embed in SceneUpdate. Larger models
+    /// are attached to the MCAP but omitted from the scene message entirely
+    /// (no empty-`data` model primitive). The viewport follow-entity's mesh
+    /// is always embedded regardless of this limit.
+    pub max_embed_mb: u64,
+}
+
+impl Default for McapExportOptions {
+    fn default() -> Self {
+        Self {
+            pattern: None,
+            include_private: false,
+            all_assets: false,
+            epoch_offset_us: None,
+            max_embed_mb: 32,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +85,7 @@ pub struct McapExportOptions {
 const SCHEMA_FRAME_TRANSFORMS: &str = include_str!("foxglove_schemas/FrameTransforms.json");
 const SCHEMA_SCENE_UPDATE: &str = include_str!("foxglove_schemas/SceneUpdate.json");
 const SCHEMA_COMPRESSED_VIDEO: &str = include_str!("foxglove_schemas/CompressedVideo.json");
+#[cfg_attr(feature = "video-export", allow(dead_code))]
 const SCHEMA_RAW_IMAGE: &str = include_str!("foxglove_schemas/RawImage.json");
 const SCHEMA_LOG: &str = include_str!("foxglove_schemas/Log.json");
 
@@ -243,23 +267,124 @@ fn timestamp_json(ts_ns: u64) -> Value {
     json!({"sec": ts_ns / 1_000_000_000, "nsec": ts_ns % 1_000_000_000})
 }
 
-fn us_to_ns(ts: Timestamp) -> u64 {
-    ts.0.max(0) as u64 * 1000
+fn us_to_ns(ts: Timestamp, offset_us: i64) -> u64 {
+    (ts.0 + offset_us).max(0) as u64 * 1000
 }
 
 /// FrameTransforms message for one pose sample (`[qx,qy,qz,qw, x,y,z]`).
-fn tf_message(entity: &str, prim: PrimType, buf: &[u8], ts_ns: u64) -> Vec<u8> {
+fn tf_message(entity: &str, parent: &str, prim: PrimType, buf: &[u8], ts_ns: u64) -> Vec<u8> {
     let q = |i| read_f64(prim, buf, i);
     let msg = json!({
         "transforms": [{
             "timestamp": timestamp_json(ts_ns),
-            "parent_frame_id": "world",
+            "parent_frame_id": parent,
             "child_frame_id": entity,
             "translation": {"x": q(4), "y": q(5), "z": q(6)},
             "rotation": {"x": q(0), "y": q(1), "z": q(2), "w": q(3)},
         }]
     });
     serde_json::to_vec(&msg).expect("json serialize")
+}
+
+// ---------------------------------------------------------------------------
+// Geo frames (schematic `coordinate` node)
+// ---------------------------------------------------------------------------
+
+/// World→NED / world→ENU transforms anchored at the schematic's geodetic
+/// `coordinate` origin. The export world frame is the raw data frame (ECEF
+/// for geo examples); entities whose `object_3d` carries `frame="NED"` or
+/// `frame="ENU"` have *local* poses that Elodin re-anchors at this origin.
+struct GeoFrameAnchors {
+    origin_ecef: [f64; 3],
+    enu_quat: [f64; 4],
+    ned_quat: [f64; 4],
+}
+
+/// Quaternion (x,y,z,w) from a rotation matrix given as three columns.
+fn quat_from_mat3_cols(c0: [f64; 3], c1: [f64; 3], c2: [f64; 3]) -> [f64; 4] {
+    let (m00, m10, m20) = (c0[0], c0[1], c0[2]);
+    let (m01, m11, m21) = (c1[0], c1[1], c1[2]);
+    let (m02, m12, m22) = (c2[0], c2[1], c2[2]);
+    let trace = m00 + m11 + m22;
+    if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        [(m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s]
+    } else if m00 > m11 && m00 > m22 {
+        let s = (1.0 + m00 - m11 - m22).sqrt() * 2.0;
+        [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s]
+    } else if m11 > m22 {
+        let s = (1.0 + m11 - m00 - m22).sqrt() * 2.0;
+        [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s]
+    } else {
+        let s = (1.0 + m22 - m00 - m11).sqrt() * 2.0;
+        [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s]
+    }
+}
+
+fn geo_frame_anchors(origin: &impeller2_wkt::GeoOriginConfig) -> GeoFrameAnchors {
+    const WGS84_A: f64 = 6_378_137.0;
+    const WGS84_E2: f64 = 6.694_379_990_141_316_5e-3;
+    let lat = origin.latitude.to_radians();
+    let lon = origin.longitude.to_radians();
+    let (slat, clat) = lat.sin_cos();
+    let (slon, clon) = lon.sin_cos();
+    let n = WGS84_A / (1.0 - WGS84_E2 * slat * slat).sqrt();
+    let alt = origin.altitude;
+    let origin_ecef = [
+        (n + alt) * clat * clon,
+        (n + alt) * clat * slon,
+        (n * (1.0 - WGS84_E2) + alt) * slat,
+    ];
+    let east = [-slon, clon, 0.0];
+    let north = [-slat * clon, -slat * slon, clat];
+    let up = [clat * clon, clat * slon, slat];
+    GeoFrameAnchors {
+        origin_ecef,
+        enu_quat: quat_from_mat3_cols(east, north, up),
+        ned_quat: quat_from_mat3_cols(north, east, [-up[0], -up[1], -up[2]]),
+    }
+}
+
+/// FrameTransforms message with the world→NED and world→ENU anchor frames.
+fn geo_frame_tf_message(anchors: &GeoFrameAnchors, ts_ns: u64) -> Vec<u8> {
+    let [x, y, z] = anchors.origin_ecef;
+    let tf = |frame: &str, q: &[f64; 4]| {
+        json!({
+            "timestamp": timestamp_json(ts_ns),
+            "parent_frame_id": "world",
+            "child_frame_id": frame,
+            "translation": {"x": x, "y": y, "z": z},
+            "rotation": {"x": q[0], "y": q[1], "z": q[2], "w": q[3]},
+        })
+    };
+    let msg = json!({
+        "transforms": [tf("NED", &anchors.ned_quat), tf("ENU", &anchors.enu_quat)],
+    });
+    serde_json::to_vec(&msg).expect("json serialize")
+}
+
+/// Map entity → geo frame name for entities whose `object_3d` declares a
+/// local `frame=` (only NED/ENU need re-parenting; ECEF equals world).
+fn entity_geo_frames(schematics: &LoadedSchematics, ctx: &eql::Context) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for elem in schematics
+        .primary
+        .iter()
+        .chain(schematics.windows.iter().map(|(_, s)| s))
+        .flat_map(|s| s.elems.iter())
+    {
+        if let SchematicElem::Object3d(object) = elem
+            && let Some(frame) = object.frame
+        {
+            let name = format!("{frame:?}");
+            if (name == "NED" || name == "ENU")
+                && let Some(entity) = entity_for_eql(&object.eql, ctx)
+            {
+                map.entry(entity).or_insert(name);
+            }
+        }
+    }
+    map
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +541,8 @@ fn load_schematics(db_path: &Path, active_key: Option<&str>) -> LoadedSchematics
 
 /// Entity frame for an EQL expression: the first referenced component with a
 /// `.world_pos`-style pose gives `<entity>`; a bare component gives its prefix.
+/// Returns `None` only for pure literal expressions (handled separately by
+/// `parse_literal_pose`).
 fn entity_for_eql(eql_src: &str, ctx: &eql::Context) -> Option<String> {
     let expr = ctx.parse_str(eql_src).ok()?;
     let mut names = Vec::new();
@@ -425,6 +552,32 @@ fn entity_for_eql(eql_src: &str, ctx: &eql::Context) -> Option<String> {
         Some((entity, _)) => entity.to_string(),
         None => first.clone(),
     })
+}
+
+/// Try to parse an EQL expression as a literal 7-element pose
+/// `(qx, qy, qz, qw, tx, ty, tz)`. Returns the pose values if successful.
+fn parse_literal_pose(eql_src: &str, ctx: &eql::Context) -> Option<[f64; 7]> {
+    let vals = parse_literal_tuple(eql_src)?;
+    if vals.len() == 7 {
+        Some([vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]])
+    } else {
+        let expr = ctx.parse_str(eql_src).ok()?;
+        let mut flat = Vec::new();
+        flatten_literals_full(&expr, &mut flat);
+        (flat.len() == 7).then(|| [flat[0], flat[1], flat[2], flat[3], flat[4], flat[5], flat[6]])
+    }
+}
+
+fn flatten_literals_full(expr: &eql::Expr, out: &mut Vec<f64>) {
+    match expr {
+        eql::Expr::FloatLiteral(v) => out.push(*v),
+        eql::Expr::Tuple(items) => {
+            for item in items {
+                flatten_literals_full(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_component_names(expr: &eql::Expr, out: &mut Vec<String>) {
@@ -481,10 +634,51 @@ fn camera_offset_from_pos(expr: &eql::Expr) -> Option<[f64; 3]> {
             _ => None,
         }
     }
-    let vals = find_literal_tuple(expr)?;
-    if vals.len() < 3 {
-        return None;
+    // Camera offset from translate formula chains like
+    // `lander.world_pos.translate_world(10, 10, 4)` or
+    // `bdx.world_pos.rotate_z(-90).translate_y(-2)`: sum every translate's
+    // literal args (rotations only affect azimuth, which stays approximate).
+    fn formula_offset(expr: &eql::Expr) -> [f64; 3] {
+        let eql::Expr::Formula(formula, inner) = expr else {
+            return [0.0; 3];
+        };
+        let eql::Expr::Tuple(items) = &**inner else {
+            return formula_offset(inner);
+        };
+        let Some((recv, args)) = items.split_first() else {
+            return [0.0; 3];
+        };
+        let mut offset = formula_offset(recv);
+        let lits: Vec<f64> = args
+            .iter()
+            .filter_map(|a| match a {
+                eql::Expr::FloatLiteral(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        let add: [f64; 3] = match (formula.name(), lits.as_slice()) {
+            ("translate_world" | "translate", [x, y, z]) => [*x, *y, *z],
+            ("translate_world_x" | "translate_x", [d]) => [*d, 0.0, 0.0],
+            ("translate_world_y" | "translate_y", [d]) => [0.0, *d, 0.0],
+            ("translate_world_z" | "translate_z", [d]) => [0.0, 0.0, *d],
+            _ => [0.0; 3],
+        };
+        for (o, a) in offset.iter_mut().zip(add) {
+            *o += a;
+        }
+        offset
     }
+
+    let vals = match find_literal_tuple(expr) {
+        Some(vals) if vals.len() >= 3 => vals,
+        _ => {
+            let off = formula_offset(expr);
+            if off == [0.0; 3] {
+                return None;
+            }
+            return Some(off);
+        }
+    };
     let [e, n, u]: [f64; 3] = vals[vals.len() - 3..].try_into().ok()?;
     if e == 0.0 && n == 0.0 && u == 0.0 {
         return None;
@@ -562,23 +756,311 @@ fn quat_from_euler_deg(rotate: (f32, f32, f32)) -> [f64; 4] {
     ]
 }
 
+/// Hamilton product `a ∘ b` (apply `b` first, then `a`). Scalar-last (x,y,z,w).
+fn quat_mul(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    let [ax, ay, az, aw] = a;
+    let [bx, by, bz, bw] = b;
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
+}
+
+/// Rotate vector `v` by unit quaternion `q` (scalar-last).
+fn quat_rotate_vec(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
+    let [x, y, z, w] = q;
+    let [vx, vy, vz] = v;
+    let tx = 2.0 * (y * vz - z * vy);
+    let ty = 2.0 * (z * vx - x * vz);
+    let tz = 2.0 * (x * vy - y * vx);
+    [
+        vx + w * tx + (y * tz - z * ty),
+        vy + w * ty + (z * tx - x * tz),
+        vz + w * tz + (x * ty - y * tx),
+    ]
+}
+
+/// Compose a parent pose with a local GLB translate/rotate: parent ∘ local.
+fn compose_pose_with_glb(
+    parent: &Value,
+    translate: (f32, f32, f32),
+    rotate: (f32, f32, f32),
+) -> Value {
+    let px = parent["position"]["x"].as_f64().unwrap_or(0.0);
+    let py = parent["position"]["y"].as_f64().unwrap_or(0.0);
+    let pz = parent["position"]["z"].as_f64().unwrap_or(0.0);
+    let pq = [
+        parent["orientation"]["x"].as_f64().unwrap_or(0.0),
+        parent["orientation"]["y"].as_f64().unwrap_or(0.0),
+        parent["orientation"]["z"].as_f64().unwrap_or(0.0),
+        parent["orientation"]["w"].as_f64().unwrap_or(1.0),
+    ];
+    let local_q = quat_from_euler_deg(rotate);
+    let offset = quat_rotate_vec(
+        pq,
+        [translate.0 as f64, translate.1 as f64, translate.2 as f64],
+    );
+    let oq = quat_mul(pq, local_q);
+    json!({
+        "position": {"x": px + offset[0], "y": py + offset[1], "z": pz + offset[2]},
+        "orientation": {"x": oq[0], "y": oq[1], "z": oq[2], "w": oq[3]},
+    })
+}
+
+/// Unique scene entity id for an `object_3d` on `frame`. First mesh keeps
+/// `{frame}-model`; subsequent meshes on the same frame get `-2`, `-3`, …
+fn next_model_entity_id(frame: &str, counts: &mut HashMap<String, u32>) -> String {
+    let n = counts.entry(frame.to_string()).or_insert(0);
+    *n += 1;
+    if *n == 1 {
+        format!("{frame}-model")
+    } else {
+        format!("{frame}-model-{n}")
+    }
+}
+
+/// Whether a GLB of `size_bytes` should be base64-embedded.
+fn should_embed_glb(size_bytes: u64, max_embed_bytes: u64, force_embed: bool) -> bool {
+    force_embed || size_bytes <= max_embed_bytes
+}
+
+/// Wrap a single scene entity in a SceneUpdate message body.
+fn scene_update_message(entity: Value) -> Vec<u8> {
+    serde_json::to_vec(&json!({"deletions": [], "entities": [entity]})).expect("json serialize")
+}
+
+/// Scene topic for a static entity: `/scene/<sanitized-id>`.
+///
+/// One topic per entity is load-bearing: Foxglove backfills only the *latest*
+/// message per topic when a 3D panel (re)mounts — e.g. after a tab switch —
+/// so N entities sharing one topic collapse to just the last one.
+fn scene_topic(entity_id: &str) -> String {
+    format!("/scene/{}", sanitize_topic_segment(entity_id))
+}
+
+fn sanitize_topic_segment(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .collect()
+}
+
+struct ComponentCursor<'a> {
+    timestamps: &'a [Timestamp],
+    data: &'a [u8],
+    sample_size: usize,
+}
+
 struct SceneBuild {
-    /// SceneUpdate JSON message body.
-    message: Vec<u8>,
-    /// Asset keys referenced by embedded models (for attachments).
+    /// `(topic, SceneUpdate JSON body)` — one topic+message per entity so
+    /// latest-per-topic backfill preserves the whole static scene.
+    messages: Vec<(String, Vec<u8>)>,
+    /// Asset keys referenced by scene models (for attachments).
     referenced_assets: Vec<String>,
 }
 
-/// Build the one-shot `/scene` SceneUpdate from schematic 3D elements.
+/// Decimation parameters for line trajectories.
+const MAX_LINE_POINTS: usize = 2000;
+
+/// Extract XYZ trajectory from a 7-element world_pos component.
+fn extract_trajectory(
+    comp: &ExportComponent,
+    cursor: &ComponentCursor,
+) -> Vec<[f64; 3]> {
+    let n = cursor.timestamps.len();
+    let step = if n > MAX_LINE_POINTS { n.div_ceil(MAX_LINE_POINTS) } else { 1 };
+    let prim = comp.component.schema.prim_type;
+    let mut points = Vec::with_capacity(n.min(MAX_LINE_POINTS + 1));
+    for i in (0..n).step_by(step) {
+        let buf = &cursor.data[i * cursor.sample_size..(i + 1) * cursor.sample_size];
+        points.push([
+            read_f64(prim, buf, 4),
+            read_f64(prim, buf, 5),
+            read_f64(prim, buf, 6),
+        ]);
+    }
+    if n > 1 && (n - 1) % step != 0 {
+        let buf = &cursor.data[(n - 1) * cursor.sample_size..n * cursor.sample_size];
+        points.push([
+            read_f64(prim, buf, 4),
+            read_f64(prim, buf, 5),
+            read_f64(prim, buf, 6),
+        ]);
+    }
+    points
+}
+
+fn default_line_color() -> Color {
+    Color { r: 0.2, g: 0.6, b: 1.0, a: 1.0 }
+}
+
+/// Build a LinePrimitive entity from a Line3d schematic element.
+fn build_line_entity(
+    line: &Line3d,
+    ctx: &eql::Context,
+    components: &[ExportComponent],
+    component_cursors: &[Option<ComponentCursor>],
+    ts_ns: u64,
+    geo_frames_active: bool,
+) -> Option<Value> {
+    let entity = entity_for_eql(&line.eql, ctx)?;
+    let pose_name = format!("{entity}.world_pos");
+    let (comp_idx, comp) = components.iter().enumerate().find(|(_, c)| c.name == pose_name)?;
+    let cursor = component_cursors[comp_idx].as_ref()?;
+
+    let flat_count: usize = comp.component.schema.dim.iter().product::<usize>().max(1);
+    if flat_count != 7 {
+        eprintln!("Warning: line_3d '{}' references a non-pose component ({}), skipping", line.eql, comp.name);
+        return None;
+    }
+
+    let points = extract_trajectory(comp, cursor);
+    if points.is_empty() {
+        return None;
+    }
+
+    let color = line.color.as_ref().copied().unwrap_or_else(default_line_color);
+    let point_values: Vec<Value> = points
+        .iter()
+        .map(|[x, y, z]| json!({"x": x, "y": y, "z": z}))
+        .collect();
+
+    // Lines whose data is local to a geodetic frame (`frame="NED"/"ENU"`)
+    // attach to that anchor frame when the schematic declares an origin.
+    let frame_id = line
+        .frame
+        .map(|f| format!("{f:?}"))
+        .filter(|n| geo_frames_active && (n == "NED" || n == "ENU"))
+        .unwrap_or_else(|| "world".to_string());
+
+    // Elodin's `line_width` is a *pixel* width. Foxglove's non-scale-invariant
+    // thickness is in meters — writing pixels as meters yields multi-meter
+    // ribbons that engulf the vehicle mesh (rc-jet's all-orange viewport).
+    Some(json!({
+        "timestamp": timestamp_json(ts_ns),
+        "frame_id": frame_id,
+        "id": format!("{entity}-line"),
+        "lifetime": {"sec": 0, "nsec": 0},
+        "frame_locked": false,
+        "lines": [{
+            "type": 0, // LINE_STRIP
+            "pose": identity_pose(),
+            "thickness": line.line_width as f64,
+            "scale_invariant": true,
+            "points": point_values,
+            "color": color_json(&color),
+            "colors": [],
+            "indices": [],
+        }],
+    }))
+}
+
+/// Resolve earth.glb: first check DB assets, then `assets/earth.glb` relative
+/// to working dir, then the repo fallback.
+fn find_earth_glb(assets_dir: &Path) -> Option<PathBuf> {
+    let candidates = [
+        assets_dir.join("earth.glb"),
+        PathBuf::from("assets/earth.glb"),
+        PathBuf::from("/home/dan/dual/elodin/assets/earth.glb"),
+    ];
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// Build a model entity for WorldMesh "globe" → earth.glb.
+/// Returns `(entity, referenced)` when the mesh is embedded, or `(None, referenced)`
+/// when oversized (attachment-only).
+fn build_globe_entity(
+    assets_dir: &Path,
+    components: &[ExportComponent],
+    ts_ns: u64,
+    max_embed_bytes: u64,
+) -> Option<(Option<Value>, Vec<String>)> {
+    let glb_path = find_earth_glb(assets_dir)?;
+    let bytes = std::fs::read(&glb_path).ok()?;
+
+    let frame = components
+        .iter()
+        .find(|c| {
+            c.pose_entity.is_some()
+                && (c.name.starts_with("Earth.") || c.name.starts_with("earth."))
+        })
+        .and_then(|c| c.pose_entity.clone())
+        .unwrap_or_else(|| "world".to_string());
+
+    let mut referenced = Vec::new();
+    if let Ok(rel) = glb_path.strip_prefix(assets_dir) {
+        referenced.push(rel.to_string_lossy().replace('\\', "/"));
+    } else {
+        referenced.push("earth.glb".to_string());
+    }
+
+    if !should_embed_glb(bytes.len() as u64, max_embed_bytes, false) {
+        eprintln!(
+            "Note: earth.glb is {} MiB (> {} MiB limit); attached but not embedded in SceneUpdate",
+            bytes.len() / (1024 * 1024),
+            max_embed_bytes / (1024 * 1024)
+        );
+        return Some((None, referenced));
+    }
+
+    let entity = json!({
+        "timestamp": timestamp_json(ts_ns),
+        "frame_id": frame,
+        "id": "earth-globe",
+        "lifetime": {"sec": 0, "nsec": 0},
+        "frame_locked": true,
+        "models": [{
+            "pose": identity_pose(),
+            "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0},
+            "override_color": false,
+            "url": "",
+            "media_type": "model/gltf-binary",
+            "data": BASE64.encode(&bytes),
+        }],
+    });
+    Some((Some(entity), referenced))
+}
+
+/// Resolve the viewport follow entity (first `object_3d` with an entity EQL).
+fn resolve_follow_entity(schematics: &LoadedSchematics, ctx: &eql::Context) -> Option<String> {
+    schematics
+        .primary
+        .iter()
+        .chain(schematics.windows.iter().map(|(_, s)| s))
+        .flat_map(|s| s.elems.iter())
+        .find_map(|elem| match elem {
+            SchematicElem::Object3d(object) => entity_for_eql(&object.eql, ctx),
+            _ => None,
+        })
+}
+
+/// Build the static scene from schematic 3D elements — one topic + one
+/// SceneUpdate message per entity (`/scene/<id>`), so latest-per-topic
+/// backfill can never drop entities. Dynamic arrows are handled separately
+/// on `/scene_dynamic`.
 fn build_scene(
     schematics: &LoadedSchematics,
     ctx: &eql::Context,
     assets_dir: &Path,
     ts_ns: u64,
+    components: &[ExportComponent],
+    component_cursors: &[Option<ComponentCursor>],
+    max_embed_bytes: u64,
+    follow_entity: Option<&str>,
+    geo_frames_active: bool,
 ) -> Option<SceneBuild> {
-    let mut entities: Vec<Value> = Vec::new();
+    let mut messages: Vec<(String, Vec<u8>)> = Vec::new();
     let mut referenced_assets = Vec::new();
     let mut arrow_groups: HashMap<String, Vec<Value>> = HashMap::new();
+    let mut literal_counter = 0u32;
+    let mut model_id_counts: HashMap<String, u32> = HashMap::new();
+
+    let push = |messages: &mut Vec<(String, Vec<u8>)>, entity: Value| {
+        let id = entity["id"].as_str().unwrap_or("entity").to_string();
+        messages.push((scene_topic(&id), scene_update_message(entity)));
+    };
 
     let all_elems = schematics
         .primary
@@ -589,28 +1071,58 @@ fn build_scene(
     for elem in all_elems {
         match elem {
             SchematicElem::Object3d(object) => {
-                match build_object_entity(object, ctx, assets_dir, ts_ns) {
-                    Ok(Some((entity, assets))) => {
-                        entities.push(entity);
+                match build_object_entity(
+                    object,
+                    ctx,
+                    assets_dir,
+                    ts_ns,
+                    max_embed_bytes,
+                    follow_entity,
+                    &mut literal_counter,
+                    &mut model_id_counts,
+                ) {
+                    Ok((Some(entity), assets)) => {
+                        push(&mut messages, entity);
                         referenced_assets.extend(assets);
                     }
-                    Ok(None) => {}
+                    Ok((None, assets)) => {
+                        referenced_assets.extend(assets);
+                    }
                     Err(err) => eprintln!("Warning: skipping object_3d ({}): {err}", object.eql),
                 }
             }
             SchematicElem::VectorArrow(arrow) => match build_arrow(arrow, ctx) {
                 Some((frame, primitive)) => arrow_groups.entry(frame).or_default().push(primitive),
-                None => eprintln!(
-                    "Warning: skipping vector_arrow '{}' (only constant body-frame arrows are exported)",
-                    arrow.vector
-                ),
+                None => {}
             },
+            SchematicElem::Line3d(line) => {
+                match build_line_entity(line, ctx, components, component_cursors, ts_ns, geo_frames_active) {
+                    Some(entity) => push(&mut messages, entity),
+                    None => eprintln!("Warning: skipping line_3d '{}' (pose not found or empty)", line.eql),
+                }
+            }
+            SchematicElem::WorldMesh(wm) => {
+                if wm.region == "globe" {
+                    match build_globe_entity(assets_dir, components, ts_ns, max_embed_bytes) {
+                        Some((Some(entity), assets)) => {
+                            push(&mut messages, entity);
+                            referenced_assets.extend(assets);
+                        }
+                        Some((None, assets)) => {
+                            referenced_assets.extend(assets);
+                        }
+                        None => eprintln!("Warning: earth.glb not found for world_mesh globe"),
+                    }
+                } else {
+                    eprintln!("Note: skipping world_mesh region '{}' (only 'globe' is exported)", wm.region);
+                }
+            }
             _ => {}
         }
     }
 
     for (frame, arrows) in arrow_groups {
-        entities.push(json!({
+        push(&mut messages, json!({
             "timestamp": timestamp_json(ts_ns),
             "frame_id": frame,
             "id": format!("{frame}-arrows"),
@@ -620,12 +1132,18 @@ fn build_scene(
         }));
     }
 
-    if entities.is_empty() {
+    if messages.is_empty() && referenced_assets.is_empty() {
         return None;
     }
-    let msg = json!({"deletions": [], "entities": entities});
+    if messages.is_empty() {
+        // Oversized-only assets still need attachments.
+        return Some(SceneBuild {
+            messages: Vec::new(),
+            referenced_assets,
+        });
+    }
     Some(SceneBuild {
-        message: serde_json::to_vec(&msg).expect("json serialize"),
+        messages,
         referenced_assets,
     })
 }
@@ -635,14 +1153,38 @@ fn build_object_entity(
     ctx: &eql::Context,
     assets_dir: &Path,
     ts_ns: u64,
-) -> Result<Option<(Value, Vec<String>)>, Error> {
-    let Some(frame) = entity_for_eql(&object.eql, ctx) else {
-        return Ok(None);
+    max_embed_bytes: u64,
+    follow_entity: Option<&str>,
+    literal_counter: &mut u32,
+    model_id_counts: &mut HashMap<String, u32>,
+) -> Result<(Option<Value>, Vec<String>), Error> {
+    let (frame, model_pose, is_literal) = if let Some(f) = entity_for_eql(&object.eql, ctx) {
+        (f, identity_pose(), false)
+    } else if let Some(pose) = parse_literal_pose(&object.eql, ctx) {
+        *literal_counter += 1;
+        let id = format!("literal-{literal_counter}");
+        let p = json!({
+            "position": {"x": pose[4], "y": pose[5], "z": pose[6]},
+            "orientation": {"x": pose[0], "y": pose[1], "z": pose[2], "w": pose[3]},
+        });
+        (id, p, true)
+    } else {
+        return Ok((None, Vec::new()));
     };
+
+    let force_embed = follow_entity.is_some_and(|f| f == frame);
+    let entity_id = next_model_entity_id(&frame, model_id_counts);
     let mut entity = Map::new();
     entity.insert("timestamp".into(), timestamp_json(ts_ns));
-    entity.insert("frame_id".into(), Value::String(frame.clone()));
-    entity.insert("id".into(), Value::String(format!("{frame}-model")));
+    entity.insert(
+        "frame_id".into(),
+        Value::String(if is_literal {
+            "world".to_string()
+        } else {
+            frame.clone()
+        }),
+    );
+    entity.insert("id".into(), Value::String(entity_id));
     entity.insert("lifetime".into(), json!({"sec": 0, "nsec": 0}));
     entity.insert("frame_locked".into(), Value::Bool(true));
     let mut referenced = Vec::new();
@@ -660,14 +1202,29 @@ fn build_object_entity(
             let bytes = std::fs::read(&glb_path).map_err(|e| {
                 invalid_data(format!("GLB asset {} unreadable: {e}", glb_path.display()))
             })?;
-            let quat = quat_from_euler_deg(*rotate);
+            referenced.push(key.clone());
+            if !should_embed_glb(bytes.len() as u64, max_embed_bytes, force_embed) {
+                eprintln!(
+                    "Note: GLB {} is {} MiB (> {} MiB limit); attached but not embedded in SceneUpdate",
+                    key,
+                    bytes.len() / (1024 * 1024),
+                    max_embed_bytes / (1024 * 1024)
+                );
+                return Ok((None, referenced));
+            }
+            let glb_pose = if is_literal {
+                compose_pose_with_glb(&model_pose, *translate, *rotate)
+            } else {
+                let quat = quat_from_euler_deg(*rotate);
+                json!({
+                    "position": {"x": translate.0, "y": translate.1, "z": translate.2},
+                    "orientation": {"x": quat[0], "y": quat[1], "z": quat[2], "w": quat[3]},
+                })
+            };
             entity.insert(
                 "models".into(),
                 json!([{
-                    "pose": {
-                        "position": {"x": translate.0, "y": translate.1, "z": translate.2},
-                        "orientation": {"x": quat[0], "y": quat[1], "z": quat[2], "w": quat[3]},
-                    },
+                    "pose": glb_pose,
                     "scale": {"x": scale, "y": scale, "z": scale},
                     "color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0},
                     "override_color": false,
@@ -676,22 +1233,22 @@ fn build_object_entity(
                     "data": BASE64.encode(&bytes),
                 }]),
             );
-            referenced.push(key);
         }
         Object3DMesh::Mesh { mesh, material } => {
             let color = color_json(&material.base_color);
+            let pose = model_pose.clone();
             match mesh {
                 impeller2_wkt::Mesh::Sphere { radius } => {
                     let d = (radius * 2.0) as f64;
                     entity.insert(
                         "spheres".into(),
-                        json!([{"pose": identity_pose(), "size": {"x": d, "y": d, "z": d}, "color": color}]),
+                        json!([{"pose": pose, "size": {"x": d, "y": d, "z": d}, "color": color}]),
                     );
                 }
                 impeller2_wkt::Mesh::Box { x, y, z } => {
                     entity.insert(
                         "cubes".into(),
-                        json!([{"pose": identity_pose(), "size": {"x": x, "y": y, "z": z}, "color": color}]),
+                        json!([{"pose": pose, "size": {"x": x, "y": y, "z": z}, "color": color}]),
                     );
                 }
                 impeller2_wkt::Mesh::Cylinder { radius, height } => {
@@ -699,7 +1256,7 @@ fn build_object_entity(
                     entity.insert(
                         "cylinders".into(),
                         json!([{
-                            "pose": identity_pose(),
+                            "pose": pose,
                             "size": {"x": d, "y": d, "z": height},
                             "bottom_scale": 1.0, "top_scale": 1.0, "color": color,
                         }]),
@@ -709,7 +1266,7 @@ fn build_object_entity(
                     entity.insert(
                         "cubes".into(),
                         json!([{
-                            "pose": identity_pose(),
+                            "pose": pose,
                             "size": {"x": width, "y": depth, "z": 0.01},
                             "color": color,
                         }]),
@@ -718,12 +1275,11 @@ fn build_object_entity(
             }
         }
         Object3DMesh::Ellipsoid { .. } => {
-            // Data-driven scale; no static scene equivalent.
-            return Ok(None);
+            return Ok((None, Vec::new()));
         }
     }
 
-    Ok(Some((Value::Object(entity), referenced)))
+    Ok((Some(Value::Object(entity)), referenced))
 }
 
 /// Body-frame constant-vector arrows attach to the origin entity's TF frame.
@@ -768,6 +1324,11 @@ struct LayoutBuilder<'a> {
     ctx: &'a eql::Context,
     components: &'a [ExportComponent],
     follow_entity: Option<String>,
+    /// First `object_3d` entity per geo frame name ("ENU"/"NED"/"ECEF") —
+    /// follow fallback for viewports whose look_at/pos are pure literals.
+    frame_entities: HashMap<String, String>,
+    /// Every `/scene/...` and `/scene_dynamic/...` topic in the export.
+    scene_topics: &'a [String],
 }
 
 impl<'a> LayoutBuilder<'a> {
@@ -775,6 +1336,8 @@ impl<'a> LayoutBuilder<'a> {
         ctx: &'a eql::Context,
         components: &'a [ExportComponent],
         follow_entity: Option<String>,
+        frame_entities: HashMap<String, String>,
+        scene_topics: &'a [String],
     ) -> Self {
         Self {
             config_by_id: Map::new(),
@@ -782,6 +1345,8 @@ impl<'a> LayoutBuilder<'a> {
             ctx,
             components,
             follow_entity,
+            frame_entities,
+            scene_topics,
         }
     }
 
@@ -923,14 +1488,28 @@ impl<'a> LayoutBuilder<'a> {
                 // Reconstruct the Elodin viewport vantage point: pos EQL like
                 // "drone.world_pos + (0,0,0,0, 2,2,2)" carries the camera's
                 // ENU offset from the look_at target in its trailing literals.
-                let offset = viewport
+                let mut offset = viewport
                     .pos
                     .as_deref()
                     .and_then(|pos| self.ctx.parse_str(pos).ok())
                     .and_then(|expr| camera_offset_from_pos(&expr));
+                // NED viewports express the offset as (north, east, down);
+                // convert to ENU so "up" doesn't become "below the horizon".
+                let frame_name = viewport.frame.map(|f| format!("{f:?}"));
+                if frame_name.as_deref() == Some("NED")
+                    && let Some([n, e, d]) = offset
+                {
+                    offset = Some([e, n, -d]);
+                }
                 let (distance, phi, theta) = camera_orbit_from_offset(offset);
+                let near = viewport.near.unwrap_or(0.01) as f64;
+                // Clamp far so the orbit camera itself is never beyond the far
+                // plane (geo-frames sets far=1.5e7 with an 8e7 m camera offset).
+                let far = viewport
+                    .far
+                    .map(|f| (f as f64).max(distance * 4.0))
+                    .unwrap_or_else(|| (distance * 4.0).max(5000.0));
                 let mut config = Map::new();
-                // cameraState angles (phi/thetaOffset/fovy) are in degrees.
                 config.insert(
                     "cameraState".into(),
                     json!({
@@ -942,21 +1521,43 @@ impl<'a> LayoutBuilder<'a> {
                         "target": [0, 0, 0],
                         "targetOrientation": [0, 0, 0, 1],
                         "fovy": viewport.fov,
-                        "near": 0.01,
-                        "far": 5000,
+                        "near": near,
+                        "far": far,
                     }),
                 );
-                if let Some(entity) = self.follow_entity.clone().or_else(|| {
-                    viewport
-                        .pos
-                        .as_deref()
-                        .and_then(|p| entity_for_eql(p, self.ctx))
-                }) {
+                // Follow the viewport's own subject: the look_at target first
+                // (what the Elodin camera orbits), then the pos entity, then
+                // the first object_3d sharing the viewport's geo frame (a
+                // literal look_at like "(0,0,0,1, 0,0,0)" means that frame's
+                // origin, e.g. geo-frames' ned_origin), then the global first
+                // object. The old global-first order pointed Apollo's camera
+                // at `surface` while the lander flew 100 km away.
+                if let Some(entity) = viewport
+                    .look_at
+                    .as_deref()
+                    .and_then(|l| entity_for_eql(l, self.ctx))
+                    .or_else(|| {
+                        viewport
+                            .pos
+                            .as_deref()
+                            .and_then(|p| entity_for_eql(p, self.ctx))
+                    })
+                    .or_else(|| {
+                        frame_name
+                            .as_deref()
+                            .and_then(|f| self.frame_entities.get(f).cloned())
+                    })
+                    .or_else(|| self.follow_entity.clone())
+                {
                     config.insert("followTf".into(), Value::String(entity));
                     config.insert("followMode".into(), Value::String("follow-position".into()));
                 }
                 config.insert("layers".into(), Value::Object(layers));
-                config.insert("topics".into(), json!({"/scene": {"visible": true}}));
+                let mut topics = Map::new();
+                for topic in self.scene_topics {
+                    topics.insert(topic.clone(), json!({"visible": true}));
+                }
+                config.insert("topics".into(), Value::Object(topics));
                 // Hide the parent->child TF connecting lines (Elodin viewports
                 // draw no such line); keep the frame axes and labels.
                 config.insert("scene".into(), json!({"transforms": {"lineWidth": 0}}));
@@ -1007,8 +1608,12 @@ impl<'a> LayoutBuilder<'a> {
                 Some(Value::String(self.add_panel("Image", config)))
             }
             Panel::SensorView(view) => {
+                #[cfg(feature = "video-export")]
+                let topic = format!("/video/{}", view.msg_name);
+                #[cfg(not(feature = "video-export"))]
+                let topic = format!("/camera/{}", view.msg_name);
                 let config = json!({
-                    "imageMode": {"imageTopic": format!("/camera/{}", view.msg_name)},
+                    "imageMode": {"imageTopic": topic},
                 });
                 Some(Value::String(self.add_panel("Image", config)))
             }
@@ -1115,21 +1720,27 @@ fn build_layout(
     schematics: &LoadedSchematics,
     ctx: &eql::Context,
     components: &[ExportComponent],
+    scene_topics: &[String],
 ) -> Option<Value> {
     let primary = schematics.primary.as_ref()?;
 
-    // Follow entity: first object_3d in any schematic.
-    let follow_entity = schematics
+    let follow_entity = resolve_follow_entity(schematics, ctx);
+    let mut frame_entities: HashMap<String, String> = HashMap::new();
+    for elem in schematics
         .primary
         .iter()
         .chain(schematics.windows.iter().map(|(_, s)| s))
         .flat_map(|s| s.elems.iter())
-        .find_map(|elem| match elem {
-            SchematicElem::Object3d(object) => entity_for_eql(&object.eql, ctx),
-            _ => None,
-        });
-
-    let mut builder = LayoutBuilder::new(ctx, components, follow_entity);
+    {
+        if let SchematicElem::Object3d(object) = elem
+            && let Some(frame) = object.frame
+            && let Some(entity) = entity_for_eql(&object.eql, ctx)
+        {
+            frame_entities.entry(format!("{frame:?}")).or_insert(entity);
+        }
+    }
+    let mut builder =
+        LayoutBuilder::new(ctx, components, follow_entity, frame_entities, scene_topics);
 
     // (title, panel) pairs that become the root tabs.
     let mut tabs: Vec<(String, Value)> = Vec::new();
@@ -1192,6 +1803,205 @@ fn build_layout(
         "playbackConfig": {"speed": 1.0},
         "layout": root_id,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic vector arrows
+// ---------------------------------------------------------------------------
+
+/// Maximum output rate for dynamic vector arrows (Hz).
+const DYNAMIC_ARROW_MAX_HZ: f64 = 30.0;
+
+/// Build precomputed dynamic arrow SceneUpdate messages. These are vector_arrows
+/// whose `vector` EQL references a data component rather than a literal tuple.
+/// Returns one `(topic, sorted (timestamp_us, payload) stream)` per arrow —
+/// separate topics so latest-per-topic backfill keeps every arrow alive.
+fn build_dynamic_arrows(
+    schematics: &LoadedSchematics,
+    ctx: &eql::Context,
+    components: &[ExportComponent],
+    component_cursors: &[Option<ComponentCursor>],
+    epoch_offset_us: i64,
+) -> Vec<(String, Vec<(i64, Vec<u8>)>)> {
+    let mut streams: Vec<(String, Vec<(i64, Vec<u8>)>)> = Vec::new();
+
+    let all_elems = schematics
+        .primary
+        .iter()
+        .chain(schematics.windows.iter().map(|(_, s)| s))
+        .flat_map(|s| s.elems.iter());
+
+    for elem in all_elems {
+        let SchematicElem::VectorArrow(arrow) = elem else {
+            continue;
+        };
+        if parse_literal_tuple(&arrow.vector).is_some() {
+            continue;
+        }
+        let vec_entity = match entity_for_eql(&arrow.vector, ctx) {
+            Some(e) => e,
+            None => continue,
+        };
+        let vec_comp_name = {
+            let expr = match ctx.parse_str(&arrow.vector) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let mut names = Vec::new();
+            collect_component_names(&expr, &mut names);
+            match names.into_iter().next() {
+                Some(n) => n,
+                None => continue,
+            }
+        };
+        let (comp_idx, comp) = match components.iter().enumerate().find(|(_, c)| c.name == vec_comp_name) {
+            Some(pair) => pair,
+            None => continue,
+        };
+        let cursor = match component_cursors[comp_idx].as_ref() {
+            Some(c) => c,
+            None => continue,
+        };
+        let flat_count: usize = comp.component.schema.dim.iter().product::<usize>().max(1);
+        if flat_count < 3 {
+            continue;
+        }
+
+        let frame = if arrow.body_frame {
+            arrow.origin.as_deref()
+                .and_then(|o| entity_for_eql(o, ctx))
+                .unwrap_or_else(|| vec_entity.clone())
+        } else {
+            arrow.origin.as_deref()
+                .and_then(|o| parse_literal_tuple(o))
+                .map(|_| "world".to_string())
+                .or_else(|| arrow.origin.as_deref().and_then(|o| entity_for_eql(o, ctx)))
+                .unwrap_or_else(|| "world".to_string())
+        };
+
+        // Literal origins may be a 3-tuple position or a 7-tuple pose
+        // `(qx,qy,qz,qw, x,y,z)` — take the trailing xyz in either case.
+        let origin_pos = if !arrow.body_frame {
+            arrow.origin.as_deref().and_then(parse_literal_tuple).and_then(|v| {
+                if v.len() >= 7 {
+                    Some([v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]])
+                } else if v.len() >= 3 {
+                    Some([v[0], v[1], v[2]])
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
+        let arrow_id = arrow.name.clone().unwrap_or_else(|| format!("{vec_comp_name}-arrow"));
+        let mut topic = format!("/scene_dynamic/{}", sanitize_topic_segment(&arrow_id));
+        let mut ordinal = 1u32;
+        while streams.iter().any(|(t, _)| *t == topic) {
+            ordinal += 1;
+            topic = format!("/scene_dynamic/{}-{ordinal}", sanitize_topic_segment(&arrow_id));
+        }
+        let prim = comp.component.schema.prim_type;
+        let mut entries: Vec<(i64, Vec<u8>)> = Vec::new();
+
+        let min_step_us = (1_000_000.0 / DYNAMIC_ARROW_MAX_HZ) as i64;
+        let mut last_emitted_us: Option<i64> = None;
+
+        for (i, ts) in cursor.timestamps.iter().enumerate() {
+            if let Some(prev) = last_emitted_us
+                && ts.0.saturating_sub(prev) < min_step_us
+            {
+                continue;
+            }
+            last_emitted_us = Some(ts.0);
+            let ts_ns = us_to_ns(*ts, epoch_offset_us);
+            let buf = &cursor.data[i * cursor.sample_size..(i + 1) * cursor.sample_size];
+            let vx = read_f64(prim, buf, 0);
+            let vy = read_f64(prim, buf, 1);
+            let vz = read_f64(prim, buf, 2);
+            let len = (vx * vx + vy * vy + vz * vz).sqrt();
+            if len < 1e-12 {
+                continue;
+            }
+            let dir = [vx / len, vy / len, vz / len];
+            let quat = quat_from_x_axis(dir);
+            let total = len * arrow.scale;
+            let pos = origin_pos.unwrap_or([0.0, 0.0, 0.0]);
+            let primitive = json!({
+                "pose": {
+                    "position": {"x": pos[0], "y": pos[1], "z": pos[2]},
+                    "orientation": {"x": quat[0], "y": quat[1], "z": quat[2], "w": quat[3]},
+                },
+                "shaft_length": total * 0.8,
+                "shaft_diameter": (total * 0.02f64).max(0.01),
+                "head_length": total * 0.2,
+                "head_diameter": (total * 0.06f64).max(0.02),
+                "color": color_json(&arrow.color),
+            });
+            let msg = json!({
+                "deletions": [],
+                "entities": [{
+                    "timestamp": timestamp_json(ts_ns),
+                    "frame_id": frame,
+                    "id": arrow_id,
+                    "lifetime": {"sec": 0, "nsec": 0},
+                    "frame_locked": true,
+                    "arrows": [primitive],
+                }],
+            });
+            entries.push((ts.0, serde_json::to_vec(&msg).expect("json serialize")));
+        }
+        if !entries.is_empty() {
+            entries.sort_by_key(|(ts, _)| *ts);
+            streams.push((topic, entries));
+        }
+    }
+
+    streams
+}
+
+// ---------------------------------------------------------------------------
+// Sensor camera H.264 encoding (video-export feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "video-export")]
+fn encode_sensor_frame(
+    cfg: &SensorCameraConfig,
+    raw_payload: &[u8],
+    ts_ns: u64,
+    name: &str,
+    encoders: &mut HashMap<usize, crate::export_videos::SensorEncoder>,
+    idx: usize,
+) -> Vec<u8> {
+    let encoder = encoders.entry(idx).or_insert_with(|| {
+        let fps = crate::export_videos::sensor_camera_export_fps(cfg, 30);
+        crate::export_videos::SensorEncoder::new(cfg.width, cfg.height, fps)
+            .expect("openh264 encoder init")
+    });
+    let yuv = match crate::export_videos::rgba_to_i420(raw_payload, cfg.width as usize, cfg.height as usize) {
+        Ok(yuv) => yuv,
+        Err(e) => {
+            eprintln!("Warning: sensor frame encode skip for {name}: {e}");
+            return msg_log_json(&MsgLogKind::SensorCamera(Box::new(cfg.clone())), name, raw_payload, ts_ns);
+        }
+    };
+    match encoder.encode_frame(&yuv) {
+        Ok(annexb) if !annexb.is_empty() => {
+            let value = json!({
+                "timestamp": timestamp_json(ts_ns),
+                "frame_id": name,
+                "data": BASE64.encode(&annexb),
+                "format": "h264",
+            });
+            serde_json::to_vec(&value).expect("json serialize")
+        }
+        Ok(_) => Vec::new(),
+        Err(e) => {
+            eprintln!("Warning: sensor frame encode error for {name}: {e}");
+            msg_log_json(&MsgLogKind::SensorCamera(Box::new(cfg.clone())), name, raw_payload, ts_ns)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1414,7 +2224,12 @@ pub fn run(
             let kind = classify_msg_log(&log, &name, &sensor_by_msg_id, &video_names);
             let topic = match kind {
                 MsgLogKind::H264Video => format!("/video/{name}"),
-                MsgLogKind::SensorCamera(_) => format!("/camera/{name}"),
+                MsgLogKind::SensorCamera(_) => {
+                    #[cfg(feature = "video-export")]
+                    { format!("/video/{name}") }
+                    #[cfg(not(feature = "video-export"))]
+                    { format!("/camera/{name}") }
+                }
                 MsgLogKind::LogEntries => format!("/log/{name}"),
                 MsgLogKind::Raw => format!("/msg/{name}"),
             };
@@ -1475,7 +2290,12 @@ pub fn run(
     for log in &export_msg_logs {
         let (schema_name, schema_body) = match log.kind {
             MsgLogKind::H264Video => ("foxglove.CompressedVideo", SCHEMA_COMPRESSED_VIDEO),
-            MsgLogKind::SensorCamera(_) => ("foxglove.RawImage", SCHEMA_RAW_IMAGE),
+            MsgLogKind::SensorCamera(_) => {
+                #[cfg(feature = "video-export")]
+                { ("foxglove.CompressedVideo", SCHEMA_COMPRESSED_VIDEO) }
+                #[cfg(not(feature = "video-export"))]
+                { ("foxglove.RawImage", SCHEMA_RAW_IMAGE) }
+            }
             MsgLogKind::LogEntries => ("foxglove.Log", SCHEMA_LOG),
             MsgLogKind::Raw => ("elodin.RawMessage", SCHEMA_RAW_BYTES),
         };
@@ -1488,11 +2308,6 @@ pub fn run(
 
     // ---- gather cursors -----------------------------------------------------
     let full_range = Timestamp(i64::MIN)..Timestamp(i64::MAX);
-    struct ComponentCursor<'a> {
-        timestamps: &'a [Timestamp],
-        data: &'a [u8],
-        sample_size: usize,
-    }
     let component_cursors: Vec<Option<ComponentCursor>> = snapshot
         .components
         .iter()
@@ -1520,18 +2335,118 @@ pub fn run(
         .min()
         .copied()
         .unwrap_or(earliest);
-    let start_ns = us_to_ns(start_ts);
 
-    // ---- /scene one-shot -----------------------------------------------------
-    let scene = build_scene(&schematics, &ctx, &assets_dir, start_ns);
+    // ---- epoch offset ---------------------------------------------------------
+    let epoch_offset_us: i64 = match options.epoch_offset_us {
+        Some(v) => {
+            if v != 0 {
+                println!("  Using manual epoch offset: {} µs", v);
+            }
+            v
+        }
+        None => {
+            if start_ts.0 < 0 {
+                let offset = -start_ts.0;
+                eprintln!(
+                    "Warning: earliest timestamp is {} µs (pre-1970); auto-rebasing by +{} µs so earliest becomes t=0",
+                    start_ts.0, offset
+                );
+                offset
+            } else {
+                0
+            }
+        }
+    };
+    let start_ns = us_to_ns(start_ts, epoch_offset_us);
+
+    let max_embed_bytes = options.max_embed_mb * 1024 * 1024;
+    let follow_entity = resolve_follow_entity(&schematics, &ctx);
+
+    // ---- geodetic frames (schematic `coordinate` node) -----------------------
+    let geo_map = entity_geo_frames(&schematics, &ctx);
+    let geo_anchors = schematics
+        .primary
+        .as_ref()
+        .and_then(|s| s.origin.as_ref())
+        .filter(|_| !geo_map.is_empty())
+        .map(geo_frame_anchors);
+    let tf_parents: Vec<String> = snapshot
+        .components
+        .iter()
+        .map(|c| {
+            c.pose_entity
+                .as_deref()
+                .filter(|_| geo_anchors.is_some())
+                .and_then(|e| geo_map.get(e).cloned())
+                .unwrap_or_else(|| "world".to_string())
+        })
+        .collect();
+
+    // ---- /scene (one message per entity) ------------------------------------
+    let scene = build_scene(
+        &schematics,
+        &ctx,
+        &assets_dir,
+        start_ns,
+        &snapshot.components,
+        &component_cursors,
+        max_embed_bytes,
+        follow_entity.as_deref(),
+        geo_anchors.is_some(),
+    );
+
+    // ---- dynamic vector arrows on /scene_dynamic ----------------------------
+    let dynamic_arrows = build_dynamic_arrows(
+        &schematics, &ctx, &snapshot.components, &component_cursors, epoch_offset_us,
+    );
+
     let mut referenced_assets: Vec<String> = Vec::new();
-    if let Some(scene) = &scene {
-        let schema_id = writer.add_schema(
+    let scene_schema_id = if scene.as_ref().is_some_and(|s| !s.messages.is_empty())
+        || !dynamic_arrows.is_empty()
+    {
+        Some(writer.add_schema(
             "foxglove.SceneUpdate",
             "jsonschema",
             SCHEMA_SCENE_UPDATE.as_bytes(),
-        )?;
-        let channel_id = writer.add_channel(schema_id, "/scene", "json", &empty_metadata)?;
+        )?)
+    } else {
+        None
+    };
+
+    if let Some(scene) = &scene {
+        referenced_assets.extend(scene.referenced_assets.iter().cloned());
+    }
+
+    // One channel per static entity (`/scene/<id>`) and per dynamic arrow
+    // (`/scene_dynamic/<name>`): Foxglove backfills only the latest message
+    // per topic when a 3D panel (re)mounts, so shared topics drop entities.
+    if let (Some(schema_id), Some(scene)) = (scene_schema_id, &scene) {
+        for (topic, msg) in &scene.messages {
+            let channel_id = writer.add_channel(schema_id, topic, "json", &empty_metadata)?;
+            writer.write_to_known_channel(
+                &MessageHeader {
+                    channel_id,
+                    sequence: 0,
+                    log_time: start_ns,
+                    publish_time: start_ns,
+                },
+                msg,
+            )?;
+        }
+    }
+
+    let mut dynamic_arrow_channels: Vec<u16> = Vec::with_capacity(dynamic_arrows.len());
+    if let Some(schema_id) = scene_schema_id {
+        for (topic, _) in &dynamic_arrows {
+            dynamic_arrow_channels
+                .push(writer.add_channel(schema_id, topic, "json", &empty_metadata)?);
+        }
+    }
+
+    let mut sequences: HashMap<u16, u32> = HashMap::new();
+
+    // world→NED / world→ENU anchor frames from the schematic `coordinate` node.
+    if let (Some(anchors), Some(channel_id)) = (&geo_anchors, tf_channel) {
         writer.write_to_known_channel(
             &MessageHeader {
                 channel_id,
@@ -1539,19 +2454,21 @@ pub fn run(
                 log_time: start_ns,
                 publish_time: start_ns,
             },
-            &scene.message,
+            &geo_frame_tf_message(anchors, start_ns),
         )?;
-        referenced_assets.extend(scene.referenced_assets.iter().cloned());
+        sequences.insert(channel_id, 1);
     }
 
     // ---- k-way merge over all cursors ----------------------------------------
     // Cursor id space: [0, n) component channels, [n, 2n) TF from pose
-    // components, [2n, 2n + m) msg logs.
+    // components, [2n, 2n + m) msg logs, [2n + m, 2n + m + k) dynamic arrows.
     let n = snapshot.components.len();
+    let m = export_msg_logs.len();
+    let k = dynamic_arrows.len();
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
     let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
-    let mut positions = vec![0usize; n * 2 + export_msg_logs.len()];
+    let mut positions = vec![0usize; 2 * n + m + k];
 
     for (i, cursor) in component_cursors.iter().enumerate() {
         if let Some(cursor) = cursor
@@ -1568,12 +2485,19 @@ pub fn run(
             heap.push(Reverse((ts.0, 2 * n + i)));
         }
     }
+    for (i, (_, entries)) in dynamic_arrows.iter().enumerate() {
+        if let Some((ts, _)) = entries.first() {
+            heap.push(Reverse((*ts, 2 * n + m + i)));
+        }
+    }
 
-    let mut sequences: HashMap<u16, u32> = HashMap::new();
+    #[cfg(feature = "video-export")]
+    let mut sensor_encoders: HashMap<usize, crate::export_videos::SensorEncoder> = HashMap::new();
+
     let mut message_count = 0u64;
     while let Some(Reverse((ts_us, cursor_id))) = heap.pop() {
         crate::cancellation::check_cancelled()?;
-        let ts_ns = us_to_ns(Timestamp(ts_us));
+        let ts_ns = us_to_ns(Timestamp(ts_us), epoch_offset_us);
         let pos = positions[cursor_id];
         let (channel_id, payload, next_ts): (u16, Vec<u8>, Option<i64>) = if cursor_id < n {
             let comp = &snapshot.components[cursor_id];
@@ -1591,17 +2515,52 @@ pub fn run(
             let entity = comp.pose_entity.as_deref().unwrap();
             (
                 tf_channel.unwrap(),
-                tf_message(entity, comp.component.schema.prim_type, buf, ts_ns),
+                tf_message(
+                    entity,
+                    &tf_parents[cursor_id - n],
+                    comp.component.schema.prim_type,
+                    buf,
+                    ts_ns,
+                ),
                 cursor.timestamps.get(pos + 1).map(|t| t.0),
             )
-        } else {
+        } else if cursor_id < 2 * n + m {
             let idx = cursor_id - 2 * n;
             let log = &export_msg_logs[idx];
-            let (_, payload) = msg_entries[idx][pos];
+            let (_, raw_payload) = msg_entries[idx][pos];
+
+            let payload = {
+                #[cfg(feature = "video-export")]
+                {
+                    if let MsgLogKind::SensorCamera(cfg) = &log.kind {
+                        encode_sensor_frame(
+                            cfg, raw_payload, ts_ns, &log.name,
+                            &mut sensor_encoders, idx,
+                        )
+                    } else {
+                        msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
+                    }
+                }
+                #[cfg(not(feature = "video-export"))]
+                {
+                    msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
+                }
+            };
+
             (
                 msg_channels[idx],
-                msg_log_json(&log.kind, &log.name, payload, ts_ns),
+                payload,
                 msg_entries[idx].get(pos + 1).map(|(t, _)| t.0),
+            )
+        } else {
+            // Dynamic arrow scene updates, one channel per arrow.
+            let idx = cursor_id - 2 * n - m;
+            let entries = &dynamic_arrows[idx].1;
+            let (_, ref payload) = entries[pos];
+            (
+                dynamic_arrow_channels[idx],
+                payload.clone(),
+                entries.get(pos + 1).map(|(t, _)| *t),
             )
         };
 
@@ -1625,9 +2584,16 @@ pub fn run(
     }
 
     // ---- metadata records ------------------------------------------------------
+    let mut db_metadata = snapshot.db_metadata.clone();
+    if epoch_offset_us != 0 {
+        db_metadata.insert(
+            "elodin.time_offset_us".to_string(),
+            epoch_offset_us.to_string(),
+        );
+    }
     writer.write_metadata(&mcap::records::Metadata {
         name: "elodin.db_state".to_string(),
-        metadata: snapshot.db_metadata.clone(),
+        metadata: db_metadata,
     })?;
     let component_meta: BTreeMap<String, String> = snapshot
         .components
@@ -1704,7 +2670,12 @@ pub fn run(
     );
 
     // ---- layout ---------------------------------------------------------------------
-    match build_layout(&schematics, &ctx, &snapshot.components) {
+    let mut scene_topics: Vec<String> = Vec::new();
+    if let Some(scene) = &scene {
+        scene_topics.extend(scene.messages.iter().map(|(t, _)| t.clone()));
+    }
+    scene_topics.extend(dynamic_arrows.iter().map(|(t, _)| t.clone()));
+    match build_layout(&schematics, &ctx, &snapshot.components, &scene_topics) {
         Some(layout) => {
             std::fs::write(
                 &layout_path,
@@ -1818,7 +2789,7 @@ mod tests {
             .iter()
             .flat_map(|v| v.to_le_bytes())
             .collect();
-        let msg = tf_message("drone", PrimType::F64, &buf, 1_000);
+        let msg = tf_message("drone", "world", PrimType::F64, &buf, 1_000);
         let value: Value = serde_json::from_slice(&msg).unwrap();
         let tf = &value["transforms"][0];
         assert_eq!(tf["child_frame_id"], "drone");
@@ -1826,5 +2797,472 @@ mod tests {
         assert_eq!(tf["rotation"]["w"], 0.9);
         assert_eq!(tf["translation"]["x"], 1.0);
         assert_eq!(tf["translation"]["z"], 3.0);
+    }
+
+    // --- Gap 1: epoch offset tests ---
+
+    #[test]
+    fn us_to_ns_with_zero_offset() {
+        assert_eq!(us_to_ns(Timestamp(1_000_000), 0), 1_000_000_000);
+    }
+
+    #[test]
+    fn us_to_ns_positive_offset() {
+        assert_eq!(us_to_ns(Timestamp(-500), 1000), 500_000);
+    }
+
+    #[test]
+    fn us_to_ns_auto_rebase_clamps_to_zero() {
+        assert_eq!(us_to_ns(Timestamp(-1000), 1000), 0);
+    }
+
+    #[test]
+    fn us_to_ns_negative_after_offset_clamps() {
+        assert_eq!(us_to_ns(Timestamp(-2000), 500), 0);
+    }
+
+    // --- Gap 3: camera near/far derivation ---
+
+    #[test]
+    fn camera_near_far_defaults() {
+        let (distance, _, _) = camera_orbit_from_offset(Some([2.0, 2.0, 2.0]));
+        let near: f64 = 0.01; // default when viewport.near is None
+        let far = (distance * 4.0).max(5000.0);
+        assert!((near - 0.01).abs() < 1e-9);
+        assert!(far >= 5000.0);
+    }
+
+    #[test]
+    fn camera_far_scales_with_distance() {
+        let (distance, _, _) = camera_orbit_from_offset(Some([5000.0, 0.0, 0.0]));
+        let far = (distance * 4.0).max(5000.0);
+        assert!(far >= distance * 4.0);
+        assert!(far >= 5000.0);
+    }
+
+    // --- Gap 5: literal pose parsing ---
+
+    #[test]
+    fn parse_literal_tuple_7() {
+        let vals = parse_literal_tuple("(0, 0, 0, 1, 1.5, 2.5, 3.5)");
+        assert_eq!(vals, Some(vec![0.0, 0.0, 0.0, 1.0, 1.5, 2.5, 3.5]));
+    }
+
+    #[test]
+    fn parse_literal_tuple_3() {
+        let vals = parse_literal_tuple("(1, 2, 3)");
+        assert_eq!(vals, Some(vec![1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn parse_literal_tuple_not_a_tuple() {
+        assert_eq!(parse_literal_tuple("drone.world_pos"), None);
+    }
+
+    // --- Gap 4: line decimation ---
+
+    fn make_test_component(name: &str, prim: PrimType, dim: &[usize]) -> ExportComponent {
+        let db_path = std::env::temp_dir().join(format!("elodin_mcap_test_{}", fastrand::u64(..)));
+        let _ = std::fs::create_dir_all(&db_path);
+        let component = crate::Component::create(
+            &db_path,
+            impeller2::types::ComponentId::new(name),
+            name.to_string(),
+            crate::ComponentSchema::new(prim, dim),
+            Timestamp(0),
+        )
+        .expect("create component");
+        ExportComponent {
+            component,
+            name: name.to_string(),
+            topic: topic_for_component(name),
+            element_paths: vec![],
+            metadata: Default::default(),
+            pose_entity: name.ends_with(".world_pos").then(|| {
+                name.trim_end_matches(".world_pos").to_string()
+            }),
+        }
+    }
+
+    #[test]
+    fn extract_trajectory_under_limit() {
+        let sample_size = 7 * 8;
+        let num_rows = 100;
+        let mut data = Vec::with_capacity(num_rows * sample_size);
+        let mut timestamps = Vec::with_capacity(num_rows);
+        for i in 0..num_rows {
+            let row: Vec<u8> = [0.0, 0.0, 0.0, 1.0, i as f64, (i * 2) as f64, 0.0]
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect();
+            data.extend_from_slice(&row);
+            timestamps.push(Timestamp(i as i64 * 1000));
+        }
+        let comp = make_test_component("test.world_pos", PrimType::F64, &[7]);
+        let cursor = ComponentCursor {
+            timestamps: &timestamps,
+            data: &data,
+            sample_size,
+        };
+        let points = extract_trajectory(&comp, &cursor);
+        assert_eq!(points.len(), 100);
+        assert_eq!(points[0], [0.0, 0.0, 0.0]);
+        assert_eq!(points[50], [50.0, 100.0, 0.0]);
+    }
+
+    #[test]
+    fn extract_trajectory_decimates() {
+        let sample_size = 7 * 8;
+        let num_rows = 5000;
+        let mut data = Vec::with_capacity(num_rows * sample_size);
+        let mut timestamps = Vec::with_capacity(num_rows);
+        for i in 0..num_rows {
+            let row: Vec<u8> = [0.0, 0.0, 0.0, 1.0, i as f64, 0.0, 0.0]
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect();
+            data.extend_from_slice(&row);
+            timestamps.push(Timestamp(i as i64 * 1000));
+        }
+        let comp = make_test_component("test.world_pos", PrimType::F64, &[7]);
+        let cursor = ComponentCursor {
+            timestamps: &timestamps,
+            data: &data,
+            sample_size,
+        };
+        let points = extract_trajectory(&comp, &cursor);
+        assert!(points.len() <= MAX_LINE_POINTS + 1);
+        assert_eq!(points[0], [0.0, 0.0, 0.0]);
+        assert_eq!(points.last().unwrap()[0], 4999.0);
+    }
+
+    // --- Pass 2: scene entity helpers ---
+
+    fn empty_eql_ctx() -> eql::Context {
+        eql::Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000))
+    }
+
+    fn test_glb_object(eql: &str, path: &str, translate: (f32, f32, f32), rotate: (f32, f32, f32)) -> Object3D {
+        Object3D {
+            eql: eql.to_string(),
+            mesh: Object3DMesh::Glb {
+                path: path.to_string(),
+                scale: 1.0,
+                translate,
+                rotate,
+                animations: vec![],
+                emissivity: 0.0,
+                glow: 0.0,
+                glow_color: None,
+            },
+            frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
+            icon: None,
+            thrusters: vec![],
+            mesh_visibility_range: None,
+            node_id: Default::default(),
+        }
+    }
+
+    #[test]
+    fn next_model_entity_id_unique_per_frame() {
+        let mut counts = HashMap::new();
+        assert_eq!(next_model_entity_id("body", &mut counts), "body-model");
+        assert_eq!(next_model_entity_id("body", &mut counts), "body-model-2");
+        assert_eq!(next_model_entity_id("body", &mut counts), "body-model-3");
+        assert_eq!(next_model_entity_id("other", &mut counts), "other-model");
+    }
+
+    #[test]
+    fn should_embed_glb_respects_force() {
+        assert!(should_embed_glb(100, 50, true));
+        assert!(!should_embed_glb(100, 50, false));
+        assert!(should_embed_glb(50, 50, false));
+    }
+
+    #[test]
+    fn compose_pose_applies_local_translate_in_parent_frame() {
+        // Parent at (10,0,0), identity orientation; local translate (1,2,3).
+        let parent = json!({
+            "position": {"x": 10.0, "y": 0.0, "z": 0.0},
+            "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+        });
+        let pose = compose_pose_with_glb(&parent, (1.0, 2.0, 3.0), (0.0, 0.0, 0.0));
+        assert!((pose["position"]["x"].as_f64().unwrap() - 11.0).abs() < 1e-9);
+        assert!((pose["position"]["y"].as_f64().unwrap() - 2.0).abs() < 1e-9);
+        assert!((pose["position"]["z"].as_f64().unwrap() - 3.0).abs() < 1e-9);
+        assert!((pose["orientation"]["w"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compose_pose_applies_local_yaw_to_orientation() {
+        let parent = identity_pose();
+        // Translate is in parent frame (not spun by local rotate); rotate sets orientation.
+        let pose = compose_pose_with_glb(&parent, (1.0, 0.0, 0.0), (0.0, 0.0, 90.0));
+        assert!((pose["position"]["x"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert!(pose["position"]["y"].as_f64().unwrap().abs() < 1e-9);
+        let qw = pose["orientation"]["w"].as_f64().unwrap();
+        let qz = pose["orientation"]["z"].as_f64().unwrap();
+        assert!((qw - (std::f64::consts::FRAC_PI_4).cos()).abs() < 1e-6);
+        assert!((qz - (std::f64::consts::FRAC_PI_4).sin()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn scene_update_message_is_one_entity() {
+        let msg = scene_update_message(json!({"id": "a"}));
+        let v: Value = serde_json::from_slice(&msg).unwrap();
+        assert_eq!(v["entities"].as_array().unwrap().len(), 1);
+        assert_eq!(v["entities"][0]["id"], "a");
+        assert!(v["deletions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn oversized_glb_omits_model_not_empty_data() {
+        let dir = std::env::temp_dir().join(format!("elodin_mcap_glb_{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let glb_path = dir.join("big.glb");
+        // 2 KiB payload with a tiny max-embed so the guard trips.
+        std::fs::write(&glb_path, vec![0u8; 2048]).unwrap();
+        let ctx = empty_eql_ctx();
+        let object = test_glb_object("(0, 0, 0, 1, 1, 2, 3)", "big.glb", (0.0, 0.0, 0.0), (0.0, 0.0, 45.0));
+        let mut lit = 0u32;
+        let mut counts = HashMap::new();
+        let (entity, assets) = build_object_entity(
+            &object,
+            &ctx,
+            &dir,
+            0,
+            1, // 1 byte max → always oversized
+            None,
+            &mut lit,
+            &mut counts,
+        )
+        .unwrap();
+        assert!(entity.is_none(), "oversized GLB must not emit a model entity");
+        assert_eq!(assets, vec!["big.glb".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn force_embed_bypasses_size_guard() {
+        let dir = std::env::temp_dir().join(format!("elodin_mcap_glb_{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let glb_path = dir.join("big.glb");
+        std::fs::write(&glb_path, vec![0u8; 64]).unwrap();
+        // Entity-backed object needs a component leaf named like `lander.world_pos`.
+        let component = Arc::new(eql::Component::new(
+            "lander.world_pos".into(),
+            impeller2::types::ComponentId::new("lander.world_pos"),
+            impeller2::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
+        ));
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000));
+        let object = test_glb_object("lander.world_pos", "big.glb", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0));
+        let mut lit = 0u32;
+        let mut counts = HashMap::new();
+        let (entity, _) = build_object_entity(
+            &object,
+            &ctx,
+            &dir,
+            0,
+            1,
+            Some("lander"),
+            &mut lit,
+            &mut counts,
+        )
+        .unwrap();
+        let entity = entity.expect("follow-entity mesh must embed");
+        let data = entity["models"][0]["data"].as_str().unwrap();
+        assert!(!data.is_empty());
+        assert_eq!(entity["id"], "lander-model");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn literal_pose_composes_glb_rotate() {
+        let dir = std::env::temp_dir().join(format!("elodin_mcap_glb_{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("tiny.glb"), b"glTF").unwrap();
+        let ctx = empty_eql_ctx();
+        let object = test_glb_object(
+            "(0, 0, 0, 1, 100, 0, 0)",
+            "tiny.glb",
+            (1.0, 0.0, 0.0),
+            (0.0, 0.0, 90.0),
+        );
+        let mut lit = 0u32;
+        let mut counts = HashMap::new();
+        let (entity, _) = build_object_entity(
+            &object,
+            &ctx,
+            &dir,
+            0,
+            1024 * 1024,
+            None,
+            &mut lit,
+            &mut counts,
+        )
+        .unwrap();
+        let entity = entity.unwrap();
+        // Literal (100,0,0) + local translate (1,0,0); local 90° Z is orientation-only.
+        assert!((entity["models"][0]["pose"]["position"]["x"].as_f64().unwrap() - 101.0).abs() < 1e-6);
+        assert!(entity["models"][0]["pose"]["position"]["y"].as_f64().unwrap().abs() < 1e-6);
+        let qz = entity["models"][0]["pose"]["orientation"]["z"].as_f64().unwrap();
+        assert!((qz - (std::f64::consts::FRAC_PI_4).sin()).abs() < 1e-6);
+        assert_eq!(entity["frame_id"], "world");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- Pass 3: camera + line fixes ---
+
+    fn ctx_with_pose(name: &str) -> eql::Context {
+        let component = Arc::new(eql::Component::new(
+            name.into(),
+            impeller2::types::ComponentId::new(name),
+            impeller2::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
+        ));
+        eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000))
+    }
+
+    #[test]
+    fn camera_offset_parses_translate_world() {
+        let ctx = ctx_with_pose("lander.world_pos");
+        let expr = ctx
+            .parse_str("lander.world_pos.translate_world(10.0, 10.0, 4.0)")
+            .unwrap();
+        let offset = camera_offset_from_pos(&expr).expect("offset");
+        assert_eq!(offset, [10.0, 10.0, 4.0]);
+        let (distance, phi, theta) = camera_orbit_from_offset(Some(offset));
+        assert!((distance - 216.0f64.sqrt()).abs() < 1e-9);
+        assert!(phi > 0.0 && theta > 0.0);
+    }
+
+    #[test]
+    fn camera_offset_parses_chained_axis_translate() {
+        let ctx = ctx_with_pose("bdx.world_pos");
+        let expr = ctx
+            .parse_str("bdx.world_pos.rotate_z(-90).translate_y(-2.0)")
+            .unwrap();
+        let offset = camera_offset_from_pos(&expr).expect("offset");
+        assert_eq!(offset, [0.0, -2.0, 0.0]);
+    }
+
+    #[test]
+    fn camera_offset_literal_tuple_still_works() {
+        let ctx = ctx_with_pose("drone.world_pos");
+        let expr = ctx
+            .parse_str("drone.world_pos + (0,0,0,0, 2,2,2)")
+            .unwrap();
+        assert_eq!(camera_offset_from_pos(&expr), Some([2.0, 2.0, 2.0]));
+    }
+
+    #[test]
+    fn line_entity_uses_pixel_thickness() {
+        let sample_size = 7 * 8;
+        let mut data = Vec::new();
+        let mut timestamps = Vec::new();
+        for i in 0..10 {
+            let row: Vec<u8> = [0.0, 0.0, 0.0, 1.0, i as f64, 0.0, 0.0]
+                .iter()
+                .flat_map(|v: &f64| v.to_le_bytes())
+                .collect();
+            data.extend_from_slice(&row);
+            timestamps.push(Timestamp(i * 1000));
+        }
+        let comp = make_test_component("jet.world_pos", PrimType::F64, &[7]);
+        let cursors = vec![Some(ComponentCursor {
+            timestamps: &timestamps,
+            data: &data,
+            sample_size,
+        })];
+        let line = Line3d {
+            eql: "jet.world_pos".into(),
+            line_width: 3.0,
+            color: None,
+            future_color: None,
+            perspective: false,
+            frame: None,
+            node_id: Default::default(),
+        };
+        let ctx = ctx_with_pose("jet.world_pos");
+        let comps = vec![comp];
+        let entity = build_line_entity(&line, &ctx, &comps, &cursors, 0, false).expect("line entity");
+        let l = &entity["lines"][0];
+        assert_eq!(l["scale_invariant"], true, "pixel-width lines must be scale invariant");
+        assert_eq!(l["thickness"], 3.0);
+    }
+
+    #[test]
+    fn build_scene_emits_per_entity_messages() {
+        let dir = std::env::temp_dir().join(format!("elodin_mcap_scene_{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.glb"), b"aaaa").unwrap();
+        std::fs::write(dir.join("b.glb"), b"bbbb").unwrap();
+        let ctx = empty_eql_ctx();
+        let schematics = LoadedSchematics {
+            primary: Some(Schematic {
+                elems: vec![
+                    SchematicElem::Object3d(test_glb_object(
+                        "(0, 0, 0, 1, 0, 0, 0)",
+                        "a.glb",
+                        (0.0, 0.0, 0.0),
+                        (0.0, 0.0, 0.0),
+                    )),
+                    SchematicElem::Object3d(test_glb_object(
+                        "(0, 0, 0, 1, 5, 0, 0)",
+                        "b.glb",
+                        (0.0, 0.0, 0.0),
+                        (0.0, 0.0, 0.0),
+                    )),
+                ],
+                theme: None,
+                timeline: None,
+                frame: None,
+                origin: None,
+                skybox: None,
+                telemetry_mode: false,
+            }),
+            windows: vec![],
+            raw: Vec::new(),
+        };
+        let scene = build_scene(&schematics, &ctx, &dir, 0, &[], &[], 1024 * 1024, None, false).unwrap();
+        assert_eq!(scene.messages.len(), 2);
+        // Each entity gets its own topic (latest-per-topic backfill safety).
+        assert_eq!(scene.messages[0].0, "/scene/literal-1-model");
+        assert_eq!(scene.messages[1].0, "/scene/literal-2-model");
+        for (_, msg) in &scene.messages {
+            let v: Value = serde_json::from_slice(msg).unwrap();
+            assert_eq!(v["entities"].as_array().unwrap().len(), 1);
+            assert!(!v["entities"][0]["models"][0]["data"].as_str().unwrap().is_empty());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scene_topic_sanitizes_ids() {
+        assert_eq!(scene_topic("bdx-model"), "/scene/bdx-model");
+        assert_eq!(scene_topic("DPS thrust"), "/scene/DPS-thrust");
+    }
+
+    #[test]
+    fn geo_anchors_equator_prime_meridian() {
+        let anchors = geo_frame_anchors(&impeller2_wkt::GeoOriginConfig {
+            latitude: 0.0,
+            longitude: 0.0,
+            altitude: 0.0,
+        });
+        // Origin on the equator at lon 0: ECEF (a, 0, 0).
+        assert!((anchors.origin_ecef[0] - 6_378_137.0).abs() < 1.0);
+        assert!(anchors.origin_ecef[1].abs() < 1e-6);
+        assert!(anchors.origin_ecef[2].abs() < 1e-6);
+        // ENU: local up (0,0,1) maps to ECEF radial +X.
+        let up = quat_rotate_vec(anchors.enu_quat, [0.0, 0.0, 1.0]);
+        assert!((up[0] - 1.0).abs() < 1e-9, "up {up:?}");
+        // NED: local down (0,0,1) maps to ECEF -X.
+        let down = quat_rotate_vec(anchors.ned_quat, [0.0, 0.0, 1.0]);
+        assert!((down[0] + 1.0).abs() < 1e-9, "down {down:?}");
+        // ENU east (1,0,0) maps to ECEF +Y.
+        let east = quat_rotate_vec(anchors.enu_quat, [1.0, 0.0, 0.0]);
+        assert!((east[1] - 1.0).abs() < 1e-9, "east {east:?}");
     }
 }
