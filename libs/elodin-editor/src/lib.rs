@@ -453,7 +453,11 @@ impl Plugin for EditorPlugin {
         embedded_asset!(app, "./assets/diffuse.ktx2");
         embedded_asset!(app, "./assets/specular.ktx2");
         if cfg!(not(target_arch = "wasm32")) {
-            app.insert_resource(DirectionalLightShadowMap { size: 8192 });
+            // Bevy allocates this Depth32Float texture even before a shadow-casting
+            // directional light exists. At 8192 this costs 256 MiB per array layer
+            // (1 GiB for the default four sun cascades), which can exceed the graphics
+            // memory budget on lower-memory GPUs and invalidate the render device.
+            app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         }
         app.configure_sets(
             PreUpdate,
