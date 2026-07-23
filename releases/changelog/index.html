@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.17.3" selected>
-                        v0.17.3
+                    <option value="v0.18.0" selected>
+                        v0.18.0
                     </option>
                 </select>
             </span>
@@ -320,6 +320,20 @@
         <h3>On this page</h3>
         <nav id="TableOfContents">
             <ul>
+                
+                <li>
+                    <a href="/releases/changelog/#v0-18">v0.18</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-18-0">v0.18.0</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
                 
                 <li>
                     <a href="/releases/changelog/#v0-17">v0.17</a>
@@ -728,7 +742,42 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
-                   <h2 id="v0-17">v0.17</h2>
+                   <h2 id="v0-18">v0.18</h2>
+<h3 id="v0-18-0">v0.18.0</h3>
+<ul>
+<li><strong>(breaking:db)</strong> Require clients to consume DB responses; use a silent connection for write-only clients. (#670)</li>
+<li><strong>(breaking:db)</strong> Reject misaligned custom VTables; add padding or order fields by descending size. (#673)</li>
+<li><strong>(feat)</strong> Add a native <code>elodin.db</code> Python client API. (#730)</li>
+<li><strong>(feat)</strong> Add in-process Monte Carlo campaigns and lifecycle hooks. (#684, #698, #732)</li>
+<li><strong>(feat)</strong> Store and serve schematic assets in Elodin DB recordings. (#679, #718, #727)</li>
+<li><strong>(feat)</strong> Add preset and AI-generated skyboxes. (#647, #692)</li>
+<li><strong>(feat)</strong> Add NED and ECEF orientation support. (#680)</li>
+<li><strong>(feat)</strong> Add planetary-scale world-mesh terrain rendering. (#681)</li>
+<li><strong>(feat)</strong> Add <code>elodin-db compact</code> for archival. (#732)</li>
+<li><strong>(feat)</strong> Add RTSP video ingest with <code>rtsp-streamer</code>. (#715)</li>
+<li><strong>(feat)</strong> Add editor telemetry mode. (#737)</li>
+<li><strong>(feat)</strong> Add geo-position and orientation gauges. (#739)</li>
+<li><strong>(feat)</strong> Add covariance-driven ellipsoid visualization. (#744)</li>
+<li><strong>(feat)</strong> Add per-segment colors to <code>line_3d</code> trails. (#706)</li>
+<li><strong>(feat)</strong> Add GPU thruster effects, scene lighting, and viewport bloom. (#684, #689, #745)</li>
+<li><strong>(feat)</strong> Add Apollo lander and Falcon 9 examples. (#684, #745)</li>
+<li><strong>(feat:aleph)</strong> Deploy the Elodin CLI, simulations, and DB assets on Aleph. (#709)</li>
+<li><strong>(fix)</strong> Prevent UI input from leaking into viewport controls. (#637)</li>
+<li><strong>(fix)</strong> Restore graph creation and labels for saved databases. (#675)</li>
+<li><strong>(fix)</strong> Fix vector arrows and <code>line_3d</code> at planetary scale. (#696, #710, #741)</li>
+<li><strong>(fix)</strong> Fix relative geo rotation in the editor. (#726)</li>
+<li><strong>(fix)</strong> Fix DB-backed skybox and asset mirroring. (#700, #718, #734)</li>
+<li><strong>(fix)</strong> Fix manual editor-to-DB connections. (#723)</li>
+<li><strong>(fix)</strong> Report formula execution errors only once. (#685)</li>
+<li><strong>(fix)</strong> Fix timer-wheel freezes and live telemetry jitter. (#742)</li>
+<li><strong>(fix)</strong> Fix editor startup on Ubuntu 22.04 and NVIDIA Quadro. (#697)</li>
+<li><strong>(perf)</strong> Improve real-time simulation and editor playback under load. (#711, #740)</li>
+<li><strong>(chore)</strong> Upgrade to Bevy 0.19. (#743)</li>
+<li><strong>(chore)</strong> Replace <code>bbq2</code> with vendored <code>bbqueue</code>. (#610)</li>
+<li><strong>(chore)</strong> Add Windows cross-build support and Linux/WSL guidance. (#667, #683, #717)</li>
+<li><strong>(test)</strong> Add release QA plans for the editor, DB, and examples. (#733, #743)</li>
+</ul>
+<h2 id="v0-17">v0.17</h2>
 <h3 id="v0-17-3">v0.17.3</h3>
 <ul>
 <li><strong>(feat)</strong> Add sensor camera recording export to <code>elodin-db export</code>. (#648)</li>
