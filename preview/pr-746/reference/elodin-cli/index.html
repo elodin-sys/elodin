@@ -1673,7 +1673,7 @@ and <code>drift_resets</code>, with worst-run callouts in the campaign summary.<
 <p><code>--all-assets</code> — MCAP-only: attach every file under <code>{db}/assets/</code> instead of only schematic-referenced assets.</p>
 </li>
 <li>
-<p><code>--epoch-offset-us &lt;i64&gt;</code> — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP <code>log_time</code>/<code>publish_time</code>. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes <code>t=0</code> and records the shift in metadata key <code>elodin.time_offset_us</code>.</p>
+<p><code>--epoch-offset-us &lt;i64&gt;</code> — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP <code>log_time</code>/<code>publish_time</code>. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes <code>t=0</code> and records the shift in metadata key <code>elodin.time_offset_us</code>. The same auto-rebase runs if a requested offset would leave any sample pre-epoch (MCAP <code>log_time</code> is unsigned and cannot store absolute 1969-era times) — so <code>--epoch-offset-us 0</code> on Apollo-style data still preserves playback ordering rather than collapsing every sample to <code>t=0</code>.</p>
 </li>
 <li>
 <p><code>--max-embed-mb &lt;u64&gt;</code> — MCAP-only: maximum GLB size (MiB) to base64-embed inside <code>/scene</code> <code>SceneUpdate</code> messages (default <code>32</code>). Larger GLBs are still attached to the MCAP but their model primitive is omitted entirely (no empty-<code>data</code> model). The viewport follow-entity's mesh is always embedded regardless of this limit.</p>
