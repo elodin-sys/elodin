@@ -245,7 +245,8 @@ pub struct LoadSchematicParams<'w, 's> {
     last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
     #[cfg(feature = "big_space")]
     big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
-    monitor_root: Single<'w, 's, Entity, With<MonitorsRoot>>,
+    // Optional: missing/duplicate root must not invalidate schematic load.
+    monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -1234,16 +1235,16 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| monitor.component_name.clone());
-                let entity = self
-                    .commands
-                    .spawn((
-                        super::monitor::MonitorData {
-                            component_name: monitor.component_name.clone(),
-                        },
-                        Name::new(label.clone()),
-                        ChildOf(*self.monitor_root),
-                    ))
-                    .id();
+                let mut entity = self.commands.spawn((
+                    super::monitor::MonitorData {
+                        component_name: monitor.component_name.clone(),
+                    },
+                    Name::new(label.clone()),
+                ));
+                if let Some(root) = self.monitor_root.as_ref() {
+                    entity.insert(ChildOf(**root));
+                }
+                let entity = entity.id();
                 let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }

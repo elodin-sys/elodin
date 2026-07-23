@@ -628,7 +628,7 @@ fn sink_inner(
                     &mut world_sink.metadata_reg,
                     &mut world_sink.commands,
                     &path,
-                    *world_sink.db_components_root,
+                    world_sink.db_components_root.as_ref().map(|r| **r),
                 );
                 world_sink.path_reg.0.insert(metadata.component_id, path);
                 world_sink
@@ -644,7 +644,7 @@ fn sink_inner(
                         &mut world_sink.metadata_reg,
                         &mut world_sink.commands,
                         &path,
-                        *world_sink.db_components_root,
+                        world_sink.db_components_root.as_ref().map(|r| **r),
                     );
                     world_sink.path_reg.0.insert(metadata.component_id, path);
                     world_sink
@@ -926,7 +926,8 @@ pub struct WorldSink<'w, 's> {
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
     db_config: ResMut<'w, DbConfig>,
-    db_components_root: Single<'w, 's, Entity, With<DbComponentsRoot>>,
+    // Optional: missing/duplicate root must not invalidate WorldSink.
+    db_components_root: Option<Single<'w, 's, Entity, With<DbComponentsRoot>>>,
 }
 
 #[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
@@ -970,12 +971,15 @@ fn try_insert_entity<'a, 'w, 's>(
 /// BigSpaceRoot). Call this from metadata handlers so leaves are not orphaned:
 /// metadata often creates the leaf before `apply_value` runs, which would make
 /// `newly_created == false` in a value-only path loop.
+///
+/// When `db_components_root` is `None`, segments are still created but the
+/// top-level entity is left unparented.
 fn ensure_component_path_hierarchy(
     entity_map: &mut EntityMap,
     metadata_reg: &mut ComponentMetadataRegistry,
     commands: &mut Commands,
     path: &ComponentPath,
-    db_components_root: Entity,
+    db_components_root: Option<Entity>,
 ) {
     let mut last_entity: Option<Entity> = None;
     for part in path.path.iter() {
@@ -987,8 +991,8 @@ fn ensure_component_path_hierarchy(
         if newly_created {
             if let Some(parent) = last_entity {
                 e.insert(ChildOf(parent));
-            } else {
-                e.insert(ChildOf(db_components_root));
+            } else if let Some(root) = db_components_root {
+                e.insert(ChildOf(root));
             }
         }
         last_entity = Some(e.id());
@@ -1012,7 +1016,7 @@ impl Decomponentize for WorldSink<'_, '_> {
             &mut self.metadata_reg,
             &mut self.commands,
             &path,
-            *self.db_components_root,
+            self.db_components_root.as_ref().map(|r| **r),
         );
 
         // ComponentValue and adapter writes (WorldPos, etc.) are handled
@@ -1844,7 +1848,7 @@ mod db_components_hierarchy_tests {
                         &mut metadata_reg,
                         &mut commands,
                         &path,
-                        root,
+                        Some(root),
                     );
                 },
             )
@@ -1877,7 +1881,7 @@ mod db_components_hierarchy_tests {
                         &mut metadata_reg,
                         &mut commands,
                         &path,
-                        root,
+                        Some(root),
                     );
                 },
             )
@@ -1927,7 +1931,7 @@ mod db_components_hierarchy_tests {
                         &mut metadata_reg,
                         &mut commands,
                         &path,
-                        root,
+                        Some(root),
                     );
                 },
             )
@@ -1950,7 +1954,7 @@ mod db_components_hierarchy_tests {
                         &mut metadata_reg,
                         &mut commands,
                         &path,
-                        root,
+                        Some(root),
                     );
                 },
             )
@@ -2002,7 +2006,7 @@ mod db_components_hierarchy_tests {
                         &mut metadata_reg,
                         &mut commands,
                         &path,
-                        root,
+                        Some(root),
                     );
                 },
             )
