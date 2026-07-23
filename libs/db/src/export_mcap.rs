@@ -405,8 +405,24 @@ struct ExportMsgLog {
     kind: MsgLogKind,
 }
 
+/// True when `payload` looks like H.264 Annex-B: a 3- or 4-byte start code
+/// followed by a plausible NAL header (forbidden_zero_bit clear, type 1–23).
+/// Rejects bare `00 00 01` prefixes that aren't actually video.
 fn is_annex_b(payload: &[u8]) -> bool {
-    payload.starts_with(&[0, 0, 0, 1]) || payload.starts_with(&[0, 0, 1])
+    let nal = if payload.starts_with(&[0, 0, 0, 1]) {
+        payload.get(4)
+    } else if payload.starts_with(&[0, 0, 1]) {
+        payload.get(3)
+    } else {
+        return false;
+    };
+    match nal {
+        Some(&b) => {
+            let nal_type = b & 0x1f;
+            (b & 0x80) == 0 && (1..=23).contains(&nal_type)
+        }
+        None => false,
+    }
 }
 
 fn classify_msg_log(
@@ -1145,7 +1161,9 @@ fn build_scene(
                 }
             }
             SchematicElem::VectorArrow(arrow) => {
-                if let Some((frame, primitive)) = build_arrow(arrow, ctx) {
+                if let Some((frame, primitive)) =
+                    build_arrow(arrow, ctx, components, component_cursors)
+                {
                     arrow_groups.entry(frame).or_default().push(primitive);
                 }
             }
@@ -1353,13 +1371,73 @@ fn build_object_entity(
     Ok((Some(Value::Object(entity)), referenced))
 }
 
-/// Body-frame constant-vector arrows attach to the origin entity's TF frame.
-fn build_arrow(arrow: &VectorArrow3d, ctx: &eql::Context) -> Option<(String, Value)> {
-    if !arrow.body_frame {
+/// Shaft length matching the editor: `|v| * scale`, or just `scale` when normalize.
+fn arrow_shaft_length(len: f64, scale: f64, normalize: bool) -> f64 {
+    if normalize { scale } else { len * scale }
+}
+
+fn arrow_primitive(dir: [f64; 3], total: f64, color: &Color, pos: [f64; 3]) -> Value {
+    let quat = quat_from_x_axis(dir);
+    json!({
+        "pose": {
+            "position": {"x": pos[0], "y": pos[1], "z": pos[2]},
+            "orientation": {"x": quat[0], "y": quat[1], "z": quat[2], "w": quat[3]},
+        },
+        "shaft_length": total * 0.8,
+        "shaft_diameter": (total * 0.02).max(0.01),
+        "head_length": total * 0.2,
+        "head_diameter": (total * 0.06).max(0.02),
+        "color": color_json(color),
+    })
+}
+
+/// World-frame origin position for a static arrow: literal xyz/pose, or the
+/// first sample of `<entity>.world_pos`.
+fn static_arrow_origin_pos(
+    origin: Option<&str>,
+    ctx: &eql::Context,
+    components: &[ExportComponent],
+    component_cursors: &[Option<ComponentCursor>],
+) -> Option<[f64; 3]> {
+    let Some(origin) = origin else {
+        return Some([0.0, 0.0, 0.0]);
+    };
+    if let Some(v) = parse_literal_tuple(origin) {
+        return if v.len() >= 7 {
+            Some([v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]])
+        } else if v.len() >= 3 {
+            Some([v[0], v[1], v[2]])
+        } else {
+            None
+        };
+    }
+    let entity = entity_for_eql(origin, ctx)?;
+    let pose_name = format!("{entity}.world_pos");
+    let (comp_idx, comp) = components
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.name == pose_name)?;
+    let cursor = component_cursors[comp_idx].as_ref()?;
+    if cursor.timestamps.is_empty() {
         return None;
     }
-    let origin = arrow.origin.as_deref()?;
-    let frame = entity_for_eql(origin, ctx)?;
+    let buf = &cursor.data[..cursor.sample_size];
+    let prim = comp.component.schema.prim_type;
+    Some([
+        read_f64(prim, buf, 4),
+        read_f64(prim, buf, 5),
+        read_f64(prim, buf, 6),
+    ])
+}
+
+/// Literal-vector arrows for the static scene. Body-frame arrows attach to the
+/// origin entity's TF; world-frame arrows go on `world` with an absolute origin.
+fn build_arrow(
+    arrow: &VectorArrow3d,
+    ctx: &eql::Context,
+    components: &[ExportComponent],
+    component_cursors: &[Option<ComponentCursor>],
+) -> Option<(String, Value)> {
     let vec = parse_literal_tuple(&arrow.vector)?;
     if vec.len() != 3 {
         return None;
@@ -1369,20 +1447,22 @@ fn build_arrow(arrow: &VectorArrow3d, ctx: &eql::Context) -> Option<(String, Val
         return None;
     }
     let dir = [vec[0] / len, vec[1] / len, vec[2] / len];
-    let quat = quat_from_x_axis(dir);
-    let total = len * arrow.scale;
-    let primitive = json!({
-        "pose": {
-            "position": {"x": 0.0, "y": 0.0, "z": 0.0},
-            "orientation": {"x": quat[0], "y": quat[1], "z": quat[2], "w": quat[3]},
-        },
-        "shaft_length": total * 0.8,
-        "shaft_diameter": total * 0.02f64.max(0.01),
-        "head_length": total * 0.2,
-        "head_diameter": total * 0.06f64.max(0.02),
-        "color": color_json(&arrow.color),
-    });
-    Some((frame, primitive))
+    let total = arrow_shaft_length(len, arrow.scale, arrow.normalize);
+    if arrow.body_frame {
+        let origin = arrow.origin.as_deref()?;
+        let frame = entity_for_eql(origin, ctx)?;
+        Some((
+            frame,
+            arrow_primitive(dir, total, &arrow.color, [0.0, 0.0, 0.0]),
+        ))
+    } else {
+        let pos =
+            static_arrow_origin_pos(arrow.origin.as_deref(), ctx, components, component_cursors)?;
+        Some((
+            "world".to_string(),
+            arrow_primitive(dir, total, &arrow.color, pos),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1915,6 +1995,24 @@ fn vector_element_indices(expr: &eql::Expr, comp_name: &str, flat_count: usize) 
     [flat_count - 3, flat_count - 2, flat_count - 1]
 }
 
+/// Last pose-sample translation at or before `ts_us` (FOHold).
+fn pose_translation_at(cursor: &ComponentCursor, prim: PrimType, ts_us: i64) -> Option<[f64; 3]> {
+    if cursor.timestamps.is_empty() {
+        return None;
+    }
+    let idx = match cursor.timestamps.binary_search_by_key(&ts_us, |t| t.0) {
+        Ok(i) => i,
+        Err(0) => 0,
+        Err(i) => i - 1,
+    };
+    let buf = &cursor.data[idx * cursor.sample_size..(idx + 1) * cursor.sample_size];
+    Some([
+        read_f64(prim, buf, 4),
+        read_f64(prim, buf, 5),
+        read_f64(prim, buf, 6),
+    ])
+}
+
 /// Build precomputed dynamic arrow SceneUpdate messages. These are vector_arrows
 /// whose `vector` EQL references a data component rather than a literal tuple.
 /// Returns one `(topic, sorted (timestamp_us, payload) stream)` per arrow —
@@ -1978,6 +2076,10 @@ fn build_dynamic_arrows(
         }
         let [ix, iy, iz] = vector_element_indices(&vec_expr, &vec_comp_name, flat_count);
 
+        // Body-frame arrows ride the origin entity's TF (Foxglove applies
+        // attitude). World-frame arrows must live on `world` with an absolute
+        // origin — attaching them to the entity TF would wrongly rotate a
+        // world vector by the body's attitude.
         let frame = if arrow.body_frame {
             arrow
                 .origin
@@ -1985,33 +2087,53 @@ fn build_dynamic_arrows(
                 .and_then(|o| entity_for_eql(o, ctx))
                 .unwrap_or_else(|| vec_entity.clone())
         } else {
-            arrow
-                .origin
-                .as_deref()
-                .and_then(parse_literal_tuple)
-                .map(|_| "world".to_string())
-                .or_else(|| arrow.origin.as_deref().and_then(|o| entity_for_eql(o, ctx)))
-                .unwrap_or_else(|| "world".to_string())
+            "world".to_string()
         };
 
-        // Literal origins may be a 3-tuple position or a 7-tuple pose
-        // `(qx,qy,qz,qw, x,y,z)` — take the trailing xyz in either case.
-        let origin_pos = if !arrow.body_frame {
-            arrow
-                .origin
-                .as_deref()
-                .and_then(parse_literal_tuple)
-                .and_then(|v| {
-                    if v.len() >= 7 {
-                        Some([v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]])
-                    } else if v.len() >= 3 {
-                        Some([v[0], v[1], v[2]])
-                    } else {
-                        None
-                    }
-                })
+        // World-frame origin: literal xyz/pose, or sample `<entity>.world_pos`
+        // at each arrow timestamp. Body-frame origins stay at the entity root.
+        enum DynamicOrigin<'a> {
+            Fixed([f64; 3]),
+            Pose {
+                cursor: &'a ComponentCursor<'a>,
+                prim: PrimType,
+            },
+        }
+        let origin = if arrow.body_frame {
+            DynamicOrigin::Fixed([0.0, 0.0, 0.0])
+        } else if let Some(v) = arrow.origin.as_deref().and_then(parse_literal_tuple) {
+            let pos = if v.len() >= 7 {
+                [v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]]
+            } else if v.len() >= 3 {
+                [v[0], v[1], v[2]]
+            } else {
+                continue;
+            };
+            DynamicOrigin::Fixed(pos)
+        } else if let Some(entity) = arrow
+            .origin
+            .as_deref()
+            .and_then(|o| entity_for_eql(o, ctx))
+            .or_else(|| Some(vec_entity.clone()))
+        {
+            let pose_name = format!("{entity}.world_pos");
+            match components
+                .iter()
+                .enumerate()
+                .find(|(_, c)| c.name == pose_name)
+                .and_then(|(i, c)| {
+                    component_cursors[i]
+                        .as_ref()
+                        .map(|cur| (cur, c.component.schema.prim_type))
+                }) {
+                Some((pose_cursor, prim)) => DynamicOrigin::Pose {
+                    cursor: pose_cursor,
+                    prim,
+                },
+                None => DynamicOrigin::Fixed([0.0, 0.0, 0.0]),
+            }
         } else {
-            None
+            DynamicOrigin::Fixed([0.0, 0.0, 0.0])
         };
 
         let arrow_id = arrow
@@ -2039,7 +2161,6 @@ fn build_dynamic_arrows(
             {
                 continue;
             }
-            last_emitted_us = Some(ts.0);
             let ts_ns = us_to_ns(*ts, epoch_offset_us);
             let buf = &cursor.data[i * cursor.sample_size..(i + 1) * cursor.sample_size];
             let vx = read_f64(prim, buf, ix);
@@ -2047,32 +2168,29 @@ fn build_dynamic_arrows(
             let vz = read_f64(prim, buf, iz);
             let len = (vx * vx + vy * vy + vz * vz).sqrt();
             if len < 1e-12 {
+                // Don't advance the throttle — a zero sample shouldn't delay
+                // the next non-zero emit.
                 continue;
             }
             let dir = [vx / len, vy / len, vz / len];
-            let quat = quat_from_x_axis(dir);
-            let total = len * arrow.scale;
-            let pos = origin_pos.unwrap_or([0.0, 0.0, 0.0]);
-            let primitive = json!({
-                "pose": {
-                    "position": {"x": pos[0], "y": pos[1], "z": pos[2]},
-                    "orientation": {"x": quat[0], "y": quat[1], "z": quat[2], "w": quat[3]},
-                },
-                "shaft_length": total * 0.8,
-                "shaft_diameter": (total * 0.02f64).max(0.01),
-                "head_length": total * 0.2,
-                "head_diameter": (total * 0.06f64).max(0.02),
-                "color": color_json(&arrow.color),
-            });
+            let total = arrow_shaft_length(len, arrow.scale, arrow.normalize);
+            let pos = match &origin {
+                DynamicOrigin::Fixed(p) => *p,
+                DynamicOrigin::Pose {
+                    cursor: pose_cursor,
+                    prim: pose_prim,
+                } => pose_translation_at(pose_cursor, *pose_prim, ts.0).unwrap_or([0.0, 0.0, 0.0]),
+            };
             let entity = json!({
                 "timestamp": timestamp_json(ts_ns),
                 "frame_id": frame,
                 "id": arrow_id,
                 "lifetime": {"sec": 0, "nsec": 0},
                 "frame_locked": true,
-                "arrows": [primitive],
+                "arrows": [arrow_primitive(dir, total, &arrow.color, pos)],
             });
             entries.push((ts.0, scene_update_message(entity)));
+            last_emitted_us = Some(ts.0);
         }
         if !entries.is_empty() {
             entries.sort_by_key(|(ts, _)| *ts);
@@ -3171,6 +3289,26 @@ mod tests {
     }
 
     #[test]
+    fn is_annex_b_requires_plausible_nal() {
+        // 4-byte start code + IDR NAL (type 5).
+        assert!(is_annex_b(&[0, 0, 0, 1, 0x65, 0x88]));
+        // 3-byte start code + non-IDR slice (type 1).
+        assert!(is_annex_b(&[0, 0, 1, 0x01, 0x00]));
+        // Bare prefix without a NAL byte.
+        assert!(!is_annex_b(&[0, 0, 1]));
+        // forbidden_zero_bit set — not a valid NAL header.
+        assert!(!is_annex_b(&[0, 0, 0, 1, 0x85]));
+        // Random telemetry that happens to start with 00 00 01.
+        assert!(!is_annex_b(&[0, 0, 1, 0xff, 0xff]));
+    }
+
+    #[test]
+    fn arrow_shaft_length_respects_normalize() {
+        assert!((arrow_shaft_length(4.0, 2.0, false) - 8.0).abs() < 1e-12);
+        assert!((arrow_shaft_length(4.0, 2.0, true) - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn scene_update_message_is_one_entity() {
         let msg = scene_update_message(json!({"id": "a"}));
         let v: Value = serde_json::from_slice(&msg).unwrap();
@@ -3479,6 +3617,7 @@ mod tests {
                 frame: None,
                 origin: None,
                 skybox: None,
+                environment: None,
                 telemetry_mode: false,
             }),
             windows: vec![],

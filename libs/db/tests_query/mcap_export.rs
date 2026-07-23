@@ -309,9 +309,13 @@ fn mcap_export_roundtrip() {
     }
 
     // The dynamic arrow reads the schematic's [3],[4],[5] elements (linear
-    // velocity (2,0,0)), not elements 0..3 (angular, (9,9,9)).
+    // velocity (2,0,0)), not elements 0..3 (angular, (9,9,9)). World-frame
+    // arrows use frame_id=world with absolute origin so body attitude cannot
+    // rotate a world vector.
     let arrow_entity = &arrow_first.unwrap()["entities"][0];
+    assert_eq!(arrow_entity["frame_id"], "world");
     let arrow = &arrow_entity["arrows"][0];
+    assert_eq!(arrow["pose"]["position"]["z"], 2.0);
     let shaft = arrow["shaft_length"].as_f64().unwrap();
     assert!(
         (shaft - 2.0 * 0.8).abs() < 1e-9,
