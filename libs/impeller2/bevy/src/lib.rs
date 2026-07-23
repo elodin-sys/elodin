@@ -973,7 +973,7 @@ fn try_insert_entity<'a, 'w, 's>(
 /// `newly_created == false` in a value-only path loop.
 ///
 /// When `db_components_root` is `None`, segments are still created but the
-/// top-level entity is left unparented.
+/// top-level entity is left parentless.
 fn ensure_component_path_hierarchy(
     entity_map: &mut EntityMap,
     metadata_reg: &mut ComponentMetadataRegistry,

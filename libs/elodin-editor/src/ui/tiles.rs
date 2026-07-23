@@ -130,7 +130,7 @@ pub(crate) fn plugin(app: &mut App) {
         .add_message::<WindowRelayout>()
         .add_systems(Startup, setup_primary_window_state)
         .add_systems(Update, sync_editor_cam_zoom_limits);
-    // Must run after the BigSpace root exists; otherwise grids stay un-parented
+    // Must run after the BigSpace root exists; otherwise grids stay parentless
     // and shimmer from float-origin precision loss.
     #[cfg(feature = "big_space")]
     app.add_systems(
@@ -144,7 +144,7 @@ pub(crate) fn plugin(app: &mut App) {
 fn spawn_viewport_grids(
     mut commands: Commands,
     // Optional so headless/test apps without the spatial plugin don't panic;
-    // grids simply stay un-parented there. In the editor the root always exists
+    // grids simply stay parentless there. In the editor the root always exists
     // because this runs after `setup_floating_origin`.
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
