@@ -219,10 +219,7 @@
           system = alephSystem;
           modules =
             flashMinimalModules
-            ++ [
-              ./modules/nvme-image.nix
-              {aleph.nvmeImage.enable = true;}
-            ];
+            ++ [{aleph.nvmeImage.enable = true;}];
         };
         flashToolSystem = nixpkgs.lib.nixosSystem {
           system = alephSystem;
@@ -319,7 +316,6 @@
                       -u '//device[@type="nvme"]/partition[@name="APP"]/filename' -v 'APPFILE' \
                       -u '//device[@type="nvme"]/partition[@name="APP"]/allocation_attribute' -v '0x8' \
                       -u '//device[@type="nvme"]/partition[@name="APP"]/unique_guid' -v '${rootPartitionUUID}' \
-                      -u '//device[@type="nvme"]/@num_sectors' -v 500000000 \
                       ${pkgs.nvidia-jetpack.bspSrc}/bootloader/generic/cfg/flash_t234_qspi_nvme.xml \
                       >$out
                   '';
