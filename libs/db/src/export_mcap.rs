@@ -1723,7 +1723,9 @@ impl<'a> LayoutBuilder<'a> {
             | Panel::Inspector
             | Panel::Hierarchy
             | Panel::SchematicTree(_)
-            | Panel::DataOverview(_) => None,
+            | Panel::DataOverview(_)
+            | Panel::GeoPositionGauge(_)
+            | Panel::OrientationGauge(_) => None,
         }
     }
 
