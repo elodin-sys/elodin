@@ -491,6 +491,85 @@ fn mcap_export_epoch_offset_auto() {
 }
 
 #[test]
+fn mcap_export_epoch_offset_zero_still_rebases_pre1970() {
+    // Explicit --epoch-offset-us 0 must not clamp every pre-1970 sample to
+    // log_time 0 (which destroys playback ordering for Apollo-style DBs).
+    let db_path = tmp_dir("db_offset_zero_pre1970");
+    let out = tmp_dir("out_offset_zero_pre1970");
+    let db = DB::create(db_path.clone()).expect("DB::create");
+
+    let specs: &[(&str, PrimType, &[usize], Option<&str>)] =
+        &[("sat.alt", PrimType::F64, &[], None)];
+
+    db.with_state_mut(|s| {
+        for (name, prim, dim, element_names) in specs {
+            let cid = ComponentId::new(name);
+            let mut metadata = HashMap::new();
+            if let Some(en) = element_names {
+                metadata.insert("element_names".to_string(), en.to_string());
+            }
+            s.set_component_metadata(
+                ComponentMetadata {
+                    component_id: cid,
+                    name: name.to_string(),
+                    metadata,
+                },
+                &db_path,
+            )
+            .expect("set_component_metadata");
+            s.insert_component(cid, ComponentSchema::new(*prim, dim), &db_path)
+                .expect("insert_component");
+        }
+    });
+
+    for step in 0..5 {
+        let ts = Timestamp(-100_000 + step as i64 * 10_000);
+        db.with_state(|s| {
+            let val = (step as f64).to_le_bytes().to_vec();
+            let c = s
+                .get_component(ComponentId::new("sat.alt"))
+                .expect("component");
+            c.time_series.push_buf(ts, &val).expect("push_buf");
+        });
+    }
+    db.flush_all().expect("flush_all");
+    drop(db);
+
+    run(
+        db_path.clone(),
+        out.clone(),
+        McapExportOptions {
+            epoch_offset_us: Some(0),
+            ..Default::default()
+        },
+    )
+    .expect("mcap export");
+
+    let db_name = db_path.file_name().unwrap().to_str().unwrap();
+    let mapped = std::fs::read(out.join(format!("{db_name}.mcap"))).expect("read mcap");
+
+    let mut log_times = Vec::new();
+    for message in mcap::MessageStream::new(&mapped).expect("stream") {
+        let message = message.expect("message");
+        if message.channel.topic == "/sat/alt" {
+            log_times.push(message.log_time);
+        }
+    }
+    assert_eq!(log_times.len(), 5);
+    assert_eq!(log_times[0], 0, "earliest should rebase to 0");
+    for window in log_times.windows(2) {
+        assert!(
+            window[1] > window[0],
+            "log_time must stay strictly increasing, got {log_times:?}"
+        );
+    }
+    assert_eq!(log_times[1] - log_times[0], 10_000 * 1000);
+
+    let _ = std::fs::remove_dir_all(&db_path);
+    let _ = std::fs::remove_dir_all(&out);
+}
+
+#[test]
 fn mcap_export_epoch_offset_manual() {
     let db_path = tmp_dir("db_offset_manual");
     let out = tmp_dir("out_offset_manual");

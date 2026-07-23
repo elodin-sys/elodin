@@ -882,7 +882,7 @@ The export runs in parallel across components and is dramatically faster than th
 
 * `--all-assets` — MCAP-only: attach every file under `{db}/assets/` instead of only schematic-referenced assets.
 
-* `--epoch-offset-us <i64>` — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP `log_time`/`publish_time`. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes `t=0` and records the shift in metadata key `elodin.time_offset_us`.
+* `--epoch-offset-us <i64>` — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP `log_time`/`publish_time`. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes `t=0` and records the shift in metadata key `elodin.time_offset_us`. The same auto-rebase runs if a requested offset would leave any sample pre-epoch (MCAP `log_time` is unsigned and cannot store absolute 1969-era times) — so `--epoch-offset-us 0` on Apollo-style data still preserves playback ordering rather than collapsing every sample to `t=0`.
 
 * `--max-embed-mb <u64>` — MCAP-only: maximum GLB size (MiB) to base64-embed inside `/scene` `SceneUpdate` messages (default `32`). Larger GLBs are still attached to the MCAP but their model primitive is omitted entirely (no empty-`data` model). The viewport follow-entity's mesh is always embedded regardless of this limit.
 

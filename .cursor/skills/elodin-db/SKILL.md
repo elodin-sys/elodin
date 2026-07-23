@@ -229,7 +229,8 @@ elodin-db export --format parquet --output ./out ./my-db
 # Foxglove-compatible MCAP + generated Foxglove layout JSON
 elodin-db export --format mcap --output ./out ./my-db
 
-# Pre-1970 epochs (e.g. Apollo 1969) auto-rebase; override with --epoch-offset-us
+# Pre-1970 epochs (e.g. Apollo 1969) auto-rebase to t=0 (also if --epoch-offset-us
+# would leave samples pre-epoch — MCAP log_time is unsigned)
 # Large GLBs (moon.glb) stay attached; model primitive omitted above --max-embed-mb (default 32)
 # Follow-entity mesh always embeds. Dynamic arrows go to /scene_dynamic.
 elodin-db export --format mcap --max-embed-mb 32 --output ./out ./apollo-db

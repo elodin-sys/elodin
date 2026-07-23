@@ -267,8 +267,15 @@ fn timestamp_json(ts_ns: u64) -> Value {
     json!({"sec": ts_ns / 1_000_000_000, "nsec": ts_ns % 1_000_000_000})
 }
 
+/// Convert a DB microsecond timestamp to MCAP nanoseconds after applying
+/// `offset_us`. MCAP `log_time` is unsigned, so negative results saturate to 0
+/// — callers must choose an offset that keeps the export range non-negative
+/// (see epoch-offset resolution in [`run`]).
 fn us_to_ns(ts: Timestamp, offset_us: i64) -> u64 {
-    (ts.0 + offset_us).max(0) as u64 * 1000
+    match ts.0.checked_add(offset_us) {
+        Some(us) if us >= 0 => (us as u64).saturating_mul(1000),
+        _ => 0,
+    }
 }
 
 /// FrameTransforms message for one pose sample (`[qx,qy,qz,qw, x,y,z]`).
@@ -2601,25 +2608,36 @@ pub fn run(
         .unwrap_or(earliest);
 
     // ---- epoch offset ---------------------------------------------------------
-    let epoch_offset_us: i64 = match options.epoch_offset_us {
-        Some(v) => {
-            if v != 0 {
-                println!("  Using manual epoch offset: {} µs", v);
-            }
-            v
-        }
-        None => {
-            if start_ts.0 < 0 {
-                let offset = -start_ts.0;
-                eprintln!(
-                    "Warning: earliest timestamp is {} µs (pre-1970); auto-rebasing by +{} µs so earliest becomes t=0",
-                    start_ts.0, offset
-                );
-                offset
+    // MCAP log_time is u64 ns since Unix epoch and cannot represent pre-1970
+    // absolute times. Prefer the caller's offset when it keeps the earliest
+    // sample >= 0; otherwise auto-rebase so relative ordering is preserved
+    // (critical for Apollo-style DBs when `--epoch-offset-us 0` would otherwise
+    // clamp every sample to log_time 0).
+    let requested_offset_us = options.epoch_offset_us.unwrap_or(0);
+    let epoch_offset_us = if start_ts
+        .0
+        .checked_add(requested_offset_us)
+        .is_none_or(|us| us < 0)
+    {
+        let offset = start_ts.0.saturating_neg();
+        eprintln!(
+            "Warning: earliest timestamp is {} µs (pre-1970); auto-rebasing by +{} µs so earliest becomes t=0{}",
+            start_ts.0,
+            offset,
+            if options.epoch_offset_us.is_some() {
+                format!(
+                    " (requested --epoch-offset-us {requested_offset_us} leaves pre-epoch times)"
+                )
             } else {
-                0
+                String::new()
             }
+        );
+        offset
+    } else {
+        if requested_offset_us != 0 {
+            println!("  Using manual epoch offset: {requested_offset_us} µs");
         }
+        requested_offset_us
     };
     let start_ns = us_to_ns(start_ts, epoch_offset_us);
 
@@ -3094,6 +3112,14 @@ mod tests {
     #[test]
     fn us_to_ns_negative_after_offset_clamps() {
         assert_eq!(us_to_ns(Timestamp(-2000), 500), 0);
+    }
+
+    #[test]
+    fn us_to_ns_pre1970_zero_offset_clamps_each_sample() {
+        // Documents the footgun: without auto-rebase, every pre-1970 sample
+        // collapses to 0. [`run`] must reject/override insufficient offsets.
+        assert_eq!(us_to_ns(Timestamp(-100_000), 0), 0);
+        assert_eq!(us_to_ns(Timestamp(-90_000), 0), 0);
     }
 
     // --- Gap 3: camera near/far derivation ---
