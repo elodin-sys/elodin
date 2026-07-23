@@ -361,6 +361,10 @@ impl Plugin for EditorPlugin {
                 Update,
                 plugins::kdl_document::reload_sticky_kdl_when_eql_ready.after(update_eql_context),
             )
+            .add_systems(
+                Update,
+                ui::gauges::compile_gauge_exprs.after(update_eql_context),
+            )
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
             .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()

@@ -15,7 +15,7 @@ The parser accepts these root nodes:
 - `theme`
 - `timeline`
 - `window`
-- Panel roots: `tabs`, `hsplit`, `vsplit`, `viewport`, `graph`, `component_monitor`, `action_pane`, `query_table`, `query_plot`, `inspector`, `hierarchy`, `schematic_tree`, `data_overview`, `dashboard`
+- Panel roots: `tabs`, `hsplit`, `vsplit`, `viewport`, `graph`, `component_monitor`, `geo_position_gauge`, `orientation_gauge`, `action_pane`, `query_table`, `query_plot`, `inspector`, `hierarchy`, `schematic_tree`, `data_overview`, `dashboard`
 - Scene roots: `object_3d`, `line_3d`, `vector_arrow`
 
 ## Coordinate Frame
@@ -49,6 +49,8 @@ coordinate frame="NED" lat=34.72 lon=-86.64 alt=180.0
 - `viewport`: camera panel (`fov`, `active`, `show_grid`, `show_arrows`, `show_view_cube`, `hdr`, `name`, `pos`, `look_at`, `frame`) and optional local child `vector_arrow` nodes.
 - `graph`: positional EQL string + optional `name`, `type` (`line|point|bar`), `lock`, `auto_y_range`, `y_min`, `y_max`, child `color` nodes.
 - `component_monitor`: requires `component_name`; optional `name`.
+- `geo_position_gauge`: positional `eql` (required; a 3-vector position or a 7-vector pose; named `eql=` also accepted); optional `name`, `source` (`ECEF`/`NED`/`ENU`; inherits from global `coordinate` if omitted, else `ENU`), `display` (`ECEF`/`NED`/`ENU`/`LLA`, default `NED`).
+- `orientation_gauge`: positional `eql` (required; a 4-vector `[x,y,z,w]` quaternion or a 7-vector pose; named `eql=` also accepted); optional `name`, `source` (`ECEF`/`NED`/`ENU`; inherits from global `coordinate` if omitted, else `ENU`), `display` (`ECEF`/`NED`/`ENU`, default `NED`), optional `reference x y z w` child (body→`source` quaternion the gimbal shows as neutral; identity when omitted).
 - `action_pane`: requires `name` and `lua`.
 - `query_table`: optional `name`, optional positional query string, optional `type` (`eql|sql`).
 - `query_plot`: requires `name` and `query`; optional `refresh_interval` (ms), `auto_refresh`, `color`, `type` (`eql|sql`), `mode` (`timeseries|xy`), `x_label`, `y_label`.

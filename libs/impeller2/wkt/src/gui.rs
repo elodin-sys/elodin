@@ -312,6 +312,8 @@ pub enum Panel {
     HSplit(Split),
     Graph(Graph),
     ComponentMonitor(ComponentMonitor),
+    GeoPositionGauge(GeoPositionGauge),
+    OrientationGauge(OrientationGauge),
     ActionPane(ActionPane),
     QueryTable(QueryTable),
     QueryPlot(QueryPlot),
@@ -335,6 +337,8 @@ impl Panel {
             Panel::ComponentMonitor(monitor) => {
                 monitor.name.as_deref().unwrap_or(&monitor.component_name)
             }
+            Panel::GeoPositionGauge(gauge) => gauge.name.as_deref().unwrap_or("Position Gauge"),
+            Panel::OrientationGauge(gauge) => gauge.name.as_deref().unwrap_or("Orientation Gauge"),
             Panel::ActionPane(action_pane) => action_pane.name.as_str(),
             Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
             Panel::QueryPlot(query_plot) => &query_plot.name,
@@ -377,6 +381,8 @@ impl Panel {
             Panel::Graph(graph) => Some(graph.node_id),
             Panel::QueryPlot(query_plot) => Some(query_plot.node_id),
             Panel::Viewport(v) => Some(v.node_id),
+            Panel::GeoPositionGauge(gauge) => Some(gauge.node_id),
+            Panel::OrientationGauge(gauge) => Some(gauge.node_id),
             _ => None,
         }
     }
@@ -1205,6 +1211,105 @@ pub struct ComponentMonitor {
     /// monitor, which can be a simple component_name.
     pub component_name: String,
     pub name: Option<String>,
+}
+
+/// A gauge for a geographic position: reads an EQL-bound position expressed
+/// in `source` and displays it, converted, in `display` (a spatial frame or
+/// LLA) as three labelled values.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct GeoPositionGauge {
+    /// EQL expression yielding a position (a 3-vector), or a pose whose tail 3
+    /// elements are the position (e.g. a `world_pos` 7-vector).
+    pub eql: String,
+    /// Coordinate frame the EQL result is expressed in.
+    ///
+    /// When `None`, inherits the schematic global `coordinate` frame (same as
+    /// viewport `frame`); if that is also unset, the editor falls back to ENU.
+    pub source: Option<bevy_geo_frames::GeoFrame>,
+    /// Coordinate system to display the position in (a spatial frame or LLA).
+    pub display: DisplayFrame,
+    pub name: Option<String>,
+    /// Ephemeral runtime id bound to the gauge entity (schematic tree
+    /// selection); not persisted in KDL. See [`crate::NodeId`].
+    #[serde(default)]
+    pub node_id: NodeId,
+}
+
+/// A gauge for an attitude: reads an EQL-bound quaternion (a bare `[x,y,z,w]`
+/// 4-vector, or the head of a `world_pos`-style 7-vector) expressed relative
+/// to `source` and renders it as a 3D gimbal against the `display` triad.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct OrientationGauge {
+    /// EQL expression yielding a quaternion (4-vector), or a pose whose head 4
+    /// elements are the quaternion (e.g. a `world_pos` 7-vector).
+    pub eql: String,
+    /// Coordinate frame the quaternion rotates from (body→`source`).
+    ///
+    /// When `None`, inherits the schematic global `coordinate` frame; if that
+    /// is also unset, the editor falls back to ENU.
+    pub source: Option<bevy_geo_frames::GeoFrame>,
+    /// Frame whose triad (axis labels / physical directions) the gimbal draws.
+    /// `None` defaults to NED. LLA is geodetic, not a rotation frame, so only
+    /// the Cartesian frames are valid here.
+    pub display: Option<bevy_geo_frames::GeoFrame>,
+    /// Attitude quaternion (`[x, y, z, w]`, body→`source`) shown as neutral:
+    /// the displayed attitude is `q · reference⁻¹`. `None` means identity
+    /// (raw component attitude).
+    #[serde(default)]
+    pub reference: Option<[f64; 4]>,
+    pub name: Option<String>,
+    /// Ephemeral runtime id bound to the gauge entity (schematic tree
+    /// selection); not persisted in KDL. See [`crate::NodeId`].
+    #[serde(default)]
+    pub node_id: NodeId,
+}
+
+/// Display coordinate choice for a [`GeoPositionGauge`]: the spatial
+/// [`bevy_geo_frames::GeoFrame`]s plus geodetic latitude/longitude/altitude.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DisplayFrame {
+    ECEF,
+    #[default]
+    NED,
+    ENU,
+    /// Geodetic latitude/longitude/altitude (deg, deg, m).
+    LLA,
+}
+
+impl DisplayFrame {
+    /// The matching [`bevy_geo_frames::GeoFrame`], or `None` for
+    /// [`DisplayFrame::LLA`] (which is not a Cartesian frame).
+    pub fn geo_frame(self) -> Option<bevy_geo_frames::GeoFrame> {
+        match self {
+            DisplayFrame::ECEF => Some(bevy_geo_frames::GeoFrame::ECEF),
+            DisplayFrame::NED => Some(bevy_geo_frames::GeoFrame::NED),
+            DisplayFrame::ENU => Some(bevy_geo_frames::GeoFrame::ENU),
+            DisplayFrame::LLA => None,
+        }
+    }
+
+    /// Parse from a case-insensitive string (`ECEF`, `NED`, `ENU`, `LLA`).
+    pub fn from_str_ci(s: &str) -> Option<Self> {
+        match s.to_ascii_uppercase().as_str() {
+            "ECEF" => Some(DisplayFrame::ECEF),
+            "NED" => Some(DisplayFrame::NED),
+            "ENU" => Some(DisplayFrame::ENU),
+            "LLA" => Some(DisplayFrame::LLA),
+            _ => None,
+        }
+    }
+
+    /// Uppercase tag used in KDL (`ECEF`, `NED`, `ENU`, `LLA`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DisplayFrame::ECEF => "ECEF",
+            DisplayFrame::NED => "NED",
+            DisplayFrame::ENU => "ENU",
+            DisplayFrame::LLA => "LLA",
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

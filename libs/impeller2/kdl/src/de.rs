@@ -202,8 +202,10 @@ fn parse_telemetry_mode(node: &KdlNode, src: &str) -> Result<bool, KdlSchematicE
 fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlSchematicError> {
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
-        | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
-        | "schematic_tree" | "data_overview" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        | "geo_position_gauge" | "orientation_gauge" | "action_pane" | "query_table"
+        | "query_plot" | "inspector" | "hierarchy" | "schematic_tree" | "data_overview" => {
+            Ok(SchematicElem::Panel(parse_panel(node, src)?))
+        }
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "timeline" => Ok(SchematicElem::Timeline(parse_timeline(node, src)?)),
@@ -640,6 +642,8 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "viewport" => parse_viewport(node, kdl_src),
         "graph" => parse_graph(node, kdl_src),
         "component_monitor" => parse_component_monitor(node, kdl_src),
+        "geo_position_gauge" => parse_geo_position_gauge(node, kdl_src),
+        "orientation_gauge" => parse_orientation_gauge(node, kdl_src),
         "action_pane" => parse_action_pane(node, kdl_src),
         "query_table" => parse_query_table(node),
         "query_plot" => parse_query_plot(node, kdl_src),
@@ -1056,6 +1060,132 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
         component_name: component_name.to_string(),
         name,
     }))
+}
+
+/// Shared front matter of both gauges: positional (or named) `eql` and the
+/// optional `source` frame (omit → inherit the schematic `coordinate`).
+fn parse_gauge_eql_source(
+    node: &KdlNode,
+    src: &str,
+    node_name: &str,
+) -> Result<(String, Option<GeoFrame>), KdlSchematicError> {
+    // Prefer positional eql (matches the grammar / graph), fall back to named.
+    let eql = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .or_else(|| node.get("eql").and_then(|v| v.as_string()))
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "eql".to_string(),
+            node: node_name.to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+
+    let source = match node.get("source").and_then(|v| v.as_string()) {
+        Some(s) => Some(
+            GeoFrame::from_str(s).map_err(|_| KdlSchematicError::InvalidValue {
+                property: "source".to_string(),
+                node: node_name.to_string(),
+                expected: "ENU, NED, or ECEF".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            })?,
+        ),
+        None => None,
+    };
+    Ok((eql, source))
+}
+
+fn parse_geo_position_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let name = parse_name(node);
+    let (eql, source) = parse_gauge_eql_source(node, src, "geo_position_gauge")?;
+
+    let display = match node.get("display").and_then(|v| v.as_string()) {
+        Some(s) => DisplayFrame::from_str_ci(s).ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "display".to_string(),
+            node: "geo_position_gauge".to_string(),
+            expected: "ECEF, NED, ENU, or LLA".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?,
+        None => DisplayFrame::default(),
+    };
+
+    Ok(Panel::GeoPositionGauge(GeoPositionGauge {
+        eql,
+        source,
+        display,
+        name,
+        node_id: NodeId::default(),
+    }))
+}
+
+fn parse_orientation_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let name = parse_name(node);
+    let (eql, source) = parse_gauge_eql_source(node, src, "orientation_gauge")?;
+
+    // Cartesian frames only: LLA is geodetic, not a rotation basis.
+    let display = match node.get("display").and_then(|v| v.as_string()) {
+        Some(s) => Some(
+            GeoFrame::from_str(s).map_err(|_| KdlSchematicError::InvalidValue {
+                property: "display".to_string(),
+                node: "orientation_gauge".to_string(),
+                expected: "ECEF, NED, or ENU".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            })?,
+        ),
+        None => None,
+    };
+
+    // Optional `reference x y z w` child: the body→source attitude shown as
+    // neutral by the gimbal.
+    let reference = node
+        .children()
+        .into_iter()
+        .flat_map(|c| c.nodes())
+        .find(|child| child.name().value() == "reference")
+        .map(|child| parse_reference_quat(child, src))
+        .transpose()?;
+
+    Ok(Panel::OrientationGauge(OrientationGauge {
+        eql,
+        source,
+        display,
+        reference,
+        name,
+        node_id: NodeId::default(),
+    }))
+}
+
+fn parse_reference_quat(node: &KdlNode, src: &str) -> Result<[f64; 4], KdlSchematicError> {
+    let invalid = || KdlSchematicError::InvalidValue {
+        property: "reference".to_string(),
+        node: "orientation_gauge".to_string(),
+        expected: "four numeric entries: reference x y z w".to_string(),
+        src: src.to_string(),
+        span: node.span(),
+    };
+    let entries: Vec<_> = node
+        .entries()
+        .iter()
+        .filter(|e| e.name().is_none())
+        .collect();
+    if entries.len() != 4 {
+        return Err(invalid());
+    }
+    let mut q = [0f64; 4];
+    for (idx, entry) in entries.iter().enumerate() {
+        q[idx] = entry
+            .value()
+            .as_float()
+            .or_else(|| entry.value().as_integer().map(|v| v as f64))
+            .ok_or_else(invalid)?;
+    }
+    Ok(q)
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -3535,6 +3665,137 @@ object_3d "a.world_pos" {
             assert_eq!(monitor.component_name, "a.world_pos");
         } else {
             panic!("Expected component_monitor");
+        }
+    }
+
+    #[test]
+    fn test_geo_position_gauge() {
+        let kdl = r#"geo_position_gauge "NAVEKFSTATE.POS_ECEF" name="Missile" source="ECEF" display="NED""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::GeoPositionGauge(gauge)) = &schematic.elems[0] {
+            assert_eq!(gauge.eql, "NAVEKFSTATE.POS_ECEF");
+            assert_eq!(gauge.source, Some(GeoFrame::ECEF));
+            assert_eq!(gauge.display, DisplayFrame::NED);
+            assert_eq!(gauge.name.as_deref(), Some("Missile"));
+        } else {
+            panic!("Expected geo_position_gauge");
+        }
+    }
+
+    #[test]
+    fn test_orientation_gauge_reference_round_trip() {
+        // No `reference` child ⇒ None, and save must not invent one.
+        let plain = parse_schematic(r#"orientation_gauge "a.q""#).unwrap();
+        if let SchematicElem::Panel(Panel::OrientationGauge(g)) = &plain.elems[0] {
+            assert_eq!(g.reference, None);
+        } else {
+            panic!("Expected orientation_gauge");
+        }
+        assert!(!crate::serialize_schematic(&plain).contains("reference"));
+
+        let kdl = r#"
+        orientation_gauge "a.q" display="NED" {
+            reference 0.0 0.7071 0.0 0.7071
+        }
+        "#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::OrientationGauge(g)) = &parsed.elems[0] else {
+            panic!("Expected orientation_gauge");
+        };
+        assert_eq!(g.reference, Some([0.0, 0.7071, 0.0, 0.7071]));
+        assert_eq!(g.display, Some(GeoFrame::NED));
+
+        let serialized = crate::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::OrientationGauge(g2)) = &reparsed.elems[0] else {
+            panic!("Expected orientation_gauge after round-trip");
+        };
+        assert_eq!(g2.reference, g.reference);
+        assert_eq!(g2.display, g.display);
+
+        // Wrong arity is a parse error, not a silent identity.
+        assert!(parse_schematic(r#"orientation_gauge "a.q" { reference 1 0 0 }"#).is_err());
+        // LLA is geodetic, not a rotation frame.
+        assert!(parse_schematic(r#"orientation_gauge "a.q" display="LLA""#).is_err());
+    }
+
+    #[test]
+    fn test_gauges_named_eql() {
+        // Named eql= is also accepted (same as older schematics / docs examples).
+        let schematic =
+            parse_schematic(r#"geo_position_gauge name="Missile" eql="NAVEKFSTATE.POS_ECEF""#)
+                .unwrap();
+        if let SchematicElem::Panel(Panel::GeoPositionGauge(gauge)) = &schematic.elems[0] {
+            assert_eq!(gauge.eql, "NAVEKFSTATE.POS_ECEF");
+            assert_eq!(gauge.name.as_deref(), Some("Missile"));
+            assert_eq!(gauge.source, None);
+        } else {
+            panic!("Expected geo_position_gauge");
+        }
+
+        let schematic =
+            parse_schematic(r#"orientation_gauge name="Att" eql="NAVEKFSTATE.Q""#).unwrap();
+        if let SchematicElem::Panel(Panel::OrientationGauge(gauge)) = &schematic.elems[0] {
+            assert_eq!(gauge.eql, "NAVEKFSTATE.Q");
+            assert_eq!(gauge.name.as_deref(), Some("Att"));
+            assert_eq!(gauge.source, None);
+            assert_eq!(gauge.display, None);
+        } else {
+            panic!("Expected orientation_gauge");
+        }
+    }
+
+    #[test]
+    fn test_geo_position_gauge_defaults_and_round_trip() {
+        // Omitted source stays unset (inherits schematic coordinate at load);
+        // omitted display defaults to NED.
+        let schematic = parse_schematic(r#"geo_position_gauge "a.pos""#).unwrap();
+        let SchematicElem::Panel(panel) = &schematic.elems[0] else {
+            panic!("Expected panel");
+        };
+        let Panel::GeoPositionGauge(gauge) = panel else {
+            panic!("Expected geo_position_gauge");
+        };
+        assert_eq!(gauge.source, None);
+        assert_eq!(gauge.display, DisplayFrame::NED);
+
+        // Save must not invent `source=` when it was omitted — otherwise the
+        // gauge stops tracking a changed global `coordinate` after reload.
+        let serialized_inherit = crate::serialize_schematic(&schematic);
+        assert!(
+            !serialized_inherit.contains("source="),
+            "omitted source must stay omitted on save, got:\n{serialized_inherit}"
+        );
+        let reparsed_inherit = parse_schematic(&serialized_inherit).unwrap();
+        if let SchematicElem::Panel(Panel::GeoPositionGauge(g)) = &reparsed_inherit.elems[0] {
+            assert_eq!(g.source, None);
+        } else {
+            panic!("Expected geo_position_gauge after inherit round-trip");
+        }
+
+        // LLA round-trips through serialization (positional eql).
+        let kdl = r#"geo_position_gauge "a.pos" name="M" source="NED" display="LLA""#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let serialized = crate::serialize_schematic(&parsed);
+        assert!(
+            serialized.contains("geo_position_gauge a.pos")
+                || serialized.contains(r#"geo_position_gauge "a.pos""#),
+            "expected positional eql in: {serialized}"
+        );
+        assert!(
+            !serialized.contains("eql="),
+            "eql should be positional, not named, in: {serialized}"
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::GeoPositionGauge(g)) = &reparsed.elems[0] {
+            assert_eq!(g.eql, "a.pos");
+            assert_eq!(g.source, Some(GeoFrame::NED));
+            assert_eq!(g.display, DisplayFrame::LLA);
+            assert_eq!(g.name.as_deref(), Some("M"));
+        } else {
+            panic!("Expected geo_position_gauge after round-trip");
         }
     }
 

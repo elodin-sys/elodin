@@ -85,6 +85,7 @@ pub mod button;
 pub mod colors;
 pub mod command_palette;
 pub mod data_overview;
+pub mod gauges;
 pub mod hierarchy;
 pub mod images;
 pub mod input_owner;
@@ -155,6 +156,12 @@ pub enum SelectedObject {
     Monitor {
         monitor_id: Entity,
     },
+    GeoPositionGauge {
+        gauge_id: Entity,
+    },
+    OrientationGauge {
+        gauge_id: Entity,
+    },
     DataOverview,
     DataOverviewComponent {
         component_id: ComponentId,
@@ -182,6 +189,8 @@ impl SelectedObject {
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
+            SelectedObject::GeoPositionGauge { gauge_id }
+            | SelectedObject::OrientationGauge { gauge_id } => Some(*gauge_id),
             SelectedObject::DataOverview => None,
             SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
