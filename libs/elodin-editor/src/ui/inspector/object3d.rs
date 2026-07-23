@@ -485,6 +485,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             // Field presence selects the driver. Clearing Cholesky must compile
                             // a dormant covariance expr (or scale); create_object_3d_entity only
                             // compiled Cholesky while both fields were set.
+                            // Respawn only when Mat3 <-> scale flips; keystrokes that keep a
+                            // Mat3 field set must only refresh the compiled expr.
                             if error_covariance_cholesky.is_none() {
                                 if let Some(cov) = error_covariance.as_ref() {
                                     covariance_expr_update =
@@ -492,9 +494,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 } else {
                                     scale_expr_update =
                                         Some(compile_scale_eql(scale, &eql_context.0));
+                                    changed = true;
                                 }
                             }
-                            changed = true;
                         }
                     } else if uses_covariance {
                         ui.label(
@@ -511,10 +513,11 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                     .as_ref()
                                     .and_then(|e| compile_covariance_eql(e, &eql_context.0).ok()),
                             );
+                            // Mat3 -> scale only when the field is cleared.
                             if error_covariance.is_none() {
                                 scale_expr_update = Some(compile_scale_eql(scale, &eql_context.0));
+                                changed = true;
                             }
-                            changed = true;
                         }
                     } else {
                         ui.label(
@@ -602,7 +605,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                     compile_covariance_eql("(1, 0, 0, 1, 0, 1)", &eql_context.0)
                                         .ok(),
                                 );
-                                changed = true;
+                                // Both drivers use the Mat3 mesh path; only refresh exprs.
                             }
                             if uses_covariance && ui.button("Use Cholesky instead").clicked() {
                                 *error_covariance_cholesky = Some("(1, 0, 1, 0, 0, 1)".to_string());
@@ -611,7 +614,6 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 cholesky_expr_update = Some(
                                     compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0).ok(),
                                 );
-                                changed = true;
                             }
                         });
                     }
