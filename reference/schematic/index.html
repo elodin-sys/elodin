@@ -716,6 +716,16 @@ describes a matrix that looks like this:
 | a 0 0 |
 | b c 0 |
 | d e f |</li>
+<li><code>error_covariance</code> as an alternative to Cholesky, specify the
+symmetric covariance matrix P directly as a 6-pack. Example
+<code>"(a,b,c,d,e,f)"</code> which describes:
+| a b c |
+| b d e |
+| c e f |
+The editor Cholesky-decomposes P at runtime. When both
+<code>error_covariance_cholesky</code> and <code>error_covariance</code> are set, Cholesky
+takes precedence based on field presence (even if the Cholesky
+expression fails to compile).</li>
 <li><code>error_confidence_interval</code> (default <code>70</code>) the percentage that if this
 were repeated 100 times, we would expect that in 70 cases, the true
 value would be within the bounds. In practice this means that the
