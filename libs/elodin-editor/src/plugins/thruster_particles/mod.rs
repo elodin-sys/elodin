@@ -1350,6 +1350,7 @@ mod tests {
             scale_expr: None,
             scale_error: None,
             error_covariance_cholesky_expr: None,
+            error_covariance_expr: None,
             joint_animations: Vec::new(),
             data: impeller2_wkt::Object3D {
                 eql: "lander.world_pos".to_string(),
