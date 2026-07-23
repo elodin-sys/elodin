@@ -486,7 +486,7 @@ fn sync_terrain_view_positions(
 
         commands
             .entity(entity)
-            .insert(TerrainViewPosition(absolute));
+            .try_insert(TerrainViewPosition(absolute));
     }
 }
 
@@ -498,7 +498,7 @@ fn sync_terrain_view_positions(
     for (entity, transform) in &cameras {
         commands
             .entity(entity)
-            .insert(TerrainViewPosition(transform.translation.as_dvec3()));
+            .try_insert(TerrainViewPosition(transform.translation.as_dvec3()));
     }
 }
 

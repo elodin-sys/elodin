@@ -53,7 +53,7 @@ use super::{
     plot::{GraphBundle, GraphState, PlotWidget},
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
-    schematic::{graph_label, viewport_label},
+    schematic::{MonitorsRoot, graph_label, viewport_label},
     video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
@@ -129,13 +129,24 @@ fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(Startup, spawn_viewport_grids)
         .add_systems(Startup, setup_primary_window_state)
         .add_systems(Update, sync_editor_cam_zoom_limits);
+    // Must run after the BigSpace root exists; otherwise grids stay parentless
+    // and shimmer from float-origin precision loss.
+    #[cfg(feature = "big_space")]
+    app.add_systems(
+        Startup,
+        spawn_viewport_grids.after(crate::spatial::setup_floating_origin),
+    );
+    #[cfg(not(feature = "big_space"))]
+    app.add_systems(Startup, spawn_viewport_grids);
 }
 
 fn spawn_viewport_grids(
     mut commands: Commands,
+    // Optional so headless/test apps without the spatial plugin don't panic;
+    // grids simply stay parentless there. In the editor the root always exists
+    // because this runs after `setup_floating_origin`.
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (frame, layer) in GRID_RENDER_LAYERS {
@@ -2973,6 +2984,8 @@ pub struct TileLayout<'w, 's> {
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     query_tables: Query<'w, 's, &'static mut QueryTableData>,
     action_tiles: Query<'w, 's, &'static mut ActionTile>,
+    // Optional: missing/duplicate root must not invalidate tile UI.
+    monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
 }
 
 #[derive(Clone)]
@@ -3243,12 +3256,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let entity = state_mut
-                            .commands
-                            .spawn(super::monitor::MonitorData {
+                        let mut entity = state_mut.commands.spawn((
+                            super::monitor::MonitorData {
                                 component_name: eql.clone(),
-                            })
-                            .id();
+                            },
+                            Name::new(eql.clone()),
+                        ));
+                        if let Some(root) = state_mut.monitor_root.as_ref() {
+                            entity.insert(ChildOf(**root));
+                        }
+                        let entity = entity.id();
                         let monitor = MonitorPane::new(entity, eql.clone());
 
                         let pane = Pane::Monitor(monitor);

@@ -892,6 +892,8 @@ pub enum Object3DMesh {
         color: Color,
         #[serde(default)]
         error_covariance_cholesky: Option<String>,
+        #[serde(default)]
+        error_covariance: Option<String>,
         #[serde(default = "default_ellipsoid_confidence_interval")]
         error_confidence_interval: f32,
         #[serde(default = "default_ellipsoid_show_grid")]
