@@ -1,0 +1,10 @@
+# CI smoke spec: one fixed nominal sample (the calibrated defaults come from
+# main.py; fixed values here keep the plan deterministic).
+
+[monte_carlo]
+n_samples = 1
+seed = 20170814
+method = "lhs"
+
+[monte_carlo.variables]
+thrust_scale = { dist = "fixed", value = 1.0323 }

@@ -132,6 +132,8 @@ fn apply_fallback_frame_to_panel(
             }
             Panel::Viewport(v)
         }
+        // Gauges keep `source: None` so they continue to track the schematic
+        // `coordinate` after save/reload (see Geo/OrientationGaugeData).
         Panel::Tabs(panels) => Panel::Tabs(
             panels
                 .iter()
@@ -215,6 +217,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
+    /// Optional: absent in minimal test apps (no SceneEnvironmentPlugin).
+    pub scene_environment: Option<ResMut<'w, crate::plugins::scene_environment::SceneEnvironment>>,
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub time_range_behavior: ResMut<'w, TimeRangeBehavior>,
     pub telemetry_mode: ResMut<'w, TelemetryMode>,
@@ -629,6 +633,10 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.current_schematic.0.skybox = schematic.skybox.clone();
+        self.current_schematic.0.environment = schematic.environment.clone();
+        if let Some(scene_environment) = self.scene_environment.as_mut() {
+            scene_environment.0 = schematic.environment.clone();
+        }
     }
 
     /// Spawns windows whose remote sub-schematic fetch (queued by
@@ -1232,6 +1240,39 @@ impl LoadSchematicParams<'_, '_> {
                     .id();
                 let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
+            }
+            Panel::GeoPositionGauge(gauge) => {
+                let label = gauge
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Position Gauge".to_string());
+                // Preserve omitted `source` as None so the gauge keeps inheriting
+                // the live schematic `coordinate` (resolved at display time).
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::gauges::GeoPositionGaugeData::new(gauge.source, gauge.display),
+                        crate::ui::gauges::EqlBinding::new(gauge.eql.clone()),
+                    ))
+                    .id();
+                let pane = crate::ui::gauges::GaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::GeoPositionGauge(pane)), parent_id, false)
+            }
+            Panel::OrientationGauge(gauge) => {
+                let label = gauge
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Orientation Gauge".to_string());
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::gauges::OrientationGaugeData::new(gauge.source, gauge.display)
+                            .with_reference(gauge.reference),
+                        crate::ui::gauges::EqlBinding::new(gauge.eql.clone()),
+                    ))
+                    .id();
+                let pane = crate::ui::gauges::GaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::OrientationGauge(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
                 let has_query = !data.query.trim().is_empty();
@@ -2004,6 +2045,113 @@ mod tests {
         assert_eq!(geo_pos.0, GeoFrame::NED);
         assert_eq!(geo_pos.1, DVec3::new(1.0, 2.0, 3.0));
         assert_eq!(geo_rot.0, GeoFrame::NED);
+    }
+
+    #[test]
+    fn geo_position_gauge_omitted_source_stays_unset_and_tracks_coordinate() {
+        // Omitted `source` must remain None on GeoPositionGaugeData so a later
+        // `coordinate` change (or save/reload) keeps inheritance — not a
+        // snapshot of the frame at load time.
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="ENU"
+            geo_position_gauge "rocket.world_pos" name="Pos" display="NED"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        {
+            let mut query = app
+                .world_mut()
+                .query::<&crate::ui::gauges::GeoPositionGaugeData>();
+            let source = query
+                .iter(app.world())
+                .next()
+                .expect("geo_position_gauge entity")
+                .source;
+            assert_eq!(source, None, "omitted source must stay unset");
+            let coordinate = app.world().resource::<Coordinate>().0;
+            assert_eq!(
+                source.or(coordinate).unwrap_or(GeoFrame::ENU),
+                GeoFrame::ENU
+            );
+        }
+
+        app.world_mut().resource_mut::<Coordinate>().0 = Some(GeoFrame::NED);
+        {
+            let mut query = app
+                .world_mut()
+                .query::<&crate::ui::gauges::GeoPositionGaugeData>();
+            let source = query
+                .iter(app.world())
+                .next()
+                .expect("geo_position_gauge entity")
+                .source;
+            let coordinate = app.world().resource::<Coordinate>().0;
+            assert_eq!(
+                source.or(coordinate).unwrap_or(GeoFrame::ENU),
+                GeoFrame::NED,
+                "inherited source must track live coordinate"
+            );
+        }
+    }
+
+    #[test]
+    fn geo_position_gauge_explicit_source_is_preserved() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="ENU"
+            geo_position_gauge "rocket.world_pos" source="ECEF" display="NED"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::GeoPositionGaugeData>();
+        let source = query
+            .iter(app.world())
+            .next()
+            .expect("geo_position_gauge entity")
+            .source;
+        assert_eq!(source, Some(GeoFrame::ECEF));
+        assert_eq!(
+            source.or(Some(GeoFrame::ENU)).unwrap_or(GeoFrame::ENU),
+            GeoFrame::ECEF,
+            "explicit source must not inherit coordinate"
+        );
+    }
+
+    #[test]
+    fn orientation_gauge_round_trips_display_and_reference() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            orientation_gauge "rocket.world_pos" name="Att" display="ECEF" {
+                reference 0.0 0.7071 0.0 0.7071
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::OrientationGaugeData>();
+        let data = query
+            .iter(app.world())
+            .next()
+            .expect("orientation_gauge entity");
+        assert_eq!(data.display, Some(GeoFrame::ECEF));
+        assert!((data.reference.length() - 1.0).abs() < 1e-12);
+        assert!(data.reference_kdl().is_some(), "non-identity reference");
     }
 
     #[test]

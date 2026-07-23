@@ -2,11 +2,13 @@ use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use miette::IntoDiagnostic;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
@@ -587,8 +589,15 @@ pub(crate) fn is_reserved_asset_key(key: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
+fn asset_etag(bytes: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    format!("\"{:016x}-{}\"", hasher.finish(), bytes.len())
+}
+
 async fn get_asset(
     AxumPath(path): AxumPath<String>,
+    headers: HeaderMap,
     State(state): State<Arc<AssetsState>>,
 ) -> Response {
     if path == INDEX_KEY || path == "__index__/" {
@@ -603,7 +612,28 @@ async fn get_asset(
     };
     let full = state.assets_dir.join(rel);
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
-        Ok(Ok(bytes)) => bytes.into_response(),
+        Ok(Ok(bytes)) => {
+            let etag = asset_etag(&bytes);
+            if let Some(inm) = headers
+                .get(header::IF_NONE_MATCH)
+                .and_then(|v| v.to_str().ok())
+                && inm
+                    .split(',')
+                    .map(str::trim)
+                    .any(|tag| tag == etag || tag == "*")
+            {
+                let mut res = StatusCode::NOT_MODIFIED.into_response();
+                if let Ok(val) = HeaderValue::from_str(&etag) {
+                    res.headers_mut().insert(header::ETAG, val);
+                }
+                return res;
+            }
+            let mut res = bytes.into_response();
+            if let Ok(val) = HeaderValue::from_str(&etag) {
+                res.headers_mut().insert(header::ETAG, val);
+            }
+            res
+        }
         Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
             // A 404 is a routine client outcome (e.g. a mirror polling for an
             // asset still being uploaded), not a server fault — log at info.
@@ -869,13 +899,28 @@ mod tests {
         spawn_assets_http(dir.path(), bound, true, None).unwrap();
 
         let assets_addr = assets_http_addr(bound);
-        let response = reqwest::Client::new()
+        let client = reqwest::Client::new();
+        let response = client
             .get(format!("http://{assets_addr}/rocket.glb"))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        let etag = response
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .expect("asset responses must include ETag for the editor disk cache")
+            .to_owned();
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"spawned-payload");
+
+        let not_modified = client
+            .get(format!("http://{assets_addr}/rocket.glb"))
+            .header(header::IF_NONE_MATCH, &etag)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
     }
 
     #[tokio::test]

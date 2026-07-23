@@ -631,6 +631,11 @@ pub fn current_selection() -> SchemeSelection {
         })
 }
 
+/// True when the active color scheme is in light mode.
+pub fn is_light_mode() -> bool {
+    current_selection().mode.eq_ignore_ascii_case("light")
+}
+
 pub fn set_active_scheme(scheme: &str, mode: &str) -> SchemeSelection {
     set_to_preset(scheme, mode)
 }

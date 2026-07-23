@@ -184,6 +184,9 @@ version = "0.2.5"
 
 [patch.crates-io]
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
+# Local-space FaceCamera/AlongVelocity: full inverse affine for camera
+# position in effect space (elodin-sys fork; upstream candidate).
+bevy_hanabi = { git = "https://github.com/elodin-sys/bevy_hanabi", rev = "1b46c8cb2bd9655cea25943c51ba0502055ce2ae" }
 
 # bevy_editor_cam's bevy-0.19 branch depends on bevy_framepace from this
 # personal git branch; redirect it to the official v0.22.0 tag so the whole

@@ -1,0 +1,170 @@
+// Falcon 9 launch-to-landing SITL — cinematic ECEF scene (WHITEPAPER 2, README).
+// World frame IS rotating WGS84 ECEF: Earth GLB at the origin, booster and
+// truth ghost at real geodetic coordinates.
+//
+// Visuals are the pyrotechnique falcon9 port (docs/design-thruster-effects-port.md):
+// hanabi .effect files authored against webcast reference imagery, driven by
+// the sim's 0..1 viz channels, under a physical sun + procedural atmosphere.
+// Wall-clock pacing is on by default so render-time particle trails accumulate;
+// Monte Carlo workers set ELODIN_MONTE_CARLO_CONTEXT and run flat out.
+
+coordinate frame="ECEF"
+// Trailing window keeps live graph redraw bounded — the full-range view of a
+// 500 s, 1000 Hz mission grinds the editor to a few FPS by MECO, which also
+// starves the render-time particle effects.
+timeline follow_latest=#true range="last_30s"
+telemetry_mode #true
+
+// Sun + sky: pyrotechnique falcon9 environment values (100 klx, azimuth 300 /
+// elevation 38 in its pad-local Y-up frame) converted into the editor's Bevy
+// world frame at LC-39A under the ECEF Plane mapping. The atmosphere is
+// Bevy's procedural earth sky centered on the ECEF origin; inner radius is
+// the pad's geocentric radius (~6,373.27 km) so the horizon haze sits at the
+// actual local surface.
+environment {
+    sun azimuth=146.58 elevation=55.41 illuminance=100000.0 shadows=#true
+    ambient scale=0.05
+    atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
+}
+
+// Layout: chase viewport (5×3) with a 2-column telemetry strip on the right
+// and a full-width actuator/status strip along the bottom — all graphs visible
+// at once (no tabs). Bevy 0.19 can only put AtmosphereSettings on one active
+// main camera, so keep a single viewport.
+vsplit {
+    hsplit share=0.75 {
+        viewport name="Chase" share=0.72 fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false active=#true {
+            bloom preset="old_school" intensity=0.28
+        }
+        vsplit share=0.28 {
+            hsplit {
+                graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
+                    color blue
+                    color green
+                }
+                graph "booster.mach[0]" name="Mach" {
+                    color white
+                }
+            }
+            hsplit {
+                graph "booster.altitude_geodetic[0], booster_truth.altitude_geodetic[0]" name="Altitude vs recorded (m)" {
+                    color blue
+                    color green
+                }
+                graph "booster.tank_pressure_lox[0], booster.tank_pressure_rp1[0], booster.inlet_pressure_lox[0], booster.inlet_pressure_rp1[0]" name="Tank + inlet pressures (Pa)" {
+                    color cyan
+                    color orange
+                    color blue
+                    color red
+                }
+            }
+            hsplit {
+                graph "booster.propellant_lox[0], booster.propellant_rp1[0]" name="Propellant (kg)" {
+                    color cyan
+                    color orange
+                }
+                graph "booster.nitrogen_kg[0]" name="RCS nitrogen (kg)" {
+                    color white
+                }
+            }
+        }
+    }
+    hsplit share=0.25 {
+        graph "booster.fsw_phase[0]" name="Mission phase (0..11)" {
+            color yellow
+        }
+        graph "booster.thrust_total[0]" name="Cluster thrust (N)" {
+            color orange
+        }
+        graph "booster.qbar[0]" name="Dynamic pressure (Pa)" {
+            color red
+        }
+        graph "booster.fin_state" name="Grid fins (rad)" {
+        }
+        graph "booster.rcs_levels" name="RCS thrusters (8)" {
+        }
+        graph "booster.engine_spool" name="Engine spool (%)" {
+        }
+        graph "booster.tvc_state" name="TVC gimbal (rad)" {
+        }
+    }
+}
+
+object_3d frame="ECEF" orientation=absolute earth.world_pos {
+    glb path="earth.glb"
+}
+
+// Booster: the Sketchfab Falcon 9 GLB pyrotechnique authored the effects
+// against, rendered at the same 70 m metric height. The raw model is +Y-up
+// with the engine plane at y~0; body +X is the long axis (nose), so the mesh
+// rotates model +Y onto +X and the engine plane sits at the entity origin.
+// orientation=absolute: world_pos attitude is a body->ECEF quaternion and
+// must compose with the ECEF basis change.
+object_3d orientation=absolute booster.world_pos {
+    glb path="falcon9.glb" rotate="(0, 0, -90)" scale=0.9944
+    icon builtin="rocket_launch" size=32 {
+        color 70 130 240
+    }
+    // Merlin cluster plume: near-parallel column tuned in pyrotechnique
+    // against ascent.jpeg. Emitter at the bell-exit plane (−1.2 m along body
+    // +X / pyro −Y) so the root is not born inside the octaweb.
+    thruster name="merlin" effect="effects/falcon9/merlin_core.effect" body_frame=#true position="(-1.2, 0, 0)" intensity="booster.plume_viz" {
+        effect "effects/falcon9/merlin_flame.effect"
+        light color="(1.0, 0.83, 0.58)" intensity=30000000.0 range=120.0 offset=6.0
+    }
+    // Persistent exhaust trail: the effect declares the anchored-trail
+    // properties, so the runtime re-homes it onto a world-fixed anchor and
+    // the column hangs in the sky as the booster climbs
+    // (floating-origin-safe). Intensity thins with air density.
+    thruster name="exhaust_smoke" effect="effects/falcon9/exhaust_smoke.effect" body_frame=#true position="(-8, 0, 0)" direction="(-1, 0, 0)" intensity="booster.smoke_viz[0]" cutoff=0.01
+    // Cold-gas RCS: falcon9-sized darts (rcs_dart) at interstage station 46 m.
+    thruster name="rcs_0" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[0]" cutoff=0.003
+    thruster name="rcs_1" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[1]" cutoff=0.003
+    thruster name="rcs_2" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[2]" cutoff=0.003
+    thruster name="rcs_3" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[3]" cutoff=0.003
+    thruster name="rcs_4" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[4]" cutoff=0.003
+    thruster name="rcs_5" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[5]" cutoff=0.003
+    thruster name="rcs_6" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[6]" cutoff=0.003
+    thruster name="rcs_7" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[7]" cutoff=0.003
+}
+
+// Launch pad: world-fixed pad-smoke emitter. Local-space particles on this
+// static entity are world-fixed in practice.
+object_3d orientation=absolute pad.world_pos {
+    sphere radius=0.02
+    thruster name="pad_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.pad_smoke_viz[0]" cutoff=0.01
+}
+
+// Landing Zone 1: dust + ASDS barge visual (~96×52 m). Physics touchdown
+// target remains LZ1 lat/lon/alt; the barge is the landing pad mesh.
+object_3d orientation=absolute lz1.world_pos {
+    // Cleaned Sketchfab ASDS: empty barge only (no 2nd hull / Falcon), Y-up,
+    // deck centered at origin (~52×96 m). Matches surface_attitude (+Y up).
+    glb path="spacex_drone_barge.glb"
+    thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
+}
+
+// Local ground: pad disc at LC-39A only (barge is the LZ-1 surface).
+object_3d orientation=absolute ground.world_pos {
+    cylinder radius=10000.0 height=4.0 {
+        color 51 56 46
+    }
+}
+
+// Truth ghost replaying the recorded CRS-12 profile along the ascent track:
+// icon + trail only (the old box read as a miss-oriented vehicle).
+object_3d booster_truth.world_pos {
+    sphere radius=0.5 {
+        color 60 200 90 160
+    }
+    icon builtin="my_location" size=24 {
+        color 60 200 90
+    }
+}
+
+line_3d booster.world_pos line_width=2.0 perspective=#false {
+    color 70 130 240 200
+}
+line_3d booster_truth.world_pos line_width=2.0 perspective=#false {
+    color 60 200 90 160
+}
