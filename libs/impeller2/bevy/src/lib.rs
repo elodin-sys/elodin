@@ -4,12 +4,12 @@ use bevy::{
         hierarchy::ChildOf,
         system::{EntityCommands, SystemId},
     },
-    prelude::{Command, In, InRef, IntoSystem, Message, Mut, System},
+    prelude::{Command, In, InRef, IntoSystem, Message, Mut, Single, System, With},
 };
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
     ecs::system::SystemState,
-    prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
+    prelude::{Commands, Component, Deref, DerefMut, Entity, Name, Query, ResMut, Resource, debug},
 };
 use impeller2::types::IntoLenPacket;
 use impeller2::types::RequestId;
@@ -620,13 +620,15 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == ComponentMetadata::ID => {
                 let metadata = m.parse::<ComponentMetadata>()?;
-                // Create entity and register path so the component appears in UI
+                // Create the full path hierarchy so the component appears in UI
+                // under DbComponentsRoot (not just an orphaned leaf entity).
                 let path = ComponentPath::from_name(&metadata.name);
-                try_insert_entity(
+                ensure_component_path_hierarchy(
                     &mut world_sink.entity_map,
                     &mut world_sink.metadata_reg,
                     &mut world_sink.commands,
-                    path.path.last().unwrap(),
+                    &path,
+                    world_sink.db_components_root.as_ref().map(|r| **r),
                 );
                 world_sink.path_reg.0.insert(metadata.component_id, path);
                 world_sink
@@ -637,11 +639,12 @@ fn sink_inner(
                 let metadata = m.parse::<DumpMetadataResp>()?;
                 for metadata in metadata.component_metadata.into_iter() {
                     let path = ComponentPath::from_name(&metadata.name);
-                    try_insert_entity(
+                    ensure_component_path_hierarchy(
                         &mut world_sink.entity_map,
                         &mut world_sink.metadata_reg,
                         &mut world_sink.commands,
-                        path.path.last().unwrap(),
+                        &path,
+                        world_sink.db_components_root.as_ref().map(|r| **r),
                     );
                     world_sink.path_reg.0.insert(metadata.component_id, path);
                     world_sink
@@ -904,6 +907,13 @@ pub struct ComponentSchemaRegistry(pub HashMap<ComponentId, Schema<Vec<u64>>>);
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
 
+#[derive(Component)]
+pub struct DbComponentsRoot;
+
+fn ensure_db_components_root(mut commands: Commands) {
+    commands.spawn((DbComponentsRoot, Name::new("db components")));
+}
+
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
     commands: Commands<'w, 's>,
@@ -916,6 +926,8 @@ pub struct WorldSink<'w, 's> {
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
     db_config: ResMut<'w, DbConfig>,
+    // Optional: missing/duplicate root must not invalidate WorldSink.
+    db_components_root: Option<Single<'w, 's, Entity, With<DbComponentsRoot>>>,
 }
 
 #[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
@@ -932,7 +944,6 @@ fn try_insert_entity<'a, 'w, 's>(
         };
         Some((e, false))
     } else {
-        let mut e = commands.spawn((component_id, ComponentValueMap::default()));
         let metadata = metadata_reg
             .entry(component_id)
             .or_insert_with(|| ComponentMetadata {
@@ -941,10 +952,50 @@ fn try_insert_entity<'a, 'w, 's>(
                 metadata: Default::default(),
             })
             .clone();
-        e.insert(metadata.clone());
-
+        let e = commands.spawn((
+            component_id,
+            ComponentValueMap::default(),
+            metadata.clone(),
+            Name::new(metadata.name.clone()),
+        ));
         entity_map.insert(component_id, e.id());
         Some((e, true))
+    }
+}
+
+/// Creates every segment of `path` and parents newly created ones under
+/// `db_components_root` (or the previous segment).
+///
+/// Hierarchy is wired only for `newly_created` entities so later value packets
+/// do not re-insert `ChildOf` and undo editor reparenting (e.g. GridCell under
+/// BigSpaceRoot). Call this from metadata handlers so leaves are not orphaned:
+/// metadata often creates the leaf before `apply_value` runs, which would make
+/// `newly_created == false` in a value-only path loop.
+///
+/// When `db_components_root` is `None`, segments are still created but the
+/// top-level entity is left parentless.
+fn ensure_component_path_hierarchy(
+    entity_map: &mut EntityMap,
+    metadata_reg: &mut ComponentMetadataRegistry,
+    commands: &mut Commands,
+    path: &ComponentPath,
+    db_components_root: Option<Entity>,
+) {
+    let mut last_entity: Option<Entity> = None;
+    for part in path.path.iter() {
+        let Some((mut e, newly_created)) =
+            try_insert_entity(entity_map, metadata_reg, commands, part)
+        else {
+            continue;
+        };
+        if newly_created {
+            if let Some(parent) = last_entity {
+                e.insert(ChildOf(parent));
+            } else if let Some(root) = db_components_root {
+                e.insert(ChildOf(root));
+            }
+        }
+        last_entity = Some(e.id());
     }
 }
 
@@ -956,40 +1007,17 @@ impl Decomponentize for WorldSink<'_, '_> {
         _view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
-        let Some(path) = self.path_reg.get(&component_id) else {
+        let Some(path) = self.path_reg.get(&component_id).cloned() else {
             return Ok(());
         };
 
-        let Some(part) = path.path.last() else {
-            return Ok(());
-        };
-
-        // Ensure the entity exists (creates if needed).
-        try_insert_entity(
+        ensure_component_path_hierarchy(
             &mut self.entity_map,
             &mut self.metadata_reg,
             &mut self.commands,
-            part,
+            &path,
+            self.db_components_root.as_ref().map(|r| **r),
         );
-
-        // Wire parent-child hierarchy only for newly created path segments.
-        // Re-inserting ChildOf every packet would undo editor reparenting of
-        // spatial leaves (GridCell under BigSpaceRoot).
-        let mut last_entity: Option<Entity> = None;
-        for parent in path.path.iter() {
-            let Some((mut e, newly_created)) = try_insert_entity(
-                &mut self.entity_map,
-                &mut self.metadata_reg,
-                &mut self.commands,
-                parent,
-            ) else {
-                continue;
-            };
-            if newly_created && let Some(last_entity) = last_entity {
-                e.insert(ChildOf(last_entity));
-            }
-            last_entity = Some(e.id());
-        }
 
         // ComponentValue and adapter writes (WorldPos, etc.) are handled
         // exclusively by apply_cached_data from the TelemetryCache.
@@ -1178,6 +1206,7 @@ impl Plugin for Impeller2Plugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<DbMessage>()
             .add_plugins(DefaultAdaptersPlugin)
+            .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(bevy::prelude::Update, flush_msg_request_queue)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
@@ -1218,6 +1247,7 @@ where
 
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
+        debug!("registered req handler {system_id:?}");
         let mut handlers = world
             .get_resource_mut::<PacketIdHandlers>()
             .expect("missing packet handlers");
@@ -1254,6 +1284,7 @@ where
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
 
+        debug!("registered reply handler {system_id:?}");
         let req_id = {
             let handlers = world.resource::<RequestIdHandlers>();
             let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
@@ -1316,6 +1347,9 @@ where
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
 
+        // TODO: This runs fairly often, and it registers a system each time. We
+        // should look for a different way to do this.
+        debug!("registered msg reply handler {system_id:?}");
         let req_id = {
             let handlers = world.resource::<MsgRequestIdHandlers>();
             let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
@@ -1779,5 +1813,217 @@ mod series_store_allowlist_tests {
         }
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].0, ComponentId(1));
+    }
+}
+
+#[cfg(test)]
+mod db_components_hierarchy_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::prelude::App;
+
+    fn parent_of(world: &World, entity: Entity) -> Option<Entity> {
+        world.get::<ChildOf>(entity).map(|c| c.0)
+    }
+
+    #[test]
+    fn single_segment_path_parents_under_db_root() {
+        let mut app = App::new();
+        let root = app
+            .world_mut()
+            .spawn((DbComponentsRoot, Name::new("db components")))
+            .id();
+        app.world_mut().insert_resource(EntityMap::default());
+        app.world_mut()
+            .insert_resource(ComponentMetadataRegistry::default());
+
+        let path = ComponentPath::from_name("position");
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut entity_map: ResMut<EntityMap>,
+                      mut metadata_reg: ResMut<ComponentMetadataRegistry>| {
+                    ensure_component_path_hierarchy(
+                        &mut entity_map,
+                        &mut metadata_reg,
+                        &mut commands,
+                        &path,
+                        Some(root),
+                    );
+                },
+            )
+            .unwrap();
+
+        let leaf_id = ComponentPath::from_name("position").id;
+        let leaf = *app.world().resource::<EntityMap>().get(&leaf_id).unwrap();
+        assert_eq!(parent_of(app.world(), leaf), Some(root));
+    }
+
+    #[test]
+    fn nested_path_wires_full_chain_under_db_root() {
+        let mut app = App::new();
+        let root = app
+            .world_mut()
+            .spawn((DbComponentsRoot, Name::new("db components")))
+            .id();
+        app.world_mut().insert_resource(EntityMap::default());
+        app.world_mut()
+            .insert_resource(ComponentMetadataRegistry::default());
+
+        let path = ComponentPath::from_name("a.b.c");
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut entity_map: ResMut<EntityMap>,
+                      mut metadata_reg: ResMut<ComponentMetadataRegistry>| {
+                    ensure_component_path_hierarchy(
+                        &mut entity_map,
+                        &mut metadata_reg,
+                        &mut commands,
+                        &path,
+                        Some(root),
+                    );
+                },
+            )
+            .unwrap();
+
+        let a = *app
+            .world()
+            .resource::<EntityMap>()
+            .get(&ComponentPart::new("a").id)
+            .unwrap();
+        let ab = *app
+            .world()
+            .resource::<EntityMap>()
+            .get(&ComponentPart::new("a.b").id)
+            .unwrap();
+        let abc = *app
+            .world()
+            .resource::<EntityMap>()
+            .get(&ComponentPart::new("a.b.c").id)
+            .unwrap();
+
+        assert_eq!(parent_of(app.world(), a), Some(root));
+        assert_eq!(parent_of(app.world(), ab), Some(a));
+        assert_eq!(parent_of(app.world(), abc), Some(ab));
+    }
+
+    #[test]
+    fn second_call_does_not_reparent_existing_entities() {
+        let mut app = App::new();
+        let root = app
+            .world_mut()
+            .spawn((DbComponentsRoot, Name::new("db components")))
+            .id();
+        let other_parent = app.world_mut().spawn_empty().id();
+        app.world_mut().insert_resource(EntityMap::default());
+        app.world_mut()
+            .insert_resource(ComponentMetadataRegistry::default());
+
+        let path = ComponentPath::from_name("solo");
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut entity_map: ResMut<EntityMap>,
+                      mut metadata_reg: ResMut<ComponentMetadataRegistry>| {
+                    ensure_component_path_hierarchy(
+                        &mut entity_map,
+                        &mut metadata_reg,
+                        &mut commands,
+                        &path,
+                        Some(root),
+                    );
+                },
+            )
+            .unwrap();
+
+        let leaf_id = ComponentPath::from_name("solo").id;
+        let leaf = *app.world().resource::<EntityMap>().get(&leaf_id).unwrap();
+        app.world_mut()
+            .entity_mut(leaf)
+            .insert(ChildOf(other_parent));
+
+        let path = ComponentPath::from_name("solo");
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut entity_map: ResMut<EntityMap>,
+                      mut metadata_reg: ResMut<ComponentMetadataRegistry>| {
+                    ensure_component_path_hierarchy(
+                        &mut entity_map,
+                        &mut metadata_reg,
+                        &mut commands,
+                        &path,
+                        Some(root),
+                    );
+                },
+            )
+            .unwrap();
+
+        assert_eq!(parent_of(app.world(), leaf), Some(other_parent));
+    }
+
+    #[test]
+    fn leaf_created_before_hierarchy_stays_orphaned_without_metadata_helper() {
+        // Documents the bug: creating only the leaf first, then running the
+        // hierarchy helper, leaves the leaf without ChildOf because it is not
+        // newly_created. Metadata handlers must call ensure_component_path_hierarchy
+        // (full path) instead of try_insert_entity(leaf) alone.
+        let mut app = App::new();
+        let root = app
+            .world_mut()
+            .spawn((DbComponentsRoot, Name::new("db components")))
+            .id();
+        app.world_mut().insert_resource(EntityMap::default());
+        app.world_mut()
+            .insert_resource(ComponentMetadataRegistry::default());
+
+        let path = ComponentPath::from_name("x.y");
+        let leaf_part = path.path.last().unwrap().clone();
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut entity_map: ResMut<EntityMap>,
+                      mut metadata_reg: ResMut<ComponentMetadataRegistry>| {
+                    let _ = try_insert_entity(
+                        &mut entity_map,
+                        &mut metadata_reg,
+                        &mut commands,
+                        &leaf_part,
+                    );
+                },
+            )
+            .unwrap();
+
+        let path = ComponentPath::from_name("x.y");
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut entity_map: ResMut<EntityMap>,
+                      mut metadata_reg: ResMut<ComponentMetadataRegistry>| {
+                    ensure_component_path_hierarchy(
+                        &mut entity_map,
+                        &mut metadata_reg,
+                        &mut commands,
+                        &path,
+                        Some(root),
+                    );
+                },
+            )
+            .unwrap();
+
+        let y = *app
+            .world()
+            .resource::<EntityMap>()
+            .get(&ComponentPart::new("x.y").id)
+            .unwrap();
+        let x = *app
+            .world()
+            .resource::<EntityMap>()
+            .get(&ComponentPart::new("x").id)
+            .unwrap();
+        assert_eq!(parent_of(app.world(), x), Some(root));
+        // Leaf was pre-created, so hierarchy helper must not invent a parent.
+        assert_eq!(parent_of(app.world(), y), None);
     }
 }

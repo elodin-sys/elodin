@@ -202,6 +202,15 @@ pub struct PendingWindowSchematics {
     loads: Vec<PendingWindowLoad>,
 }
 
+#[derive(Component)]
+pub struct MonitorsRoot;
+
+pub(crate) fn plugin(app: &mut App) {
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn((MonitorsRoot, Name::new("monitors")));
+    });
+}
+
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -240,6 +249,8 @@ pub struct LoadSchematicParams<'w, 's> {
     last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
     #[cfg(feature = "big_space")]
     big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
+    // Optional: missing/duplicate root must not invalidate schematic load.
+    monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -1232,12 +1243,16 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| monitor.component_name.clone());
-                let entity = self
-                    .commands
-                    .spawn(super::monitor::MonitorData {
+                let mut entity = self.commands.spawn((
+                    super::monitor::MonitorData {
                         component_name: monitor.component_name.clone(),
-                    })
-                    .id();
+                    },
+                    Name::new(label.clone()),
+                ));
+                if let Some(root) = self.monitor_root.as_ref() {
+                    entity.insert(ChildOf(**root));
+                }
+                let entity = entity.id();
                 let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
@@ -1664,7 +1679,7 @@ pub fn show_document_load_failures(
 
 #[cfg(test)]
 mod tests {
-    use super::LoadSchematicParams;
+    use super::{LoadSchematicParams, MonitorsRoot};
     use crate::ui::widgets::SystemStateExt;
     use crate::{
         Coordinate, EqlContext,
@@ -1728,6 +1743,7 @@ mod tests {
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut().spawn((MonitorsRoot, Name::new("monitors")));
         settle(&mut app);
         app
     }

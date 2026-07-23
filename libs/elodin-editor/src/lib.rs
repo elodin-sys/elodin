@@ -589,6 +589,9 @@ fn run_egui_inspector(world: &mut World) {
     };
     let mut egui_context = egui_context.clone();
 
+    // CentralPanel::show(Context) is deprecated in egui 0.34 in favor of
+    // show_inside(Ui); top-level Context usage still requires show().
+    #[expect(deprecated)]
     egui::CentralPanel::default().show(egui_context.get_mut(), |ui| {
         egui::ScrollArea::both().show(ui, |ui| {
             bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
