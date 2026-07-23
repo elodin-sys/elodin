@@ -134,51 +134,63 @@ To revert to the previous configuration, reboot and select the previous bootload
 
 NOTE: The bootloader can only be accessed via the serial console. So, you'll need to switch the USB-C cable to the debugger port (left-most USB-C port).
 
-## Fresh Install / Recovery (via USB / SD card)
+## Fresh Install / Recovery (initrd flash over USB-C)
 
-This method installs a minimal base NixOS image on Aleph, returning the device to its factory state. It's useful primarily for recovery when the system becomes unbootable or severely corrupted. This method requires a USB drive with at least 8GB of space.
+This is the recommended way to bring up a bare Aleph or recover an unbootable unit. One command flashes the UEFI bootloader (QSPI) **and** installs NixOS to the M.2 NVMe over the recovery USB-C port — NVIDIA's supported initrd-flash flow for Orin NX + NVMe.
 
-1. Compile the SD Image from source using Nix:
+**Host requirements:** x86_64 Linux, Nix with flakes, and a good USB-C cable to the recovery port.
+
+1. Put Aleph into Force Recovery mode:
+   - Power off the module.
+   - Hold the recovery button while powering on (or use the recovery jumper).
+   - Confirm the device appears as NVIDIA APX:
+     ```bash
+     lsusb | grep -i nvidia
+     # expected: 0955:7xxx NVIDIA Corp. APX
+     ```
+
+2. Connect the recovery USB-C port to the host (same port used for `flash-uefi`). Optionally attach a serial console on the debug port (leftmost USB-C, 115200) to watch progress.
+
+3. From `aleph/`, run:
    ```bash
-   nix build --accept-flake-config .#packages.aarch64-linux.sdimage
+   nix run --accept-flake-config .#flash-initrd
+   # or: nix build --accept-flake-config .#packages.x86_64-linux.flash-initrd && sudo ./result/flash-initrd
    ```
 
-2. Flash the image to a USB drive.
+4. Wait for the script to report success. The device RCM-boots a flashing initrd, writes QSPI firmware, partitions and images the NVMe (ESP + root), then reboots into NixOS.
 
-    ⚠️ The `dd` command can cause **PERMANENT DATA LOSS** if used incorrectly. Double-check your device name before proceeding.
+5. After reboot, SSH in and continue with [Initial Setup](#initial-setup):
+   ```bash
+   ssh root@fde1:2240:a1ef::1   # password: root
+   ```
 
-    - Identify your USB drive's device name:
-        - **Linux:** Run `lsblk` and look for your USB drive (e.g., `/dev/sdb`, `/dev/sdc`).
-        - **macOS**: Run `diskutil list` and identify your USB drive (e.g., `/dev/disk2`). For better performance, use the raw device path (e.g., `/dev/rdisk2`).
-    - Unmount the USB drive:
-        - **Linux:** `sudo umount /dev/sdX*` (replace `/dev/sdX` with your device name)
-        - **macOS:** `sudo diskutil unmountDisk /dev/diskX` (replace `/dev/diskX` with your device identifier)
-    - Write the image to the USB drive:
-      ```bash
-      # Replace /dev/sdX with your actual device name
-      sudo dd if=aleph-os.img of=/dev/sdX bs=4M status=progress oflag=sync
-      ```
-    - Safely umount and remove the USB drive.
+Subsequent updates use `./deploy.sh` as usual.
 
-3. Boot Aleph from the USB drive.
-    - Insert the USB drive into the middle USB-C port on Aleph.
-    - Power Aleph using the debug USB-C port (leftmost port) or using the DC power connector.
-    - The UEFI firmware should automatically boot from USB. If not, access the boot menu by connecting via serial console and pressing ESC during boot.
+<details>
 
-4. Connect to Aleph and run the installer.
-    - Connect to Aleph using the rightmost USB-C port (Ethernet gadget).
-    - SSH into Aleph (password: `root`).
-      ```bash
-      ssh root@fde1:2240:a1ef::1
-      ```
-    - Run the installer script and follow the prompts.
-      ```bash
-      aleph-installer
-      ```
+<summary>Legacy: USB / SD card installer</summary>
 
-5. Remove the USB drive and reboot Aleph.
+The USB sd-image installer remains available if initrd flash is not an option. USB mass-storage boot is unreliable on some Aleph units (host controller enumerates but the stick never appears), which is why initrd flash is preferred.
 
-After rebooting, you can re-establish SSH connectivity and proceed with the initial setup as described in the earlier sections.
+1. Build and flash a USB stick (≥8GB):
+   ```bash
+   nix build --accept-flake-config .#packages.aarch64-linux.sdimage
+   # Identify the stick with lsblk / diskutil, then:
+   sudo dd if=result/sd-image/aleph-os.img of=/dev/sdX bs=4M status=progress oflag=sync
+   ```
+   ⚠️ `dd` can cause **permanent data loss** — double-check the device name.
+
+2. Insert the stick into the middle USB-C port, power on (debug port or DC), and boot from USB (ESC in the serial boot menu if needed).
+
+3. SSH via the Ethernet gadget (rightmost USB-C) and run the installer:
+   ```bash
+   ssh root@fde1:2240:a1ef::1   # password: root
+   aleph-installer
+   ```
+
+4. Remove the stick and reboot, then continue with Initial Setup.
+
+</details>
 
 <details>
 
