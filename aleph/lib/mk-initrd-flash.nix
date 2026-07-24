@@ -155,13 +155,16 @@
     ];
   };
 
-  flashInitrd = flash-initrd-cross.pkgs.nvidia-jetpack.flashInitrd;
-  flash-initrd-bin-name = "initrd-flash-${flash-initrd-cross.config.hardware.nvidia-jetpack.name}";
+  hostHooks = hostPkgs.replaceVars ../pkgs/flash-initrd-host-hooks.sh {
+    ip = "${hostPkgs.iproute2}/bin/ip";
+    python = "${hostPkgs.python3}/bin/python3";
+    inherit flashPayload;
+  };
   # Keep headroom below MB1's measured RCM blob limit.
   maxInitrdBytes = 314572800; # 300 MiB
 in
   hostPkgs.runCommand "flash-initrd" {} ''
-    initrd=${flashInitrd}/initrd
+    initrd=${flash-initrd-cross.pkgs.nvidia-jetpack.flashInitrd}/initrd
     size=$(stat -c %s "$initrd")
     if [ "$size" -ge ${toString maxInitrdBytes} ]; then
       echo "error: flash initrd is $size bytes (≥ ${toString maxInitrdBytes});" >&2
@@ -169,54 +172,11 @@ in
       exit 1
     fi
     mkdir -p $out
-    cp ${flash-initrd-cross.config.system.build.initrdFlashScript}/bin/${flash-initrd-bin-name} $out/flash-initrd
+    cp ${flash-initrd-cross.config.system.build.initrdFlashScript}/bin/initrd-flash-${flash-initrd-cross.config.hardware.nvidia-jetpack.name} $out/flash-initrd
     chmod +w $out/flash-initrd
 
-    # Right after cd "$WORKDIR": self-log every run, and raise usbfs staging
-    # memory — the 16 MiB default stalls RCM bulk writes with
-    # "might be timeout in USB write" (forums.developer.nvidia.com/t/360581).
-    cat > insert-pre <<'EOF'
-    exec > >(tee /tmp/flash-initrd-$(date +%s).log) 2>&1
-    echo 2048 > /sys/module/usbcore/parameters/usbfs_memory_mb || true
-    echo -1 > /sys/module/usbcore/parameters/autosuspend || true
-    # ModemManager probes the flash ACM console with AT commands; keep it away
-    MM_WAS_ACTIVE=0
-    if systemctl is-active --quiet ModemManager 2>/dev/null; then
-      MM_WAS_ACTIVE=1
-      systemctl stop ModemManager || true
-    fi
-    trap '[ "$MM_WAS_ACTIVE" = 1 ] && systemctl start ModemManager 2>/dev/null; type on_exit >/dev/null 2>&1 && on_exit || true' EXIT
-    EOF
-
-    # Right after flash.sh (RCM boot started): bring up the gadget ethernet
-    # and serve the OS images for flash-from-device to fetch.
-    cat > insert-post <<'EOF'
-    echo "Starting sideload server for the flash initrd..."
-    for i in $(seq 1 90); do
-      ${hostPkgs.iproute2}/bin/ip link show enx327005180101 >/dev/null 2>&1 && break
-      sleep 1
-    done
-    if ! ${hostPkgs.iproute2}/bin/ip link show enx327005180101 >/dev/null 2>&1; then
-      echo "ERR: gadget ethernet enx327005180101 did not appear" >&2
-      exit 3
-    fi
-    # NetworkManager tears our static address down mid-flash; unmanage the
-    # iface if NM is present, and keep re-asserting the address regardless.
-    command -v nmcli >/dev/null 2>&1 && nmcli dev set enx327005180101 managed no || true
-    ${hostPkgs.iproute2}/bin/ip addr replace 192.168.7.1/24 dev enx327005180101
-    ${hostPkgs.iproute2}/bin/ip link set enx327005180101 up
-    (
-      while true; do
-        ${hostPkgs.iproute2}/bin/ip addr replace 192.168.7.1/24 dev enx327005180101 2>/dev/null
-        ${hostPkgs.iproute2}/bin/ip link set enx327005180101 up 2>/dev/null
-        sleep 5
-      done
-    ) &
-    KEEPER_PID=$!
-    ${hostPkgs.python3}/bin/python3 -m http.server 8080 --bind 192.168.7.1 --directory ${flashPayload} &
-    HTTP_PID=$!
-    trap 'kill $HTTP_PID $KEEPER_PID 2>/dev/null || true; command -v nmcli >/dev/null 2>&1 && nmcli dev set enx327005180101 managed yes 2>/dev/null || true; [ "$MM_WAS_ACTIVE" = 1 ] && systemctl start ModemManager 2>/dev/null; type on_exit >/dev/null 2>&1 && on_exit || true' EXIT
-    EOF
+    printf '%s\n' 'source ${hostHooks}' aleph_flash_prepare_host > insert-pre
+    echo aleph_flash_start_sideload > insert-post
 
     # After the devicetree copy: boot the RCM kernel with Aleph's tree — the
     # devkit DTB leaves the M.2 PCIe link down, so /dev/nvme0n1 never appears.
