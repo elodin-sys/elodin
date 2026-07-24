@@ -171,24 +171,19 @@
           ];
         };
       });
-      apps = let
-        baseApps = forAllSystems (pkgs: {
+      apps =
+        nixpkgs.lib.recursiveUpdate
+        (forAllSystems (pkgs: {
           deploy = {
             type = "app";
             program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
           };
-        });
-      in
-        baseApps
-        // {
-          x86_64-linux =
-            baseApps.x86_64-linux
-            // {
-              flash-initrd = {
-                type = "app";
-                program = "${self.packages.x86_64-linux.flash-initrd}/flash-initrd";
-              };
-            };
+        }))
+        {
+          x86_64-linux.flash-initrd = {
+            type = "app";
+            program = "${self.packages.x86_64-linux.flash-initrd}/flash-initrd";
+          };
         };
     }
     // rec {
@@ -223,9 +218,8 @@
         rootImage = flashInstallSystem.config.system.build.alephRootImage;
         rootPartitionUUID = flashInstallSystem.config.aleph.fs.rootPartitionUUID;
 
-        # The device rejects RCM blobs somewhere between 383 MB and 803 MB
-        # (MB1 RCM_BLOB err 0x354b0107; see ai-context/rcm-bisect). OS images are
-        # therefore sideloaded to the flash initrd over a USB ethernet gadget.
+        # MB1 rejects RCM blobs between 383 MB and 803 MB (err 0x354b0107),
+        # so OS images are sideloaded over a USB ethernet gadget.
         sideloadUrl = "http://192.168.7.1:8080";
         flashPayload = hostPkgs.runCommand "aleph-flash-payload" {} ''
           mkdir -p $out
@@ -246,7 +240,7 @@
         # jetpack's overlay-with-config).
         alephFlashOverlay = final: prev: {
           nvidia-jetpack = prev.nvidia-jetpack.overrideScope (_jfinal: jprev: {
-            # jetpack's on-device flasher skips NVMe rows; patch in 9:0 / 12:* writes
+            # jetpack's on-device flasher skips NVMe rows; patch in 12:0 writes
             flashFromDevice =
               final.runCommand "flash-from-device" {
                 meta.mainProgram = "flash-from-device";
@@ -258,17 +252,6 @@
                 python3 ${./pkgs/patch-flash-from-device-nvme.py} $out/bin/flash-from-device
                 chmod +x $out/bin/flash-from-device
               '';
-            # MB2 initializes every device in its cold-boot BCT storage info; on the
-            # Aleph carrier PCIe cannot come up that early (SError in
-            # tegrabl_pcie_soc_init, board falls back to recovery). Strip NVMe from
-            # the storage-info step only — GPT/flash.idx keep the full layout.
-            flash-tools = jprev.flash-tools.overrideAttrs (old: {
-              postInstall =
-                (old.postInstall or "")
-                + ''
-                  python3 ${./pkgs/patch-tegraflash-storage-info.py} $out/bootloader/tegraflash_impl_t234.py
-                '';
-            });
             # Strip OS images from the firmware tree (kept out of the RCM blob) and
             # point flash.idx esp/APP rows at the host sideload URLs.
             # makeInitrd packs this closure — do not repack.
@@ -320,18 +303,18 @@
               nixpkgs.overlays = lib.mkAfter [alephFlashOverlay];
 
               hardware.nvidia-jetpack.firmware.initialBootOrder = ["nvme" "usb" "emmc" "sd" "scsi"];
+              # g_ncm is builtin and would claim the UDC before the flash gadget.
+              hardware.nvidia-jetpack.console.args = lib.mkAfter ["initcall_blacklist=ncm_driver_init"];
 
               hardware.nvidia-jetpack.flashScriptOverrides = {
                 # jetpack adds its own QSPI/USB-gadget modules; these are the Aleph
                 # additions for the SSD. mkForce sheds the option default
                 # (availableKernelModules), which lists modules absent from
                 # tegra_defconfig and fails makeModulesClosure (allowMissing = false).
+                # NVMe and ECM are builtin; only the PCIe drivers need packaging.
                 additionalInitrdFlashModules = lib.mkForce [
                   "phy_tegra194_p2u"
                   "pcie_tegra194"
-                  "nvme"
-                  "nvme-core"
-                  "usb_f_ecm"
                 ];
 
                 partitionTemplate =
@@ -372,6 +355,7 @@
 
                 postPatch = ''
                   cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts
+                  ${pkgs.buildPackages.python3}/bin/python3 ${./pkgs/patch-tegraflash-storage-info.py} bootloader/tegraflash_impl_t234.py
                 '';
               };
             })
@@ -390,8 +374,7 @@
 
         flash-initrd = let
           flashInitrd = flash-initrd-cross.pkgs.nvidia-jetpack.flashInitrd;
-          # MB1 rejects RCM blobs between 383 MB (accepted) and 803 MB (rejected):
-          # RCM_BLOB err 0x354b0107, see ai-context/rcm-bisect. Keep headroom.
+          # Keep headroom below MB1's measured RCM blob limit.
           maxInitrdBytes = 314572800; # 300 MiB
         in
           hostPkgs.runCommand "flash-initrd" {} ''
@@ -419,6 +402,7 @@
               MM_WAS_ACTIVE=1
               systemctl stop ModemManager || true
             fi
+            trap '[ "$MM_WAS_ACTIVE" = 1 ] && systemctl start ModemManager 2>/dev/null; type on_exit >/dev/null 2>&1 && on_exit || true' EXIT
             EOF
 
             # Right after flash.sh (RCM boot started): bring up the gadget ethernet
@@ -448,7 +432,7 @@
             KEEPER_PID=$!
             ${hostPkgs.python3}/bin/python3 -m http.server 8080 --bind 192.168.7.1 --directory ${flashPayload} &
             HTTP_PID=$!
-            trap 'kill $HTTP_PID $KEEPER_PID 2>/dev/null || true; [ "$MM_WAS_ACTIVE" = 1 ] && systemctl start ModemManager 2>/dev/null; type on_exit >/dev/null 2>&1 && on_exit || true' EXIT
+            trap 'kill $HTTP_PID $KEEPER_PID 2>/dev/null || true; command -v nmcli >/dev/null 2>&1 && nmcli dev set enx327005180101 managed yes 2>/dev/null || true; [ "$MM_WAS_ACTIVE" = 1 ] && systemctl start ModemManager 2>/dev/null; type on_exit >/dev/null 2>&1 && on_exit || true' EXIT
             EOF
 
             # After the devicetree copy: boot the RCM kernel with Aleph's tree — the
@@ -464,12 +448,6 @@
             sed -i '/\. kernel\/dtb\/$/r insert-dtb' $out/flash-initrd
             grep -q '^\./flash\.sh ' $out/flash-initrd
             sed -i '/^\.\/flash\.sh /r insert-post' $out/flash-initrd
-            # The Aleph kernel builds g_ncm builtin (CONFIG_USB_G_NCM=y, used by
-            # usb-eth.nix); it binds the sole UDC before /init runs, so the flash
-            # gadget (ACM serial + ECM) can never attach. Blacklist its initcall
-            # for the RCM boot only — the installed system is unaffected.
-            grep -q '^export CMDLINE=' $out/flash-initrd
-            sed -i 's|^export CMDLINE="\(.*\)"|export CMDLINE="\1 initcall_blacklist=ncm_driver_init"|' $out/flash-initrd
             chmod +x $out/flash-initrd
           '';
       };

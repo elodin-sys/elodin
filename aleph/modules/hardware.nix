@@ -40,8 +40,6 @@
     # Tegra-specific modules for NVMe boot
     "phy_tegra194_p2u"
     "pcie_tegra194"
-    "nvme"
-    "nvme-core"
     # Tegra-specific modules required for usb/sdimage boot
     "xhci-tegra"
     # USB mass-storage boot path
@@ -57,7 +55,6 @@
     "usb_storage"
     "uas"
     "sd_mod"
-    "nvme"
   ];
 
   # Avoids a bunch of extra modules we don't have in the tegra_defconfig, like "ata_piix",

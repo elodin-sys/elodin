@@ -20,7 +20,6 @@
   ...
 }: let
   cfg = config.aleph.nvmeImage;
-  inherit (config.aleph.fs) rootPartitionUUID;
   fdtPath = "${config.hardware.deviceTree.package}/${config.hardware.deviceTree.name}";
 
   mkESPContent =
@@ -60,58 +59,57 @@ in {
     enable = lib.mkEnableOption "Build ESP/root images for initrd NVMe flashing";
   };
 
-  config = lib.mkMerge [
-    {
-      image.fileName = "aleph-os.img";
+  config = {
+    image.fileName = "aleph-os.img";
 
-      sdImage = {
-        firmwareSize = 256;
-        populateFirmwareCommands = ''
-          mkdir -pv firmware
-          ${pkgs.buildPackages.python3}/bin/python3 ${mkESPContent} \
-            --toplevel ${config.system.build.toplevel} \
-            --output firmware/ \
-            --device-tree ${fdtPath}
-        '';
-        populateRootCommands = '''';
-        postBuildCommands = ''
-          fdisk_output=$(fdisk -l "$img")
+    sdImage = {
+      firmwareSize = 256;
+      populateFirmwareCommands = ''
+        mkdir -pv firmware
+        ${pkgs.buildPackages.python3}/bin/python3 ${mkESPContent} \
+          --toplevel ${config.system.build.toplevel} \
+          --output firmware/ \
+          --device-tree ${fdtPath}
+      '';
+      populateRootCommands = '''';
+      postBuildCommands = ''
+        fdisk_output=$(fdisk -l "$img")
 
-          # Offsets and sizes are in 512 byte sectors
-          blocksize=512
+        # Offsets and sizes are in 512 byte sectors
+        blocksize=512
 
-          # ESP partition offset and sector count
-          part_esp=$(echo -n "$fdisk_output" | tail -n 2 | head -n 1 | tr -s ' ')
-          part_esp_begin=$(echo -n "$part_esp" | cut -d ' ' -f2)
-          part_esp_count=$(echo -n "$part_esp" | cut -d ' ' -f4)
+        # ESP partition offset and sector count
+        part_esp=$(echo -n "$fdisk_output" | tail -n 2 | head -n 1 | tr -s ' ')
+        part_esp_begin=$(echo -n "$part_esp" | cut -d ' ' -f2)
+        part_esp_count=$(echo -n "$part_esp" | cut -d ' ' -f4)
 
-          # root-partition offset and sector count
-          part_root=$(echo -n "$fdisk_output" | tail -n 1 | head -n 1 | tr -s ' ')
-          part_root_begin=$(echo -n "$part_root" | cut -d ' ' -f3)
-          part_root_count=$(echo -n "$part_root" | cut -d ' ' -f4)
+        # root-partition offset and sector count
+        part_root=$(echo -n "$fdisk_output" | tail -n 1 | head -n 1 | tr -s ' ')
+        part_root_begin=$(echo -n "$part_root" | cut -d ' ' -f3)
+        part_root_count=$(echo -n "$part_root" | cut -d ' ' -f4)
 
-          echo -n $part_esp_begin > $out/esp.offset
-          echo -n $part_esp_count > $out/esp.size
-          echo -n $part_root_begin > $out/root.offset
-          echo -n $part_root_count > $out/root.size
-        '';
-      };
+        echo -n $part_esp_begin > $out/esp.offset
+        echo -n $part_esp_count > $out/esp.size
+        echo -n $part_root_begin > $out/root.offset
+        echo -n $part_root_count > $out/root.size
+      '';
+    };
 
-      fileSystems."/" = lib.mkIf (!config.aleph.sd.enable) (lib.mkForce {
-        device = "/dev/disk/by-uuid/${rootPartitionUUID}";
-        fsType = "ext4";
-        autoResize = cfg.enable;
-      });
-      fileSystems."/boot" = lib.mkIf (!config.aleph.sd.enable) {
-        device = "/dev/disk/by-label/BOOT";
-        fsType = "vfat";
-      };
-    }
-    (lib.mkIf cfg.enable {
-      # Grow APP partition to fill the NVMe on first boot (filesystem via autoResize above)
-      boot.growPartition = true;
+    fileSystems."/" = lib.mkIf (!config.aleph.sd.enable) (lib.mkForce {
+      device = "/dev/disk/by-uuid/${config.aleph.fs.rootPartitionUUID}";
+      fsType = "ext4";
+      autoResize = cfg.enable;
+    });
+    fileSystems."/boot" = lib.mkIf (!config.aleph.sd.enable) {
+      device = "/dev/disk/by-label/BOOT";
+      fsType = "vfat";
+    };
 
-      system.build.alephEspImage = let
+    # Grow APP to fill the NVMe on first boot (filesystem via autoResize above).
+    boot.growPartition = lib.mkIf cfg.enable true;
+
+    system.build = lib.mkIf cfg.enable {
+      alephEspImage = let
         espContents =
           pkgs.runCommand "aleph-esp-contents" {
             nativeBuildInputs = [pkgs.buildPackages.python3];
@@ -131,15 +129,15 @@ in {
           mcopy -i $out -s ${espContents}/* ::/
         '';
 
-      system.build.alephRootImage = pkgs.callPackage "${modulesPath}/../lib/make-ext4-fs.nix" {
+      alephRootImage = pkgs.callPackage "${modulesPath}/../lib/make-ext4-fs.nix" {
         storePaths = [config.system.build.toplevel];
         compressImage = false;
         volumeLabel = "APP";
-        uuid = rootPartitionUUID;
+        uuid = config.aleph.fs.rootPartitionUUID;
         populateImageCommands = ''
           mkdir -p ./files
         '';
       };
-    })
-  ];
+    };
+  };
 }

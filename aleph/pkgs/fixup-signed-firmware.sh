@@ -19,7 +19,7 @@ for dir in "$out"/*/; do
   [ -f "$dir/flash.idx" ] || continue
 
   # Drop image copies tegraflash placed in SKU dirs; they must not enter the initrd
-  rm -f "$dir/esp.img" "$dir/system.img" "$dir/esp.img.gz" "$dir/system.img.gz"
+  rm -f "$dir/esp.img" "$dir/system.img"
 
   # flash.idx fields: num, loc, start, size, file, filesize, attrs, sha.
   # URLs are comma/space-free, safe for the IFS=", " parser in flash-from-device.
@@ -33,8 +33,8 @@ out_lines = []
 fixed_esp = 0
 fixed_app = 0
 for line in lines:
-    m_esp = re.match(r"^(\d+, (?:12:\d+|9:0):esp, \d+, \d+), [^,]*, [^,]*, (.*)$", line)
-    m_app = re.match(r"^(\d+, (?:12:\d+|9:0):APP, \d+, \d+), [^,]*, [^,]*, (.*)$", line)
+    m_esp = re.match(r"^(\d+, 12:0:esp, \d+, \d+), [^,]*, [^,]*, (.*)$", line)
+    m_app = re.match(r"^(\d+, 12:0:APP, \d+, \d+), [^,]*, [^,]*, (.*)$", line)
     if m_esp:
         line = f"{m_esp.group(1)}, {base_url}/esp.img.gz, 0, {m_esp.group(2)}"
         fixed_esp += 1
@@ -42,10 +42,10 @@ for line in lines:
         line = f"{m_app.group(1)}, {base_url}/system.img.gz, 0, {m_app.group(2)}"
         fixed_app += 1
     out_lines.append(line)
-if fixed_esp == 0:
-    sys.exit(f"{path}: no NVMe esp row found in flash.idx")
-if fixed_app == 0:
-    sys.exit(f"{path}: no NVMe APP row found in flash.idx")
+if fixed_esp != 1:
+    sys.exit(f"{path}: expected one NVMe esp row, found {fixed_esp}")
+if fixed_app != 1:
+    sys.exit(f"{path}: expected one NVMe APP row, found {fixed_app}")
 open(path, "w").write("\n".join(out_lines) + "\n")
 PY
 done

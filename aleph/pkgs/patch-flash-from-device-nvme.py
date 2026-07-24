@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch jetpack flash-from-device.sh to write NVMe partitions (9:0 and 12:*).
+"""Patch jetpack flash-from-device.sh to write Aleph's NVMe partitions.
 
 esp/APP rows carry http URLs (host sideload server over the ECM gadget);
 those are streamed with wget | gunzip | dd instead of read from the initrd.
@@ -8,10 +8,8 @@ those are streamed with wget | gunzip | dd instead of read from the initrd.
 import sys
 from pathlib import Path
 
-# NVIDIA tegraflash maps nvme instance 0 → device 12:0 (mbr_12_0.bin).
-# Stock flash_t234_qspi_nvme.xml uses instance 4 → 12:4 (no GPT name map).
-# External storage fallback is 9:0. Treat all of these as /dev/nvme0n1.
-NVME_TEST = '[[ "$devnum" -eq 9 && "$instnum" -eq 0 ]] || [[ "$devnum" -eq 12 ]]'
+# The Aleph partition template maps NVMe instance 0 to flash.idx device 12:0.
+NVME_TEST = '[[ "$devnum" -eq 12 && "$instnum" -eq 0 ]]'
 
 
 def main() -> None:
@@ -53,14 +51,9 @@ def main() -> None:
       fi
     elif {NVME_TEST}; then
       report_step "Writing $partfile to $partname on /dev/nvme0n1 (offset=$start_location)"
-      set -o pipefail
       if [[ "$partfile" == http* ]]; then
         fetch_ok=0
         for attempt in 1 2 3 4 5; do
-          for i in $(seq 1 30); do
-            wget -q -O /dev/null "${{partfile%/*}}/" && break
-            sleep 2
-          done
           # dd seeks to a fixed offset, so retrying after a partial write is safe
           if wget -q -O - "$partfile" | gzip -dc | dd of="/dev/nvme0n1" bs=1M seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null; then
             fetch_ok=1
@@ -71,11 +64,6 @@ def main() -> None:
         done
         if [[ "$fetch_ok" -ne 1 ]]; then
           echo "ERR: failed sideloading $partfile to /dev/nvme0n1" >&2
-          return 1
-        fi
-      elif [[ "$partfile" == *.gz ]]; then
-        if ! gzip -dc "$partfile" | dd of="/dev/nvme0n1" bs=1M seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null; then
-          echo "ERR: failed writing $partfile to /dev/nvme0n1" >&2
           return 1
         fi
       else
@@ -98,31 +86,17 @@ write_partitions
 
 echo Finished flashing device
 """
-    main_repl = f"""needs_nvme=0
-while IFS=", " read -r _pn partloc _a _b _c _d _e _f; do
-  devnum=$(echo "$partloc" | cut -d':' -f 1)
-  instnum=$(echo "$partloc" | cut -d':' -f 2)
-  if {NVME_TEST}; then
-    needs_nvme=1
+    main_repl = """for i in $(seq 1 60); do
+  if [[ -b /dev/nvme0n1 ]]; then
+    echo "NVMe device ready: /dev/nvme0n1"
     break
   fi
-done <flash.idx
-
-if [[ "$needs_nvme" -eq 1 ]]; then
-  for i in $(seq 1 60); do
-    if [[ -b /dev/nvme0n1 ]]; then
-      echo "NVMe device ready: /dev/nvme0n1"
-      break
-    fi
-    echo "Waiting for /dev/nvme0n1 ($i/60)..."
-    sleep 1
-  done
-  if [[ ! -b /dev/nvme0n1 ]]; then
-    echo "ERR: /dev/nvme0n1 did not appear" >&2
-    exit 1
-  fi
-  echo "Discarding /dev/nvme0n1..."
-  blkdiscard -f /dev/nvme0n1 || true
+  echo "Waiting for /dev/nvme0n1 ($i/60)..."
+  sleep 1
+done
+if [[ ! -b /dev/nvme0n1 ]]; then
+  echo "ERR: /dev/nvme0n1 did not appear" >&2
+  exit 1
 fi
 
 first_url=""
@@ -132,22 +106,27 @@ while IFS=", " read -r _pn _loc _a _b partfile _f _g _h; do
   esac
 done <flash.idx
 
-if [[ -n "$first_url" ]]; then
-  probe="${{first_url%/*}}/"
-  echo "Waiting for sideload server at $probe..."
-  server_ok=0
-  for i in $(seq 1 90); do
-    if wget -q -O /dev/null "$probe"; then
-      server_ok=1
-      break
-    fi
-    sleep 2
-  done
-  if [[ "$server_ok" -ne 1 ]]; then
-    echo "ERR: sideload server unreachable: $probe" >&2
-    exit 1
-  fi
+if [[ -z "$first_url" ]]; then
+  echo "ERR: flash.idx has no sideload URL" >&2
+  exit 1
 fi
+probe="${first_url%/*}/"
+echo "Waiting for sideload server at $probe..."
+server_ok=0
+for i in $(seq 1 90); do
+  if wget -q -O /dev/null "$probe"; then
+    server_ok=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$server_ok" -ne 1 ]]; then
+  echo "ERR: sideload server unreachable: $probe" >&2
+  exit 1
+fi
+
+echo "Discarding /dev/nvme0n1..."
+blkdiscard -f /dev/nvme0n1 || true
 
 steps=$(expr "$(wc -l <flash.idx)" + "1")
 
@@ -162,7 +141,7 @@ echo Finished flashing device
     text = text.replace(main_needle, main_repl, 1)
 
     path.write_text(text)
-    print(f"Patched {path} for NVMe (9:0 / 12:*)")
+    print(f"Patched {path} for Aleph NVMe sideloading")
 
 
 if __name__ == "__main__":
