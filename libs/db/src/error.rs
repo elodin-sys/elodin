@@ -68,6 +68,9 @@ pub enum Error {
     #[cfg(feature = "parquet")]
     #[error("parquet {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
+    #[cfg(feature = "mcap-export")]
+    #[error("mcap {0}")]
+    Mcap(#[from] mcap::McapError),
     #[error("schema mismatch")]
     SchemaMismatch,
     #[error("missing db_state file at {0}")]

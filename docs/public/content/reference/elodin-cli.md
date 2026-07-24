@@ -846,7 +846,7 @@ elodin-db query --eql "rocket.world_pos" --limit 1000 -f parquet ./my-database >
 
 ## `elodin-db export`
 
-Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.
+Export database contents to parquet, arrow-ipc, csv, or a Foxglove-compatible mcap file without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks, or for reviewing and sharing recordings in [Foxglove](https://foxglove.dev).
 
 The export runs in parallel across components and is dramatically faster than the historical single-threaded path; on a 20-core machine the customer's ~3 GB CSV export went from ~32 s (default formatting) to ~2.2 s (`--csv-fast-floats`), a 14× speedup.
 
@@ -864,7 +864,7 @@ The export runs in parallel across components and is dramatically faster than th
 
   Default value: `parquet`
 
-  Possible values: `parquet`, `arrow-ipc`, `csv`
+  Possible values: `parquet`, `arrow-ipc`, `csv`, `mcap` (alias: `foxglove`)
 
 * `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned.x`, `vel_ned.y`, `vel_ned.z`)
 
@@ -880,6 +880,12 @@ The export runs in parallel across components and is dramatically faster than th
 
 * `--include-private` — Include components whose metadata has `private: true`. Off by default — those components are skipped (see [Private Components](#private-components) below).
 
+* `--all-assets` — MCAP-only: attach every file under `{db}/assets/` instead of only schematic-referenced assets.
+
+* `--epoch-offset-us <i64>` — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP `log_time`/`publish_time`. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes `t=0` and records the shift in metadata key `elodin.time_offset_us`. The same auto-rebase runs if a requested offset would leave any sample pre-epoch (MCAP `log_time` is unsigned and cannot store absolute 1969-era times) — so `--epoch-offset-us 0` on Apollo-style data still preserves playback ordering rather than collapsing every sample to `t=0`.
+
+* `--max-embed-mb <u64>` — MCAP-only: maximum GLB size (MiB) to base64-embed inside `/scene` `SceneUpdate` messages (default `32`). Larger GLBs are still attached to the MCAP but their model primitive is omitted entirely (no empty-`data` model). The viewport follow-entity's mesh is always embedded regardless of this limit.
+
 ###### **Export Formats**
 
 | Format | Extension | Description |
@@ -887,6 +893,33 @@ The export runs in parallel across components and is dramatically faster than th
 | `parquet` | `.parquet` | Columnar format with compression. Best for large datasets and analytics tools. |
 | `arrow-ipc` | `.arrow` | Arrow IPC format. Fast to read/write, good for streaming data between processes. |
 | `csv` | `.csv` | Plain text format. Universal compatibility but larger file sizes. |
+| `mcap` | `.mcap` | Foxglove-compatible MCAP recording (single file, zstd-compressed JSON channels). See [Foxglove MCAP Export](#foxglove-mcap-export) below. |
+
+###### **Foxglove MCAP Export**
+
+`--format mcap` (alias `--format foxglove`) writes a single `{db_name}.mcap` plus a generated `{db_name}.foxglove-layout.json`, ready to open in [Foxglove](https://app.foxglove.dev) or upload to the Foxglove Data Platform:
+
+- Every component becomes a JSON channel (`drone.world_pos` → `/drone/world_pos`) with fields named after the component's `element_names`; dotted names nest (`e.r` → `.e.r`).
+- Pose components (`*.world_pos`, 7 elements) additionally publish `foxglove.FrameTransforms` on `/tf` (`world` → entity), driving the Foxglove 3D panel.
+- Schematic `object_3d` meshes/GLBs (including literal-pose entities), `line_3d` trajectories (decimated, pixel-width scale-invariant lines), constant `vector_arrow`s, and `world_mesh "globe"` (swapped to `earth.glb` on the Earth frame) become `foxglove.SceneUpdate` entities — **one topic per entity** (`/scene/<entity-id>`), because Foxglove backfills only the latest message per topic when a 3D panel (re)mounts. Data-driven `vector_arrow`s (≤30 Hz) publish one topic each (`/scene_dynamic/<name>`). Multiple `object_3d` on the same entity get unique ids (`{frame}-model`, `{frame}-model-2`, …). Literal poses compose with GLB `translate`/`rotate`.
+- Viewport `near`/`far` are honored in the 3D panel `cameraState`; `far` is clamped to ≥4× the camera distance (derived from the viewport `pos` offset, including `translate_world(x,y,z)`-style method chains). Each 3D panel follows its own `look_at`/`pos` subject and subscribes to every scene topic.
+- A schematic `coordinate lat=… lon=… alt=…` node emits static world→`NED`/`ENU` anchor transforms and re-parents entities whose `object_3d` declares `frame="NED"`/`"ENU"` under them.
+- Message logs export as `foxglove.CompressedVideo` (native H.264 and sensor-camera RGBA re-encoded via openh264 when the `video-export` feature is on), `foxglove.RawImage` (sensor cameras without video-export), `foxglove.Log` (LogEntry streams → Log/`RosOut` panel), or base64 JSON (other).
+- Schematic KDL files and referenced GLB assets travel along as MCAP attachments; DB and component metadata as MCAP metadata records (including `elodin.time_offset_us` when timestamps are rebased).
+- The generated layout mirrors the Elodin schematic: tabs/splits map to Foxglove tabs/splits, `graph` EQL expressions expand to Plot panel series, `viewport` becomes a 3D panel following the vehicle, `component_monitor` becomes Raw Messages, `log_stream` becomes a Log panel. SQL `query_plot`, icons, thrusters, bloom/hdr, and non-globe `world_mesh` regions are skipped with a console note.
+
+```bash
+# Export and open locally (drag into app.foxglove.dev or the desktop app)
+elodin-db export --format mcap --output ./fg ./my-database
+
+# One-shot upload + layout + view URL
+scripts/foxglove-upload.sh \
+  --mcap ./fg/my-database.mcap \
+  --layout ./fg/my-database.foxglove-layout.json \
+  --device elodin-my-example \
+  --key elodin-my-example-v1 \
+  --layout-name "Elodin My Example"
+```
 
 ###### **Vector Column Handling**
 

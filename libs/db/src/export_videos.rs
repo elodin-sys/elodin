@@ -85,7 +85,11 @@ fn find_sps_nal(payload: &[u8]) -> Option<&[u8]> {
 }
 
 /// Convert one packed RGBA frame into the I420 layout expected by OpenH264.
-fn rgba_to_i420(payload: &[u8], width: usize, height: usize) -> Result<YUVBuffer, Error> {
+pub(crate) fn rgba_to_i420(
+    payload: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<YUVBuffer, Error> {
     if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
         return Err(invalid_data(format!(
             "sensor camera dimensions must be even for I420: {}x{}",
@@ -107,12 +111,12 @@ fn rgba_to_i420(payload: &[u8], width: usize, height: usize) -> Result<YUVBuffer
     Ok(YUVBuffer::from_rgb_source(rgba))
 }
 
-struct SensorEncoder {
+pub(crate) struct SensorEncoder {
     encoder: Encoder,
 }
 
 impl SensorEncoder {
-    fn new(width: u32, height: u32, fps: f32) -> Result<Self, Error> {
+    pub(crate) fn new(width: u32, height: u32, fps: f32) -> Result<Self, Error> {
         let fps = if fps.is_finite() && fps > 0.0 {
             fps
         } else {
@@ -133,7 +137,7 @@ impl SensorEncoder {
         Ok(Self { encoder })
     }
 
-    fn encode_frame(&mut self, yuv: &YUVBuffer) -> Result<Vec<u8>, Error> {
+    pub(crate) fn encode_frame(&mut self, yuv: &YUVBuffer) -> Result<Vec<u8>, Error> {
         self.encoder
             .encode(yuv)
             .map(|bitstream| bitstream.to_vec())
@@ -141,7 +145,7 @@ impl SensorEncoder {
     }
 }
 
-fn sensor_camera_export_fps(cfg: &SensorCameraConfig, default_fps: u32) -> f32 {
+pub(crate) fn sensor_camera_export_fps(cfg: &SensorCameraConfig, default_fps: u32) -> f32 {
     if cfg.fps.is_finite() && cfg.fps > 0.0 {
         cfg.fps
     } else {
