@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.17.3" selected>
-                        v0.17.3
+                    <option value="v0.18.0" selected>
+                        v0.18.0
                     </option>
                 </select>
             </span>
@@ -800,6 +800,10 @@
                                 
                                 <li>
                                     <a href="/reference/elodin-cli/#export-formats">Export Formats</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#foxglove-mcap-export">Foxglove MCAP Export</a>
                                 </li>
                                 
                                 <li>
@@ -1627,7 +1631,7 @@ and <code>drift_resets</code>, with worst-run callouts in the campaign summary.<
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>eql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.world_pos<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>limit</span> 1000<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>f</span> parquet ./my-database <span class="z-keyword z-operator z-assignment z-redirection z-shell">&gt;</span> out.parquet</span>
 </span></code></pre>
 <h2 id="elodin-db-export"><code>elodin-db export</code></h2>
-<p>Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.</p>
+<p>Export database contents to parquet, arrow-ipc, csv, or a Foxglove-compatible mcap file without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks, or for reviewing and sharing recordings in <a href="https://foxglove.dev">Foxglove</a>.</p>
 <p>The export runs in parallel across components and is dramatically faster than the historical single-threaded path; on a 20-core machine the customer's ~3 GB CSV export went from ~32 s (default formatting) to ~2.2 s (<code>--csv-fast-floats</code>), a 14× speedup.</p>
 <p><strong>Usage:</strong> <code>elodin-db export [OPTIONS] --output &lt;OUTPUT&gt; &lt;PATH&gt;</code></p>
 <h6 id="arguments-13"><strong>Arguments</strong></h6>
@@ -1642,7 +1646,7 @@ and <code>drift_resets</code>, with worst-run callouts in the campaign summary.<
 <li>
 <p><code>--format &lt;FORMAT&gt;</code> — Export format</p>
 <p>Default value: <code>parquet</code></p>
-<p>Possible values: <code>parquet</code>, <code>arrow-ipc</code>, <code>csv</code></p>
+<p>Possible values: <code>parquet</code>, <code>arrow-ipc</code>, <code>csv</code>, <code>mcap</code> (alias: <code>foxglove</code>)</p>
 </li>
 <li>
 <p><code>--flatten</code> — Flatten vector columns to separate columns (e.g., <code>vel_ned</code> becomes <code>vel_ned.x</code>, <code>vel_ned.y</code>, <code>vel_ned.z</code>)</p>
@@ -1665,13 +1669,46 @@ and <code>drift_resets</code>, with worst-run callouts in the campaign summary.<
 <li>
 <p><code>--include-private</code> — Include components whose metadata has <code>private: true</code>. Off by default — those components are skipped (see <a href="/reference/elodin-cli/#private-components">Private Components</a> below).</p>
 </li>
+<li>
+<p><code>--all-assets</code> — MCAP-only: attach every file under <code>{db}/assets/</code> instead of only schematic-referenced assets.</p>
+</li>
+<li>
+<p><code>--epoch-offset-us &lt;i64&gt;</code> — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP <code>log_time</code>/<code>publish_time</code>. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes <code>t=0</code> and records the shift in metadata key <code>elodin.time_offset_us</code>. The same auto-rebase runs if a requested offset would leave any sample pre-epoch (MCAP <code>log_time</code> is unsigned and cannot store absolute 1969-era times) — so <code>--epoch-offset-us 0</code> on Apollo-style data still preserves playback ordering rather than collapsing every sample to <code>t=0</code>.</p>
+</li>
+<li>
+<p><code>--max-embed-mb &lt;u64&gt;</code> — MCAP-only: maximum GLB size (MiB) to base64-embed inside <code>/scene</code> <code>SceneUpdate</code> messages (default <code>32</code>). Larger GLBs are still attached to the MCAP but their model primitive is omitted entirely (no empty-<code>data</code> model). The viewport follow-entity's mesh is always embedded regardless of this limit.</p>
+</li>
 </ul>
 <h6 id="export-formats"><strong>Export Formats</strong></h6>
 <table><thead><tr><th>Format</th><th>Extension</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>parquet</code></td><td><code>.parquet</code></td><td>Columnar format with compression. Best for large datasets and analytics tools.</td></tr>
 <tr><td><code>arrow-ipc</code></td><td><code>.arrow</code></td><td>Arrow IPC format. Fast to read/write, good for streaming data between processes.</td></tr>
 <tr><td><code>csv</code></td><td><code>.csv</code></td><td>Plain text format. Universal compatibility but larger file sizes.</td></tr>
+<tr><td><code>mcap</code></td><td><code>.mcap</code></td><td>Foxglove-compatible MCAP recording (single file, zstd-compressed JSON channels). See <a href="/reference/elodin-cli/#foxglove-mcap-export">Foxglove MCAP Export</a> below.</td></tr>
 </tbody></table>
+<h6 id="foxglove-mcap-export"><strong>Foxglove MCAP Export</strong></h6>
+<p><code>--format mcap</code> (alias <code>--format foxglove</code>) writes a single <code>{db_name}.mcap</code> plus a generated <code>{db_name}.foxglove-layout.json</code>, ready to open in <a href="https://app.foxglove.dev">Foxglove</a> or upload to the Foxglove Data Platform:</p>
+<ul>
+<li>Every component becomes a JSON channel (<code>drone.world_pos</code> → <code>/drone/world_pos</code>) with fields named after the component's <code>element_names</code>; dotted names nest (<code>e.r</code> → <code>.e.r</code>).</li>
+<li>Pose components (<code>*.world_pos</code>, 7 elements) additionally publish <code>foxglove.FrameTransforms</code> on <code>/tf</code> (<code>world</code> → entity), driving the Foxglove 3D panel.</li>
+<li>Schematic <code>object_3d</code> meshes/GLBs (including literal-pose entities), <code>line_3d</code> trajectories (decimated, pixel-width scale-invariant lines), constant <code>vector_arrow</code>s, and <code>world_mesh "globe"</code> (swapped to <code>earth.glb</code> on the Earth frame) become <code>foxglove.SceneUpdate</code> entities — <strong>one topic per entity</strong> (<code>/scene/&lt;entity-id&gt;</code>), because Foxglove backfills only the latest message per topic when a 3D panel (re)mounts. Data-driven <code>vector_arrow</code>s (≤30 Hz) publish one topic each (<code>/scene_dynamic/&lt;name&gt;</code>). Multiple <code>object_3d</code> on the same entity get unique ids (<code>{frame}-model</code>, <code>{frame}-model-2</code>, …). Literal poses compose with GLB <code>translate</code>/<code>rotate</code>.</li>
+<li>Viewport <code>near</code>/<code>far</code> are honored in the 3D panel <code>cameraState</code>; <code>far</code> is clamped to ≥4× the camera distance (derived from the viewport <code>pos</code> offset, including <code>translate_world(x,y,z)</code>-style method chains). Each 3D panel follows its own <code>look_at</code>/<code>pos</code> subject and subscribes to every scene topic.</li>
+<li>A schematic <code>coordinate lat=… lon=… alt=…</code> node emits static world→<code>NED</code>/<code>ENU</code> anchor transforms and re-parents entities whose <code>object_3d</code> declares <code>frame="NED"</code>/<code>"ENU"</code> under them.</li>
+<li>Message logs export as <code>foxglove.CompressedVideo</code> (native H.264 and sensor-camera RGBA re-encoded via openh264 when the <code>video-export</code> feature is on), <code>foxglove.RawImage</code> (sensor cameras without video-export), <code>foxglove.Log</code> (LogEntry streams → Log/<code>RosOut</code> panel), or base64 JSON (other).</li>
+<li>Schematic KDL files and referenced GLB assets travel along as MCAP attachments; DB and component metadata as MCAP metadata records (including <code>elodin.time_offset_us</code> when timestamps are rebased).</li>
+<li>The generated layout mirrors the Elodin schematic: tabs/splits map to Foxglove tabs/splits, <code>graph</code> EQL expressions expand to Plot panel series, <code>viewport</code> becomes a 3D panel following the vehicle, <code>component_monitor</code> becomes Raw Messages, <code>log_stream</code> becomes a Log panel. SQL <code>query_plot</code>, icons, thrusters, bloom/hdr, and non-globe <code>world_mesh</code> regions are skipped with a console note.</li>
+</ul>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export and open locally (drag into app.foxglove.dev or the desktop app)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>format</span> mcap<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>output</span> ./fg ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> One-shot upload + layout + view URL</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">scripts/foxglove-upload.sh</span></span><span class="z-meta z-function-call z-arguments z-shell"> <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>mcap</span> ./fg/my-database.mcap <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>layout</span> ./fg/my-database.foxglove-layout.json <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>device</span> elodin-my-example <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>key</span> elodin-my-example-v1 <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>layout-name</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>Elodin My Example<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
+</span></code></pre>
 <h6 id="vector-column-handling"><strong>Vector Column Handling</strong></h6>
 <p>By default, vector columns (e.g., 3D positions, quaternions) are exported as fixed-size lists. When exporting to CSV without <code>--flatten</code>, these appear as JSON-like strings (e.g., <code>[1.0, 2.0, 3.0]</code>).</p>
 <p>With <code>--flatten</code>, vector columns are split into separate scalar columns with element names as suffixes:</p>
