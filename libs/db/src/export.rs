@@ -37,6 +37,9 @@ pub enum ExportFormat {
     Parquet,
     ArrowIpc,
     Csv,
+    /// Foxglove-compatible MCAP (single file + generated Foxglove layout).
+    #[value(alias = "foxglove")]
+    Mcap,
 }
 
 /// Build the JSON-style "[v0, v1, ...]" rows for a FixedSizeList over a primitive array,
@@ -682,6 +685,8 @@ fn write_record_batch(
         ExportFormat::Parquet => {
             return Err(Error::UnsupportedArchiveFormat);
         }
+        // Dispatched to `export_mcap::run` before reaching the per-component path.
+        ExportFormat::Mcap => return Err(Error::UnsupportedArchiveFormat),
         ExportFormat::Csv => {
             let csv_batch = if flatten {
                 record_batch.clone()
@@ -808,6 +813,8 @@ pub fn run(
         ExportFormat::Parquet => "parquet",
         ExportFormat::ArrowIpc => "arrow-ipc",
         ExportFormat::Csv => "csv",
+        // The MCAP format is handled by `export_mcap::run`, not this path.
+        ExportFormat::Mcap => return Err(Error::UnsupportedArchiveFormat),
     };
     println!("Format: {}", format_name);
     if flatten {

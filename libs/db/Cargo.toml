@@ -19,7 +19,7 @@ license = false
 eula = false
 
 [features]
-default = ["axum", "parquet", "video-export"]
+default = ["axum", "parquet", "video-export", "mcap-export"]
 axum = [
     "dep:axum",
     "dep:axum-streams",
@@ -30,6 +30,7 @@ axum = [
 ]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
+mcap-export = ["dep:mcap", "dep:base64", "dep:serde_json", "dep:impeller2-kdl"]
 tracy = ["dep:tracing-tracy"]
 
 [dependencies]
@@ -135,6 +136,10 @@ muxide = { workspace = true, optional = true }
 openh264 = { version = "0.8", optional = true }
 scuffle-h264 = { version = "0.2", optional = true }
 
+# foxglove-compatible mcap export
+mcap = { version = "0.25", optional = true }
+base64 = { version = "0.22", optional = true }
+
 [[bin]]
 name = "elodin-db-bench"
 path = "src/bin/bench.rs"
@@ -158,6 +163,10 @@ path = "tests_query/prim_types_fixture_goldie.rs"
 [[test]]
 name = "csv_export_goldie"
 path = "tests_query/csv_export_goldie.rs"
+
+[[test]]
+name = "mcap_export"
+path = "tests_query/mcap_export.rs"
 
 [[test]]
 name = "sensor_camera_export"

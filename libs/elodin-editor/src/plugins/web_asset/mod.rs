@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::Path;
 
@@ -136,21 +138,51 @@ impl Client {
     }
 }
 
+/// Content fingerprint used when the HTTP server omits `ETag` (historically
+/// elodin-db's asset server). Without a stored tag the disk cache never
+/// persisted successful fetches, so every thruster reload re-hit the network.
+fn weak_etag(bytes: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    format!("W/\"{:016x}-{}\"", hasher.finish(), bytes.len())
+}
+
 impl AssetReader for Client {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<Box<dyn Reader>, AssetReaderError> {
         let url = self.url(path)?;
         let cached_asset = self.cache.get(&url);
 
-        let (bytes, etag) = self.get(url.clone(), cached_asset).await?;
-        if let Some(etag) = etag {
-            let cached_asset = CachedAsset {
-                data: bytes.clone(),
-                etag,
-            };
-            self.cache.put(&url, cached_asset);
+        match self.get(url.clone(), cached_asset.clone()).await {
+            Ok((bytes, etag)) => {
+                // Always persist: synthesize a weak tag when the server sends none
+                // so the next load can short-circuit / revalidate.
+                let etag = etag.unwrap_or_else(|| weak_etag(&bytes));
+                self.cache.put(
+                    &url,
+                    CachedAsset {
+                        data: bytes.clone(),
+                        etag,
+                    },
+                );
+                let reader = VecReader::new(bytes);
+                Ok(Box::new(reader) as Box<dyn Reader>)
+            }
+            Err(err) => {
+                // Stale-while-error: if the DB asset HTTP port is already down
+                // (sim teardown) or briefly unreachable, keep using the last
+                // good copy instead of spamming failed fetches.
+                if let Some(CachedAsset { data, .. }) = cached_asset {
+                    tracing::warn!(
+                        url = %url,
+                        error = %err,
+                        "serving cached web asset after fetch failure"
+                    );
+                    let reader = VecReader::new(data);
+                    return Ok(Box::new(reader) as Box<dyn Reader>);
+                }
+                Err(err)
+            }
         }
-        let reader = VecReader::new(bytes);
-        Ok(Box::new(reader) as Box<dyn Reader>)
     }
 
     async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<Box<dyn Reader>, AssetReaderError> {
@@ -176,4 +208,19 @@ fn http_err(url: &str, err: reqwest::Error) -> AssetReaderError {
     let message = format!("{url}: {err}");
     tracing::warn!(error = %message, "failed to fetch web asset");
     AssetReaderError::Io(io::Error::other(message).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weak_etag_is_stable_for_same_bytes() {
+        let a = weak_etag(b"hello");
+        let b = weak_etag(b"hello");
+        let c = weak_etag(b"world");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert!(a.starts_with("W/\""));
+    }
 }

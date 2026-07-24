@@ -17,6 +17,9 @@ use bevy_geo_frames::GeoFrame;
 use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
+/// Thruster `ParticleEffect` entities. Viewport cameras include this layer when
+/// KDL `effects` is true (default); `effects=#false` hides plumes in that view.
+pub const THRUSTER_PARTICLES_RENDER_LAYER: usize = 28;
 pub const ENU_GRID_RENDER_LAYER: usize = 31;
 pub const NED_GRID_RENDER_LAYER: usize = 32;
 pub const ECEF_GRID_RENDER_LAYER: usize = 33;
@@ -172,6 +175,7 @@ impl RenderLayerAllocator {
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
         let reserved = RenderLayers::layer(0)
+            .with(THRUSTER_PARTICLES_RENDER_LAYER)
             .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
             .with(ENU_GRID_RENDER_LAYER)

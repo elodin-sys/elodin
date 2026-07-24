@@ -1,0 +1,22 @@
+timeout = "300s"
+retries = 0
+continue_on_error = true
+
+[[build]]
+command = "cargo"
+args = ["build", "--release", "--manifest-path", "examples/falcon9/controller/Cargo.toml"]
+
+[resources]
+port_stride = 40
+db_port = 2340
+
+[resources.ports]
+state = 9114
+command = 9115
+
+[retention]
+keep_run_db = "never"
+
+[hooks]
+post_run = "examples/falcon9/hooks/ci_score.py"
+post_campaign = "examples/falcon9/hooks/ci_gate.py"

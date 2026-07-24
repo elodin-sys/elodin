@@ -1,0 +1,137 @@
+(
+  name: "rcs_dart",
+  capacity: 4096,
+  spawner: (
+    count: Single(1200.0),
+    spawn_duration: Single(1.0),
+    period: Single(1.0),
+    cycle_count: 0,
+    starts_active: true,
+    emit_on_start: true,
+  ),
+  z_layer_2d: 0.0,
+  simulation_space: Local,
+  simulation_condition: WhenVisible,
+  prng_seed: 0,
+  init_modifiers: [
+    {
+      "bevy_hanabi::modifier::position::SetPositionCone3dModifier": (
+        height: "#1",
+        base_radius: "#2",
+        top_radius: "#3",
+        dimension: Volume,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::velocity::SetVelocitySphereModifier": (
+        center: "#4",
+        speed: "#7",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "age",
+        value: "#8",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "lifetime",
+        value: "#11",
+      ),
+    },
+  ],
+  update_modifiers: [],
+  render_modifiers: [
+    {
+      "bevy_hanabi::modifier::output::OrientModifier": (
+        mode: AlongVelocity,
+        rotation: None,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ParticleTextureModifier": (
+        texture_slot: "#12",
+        sample_mapping: ModulateOpacityFromR,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::SizeOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (1.6, 0.45, 0.45),
+            ),
+            (
+              ratio: 0.4,
+              value: (3.2, 0.85, 0.85),
+            ),
+            (
+              ratio: 1.0,
+              value: (2.2, 0.6, 0.6),
+            ),
+          ],
+        ),
+        screen_space_size: false,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ColorOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (14.0, 15.5, 19.0, 1.0),
+            ),
+            (
+              ratio: 0.35,
+              value: (7.0, 8.0, 11.0, 0.65),
+            ),
+            (
+              ratio: 1.0,
+              value: (1.8, 2.1, 3.0, 0.0),
+            ),
+          ],
+        ),
+        blend: Overwrite,
+        mask: (15),
+      ),
+    },
+  ],
+  motion_integration: PostUpdate,
+  module: (
+    expressions: [
+      Literal(Scalar(Float(0.25))),
+      Literal(Scalar(Float(0.14))),
+      Literal(Scalar(Float(0.1))),
+      Literal(Vector(Vec3((0.0, 1.4, 0.0)))),
+      Literal(Scalar(Float(18.0))),
+      Literal(Scalar(Float(32.0))),
+      Binary(
+        op: UniformRand,
+        left: "#5",
+        right: "#6",
+      ),
+      Literal(Scalar(Float(0.0))),
+      Literal(Scalar(Float(0.35))),
+      Literal(Scalar(Float(0.85))),
+      Binary(
+        op: UniformRand,
+        left: "#9",
+        right: "#10",
+      ),
+      Literal(Scalar(Uint(0))),
+    ],
+    properties: [],
+    texture_layout: (
+      layout: [
+        (
+          name: "mask",
+        ),
+      ],
+    ),
+  ),
+  alpha_mode: Add,
+  mesh: None,
+)

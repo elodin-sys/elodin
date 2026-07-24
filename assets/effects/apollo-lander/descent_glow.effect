@@ -1,0 +1,157 @@
+(
+  name: "descent_glow",
+  capacity: 4096,
+  spawner: (
+    count: Single(1800.0),
+    spawn_duration: Single(1.0),
+    period: Single(1.0),
+    cycle_count: 0,
+    starts_active: true,
+    emit_on_start: true,
+  ),
+  z_layer_2d: 0.0,
+  simulation_space: Local,
+  simulation_condition: WhenVisible,
+  prng_seed: 0,
+  init_modifiers: [
+    {
+      "bevy_hanabi::modifier::position::SetPositionCone3dModifier": (
+        height: "#1",
+        base_radius: "#2",
+        top_radius: "#3",
+        dimension: Volume,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "position",
+        value: "#6",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "velocity",
+        value: "#11",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "age",
+        value: "#12",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "lifetime",
+        value: "#15",
+      ),
+    },
+  ],
+  update_modifiers: [],
+  render_modifiers: [
+    {
+      "bevy_hanabi::modifier::output::OrientModifier": (
+        mode: FaceCameraPosition,
+        rotation: None,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ParticleTextureModifier": (
+        texture_slot: "#16",
+        sample_mapping: ModulateOpacityFromR,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::SizeOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (0.7, 0.7, 0.7),
+            ),
+            (
+              ratio: 0.5,
+              value: (1.1, 1.1, 1.1),
+            ),
+            (
+              ratio: 1.0,
+              value: (1.4, 1.4, 1.4),
+            ),
+          ],
+        ),
+        screen_space_size: false,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ColorOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (5.0, 5.5, 6.8, 0.045),
+            ),
+            (
+              ratio: 0.5,
+              value: (2.2, 2.6, 3.4, 0.022),
+            ),
+            (
+              ratio: 1.0,
+              value: (0.8, 0.95, 1.3, 0.0),
+            ),
+          ],
+        ),
+        blend: Overwrite,
+        mask: (15),
+      ),
+    },
+  ],
+  motion_integration: PostUpdate,
+  module: (
+    expressions: [
+      Literal(Scalar(Float(3.5))),
+      Literal(Scalar(Float(0.3))),
+      Literal(Scalar(Float(0.38))),
+      Attribute((
+        attr: "position",
+      )),
+      Literal(Vector(Vec3((0.0, -3.6, 0.0)))),
+      Binary(
+        op: Add,
+        left: "#4",
+        right: "#5",
+      ),
+      Literal(Scalar(Float(4.0))),
+      Literal(Scalar(Float(7.0))),
+      Binary(
+        op: UniformRand,
+        left: "#7",
+        right: "#8",
+      ),
+      Literal(Vector(Vec3((0.0, -1.0, 0.0)))),
+      Binary(
+        op: Mul,
+        left: "#10",
+        right: "#9",
+      ),
+      Literal(Scalar(Float(0.0))),
+      Literal(Scalar(Float(0.22))),
+      Literal(Scalar(Float(0.36))),
+      Binary(
+        op: UniformRand,
+        left: "#13",
+        right: "#14",
+      ),
+      Literal(Scalar(Uint(0))),
+    ],
+    properties: [],
+    texture_layout: (
+      layout: [
+        (
+          name: "mask",
+        ),
+      ],
+    ),
+  ),
+  alpha_mode: Add,
+  mesh: None,
+)

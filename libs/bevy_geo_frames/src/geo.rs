@@ -23,6 +23,14 @@ pub fn radius(ellipsoid: &Ellipsoid, latitude: f64) -> f64 {
     map_3d::get_radius_normal(latitude, ellipsoid)
 }
 
+/// Convert an ECEF position (metres) to geodetic latitude/longitude/altitude.
+///
+/// Latitude and longitude are returned in **degrees**, altitude in metres.
+pub fn ecef_to_lla_deg(ecef: DVec3, ellipsoid: &Ellipsoid) -> (f64, f64, f64) {
+    let (lat, lon, alt) = map_3d::ecef2geodetic(ecef.x, ecef.y, ecef.z, ellipsoid);
+    (lat.to_degrees(), lon.to_degrees(), alt)
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 /// How should these coordinates be presented.
 pub enum Present {

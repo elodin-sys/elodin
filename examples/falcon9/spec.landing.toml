@@ -1,0 +1,22 @@
+# Focused landing-controller recalibration: vehicle physics stay at the
+# CRS-12-calibrated defaults in main.py; only recovery / descent tunables
+# are sampled (fixed seed for the narrow-around-best loop).
+
+[monte_carlo]
+n_samples = 24
+seed = 20170814
+method = "lhs"
+
+[monte_carlo.variables]
+boostback_overshoot_m = { dist = "uniform", min = -2200.0, max = -800.0 }
+entry_dv_mps = { dist = "uniform", min = 330.0, max = 380.0 }
+entry_throttle = { dist = "uniform", min = 0.57, max = 0.70 }
+landing_arm_alt_m = { dist = "uniform", min = 5000.0, max = 7000.0 }
+landing_accel_margin = { dist = "uniform", min = 1.15, max = 1.40 }
+fsw_cd_s_m2 = { dist = "uniform", min = 35.0, max = 45.0 }
+fin_wn = { dist = "uniform", min = 1.1, max = 1.9 }
+divert_speed_cap = { dist = "uniform", min = 28.0, max = 42.0 }
+steer_tilt_cap = { dist = "uniform", min = 0.16, max = 0.24 }
+wind_north_mps = { dist = "uniform", min = -6.0, max = 6.0 }
+wind_east_mps = { dist = "uniform", min = -6.0, max = 6.0 }
+gust_sigma_mps = { dist = "uniform", min = 0.0, max = 1.5 }

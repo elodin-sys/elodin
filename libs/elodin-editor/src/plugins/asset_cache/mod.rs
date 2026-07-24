@@ -15,6 +15,7 @@ pub fn cache() -> FsCache {
     FsCache::new()
 }
 
+#[derive(Clone)]
 pub struct CachedAsset {
     pub data: Vec<u8>,
     pub etag: String,

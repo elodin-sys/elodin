@@ -146,6 +146,7 @@ impl Plugin for HeadlessEditorPlugin {
             )
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
+            .init_resource::<crate::Coordinate>()
             .init_resource::<crate::SyncedObject3d>()
             .init_resource::<HeadlessSchematicSkybox>()
             .init_resource::<HeadlessSkyboxRenderGate>()
@@ -218,6 +219,7 @@ fn load_headless_scene(
     asset_server: Res<AssetServer>,
     connection_addr: Option<Res<ConnectionAddr>>,
     mut geo_context: ResMut<GeoContext>,
+    mut coordinate: ResMut<crate::Coordinate>,
 ) {
     // Poll an in-flight fetch. The blocking HTTP request runs on the IO pool
     // (RFD #724): a slow/unreachable DB Asset Server never freezes the app.
@@ -253,6 +255,7 @@ fn load_headless_scene(
             if let Some(previous) = pending.loaded.take() {
                 despawn_headless_scene(&mut commands, &previous);
                 schematic_skybox.0 = None;
+                coordinate.0 = None;
             }
             return;
         };
@@ -299,6 +302,7 @@ fn load_headless_scene(
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
+    coordinate.0 = schematic.frame;
 
     if let Some(o) = schematic.origin {
         geo_context.origin =

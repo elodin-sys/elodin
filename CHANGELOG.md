@@ -2,6 +2,41 @@
 
 ## unreleased
 
+## v0.18
+
+### v0.18.0
+- **(breaking:db)** Require clients to consume DB responses; use a silent connection for write-only clients. (#670)
+- **(breaking:db)** Reject misaligned custom VTables; add padding or order fields by descending size. (#673)
+- **(feat)** Add a native `elodin.db` Python client API. (#730)
+- **(feat)** Add in-process Monte Carlo campaigns and lifecycle hooks. (#684, #698, #732)
+- **(feat)** Store and serve schematic assets in Elodin DB recordings. (#679, #718, #727)
+- **(feat)** Add preset and AI-generated skyboxes. (#647, #692)
+- **(feat)** Add NED and ECEF orientation support. (#680)
+- **(feat)** Add planetary-scale world-mesh terrain rendering. (#681)
+- **(feat)** Add `elodin-db compact` for archival. (#732)
+- **(feat)** Add RTSP video ingest with `rtsp-streamer`. (#715)
+- **(feat)** Add editor telemetry mode. (#737)
+- **(feat)** Add geo-position and orientation gauges. (#739)
+- **(feat)** Add covariance-driven ellipsoid visualization. (#744)
+- **(feat)** Add per-segment colors to `line_3d` trails. (#706)
+- **(feat)** Add GPU thruster effects, scene lighting, and viewport bloom. (#684, #689, #745)
+- **(feat)** Add Apollo lander and Falcon 9 examples. (#684, #745)
+- **(feat:aleph)** Deploy the Elodin CLI, simulations, and DB assets on Aleph. (#709)
+- **(fix)** Prevent UI input from leaking into viewport controls. (#637)
+- **(fix)** Restore graph creation and labels for saved databases. (#675)
+- **(fix)** Fix vector arrows and `line_3d` at planetary scale. (#696, #710, #741)
+- **(fix)** Fix relative geo rotation in the editor. (#726)
+- **(fix)** Fix DB-backed skybox and asset mirroring. (#700, #718, #734)
+- **(fix)** Fix manual editor-to-DB connections. (#723)
+- **(fix)** Report formula execution errors only once. (#685)
+- **(fix)** Fix timer-wheel freezes and live telemetry jitter. (#742)
+- **(fix)** Fix editor startup on Ubuntu 22.04 and NVIDIA Quadro. (#697)
+- **(perf)** Improve real-time simulation and editor playback under load. (#711, #740)
+- **(chore)** Upgrade to Bevy 0.19. (#743)
+- **(chore)** Replace `bbq2` with vendored `bbqueue`. (#610)
+- **(chore)** Add Windows cross-build support and Linux/WSL guidance. (#667, #683, #717)
+- **(test)** Add release QA plans for the editor, DB, and examples. (#733, #743)
+
 ## v0.17
 
 ### v0.17.3

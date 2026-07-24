@@ -312,6 +312,22 @@ struct ExportArgs {
         help = "Include components whose metadata has `private: true`. Off by default \u{2014} those components are skipped."
     )]
     include_private: bool,
+    #[clap(
+        long,
+        help = "MCAP-only: attach every file under {db}/assets/ instead of only schematic-referenced assets"
+    )]
+    all_assets: bool,
+    #[clap(
+        long,
+        help = "MCAP-only: microsecond offset added to all timestamps (auto-computed when earliest < 0)"
+    )]
+    epoch_offset_us: Option<i64>,
+    #[clap(
+        long,
+        default_value = "32",
+        help = "MCAP-only: max GLB embed size in MiB; larger models are attached but not base64-inlined"
+    )]
+    max_embed_mb: u64,
 }
 
 #[cfg(feature = "video-export")]
@@ -720,9 +736,36 @@ async fn main() -> miette::Result<()> {
             mono_ns,
             mono_us,
             include_private,
+            all_assets,
+            epoch_offset_us,
+            max_embed_mb,
         }) => {
             // Install signal handlers only for Export command which uses check_cancelled()
             elodin_db::cancellation::install_signal_handlers();
+
+            if matches!(format, elodin_db::export::ExportFormat::Mcap) {
+                if flatten || join || csv_fast_floats || mono_ns || mono_us {
+                    return Err(miette::miette!(
+                        "--flatten, --join, --csv-fast-floats, --mono-ns, and --mono-us do not apply to --format mcap"
+                    ));
+                }
+                #[cfg(feature = "mcap-export")]
+                {
+                    let options = elodin_db::export_mcap::McapExportOptions {
+                        pattern,
+                        include_private,
+                        all_assets,
+                        epoch_offset_us,
+                        max_embed_mb,
+                    };
+                    return elodin_db::export_mcap::run(path, output, options).into_diagnostic();
+                }
+                #[cfg(not(feature = "mcap-export"))]
+                return Err(miette::miette!(
+                    "this build of elodin-db was compiled without the `mcap-export` feature"
+                ));
+            }
+            let _ = all_assets;
 
             // clap's `conflicts_with` ensures these aren't both set.
             let time_format = match (mono_ns, mono_us) {

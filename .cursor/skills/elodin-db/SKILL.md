@@ -218,6 +218,40 @@ elodin-db merge -o merged --prefix1 sitl --prefix2 real \
 
 Use `--from-playback-start` when alignment timestamps come from the Editor's playback timeline (relative to recording start). Without it, `--align1`/`--align2` are absolute timestamps.
 
+## Exporting a Database
+
+Offline export to analysis formats or a Foxglove-ready MCAP recording:
+
+```bash
+# Parquet / arrow-ipc / csv (one file per component)
+elodin-db export --format parquet --output ./out ./my-db
+
+# Foxglove-compatible MCAP + generated Foxglove layout JSON
+elodin-db export --format mcap --output ./out ./my-db
+
+# Pre-1970 epochs (e.g. Apollo 1969) auto-rebase to t=0 (also if --epoch-offset-us
+# would leave samples pre-epoch — MCAP log_time is unsigned)
+# Large GLBs (moon.glb) stay attached; model primitive omitted above --max-embed-mb (default 32)
+# Follow-entity mesh always embeds. Dynamic arrows go to /scene_dynamic.
+elodin-db export --format mcap --max-embed-mb 32 --output ./out ./apollo-db
+```
+
+The MCAP export maps components to JSON channels (`/drone/world_pos.q0` message
+paths), emits `/tf` from `*.world_pos` poses (with world→NED/ENU anchors from a
+schematic `coordinate` node), publishes `foxglove.SceneUpdate` **one topic per
+entity** (`/scene/<id>`: GLBs, literal-pose objects with composed
+translate/rotate, pixel-width `line_3d` trails, static arrows,
+`world_mesh "globe"` → `earth.glb`) plus ≤30 Hz dynamic arrows on
+`/scene_dynamic/<name>` (Foxglove backfills latest-per-topic on panel remount,
+so shared scene topics silently drop entities), encodes sensor-camera RGBA to
+H.264 `CompressedVideo` when `video-export` is enabled, attaches schematic
+KDLs/assets, and generates `{db}.foxglove-layout.json` (per-viewport followTf
+from `look_at`, camera offsets incl. `translate_world(...)`, far ≥ 4× distance).
+Upload with [`scripts/foxglove-upload.sh`](../../../scripts/foxglove-upload.sh)
+or manually via `POST /v1/data/upload` + `PUT` then `POST /v1/layouts`. See
+[elodin-cli.md](../../../docs/public/content/reference/elodin-cli.md) `Foxglove MCAP Export`
+and [foxglove-mcap-export-design.md](../../../ai-context/foxglove-mcap-export-design.md).
+
 ## Trimming a Database
 
 Remove data from the beginning or end of a recording. Values are in microseconds. Without `--output`, modifies in place.

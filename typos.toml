@@ -23,10 +23,14 @@
 "ALOS" = "ALOS"
 "bse" = "bse"
 "numer" = "numer"
+"ix" = "ix"
 "iy" = "iy"
+"iz" = "iz"
 "PNGs" = "PNGs"
 "PN" = "PN"
 "FO" = "FO"
+"Iz" = "Iz"
+"Trak" = "Trak"
 
 [files]
 extend-exclude = [

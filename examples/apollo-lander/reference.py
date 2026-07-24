@@ -67,6 +67,13 @@ THROTTLE_DOWN_S = 98.0  # GET 102:39:31 — end of the fixed-throttle (FTP) burn
 HIGH_GATE_S = 219.0  # GET 102:41:32 — P63 -> P64 pitchover at ~7,400 ft
 P66_START_S = 353.0  # ~GET 102:43:46 — manual landing phase (P66)
 
+# Digitized chart ends ~4.6 m above the surface (entity / CG altitude). Extend
+# the profile to the footpad contact height so guidance and the truth ghost
+# continue the final let-down instead of hovering above the regolith.
+# Must match sim.FOOTPAD_HEIGHT_M (entity z when pads meet z = 0).
+FOOTPAD_CONTACT_ALT_M = 2.40
+TERMINAL_CONTACT_RATE_MPS = 0.5  # matches controller MIN_DESCENT_RATE_MPS
+
 # Horizontal-velocity anchors used to calibrate the reconstruction (m/s).
 HIGH_GATE_HSPEED_MPS = 152.0  # ~500 ft/s nominal P63 exit velocity
 ANCHOR_333S_MPS = 17.7  # GET 102:43:26 transcript: "58 (ft/s) forward"
@@ -365,7 +372,60 @@ def build_reference(
 
     hspeed, downrange = _reconstruct_horizontal(grid, rate)
 
+    # Chart digitization stops short of contact. Append a P66-style let-down
+    # at the terminal contact rate so the vehicle reaches footpad height.
+    grid, altitude_m, rate, pitch, slant, hspeed, downrange = _extend_to_contact(
+        grid, altitude_m, rate, pitch, slant, hspeed, downrange
+    )
+    t_end = grid[-1] if grid else t_end
+
     return Reference(grid, altitude_m, rate, pitch, slant, hspeed, downrange, t_end)
+
+
+def _extend_to_contact(
+    grid: list[float],
+    altitude_m: list[float],
+    rate: list[float],
+    pitch: list[float],
+    slant: list[float],
+    hspeed: list[float],
+    downrange: list[float],
+) -> tuple[
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+]:
+    """Append samples from the last chart altitude down to footpad contact."""
+    if not altitude_m:
+        return grid, altitude_m, rate, pitch, slant, hspeed, downrange
+    alt = altitude_m[-1]
+    if alt <= FOOTPAD_CONTACT_ALT_M + 1e-6:
+        return grid, altitude_m, rate, pitch, slant, hspeed, downrange
+
+    t = grid[-1]
+    last_pitch = pitch[-1]
+    last_slant = slant[-1]
+    last_hspeed = hspeed[-1]
+    last_downrange = downrange[-1]
+    while alt > FOOTPAD_CONTACT_ALT_M + 1e-6:
+        t += REFERENCE_DT_S
+        next_alt = max(FOOTPAD_CONTACT_ALT_M, alt - TERMINAL_CONTACT_RATE_MPS * REFERENCE_DT_S)
+        grid.append(t)
+        altitude_m.append(next_alt)
+        rate.append(-TERMINAL_CONTACT_RATE_MPS)
+        pitch.append(last_pitch)
+        # Slant ≈ altitude when upright over the site.
+        slant.append(max(last_slant * (next_alt / alt) if alt > 1e-6 else next_alt, next_alt))
+        # Null residual groundspeed over the site during the final let-down.
+        last_hspeed = max(0.0, last_hspeed - 0.15 * REFERENCE_DT_S)
+        hspeed.append(last_hspeed)
+        downrange.append(last_downrange)
+        alt = next_alt
+    return grid, altitude_m, rate, pitch, slant, hspeed, downrange
 
 
 def sanity_check(tolerance_m: float = 1e-3) -> dict[str, float]:

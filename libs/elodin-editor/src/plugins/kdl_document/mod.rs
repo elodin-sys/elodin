@@ -7,9 +7,11 @@ mod types;
 
 pub use commands::*;
 pub use messages::*;
+#[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
+pub use operations::fetch_active_schematic_kdl;
 pub use operations::{
-    apply_initial_kdl_path, fetch_active_schematic_kdl, reload_sticky_kdl_when_eql_ready,
-    sync_document_from_config, sync_document_skybox,
+    apply_initial_kdl_path, reload_sticky_kdl_when_eql_ready, sync_document_from_config,
+    sync_document_skybox,
 };
 pub(crate) use operations::{
     fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,

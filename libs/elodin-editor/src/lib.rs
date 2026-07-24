@@ -295,6 +295,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(GizmoPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
+        app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
         app.add_plugins(ui::UiPlugin)
@@ -359,6 +360,10 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 plugins::kdl_document::reload_sticky_kdl_when_eql_ready.after(update_eql_context),
+            )
+            .add_systems(
+                Update,
+                ui::gauges::compile_gauge_exprs.after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
@@ -452,7 +457,11 @@ impl Plugin for EditorPlugin {
         embedded_asset!(app, "./assets/diffuse.ktx2");
         embedded_asset!(app, "./assets/specular.ktx2");
         if cfg!(not(target_arch = "wasm32")) {
-            app.insert_resource(DirectionalLightShadowMap { size: 8192 });
+            // Bevy allocates this Depth32Float texture even before a shadow-casting
+            // directional light exists. At 8192 this costs 256 MiB per array layer
+            // (1 GiB for the default four sun cascades), which can exceed the graphics
+            // memory budget on lower-memory GPUs and invalidate the render device.
+            app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         }
         app.configure_sets(
             PreUpdate,
@@ -580,6 +589,9 @@ fn run_egui_inspector(world: &mut World) {
     };
     let mut egui_context = egui_context.clone();
 
+    // CentralPanel::show(Context) is deprecated in egui 0.34 in favor of
+    // show_inside(Ui); top-level Context usage still requires show().
+    #[expect(deprecated)]
     egui::CentralPanel::default().show(egui_context.get_mut(), |ui| {
         egui::ScrollArea::both().show(ui, |ui| {
             bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);

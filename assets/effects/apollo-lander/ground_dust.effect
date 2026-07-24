@@ -1,0 +1,237 @@
+(
+  name: "ground_dust",
+  capacity: 32768,
+  spawner: (
+    count: Single(4000.0),
+    spawn_duration: Single(1.0),
+    period: Single(1.0),
+    cycle_count: 0,
+    starts_active: true,
+    emit_on_start: true,
+  ),
+  z_layer_2d: 0.0,
+  simulation_space: Local,
+  simulation_condition: WhenVisible,
+  prng_seed: 0,
+  init_modifiers: [
+    {
+      "bevy_hanabi::modifier::position::SetPositionCircleModifier": (
+        center: "#1",
+        axis: "#2",
+        radius: "#3",
+        dimension: Volume,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::velocity::SetVelocityCircleModifier": (
+        center: "#4",
+        axis: "#5",
+        speed: "#8",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "velocity",
+        value: "#16",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "age",
+        value: "#17",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "lifetime",
+        value: "#20",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "color",
+        value: "#33",
+      ),
+    },
+  ],
+  update_modifiers: [
+    {
+      "bevy_hanabi::modifier::accel::AccelModifier": (
+        accel: "#34",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::kill::KillAabbModifier": (
+        center: "#35",
+        half_size: "#36",
+        kill_inside: true,
+      ),
+    },
+  ],
+  render_modifiers: [
+    {
+      "bevy_hanabi::modifier::output::OrientModifier": (
+        mode: AlongVelocity,
+        rotation: None,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ParticleTextureModifier": (
+        texture_slot: "#37",
+        sample_mapping: ModulateOpacityFromR,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::SizeOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (0.7, 0.1, 0.1),
+            ),
+            (
+              ratio: 0.4,
+              value: (1.6, 0.21, 0.21),
+            ),
+            (
+              ratio: 1.0,
+              value: (2.3, 0.32, 0.32),
+            ),
+          ],
+        ),
+        screen_space_size: false,
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::output::ColorOverLifetimeModifier": (
+        gradient: (
+          keys: [
+            (
+              ratio: 0.0,
+              value: (1.9, 1.8, 1.62, 0.55),
+            ),
+            (
+              ratio: 0.4,
+              value: (1.55, 1.48, 1.36, 0.4),
+            ),
+            (
+              ratio: 1.0,
+              value: (1.2, 1.15, 1.1, 0.0),
+            ),
+          ],
+        ),
+        blend: Modulate,
+        mask: (15),
+      ),
+    },
+  ],
+  motion_integration: PostUpdate,
+  module: (
+    expressions: [
+      Literal(Vector(Vec3((0.0, 0.1, 0.0)))),
+      Literal(Vector(Vec3((0.0, 1.0, 0.0)))),
+      Literal(Scalar(Float(1.0))),
+      Literal(Vector(Vec3((0.0, 0.0, 0.0)))),
+      Literal(Vector(Vec3((0.0, 1.0, 0.0)))),
+      Literal(Scalar(Float(5.0))),
+      Literal(Scalar(Float(16.0))),
+      Binary(
+        op: UniformRand,
+        left: "#6",
+        right: "#7",
+      ),
+      BuiltIn((
+        operator: Rand(Scalar(Float)),
+      )),
+      Literal(Scalar(Float(1.2))),
+      Binary(
+        op: Mul,
+        left: "#9",
+        right: "#10",
+      ),
+      Attribute((
+        attr: "velocity",
+      )),
+      Literal(Scalar(Float(0.0))),
+      Literal(Scalar(Float(0.0))),
+      Ternary(
+        op: Vec3,
+        first: "#13",
+        second: "#11",
+        third: "#14",
+      ),
+      Binary(
+        op: Add,
+        left: "#12",
+        right: "#15",
+      ),
+      Literal(Scalar(Float(0.0))),
+      Literal(Scalar(Float(0.5))),
+      Literal(Scalar(Float(1.3))),
+      Binary(
+        op: UniformRand,
+        left: "#18",
+        right: "#19",
+      ),
+      BuiltIn((
+        operator: Rand(Scalar(Float)),
+      )),
+      Literal(Scalar(Float(0.45))),
+      Binary(
+        op: Mul,
+        left: "#21",
+        right: "#22",
+      ),
+      Literal(Scalar(Float(0.55))),
+      Binary(
+        op: Add,
+        left: "#23",
+        right: "#24",
+      ),
+      BuiltIn((
+        operator: Rand(Scalar(Float)),
+      )),
+      Literal(Scalar(Float(0.7))),
+      Binary(
+        op: Mul,
+        left: "#26",
+        right: "#27",
+      ),
+      Literal(Scalar(Float(0.3))),
+      Binary(
+        op: Add,
+        left: "#28",
+        right: "#29",
+      ),
+      Ternary(
+        op: Vec3,
+        first: "#25",
+        second: "#25",
+        third: "#25",
+      ),
+      Binary(
+        op: Vec4XyzW,
+        left: "#31",
+        right: "#30",
+      ),
+      Unary(
+        op: Pack4x8unorm,
+        expr: "#32",
+      ),
+      Literal(Vector(Vec3((0.0, -1.62, 0.0)))),
+      Literal(Vector(Vec3((0.0, -1000.0, 0.0)))),
+      Literal(Vector(Vec3((1000000.0, 1000.0, 1000000.0)))),
+      Literal(Scalar(Uint(0))),
+    ],
+    properties: [],
+    texture_layout: (
+      layout: [
+        (
+          name: "mask",
+        ),
+      ],
+    ),
+  ),
+  alpha_mode: Blend,
+  mesh: None,
+)
