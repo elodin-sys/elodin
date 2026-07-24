@@ -18,7 +18,25 @@
   modulesPath,
   lib,
   ...
-}: {
+}: let
+  cfg = config.aleph.nvmeImage;
+  fdtPath = "${config.hardware.deviceTree.package}/${config.hardware.deviceTree.name}";
+
+  mkESPContent =
+    pkgs.runCommand "mk-esp-contents" {
+      nativeBuildInputs = with pkgs; [
+        mypy
+        python3
+      ];
+    } ''
+      install -m755 ${./mk-esp-contents.py} $out
+      mypy \
+        --no-implicit-optional \
+        --disallow-untyped-calls \
+        --disallow-untyped-defs \
+        $out
+    '';
+in {
   imports = [(modulesPath + "/installer/sd-card/sd-image.nix")];
 
   options.aleph.sd = {
@@ -37,28 +55,14 @@
     };
   };
 
+  options.aleph.nvmeImage = {
+    enable = lib.mkEnableOption "Build ESP/root images for initrd NVMe flashing";
+  };
+
   config = {
     image.fileName = "aleph-os.img";
 
-    sdImage = let
-      mkESPContent =
-        pkgs.runCommand "mk-esp-contents"
-        {
-          nativeBuildInputs = with pkgs; [
-            mypy
-            python3
-          ];
-        }
-        ''
-          install -m755 ${./mk-esp-contents.py} $out
-          mypy \
-            --no-implicit-optional \
-            --disallow-untyped-calls \
-            --disallow-untyped-defs \
-            $out
-        '';
-      fdtPath = "${config.hardware.deviceTree.package}/${config.hardware.deviceTree.name}";
-    in {
+    sdImage = {
       firmwareSize = 256;
       populateFirmwareCommands = ''
         mkdir -pv firmware
@@ -94,10 +98,46 @@
     fileSystems."/" = lib.mkIf (!config.aleph.sd.enable) (lib.mkForce {
       device = "/dev/disk/by-uuid/${config.aleph.fs.rootPartitionUUID}";
       fsType = "ext4";
+      autoResize = cfg.enable;
     });
     fileSystems."/boot" = lib.mkIf (!config.aleph.sd.enable) {
       device = "/dev/disk/by-label/BOOT";
       fsType = "vfat";
+    };
+
+    # Grow APP to fill the NVMe on first boot (filesystem via autoResize above).
+    boot.growPartition = lib.mkIf cfg.enable true;
+
+    system.build = lib.mkIf cfg.enable {
+      alephEspImage = let
+        espContents =
+          pkgs.runCommand "aleph-esp-contents" {
+            nativeBuildInputs = [pkgs.buildPackages.python3];
+          } ''
+            mkdir -p $out
+            ${pkgs.buildPackages.python3}/bin/python3 ${mkESPContent} \
+              --toplevel ${config.system.build.toplevel} \
+              --output $out/ \
+              --device-tree ${fdtPath}
+          '';
+      in
+        pkgs.runCommand "aleph-esp.img" {
+          nativeBuildInputs = with pkgs.buildPackages; [dosfstools mtools];
+        } ''
+          truncate -s 512M $out
+          mkfs.vfat -F 32 -n BOOT $out
+          mcopy -i $out -s ${espContents}/* ::/
+        '';
+
+      alephRootImage = pkgs.callPackage "${modulesPath}/../lib/make-ext4-fs.nix" {
+        storePaths = [config.system.build.toplevel];
+        compressImage = false;
+        volumeLabel = "APP";
+        uuid = config.aleph.fs.rootPartitionUUID;
+        populateImageCommands = ''
+          mkdir -p ./files
+        '';
+      };
     };
   };
 }
