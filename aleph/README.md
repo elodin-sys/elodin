@@ -149,15 +149,19 @@ This is the recommended way to bring up a bare Aleph or recover an unbootable un
      # expected: 0955:7xxx NVIDIA Corp. APX
      ```
 
-2. Connect the recovery USB-C port to the host (same port used for `flash-uefi`). Optionally attach a serial console on the debug port (leftmost USB-C, 115200) to watch progress.
-
-3. From `aleph/`, run:
+2. Connect the recovery USB-C port to the host (same port used for `flash-uefi`). Attaching a serial console on the debug port (leftmost USB-C, 115200) is strongly recommended — it is the only place device-side flash errors are reported:
    ```bash
-   nix run --accept-flake-config .#flash-initrd
-   # or: nix build --accept-flake-config .#packages.x86_64-linux.flash-initrd && sudo ./result/flash-initrd
+   screen -L -Logfile /tmp/aleph-serial.log /dev/ttyUSB0 115200
    ```
 
-4. Wait for the script to report success. The device RCM-boots a flashing initrd, writes QSPI firmware, partitions and images the NVMe (ESP + root), then reboots into NixOS.
+3. From `aleph/`, build then flash as root (prefer a direct USB port; docks often break RCM uploads):
+   ```bash
+   nix build --accept-flake-config .#packages.x86_64-linux.flash-initrd
+   sudo ./result/flash-initrd
+   ```
+   Each run also self-logs to `/tmp/flash-initrd-<timestamp>.log`.
+
+4. Wait for the script to report success. The device RCM-boots a small flashing initrd (~10 s upload), writes QSPI firmware, then fetches the ESP/root images from the host over the USB ethernet gadget (`192.168.7.0/24`, ~1–2 min) and writes them to NVMe before rebooting into NixOS.
 
 5. After reboot, SSH in and continue with [Initial Setup](#initial-setup):
    ```bash

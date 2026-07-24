@@ -1,51 +1,53 @@
 #!/usr/bin/env bash
 # Fix up jetpack signedFirmware for Aleph NVMe initrd flash:
-# - Ensure each boardspec dir has esp.img + system.img
-# - Repair flash.idx APP lines that tegraflash left with an empty filename
-# - Hardlink large images across SKU dirs (cpio stores one copy in the initrd)
+# - Remove OS image copies from the tree: the device caps RCM blobs between
+#   383 MB (accepted) and 803 MB (rejected), so images cannot ride in the
+#   initrd and are sideloaded over the USB ethernet gadget instead
+# - Point flash.idx esp/APP rows at the host HTTP payload URLs
+# - Fail if a boardspec flash.idx lacks NVMe esp or APP rows
 set -euo pipefail
 
 src="$1"
 out="$2"
-esp_img="$3"
-system_img="$4"
+base_url="$3"
 
-system_size=$(stat -c %s "$system_img")
-
-mkdir -p "$out/shared"
 cp -a "$src"/. "$out/"
 chmod -R u+w "$out"
 
-cp -f "$esp_img" "$out/shared/esp.img"
-cp -f "$system_img" "$out/shared/system.img"
-
 for dir in "$out"/*/; do
   [ -d "$dir" ] || continue
-  base=$(basename "$dir")
-  [ "$base" = shared ] && continue
   [ -f "$dir/flash.idx" ] || continue
 
-  rm -f "$dir/esp.img" "$dir/system.img"
-  ln "$out/shared/esp.img" "$dir/esp.img"
-  ln "$out/shared/system.img" "$dir/system.img"
+  # Drop image copies tegraflash placed in SKU dirs; they must not enter the initrd
+  rm -f "$dir/esp.img" "$dir/system.img" "$dir/esp.img.gz" "$dir/system.img.gz"
 
-  # flash.idx fields: num, loc, start, size, file, filesize, attrs, sha
-  # Tegra leaves APP file empty under NO_ROOTFS even when system.img exists.
-  python3 - "$dir/flash.idx" "$system_size" <<'PY'
-import re, sys
-path, system_size = sys.argv[1], sys.argv[2]
+  # flash.idx fields: num, loc, start, size, file, filesize, attrs, sha.
+  # URLs are comma/space-free, safe for the IFS=", " parser in flash-from-device.
+  python3 - "$dir/flash.idx" "$base_url" <<'PY'
+import re
+import sys
+
+path, base_url = sys.argv[1], sys.argv[2]
 lines = open(path).read().splitlines()
 out_lines = []
+fixed_esp = 0
+fixed_app = 0
 for line in lines:
-    m = re.match(
-        r"^(\d+, (?:12:\d+|9:0):APP, \d+, \d+), , , (.*)$",
-        line,
-    )
-    if m:
-        line = f"{m.group(1)}, system.img, {system_size}, {m.group(2)}"
+    m_esp = re.match(r"^(\d+, (?:12:\d+|9:0):esp, \d+, \d+), [^,]*, [^,]*, (.*)$", line)
+    m_app = re.match(r"^(\d+, (?:12:\d+|9:0):APP, \d+, \d+), [^,]*, [^,]*, (.*)$", line)
+    if m_esp:
+        line = f"{m_esp.group(1)}, {base_url}/esp.img.gz, 0, {m_esp.group(2)}"
+        fixed_esp += 1
+    elif m_app:
+        line = f"{m_app.group(1)}, {base_url}/system.img.gz, 0, {m_app.group(2)}"
+        fixed_app += 1
     out_lines.append(line)
+if fixed_esp == 0:
+    sys.exit(f"{path}: no NVMe esp row found in flash.idx")
+if fixed_app == 0:
+    sys.exit(f"{path}: no NVMe APP row found in flash.idx")
 open(path, "w").write("\n".join(out_lines) + "\n")
 PY
 done
 
-echo "Fixed signed firmware APP/system.img entries; deduped into $out/shared"
+echo "Fixed signed firmware: esp/APP rows -> $base_url sideload URLs, no embedded images"

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Patch jetpack flash-from-device.sh to write NVMe partitions (9:0 and 12:*)."""
+"""Patch jetpack flash-from-device.sh to write NVMe partitions (9:0 and 12:*).
+
+esp/APP rows carry http URLs (host sideload server over the ECM gadget);
+those are streamed with wget | gunzip | dd instead of read from the initrd.
+"""
 
 import sys
 from pathlib import Path
@@ -49,29 +53,43 @@ def main() -> None:
       fi
     elif {NVME_TEST}; then
       report_step "Writing $partfile to $partname on /dev/nvme0n1 (offset=$start_location)"
-      file_size=$(stat -c "%s" "$partfile")
-      if ! dd if="$partfile" of="/dev/nvme0n1" bs=1M seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null; then
-        echo "ERR: failed writing $partfile to /dev/nvme0n1" >&2
-        return 1
+      set -o pipefail
+      if [[ "$partfile" == http* ]]; then
+        fetch_ok=0
+        for attempt in 1 2 3 4 5; do
+          for i in $(seq 1 30); do
+            wget -q -O /dev/null "${{partfile%/*}}/" && break
+            sleep 2
+          done
+          # dd seeks to a fixed offset, so retrying after a partial write is safe
+          if wget -q -O - "$partfile" | gzip -dc | dd of="/dev/nvme0n1" bs=1M seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null; then
+            fetch_ok=1
+            break
+          fi
+          echo "WARN: sideload attempt $attempt failed for $partfile; retrying..."
+          sleep 2
+        done
+        if [[ "$fetch_ok" -ne 1 ]]; then
+          echo "ERR: failed sideloading $partfile to /dev/nvme0n1" >&2
+          return 1
+        fi
+      elif [[ "$partfile" == *.gz ]]; then
+        if ! gzip -dc "$partfile" | dd of="/dev/nvme0n1" bs=1M seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null; then
+          echo "ERR: failed writing $partfile to /dev/nvme0n1" >&2
+          return 1
+        fi
+      else
+        if ! dd if="$partfile" of="/dev/nvme0n1" bs=1M seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null; then
+          echo "ERR: failed writing $partfile to /dev/nvme0n1" >&2
+          return 1
+        fi
       fi
     fi
   done <flash.idx
 }}"""
     if write_needle not in text:
-        write_needle_fsync = write_needle.replace(
-            "oflag=seek_bytes >/dev/null",
-            "oflag=seek_bytes conv=fsync >/dev/null",
-        )
-        write_repl_fsync = write_repl.replace(
-            'of="/dev/mmcblk0" bs=4096 seek="$start_location" oflag=seek_bytes >/dev/null',
-            'of="/dev/mmcblk0" bs=4096 seek="$start_location" oflag=seek_bytes conv=fsync >/dev/null',
-        )
-        if write_needle_fsync in text:
-            text = text.replace(write_needle_fsync, write_repl_fsync, 1)
-        else:
-            raise SystemExit("write_partitions() pattern not found")
-    else:
-        text = text.replace(write_needle, write_repl, 1)
+        raise SystemExit("write_partitions() pattern not found")
+    text = text.replace(write_needle, write_repl, 1)
 
     main_needle = """steps=$(expr "$(wc -l <flash.idx)" + "1")
 
@@ -105,6 +123,30 @@ if [[ "$needs_nvme" -eq 1 ]]; then
   fi
   echo "Discarding /dev/nvme0n1..."
   blkdiscard -f /dev/nvme0n1 || true
+fi
+
+first_url=""
+while IFS=", " read -r _pn _loc _a _b partfile _f _g _h; do
+  case "$partfile" in
+    http*) first_url="$partfile"; break ;;
+  esac
+done <flash.idx
+
+if [[ -n "$first_url" ]]; then
+  probe="${{first_url%/*}}/"
+  echo "Waiting for sideload server at $probe..."
+  server_ok=0
+  for i in $(seq 1 90); do
+    if wget -q -O /dev/null "$probe"; then
+      server_ok=1
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$server_ok" -ne 1 ]]; then
+    echo "ERR: sideload server unreachable: $probe" >&2
+    exit 1
+  fi
 fi
 
 steps=$(expr "$(wc -l <flash.idx)" + "1")

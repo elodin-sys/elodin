@@ -212,22 +212,26 @@
       };
       packages.x86_64-linux = let
         # baseModules only (no FSW/CUDA) — flash tooling + NVMe install image.
-        flashMinimalModules = [
-          ({...}: {imports = builtins.attrValues baseModules;})
-        ];
-        flashInstallSystem = nixpkgs.lib.nixosSystem {
-          system = alephSystem;
-          modules =
-            flashMinimalModules
-            ++ [{aleph.nvmeImage.enable = true;}];
-        };
         flashToolSystem = nixpkgs.lib.nixosSystem {
           system = alephSystem;
-          modules = flashMinimalModules;
+          modules = [({...}: {imports = builtins.attrValues baseModules;})];
+        };
+        flashInstallSystem = flashToolSystem.extendModules {
+          modules = [{aleph.nvmeImage.enable = true;}];
         };
         espImage = flashInstallSystem.config.system.build.alephEspImage;
         rootImage = flashInstallSystem.config.system.build.alephRootImage;
         rootPartitionUUID = flashInstallSystem.config.aleph.fs.rootPartitionUUID;
+
+        # The device rejects RCM blobs somewhere between 383 MB and 803 MB
+        # (MB1 RCM_BLOB err 0x354b0107; see ai-context/rcm-bisect). OS images are
+        # therefore sideloaded to the flash initrd over a USB ethernet gadget.
+        sideloadUrl = "http://192.168.7.1:8080";
+        flashPayload = hostPkgs.runCommand "aleph-flash-payload" {} ''
+          mkdir -p $out
+          gzip -1 -c ${espImage} > $out/esp.img.gz
+          gzip -1 -c ${rootImage} > $out/system.img.gz
+        '';
 
         flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
           modules = [
@@ -236,42 +240,70 @@
           ];
         };
 
-        # Explicit list: nixpkgs defaults (e.g. tpm-tis) are missing from tegra_defconfig
-        # and break makeModulesClosure (allowMissing = false).
-        flashInitrdModules = [
-          "mtdblock"
-          "spi_tegra210_quad"
-          "libcomposite"
-          "udc-core"
-          "tegra-xudc"
-          "xhci-tegra"
-          "u_serial"
-          "usb_f_acm"
-          "phy_tegra194_p2u"
-          "pcie_tegra194"
-          "nvme"
-          "nvme-core"
-        ];
-
-        # mkBefore: patch flashFromDevice before overlay-with-config bakes it into /init.
-        flashFromDeviceNvmeOverlay = final: prev: {
-          nvidia-jetpack6 = prev.nvidia-jetpack6.overrideScope (_jfinal: jprev: {
-            flashFromDevice = final.callPackage ./pkgs/flash-from-device-nvme.nix {
-              flashFromDevice = jprev.flashFromDevice;
-            };
-          });
-        };
-
-        # mkAfter: override nvidia-jetpack (not only nvidia-jetpack6) so initrdFlashScript
-        # sees the fixed signedFirmware. makeInitrd packs that closure — do not repack.
-        signedFirmwareFixupOverlay = final: prev: {
+        # The flash initrd /init resolves flashFromDevice and signedFirmware through
+        # the nvidia-jetpack scope fixpoint, so one late override of that scope
+        # regenerates the initrd with both Aleph pieces (mkAfter: must compose after
+        # jetpack's overlay-with-config).
+        alephFlashOverlay = final: prev: {
           nvidia-jetpack = prev.nvidia-jetpack.overrideScope (_jfinal: jprev: {
+            # jetpack's on-device flasher skips NVMe rows; patch in 9:0 / 12:* writes
+            flashFromDevice =
+              final.runCommand "flash-from-device" {
+                meta.mainProgram = "flash-from-device";
+                nativeBuildInputs = [final.buildPackages.python3];
+              } ''
+                mkdir -p $out/bin
+                cp ${final.lib.getExe jprev.flashFromDevice} $out/bin/flash-from-device
+                chmod +w $out/bin/flash-from-device
+                python3 ${./pkgs/patch-flash-from-device-nvme.py} $out/bin/flash-from-device
+                chmod +x $out/bin/flash-from-device
+              '';
+            # MB2 initializes every device in its cold-boot BCT storage info; on the
+            # Aleph carrier PCIe cannot come up that early (SError in
+            # tegrabl_pcie_soc_init, board falls back to recovery). Strip NVMe from
+            # the storage-info step only — GPT/flash.idx keep the full layout.
+            flash-tools = jprev.flash-tools.overrideAttrs (old: {
+              postInstall =
+                (old.postInstall or "")
+                + ''
+                  python3 ${./pkgs/patch-tegraflash-storage-info.py} $out/bootloader/tegraflash_impl_t234.py
+                '';
+            });
+            # Strip OS images from the firmware tree (kept out of the RCM blob) and
+            # point flash.idx esp/APP rows at the host sideload URLs.
+            # makeInitrd packs this closure — do not repack.
             signedFirmware =
               final.runCommand "signed-${jprev.l4tMajorMinorPatchVersion}-aleph" {
                 nativeBuildInputs = [final.buildPackages.python3];
               } ''
                 bash ${./pkgs/fixup-signed-firmware.sh} \
-                  ${jprev.signedFirmware} $out ${espImage} ${rootImage}
+                  ${jprev.signedFirmware} $out ${sideloadUrl}
+              '';
+            # Add an ECM ethernet function + static IP to the flash initrd /init so
+            # flash-from-device can fetch the images. The kernel lets later cpio
+            # members win, so append a tiny archive instead of repacking.
+            flashInitrd =
+              final.runCommand "flash-initrd-ecm" {
+                nativeBuildInputs = [final.buildPackages.cpio final.buildPackages.gzip];
+                passthru = jprev.flashInitrd.passthru;
+              } ''
+                mkdir work && cd work
+                zcat ${jprev.flashInitrd}/initrd | cpio -id init 2>/dev/null
+                target=$(readlink init)
+                member=''${target#/}
+                zcat ${jprev.flashInitrd}/initrd | cpio -id "$member" 2>/dev/null
+                rm init
+                cp "$member" init
+                chmod +w init
+
+                grep -q 'ln -s $gadget/functions/acm.usb0 $gadget/configs/c.1/' init
+                sed -i 's|ln -s $gadget/functions/acm.usb0 $gadget/configs/c.1/|&\nmkdir $gadget/functions/ecm.usb0\necho 32:70:05:18:01:01 >$gadget/functions/ecm.usb0/host_addr\necho 32:70:05:18:01:02 >$gadget/functions/ecm.usb0/dev_addr\nln -s $gadget/functions/ecm.usb0 $gadget/configs/c.1/|' init
+                grep -q 'mdev -s' init
+                sed -i 's|mdev -s|&\nifconfig usb0 192.168.7.2 netmask 255.255.255.0 up|' init
+
+                mkdir -p $out
+                echo init | cpio -H newc -o | gzip -1 > extra.cpio.gz
+                cat ${jprev.flashInitrd}/initrd extra.cpio.gz > $out/initrd
               '';
           });
         };
@@ -280,21 +312,27 @@
           modules = [
             {nixpkgs.buildPlatform.system = "x86_64-linux";}
             {nixpkgs.overlays = [secureBzip2Overlay];}
-            ({lib, ...}: {
-              nixpkgs.overlays = lib.mkBefore [flashFromDeviceNvmeOverlay];
-            })
-            ({lib, ...}: {
-              nixpkgs.overlays = lib.mkAfter [signedFirmwareFixupOverlay];
-            })
             ({
               lib,
               pkgs,
               ...
             }: {
+              nixpkgs.overlays = lib.mkAfter [alephFlashOverlay];
+
               hardware.nvidia-jetpack.firmware.initialBootOrder = ["nvme" "usb" "emmc" "sd" "scsi"];
 
               hardware.nvidia-jetpack.flashScriptOverrides = {
-                additionalInitrdFlashModules = lib.mkForce flashInitrdModules;
+                # jetpack adds its own QSPI/USB-gadget modules; these are the Aleph
+                # additions for the SSD. mkForce sheds the option default
+                # (availableKernelModules), which lists modules absent from
+                # tegra_defconfig and fails makeModulesClosure (allowMissing = false).
+                additionalInitrdFlashModules = lib.mkForce [
+                  "phy_tegra194_p2u"
+                  "pcie_tegra194"
+                  "nvme"
+                  "nvme-core"
+                  "usb_f_ecm"
+                ];
 
                 partitionTemplate =
                   pkgs.runCommand "aleph-t234-qspi-nvme.xml" {
@@ -350,11 +388,90 @@
           chmod +x $out/flash-uefi
         '';
 
-        flash-initrd = hostPkgs.runCommand "flash-initrd" {} ''
-          mkdir -p $out
-          cp ${flash-initrd-cross.config.system.build.initrdFlashScript}/bin/${flash-initrd-bin-name} $out/flash-initrd
-          chmod +x $out/flash-initrd
-        '';
+        flash-initrd = let
+          flashInitrd = flash-initrd-cross.pkgs.nvidia-jetpack.flashInitrd;
+          # MB1 rejects RCM blobs between 383 MB (accepted) and 803 MB (rejected):
+          # RCM_BLOB err 0x354b0107, see ai-context/rcm-bisect. Keep headroom.
+          maxInitrdBytes = 314572800; # 300 MiB
+        in
+          hostPkgs.runCommand "flash-initrd" {} ''
+            initrd=${flashInitrd}/initrd
+            size=$(stat -c %s "$initrd")
+            if [ "$size" -ge ${toString maxInitrdBytes} ]; then
+              echo "error: flash initrd is $size bytes (≥ ${toString maxInitrdBytes});" >&2
+              echo "MB1 rejects RCM blobs above ~0.4 GB (RCM_BLOB err 0x354b0107)." >&2
+              exit 1
+            fi
+            mkdir -p $out
+            cp ${flash-initrd-cross.config.system.build.initrdFlashScript}/bin/${flash-initrd-bin-name} $out/flash-initrd
+            chmod +w $out/flash-initrd
+
+            # Right after cd "$WORKDIR": self-log every run, and raise usbfs staging
+            # memory — the 16 MiB default stalls RCM bulk writes with
+            # "might be timeout in USB write" (forums.developer.nvidia.com/t/360581).
+            cat > insert-pre <<'EOF'
+            exec > >(tee /tmp/flash-initrd-$(date +%s).log) 2>&1
+            echo 2048 > /sys/module/usbcore/parameters/usbfs_memory_mb || true
+            echo -1 > /sys/module/usbcore/parameters/autosuspend || true
+            # ModemManager probes the flash ACM console with AT commands; keep it away
+            MM_WAS_ACTIVE=0
+            if systemctl is-active --quiet ModemManager 2>/dev/null; then
+              MM_WAS_ACTIVE=1
+              systemctl stop ModemManager || true
+            fi
+            EOF
+
+            # Right after flash.sh (RCM boot started): bring up the gadget ethernet
+            # and serve the OS images for flash-from-device to fetch.
+            cat > insert-post <<'EOF'
+            echo "Starting sideload server for the flash initrd..."
+            for i in $(seq 1 90); do
+              ${hostPkgs.iproute2}/bin/ip link show enx327005180101 >/dev/null 2>&1 && break
+              sleep 1
+            done
+            if ! ${hostPkgs.iproute2}/bin/ip link show enx327005180101 >/dev/null 2>&1; then
+              echo "ERR: gadget ethernet enx327005180101 did not appear" >&2
+              exit 3
+            fi
+            # NetworkManager tears our static address down mid-flash; unmanage the
+            # iface if NM is present, and keep re-asserting the address regardless.
+            command -v nmcli >/dev/null 2>&1 && nmcli dev set enx327005180101 managed no || true
+            ${hostPkgs.iproute2}/bin/ip addr replace 192.168.7.1/24 dev enx327005180101
+            ${hostPkgs.iproute2}/bin/ip link set enx327005180101 up
+            (
+              while true; do
+                ${hostPkgs.iproute2}/bin/ip addr replace 192.168.7.1/24 dev enx327005180101 2>/dev/null
+                ${hostPkgs.iproute2}/bin/ip link set enx327005180101 up 2>/dev/null
+                sleep 5
+              done
+            ) &
+            KEEPER_PID=$!
+            ${hostPkgs.python3}/bin/python3 -m http.server 8080 --bind 192.168.7.1 --directory ${flashPayload} &
+            HTTP_PID=$!
+            trap 'kill $HTTP_PID $KEEPER_PID 2>/dev/null || true; [ "$MM_WAS_ACTIVE" = 1 ] && systemctl start ModemManager 2>/dev/null; type on_exit >/dev/null 2>&1 && on_exit || true' EXIT
+            EOF
+
+            # After the devicetree copy: boot the RCM kernel with Aleph's tree — the
+            # devkit DTB leaves the M.2 PCIe link down, so /dev/nvme0n1 never appears.
+            cat > insert-dtb <<'EOF'
+            cp ${flash-initrd-cross.config.hardware.deviceTree.package}/${flash-initrd-cross.config.hardware.deviceTree.name} \
+              "kernel/dtb/tegra234-p3768-0000+p3767-0000-nv.dtb"
+            EOF
+
+            grep -q '^cd "$WORKDIR"$' $out/flash-initrd
+            sed -i '/^cd "$WORKDIR"$/r insert-pre' $out/flash-initrd
+            grep -q '\. kernel/dtb/$' $out/flash-initrd
+            sed -i '/\. kernel\/dtb\/$/r insert-dtb' $out/flash-initrd
+            grep -q '^\./flash\.sh ' $out/flash-initrd
+            sed -i '/^\.\/flash\.sh /r insert-post' $out/flash-initrd
+            # The Aleph kernel builds g_ncm builtin (CONFIG_USB_G_NCM=y, used by
+            # usb-eth.nix); it binds the sole UDC before /init runs, so the flash
+            # gadget (ACM serial + ECM) can never attach. Blacklist its initcall
+            # for the RCM boot only — the installed system is unaffected.
+            grep -q '^export CMDLINE=' $out/flash-initrd
+            sed -i 's|^export CMDLINE="\(.*\)"|export CMDLINE="\1 initcall_blacklist=ncm_driver_init"|' $out/flash-initrd
+            chmod +x $out/flash-initrd
+          '';
       };
       lib.installerSystem = installerSystem;
       templates.default = {
