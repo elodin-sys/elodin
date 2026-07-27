@@ -14,6 +14,7 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
             .push(serialize_coordinate(&CoordinateConfig {
                 frame,
                 origin: schematic.origin,
+                body: schematic.body,
             }));
     }
     if let Some(theme) = schematic.theme.as_ref() {
@@ -72,6 +73,10 @@ fn serialize_coordinate(coordinate: &CoordinateConfig) -> KdlNode {
             node.entries_mut()
                 .push(KdlEntry::new_prop("alt", origin.altitude));
         }
+    }
+    if let Some(body) = coordinate.body {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("body", body.as_str()));
     }
     node
 }
@@ -204,6 +209,7 @@ fn serialize_panel(panel: &Panel) -> KdlNode {
         Panel::ComponentMonitor(monitor) => serialize_component_monitor(monitor),
         Panel::GeoPositionGauge(gauge) => serialize_geo_position_gauge(gauge),
         Panel::OrientationGauge(gauge) => serialize_orientation_gauge(gauge),
+        Panel::HorizonGauge(gauge) => serialize_horizon_gauge(gauge),
         Panel::ActionPane(action_pane) => serialize_action_pane(action_pane),
         Panel::QueryTable(query_table) => serialize_query_table(query_table),
         Panel::QueryPlot(query_plot) => serialize_query_plot(query_plot),
@@ -674,18 +680,37 @@ fn serialize_orientation_gauge(gauge: &OrientationGauge) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("display", <&str>::from(display)));
     }
-    if let Some(q) = gauge.reference {
-        let mut reference = KdlNode::new("reference");
-        for v in q {
-            reference
-                .entries_mut()
-                .push(KdlEntry::new(round_float_default(v)));
-        }
-        let mut children = KdlDocument::new();
-        children.nodes_mut().push(reference);
-        node.set_children(children);
-    }
+    push_optional_reference(&mut node, gauge.reference);
     node
+}
+
+fn serialize_horizon_gauge(gauge: &HorizonGauge) -> KdlNode {
+    let mut node = KdlNode::new("horizon_gauge");
+    node.entries_mut().push(KdlEntry::new(gauge.eql.clone()));
+    push_optional_name_prop(&mut node, gauge.name.as_deref());
+    if let Some(source) = gauge.source {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("source", <&str>::from(source)));
+    }
+    push_optional_reference(&mut node, gauge.reference);
+    node
+}
+
+/// Emit the `reference x y z w` child, if the gauge has one (an identity
+/// reference is stored as `None`, so the common case stays implicit).
+fn push_optional_reference(node: &mut KdlNode, reference: Option<[f64; 4]>) {
+    let Some(q) = reference else {
+        return;
+    };
+    let mut child = KdlNode::new("reference");
+    for v in q {
+        child
+            .entries_mut()
+            .push(KdlEntry::new(round_float_default(v)));
+    }
+    let mut children = KdlDocument::new();
+    children.nodes_mut().push(child);
+    node.set_children(children);
 }
 
 fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {

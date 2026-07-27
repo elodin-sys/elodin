@@ -162,6 +162,9 @@ pub enum SelectedObject {
     OrientationGauge {
         gauge_id: Entity,
     },
+    HorizonGauge {
+        gauge_id: Entity,
+    },
     DataOverview,
     DataOverviewComponent {
         component_id: ComponentId,
@@ -190,7 +193,8 @@ impl SelectedObject {
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
             SelectedObject::GeoPositionGauge { gauge_id }
-            | SelectedObject::OrientationGauge { gauge_id } => Some(*gauge_id),
+            | SelectedObject::OrientationGauge { gauge_id }
+            | SelectedObject::HorizonGauge { gauge_id } => Some(*gauge_id),
             SelectedObject::DataOverview => None,
             SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),

@@ -125,7 +125,9 @@ fn panel(
         Panel::VSplit(_) | Panel::HSplit(_) => icons.container,
         Panel::Graph(_) => icons.plot,
         Panel::ComponentMonitor(_) => icons.viewport,
-        Panel::GeoPositionGauge(_) | Panel::OrientationGauge(_) => icons.viewport,
+        Panel::GeoPositionGauge(_) | Panel::OrientationGauge(_) | Panel::HorizonGauge(_) => {
+            icons.viewport
+        }
         Panel::ActionPane(_) => icons.viewport,
         Panel::QueryTable(_) => icons.viewport,
         Panel::QueryPlot(_) => icons.plot,
@@ -181,6 +183,11 @@ fn panel(
             Panel::OrientationGauge(gauge) => {
                 if let Some(gauge_id) = bindings.get(gauge.node_id) {
                     *selected_object = SelectedObject::OrientationGauge { gauge_id };
+                }
+            }
+            Panel::HorizonGauge(gauge) => {
+                if let Some(gauge_id) = bindings.get(gauge.node_id) {
+                    *selected_object = SelectedObject::HorizonGauge { gauge_id };
                 }
             }
             _ => {}

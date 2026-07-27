@@ -14,7 +14,7 @@ use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp};
 use std::f32::consts::TAU;
 
-use super::{EqlBinding, GaugePane, gauge_title};
+use super::{BARE_QUAT_UNIT_TOLERANCE, EqlBinding, GaugePane, gauge_title, text_with_halo};
 use crate::ui::{
     colors::get_scheme,
     widgets::{SystemStateExt, WidgetSystem},
@@ -198,11 +198,6 @@ fn canonical_hemisphere(q: DQuat) -> DQuat {
     }
     q
 }
-
-/// Max deviation of a bare 4-vector's length² from 1 to still count as a
-/// quaternion. Loose enough for telemetry drift / un-renormalized integration,
-/// tight enough that arbitrary 4-vectors (e.g. fin deflections) are rejected.
-const BARE_QUAT_UNIT_TOLERANCE: f64 = 0.1;
 
 /// Extract an attitude quaternion from a component value.
 ///
@@ -630,27 +625,6 @@ fn paint_frame_sphere(
             Color32::BLACK.gamma_multiply(alpha * 0.9),
         );
     }
-}
-
-/// Draw `text` with a 1px halo so it reads over both hemisphere tones.
-fn text_with_halo(
-    painter: &egui::Painter,
-    pos: Pos2,
-    text: &str,
-    font: FontId,
-    color: Color32,
-    halo: Color32,
-) {
-    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-        painter.text(
-            pos + Vec2::new(dx, dy),
-            Align2::CENTER_CENTER,
-            text,
-            font.clone(),
-            halo,
-        );
-    }
-    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
 
 #[cfg(test)]

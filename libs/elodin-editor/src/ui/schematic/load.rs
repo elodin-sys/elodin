@@ -120,6 +120,17 @@ fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<
     }
 }
 
+/// Reference ellipsoid for the schematic's `coordinate body=…`; absent means
+/// Earth, so existing schematics keep WGS84.
+fn body_ellipsoid(body: Option<impeller2_wkt::CelestialBody>) -> bevy_geo_frames::Ellipsoid {
+    match body.unwrap_or_default() {
+        impeller2_wkt::CelestialBody::Earth => bevy_geo_frames::Ellipsoid::WGS84,
+        impeller2_wkt::CelestialBody::Moon => bevy_geo_frames::Ellipsoid::Sphere {
+            radius: impeller2_wkt::CelestialBody::MOON_RADIUS_M,
+        },
+    }
+}
+
 fn apply_fallback_frame_to_panel(
     panel: &Panel,
     fallback_frame: Option<bevy_geo_frames::GeoFrame>,
@@ -399,10 +410,12 @@ impl LoadSchematicParams<'_, '_> {
             .map(|o| {
                 bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude)
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .with_ellipsoid(body_ellipsoid(schematic.body));
         let current = &self.geo_context.origin;
         if (current.latitude, current.longitude, current.altitude)
             != (origin.latitude, origin.longitude, origin.altitude)
+            || current.ellipsoid.parameters() != origin.ellipsoid.parameters()
         {
             self.geo_context.origin = origin;
         }
@@ -1289,6 +1302,22 @@ impl LoadSchematicParams<'_, '_> {
                 let pane = crate::ui::gauges::GaugePane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::OrientationGauge(pane)), parent_id, false)
             }
+            Panel::HorizonGauge(gauge) => {
+                let label = gauge
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Horizon Gauge".to_string());
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::gauges::HorizonGaugeData::new(gauge.source)
+                            .with_reference(gauge.reference),
+                        crate::ui::gauges::EqlBinding::new(gauge.eql.clone()),
+                    ))
+                    .id();
+                let pane = crate::ui::gauges::GaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::HorizonGauge(pane)), parent_id, false)
+            }
             Panel::QueryTable(data) => {
                 let has_query = !data.query.trim().is_empty();
                 let entity = self
@@ -2037,6 +2066,98 @@ mod tests {
         assert_eq!(origin.latitude, default_origin.latitude);
         assert_eq!(origin.longitude, default_origin.longitude);
         assert_eq!(origin.altitude, default_origin.altitude);
+    }
+
+    #[test]
+    fn coordinate_body_sets_the_reference_ellipsoid() {
+        let mut app = test_app();
+        let earth_radius = app
+            .world()
+            .resource::<bevy_geo_frames::GeoContext>()
+            .origin
+            .ellipsoid
+            .parameters()
+            .0;
+
+        let schematic = Schematic::from_kdl(r#"coordinate frame=ECEF lat=0 lon=0 body="moon""#)
+            .expect("parse lunar schematic");
+        load_schematic(&mut app, &schematic);
+        let ellipsoid = app
+            .world()
+            .resource::<bevy_geo_frames::GeoContext>()
+            .origin
+            .ellipsoid;
+        assert_eq!(
+            ellipsoid.parameters().0,
+            impeller2_wkt::CelestialBody::MOON_RADIUS_M
+        );
+        // A lunar sphere has no flattening, unlike WGS84.
+        assert_eq!(ellipsoid.parameters().0, ellipsoid.parameters().1);
+
+        // Clearing the schematic restores Earth.
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(
+            app.world()
+                .resource::<bevy_geo_frames::GeoContext>()
+                .origin
+                .ellipsoid
+                .parameters()
+                .0,
+            earth_radius
+        );
+    }
+
+    #[test]
+    fn horizon_gauge_round_trips_source_and_reference() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            horizon_gauge "rocket.world_pos" name="ADI" source="ECEF" {
+                reference 0.0 0.7071068 0.0 0.7071068
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::HorizonGaugeData>();
+        let data = query
+            .iter(app.world())
+            .next()
+            .expect("horizon_gauge entity");
+        assert_eq!(data.source, Some(GeoFrame::ECEF));
+        // The reference is normalized on load and stays non-identity.
+        assert!((data.reference.length() - 1.0).abs() < 1e-9);
+        assert!(data.reference_kdl().is_some());
+    }
+
+    #[test]
+    fn horizon_gauge_omitted_source_keeps_inheriting_coordinate() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame=NED
+            horizon_gauge "rocket.world_pos"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::HorizonGaugeData>();
+        let data = query
+            .iter(app.world())
+            .next()
+            .expect("horizon_gauge entity");
+        // Stored as None so a later `coordinate` change still applies.
+        assert_eq!(data.source, None);
+        assert_eq!(data.effective_source(Some(GeoFrame::NED)), GeoFrame::NED);
+        assert_eq!(data.reference_kdl(), None);
     }
 
     #[test]

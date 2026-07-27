@@ -659,10 +659,27 @@ pub fn create_orientation_gauge(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_horizon_gauge(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Horizon Gauge",
+        TILES_LABEL,
+        move |_: In<String>, eql: Res<EqlContext>| {
+            PalettePage::new(gauge_parts(
+                &eql.0.component_parts,
+                tile_id,
+                GaugeKind::Horizon,
+            ))
+            .prompt("Select a pose component to monitor")
+            .into_event()
+        },
+    )
+}
+
 #[derive(Clone, Copy)]
 enum GaugeKind {
     Position,
     Orientation,
+    Horizon,
 }
 
 fn gauge_parts(
@@ -690,6 +707,8 @@ fn gauge_parts(
                                 .create_geo_position_gauge_tile(component.name.clone(), tile_id),
                             GaugeKind::Orientation => tile_state
                                 .create_orientation_gauge_tile(component.name.clone(), tile_id),
+                            GaugeKind::Horizon => tile_state
+                                .create_horizon_gauge_tile(component.name.clone(), tile_id),
                         }
                         PaletteEvent::Exit
                     } else {
@@ -2165,6 +2184,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_monitor(Some(tile_id)),
         create_geo_position_gauge(Some(tile_id)),
         create_orientation_gauge(Some(tile_id)),
+        create_horizon_gauge(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
@@ -2237,6 +2257,7 @@ impl Default for PalettePage {
             create_monitor(None),
             create_geo_position_gauge(None),
             create_orientation_gauge(None),
+            create_horizon_gauge(None),
             create_viewport(None),
             create_query_table(None),
             create_query_plot(None),

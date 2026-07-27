@@ -8,7 +8,7 @@
 use crate::{GeoFrame, RotationKind};
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
-use map_3d::Ellipsoid;
+pub use map_3d::Ellipsoid;
 
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;

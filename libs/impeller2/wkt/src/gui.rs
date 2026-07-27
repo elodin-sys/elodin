@@ -58,6 +58,10 @@ pub struct Schematic {
     /// the viewer's `GeoContext` origin.
     #[serde(default)]
     pub origin: Option<GeoOriginConfig>,
+    /// Celestial body the coordinates sit on, selecting the reference
+    /// ellipsoid. `None` = Earth.
+    #[serde(default)]
+    pub body: Option<CelestialBody>,
     #[serde(default)]
     pub skybox: Option<SkyboxConfig>,
     /// Cinematic scene environment: sun light + shadows, ambient scaling, sky
@@ -219,12 +223,51 @@ pub struct GeoOriginConfig {
     pub altitude: f64,
 }
 
+/// Celestial body the schematic's coordinates sit on, selecting the reference
+/// ellipsoid used for geodetic conversions (LLA readouts, local verticals).
+///
+/// A body-fixed frame is called "ECEF" whatever the body; only its shape
+/// changes here.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CelestialBody {
+    /// WGS84 ellipsoid.
+    #[default]
+    Earth,
+    /// IAU mean lunar sphere.
+    Moon,
+}
+
+impl CelestialBody {
+    /// Radius of the IAU mean lunar reference sphere [m].
+    pub const MOON_RADIUS_M: f64 = 1_737_400.0;
+
+    /// KDL spelling of the body.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CelestialBody::Earth => "earth",
+            CelestialBody::Moon => "moon",
+        }
+    }
+
+    /// Parse the KDL spelling, case-insensitively.
+    pub fn from_str_ci(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "earth" => Some(CelestialBody::Earth),
+            "moon" => Some(CelestialBody::Moon),
+            _ => None,
+        }
+    }
+}
+
 /// Contents of the global `coordinate` schematic node.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct CoordinateConfig {
     pub frame: bevy_geo_frames::GeoFrame,
     #[serde(default)]
     pub origin: Option<GeoOriginConfig>,
+    /// Body whose ellipsoid the geodetic conversions use. `None` = Earth.
+    #[serde(default)]
+    pub body: Option<CelestialBody>,
 }
 
 #[cfg(feature = "bevy")]
@@ -314,6 +357,7 @@ pub enum Panel {
     ComponentMonitor(ComponentMonitor),
     GeoPositionGauge(GeoPositionGauge),
     OrientationGauge(OrientationGauge),
+    HorizonGauge(HorizonGauge),
     ActionPane(ActionPane),
     QueryTable(QueryTable),
     QueryPlot(QueryPlot),
@@ -339,6 +383,7 @@ impl Panel {
             }
             Panel::GeoPositionGauge(gauge) => gauge.name.as_deref().unwrap_or("Position Gauge"),
             Panel::OrientationGauge(gauge) => gauge.name.as_deref().unwrap_or("Orientation Gauge"),
+            Panel::HorizonGauge(gauge) => gauge.name.as_deref().unwrap_or("Horizon Gauge"),
             Panel::ActionPane(action_pane) => action_pane.name.as_str(),
             Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
             Panel::QueryPlot(query_plot) => &query_plot.name,
@@ -383,6 +428,7 @@ impl Panel {
             Panel::Viewport(v) => Some(v.node_id),
             Panel::GeoPositionGauge(gauge) => Some(gauge.node_id),
             Panel::OrientationGauge(gauge) => Some(gauge.node_id),
+            Panel::HorizonGauge(gauge) => Some(gauge.node_id),
             _ => None,
         }
     }
@@ -1259,6 +1305,36 @@ pub struct OrientationGauge {
     /// Attitude quaternion (`[x, y, z, w]`, body→`source`) shown as neutral:
     /// the displayed attitude is `q · reference⁻¹`. `None` means identity
     /// (raw component attitude).
+    #[serde(default)]
+    pub reference: Option<[f64; 4]>,
+    pub name: Option<String>,
+    /// Ephemeral runtime id bound to the gauge entity (schematic tree
+    /// selection); not persisted in KDL. See [`crate::NodeId`].
+    #[serde(default)]
+    pub node_id: NodeId,
+}
+
+/// An artificial horizon (attitude indicator): reads an EQL-bound pose and
+/// renders pitch and bank as a cockpit-view horizon.
+///
+/// There is deliberately no `display` field: a horizon is intrinsically local,
+/// so the frame choice only matters as the `source` of the incoming attitude.
+/// In ECEF the local vertical is derived from the pose's own position, so the
+/// expression must yield a full pose there.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct HorizonGauge {
+    /// EQL expression yielding a pose (`world_pos`-style 7-vector), or a bare
+    /// quaternion 4-vector when `source` is a local tangent frame.
+    pub eql: String,
+    /// Coordinate frame the quaternion rotates from (body→`source`).
+    ///
+    /// When `None`, inherits the schematic global `coordinate` frame; if that
+    /// is also unset, the editor falls back to ENU.
+    pub source: Option<bevy_geo_frames::GeoFrame>,
+    /// Attitude quaternion (`[x, y, z, w]`, body→`source`) shown as level: the
+    /// displayed attitude is `q · reference⁻¹`. `None` means identity (raw
+    /// component attitude).
     #[serde(default)]
     pub reference: Option<[f64; 4]>,
     pub name: Option<String>,
