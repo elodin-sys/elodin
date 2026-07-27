@@ -26,9 +26,18 @@
     shopt -s nullglob
 
     mode="''${ELODIN_GPU:-auto}"
+    nvidia_icd=""
+    for candidate in \
+      /usr/share/vulkan/icd.d/nvidia_icd.json \
+      /etc/vulkan/icd.d/nvidia_icd.json; do
+      if [ -e "$candidate" ]; then
+        nvidia_icd="$candidate"
+        break
+      fi
+    done
 
     nvidia_present() {
-      [ -e /proc/driver/nvidia/version ] && [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]
+      [ -e /proc/driver/nvidia/version ] && [ -n "$nvidia_icd" ]
     }
 
     # A Mesa-capable GPU (Intel 0x8086 / AMD 0x1002) means the editor has a
@@ -69,6 +78,8 @@
     have_glx=0
     for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
       /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
+      /usr/lib/x86_64-linux-gnu/libcuda.so* \
+      /usr/lib/x86_64-linux-gnu/libnvcuvid.so* \
       /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
       [ -e "$lib" ] || continue
       ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
@@ -83,8 +94,8 @@
     # defaults when the host driver libraries are not present.
     [ "$have_glx" = 1 ] || exit 0
 
-    printf 'export VK_ICD_FILENAMES=%s\n' /usr/share/vulkan/icd.d/nvidia_icd.json
-    printf 'export VK_DRIVER_FILES=%s\n' /usr/share/vulkan/icd.d/nvidia_icd.json
+    printf 'export VK_ICD_FILENAMES=%s\n' "$nvidia_icd"
+    printf 'export VK_DRIVER_FILES=%s\n' "$nvidia_icd"
     printf 'export __GLX_VENDOR_LIBRARY_NAME=nvidia\n'
     printf 'export LD_LIBRARY_PATH="%s''${LD_LIBRARY_PATH:+:''${LD_LIBRARY_PATH}}"\n' "$nvidia_lib_dir"
     printf 'unset LIBGL_ALWAYS_SOFTWARE\n'
