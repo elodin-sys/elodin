@@ -122,13 +122,26 @@ fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<
 
 /// Reference ellipsoid for the schematic's `coordinate body=…`; absent means
 /// Earth, so existing schematics keep WGS84.
-fn body_ellipsoid(body: Option<impeller2_wkt::CelestialBody>) -> bevy_geo_frames::Ellipsoid {
+pub(crate) fn body_ellipsoid(
+    body: Option<impeller2_wkt::CelestialBody>,
+) -> bevy_geo_frames::Ellipsoid {
     match body.unwrap_or_default() {
         impeller2_wkt::CelestialBody::Earth => bevy_geo_frames::Ellipsoid::WGS84,
         impeller2_wkt::CelestialBody::Moon => bevy_geo_frames::Ellipsoid::Sphere {
             radius: impeller2_wkt::CelestialBody::MOON_RADIUS_M,
         },
     }
+}
+
+/// Inverse of [`body_ellipsoid`]: the `coordinate body=…` that reproduces a
+/// live [`bevy_geo_frames::GeoContext`] ellipsoid on reload. `None` for Earth
+/// (and for any ellipsoid no body maps to), so plain schematics stay unchanged.
+pub(crate) fn ellipsoid_body(
+    ellipsoid: bevy_geo_frames::Ellipsoid,
+) -> Option<impeller2_wkt::CelestialBody> {
+    [impeller2_wkt::CelestialBody::Moon]
+        .into_iter()
+        .find(|&body| body_ellipsoid(Some(body)).parameters() == ellipsoid.parameters())
 }
 
 fn apply_fallback_frame_to_panel(
@@ -1809,6 +1822,16 @@ mod tests {
         settle(app);
     }
 
+    /// Rebuilds `CurrentSchematic` from live editor state, as saving does.
+    fn save_schematic(app: &mut App) -> Schematic {
+        app.init_resource::<impeller2_bevy::ComponentMetadataRegistry>()
+            .init_resource::<crate::ui::schematic::CurrentWindowSchematics>();
+        app.world_mut()
+            .run_system_cached(crate::ui::schematic::tiles_to_schematic)
+            .expect("run tiles_to_schematic");
+        app.world().resource::<CurrentSchematic>().0.clone()
+    }
+
     #[test_case("line_3d \"(0,0,0)\""; "line_3d")]
     #[test_case("vector_arrow \"(0,0,1)\"" ; "vector_arrow")]
     #[test_case("object_3d \"(0,0,0,1, 0,0,0)\" { sphere radius=1.0 { color 0 0 0 } }" ; "object_3d")]
@@ -2104,6 +2127,55 @@ mod tests {
                 .parameters()
                 .0,
             earth_radius
+        );
+    }
+
+    #[test]
+    fn coordinate_body_survives_a_save() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(r#"coordinate frame=ECEF lat=0 lon=0 body="moon""#)
+            .expect("parse lunar schematic");
+        load_schematic(&mut app, &schematic);
+
+        let saved = save_schematic(&mut app);
+        assert_eq!(saved.frame, Some(GeoFrame::ECEF));
+        assert_eq!(saved.body, Some(impeller2_wkt::CelestialBody::Moon));
+        assert!(impeller2_kdl::serialize_schematic(&saved).contains(r#"body=moon"#));
+
+        // Reloading the saved schematic keeps the lunar ellipsoid.
+        load_schematic(&mut app, &saved);
+        let ellipsoid = app
+            .world()
+            .resource::<bevy_geo_frames::GeoContext>()
+            .origin
+            .ellipsoid;
+        assert_eq!(
+            ellipsoid.parameters().0,
+            impeller2_wkt::CelestialBody::MOON_RADIUS_M
+        );
+
+        // Earth stays implicit, and a stale lunar body does not linger.
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(save_schematic(&mut app).body, None);
+    }
+
+    #[test]
+    fn celestial_bodies_round_trip_through_their_ellipsoids() {
+        use impeller2_wkt::CelestialBody;
+        assert_eq!(super::ellipsoid_body(super::body_ellipsoid(None)), None);
+        assert_eq!(
+            super::ellipsoid_body(super::body_ellipsoid(Some(CelestialBody::Earth))),
+            None,
+            "Earth is the default, so it stays implicit"
+        );
+        assert_eq!(
+            super::ellipsoid_body(super::body_ellipsoid(Some(CelestialBody::Moon))),
+            Some(CelestialBody::Moon)
+        );
+        assert_eq!(
+            super::ellipsoid_body(bevy_geo_frames::Ellipsoid::Sphere { radius: 1.0 }),
+            None,
+            "an ellipsoid no body maps to must not claim one"
         );
     }
 

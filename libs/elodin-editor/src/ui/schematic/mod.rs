@@ -494,6 +494,9 @@ pub fn tiles_to_schematic(
             longitude: origin.longitude.to_degrees(),
             altitude: origin.altitude,
         });
+    // The ellipsoid rides along with the origin: without it a lunar schematic
+    // would reload as WGS84, breaking ECEF verticals and LLA conversions.
+    schematic.body = load::ellipsoid_body(origin.ellipsoid);
     bindings.clear_ephemeral();
 
     if let Some(root_panels) =
