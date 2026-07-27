@@ -120,6 +120,21 @@ fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<
     }
 }
 
+/// The [`bevy_geo_frames::GeoContext`] origin a schematic asks for: its
+/// `coordinate` lat/lon/alt on the body's reference ellipsoid, reset to the
+/// default when absent so reloads are deterministic.
+///
+/// Shared with the headless loader ([`crate::headless`]), which spawns the
+/// same `object_3d`/`world_mesh` entities and so needs the same ellipsoid for
+/// its ECEF/LLA conversions.
+pub(crate) fn schematic_geo_origin(schematic: &Schematic) -> bevy_geo_frames::GeoOrigin {
+    schematic
+        .origin
+        .map(|o| bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude))
+        .unwrap_or_default()
+        .with_ellipsoid(body_ellipsoid(schematic.body))
+}
+
 /// Reference ellipsoid for the schematic's `coordinate body=…`; absent means
 /// Earth, so existing schematics keep WGS84.
 pub(crate) fn body_ellipsoid(
@@ -414,17 +429,10 @@ impl LoadSchematicParams<'_, '_> {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
 
-        // Set the GeoContext origin from the schematic (degrees -> radians),
-        // resetting to the default when absent so reloads are deterministic.
+        // Set the GeoContext origin from the schematic (degrees -> radians).
         // Only write on change: mutating GeoContext re-touches every
         // GeoPosition/GeoRotation in the world.
-        let origin = schematic
-            .origin
-            .map(|o| {
-                bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude)
-            })
-            .unwrap_or_default()
-            .with_ellipsoid(body_ellipsoid(schematic.body));
+        let origin = schematic_geo_origin(schematic);
         let current = &self.geo_context.origin;
         if (current.latitude, current.longitude, current.altitude)
             != (origin.latitude, origin.longitude, origin.altitude)
@@ -2157,6 +2165,43 @@ mod tests {
         // Earth stays implicit, and a stale lunar body does not linger.
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(save_schematic(&mut app).body, None);
+    }
+
+    /// `schematic_geo_origin` is what both the editor and the headless render
+    /// server load, so the body must survive with or without an explicit
+    /// lat/lon.
+    #[test]
+    fn schematic_geo_origin_carries_the_body_ellipsoid() {
+        let moon_radius = impeller2_wkt::CelestialBody::MOON_RADIUS_M;
+        let earth_radius = bevy_geo_frames::GeoOrigin::default()
+            .ellipsoid
+            .parameters()
+            .0;
+
+        let lunar_site = super::schematic_geo_origin(
+            &Schematic::from_kdl(r#"coordinate frame=ECEF lat=10 lon=20 body="moon""#)
+                .expect("parse lunar schematic"),
+        );
+        assert_eq!(lunar_site.ellipsoid.parameters().0, moon_radius);
+        assert_eq!(lunar_site.latitude, 10f64.to_radians());
+
+        // A body with no launch site still selects its ellipsoid.
+        let lunar_bare = super::schematic_geo_origin(
+            &Schematic::from_kdl(r#"coordinate frame=ECEF body="moon""#)
+                .expect("parse lunar schematic"),
+        );
+        assert_eq!(lunar_bare.ellipsoid.parameters().0, moon_radius);
+
+        // Earth and an empty schematic both give the default origin.
+        for kdl in [r#"coordinate frame=ECEF lat=1 lon=2 body="earth""#, ""] {
+            let origin =
+                super::schematic_geo_origin(&Schematic::from_kdl(kdl).expect("parse schematic"));
+            assert_eq!(origin.ellipsoid.parameters().0, earth_radius, "{kdl:?}");
+        }
+        assert_eq!(
+            super::schematic_geo_origin(&Schematic::default()).latitude,
+            bevy_geo_frames::GeoOrigin::default().latitude
+        );
     }
 
     #[test]
