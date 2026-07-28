@@ -118,11 +118,8 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#false show_frustums=#true active=#true far=100000
                 vsplit share=0.4 {
                     vsplit {
-                        // Primary-flight-display spot, top-right of the main viewport.
                         // With no `coordinate` node the source frame is ENU, matching this
                         // jet's X-fwd/Y-left/Z-up body frame; NED would invert the horizon.
-                        // A peer share of the graphs below it: the face is square, so extra
-                        // height buys it nothing and starves the graphs sharing the column.
                         horizon_gauge "bdx.world_pos" name="ADI"
                         graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
