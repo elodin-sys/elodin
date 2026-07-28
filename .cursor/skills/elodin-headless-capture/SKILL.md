@@ -98,23 +98,28 @@ the editor's `ELODIN_SCREENSHOT` mechanism documented in the
 
 ## Record video
 
-In terminal 2, start this after the editor has loaded. Resolve the node name
-instead of hard-coding it: current PipeWire wraps the stream as
-`.gamescope-wrapped`, while older versions also accepted the media name
-`gamescope`.
+In terminal 2, start this after the editor has loaded. Resolve the newest
+Gamescope node's PipeWire object serial instead of hard-coding its name. Current
+PipeWire can publish multiple nodes with the same `.gamescope-wrapped` name, so
+the serial uniquely identifies the live compositor.
 
 ```bash
-GAMESCOPE_NODE="$(pw-dump | jq -r '
-  .[]
-  | select(.type == "PipeWire:Interface:Node")
-  | .info.props
-  | select(."media.name" == "gamescope")
-  | ."node.name"
-' | head -n1)"
-test -n "$GAMESCOPE_NODE"
+GAMESCOPE_TARGET="$(pw-dump | jq -r '
+  [
+    .[]
+    | select(.type == "PipeWire:Interface:Node")
+    | select(.info.props["media.name"] == "gamescope")
+    | select(.info.props["object.serial"] != null)
+    | {id: .id, serial: (.info.props["object.serial"] | tostring)}
+  ]
+  | sort_by(.id)
+  | last
+  | .serial // empty
+')"
+test -n "$GAMESCOPE_TARGET"
 
 gst-launch-1.0 -e \
-  pipewiresrc target-object="$GAMESCOPE_NODE" do-timestamp=true \
+  pipewiresrc target-object="$GAMESCOPE_TARGET" do-timestamp=true \
   ! video/x-raw,format=BGRx \
   ! queue \
   ! videoconvert \
