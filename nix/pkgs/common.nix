@@ -23,7 +23,7 @@
   '';
   mesaVulkanIcdPath =
     lib.concatMapStringsSep ":" (
-      manifest: "${pkgs.mesa}/share/vulkan/icd.d/${manifest}_icd.${pkgs.stdenv.hostPlatform.linuxArch}.json"
+      manifest: "${pkgs.mesa}/share/vulkan/icd.d/${manifest}_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json"
     ) [
       "radeon"
       "intel"
