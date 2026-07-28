@@ -20,7 +20,9 @@ use impeller2_wkt::{ComponentValue, CurrentTimestamp};
 
 use super::{BARE_QUAT_UNIT_TOLERANCE, EqlBinding, GaugePane, gauge_title, text_with_halo};
 use crate::ui::{
+    SelectedObject,
     colors::get_scheme,
+    tiles::WindowState,
     widgets::{SystemStateExt, WidgetSystem},
 };
 
@@ -538,17 +540,18 @@ pub struct HorizonGaugeWidget<'w, 's> {
     current_timestamp: Res<'w, CurrentTimestamp>,
     geo_context: Res<'w, GeoContext>,
     coordinate: Res<'w, crate::Coordinate>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for HorizonGaugeWidget<'_, '_> {
-    type Args = GaugePane;
+    type Args = (GaugePane, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        pane: Self::Args,
+        (pane, target_window): Self::Args,
     ) -> Self::Output {
         let HorizonGaugeWidget {
             gauges,
@@ -558,6 +561,7 @@ impl WidgetSystem for HorizonGaugeWidget<'_, '_> {
             current_timestamp,
             geo_context,
             coordinate,
+            mut window_states,
         } = state.params_mut(world);
         let Ok((data, binding)) = gauges.get(pane.entity) else {
             return;
@@ -569,6 +573,16 @@ impl WidgetSystem for HorizonGaugeWidget<'_, '_> {
         // Keep inherit (`source = None`) live against `Coordinate` changes.
         let source = data.effective_source(coordinate.0);
         let solved = solve_attitude(value.as_ref(), source, data.reference, &geo_context);
+
+        // Clicking the panel selects it, since a pane in a split has no tab.
+        let panel = super::panel_select_target(ui, pane.entity);
+        if panel.clicked()
+            && let Ok(mut window_state) = window_states.get_mut(target_window)
+        {
+            window_state.ui_state.selected_object = SelectedObject::HorizonGauge {
+                gauge_id: pane.entity,
+            };
+        }
 
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(super::GAUGE_PANEL_MARGIN))

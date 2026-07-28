@@ -1420,7 +1420,7 @@ impl Pane {
                 ui.add_widget_with::<GeoPositionGaugeWidget>(
                     world,
                     "geo_position_gauge",
-                    pane.clone(),
+                    (pane.clone(), target_window),
                 );
                 egui_tiles::UiResponse::None
             }
@@ -1436,7 +1436,7 @@ impl Pane {
                 ui.add_widget_with::<OrientationGaugeWidget>(
                     world,
                     "orientation_gauge",
-                    pane.clone(),
+                    (pane.clone(), target_window),
                 );
                 egui_tiles::UiResponse::None
             }
@@ -1449,7 +1449,11 @@ impl Pane {
                     UiBlocker::OtherPanel,
                     PointerOwnerPriority::Panel,
                 );
-                ui.add_widget_with::<HorizonGaugeWidget>(world, "horizon_gauge", pane.clone());
+                ui.add_widget_with::<HorizonGaugeWidget>(
+                    world,
+                    "horizon_gauge",
+                    (pane.clone(), target_window),
+                );
                 egui_tiles::UiResponse::None
             }
             Pane::QueryTable(pane) => {

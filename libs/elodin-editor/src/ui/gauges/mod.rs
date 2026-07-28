@@ -184,6 +184,21 @@ fn gauge_title(eql: &str, name: &PaneName) -> String {
 /// Uniform inner padding for both gauge panels, so sibling gauges line up.
 pub(crate) const GAUGE_PANEL_MARGIN: i8 = 6;
 
+/// Claims the whole gauge panel as a click target, so clicking it can put the
+/// gauge in the inspector.
+///
+/// A gauge pane living directly in a split gets no tab bar, and the title it
+/// draws is painted text, so without this there is nothing to click and the
+/// inspector is unreachable. Call it *before* drawing the panel's contents:
+/// widgets registered later keep their own clicks.
+pub(crate) fn panel_select_target(ui: &mut egui::Ui, gauge: Entity) -> egui::Response {
+    ui.interact(
+        ui.max_rect(),
+        ui.id().with(("gauge_panel", gauge)),
+        egui::Sense::click(),
+    )
+}
+
 /// Panel header shared by both gauges: the [`gauge_title`] in muted 10px mono,
 /// followed by a small gap before the panel body.
 pub(crate) fn gauge_header(ui: &mut egui::Ui, title: &str) {
