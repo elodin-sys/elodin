@@ -47,13 +47,43 @@ impl ControlInput {
     }
 }
 
-/// Whether a human is actually flying: any surface off neutral, or a throttle
-/// moved away from the idle default.
-fn is_flying(input: &ControlInput) -> bool {
-    input.elevator.abs() > 1e-3
+/// Whether a human is actually flying: any surface off neutral, a throttle
+/// stick the pilot has moved, or a keyboard throttle away from the idle
+/// default.
+fn is_flying(input: &ControlInput, gamepad_throttle: bool) -> bool {
+    gamepad_throttle
+        || input.elevator.abs() > 1e-3
         || input.aileron.abs() > 1e-3
         || input.rudder.abs() > 1e-3
         || (input.throttle - IDLE_THROTTLE).abs() > 0.01
+}
+
+/// Merge the two input sources. Each gamepad axis wins while it is off
+/// neutral; the throttle is the gamepad's only once its stick has been moved,
+/// since a centred stick means "untouched", not "half throttle".
+fn combine(gamepad: ControlInput, keyboard: ControlInput, gamepad_throttle: bool) -> ControlInput {
+    ControlInput {
+        elevator: if gamepad.elevator.abs() > 0.001 {
+            gamepad.elevator
+        } else {
+            keyboard.elevator
+        },
+        aileron: if gamepad.aileron.abs() > 0.001 {
+            gamepad.aileron
+        } else {
+            keyboard.aileron
+        },
+        rudder: if gamepad.rudder.abs() > 0.001 {
+            gamepad.rudder
+        } else {
+            keyboard.rudder
+        },
+        throttle: if gamepad_throttle {
+            gamepad.throttle
+        } else {
+            keyboard.throttle
+        },
+    }
 }
 
 /// Input reader combining gamepad and keyboard
@@ -70,6 +100,12 @@ pub struct InputReader {
     keyboard_throttle: f64,
     /// Last control input for smoothing
     last_input: ControlInput,
+    /// Whether the gamepad's throttle stick has ever left neutral.
+    ///
+    /// A gamepad self-centres its sticks and centre maps to mid-throttle, so
+    /// an untouched pad would otherwise out-vote the keyboard. A transmitter's
+    /// ratcheted throttle sits off centre, so it latches on the first read.
+    gamepad_throttle_engaged: bool,
     /// Flies gentle banks until the human takes over
     idle_pilot: IdlePilot,
 }
@@ -118,6 +154,7 @@ impl InputReader {
                 throttle: IDLE_THROTTLE,
                 ..Default::default()
             },
+            gamepad_throttle_engaged: false,
             idle_pilot: IdlePilot::new(demo),
         }
     }
@@ -137,33 +174,15 @@ impl InputReader {
         // Read keyboard input
         let keyboard_input = self.read_keyboard();
 
-        // Combine inputs - gamepad takes priority for each axis if non-zero
-        let mut combined = ControlInput {
-            elevator: if gamepad_input.elevator.abs() > 0.001 {
-                gamepad_input.elevator
-            } else {
-                keyboard_input.elevator
-            },
-            aileron: if gamepad_input.aileron.abs() > 0.001 {
-                gamepad_input.aileron
-            } else {
-                keyboard_input.aileron
-            },
-            rudder: if gamepad_input.rudder.abs() > 0.001 {
-                gamepad_input.rudder
-            } else {
-                keyboard_input.rudder
-            },
-            throttle: if (gamepad_input.throttle - IDLE_THROTTLE).abs() > 0.01 {
-                gamepad_input.throttle
-            } else {
-                keyboard_input.throttle
-            },
-        };
+        let gamepad_throttle = self.gamepad_throttle_engaged;
+        let mut combined = combine(gamepad_input, keyboard_input, gamepad_throttle);
 
         // Hand the ailerons to the idle pilot until the human flies. Done
         // before smoothing so the handover blends like any other input.
-        if let Some(aileron) = self.idle_pilot.aileron(is_flying(&combined)) {
+        if let Some(aileron) = self
+            .idle_pilot
+            .aileron(is_flying(&combined, gamepad_throttle))
+        {
             combined.aileron = aileron;
         }
 
@@ -181,7 +200,7 @@ impl InputReader {
     }
 
     /// Read gamepad input
-    fn read_gamepad(&self) -> ControlInput {
+    fn read_gamepad(&mut self) -> ControlInput {
         let Some(ref gilrs) = self.gilrs else {
             return ControlInput {
                 throttle: IDLE_THROTTLE,
@@ -202,6 +221,14 @@ impl InputReader {
         let left_y = self.apply_deadzone(gamepad.value(Axis::LeftStickY) as f64);
         let right_x = self.apply_deadzone(gamepad.value(Axis::RightStickX) as f64);
         let right_y = self.apply_deadzone(gamepad.value(Axis::RightStickY) as f64);
+
+        // The deadzone reads exactly zero at centre, so any other value means
+        // the throttle stick has been moved (or never self-centred).
+        let throttle_axis = match self.stick_mode {
+            StickMode::Mode2 => left_y,
+            StickMode::Mode1 => right_y,
+        };
+        self.gamepad_throttle_engaged |= throttle_axis != 0.0;
 
         // Map based on stick mode
         match self.stick_mode {
@@ -283,5 +310,81 @@ impl InputReader {
             let magnitude = (value.abs() - self.deadzone) / (1.0 - self.deadzone);
             sign * magnitude
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An untouched gamepad: sticks centred, which the throttle mapping
+    /// `(axis + 1) / 2` turns into mid-throttle.
+    const IDLE_GAMEPAD: ControlInput = ControlInput {
+        elevator: 0.0,
+        aileron: 0.0,
+        rudder: 0.0,
+        throttle: 0.5,
+    };
+
+    /// The keyboard at rest, before any key is pressed.
+    const IDLE_KEYBOARD: ControlInput = ControlInput {
+        elevator: 0.0,
+        aileron: 0.0,
+        rudder: 0.0,
+        throttle: IDLE_THROTTLE,
+    };
+
+    #[test]
+    fn untouched_gamepad_keeps_the_idle_throttle() {
+        let combined = combine(IDLE_GAMEPAD, IDLE_KEYBOARD, false);
+        assert_eq!(combined.throttle, IDLE_THROTTLE);
+        assert!(!is_flying(&combined, false));
+    }
+
+    #[test]
+    fn untouched_gamepad_does_not_out_vote_the_keyboard_throttle() {
+        let keyboard = ControlInput {
+            throttle: 0.8,
+            ..IDLE_KEYBOARD
+        };
+        assert_eq!(combine(IDLE_GAMEPAD, keyboard, false).throttle, 0.8);
+    }
+
+    #[test]
+    fn moved_throttle_stick_wins_and_counts_as_flying() {
+        let gamepad = ControlInput {
+            throttle: 0.75,
+            ..IDLE_GAMEPAD
+        };
+        let combined = combine(gamepad, IDLE_KEYBOARD, true);
+        assert_eq!(combined.throttle, 0.75);
+        assert!(is_flying(&combined, true));
+    }
+
+    /// A transmitter parked at a throttle that happens to match the idle
+    /// default is still a pilot at the controls.
+    #[test]
+    fn a_moved_stick_flies_even_at_idle_throttle() {
+        assert!(is_flying(&IDLE_KEYBOARD, true));
+    }
+
+    #[test]
+    fn stick_deflection_flies() {
+        let gamepad = ControlInput {
+            aileron: 0.1,
+            ..IDLE_GAMEPAD
+        };
+        let combined = combine(gamepad, IDLE_KEYBOARD, false);
+        assert_eq!(combined.aileron, 0.1);
+        assert!(is_flying(&combined, false));
+    }
+
+    #[test]
+    fn keyboard_throttle_off_idle_flies() {
+        let keyboard = ControlInput {
+            throttle: IDLE_THROTTLE + 0.05,
+            ..IDLE_KEYBOARD
+        };
+        assert!(is_flying(&combine(IDLE_GAMEPAD, keyboard, false), false));
     }
 }
