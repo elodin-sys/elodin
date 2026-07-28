@@ -1,4 +1,4 @@
-//! Idle pilot: gentle periodic banks while nobody is on the sticks.
+//! Idle pilot: a slow roll left and right while nobody is on the sticks.
 //!
 //! Left alone the jet flies straight and the attitude instruments never move,
 //! which makes the ADI look broken. This nudges the ailerons until the first
@@ -8,22 +8,17 @@
 use std::f64::consts::TAU;
 use std::time::Instant;
 
-/// Wings-level lead-in, so the jet settles into trimmed flight before the
-/// first bank.
-const LEAD_IN_S: f64 = 5.0;
-/// Length of one bank-and-recover burst.
-const BURST_S: f64 = 6.0;
-/// Wings-level pause between bursts.
-const PAUSE_S: f64 = 8.0;
-/// Peak aileron during a burst, in radians (~0.9°).
+/// One full right-then-left roll.
+const PERIOD_S: f64 = 14.0;
+/// Peak aileron, in radians (~0.85°).
 ///
 /// Roll rate at cruise is roughly `(C_lda / -C_lp) * (2V/b) * delta_a`, about
-/// 16 rad/s per radian of aileron, and roll damping settles in tens of
-/// milliseconds — so half a burst integrates to a bank of a few tens of
-/// degrees. Full throw is 25°: this is a fingertip input.
-const PEAK_AILERON_RAD: f64 = 0.017;
+/// [`ROLL_RATE_PER_RAD`] for this airframe, and roll damping settles in tens of
+/// milliseconds, so the bank is essentially the integral of this. That puts the
+/// peak near 30° of bank — a fingertip input against the 25° of full throw.
+const PEAK_AILERON_RAD: f64 = 0.0148;
 
-/// Flies [`bank_burst`] until a human takes over.
+/// Flies [`roll_aileron`] until a human takes over.
 pub struct IdlePilot {
     start: Instant,
     flying: bool,
@@ -44,80 +39,75 @@ impl IdlePilot {
     pub fn aileron(&mut self, pilot_input: bool) -> Option<f64> {
         self.flying &= !pilot_input;
         self.flying
-            .then(|| bank_burst(self.start.elapsed().as_secs_f64()))
+            .then(|| roll_aileron(self.start.elapsed().as_secs_f64()))
     }
 }
 
-/// Aileron of the burst sequence `t` seconds after start: bursts alternating
-/// right and left, each a whole sine period so the wings come back level on
-/// their own and the jet holds its average heading.
-fn bank_burst(t: f64) -> f64 {
-    let t = t - LEAD_IN_S;
-    if t < 0.0 {
-        return 0.0;
-    }
-    let cycle = BURST_S + PAUSE_S;
-    let phase = t % cycle;
-    if phase >= BURST_S {
-        return 0.0;
-    }
-    let sign = if ((t / cycle) as u64).is_multiple_of(2) {
-        1.0
-    } else {
-        -1.0
-    };
-    sign * PEAK_AILERON_RAD * (TAU * phase / BURST_S).sin()
+/// Aileron `t` seconds in.
+///
+/// A cosine, not a sine: bank is the integral of roll rate, so this is what
+/// makes the bank itself a sine — swinging evenly either side of level, wings
+/// passing through flat twice a period, average heading held. Driving with a
+/// sine would bank one way only and turn the jet in circles.
+fn roll_aileron(t: f64) -> f64 {
+    PEAK_AILERON_RAD * (TAU * t / PERIOD_S).cos()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const CYCLE_S: f64 = BURST_S + PAUSE_S;
+    /// Roll rate per radian of aileron at cruise, from the airframe's
+    /// `C_lda = 0.15`, `C_lp = -0.5`, `b = 2.65 m` at 70 m/s.
+    const ROLL_RATE_PER_RAD: f64 = 15.85;
 
+    /// Bank angle over one period, integrating `p = ROLL_RATE_PER_RAD * aileron`
+    /// from level. Roll damping settles far faster than the 14 s drive, so the
+    /// quasi-steady rate is a fair stand-in for the airframe.
+    fn bank_samples() -> Vec<f64> {
+        let steps = 14_000;
+        let dt = PERIOD_S / f64::from(steps);
+        let mut bank = 0.0;
+        (0..steps)
+            .map(|i| {
+                bank += ROLL_RATE_PER_RAD * roll_aileron((f64::from(i) + 0.5) * dt) * dt;
+                bank
+            })
+            .collect()
+    }
+
+    /// The point of the whole thing: the ADI shows a bank of a few tens of
+    /// degrees, and the same amount each way.
     #[test]
-    fn stays_level_during_lead_in_and_pauses() {
-        for t in [0.0, 1.0, LEAD_IN_S - 0.01] {
-            assert_eq!(bank_burst(t), 0.0, "lead-in at {t}");
-        }
-        for t in [BURST_S, BURST_S + 1.0, CYCLE_S - 0.01] {
-            assert_eq!(bank_burst(LEAD_IN_S + t), 0.0, "pause at {t}");
-        }
+    fn banks_about_thirty_degrees_either_side() {
+        let bank: Vec<f64> = bank_samples();
+        let max = bank.iter().copied().fold(f64::MIN, f64::max).to_degrees();
+        let min = bank.iter().copied().fold(f64::MAX, f64::min).to_degrees();
+        assert!((25.0..35.0).contains(&max), "peak bank {max}°");
+        assert!((-35.0..=-25.0).contains(&min), "opposite bank {min}°");
+        assert!((max + min).abs() < 1.0, "lopsided: {max}° vs {min}°");
+    }
+
+    /// Wings level at the end of a period, so the jet holds its heading on
+    /// average instead of spiralling.
+    #[test]
+    fn a_period_leaves_the_wings_level() {
+        let bank = bank_samples();
+        assert!(
+            bank.last().unwrap().abs() < 1e-3,
+            "residual {:?}",
+            bank.last()
+        );
     }
 
     #[test]
-    fn each_burst_starts_and_ends_neutral() {
-        for burst in 0..4 {
-            let base = LEAD_IN_S + f64::from(burst) * CYCLE_S;
-            assert!(bank_burst(base).abs() < 1e-12);
-            assert!(bank_burst(base + BURST_S - 1e-9).abs() < 1e-6);
-        }
-    }
-
-    #[test]
-    fn bursts_alternate_direction_and_stay_gentle() {
-        let peak = |burst: u32| bank_burst(LEAD_IN_S + f64::from(burst) * CYCLE_S + BURST_S / 4.0);
-        assert!((peak(0) - PEAK_AILERON_RAD).abs() < 1e-12);
-        assert!((peak(1) + PEAK_AILERON_RAD).abs() < 1e-12);
-        assert!((peak(2) - PEAK_AILERON_RAD).abs() < 1e-12);
+    fn stays_a_fingertip_input() {
         let max = (0..2000)
-            .map(|i| bank_burst(f64::from(i) * 0.05).abs())
+            .map(|i| roll_aileron(f64::from(i) * 0.05).abs())
             .fold(0.0, f64::max);
-        assert!(max <= PEAK_AILERON_RAD + 1e-12, "peak {max}");
+        assert!(max <= PEAK_AILERON_RAD + 1e-12, "peak aileron {max}");
         // Never more than a tenth of the 25° full throw.
         assert!(PEAK_AILERON_RAD < 25f64.to_radians() / 10.0);
-    }
-
-    /// A burst is a full sine period, so the net roll impulse (and hence the
-    /// bank it leaves behind) cancels.
-    #[test]
-    fn a_burst_integrates_to_zero() {
-        let steps = 60_000;
-        let dt = BURST_S / f64::from(steps);
-        let area: f64 = (0..steps)
-            .map(|i| bank_burst(LEAD_IN_S + (f64::from(i) + 0.5) * dt) * dt)
-            .sum();
-        assert!(area.abs() < 1e-6, "net aileron impulse {area}");
     }
 
     #[test]
