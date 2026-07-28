@@ -303,7 +303,10 @@ run_pipeline() {
   local requested_duration=$3
   local wall_duration
   local status
-  wall_duration=$(awk -v duration="$requested_duration" 'BEGIN { printf "%.3f", duration + 0.30 }')
+  # timeout also covers plugin/device initialization. NVENC can spend roughly
+  # two seconds creating its first CUDA context, so leave enough startup slack
+  # and trim the completed capture to the requested duration below.
+  wall_duration=$(awk -v duration="$requested_duration" 'BEGIN { printf "%.3f", duration + 3.0 }')
 
   set +e
   case "$selected_encoder" in
@@ -409,7 +412,14 @@ minimum_duration=$(awk -v duration="$duration" 'BEGIN { printf "%.3f", duration 
 awk -v actual="$actual_duration" -v minimum="$minimum_duration" 'BEGIN { exit !(actual >= minimum) }' \
   || fail "recording is too short: ${actual_duration}s (requested ${duration}s)"
 
-mv "$partial_output" "$output"
+# Remove the encoder startup allowance while stream-copying the already encoded
+# H.264. A frame boundary may leave the MP4 a fraction of a second over.
+trimmed_output=$tmp_dir/capture-trimmed.mp4
+ffmpeg -v error -y -i "$partial_output" -t "$duration" -c copy -movflags +faststart "$trimmed_output" \
+  || fail "could not trim recording to the requested duration"
+video_is_valid "$trimmed_output" || fail "trimmed recording is invalid or blank"
+
+mv "$trimmed_output" "$output"
 echo "Captured $output"
 ffprobe -v error \
   -show_entries format=duration,size:stream=codec_name,width,height,avg_frame_rate \
