@@ -55,6 +55,19 @@ The controller automatically:
 - Accepts input from both simultaneously (gamepad is primary)
 - Sends control commands at 60Hz to the simulation
 
+#### Idle Demo
+
+Until you touch a control, the controller flies itself: after a short lead-in it
+banks alternately right and left every ~14 s, reaching about ±30°, so the ADI and
+the attitude graphs have something to show on an untouched run. Each burst is a
+whole sine period of aileron, so the wings come back level and the average
+heading holds. The first stick or key input hands the aircraft over for good —
+it never takes control back. Start wings-level instead with:
+
+```bash
+cargo run -p rc-jet-controller -- --no-demo
+```
+
 #### Control Mapping (Mode 2 - US Standard)
 
 | Gamepad | Keyboard | Control |

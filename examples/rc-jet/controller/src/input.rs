@@ -12,6 +12,11 @@ use device_query::{DeviceQuery, DeviceState, Keycode};
 use gilrs::{Axis, Gilrs};
 use std::f64::consts::PI;
 
+use crate::demo::IdlePilot;
+
+/// Throttle held when no one is on the sticks: enough for level flight.
+const IDLE_THROTTLE: f64 = 0.3;
+
 /// Stick mode configuration
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StickMode {
@@ -42,6 +47,15 @@ impl ControlInput {
     }
 }
 
+/// Whether a human is actually flying: any surface off neutral, or a throttle
+/// moved away from the idle default.
+fn is_flying(input: &ControlInput) -> bool {
+    input.elevator.abs() > 1e-3
+        || input.aileron.abs() > 1e-3
+        || input.rudder.abs() > 1e-3
+        || (input.throttle - IDLE_THROTTLE).abs() > 0.01
+}
+
 /// Input reader combining gamepad and keyboard
 pub struct InputReader {
     gilrs: Option<Gilrs>,
@@ -56,10 +70,12 @@ pub struct InputReader {
     keyboard_throttle: f64,
     /// Last control input for smoothing
     last_input: ControlInput,
+    /// Flies gentle banks until the human takes over
+    idle_pilot: IdlePilot,
 }
 
 impl InputReader {
-    pub fn new(stick_mode: StickMode) -> Self {
+    pub fn new(stick_mode: StickMode, demo: bool) -> Self {
         // Try to initialize gilrs, but don't fail if no gamepad available
         let gilrs = match Gilrs::new() {
             Ok(g) => {
@@ -97,11 +113,12 @@ impl InputReader {
             deadzone: 0.1,
             max_deflection_rad: 25.0 * PI / 180.0, // 25° in radians
             max_rudder_rad: 30.0 * PI / 180.0,     // 30° in radians
-            keyboard_throttle: 0.3,                // Start with some throttle for level flight
+            keyboard_throttle: IDLE_THROTTLE,
             last_input: ControlInput {
-                throttle: 0.3,
+                throttle: IDLE_THROTTLE,
                 ..Default::default()
             },
+            idle_pilot: IdlePilot::new(demo),
         }
     }
 
@@ -121,7 +138,7 @@ impl InputReader {
         let keyboard_input = self.read_keyboard();
 
         // Combine inputs - gamepad takes priority for each axis if non-zero
-        let combined = ControlInput {
+        let mut combined = ControlInput {
             elevator: if gamepad_input.elevator.abs() > 0.001 {
                 gamepad_input.elevator
             } else {
@@ -137,12 +154,18 @@ impl InputReader {
             } else {
                 keyboard_input.rudder
             },
-            throttle: if (gamepad_input.throttle - 0.3).abs() > 0.01 {
+            throttle: if (gamepad_input.throttle - IDLE_THROTTLE).abs() > 0.01 {
                 gamepad_input.throttle
             } else {
                 keyboard_input.throttle
             },
         };
+
+        // Hand the ailerons to the idle pilot until the human flies. Done
+        // before smoothing so the handover blends like any other input.
+        if let Some(aileron) = self.idle_pilot.aileron(is_flying(&combined)) {
+            combined.aileron = aileron;
+        }
 
         // Apply some smoothing
         let smoothing = 0.3;
@@ -161,7 +184,7 @@ impl InputReader {
     fn read_gamepad(&self) -> ControlInput {
         let Some(ref gilrs) = self.gilrs else {
             return ControlInput {
-                throttle: 0.3,
+                throttle: IDLE_THROTTLE,
                 ..Default::default()
             };
         };
@@ -169,7 +192,7 @@ impl InputReader {
         // Find first connected gamepad
         let Some((_id, gamepad)) = gilrs.gamepads().find(|(_, g)| g.is_connected()) else {
             return ControlInput {
-                throttle: 0.3,
+                throttle: IDLE_THROTTLE,
                 ..Default::default()
             };
         };
