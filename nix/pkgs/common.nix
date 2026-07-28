@@ -21,6 +21,13 @@
       type pulse
     }
   '';
+  mesaVulkanIcdPath =
+    lib.concatMapStringsSep ":" (
+      manifest: "${pkgs.mesa}/share/vulkan/icd.d/${manifest}_icd.${pkgs.stdenv.hostPlatform.linuxArch}.json"
+    ) [
+      "radeon"
+      "intel"
+    ];
   gpuDetectScript = pkgs.writeShellScript "elodin-gpu-detect" ''
     set -u
     shopt -s nullglob
@@ -28,8 +35,9 @@
     mode="''${ELODIN_GPU:-auto}"
     nvidia_icd=""
     for candidate in \
-      /usr/share/vulkan/icd.d/nvidia_icd.json \
-      /etc/vulkan/icd.d/nvidia_icd.json; do
+      /run/opengl-driver/share/vulkan/icd.d/nvidia_icd*.json \
+      /usr/share/vulkan/icd.d/nvidia_icd*.json \
+      /etc/vulkan/icd.d/nvidia_icd*.json; do
       if [ -e "$candidate" ]; then
         nvidia_icd="$candidate"
         break
@@ -76,16 +84,22 @@
     nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
     mkdir -p "$nvidia_lib_dir"
     have_glx=0
-    for lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so* \
-      /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so* \
-      /usr/lib/x86_64-linux-gnu/libcuda.so* \
-      /usr/lib/x86_64-linux-gnu/libnvcuvid.so* \
-      /usr/lib/x86_64-linux-gnu/libnvidia-*.so*; do
-      [ -e "$lib" ] || continue
-      ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
-      case "$lib" in
-        */libGLX_nvidia.so*) have_glx=1 ;;
-      esac
+    for lib_dir in \
+      /run/opengl-driver/lib \
+      /usr/lib/x86_64-linux-gnu \
+      /usr/lib/aarch64-linux-gnu \
+      /usr/lib64; do
+      for lib in "$lib_dir"/libGLX_nvidia.so* \
+        "$lib_dir"/libEGL_nvidia.so* \
+        "$lib_dir"/libcuda.so* \
+        "$lib_dir"/libnvcuvid.so* \
+        "$lib_dir"/libnvidia-*.so*; do
+        [ -e "$lib" ] || continue
+        ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+        case "$lib" in
+          */libGLX_nvidia.so*) have_glx=1 ;;
+        esac
+      done
     done
 
     # libGLX_nvidia provides both the NVIDIA Vulkan ICD (per nvidia_icd.json) and
@@ -104,7 +118,7 @@
     eval "$(${gpuDetectScript})"
   '';
 in {
-  inherit alsaPluginDir asoundConf nvidiaHookScript;
+  inherit alsaPluginDir asoundConf mesaVulkanIcdPath nvidiaHookScript;
 
   src = let
     includeSrc = orig_path: type: let
@@ -256,7 +270,8 @@ in {
     LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
     __GLX_VENDOR_LIBRARY_NAME = "mesa";
     LIBVA_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
-    VK_ICD_FILENAMES = "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json";
+    VK_ICD_FILENAMES = mesaVulkanIcdPath;
+    VK_DRIVER_FILES = mesaVulkanIcdPath;
     VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
     ALSA_PLUGIN_DIR = "${alsaPluginDir}/lib/alsa-lib";
     ALSA_CONFIG_PATH = "${asoundConf}";
@@ -309,7 +324,8 @@ in {
       --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
       --set __GLX_VENDOR_LIBRARY_NAME "mesa" \
       --set LIBVA_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-      --set VK_ICD_FILENAMES "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json" \
+      --set VK_ICD_FILENAMES "${mesaVulkanIcdPath}" \
+      --set VK_DRIVER_FILES "${mesaVulkanIcdPath}" \
       --prefix VK_LAYER_PATH : "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d" \
       --set ALSA_PLUGIN_DIR "${alsaPluginDir}/lib/alsa-lib" \
       --set ALSA_CONFIG_PATH "${asoundConf}" \

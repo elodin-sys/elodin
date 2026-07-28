@@ -39,7 +39,30 @@ Gamescope and GStreamer must use the same user's PipeWire socket under
    graphics drivers for accelerated editor rendering; Nix supplies the
    user-space tools, not the kernel driver.
 
-## Start the editor
+## Automated capture (preferred)
+
+The repository provides `scripts/elodin_capture.sh`, which performs the
+PipeWire preflight, selects a vendor-compatible graphics path, starts Gamescope
+with Nix's Xwayland, validates a hardware encoder when available, falls back to
+x264, records, decodes a frame, rejects blank output, and cleans up all child
+processes:
+
+```bash
+./scripts/elodin_capture.sh --duration 10 --output /tmp/elodin.mp4 examples/cube-sat/main.py
+```
+
+Run it inside `nix develop`. The default readiness check waits for the
+simulation database server and then allows a two-second warmup. Use
+`--ready-regex` or `--warmup` for examples with unusual startup behavior. Use
+`--encoder x264` to force the portable fallback, or `--encoder vaapi` /
+`--encoder nvenc` when testing a specific hardware path. Set
+`ELODIN_GPU=mesa` or `ELODIN_GPU=nvidia` before entering the development shell
+to override automatic GPU selection. An explicitly set `GBM_BACKENDS_PATH` is
+always preserved.
+
+The manual workflow below remains useful for debugging capture infrastructure.
+
+## Start the editor manually
 
 Use the lowest practical resolution so the editor and encoder consume fewer GPU
 resources. In terminal 1:

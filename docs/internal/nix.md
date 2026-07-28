@@ -12,6 +12,22 @@ Elodin provides a unified development shell that includes all necessary tools fo
 - No need to switch between different shells for different tasks
 - git-lfs is included to handle large files in the repository
 
+## Linux headless capture
+
+The Linux shell includes Gamescope, Nix's Xwayland, PipeWire/GStreamer tools,
+and VA-API diagnostics. Run the capture helper from the repository root inside
+`nix develop`:
+
+```bash
+./scripts/elodin_capture.sh --duration 10 --output /tmp/elodin.mp4 examples/cube-sat/main.py
+```
+
+The helper keeps capture-specific GBM configuration scoped to Gamescope,
+automatically selects validated VA-API or NVENC encoding when available, and
+falls back to x264. It preserves an explicit `GBM_BACKENDS_PATH`. Set
+`ELODIN_GPU=mesa|nvidia` before entering the development shell for manual vendor
+selection.
+
 # macOS VM
 Often you want to build Linux binaries with Nix on your mac. This guide shows how to setup a VM using OrbStack, that supports remote builds.
 

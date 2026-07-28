@@ -97,6 +97,8 @@ with pkgs; let
         ++ [
           # Additional Linux-specific tools not in common
           gamescope
+          xwayland
+          libva-utils
           alsa-oss
           alsa-utils
           gtk3
