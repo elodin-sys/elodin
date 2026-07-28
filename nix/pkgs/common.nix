@@ -84,6 +84,7 @@
     nvidia_lib_dir="''${TMPDIR:-/tmp}/elodin-nvidia-libs"
     mkdir -p "$nvidia_lib_dir"
     have_glx=0
+    declare -A linked_libs=()
     for lib_dir in \
       /run/opengl-driver/lib \
       /usr/lib/x86_64-linux-gnu \
@@ -95,7 +96,11 @@
         "$lib_dir"/libnvcuvid.so* \
         "$lib_dir"/libnvidia-*.so*; do
         [ -e "$lib" ] || continue
-        ln -sf "$lib" "$nvidia_lib_dir/$(basename "$lib")"
+        lib_name="$(basename "$lib")"
+        # Keep the first match so later fallback directories cannot replace it.
+        [ -z "''${linked_libs[$lib_name]+x}" ] || continue
+        ln -sf "$lib" "$nvidia_lib_dir/$lib_name"
+        linked_libs["$lib_name"]=1
         case "$lib" in
           */libGLX_nvidia.so*) have_glx=1 ;;
         esac
