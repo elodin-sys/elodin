@@ -28,12 +28,6 @@ hsplit {
     }
     vsplit share=0.536157 {
         hsplit {
-            // ADI alongside the main view. The scene is ENU and the LM's
-            // identity attitude is upright (DPS thrust along body +Z), so
-            // wings-level reads as upright and the horizon tracks the same
-            // pitch-back the graph below plots — no `source`/`reference`
-            // needed.
-            horizon_gauge "lander.world_pos" name="Attitude (ADI)" share=0.5
             graph "lander.altitude[0], lander_truth.altitude[0], lander_truth.slant_range[0]" name="Altitude vs real + radar slant (m)" {
                 color 106 155 165
                 color 114 87 179
