@@ -27,6 +27,7 @@
     ) [
       "radeon"
       "intel"
+      "lvp"
     ];
   gpuDetectScript = pkgs.writeShellScript "elodin-gpu-detect" ''
     set -u
