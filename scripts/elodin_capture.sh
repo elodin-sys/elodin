@@ -311,7 +311,10 @@ gamescope_pgid=$gamescope_pid
 pipewire_target=
 for _ in $(seq 1 "$ready_timeout"); do
   kill -0 "$gamescope_pid" 2>/dev/null || fail "Gamescope/editor exited during startup"
-  pipewire_target=$(pw-dump 2>/dev/null | jq -r \
+  # The PipeWire registry can change while pw-dump is serializing it. Keep
+  # polling when a transient dump or parse failure occurs instead of allowing
+  # errexit and pipefail to abort the capture.
+  if new_pipewire_target=$(pw-dump 2>/dev/null | jq -r \
     --argjson preexisting "$preexisting_gamescope_serials" '
       [
         .[]
@@ -327,7 +330,9 @@ for _ in $(seq 1 "$ready_timeout"); do
       | sort_by(.id)
       | last
       | .serial // empty
-    ')
+    '); then
+    pipewire_target=$new_pipewire_target
+  fi
   [[ -n "$pipewire_target" ]] && break
   sleep 1
 done
