@@ -286,6 +286,21 @@ if [[ -x "$PWD/.venv/bin/python" ]]; then
   child_path="$PWD/.venv/bin:$child_path"
 fi
 
+# Remember every source that predates this launch. Merely choosing the highest
+# node id is racy: a stale source may be the newest match until this Gamescope
+# instance has finished publishing its own source. Node names are not unique,
+# so use the PipeWire object serial both to identify and target the new source.
+preexisting_gamescope_serials=$(pw-dump 2>/dev/null | jq -c '
+  [
+    .[]
+    | select(.type == "PipeWire:Interface:Node")
+    | select(.info.props["media.name"] == "gamescope")
+    | select(.info.props["object.serial"] != null)
+    | .info.props["object.serial"]
+    | tostring
+  ]
+')
+
 setsid gamescope --backend headless \
   -w "$width" -h "$height" -W "$width" -H "$height" -r "$refresh" \
   -- env PATH="$child_path" "$editor" editor "$simulation" \
@@ -293,24 +308,30 @@ setsid gamescope --backend headless \
 gamescope_pid=$!
 gamescope_pgid=$gamescope_pid
 
-pipewire_node=
+pipewire_target=
 for _ in $(seq 1 "$ready_timeout"); do
   kill -0 "$gamescope_pid" 2>/dev/null || fail "Gamescope/editor exited during startup"
-  pipewire_node=$(pw-dump 2>/dev/null | jq -r '
-    [
-      .[]
-      | select(.type == "PipeWire:Interface:Node")
-      | select(.info.props["media.name"] == "gamescope")
-      | {id: .id, name: .info.props["node.name"]}
-    ]
-    | sort_by(.id)
-    | last
-    | .name // empty
-  ')
-  [[ -n "$pipewire_node" ]] && break
+  pipewire_target=$(pw-dump 2>/dev/null | jq -r \
+    --argjson preexisting "$preexisting_gamescope_serials" '
+      [
+        .[]
+        | select(.type == "PipeWire:Interface:Node")
+        | select(.info.props["media.name"] == "gamescope")
+        | select(.info.props["object.serial"] != null)
+        | select(
+            (.info.props["object.serial"] | tostring) as $serial
+            | ($preexisting | index($serial)) == null
+          )
+        | {id: .id, serial: (.info.props["object.serial"] | tostring)}
+      ]
+      | sort_by(.id)
+      | last
+      | .serial // empty
+    ')
+  [[ -n "$pipewire_target" ]] && break
   sleep 1
 done
-[[ -n "$pipewire_node" ]] || fail "Gamescope did not publish a PipeWire source"
+[[ -n "$pipewire_target" ]] || fail "Gamescope did not publish a new PipeWire source"
 
 for _ in $(seq 1 "$ready_timeout"); do
   kill -0 "$gamescope_pid" 2>/dev/null || fail "Gamescope/editor exited before becoming ready"
@@ -335,7 +356,7 @@ run_pipeline() {
   case "$selected_encoder" in
     vaapi)
       timeout --signal=INT --kill-after=8s "${wall_duration}s" gst-launch-1.0 -q -e \
-        pipewiresrc target-object="$pipewire_node" do-timestamp=true \
+        pipewiresrc target-object="$pipewire_target" do-timestamp=true \
         ! video/x-raw,format=BGRx \
         ! queue \
         ! videoconvert \
@@ -349,7 +370,7 @@ run_pipeline() {
       ;;
     nvenc)
       timeout --signal=INT --kill-after=8s "${wall_duration}s" gst-launch-1.0 -q -e \
-        pipewiresrc target-object="$pipewire_node" do-timestamp=true \
+        pipewiresrc target-object="$pipewire_target" do-timestamp=true \
         ! video/x-raw,format=BGRx \
         ! queue \
         ! videoconvert \
@@ -363,7 +384,7 @@ run_pipeline() {
       ;;
     x264)
       timeout --signal=INT --kill-after=8s "${wall_duration}s" gst-launch-1.0 -q -e \
-        pipewiresrc target-object="$pipewire_node" do-timestamp=true \
+        pipewiresrc target-object="$pipewire_target" do-timestamp=true \
         ! video/x-raw,format=BGRx \
         ! queue \
         ! videoconvert \
