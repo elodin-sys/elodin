@@ -98,6 +98,7 @@ with pkgs; let
           # Additional Linux-specific tools not in common
           gamescope
           xwayland
+          util-linux # Provides setsid for capture process-group cleanup
           libva-utils
           alsa-oss
           alsa-utils

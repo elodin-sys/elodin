@@ -155,7 +155,7 @@ case "$encoder" in
   *) fail "encoder must be auto, vaapi, nvenc, or x264" ;;
 esac
 
-for command in gamescope Xwayland pw-cli pw-dump jq gst-inspect-1.0 gst-launch-1.0 ffmpeg ffprobe timeout; do
+for command in gamescope Xwayland pw-cli pw-dump jq gst-inspect-1.0 gst-launch-1.0 ffmpeg ffprobe setsid timeout; do
   command -v "$command" >/dev/null || fail "missing required command: $command"
 done
 pw-cli info 0 >/dev/null 2>&1 || fail "PipeWire is unavailable; start the user PipeWire service"
@@ -173,17 +173,39 @@ fi
 tmp_dir=$(mktemp -d -t elodin-capture.XXXXXX)
 gamescope_log=$tmp_dir/gamescope.log
 gamescope_pid=
+gamescope_pgid=
+
+background_job_is_running() {
+  local target_pid=$1
+  local job_pid
+  while IFS= read -r job_pid; do
+    [[ "$job_pid" == "$target_pid" ]] && return 0
+  done < <(jobs -r -p)
+  return 1
+}
 
 cleanup() {
   status=$?
   trap - EXIT INT TERM
-  if [[ -n "$gamescope_pid" ]] && kill -0 "$gamescope_pid" 2>/dev/null; then
-    kill "$gamescope_pid" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-      kill -0 "$gamescope_pid" 2>/dev/null || break
+  if [[ -n "$gamescope_pgid" ]]; then
+    # Gamescope, the editor, and the simulation run in a dedicated process
+    # group. Signal the whole group so cleanup does not depend on Gamescope
+    # forwarding SIGTERM to children before it exits.
+    kill -TERM -- "-$gamescope_pgid" 2>/dev/null || true
+    for _ in $(seq 1 100); do
+      # Reap the group leader as soon as it exits. Otherwise its zombie keeps
+      # kill -0 reporting that the process group exists for the full timeout.
+      if [[ -n "$gamescope_pid" ]] && ! background_job_is_running "$gamescope_pid"; then
+        wait "$gamescope_pid" 2>/dev/null || true
+        gamescope_pid=
+      fi
+      kill -0 -- "-$gamescope_pgid" 2>/dev/null || break
       sleep 0.1
     done
-    kill -KILL "$gamescope_pid" 2>/dev/null || true
+    # Sweep any group members that ignored SIGTERM or outlived Gamescope.
+    kill -KILL -- "-$gamescope_pgid" 2>/dev/null || true
+  fi
+  if [[ -n "$gamescope_pid" ]]; then
     wait "$gamescope_pid" 2>/dev/null || true
   fi
   if [[ -n "$keep_log" && -f "$gamescope_log" ]]; then
@@ -264,11 +286,12 @@ if [[ -x "$PWD/.venv/bin/python" ]]; then
   child_path="$PWD/.venv/bin:$child_path"
 fi
 
-gamescope --backend headless \
+setsid gamescope --backend headless \
   -w "$width" -h "$height" -W "$width" -H "$height" -r "$refresh" \
   -- env PATH="$child_path" "$editor" editor "$simulation" \
   >"$gamescope_log" 2>&1 &
 gamescope_pid=$!
+gamescope_pgid=$gamescope_pid
 
 pipewire_node=
 for _ in $(seq 1 "$ready_timeout"); do
