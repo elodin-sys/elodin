@@ -168,8 +168,9 @@ impl InputReader {
             }
         }
 
-        // Read gamepad input
-        let gamepad_input = self.read_gamepad();
+        // Read gamepad input; absent, it contributes nothing and every axis
+        // falls through to the keyboard.
+        let gamepad_input = self.read_gamepad().unwrap_or_default();
 
         // Read keyboard input
         let keyboard_input = self.read_keyboard();
@@ -199,28 +200,28 @@ impl InputReader {
         smoothed
     }
 
-    /// Read gamepad input
-    fn read_gamepad(&mut self) -> ControlInput {
-        let Some(ref gilrs) = self.gilrs else {
-            return ControlInput {
-                throttle: IDLE_THROTTLE,
-                ..Default::default()
-            };
+    /// Read the connected gamepad, or `None` when there is no pad to read.
+    fn read_gamepad(&mut self) -> Option<ControlInput> {
+        let axes = self.gilrs.as_ref().and_then(|gilrs| {
+            let (_id, gamepad) = gilrs.gamepads().find(|(_, g)| g.is_connected())?;
+            Some((
+                gamepad.value(Axis::LeftStickX) as f64,
+                gamepad.value(Axis::LeftStickY) as f64,
+                gamepad.value(Axis::RightStickX) as f64,
+                gamepad.value(Axis::RightStickY) as f64,
+            ))
+        });
+        let Some((left_x, left_y, right_x, right_y)) = axes else {
+            // The latch goes away with the pad it speaks for, so unplugging
+            // one hands the throttle back to the keyboard.
+            self.gamepad_throttle_engaged = false;
+            return None;
         };
 
-        // Find first connected gamepad
-        let Some((_id, gamepad)) = gilrs.gamepads().find(|(_, g)| g.is_connected()) else {
-            return ControlInput {
-                throttle: IDLE_THROTTLE,
-                ..Default::default()
-            };
-        };
-
-        // Read stick axes
-        let left_x = self.apply_deadzone(gamepad.value(Axis::LeftStickX) as f64);
-        let left_y = self.apply_deadzone(gamepad.value(Axis::LeftStickY) as f64);
-        let right_x = self.apply_deadzone(gamepad.value(Axis::RightStickX) as f64);
-        let right_y = self.apply_deadzone(gamepad.value(Axis::RightStickY) as f64);
+        let left_x = self.apply_deadzone(left_x);
+        let left_y = self.apply_deadzone(left_y);
+        let right_x = self.apply_deadzone(right_x);
+        let right_y = self.apply_deadzone(right_y);
 
         // The deadzone reads exactly zero at centre, so any other value means
         // the throttle stick has been moved (or never self-centred).
@@ -231,7 +232,7 @@ impl InputReader {
         self.gamepad_throttle_engaged |= throttle_axis != 0.0;
 
         // Map based on stick mode
-        match self.stick_mode {
+        Some(match self.stick_mode {
             StickMode::Mode2 => {
                 // Mode 2: Left = Throttle(Y)/Rudder(X), Right = Elevator(Y)/Aileron(X)
                 ControlInput {
@@ -250,7 +251,7 @@ impl InputReader {
                     aileron: right_x * self.max_deflection_rad,
                 }
             }
-        }
+        })
     }
 
     /// Read keyboard input
@@ -377,6 +378,21 @@ mod tests {
         let combined = combine(gamepad, IDLE_KEYBOARD, false);
         assert_eq!(combined.aileron, 0.1);
         assert!(is_flying(&combined, false));
+    }
+
+    /// A pad that goes away contributes a zeroed input with its throttle latch
+    /// cleared, so W/S drive the throttle again instead of being out-voted by
+    /// a controller that is no longer there.
+    #[test]
+    fn a_vanished_gamepad_hands_the_throttle_back() {
+        let keyboard = ControlInput {
+            throttle: 0.9,
+            elevator: 0.2,
+            ..IDLE_KEYBOARD
+        };
+        let combined = combine(ControlInput::default(), keyboard, false);
+        assert_eq!(combined.throttle, 0.9);
+        assert_eq!(combined.elevator, 0.2);
     }
 
     #[test]
