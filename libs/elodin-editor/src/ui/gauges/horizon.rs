@@ -335,20 +335,24 @@ const READOUT_GAP: f32 = 3.0;
 /// only as readable as the face is big — but a maximised tile should not turn
 /// into a wall of sky.
 const FACE_MAX: f32 = 320.0;
-/// Below this the ladder and roll scale collapse into noise, so the face is
-/// dropped and the pane keeps the numbers alone.
-const FACE_MIN: f32 = 60.0;
+/// Below this the ladder and roll scale collapse into a smudge, so the face
+/// goes unpainted and the pane keeps the numbers alone. It still claims its
+/// space, so a pane being squeezed shrinks smoothly instead of snapping.
+const FACE_MIN: f32 = 40.0;
 /// Face the symbology's type and line weights are quoted for; they scale from
 /// here so a bigger instrument reads bigger instead of just emptier.
 const REFERENCE_FACE: f32 = 170.0;
 
 /// Side of the square face for a pane of `avail`, once `readout_room` is set
-/// aside for the numbers underneath. `None` when what's left is too small to
-/// draw a legible instrument — the readout outranks the face, since a horizon
-/// nobody can read is worth less than the two figures it stands for.
-fn face_size(avail: Vec2, readout_room: f32) -> Option<f32> {
-    let size = avail.x.min(avail.y - readout_room).min(FACE_MAX);
-    (size >= FACE_MIN).then_some(size)
+/// aside for the numbers underneath: the largest square left over, capped at
+/// [`FACE_MAX`] and floored at nothing.
+///
+/// The readout outranks the face — a horizon nobody can read is worth less
+/// than the two figures it stands for — but the face gives its space up
+/// continuously, like the sibling gauges, so dragging a divider never makes the
+/// instrument jump.
+fn face_size(avail: Vec2, readout_room: f32) -> f32 {
+    avail.x.min(avail.y - readout_room).clamp(0.0, FACE_MAX)
 }
 
 /// Scale of type and line weights for a given face, damped and bounded so the
@@ -361,19 +365,19 @@ fn symbol_scale(size: f32) -> f32 {
 /// ladder and roll scale, and the fixed aircraft symbol. An inactive state
 /// draws a dimmed empty rim with its reason.
 ///
-/// Draws nothing at all when the pane is too short to hold both the face and
-/// the readout the caller adds underneath.
+/// Takes the space left over the readout the caller adds underneath, and leaves
+/// it blank once that is too little to paint a legible face.
 fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
     let scheme = get_scheme();
     let readout_room =
         READOUT_GAP + ui.fonts_mut(|fonts| fonts.row_height(&FontId::monospace(READOUT_FONT_SIZE)));
-    let Some(size) = face_size(ui.available_size(), readout_room) else {
-        return;
-    };
-    let k = symbol_scale(size);
-    let avail = ui.available_width();
+    let size = face_size(ui.available_size(), readout_room);
     let (full_rect, _response) =
-        ui.allocate_exact_size(Vec2::new(avail.max(size), size), Sense::hover());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), size), Sense::hover());
+    if size < FACE_MIN {
+        return;
+    }
+    let k = symbol_scale(size);
     let rect = egui::Rect::from_center_size(full_rect.center(), Vec2::splat(size));
     let painter = ui.painter_at(rect);
     let center = rect.center();
@@ -1019,14 +1023,12 @@ mod tests {
 
     #[test]
     fn the_face_never_eats_the_readouts_room() {
-        for height in [0.0, 40.0, 77.0, 120.0, 200.0, 400.0, 2000.0] {
-            let avail = Vec2::new(400.0, height);
-            if let Some(size) = face_size(avail, READOUT_ROOM) {
-                assert!(
-                    size + READOUT_ROOM <= height + 1e-3,
-                    "face {size} + readout leaves nothing of {height}"
-                );
-            }
+        for height in [0.0, 10.0, 40.0, 77.0, 120.0, 200.0, 400.0, 2000.0] {
+            let size = face_size(Vec2::new(400.0, height), READOUT_ROOM);
+            assert!(
+                size <= (height - READOUT_ROOM).max(0.0) + 1e-3,
+                "face {size} leaves no room for the readout in {height}"
+            );
         }
     }
 
@@ -1037,37 +1039,46 @@ mod tests {
         // shrinks the instrument.
         let mut prev = 0.0;
         for step in 0..200u16 {
-            let Some(size) = at(50.0 + f32::from(step) * 10.0) else {
-                continue;
-            };
+            let size = at(f32::from(step) * 10.0);
             assert!(size >= prev - 1e-3, "shrank from {prev} to {size}");
             prev = size;
         }
         // It does grow past the old fixed 200 px, and stops at the cap.
-        assert!(at(300.0).expect("drawable") > 200.0);
-        assert_eq!(at(4000.0), Some(FACE_MAX));
+        assert!(at(300.0) > 200.0);
+        assert_eq!(at(4000.0), FACE_MAX);
         // A narrow pane is bounded by its width instead.
-        assert_eq!(
-            face_size(Vec2::new(120.0, 4000.0), READOUT_ROOM),
-            Some(120.0)
-        );
+        assert_eq!(face_size(Vec2::new(120.0, 4000.0), READOUT_ROOM), 120.0);
+    }
+
+    /// A pane being squeezed gives the face up a pixel at a time — the failure
+    /// mode of a legibility floor applied to the *size* instead of the
+    /// painting, which made the instrument vanish mid-drag.
+    #[test]
+    fn the_face_gives_up_its_space_continuously() {
+        let at = |h: f32| face_size(Vec2::new(400.0, h), READOUT_ROOM);
+        let mut prev = at(0.0);
+        assert_eq!(prev, 0.0, "a pane with no height claims none");
+        for step in 1..=600u16 {
+            let size = at(f32::from(step) * 0.5);
+            assert!(size - prev <= 0.5 + 1e-3, "jumped from {prev} to {size}");
+            prev = size;
+        }
     }
 
     #[test]
-    fn a_pane_too_short_for_both_keeps_the_readout() {
-        // Anything that would leave a face below the legibility floor draws no
-        // face at all, so the caller's readout is all that remains.
-        for height in [0.0, 20.0, FACE_MIN, FACE_MIN + READOUT_ROOM - 1.0] {
+    fn a_pane_too_short_for_a_face_keeps_the_readout() {
+        // Nothing is left over for a face, so the readout is all the pane draws.
+        for height in [0.0, READOUT_ROOM / 2.0, READOUT_ROOM] {
             assert_eq!(
                 face_size(Vec2::new(400.0, height), READOUT_ROOM),
-                None,
-                "height {height} should drop the face"
+                0.0,
+                "height {height} should leave no face"
             );
         }
-        assert_eq!(
-            face_size(Vec2::new(400.0, FACE_MIN + READOUT_ROOM), READOUT_ROOM),
-            Some(FACE_MIN)
-        );
+        // Below the legibility floor the space is claimed but left unpainted,
+        // which is what keeps the shrink smooth.
+        let squeezed = face_size(Vec2::new(400.0, 50.0), READOUT_ROOM);
+        assert!(squeezed > 0.0 && squeezed < FACE_MIN, "face {squeezed}");
     }
 
     #[test]
