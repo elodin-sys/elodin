@@ -62,11 +62,7 @@ banks alternately right and left every ~14 s, reaching about ±30°, so the ADI 
 the attitude graphs have something to show on an untouched run. Each burst is a
 whole sine period of aileron, so the wings come back level and the average
 heading holds. The first stick or key input hands the aircraft over for good —
-it never takes control back. Start wings-level instead with:
-
-```bash
-cargo run -p rc-jet-controller -- --no-demo
-```
+it never takes control back.
 
 #### Control Mapping (Mode 2 - US Standard)
 

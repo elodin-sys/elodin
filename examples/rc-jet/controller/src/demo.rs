@@ -29,14 +29,16 @@ pub struct IdlePilot {
     flying: bool,
 }
 
-impl IdlePilot {
-    pub fn new(enabled: bool) -> Self {
+impl Default for IdlePilot {
+    fn default() -> Self {
         Self {
             start: Instant::now(),
-            flying: enabled,
+            flying: true,
         }
     }
+}
 
+impl IdlePilot {
     /// Aileron the idle pilot wants now, or `None` once `pilot_input` has been
     /// seen even once.
     pub fn aileron(&mut self, pilot_input: bool) -> Option<f64> {
@@ -120,15 +122,10 @@ mod tests {
 
     #[test]
     fn hands_over_permanently_on_first_pilot_input() {
-        let mut pilot = IdlePilot::new(true);
+        let mut pilot = IdlePilot::default();
         assert!(pilot.aileron(false).is_some());
         assert!(pilot.aileron(true).is_none());
         // Releasing the stick must not bring the demo back.
         assert!(pilot.aileron(false).is_none());
-    }
-
-    #[test]
-    fn disabled_pilot_never_flies() {
-        assert!(IdlePilot::new(false).aileron(false).is_none());
     }
 }

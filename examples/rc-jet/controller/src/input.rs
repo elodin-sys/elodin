@@ -111,7 +111,7 @@ pub struct InputReader {
 }
 
 impl InputReader {
-    pub fn new(stick_mode: StickMode, demo: bool) -> Self {
+    pub fn new(stick_mode: StickMode) -> Self {
         // Try to initialize gilrs, but don't fail if no gamepad available
         let gilrs = match Gilrs::new() {
             Ok(g) => {
@@ -155,7 +155,7 @@ impl InputReader {
                 ..Default::default()
             },
             gamepad_throttle_engaged: false,
-            idle_pilot: IdlePilot::new(demo),
+            idle_pilot: IdlePilot::default(),
         }
     }
 

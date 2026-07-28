@@ -40,10 +40,6 @@ struct Args {
     #[arg(long)]
     mode1: bool,
 
-    /// Start wings-level instead of flying the idle demo banks
-    #[arg(long)]
-    no_demo: bool,
-
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -75,14 +71,13 @@ async fn main() -> Result<()> {
         StickMode::Mode2
     };
 
-    let demo = !args.no_demo;
-    print_banner(stick_mode, demo);
+    print_banner(stick_mode);
 
     // Run controller
-    run_controller(addr, stick_mode, demo).await
+    run_controller(addr, stick_mode).await
 }
 
-fn print_banner(stick_mode: StickMode, demo: bool) {
+fn print_banner(stick_mode: StickMode) {
     println!();
     println!(
         "{}",
@@ -110,16 +105,14 @@ fn print_banner(stick_mode: StickMode, demo: bool) {
     println!("    {} Elevator up/down (pitch)", "↑/↓".green());
     println!("    {} Aileron left/right (roll)", "←/→".green());
     println!();
-    if demo {
-        println!(
-            "  {} flying gentle banks until you touch a control (--no-demo to skip)",
-            "Idle demo:".bold()
-        );
-        println!();
-    }
+    println!(
+        "  {} flying gentle banks until you touch a control",
+        "Idle demo:".bold()
+    );
+    println!();
 }
 
-async fn run_controller(addr: SocketAddr, stick_mode: StickMode, demo: bool) -> Result<()> {
+async fn run_controller(addr: SocketAddr, stick_mode: StickMode) -> Result<()> {
     info!("Connecting to elodin-db at {}", addr);
 
     // Connect with retry
@@ -149,7 +142,7 @@ async fn run_controller(addr: SocketAddr, stick_mode: StickMode, demo: bool) -> 
     stellarator::sleep(Duration::from_millis(100)).await;
 
     // Initialize input reader
-    let mut input_reader = InputReader::new(stick_mode, demo);
+    let mut input_reader = InputReader::new(stick_mode);
 
     println!();
     println!("  {} Streaming control inputs...", "📡".green());
