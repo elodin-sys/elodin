@@ -47,15 +47,14 @@ impl ControlInput {
     }
 }
 
-/// Whether a human is actually flying: any surface off neutral, a throttle
-/// stick the pilot has moved, or a keyboard throttle away from the idle
-/// default.
-fn is_flying(input: &ControlInput, gamepad_throttle: bool) -> bool {
-    gamepad_throttle
-        || input.elevator.abs() > 1e-3
-        || input.aileron.abs() > 1e-3
-        || input.rudder.abs() > 1e-3
-        || (input.throttle - IDLE_THROTTLE).abs() > 0.01
+/// Whether a human is on the sticks: any control surface off neutral.
+///
+/// The throttle is deliberately no evidence at all. A ratcheted transmitter
+/// reports a throttle stick far off centre from the moment it is plugged in,
+/// so reading that as "someone is flying" would retire the idle pilot before
+/// it ever flew a bank.
+fn is_flying(input: &ControlInput) -> bool {
+    input.elevator.abs() > 1e-3 || input.aileron.abs() > 1e-3 || input.rudder.abs() > 1e-3
 }
 
 /// Merge the two input sources. Each gamepad axis wins while it is off
@@ -175,15 +174,11 @@ impl InputReader {
         // Read keyboard input
         let keyboard_input = self.read_keyboard();
 
-        let gamepad_throttle = self.gamepad_throttle_engaged;
-        let mut combined = combine(gamepad_input, keyboard_input, gamepad_throttle);
+        let mut combined = combine(gamepad_input, keyboard_input, self.gamepad_throttle_engaged);
 
         // Hand the ailerons to the idle pilot until the human flies. Done
         // before smoothing so the handover blends like any other input.
-        if let Some(aileron) = self
-            .idle_pilot
-            .aileron(is_flying(&combined, gamepad_throttle))
-        {
+        if let Some(aileron) = self.idle_pilot.aileron(is_flying(&combined)) {
             combined.aileron = aileron;
         }
 
@@ -339,7 +334,7 @@ mod tests {
     fn untouched_gamepad_keeps_the_idle_throttle() {
         let combined = combine(IDLE_GAMEPAD, IDLE_KEYBOARD, false);
         assert_eq!(combined.throttle, IDLE_THROTTLE);
-        assert!(!is_flying(&combined, false));
+        assert!(!is_flying(&combined));
     }
 
     #[test]
@@ -351,22 +346,23 @@ mod tests {
         assert_eq!(combine(IDLE_GAMEPAD, keyboard, false).throttle, 0.8);
     }
 
+    /// A ratcheted transmitter (FrSky and friends) reports its throttle stick
+    /// far off centre the moment it is plugged in. It rightly wins the throttle,
+    /// but it must not pass for a pilot on the sticks, or the idle banks the
+    /// README promises would never fly with the very hardware it highlights.
     #[test]
-    fn moved_throttle_stick_wins_and_counts_as_flying() {
-        let gamepad = ControlInput {
+    fn a_ratcheted_transmitter_still_lets_the_idle_pilot_fly() {
+        let transmitter = ControlInput {
             throttle: 0.75,
             ..IDLE_GAMEPAD
         };
-        let combined = combine(gamepad, IDLE_KEYBOARD, true);
+        let combined = combine(transmitter, IDLE_KEYBOARD, true);
         assert_eq!(combined.throttle, 0.75);
-        assert!(is_flying(&combined, true));
-    }
-
-    /// A transmitter parked at a throttle that happens to match the idle
-    /// default is still a pilot at the controls.
-    #[test]
-    fn a_moved_stick_flies_even_at_idle_throttle() {
-        assert!(is_flying(&IDLE_KEYBOARD, true));
+        assert!(!is_flying(&combined));
+        assert!(
+            IdlePilot::default().aileron(is_flying(&combined)).is_some(),
+            "a connected transmitter must not retire the idle pilot"
+        );
     }
 
     #[test]
@@ -377,7 +373,7 @@ mod tests {
         };
         let combined = combine(gamepad, IDLE_KEYBOARD, false);
         assert_eq!(combined.aileron, 0.1);
-        assert!(is_flying(&combined, false));
+        assert!(is_flying(&combined));
     }
 
     /// A pad that goes away contributes a zeroed input with its throttle latch
@@ -395,12 +391,14 @@ mod tests {
         assert_eq!(combined.elevator, 0.2);
     }
 
+    /// Throttling up with W is not flying either: the demo keeps the wings
+    /// working until a surface moves, which is what the ADI is there to show.
     #[test]
-    fn keyboard_throttle_off_idle_flies() {
+    fn throttle_alone_is_not_flying() {
         let keyboard = ControlInput {
             throttle: IDLE_THROTTLE + 0.05,
             ..IDLE_KEYBOARD
         };
-        assert!(is_flying(&combine(IDLE_GAMEPAD, keyboard, false), false));
+        assert!(!is_flying(&combine(IDLE_GAMEPAD, keyboard, false)));
     }
 }

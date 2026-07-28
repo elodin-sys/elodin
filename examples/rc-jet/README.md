@@ -61,8 +61,10 @@ Until you touch a control, the controller flies itself: after a short lead-in it
 banks alternately right and left every ~14 s, reaching about ±30°, so the ADI and
 the attitude graphs have something to show on an untouched run. Each burst is a
 whole sine period of aileron, so the wings come back level and the average
-heading holds. The first stick or key input hands the aircraft over for good —
-it never takes control back.
+heading holds. The first elevator, aileron or rudder input — stick or arrow key
+— hands the aircraft over for good; it never takes control back. Throttle is
+not a handover: a ratcheted transmitter sits far off centre from the moment it
+is plugged in, and the demo would never fly.
 
 #### Control Mapping (Mode 2 - US Standard)
 
