@@ -31,7 +31,11 @@ use crate::ui::{
 /// so the frame choice only matters as the `source` of the incoming attitude.
 #[derive(Component)]
 pub struct HorizonGaugeData {
-    /// Frame the EQL quaternion rotates from (body→source).
+    /// Frame the EQL pose is expressed in: the quaternion rotates body→source,
+    /// and a 7-vector's position tail is read in that same frame — as in the
+    /// [geo-position gauge](super::geo_position), `source` describes the data,
+    /// not just the rotation. Overriding it to ECEF therefore asserts the
+    /// positions are ECEF, whatever the scene's `coordinate` is.
     ///
     /// `None` means inherit the schematic global [`crate::Coordinate`] (same as
     /// omitting `source` in KDL), resolved via [`Self::effective_source`].
@@ -323,17 +327,50 @@ const SYMBOL: Color32 = Color32::from_rgb(255, 179, 0);
 /// Bank angles ticked on the roll scale (mirrored either side of zero).
 const BANK_TICKS_DEG: [f64; 5] = [10.0, 20.0, 30.0, 45.0, 60.0];
 
+/// Type size of the readout under the face, and the gap above it.
+const READOUT_FONT_SIZE: f32 = 10.0;
+const READOUT_GAP: f32 = 3.0;
+
+/// Largest face we draw. The instrument follows its pane — pitch and bank are
+/// only as readable as the face is big — but a maximised tile should not turn
+/// into a wall of sky.
+const FACE_MAX: f32 = 320.0;
+/// Below this the ladder and roll scale collapse into noise, so the face is
+/// dropped and the pane keeps the numbers alone.
+const FACE_MIN: f32 = 60.0;
+/// Face the symbology's type and line weights are quoted for; they scale from
+/// here so a bigger instrument reads bigger instead of just emptier.
+const REFERENCE_FACE: f32 = 170.0;
+
+/// Side of the square face for a pane of `avail`, once `readout_room` is set
+/// aside for the numbers underneath. `None` when what's left is too small to
+/// draw a legible instrument — the readout outranks the face, since a horizon
+/// nobody can read is worth less than the two figures it stands for.
+fn face_size(avail: Vec2, readout_room: f32) -> Option<f32> {
+    let size = avail.x.min(avail.y - readout_room).min(FACE_MAX);
+    (size >= FACE_MIN).then_some(size)
+}
+
+/// Scale of type and line weights for a given face, damped and bounded so the
+/// extremes stay legible rather than tracking the face exactly.
+fn symbol_scale(size: f32) -> f32 {
+    (size / REFERENCE_FACE).clamp(0.85, 1.5)
+}
+
 /// Paint the instrument face: two-tone sky/ground split by the horizon, a pitch
 /// ladder and roll scale, and the fixed aircraft symbol. An inactive state
 /// draws a dimmed empty rim with its reason.
+///
+/// Draws nothing at all when the pane is too short to hold both the face and
+/// the readout the caller adds underneath.
 fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
     let scheme = get_scheme();
-    // Respect the tile's real estate; a larger cap than the gimbal's, since
-    // pitch legibility scales with the face.
-    let size = ui
-        .available_width()
-        .min(ui.available_height())
-        .clamp(0.0, 200.0);
+    let readout_room =
+        READOUT_GAP + ui.fonts_mut(|fonts| fonts.row_height(&FontId::monospace(READOUT_FONT_SIZE)));
+    let Some(size) = face_size(ui.available_size(), readout_room) else {
+        return;
+    };
+    let k = symbol_scale(size);
     let avail = ui.available_width();
     let (full_rect, _response) =
         ui.allocate_exact_size(Vec2::new(avail.max(size), size), Sense::hover());
@@ -348,20 +385,20 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
             painter.circle_stroke(
                 center,
                 radius,
-                Stroke::new(1.5, scheme.border_primary.gamma_multiply(0.5)),
+                Stroke::new(1.5 * k, scheme.border_primary.gamma_multiply(0.5)),
             );
             painter.text(
                 center,
                 Align2::CENTER_CENTER,
                 "—",
-                FontId::monospace(15.0),
+                FontId::monospace(15.0 * k),
                 scheme.text_secondary,
             );
             painter.text(
                 Pos2::new(center.x, center.y + radius * 0.55),
                 Align2::CENTER_CENTER,
                 reason.label(),
-                FontId::monospace(9.0),
+                FontId::monospace(9.0 * k),
                 scheme.text_secondary,
             );
             return;
@@ -401,14 +438,14 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
         let Some((a, b)) = clip_segment(center, radius, a, b) else {
             continue;
         };
-        painter.line_segment([a, b], Stroke::new(1.0, marking.gamma_multiply(0.9)));
+        painter.line_segment([a, b], Stroke::new(1.0 * k, marking.gamma_multiply(0.9)));
         if !major {
             continue;
         }
         let label = format!("{}", rung_deg.abs() as i32);
         for end in [a, b] {
             let outward = (end - mid).normalized();
-            let pos = end + outward * 10.0;
+            let pos = end + outward * 10.0 * k;
             if (pos - center).length() > radius * 0.98 {
                 continue;
             }
@@ -416,7 +453,7 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
                 &painter,
                 pos,
                 &label,
-                FontId::monospace(9.0),
+                FontId::monospace(9.0 * k),
                 marking,
                 Color32::BLACK.gamma_multiply(0.7),
             );
@@ -425,10 +462,10 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
 
     // Horizon line, brighter than the ladder.
     if let Some((a, b)) = line_chord(center, radius, horizon_point, up_dir) {
-        painter.line_segment([a, b], Stroke::new(1.8, marking));
+        painter.line_segment([a, b], Stroke::new(1.8 * k, marking));
     }
 
-    painter.circle_stroke(center, radius, Stroke::new(1.5, scheme.border_primary));
+    painter.circle_stroke(center, radius, Stroke::new(1.5 * k, scheme.border_primary));
 
     // Roll scale: fixed to the screen, ticked either side of top-dead-centre.
     // The bank index belongs to the rolling world, so a right bank moves it
@@ -444,7 +481,7 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
                 center + dir * radius * 1.02,
                 center + dir * radius * (1.02 + len),
             ],
-            Stroke::new(1.0, scheme.text_secondary),
+            Stroke::new(1.0 * k, scheme.text_secondary),
         );
     }
     let tip = center + up_dir * radius * 1.05;
@@ -452,8 +489,8 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
     painter.add(Shape::convex_polygon(
         vec![
             tip,
-            tip + up_dir * 7.0 + side * 4.0,
-            tip + up_dir * 7.0 - side * 4.0,
+            tip + (up_dir * 7.0 + side * 4.0) * k,
+            tip + (up_dir * 7.0 - side * 4.0) * k,
         ],
         SYMBOL,
         Stroke::NONE,
@@ -466,11 +503,11 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
                 Pos2::new(center.x + sign * radius * 0.10, center.y),
                 Pos2::new(center.x + sign * radius * 0.34, center.y),
             ],
-            Stroke::new(2.5, SYMBOL),
+            Stroke::new(2.5 * k, SYMBOL),
         );
     }
     painter.rect_filled(
-        egui::Rect::from_center_size(center, Vec2::splat(4.0)),
+        egui::Rect::from_center_size(center, Vec2::splat(4.0 * k)),
         0.0,
         SYMBOL,
     );
@@ -533,13 +570,15 @@ impl WidgetSystem for HorizonGaugeWidget<'_, '_> {
             .inner_margin(egui::Margin::same(super::GAUGE_PANEL_MARGIN))
             .show(ui, |ui| {
                 super::gauge_header(ui, &title);
+                // The face yields its space to the readout, never the reverse:
+                // the numbers are what the pane is for.
                 paint_horizon(ui, solved);
-                ui.add_space(3.0);
+                ui.add_space(READOUT_GAP);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(attitude_readout(solved))
                             .monospace()
-                            .size(10.0)
+                            .size(READOUT_FONT_SIZE)
                             .color(get_scheme().text_secondary),
                     );
                 });
@@ -972,6 +1011,75 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// Room the readout takes at the sizes egui actually reports for a 10 px
+    /// monospace row.
+    const READOUT_ROOM: f32 = READOUT_GAP + 14.0;
+
+    #[test]
+    fn the_face_never_eats_the_readouts_room() {
+        for height in [0.0, 40.0, 77.0, 120.0, 200.0, 400.0, 2000.0] {
+            let avail = Vec2::new(400.0, height);
+            if let Some(size) = face_size(avail, READOUT_ROOM) {
+                assert!(
+                    size + READOUT_ROOM <= height + 1e-3,
+                    "face {size} + readout leaves nothing of {height}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_face_grows_with_the_pane_up_to_the_cap() {
+        let at = |h: f32| face_size(Vec2::new(1000.0, h), READOUT_ROOM);
+        // Monotone in the pane's height, so dragging a tile larger never
+        // shrinks the instrument.
+        let mut prev = 0.0;
+        for step in 0..200u16 {
+            let Some(size) = at(50.0 + f32::from(step) * 10.0) else {
+                continue;
+            };
+            assert!(size >= prev - 1e-3, "shrank from {prev} to {size}");
+            prev = size;
+        }
+        // It does grow past the old fixed 200 px, and stops at the cap.
+        assert!(at(300.0).expect("drawable") > 200.0);
+        assert_eq!(at(4000.0), Some(FACE_MAX));
+        // A narrow pane is bounded by its width instead.
+        assert_eq!(
+            face_size(Vec2::new(120.0, 4000.0), READOUT_ROOM),
+            Some(120.0)
+        );
+    }
+
+    #[test]
+    fn a_pane_too_short_for_both_keeps_the_readout() {
+        // Anything that would leave a face below the legibility floor draws no
+        // face at all, so the caller's readout is all that remains.
+        for height in [0.0, 20.0, FACE_MIN, FACE_MIN + READOUT_ROOM - 1.0] {
+            assert_eq!(
+                face_size(Vec2::new(400.0, height), READOUT_ROOM),
+                None,
+                "height {height} should drop the face"
+            );
+        }
+        assert_eq!(
+            face_size(Vec2::new(400.0, FACE_MIN + READOUT_ROOM), READOUT_ROOM),
+            Some(FACE_MIN)
+        );
+    }
+
+    #[test]
+    fn symbology_scales_with_the_face_within_bounds() {
+        assert!((symbol_scale(REFERENCE_FACE) - 1.0).abs() < 1e-6);
+        assert!(symbol_scale(FACE_MAX) > 1.0);
+        assert!(symbol_scale(FACE_MIN) < 1.0);
+        // Bounded at both ends: type stays readable, line weights stay thin.
+        for size in [0.0, FACE_MIN, 200.0, FACE_MAX, 10_000.0] {
+            let k = symbol_scale(size);
+            assert!((0.85..=1.5).contains(&k), "scale {k} at face {size}");
+        }
     }
 
     #[test]
