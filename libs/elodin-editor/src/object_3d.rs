@@ -1022,7 +1022,9 @@ pub fn update_object_3d_system(
     component_value_maps: Query<&'static ComponentValue>,
     geo_context: Res<GeoContext>,
     coordinate: Res<Coordinate>,
+    eql_ctx: Res<EqlContext>,
 ) {
+    let eql_ctx_changed = eql_ctx.is_changed();
     for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
     {
@@ -1047,10 +1049,18 @@ pub fn update_object_3d_system(
         else {
             continue;
         };
+        let error_confidence_interval = *error_confidence_interval;
 
         let Some(shape_mode) = ellipsoid_shape_mode(&object_3d.data.mesh) else {
             continue;
         };
+
+        // Schematics can load before the sim registers its components, in
+        // which case the spawn-time compile of the shape-driver expression
+        // fails. Retry whenever the EQL context gains components.
+        if eql_ctx_changed {
+            retry_ellipsoid_expr_compile(&mut object_3d, shape_mode, &eql_ctx.0);
+        }
 
         let covariance_frame = resolve_covariance_frame(&object_3d.data, &coordinate);
 
@@ -1085,7 +1095,7 @@ pub fn update_object_3d_system(
                 {
                     let linear = covariance_linear_from_l(
                         &l,
-                        *error_confidence_interval,
+                        error_confidence_interval,
                         covariance_frame,
                         &geo_context,
                     );
@@ -1107,7 +1117,7 @@ pub fn update_object_3d_system(
                     if let Some(l) = cholesky_3x3_spd(&p_mat) {
                         let linear = covariance_linear_from_l(
                             &l,
-                            *error_confidence_interval,
+                            error_confidence_interval,
                             covariance_frame,
                             &geo_context,
                         );
@@ -1144,6 +1154,11 @@ pub fn update_object_3d_system(
                         }
                     }
                     Err(err) => {
+                        warn_once!(
+                            entity = ?entity,
+                            error = %err,
+                            "ellipsoid scale failed to evaluate"
+                        );
                         object_3d.scale_error = Some(err.into());
                         ellipse.oversized = false;
                         ellipse.max_extent = 0.0;
@@ -1425,6 +1440,54 @@ pub fn warn_imported_cameras(
                  embedded cameras stay active. Remove the camera from the asset if this is unintended."
             );
         }
+    }
+}
+
+/// Retries the spawn-time compile of the field-selected shape-driver
+/// expression if it failed (e.g. the schematic loaded before the sim's
+/// components were registered).
+fn retry_ellipsoid_expr_compile(
+    state: &mut Object3DState,
+    shape_mode: EllipsoidShapeMode,
+    ctx: &eql::Context,
+) {
+    let (scale, cholesky, covariance) = match &state.data.mesh {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky,
+            error_covariance,
+            ..
+        } => (
+            scale.clone(),
+            error_covariance_cholesky.clone(),
+            error_covariance.clone(),
+        ),
+        _ => return,
+    };
+    match shape_mode {
+        EllipsoidShapeMode::Scale if state.scale_expr.is_none() => {
+            match compile_scale_eql(&scale, ctx) {
+                Ok(compiled) => {
+                    state.scale_expr = Some(compiled);
+                    state.scale_error = None;
+                }
+                Err(err) => {
+                    warn_once!(scale = %scale, error = %err, "ellipsoid scale failed to compile");
+                    state.scale_error = Some(err);
+                }
+            }
+        }
+        EllipsoidShapeMode::Cholesky if state.error_covariance_cholesky_expr.is_none() => {
+            if let Some(expr) = cholesky {
+                state.error_covariance_cholesky_expr = compile_cholesky_eql(&expr, ctx).ok();
+            }
+        }
+        EllipsoidShapeMode::Covariance if state.error_covariance_expr.is_none() => {
+            if let Some(expr) = covariance {
+                state.error_covariance_expr = compile_covariance_eql(&expr, ctx).ok();
+            }
+        }
+        _ => {}
     }
 }
 
