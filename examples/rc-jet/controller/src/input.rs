@@ -79,31 +79,35 @@ fn is_flying(input: &ControlInput) -> bool {
         || input.rudder.abs() > PILOT_INPUT_FRACTION * MAX_RUDDER_RAD
 }
 
-/// Merge the two input sources. Each gamepad axis wins while it is off
-/// neutral; the throttle is the gamepad's only once its stick has been moved,
-/// since a centred stick means "untouched", not "half throttle".
+/// Merge the two input sources. Each surface takes whichever device asks for
+/// more of it, so the gamepad stays primary wherever it is actually deflected;
+/// the throttle is the gamepad's only once its stick has been moved, since a
+/// centred stick means "untouched", not "half throttle".
 fn combine(gamepad: ControlInput, keyboard: ControlInput, gamepad_throttle: bool) -> ControlInput {
     ControlInput {
-        elevator: if gamepad.elevator.abs() > 0.001 {
-            gamepad.elevator
-        } else {
-            keyboard.elevator
-        },
-        aileron: if gamepad.aileron.abs() > 0.001 {
-            gamepad.aileron
-        } else {
-            keyboard.aileron
-        },
-        rudder: if gamepad.rudder.abs() > 0.001 {
-            gamepad.rudder
-        } else {
-            keyboard.rudder
-        },
+        elevator: dominant(gamepad.elevator, keyboard.elevator),
+        aileron: dominant(gamepad.aileron, keyboard.aileron),
+        rudder: dominant(gamepad.rudder, keyboard.rudder),
         throttle: if gamepad_throttle {
             gamepad.throttle
         } else {
             keyboard.throttle
         },
+    }
+}
+
+/// The larger of two commands for one surface, gamepad winning a tie.
+///
+/// Comparing deflections rather than testing the gamepad against a small
+/// threshold is what keeps a stick left off centre by trim from swallowing a
+/// held key: such an axis is a thousandth of a radian of surface, which used to
+/// out-vote an arrow key's half throw and leave [`is_flying`] reading the trim
+/// instead of the pilot.
+fn dominant(gamepad: f64, keyboard: f64) -> f64 {
+    if gamepad.abs() >= keyboard.abs() {
+        gamepad
+    } else {
+        keyboard
     }
 }
 
@@ -398,6 +402,53 @@ mod tests {
                 IdlePilot::default().aileron(is_flying(&combined)).is_some(),
                 "raw axis {raw} retired the idle pilot"
             );
+        }
+    }
+
+    /// A trimmed axis is nobody flying, but it must not silence the pilot who
+    /// is: the keys have to reach the surfaces and hand the aircraft over, even
+    /// on the axis the trim sits on.
+    #[test]
+    fn a_trimmed_gamepad_axis_does_not_swallow_a_held_key() {
+        for raw in [0.1021, 0.11, 0.15, -0.15, 0.17] {
+            let gamepad = ControlInput {
+                elevator: apply_deadzone(raw) * MAX_DEFLECTION_RAD,
+                aileron: apply_deadzone(raw) * MAX_DEFLECTION_RAD,
+                rudder: apply_deadzone(raw) * MAX_RUDDER_RAD,
+                ..IDLE_GAMEPAD
+            };
+            let keyboard = ControlInput {
+                elevator: -MAX_DEFLECTION_RAD * 0.5,
+                aileron: MAX_DEFLECTION_RAD * 0.5,
+                rudder: -MAX_RUDDER_RAD * 0.5,
+                ..IDLE_KEYBOARD
+            };
+            let combined = combine(gamepad, keyboard, false);
+            assert_eq!(combined.elevator, keyboard.elevator, "raw axis {raw}");
+            assert_eq!(combined.aileron, keyboard.aileron, "raw axis {raw}");
+            assert_eq!(combined.rudder, keyboard.rudder, "raw axis {raw}");
+            assert!(is_flying(&combined), "raw axis {raw} hid the pilot");
+            assert!(
+                IdlePilot::default().aileron(is_flying(&combined)).is_none(),
+                "raw axis {raw} kept the idle pilot flying under a held key"
+            );
+        }
+    }
+
+    /// A real stick still beats the keyboard on the same axis, in either
+    /// direction: the gamepad is the primary control.
+    #[test]
+    fn a_deflected_stick_beats_a_held_key() {
+        for sign in [1.0, -1.0] {
+            let gamepad = ControlInput {
+                elevator: sign * apply_deadzone(0.8) * MAX_DEFLECTION_RAD,
+                ..IDLE_GAMEPAD
+            };
+            let keyboard = ControlInput {
+                elevator: MAX_DEFLECTION_RAD * 0.5,
+                ..IDLE_KEYBOARD
+            };
+            assert_eq!(combine(gamepad, keyboard, false).elevator, gamepad.elevator);
         }
     }
 
