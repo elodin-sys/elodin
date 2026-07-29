@@ -326,8 +326,73 @@ fn horizon_palette() -> (Color32, Color32, Color32) {
 /// Amber of the screen-fixed symbology, shared with the gimbal's reticle.
 const SYMBOL: Color32 = Color32::from_rgb(255, 179, 0);
 
-/// Bank angles ticked on the roll scale (mirrored either side of zero).
-const BANK_TICKS_DEG: [f64; 5] = [10.0, 20.0, 30.0, 45.0, 60.0];
+/// A graduation of the roll scale: its bank angle, its length as a fraction of
+/// the face radius, and its stroke weight before the symbol scale.
+struct BankTick {
+    deg: f64,
+    len: f32,
+    weight: f32,
+}
+
+/// Graduations of the roll scale, mirrored either side of the card's zero.
+///
+/// The scale is not uniform — 10, 20, 30, then 45, 60, which is the convention —
+/// so drawing them alike would read as equal steps and be counted rather than
+/// read. Long, heavy marks at 30° and 60° give the eye two anchors, leaving 10°,
+/// 20° and 45° as minor marks between them.
+const BANK_TICKS: [BankTick; 5] = [
+    BankTick {
+        deg: 10.0,
+        len: 0.07,
+        weight: 1.0,
+    },
+    BankTick {
+        deg: 20.0,
+        len: 0.07,
+        weight: 1.0,
+    },
+    BankTick {
+        deg: 30.0,
+        len: 0.13,
+        weight: 2.0,
+    },
+    BankTick {
+        deg: 45.0,
+        len: 0.07,
+        weight: 1.0,
+    },
+    BankTick {
+        deg: 60.0,
+        len: 0.13,
+        weight: 2.0,
+    },
+];
+
+/// The card's own wings-level mark, which the index covers at zero bank.
+const ZERO_TICK: BankTick = BankTick {
+    deg: 0.0,
+    len: 0.15,
+    weight: 2.2,
+};
+
+/// Where the roll scale starts, as a fraction of the face radius: just clear of
+/// the rim, leaving the longest graduation short of the face's corner.
+const SCALE_INNER: f32 = 1.02;
+
+/// Screen direction (y-down) of the roll index: straight up, i.e. always
+/// directly above the aircraft symbol, because the index belongs to the
+/// airframe and not to the world turning behind it.
+const ROLL_INDEX_DIR: Vec2 = Vec2::new(0.0, -1.0);
+
+/// Screen direction of the graduation engraved at `bank_deg` on the roll scale,
+/// for an aircraft rolled by `roll`.
+///
+/// The scale is rigid with the world, so banking carries the matching
+/// graduation up to the fixed index: bank is read off which mark sits under the
+/// index, not off where a moving index has drifted to.
+fn bank_tick_dir(roll: f64, bank_deg: f64) -> Vec2 {
+    world_dirs(roll - bank_deg.to_radians()).0
+}
 
 /// Type size of the readout under the face, and the gap above it.
 const READOUT_FONT_SIZE: f32 = 10.0;
@@ -344,6 +409,9 @@ const FACE_MIN: f32 = 40.0;
 /// Face the symbology's type and line weights are quoted for; they scale from
 /// here so a bigger instrument reads bigger instead of just emptier.
 const REFERENCE_FACE: f32 = 170.0;
+/// Rim radius as a fraction of the square face, leaving the margin the roll
+/// scale is drawn in.
+const FACE_RADIUS_FRAC: f32 = 0.42;
 
 /// Side of the square face for a pane of `avail`, once `readout_room` is set
 /// aside for the numbers underneath: the largest square left over, capped at
@@ -383,7 +451,7 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
     let rect = egui::Rect::from_center_size(full_rect.center(), Vec2::splat(size));
     let painter = ui.painter_at(rect);
     let center = rect.center();
-    let radius = size * 0.42;
+    let radius = size * FACE_RADIUS_FRAC;
 
     let attitude = match state {
         Ok(attitude) => attitude,
@@ -473,30 +541,32 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
 
     painter.circle_stroke(center, radius, Stroke::new(1.5 * k, scheme.border_primary));
 
-    // Roll scale: fixed to the screen, ticked either side of top-dead-centre.
-    // The bank index belongs to the rolling world, so a right bank moves it
-    // left of zero (sky-pointer convention).
-    // Ticks and index share `world_dirs`' up, so the scale and the pointer
-    // cannot drift apart.
-    for (bank_deg, len) in std::iter::once((0.0, 0.13))
-        .chain(BANK_TICKS_DEG.iter().flat_map(|&b| [(b, 0.09), (-b, 0.09)]))
-    {
-        let (dir, _) = world_dirs(bank_deg.to_radians());
+    // Roll scale: engraved on the rolling world, so it turns under the index.
+    for (bank_deg, tick) in std::iter::once((ZERO_TICK.deg, &ZERO_TICK)).chain(
+        BANK_TICKS
+            .iter()
+            .flat_map(|tick| [(tick.deg, tick), (-tick.deg, tick)]),
+    ) {
+        let dir = bank_tick_dir(attitude.roll, bank_deg);
         painter.line_segment(
             [
-                center + dir * radius * 1.02,
-                center + dir * radius * (1.02 + len),
+                center + dir * radius * SCALE_INNER,
+                center + dir * radius * (SCALE_INNER + tick.len),
             ],
-            Stroke::new(1.0 * k, scheme.text_secondary),
+            Stroke::new(tick.weight * k, scheme.text_secondary),
         );
     }
-    let tip = center + up_dir * radius * 1.05;
-    let side = Vec2::new(-up_dir.y, up_dir.x);
+
+    // Roll index: part of the airframe, so it stays directly above the aircraft
+    // symbol and the scale moves instead. Drawn after the scale, which it
+    // covers at wings level as on a real instrument.
+    let tip = center + ROLL_INDEX_DIR * radius * SCALE_INNER;
+    let side = Vec2::new(-ROLL_INDEX_DIR.y, ROLL_INDEX_DIR.x);
     painter.add(Shape::convex_polygon(
         vec![
             tip,
-            tip + (up_dir * 7.0 + side * 4.0) * k,
-            tip + (up_dir * 7.0 - side * 4.0) * k,
+            tip + (ROLL_INDEX_DIR * 7.0 + side * 4.0) * k,
+            tip + (ROLL_INDEX_DIR * 7.0 - side * 4.0) * k,
         ],
         SYMBOL,
         Stroke::NONE,
@@ -961,6 +1031,81 @@ mod tests {
         let (up_dir, right_dir) = world_dirs(0.0);
         assert!((up_dir - Vec2::new(0.0, -1.0)).length() < 1e-6);
         assert!((right_dir - Vec2::new(1.0, 0.0)).length() < 1e-6);
+    }
+
+    /// The index belongs to the airframe, so whatever the bank, it is the
+    /// matching graduation that swings up to meet it — the reading is which
+    /// mark sits under the index.
+    #[test]
+    fn the_matching_graduation_swings_up_to_the_fixed_index() {
+        for deg in [
+            -179.0_f64, -60.0, -45.0, -30.0, -10.0, 0.0, 10.0, 30.0, 45.0, 60.0, 179.0,
+        ] {
+            let dir = bank_tick_dir(deg.to_radians(), deg);
+            assert!(
+                (dir - ROLL_INDEX_DIR).length() < 1e-6,
+                "the {deg}° graduation sits at {dir:?}, not under the index"
+            );
+        }
+    }
+
+    /// The scale turns with the world: a right-hand graduation starts right of
+    /// the index at wings level and climbs towards it as the bank builds, where
+    /// a moving index would instead drift away from a still scale.
+    #[test]
+    fn the_scale_turns_under_the_index() {
+        for tick in &BANK_TICKS {
+            let level = bank_tick_dir(0.0, tick.deg);
+            assert!(
+                level.x > 0.0,
+                "the {}° graduation should start right of the index: {level:?}",
+                tick.deg
+            );
+            let half_way = bank_tick_dir((tick.deg / 2.0).to_radians(), tick.deg);
+            assert!(
+                half_way.dot(ROLL_INDEX_DIR) > level.dot(ROLL_INDEX_DIR),
+                "the {}° graduation moved away from the index: {level:?} -> {half_way:?}",
+                tick.deg
+            );
+        }
+        // Zero bank leaves the card's own mark under the index.
+        assert!((bank_tick_dir(0.0, ZERO_TICK.deg) - ROLL_INDEX_DIR).length() < 1e-6);
+    }
+
+    /// 10, 20, 30, 45, 60 is the convention, and it is not a uniform scale, so
+    /// the marks must not be drawn alike: 30° and 60° anchor the reading and
+    /// have to stand out from their neighbours.
+    #[test]
+    fn the_anchor_graduations_stand_out() {
+        let tick = |deg: f64| {
+            BANK_TICKS
+                .iter()
+                .find(|t| t.deg == deg)
+                .unwrap_or_else(|| panic!("no {deg}° graduation"))
+        };
+        for anchor in [30.0, 60.0] {
+            for minor in [10.0, 20.0, 45.0] {
+                assert!(
+                    tick(anchor).len > tick(minor).len * 1.5,
+                    "{anchor}° is not clearly longer than {minor}°"
+                );
+                assert!(
+                    tick(anchor).weight > tick(minor).weight,
+                    "{anchor}° is not heavier than {minor}°"
+                );
+            }
+        }
+        // The card's wings-level mark leads them all, and every graduation
+        // stays inside the square face rather than being clipped at a corner.
+        let longest = std::iter::once(&ZERO_TICK)
+            .chain(BANK_TICKS.iter())
+            .map(|t| t.len)
+            .fold(0.0, f32::max);
+        assert_eq!(longest, ZERO_TICK.len);
+        assert!(
+            SCALE_INNER + longest < 0.5 / FACE_RADIUS_FRAC,
+            "the roll scale reaches past the face"
+        );
     }
 
     #[test]
