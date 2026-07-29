@@ -17,6 +17,24 @@ use crate::demo::IdlePilot;
 /// Throttle held when no one is on the sticks: enough for level flight.
 const IDLE_THROTTLE: f64 = 0.3;
 
+/// Stick travel around centre that reads as neutral.
+const DEADZONE: f64 = 0.1;
+/// Full elevator/aileron throw, in radians (25°).
+const MAX_DEFLECTION_RAD: f64 = 25.0 * PI / 180.0;
+/// Full rudder throw, in radians (30°).
+const MAX_RUDDER_RAD: f64 = 30.0 * PI / 180.0;
+
+/// Fraction of full throw a surface must move before someone counts as flying.
+///
+/// A tenth of throw sits between the two cases that matter. Below it: a gamepad
+/// axis that trim or a sloppy calibration parks a little past the deadzone,
+/// which the `(axis - deadzone) / (1 - deadzone)` rescale then multiplies by the
+/// throw — a raw 0.15 is only 1.4° of elevator, and a raw 0.1021 is the 0.057°
+/// that a bare `1e-3` rad test would have read as a pilot on the sticks. Above
+/// it: every input a pilot can actually make, the smallest being the half-throw
+/// of an arrow key.
+const PILOT_INPUT_FRACTION: f64 = 0.1;
+
 /// Stick mode configuration
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StickMode {
@@ -47,14 +65,18 @@ impl ControlInput {
     }
 }
 
-/// Whether a human is on the sticks: any control surface off neutral.
+/// Whether a human is on the sticks: any control surface deliberately moved,
+/// i.e. past [`PILOT_INPUT_FRACTION`] of its throw. Merely off neutral is not
+/// enough — a resting gamepad axis is rarely exactly centred.
 ///
 /// The throttle is deliberately no evidence at all. A ratcheted transmitter
 /// reports a throttle stick far off centre from the moment it is plugged in,
 /// so reading that as "someone is flying" would retire the idle pilot before
 /// it ever flew a bank.
 fn is_flying(input: &ControlInput) -> bool {
-    input.elevator.abs() > 1e-3 || input.aileron.abs() > 1e-3 || input.rudder.abs() > 1e-3
+    input.elevator.abs() > PILOT_INPUT_FRACTION * MAX_DEFLECTION_RAD
+        || input.aileron.abs() > PILOT_INPUT_FRACTION * MAX_DEFLECTION_RAD
+        || input.rudder.abs() > PILOT_INPUT_FRACTION * MAX_RUDDER_RAD
 }
 
 /// Merge the two input sources. Each gamepad axis wins while it is off
@@ -90,11 +112,6 @@ pub struct InputReader {
     gilrs: Option<Gilrs>,
     device_state: DeviceState,
     stick_mode: StickMode,
-    deadzone: f64,
-    /// Max deflection for elevator/aileron in radians (25°)
-    max_deflection_rad: f64,
-    /// Max deflection for rudder in radians (30°)
-    max_rudder_rad: f64,
     /// Current throttle state (keyboard is incremental)
     keyboard_throttle: f64,
     /// Last control input for smoothing
@@ -145,9 +162,6 @@ impl InputReader {
             gilrs,
             device_state: DeviceState::new(),
             stick_mode,
-            deadzone: 0.1,
-            max_deflection_rad: 25.0 * PI / 180.0, // 25° in radians
-            max_rudder_rad: 30.0 * PI / 180.0,     // 30° in radians
             keyboard_throttle: IDLE_THROTTLE,
             last_input: ControlInput {
                 throttle: IDLE_THROTTLE,
@@ -213,10 +227,10 @@ impl InputReader {
             return None;
         };
 
-        let left_x = self.apply_deadzone(left_x);
-        let left_y = self.apply_deadzone(left_y);
-        let right_x = self.apply_deadzone(right_x);
-        let right_y = self.apply_deadzone(right_y);
+        let left_x = apply_deadzone(left_x);
+        let left_y = apply_deadzone(left_y);
+        let right_x = apply_deadzone(right_x);
+        let right_y = apply_deadzone(right_y);
 
         // The deadzone reads exactly zero at centre, so any other value means
         // the throttle stick has been moved (or never self-centred).
@@ -232,18 +246,18 @@ impl InputReader {
                 // Mode 2: Left = Throttle(Y)/Rudder(X), Right = Elevator(Y)/Aileron(X)
                 ControlInput {
                     throttle: (left_y + 1.0) / 2.0, // Convert -1..1 to 0..1
-                    rudder: left_x * self.max_rudder_rad,
-                    elevator: -right_y * self.max_deflection_rad, // Inverted: stick up = nose up = negative
-                    aileron: right_x * self.max_deflection_rad,
+                    rudder: left_x * MAX_RUDDER_RAD,
+                    elevator: -right_y * MAX_DEFLECTION_RAD, // Inverted: stick up = nose up = negative
+                    aileron: right_x * MAX_DEFLECTION_RAD,
                 }
             }
             StickMode::Mode1 => {
                 // Mode 1: Left = Elevator(Y)/Rudder(X), Right = Throttle(Y)/Aileron(X)
                 ControlInput {
-                    elevator: -left_y * self.max_deflection_rad, // Inverted
-                    rudder: left_x * self.max_rudder_rad,
+                    elevator: -left_y * MAX_DEFLECTION_RAD, // Inverted
+                    rudder: left_x * MAX_RUDDER_RAD,
                     throttle: (right_y + 1.0) / 2.0,
-                    aileron: right_x * self.max_deflection_rad,
+                    aileron: right_x * MAX_DEFLECTION_RAD,
                 }
             }
         })
@@ -263,27 +277,27 @@ impl InputReader {
 
         // Rudder (A/D)
         let rudder = if keys.contains(&Keycode::A) {
-            -self.max_rudder_rad * 0.5 // Half max deflection
+            -MAX_RUDDER_RAD * 0.5 // Half max deflection
         } else if keys.contains(&Keycode::D) {
-            self.max_rudder_rad * 0.5
+            MAX_RUDDER_RAD * 0.5
         } else {
             0.0
         };
 
         // Elevator (Up/Down arrows)
         let elevator = if keys.contains(&Keycode::Up) {
-            -self.max_deflection_rad * 0.5 // Up arrow = nose up = negative elevator
+            -MAX_DEFLECTION_RAD * 0.5 // Up arrow = nose up = negative elevator
         } else if keys.contains(&Keycode::Down) {
-            self.max_deflection_rad * 0.5
+            MAX_DEFLECTION_RAD * 0.5
         } else {
             0.0
         };
 
         // Aileron (Left/Right arrows)
         let aileron = if keys.contains(&Keycode::Left) {
-            -self.max_deflection_rad * 0.5
+            -MAX_DEFLECTION_RAD * 0.5
         } else if keys.contains(&Keycode::Right) {
-            self.max_deflection_rad * 0.5
+            MAX_DEFLECTION_RAD * 0.5
         } else {
             0.0
         };
@@ -295,17 +309,17 @@ impl InputReader {
             throttle: self.keyboard_throttle,
         }
     }
+}
 
-    /// Apply deadzone to axis value
-    fn apply_deadzone(&self, value: f64) -> f64 {
-        if value.abs() < self.deadzone {
-            0.0
-        } else {
-            // Rescale to remove deadzone gap
-            let sign = value.signum();
-            let magnitude = (value.abs() - self.deadzone) / (1.0 - self.deadzone);
-            sign * magnitude
-        }
+/// Apply deadzone to axis value
+fn apply_deadzone(value: f64) -> f64 {
+    if value.abs() < DEADZONE {
+        0.0
+    } else {
+        // Rescale to remove deadzone gap
+        let sign = value.signum();
+        let magnitude = (value.abs() - DEADZONE) / (1.0 - DEADZONE);
+        sign * magnitude
     }
 }
 
@@ -363,6 +377,79 @@ mod tests {
             IdlePilot::default().aileron(is_flying(&combined)).is_some(),
             "a connected transmitter must not retire the idle pilot"
         );
+    }
+
+    /// A gamepad axis that trim or calibration parks a little past the
+    /// deadzone. The rescale makes such an axis map to a fraction of a degree
+    /// of surface, which is nobody flying — the idle banks must still run, on
+    /// the very FrSky-style hardware the README highlights.
+    #[test]
+    fn a_trimmed_gamepad_axis_still_lets_the_idle_pilot_fly() {
+        for raw in [0.1021, 0.11, 0.15, -0.15, 0.17] {
+            let gamepad = ControlInput {
+                elevator: apply_deadzone(raw) * MAX_DEFLECTION_RAD,
+                aileron: apply_deadzone(raw) * MAX_DEFLECTION_RAD,
+                rudder: apply_deadzone(raw) * MAX_RUDDER_RAD,
+                ..IDLE_GAMEPAD
+            };
+            let combined = combine(gamepad, IDLE_KEYBOARD, false);
+            assert!(!is_flying(&combined), "raw axis {raw} read as flying");
+            assert!(
+                IdlePilot::default().aileron(is_flying(&combined)).is_some(),
+                "raw axis {raw} retired the idle pilot"
+            );
+        }
+    }
+
+    /// The idle pilot's own fingertip aileron is not a pilot input either, or
+    /// the demo would retire itself on the tick after it started.
+    #[test]
+    fn the_idle_pilot_does_not_retire_itself() {
+        let aileron = IdlePilot::default()
+            .aileron(false)
+            .expect("idle pilot flies");
+        let combined = combine(
+            ControlInput {
+                aileron,
+                ..IDLE_GAMEPAD
+            },
+            IDLE_KEYBOARD,
+            false,
+        );
+        assert!(!is_flying(&combined));
+    }
+
+    /// The smallest input a pilot can actually make, from either device, has to
+    /// hand over: arrow keys and A/D are half throw.
+    #[test]
+    fn the_smallest_keyboard_input_flies() {
+        for keyboard in [
+            ControlInput {
+                elevator: MAX_DEFLECTION_RAD * 0.5,
+                ..IDLE_KEYBOARD
+            },
+            ControlInput {
+                aileron: MAX_DEFLECTION_RAD * 0.5,
+                ..IDLE_KEYBOARD
+            },
+            ControlInput {
+                rudder: MAX_RUDDER_RAD * 0.5,
+                ..IDLE_KEYBOARD
+            },
+        ] {
+            assert!(is_flying(&combine(IDLE_GAMEPAD, keyboard, false)));
+        }
+    }
+
+    /// A stick moved well clear of the deadzone: a quarter of throw is already
+    /// a deliberate input.
+    #[test]
+    fn a_deflected_stick_flies() {
+        let gamepad = ControlInput {
+            aileron: apply_deadzone(0.35) * MAX_DEFLECTION_RAD,
+            ..IDLE_GAMEPAD
+        };
+        assert!(is_flying(&combine(gamepad, IDLE_KEYBOARD, false)));
     }
 
     #[test]

@@ -63,9 +63,11 @@ the attitude graphs have something to show on an untouched run. The aileron is a
 cosine, which is what makes the bank a sine — the wings pass through level twice
 a cycle and the average heading holds. The first elevator, aileron or rudder input
 — stick or arrow key
-— hands the aircraft over for good; it never takes control back. Throttle is
-not a handover: a ratcheted transmitter sits far off centre from the moment it
-is plugged in, and the demo would never fly.
+— hands the aircraft over for good; it never takes control back. Handover wants a
+real input, a tenth of full throw, so a stick left a little off centre by trim or
+calibration is not mistaken for one. Throttle is not a handover at all: a
+ratcheted transmitter sits far off centre from the moment it is plugged in, and
+the demo would never fly.
 
 #### Control Mapping (Mode 2 - US Standard)
 
