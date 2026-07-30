@@ -16,13 +16,21 @@ use super::Cli;
 
 const DEFAULT_SIM: Simulator = Simulator::None;
 
-#[derive(clap::Args, Clone, Default)]
+fn default_sim_addr() -> SocketAddr {
+    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240)
+}
+
+#[derive(clap::Args, Clone)]
 #[command(
     after_help = "Environment:\n  BLOCKADE_API_KEY    Optional. Enables Skybox AI generation from the command palette. Get one from https://skybox.blockadelabs.com/api and keep it out of source control."
 )]
 pub struct Args {
     #[clap(name = "addr/path", default_value_t = DEFAULT_SIM)]
     sim: Simulator,
+
+    /// Address to use when launching a simulation file. Assets use its port + 1.
+    #[clap(long, default_value = "[::]:2240")]
+    addr: SocketAddr,
 
     /// Open this KDL schematic file after connecting to the database.
     #[clap(long)]
@@ -52,6 +60,17 @@ enum Simulator {
 
 #[derive(Resource)]
 struct WindowStateFile(std::fs::File);
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            sim: DEFAULT_SIM,
+            addr: default_sim_addr(),
+            kdl: None,
+            replay: false,
+        }
+    }
+}
 
 impl Default for Simulator {
     fn default() -> Self {
@@ -98,6 +117,7 @@ impl Cli {
         cancel_token: CancelToken,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
+        let sim_addr = args.addr;
         let dirs = self.dirs().into_diagnostic()?;
         let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
@@ -122,10 +142,11 @@ impl Cli {
                 match &sim {
                     Simulator::File(path) => {
                         let mut res = None;
-                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe(
+                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe_at(
                             cache_dir,
                             path.clone(),
                             cancel_token.clone(),
+                            sim_addr,
                         ));
                         tokio::select! {
                             r = &mut recipe_fut => res = Some(r),
@@ -181,9 +202,7 @@ impl Cli {
                 app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(addr)));
             }
             Simulator::File(_) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(
-                    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
-                )));
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
             }
             Simulator::ReplayDir(_) => {
                 // TODO

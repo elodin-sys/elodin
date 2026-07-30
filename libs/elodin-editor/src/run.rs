@@ -3,7 +3,10 @@ use bevy::prelude::*;
 #[cfg(not(target_os = "windows"))]
 use miette::{Context, IntoDiagnostic, miette};
 #[cfg(not(target_os = "windows"))]
-use std::path::{Path, PathBuf};
+use std::{
+    net::{Ipv6Addr, SocketAddr},
+    path::{Path, PathBuf},
+};
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
 
@@ -12,6 +15,22 @@ pub async fn run_recipe(
     cache_dir: PathBuf,
     path: PathBuf,
     cancel_token: CancelToken,
+) -> miette::Result<()> {
+    run_recipe_at(
+        cache_dir,
+        path,
+        cancel_token,
+        SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
+    )
+    .await
+}
+
+#[cfg(not(target_os = "windows"))]
+pub async fn run_recipe_at(
+    cache_dir: PathBuf,
+    path: PathBuf,
+    cancel_token: CancelToken,
+    addr: SocketAddr,
 ) -> miette::Result<()> {
     let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
@@ -38,6 +57,7 @@ pub async fn run_recipe(
             .arg(path.clone())
             .arg("plan")
             .arg(&out_dir)
+            .arg(addr.to_string())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
