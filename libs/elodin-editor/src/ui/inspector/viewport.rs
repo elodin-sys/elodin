@@ -2062,9 +2062,11 @@ mod tests {
         );
     }
 
-    /// `WorldPosExt::bevy_att` must match `GeoRotation::to_bevy` in plane mode.
+    /// Relative and Absolute local→frame attitudes share composition
+    /// (`bevy_R * att`) in plane mode. Legacy `bevy_att` is the ENU similarity
+    /// swizzle and is not the GeoRotation path.
     #[test]
-    fn test_bevy_att_vs_geo_frames_plane() {
+    fn test_relative_and_absolute_agree_in_plane() {
         use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
 
         let ctx = GeoContext::default().with_present(Present::Plane);
@@ -2079,12 +2081,11 @@ mod tests {
                 pos: nox::Vec3::new(0.0, 0.0, 0.0),
             };
 
-            let elodin_bevy = world_pos.bevy_att();
-            let geo_frames_bevy =
-                GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let relative = GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let absolute = GeoRotation::absolute(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
             assert_eq_quat!(
-                elodin_bevy.as_quat(),
-                geo_frames_bevy.as_quat(),
+                relative.as_quat(),
+                absolute.as_quat(),
                 "case {i} dir {dir} up {up}"
             );
         }

@@ -56,11 +56,16 @@ pub enum GeoFrame {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
 pub enum RotationKind {
     #[default]
-    /// The rotation is relative. An identity rotation in any frame is an
-    /// identity rotation in Bevy's frame.
+    /// Local→frame attitude composed with the frame→Bevy basis change
+    /// (`bevy_R * att`). Same Bevy mapping as [`Absolute`]; identity attitude
+    /// therefore aligns body axes with the frame (not with Bevy axes). Kept as
+    /// the default so WorldPos body attitudes and EQL body-frame
+    /// `.translate()` agree with the rendered mesh without requiring
+    /// `orientation=absolute` on every object.
     Relative,
-    /// The rotation is absolute. An identity rotation in ENU will produce a
-    /// rotation that rotates [x,y,z] to [x,z,-y] for instance.
+    /// Local→frame attitude composed with the frame→Bevy basis change.
+    /// An identity rotation in ENU produces the ENU→Bevy basis (e.g. maps
+    /// `[x,y,z]` to `[x,z,-y]`).
     Absolute,
 }
 

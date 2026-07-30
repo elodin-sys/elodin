@@ -2458,10 +2458,9 @@ mod tests {
     use impeller2_wkt::ComponentValue;
 
     /// Inserting a bare `WorldPos` must pull in the `Geo*` components
-    /// (required components) and end up at the same Bevy pose the old
-    /// `sync_pos` fallback (`bevy_pos()`/`bevy_att()`) produced.
+    /// (required components) and map through composition (`bevy_R * att`).
     #[test]
-    fn world_pos_geo_pipeline_matches_legacy_swizzle() {
+    fn world_pos_geo_pipeline_uses_frame_composition() {
         let ctx = GeoContext::default();
         let mut app = App::new();
         app.insert_resource(ctx.clone());
@@ -2489,10 +2488,10 @@ mod tests {
             wp.bevy_pos()
         );
         let q = geo_rot.to_bevy(&ctx);
+        let expected = GeoRotation::absolute(GeoFrame::ENU, wp.att()).to_bevy(&ctx);
         assert!(
-            q.dot(wp.bevy_att()).abs() > 1.0 - 1e-9,
-            "got {q:?}, expected {:?}",
-            wp.bevy_att()
+            q.dot(expected).abs() > 1.0 - 1e-9,
+            "got {q:?}, expected {expected:?}"
         );
     }
 

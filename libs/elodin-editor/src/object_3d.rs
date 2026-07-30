@@ -2897,7 +2897,9 @@ mod translate_body_frame_tests {
     /// the mesh.
     #[test]
     fn ecef_body_translate_matches_rendered_aft_with_default_relative_orientation() {
-        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind};
+        use bevy_geo_frames::{
+            GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind,
+        };
 
         let ctx = GeoContext::default().with_present(Present::Plane);
         let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
@@ -2914,8 +2916,7 @@ mod translate_body_frame_tests {
         // Default object_3d orientation is Relative; sync_pos writes WorldPos.att
         // into GeoRotation while preserving RotationKind.
         assert_eq!(RotationKind::default(), RotationKind::Relative);
-        let rendered_aft =
-            GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+        let rendered_aft = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
 
         assert!(
             (cam_delta_bevy - rendered_aft).length() < 1e-6,
@@ -2944,8 +2945,7 @@ mod translate_body_frame_tests {
         );
         let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
             - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
-        let rendered_aft =
-            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+        let rendered_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
 
         assert!(
             (cam_delta_bevy - rendered_aft).length() < 1e-6,

@@ -1092,8 +1092,7 @@ mod tests {
 
         let end = arrow_end_pos(&start, direction, true);
         let delta = bevy_delta(&start, &end, GeoFrame::ECEF, &ctx);
-        let expected =
-            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * direction;
+        let expected = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * direction;
         assert!(
             (delta - expected).length() < 1e-6,
             "ECEF body −X at planetary scale: got {delta:?}, expected {expected:?}"

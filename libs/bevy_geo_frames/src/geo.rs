@@ -384,13 +384,17 @@ impl GeoRotation {
     ///
     /// If `up` is `None` (or collinear with `dir`), the frame's natural camera
     /// up — the frame direction that maps to Bevy `+Y` — is used.
+    ///
+    /// The stored quaternion is the camera's local→frame attitude for
+    /// [`Self::to_bevy`]'s basis composition (`bevy_R * att`).
     pub fn look_at(
         frame: GeoFrame,
         dir: impl Into<DVec3>,
         up: Option<DVec3>,
         context: &GeoContext,
     ) -> Self {
-        let frame_R_bevy = GeoFrame::bevy_R_(&frame, context).transpose();
+        let bevy_R = GeoFrame::bevy_R_(&frame, context);
+        let frame_R_bevy = bevy_R.transpose();
         // The camera's identity axes expressed in `frame` coordinates.
         let f0 = frame_R_bevy * DVec3::NEG_Z;
         let u0 = frame_R_bevy * DVec3::Y;
@@ -409,26 +413,26 @@ impl GeoRotation {
         let s = f.cross(up).normalize();
         let u = s.cross(f);
 
-        // Rotation taking the identity camera axes to the desired ones.
+        // Rotation taking the identity camera axes (in frame) to the desired
+        // ones. Historically this `r_frame` was applied via similarity
+        // (`bevy_R ∘ r ∘ bevy_R⁻¹`). With composition `to_bevy = bevy_R ∘ att`,
+        // store `r_frame ∘ bevy_R⁻¹` so Bevy output is unchanged.
         let m0 = DMat3::from_cols(f0.cross(u0), f0, u0);
         let m = DMat3::from_cols(s, f, u);
-        GeoRotation(
-            frame,
-            DQuat::from_mat3(&(m * m0.transpose())),
-            RotationKind::Relative,
-        )
+        let r_frame = DQuat::from_mat3(&(m * m0.transpose()));
+        let q = DQuat::from_mat3(&bevy_R);
+        GeoRotation(frame, r_frame * q.conjugate(), RotationKind::Relative)
     }
 
     /// Convert orientation to Bevy.
+    ///
+    /// Both [`RotationKind`]s compose the local→frame attitude with the
+    /// frame→Bevy basis (`bevy_R * att`), so body-frame EQL offsets and the
+    /// rendered mesh share the same Bevy axes.
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
         let local_rot = self.1;
         let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&self.0, context));
-        match self.2 {
-            // Re-express the rotation operator in Bevy coordinates.
-            RotationKind::Relative => q * local_rot * q.conjugate(),
-            // Compose with the frame's basis change into Bevy.
-            RotationKind::Absolute => q * local_rot,
-        }
+        q * local_rot
     }
 
     /// Convert a [RotationKind::Relative] orientation from Bevy.
@@ -445,22 +449,14 @@ impl GeoRotation {
     ) -> Self {
         let v = v_bevy.into();
         let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context));
-        let local_rot = match kind {
-            RotationKind::Relative => q.conjugate() * v * q,
-            RotationKind::Absolute => q.conjugate() * v,
-        };
-        GeoRotation(frame, local_rot, kind)
+        GeoRotation(frame, q.conjugate() * v, kind)
     }
 
     /// Re-express the rotation in another frame, preserving the rotation it
     /// produces in Bevy and its [RotationKind].
     pub fn as_frame(&self, to_frame: GeoFrame, context: &GeoContext) -> GeoRotation {
         let R = DQuat::from_mat3(&to_frame._R_(&self.0, context));
-        let local_rot = match self.2 {
-            RotationKind::Relative => R * self.1 * R.conjugate(),
-            RotationKind::Absolute => R * self.1,
-        };
-        GeoRotation(to_frame, local_rot, self.2)
+        GeoRotation(to_frame, R * self.1, self.2)
     }
 
     /// Create from a Bevy Transform's rotation.
@@ -826,11 +822,17 @@ mod tests {
     }
 
     #[test]
-    fn test_as_frame() {
+    fn test_from_bevy_identity_round_trips_to_bevy() {
         let ctx = dummy_ctx();
         let geo_rotation = GeoRotation::from_bevy(GeoFrame::ENU, DQuat::IDENTITY, &ctx);
-        assert_eq!(geo_rotation.1.as_quat(), Quat::IDENTITY);
+        // Composition stores bevy_R⁻¹ so to_bevy recovers Bevy identity.
         assert_eq!(geo_rotation.to_bevy(&ctx).as_quat(), Quat::IDENTITY);
+        let basis = DQuat::from_mat3(&GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx));
+        assert!(
+            geo_rotation.1.dot(basis.conjugate()).abs() > 1.0 - 1e-9,
+            "local att should be basis conjugate, got {:?}",
+            geo_rotation.1
+        );
     }
 
     /// Quaternion equality up to sign (double cover), robust to fp noise.
@@ -852,12 +854,13 @@ mod tests {
     }
 
     #[test]
-    fn relative_identity_is_identity_in_bevy() {
+    fn relative_identity_composes_with_frame_basis() {
         let ctx = dummy_ctx();
         for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
             let r = GeoRotation::relative(frame, DQuat::IDENTITY);
             assert_eq!(r.2, RotationKind::Relative);
-            assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?}");
+            let basis = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, &ctx));
+            assert_quat_eq!(r.to_bevy(&ctx), basis, "{frame:?}");
         }
     }
 
@@ -931,8 +934,8 @@ mod tests {
         }
     }
 
-    /// Looking "north" with frame-up must be the identity attitude in both
-    /// ENU and NED (their camera identity axes differ, the result must not).
+    /// Looking "north" with frame-up must yield Bevy identity in both ENU and
+    /// NED (their camera identity axes differ; the Bevy result must not).
     #[test]
     fn look_at_identity_per_frame() {
         let ctx = dummy_ctx();
@@ -942,7 +945,6 @@ mod tests {
         ];
         for (frame, north, up) in cases {
             let r = GeoRotation::look_at(frame, north, Some(up), &ctx);
-            assert_quat_eq!(r.1, DQuat::IDENTITY, "{frame:?} local");
             assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?} bevy");
         }
     }
