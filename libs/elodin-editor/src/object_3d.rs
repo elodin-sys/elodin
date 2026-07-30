@@ -2748,6 +2748,213 @@ mod ellipsoid_covariance_tests {
 }
 
 #[cfg(test)]
+mod translate_body_frame_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::math::{DQuat, DVec3};
+    use bevy::prelude::{Query, World};
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller2_bevy::EntityMap;
+    use impeller2_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::{ComponentArrayExt, compile_eql_expr};
+    use crate::WorldPosExt;
+    use crate::ui::widgets::SystemStateExt;
+
+    /// Cape Canaveral–scale ECEF position so we exercise planetary magnitudes.
+    const ROCKET_ECEF: DVec3 = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+
+    fn world_pos_component() -> Arc<eql::Component> {
+        Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ))
+    }
+
+    fn spatial_value(att: DQuat, pos: DVec3) -> ComponentValue {
+        let buf = vec![att.x, att.y, att.z, att.w, pos.x, pos.y, pos.z];
+        ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![7], buf)
+                .expect("spatial buffer"),
+        )
+    }
+
+    fn eval_eql(expr: &str, att: DQuat, pos: DVec3) -> impeller2_wkt::WorldPos {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        compiled
+            .execute(&entity_map, &values)
+            .expect("execute")
+            .as_world_pos()
+            .expect("WorldPos")
+    }
+
+    #[test]
+    fn body_translate_with_identity_matches_world_axes() {
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            DQuat::IDENTITY,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        assert!(
+            (delta - DVec3::new(-2.0, 0.0, 0.0)).length() < 1e-9,
+            "identity attitude: body translate must equal ECEF axes, got {delta:?}"
+        );
+    }
+
+    /// Chase camera: 2 m aft along body −X with a non-identity ECEF attitude.
+    /// Body +X is pitched 90° onto ECEF +Z (nose "up" along +Z).
+    #[test]
+    fn body_translate_neg_x_follows_attitude_in_ecef() {
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        let expected = att * DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (delta - expected).length() < 1e-9,
+            "body −X must rotate into ECEF by attitude: got {delta:?}, expected {expected:?}"
+        );
+        // Must not silently fall back to world-frame axes.
+        assert!(
+            (delta - DVec3::new(-2.0, 0.0, 0.0)).length() > 1.0,
+            "body translate must differ from world translate for this attitude"
+        );
+    }
+
+    #[test]
+    fn body_translate_differs_from_translate_world_when_rotated() {
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.4, -1.1, 0.7);
+        let body = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let world = eval_eql(
+            "rocket.world_pos.translate_world(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let body_delta = body.pos() - ROCKET_ECEF;
+        let world_delta = world.pos() - ROCKET_ECEF;
+        assert!(
+            (world_delta - DVec3::new(-2.0, 0.0, 0.0)).length() < 1e-9,
+            "translate_world must ignore attitude"
+        );
+        assert!(
+            (body_delta - (att * DVec3::new(-2.0, 0.0, 0.0))).length() < 1e-9,
+            "translate must apply attitude: got {body_delta:?}"
+        );
+        assert!(
+            (body_delta - world_delta).length() > 1e-6,
+            "body and world translates must diverge when attitude is non-identity"
+        );
+    }
+
+    #[test]
+    fn body_translate_xyz_combined_in_ecef() {
+        let att = DQuat::from_euler(bevy::math::EulerRot::ZYX, 0.9, -0.3, 1.2);
+        let offset = DVec3::new(-2.0, 0.5, 1.0);
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.5, 1.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        let expected = att * offset;
+        assert!(
+            (delta - expected).length() < 1e-9,
+            "combined body translate: got {delta:?}, expected {expected:?}"
+        );
+    }
+
+    /// Camera from `.translate(-2,0,0)` must sit on the rendered mesh's body
+    /// aft axis. With default [`RotationKind::Relative`] in ECEF, Absolute
+    /// body→frame attitudes are re-expressed into Bevy and the visual aft
+    /// diverges from the EQL body offset — the chase camera is not behind
+    /// the mesh.
+    #[test]
+    fn ecef_body_translate_matches_rendered_aft_with_default_relative_orientation() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+
+        let translated = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
+
+        // Default object_3d orientation is Relative; sync_pos writes WorldPos.att
+        // into GeoRotation while preserving RotationKind.
+        assert_eq!(RotationKind::default(), RotationKind::Relative);
+        let rendered_aft =
+            GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+
+        assert!(
+            (cam_delta_bevy - rendered_aft).length() < 1e-6,
+            "ECEF Relative mesh aft must match body translate offset in Bevy:\n\
+             translate Δ={cam_delta_bevy:?}\n\
+             rendered aft={rendered_aft:?}\n\
+             (Absolute aft would be {:?})",
+            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft
+        );
+    }
+
+    /// Same contract with `orientation=absolute` (Falcon-style ECEF objects):
+    /// body translate and rendered aft must agree.
+    #[test]
+    fn ecef_body_translate_matches_rendered_aft_with_absolute_orientation() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+
+        let translated = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
+        let rendered_aft =
+            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+
+        assert!(
+            (cam_delta_bevy - rendered_aft).length() < 1e-6,
+            "ECEF Absolute mesh aft must match body translate: Δ={cam_delta_bevy:?}, aft={rendered_aft:?}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod db_asset_url_tests {
     use super::resolve_db_asset_url;
     use std::net::SocketAddr;

@@ -1070,7 +1070,7 @@ mod tests {
         let start = world_pos(DVec3::new(-3.0, 8.0, 1.0), att);
         let direction = DVec3::new(0.5, -1.5, 2.0);
 
-        for frame in [GeoFrame::ENU, GeoFrame::NED] {
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
             let end = arrow_end_pos(&start, direction, true);
             let delta = bevy_delta(&start, &end, frame, &ctx);
             let expected = GeoRotation::absolute(frame, att).to_bevy(&ctx) * direction;
@@ -1079,5 +1079,24 @@ mod tests {
                 "{frame:?}: got {delta:?}, expected {expected:?}"
             );
         }
+    }
+
+    /// Body-frame arrow at planetary ECEF magnitude: Bevy delta must stay
+    /// `Absolute(ECEF, att) * body_dir`, same contract as EQL `.translate()`.
+    #[test]
+    fn ecef_body_frame_arrow_at_planetary_scale() {
+        let ctx = GeoContext::default();
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let start = world_pos(DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0), att);
+        let direction = DVec3::new(-2.0, 0.0, 0.0);
+
+        let end = arrow_end_pos(&start, direction, true);
+        let delta = bevy_delta(&start, &end, GeoFrame::ECEF, &ctx);
+        let expected =
+            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * direction;
+        assert!(
+            (delta - expected).length() < 1e-6,
+            "ECEF body −X at planetary scale: got {delta:?}, expected {expected:?}"
+        );
     }
 }

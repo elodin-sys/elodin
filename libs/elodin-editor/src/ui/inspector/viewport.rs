@@ -1560,6 +1560,132 @@ mod tests {
         }
     }
 
+    /// ECEF chase camera: `rocket.world_pos.translate(-2,0,0)` must place the
+    /// viewport 2 m along body −X (aft), not along ECEF −X, then look at the
+    /// rocket. Reproduces the body-local translate failure in ECEF scenes.
+    #[test]
+    fn ecef_viewport_body_translate_behind_rocket() {
+        use crate::object_3d::{EditableEQL, compile_eql_expr};
+        use bevy::math::{DQuat, DVec3};
+        use bevy::prelude::{IntoScheduleConfigs, Transform};
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, GeoPosition, GeoRotation, Present};
+        use impeller2::schema::Schema;
+        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use impeller2_wkt::ComponentValue;
+        use nox::Array;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let rocket_ecef = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+        // Nose along ECEF +Z: body −X (aft / "behind") maps to ECEF −Z.
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let expected_cam_ecef = rocket_ecef + att * DVec3::new(-2.0, 0.0, 0.0);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ));
+        let component_id = component.id;
+        let eql_ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let editable = |s: &str| EditableEQL {
+            eql: s.to_string(),
+            compiled_expr: Some(
+                compile_eql_expr(
+                    eql_ctx
+                        .parse_str(s)
+                        .unwrap_or_else(|e| panic!("parse {s:?}: {e}")),
+                )
+                .unwrap_or_else(|e| panic!("compile {s:?}: {e}")),
+            ),
+        };
+
+        let mut app = bevy::app::App::new();
+        // Origin near the rocket so Plane ECEF→Bevy keeps metre-scale precision.
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        app.insert_resource(GeoContext::from(origin).with_present(Present::Plane));
+        crate::register_world_pos_components(&mut app);
+        app.add_systems(
+            bevy::app::Update,
+            (
+                super::set_viewport_pos,
+                crate::sync_pos,
+                bevy_geo_frames::apply_transforms,
+                bevy_geo_frames::apply_geo_rotation,
+            )
+                .chain(),
+        );
+
+        let rocket_entity = app
+            .world_mut()
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![7],
+                    vec![
+                        att.x,
+                        att.y,
+                        att.z,
+                        att.w,
+                        rocket_ecef.x,
+                        rocket_ecef.y,
+                        rocket_ecef.z,
+                    ],
+                )
+                .unwrap(),
+            ))
+            .id();
+        app.insert_resource(EntityMap(HashMap::from([(component_id, rocket_entity)])));
+
+        let frame = GeoFrame::ECEF;
+        let parent = app
+            .world_mut()
+            .spawn((
+                super::WorldPos::default(),
+                GeoPosition(frame, DVec3::ZERO),
+                GeoRotation::relative(frame, DQuat::IDENTITY),
+                Transform::default(),
+            ))
+            .id();
+        app.world_mut().spawn((
+            super::Viewport::new(
+                parent,
+                editable("rocket.world_pos.translate(-2.0, 0.0, 0.0)"),
+                editable("rocket.world_pos"),
+                EditableEQL::default(),
+                Some(frame),
+            ),
+            EditorCam::default(),
+        ));
+        app.update();
+
+        let cam_pos = app.world().get::<super::WorldPos>(parent).unwrap();
+        let pos_err = (cam_pos.pos() - expected_cam_ecef).length();
+        assert!(
+            pos_err < 1e-6,
+            "viewport WorldPos must sit 2 m aft in body frame: got {:?}, expected {:?}, err={pos_err}",
+            cam_pos.pos(),
+            expected_cam_ecef
+        );
+
+        // World-frame translate would leave the camera at rocket + (−2,0,0) ECEF.
+        let world_frame_cam = rocket_ecef + DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (cam_pos.pos() - world_frame_cam).length() > 1.0,
+            "camera must not use world-frame −X when attitude is non-identity"
+        );
+
+        let geo_ctx = app.world().resource::<GeoContext>();
+        let cam_bevy = GeoPosition(frame, cam_pos.pos()).to_bevy(geo_ctx);
+        let rocket_bevy = GeoPosition(frame, rocket_ecef).to_bevy(geo_ctx);
+        let delta_bevy = cam_bevy - rocket_bevy;
+        let expected_bevy =
+            GeoRotation::absolute(frame, att).to_bevy(geo_ctx) * DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (delta_bevy - expected_bevy).length() < 1e-4,
+            "Bevy delta must be Absolute(ECEF,att)*body(−2,0,0): got {delta_bevy:?}, expected {expected_bevy:?}"
+        );
+    }
+
     /// Full pipeline test with real EQL: `set_viewport_pos` -> `sync_pos` ->
     /// `apply_geo_rotation`. A NED viewport with an explicit `up="(0,0,-1)"`
     /// (up, away from the ground in NED) must produce a right-side-up rig
