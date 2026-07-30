@@ -326,58 +326,86 @@ fn horizon_palette() -> (Color32, Color32, Color32) {
 /// Amber of the screen-fixed symbology, shared with the gimbal's reticle.
 const SYMBOL: Color32 = Color32::from_rgb(255, 179, 0);
 
-/// A graduation of the roll scale: its bank angle, its length as a fraction of
-/// the face radius, and its stroke weight before the symbol scale.
+/// How a graduation of the roll scale is drawn.
+enum Mark {
+    /// A radial tick, its length a fraction of the face radius and its weight
+    /// the stroke width before the symbol scale.
+    Tick { len: f32, weight: f32 },
+    /// The dot 45° carries by convention. Differing in kind rather than in
+    /// size is what stops it being read as one more step of the sequence.
+    Dot,
+}
+
+/// A graduation of the roll scale: the bank angle it stands for, and its mark.
 struct BankTick {
     deg: f64,
-    len: f32,
-    weight: f32,
+    mark: Mark,
 }
+
+/// Length of a minor graduation as a fraction of the face radius, and of the
+/// anchors that have to stand out from it.
+const MINOR_LEN: f32 = 0.07;
+const MAJOR_LEN: f32 = 0.13;
 
 /// Graduations of the roll scale, mirrored either side of the card's zero.
 ///
 /// The scale is not uniform — 10, 20, 30, then 45, 60, which is the convention —
 /// so drawing them alike would read as equal steps and be counted rather than
-/// read. Long, heavy marks at 30° and 60° give the eye two anchors, leaving 10°,
-/// 20° and 45° as minor marks between them.
+/// read. Long, heavy marks anchor 30° and 60°, 10° and 20° stay minor between
+/// them, and 45°, which breaks the sequence, is a dot.
 const BANK_TICKS: [BankTick; 5] = [
     BankTick {
         deg: 10.0,
-        len: 0.07,
-        weight: 1.0,
+        mark: Mark::Tick {
+            len: MINOR_LEN,
+            weight: 1.0,
+        },
     },
     BankTick {
         deg: 20.0,
-        len: 0.07,
-        weight: 1.0,
+        mark: Mark::Tick {
+            len: MINOR_LEN,
+            weight: 1.0,
+        },
     },
     BankTick {
         deg: 30.0,
-        len: 0.13,
-        weight: 2.0,
+        mark: Mark::Tick {
+            len: MAJOR_LEN,
+            weight: 2.0,
+        },
     },
     BankTick {
         deg: 45.0,
-        len: 0.07,
-        weight: 1.0,
+        mark: Mark::Dot,
     },
     BankTick {
         deg: 60.0,
-        len: 0.13,
-        weight: 2.0,
+        mark: Mark::Tick {
+            len: MAJOR_LEN,
+            weight: 2.0,
+        },
     },
 ];
 
 /// The card's own wings-level mark, which the index covers at zero bank.
 const ZERO_TICK: BankTick = BankTick {
     deg: 0.0,
-    len: 0.15,
-    weight: 2.2,
+    mark: Mark::Tick {
+        len: 0.15,
+        weight: 2.2,
+    },
 };
 
 /// Where the roll scale starts, as a fraction of the face radius: just clear of
 /// the rim, leaving the longest graduation short of the face's corner.
 const SCALE_INNER: f32 = 1.02;
+/// Centre of the 45° dot, inside the band the minor ticks occupy so the scale
+/// keeps one silhouette.
+const DOT_CENTER: f32 = SCALE_INNER + MINOR_LEN / 2.0;
+/// Dot radius in pixels before the symbol scale — quoted like a stroke weight
+/// rather than as a fraction of the face, so it stays a dot on a small one.
+const DOT_RADIUS: f32 = 1.8;
 
 /// Screen direction (y-down) of the roll index: straight up, i.e. always
 /// directly above the aircraft symbol, because the index belongs to the
@@ -401,7 +429,7 @@ const READOUT_GAP: f32 = 3.0;
 /// Largest face we draw. The instrument follows its pane — pitch and bank are
 /// only as readable as the face is big — but a maximised tile should not turn
 /// into a wall of sky.
-const FACE_MAX: f32 = 320.0;
+const FACE_MAX: f32 = 672.0;
 /// Below this the ladder and roll scale collapse into a smudge, so the face
 /// goes unpainted and the pane keeps the numbers alone. It still claims its
 /// space, so a pane being squeezed shrinks smoothly instead of snapping.
@@ -548,13 +576,24 @@ fn paint_horizon(ui: &mut egui::Ui, state: Result<Attitude, InactiveReason>) {
             .flat_map(|tick| [(tick.deg, tick), (-tick.deg, tick)]),
     ) {
         let dir = bank_tick_dir(attitude.roll, bank_deg);
-        painter.line_segment(
-            [
-                center + dir * radius * SCALE_INNER,
-                center + dir * radius * (SCALE_INNER + tick.len),
-            ],
-            Stroke::new(tick.weight * k, scheme.text_secondary),
-        );
+        match tick.mark {
+            Mark::Tick { len, weight } => {
+                painter.line_segment(
+                    [
+                        center + dir * radius * SCALE_INNER,
+                        center + dir * radius * (SCALE_INNER + len),
+                    ],
+                    Stroke::new(weight * k, scheme.text_secondary),
+                );
+            }
+            Mark::Dot => {
+                painter.circle_filled(
+                    center + dir * radius * DOT_CENTER,
+                    DOT_RADIUS * k,
+                    scheme.text_secondary,
+                );
+            }
+        }
     }
 
     // Roll index: part of the airframe, so it stays directly above the aircraft
@@ -1073,35 +1112,47 @@ mod tests {
     }
 
     /// 10, 20, 30, 45, 60 is the convention, and it is not a uniform scale, so
-    /// the marks must not be drawn alike: 30° and 60° anchor the reading and
-    /// have to stand out from their neighbours.
+    /// the marks must not be drawn alike: 30° and 60° anchor the reading, and
+    /// 45°, which breaks the sequence, is a dot rather than a shorter tick.
     #[test]
-    fn the_anchor_graduations_stand_out() {
-        let tick = |deg: f64| {
-            BANK_TICKS
+    fn the_marks_show_a_scale_that_is_not_uniform() {
+        let mark = |deg: f64| {
+            &BANK_TICKS
                 .iter()
                 .find(|t| t.deg == deg)
                 .unwrap_or_else(|| panic!("no {deg}° graduation"))
+                .mark
+        };
+        let tick = |deg: f64| match mark(deg) {
+            Mark::Tick { len, weight } => (*len, *weight),
+            Mark::Dot => panic!("{deg}° is a dot, not a tick"),
         };
         for anchor in [30.0, 60.0] {
-            for minor in [10.0, 20.0, 45.0] {
+            for minor in [10.0, 20.0] {
                 assert!(
-                    tick(anchor).len > tick(minor).len * 1.5,
+                    tick(anchor).0 > tick(minor).0 * 1.5,
                     "{anchor}° is not clearly longer than {minor}°"
                 );
                 assert!(
-                    tick(anchor).weight > tick(minor).weight,
+                    tick(anchor).1 > tick(minor).1,
                     "{anchor}° is not heavier than {minor}°"
                 );
             }
         }
-        // The card's wings-level mark leads them all, and every graduation
-        // stays inside the square face rather than being clipped at a corner.
+        assert!(matches!(mark(45.0), Mark::Dot));
+
+        // The card's wings-level mark leads the ticks, the dot sits within the
+        // band they occupy, and nothing reaches past the square face.
+        let lengths = |t: &BankTick| match t.mark {
+            Mark::Tick { len, .. } => len,
+            Mark::Dot => 0.0,
+        };
         let longest = std::iter::once(&ZERO_TICK)
             .chain(BANK_TICKS.iter())
-            .map(|t| t.len)
+            .map(lengths)
             .fold(0.0, f32::max);
-        assert_eq!(longest, ZERO_TICK.len);
+        assert_eq!(longest, lengths(&ZERO_TICK));
+        assert!((SCALE_INNER..SCALE_INNER + MINOR_LEN).contains(&DOT_CENTER));
         assert!(
             SCALE_INNER + longest < 0.5 / FACE_RADIUS_FRAC,
             "the roll scale reaches past the face"
