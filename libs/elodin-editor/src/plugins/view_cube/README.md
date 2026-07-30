@@ -31,6 +31,8 @@ It replaces the legacy navigation gizmo UX.
 - **Bottom-right button**: zoom out while preserving current orientation; holding Alt (Option on
   macOS) turns it into a zoom-in button, showing `+` instead of `−`. The mode follows the held state
   of the key, so a press or release event lost to the window manager cannot latch the wrong mode.
+  Both directions share one orbit distance ratio (`VIEWPORT_ZOOM_STEP`), so a `+` click undoes a `−`
+  click exactly.
 
 ## Quick Start
 
