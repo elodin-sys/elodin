@@ -11,7 +11,7 @@ It replaces the legacy navigation gizmo UX.
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
 - **Rotation arrows**: top-left/top-right roll around the camera axis; left/right rotate around camera up; up/down rotate around camera right
-- **Viewport action buttons**: bottom-left reset and bottom-right zoom-out controls
+- **Viewport action buttons**: bottom-left reset and bottom-right zoom controls
 - **Hover highlighting**: Visual feedback with CAD-style grouped edge hover (4 edges for active front frame, 2-3 edges for hidden-face groups)
 - **Overlay rendering**: Dedicated ViewCube camera rendered in viewport corner
 - **Camera sync**: Cube mirrors the main camera orientation
@@ -28,7 +28,9 @@ It replaces the legacy navigation gizmo UX.
 - **Corners**: hover highlights only the targeted corner and click snaps to that corner view
 - **Front corner click**: no-op when the clicked corner is already aligned with the camera axis
 - **Bottom-left button**: reset viewport camera (`Transform::IDENTITY`, anchor depth `-2.0`)
-- **Bottom-right button**: zoom out while preserving current orientation
+- **Bottom-right button**: zoom out while preserving current orientation; holding Alt (Option on
+  macOS) turns it into a zoom-in button, showing `+` instead of `−`. The mode follows the held state
+  of the key, so a press or release event lost to the window manager cannot latch the wrong mode.
 
 ## Quick Start
 
