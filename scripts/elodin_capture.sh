@@ -150,6 +150,8 @@ done
   exit 2
 }
 [[ -f "$simulation" ]] || fail "simulation not found: $simulation"
+[[ "$simulation" == *.py ]] \
+  || fail "headless capture requires a Python simulation file; existing s10.toml plans control their own ports"
 [[ -x "$editor" ]] || fail "editor not found at $editor; run 'cargo build --release -p elodin' or pass --editor"
 is_positive_number "$duration" || fail "duration must be positive"
 is_positive_number "$warmup" || [[ "$warmup" == 0 ]] || fail "warmup must be non-negative"
