@@ -14,9 +14,11 @@ use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp};
 use std::f32::consts::TAU;
 
-use super::{EqlBinding, GaugePane, gauge_title};
+use super::{BARE_QUAT_UNIT_TOLERANCE, EqlBinding, GaugePane, gauge_title, text_with_halo};
 use crate::ui::{
+    SelectedObject,
     colors::get_scheme,
+    tiles::WindowState,
     widgets::{SystemStateExt, WidgetSystem},
 };
 
@@ -86,17 +88,18 @@ pub struct OrientationGaugeWidget<'w, 's> {
     current_timestamp: Res<'w, CurrentTimestamp>,
     geo_context: Res<'w, GeoContext>,
     coordinate: Res<'w, crate::Coordinate>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for OrientationGaugeWidget<'_, '_> {
-    type Args = GaugePane;
+    type Args = (GaugePane, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        pane: Self::Args,
+        (pane, target_window): Self::Args,
     ) -> Self::Output {
         let OrientationGaugeWidget {
             mut gauges,
@@ -106,6 +109,7 @@ impl WidgetSystem for OrientationGaugeWidget<'_, '_> {
             current_timestamp,
             geo_context,
             coordinate,
+            mut window_states,
         } = state.params_mut(world);
         let Ok((mut data, binding)) = gauges.get_mut(pane.entity) else {
             return;
@@ -117,6 +121,16 @@ impl WidgetSystem for OrientationGaugeWidget<'_, '_> {
         // Keep inherit (`source = None`) live against `Coordinate` changes.
         let source = data.effective_source(coordinate.0);
         let combo_id = egui::Id::new(("orientation_gauge_display", pane.entity));
+
+        // Clicking the panel selects it, since a pane in a split has no tab.
+        let panel = super::panel_select_target(ui, pane.entity);
+        if panel.clicked()
+            && let Ok(mut window_state) = window_states.get_mut(target_window)
+        {
+            window_state.ui_state.selected_object = SelectedObject::OrientationGauge {
+                gauge_id: pane.entity,
+            };
+        }
 
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(super::GAUGE_PANEL_MARGIN))
@@ -198,11 +212,6 @@ fn canonical_hemisphere(q: DQuat) -> DQuat {
     }
     q
 }
-
-/// Max deviation of a bare 4-vector's length² from 1 to still count as a
-/// quaternion. Loose enough for telemetry drift / un-renormalized integration,
-/// tight enough that arbitrary 4-vectors (e.g. fin deflections) are rejected.
-const BARE_QUAT_UNIT_TOLERANCE: f64 = 0.1;
 
 /// Extract an attitude quaternion from a component value.
 ///
@@ -630,27 +639,6 @@ fn paint_frame_sphere(
             Color32::BLACK.gamma_multiply(alpha * 0.9),
         );
     }
-}
-
-/// Draw `text` with a 1px halo so it reads over both hemisphere tones.
-fn text_with_halo(
-    painter: &egui::Painter,
-    pos: Pos2,
-    text: &str,
-    font: FontId,
-    color: Color32,
-    halo: Color32,
-) {
-    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-        painter.text(
-            pos + Vec2::new(dx, dy),
-            Align2::CENTER_CENTER,
-            text,
-            font.clone(),
-            halo,
-        );
-    }
-    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod control;
+mod demo;
 mod input;
 
 use control::ControlSender;
@@ -103,6 +104,11 @@ fn print_banner(stick_mode: StickMode) {
     println!("    {} Rudder left/right", "A/D".green());
     println!("    {} Elevator up/down (pitch)", "↑/↓".green());
     println!("    {} Aileron left/right (roll)", "←/→".green());
+    println!();
+    println!(
+        "  {} flying gentle banks until you touch a control",
+        "Idle demo:".bold()
+    );
     println!();
 }
 

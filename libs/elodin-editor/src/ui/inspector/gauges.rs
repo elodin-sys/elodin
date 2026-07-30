@@ -9,7 +9,7 @@ use crate::{
     EqlContext,
     ui::{
         colors::get_scheme,
-        gauges::{EqlBinding, GeoPositionGaugeData, OrientationGaugeData},
+        gauges::{EqlBinding, GeoPositionGaugeData, HorizonGaugeData, OrientationGaugeData},
         inspector::{eql_autocomplete, inspector_text_field},
         theme,
         widgets::{SystemStateExt, WidgetSystem},
@@ -149,29 +149,81 @@ impl WidgetSystem for InspectorOrientationGauge<'_, '_> {
                         .color(get_scheme().text_secondary),
                 );
                 ui.add_space(4.0);
-                // Body→source quaternion the gimbal treats as neutral;
-                // normalized on edit so hand-typed values stay a rotation.
-                let q = &mut gauge.reference;
-                let mut parts = [q.x, q.y, q.z, q.w];
-                let mut changed = false;
-                ui.horizontal(|ui| {
-                    for part in &mut parts {
-                        changed |= ui
-                            .add(egui::DragValue::new(part).speed(0.01).range(-1.0..=1.0))
-                            .changed();
-                    }
-                    if ui.button("Reset").clicked() {
-                        parts = [0.0, 0.0, 0.0, 1.0];
-                        changed = true;
-                    }
-                });
-                if changed {
-                    let next = DQuat::from_xyzw(parts[0], parts[1], parts[2], parts[3]);
-                    if next.length() > 1e-9 {
-                        *q = next.normalize();
-                    }
-                }
+                // Body→source quaternion the gimbal treats as neutral.
+                reference_quat_ui(ui, &mut gauge.reference);
             });
+    }
+}
+
+#[derive(SystemParam)]
+pub struct InspectorHorizonGauge<'w, 's> {
+    gauges: Query<'w, 's, (&'static mut HorizonGaugeData, &'static mut EqlBinding)>,
+    eql_context: Res<'w, EqlContext>,
+}
+
+impl WidgetSystem for InspectorHorizonGauge<'_, '_> {
+    type Args = Entity;
+    type Output = ();
+
+    fn ui_system(
+        world: &mut bevy::prelude::World,
+        state: &mut bevy::ecs::system::SystemState<Self>,
+        ui: &mut egui::Ui,
+        entity: Self::Args,
+    ) -> Self::Output {
+        let InspectorHorizonGauge {
+            mut gauges,
+            eql_context,
+        } = state.params_mut(world);
+        let Ok((mut gauge, mut binding)) = gauges.get_mut(entity) else {
+            return;
+        };
+
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(0, 8))
+            .show(ui, |ui| {
+                // No display frame: the horizon is intrinsically local, so
+                // there is nothing to re-express the attitude into.
+                eql_and_source_ui(
+                    ui,
+                    &eql_context,
+                    &mut binding,
+                    &mut gauge.source,
+                    "Pose EQL (i.e a.world_pos)",
+                );
+
+                ui.add_space(12.0);
+                ui.label(
+                    egui::RichText::new("LEVEL ATTITUDE (X Y Z W)")
+                        .color(get_scheme().text_secondary),
+                );
+                ui.add_space(4.0);
+                reference_quat_ui(ui, &mut gauge.reference);
+            });
+    }
+}
+
+/// Editor for a gauge's reference quaternion: four drag values plus a reset,
+/// renormalized on edit so hand-typed values stay a rotation.
+fn reference_quat_ui(ui: &mut egui::Ui, q: &mut DQuat) {
+    let mut parts = [q.x, q.y, q.z, q.w];
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        for part in &mut parts {
+            changed |= ui
+                .add(egui::DragValue::new(part).speed(0.01).range(-1.0..=1.0))
+                .changed();
+        }
+        if ui.button("Reset").clicked() {
+            parts = [0.0, 0.0, 0.0, 1.0];
+            changed = true;
+        }
+    });
+    if changed {
+        let next = DQuat::from_xyzw(parts[0], parts[1], parts[2], parts[3]);
+        if next.length() > 1e-9 {
+            *q = next.normalize();
+        }
     }
 }
 

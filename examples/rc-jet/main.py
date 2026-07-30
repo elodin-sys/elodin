@@ -114,18 +114,26 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         telemetry_mode #true
 
         tabs {
+            // Instruments left, camera views right, chase view between them: the
+            // shares are weights against the viewport's default 1.0, so 0.4 each
+            // side leaves the chase view a bit over half the width.
             hsplit name="Main View" {
+                vsplit share=0.4 {
+                    // With no `coordinate` node the source frame is ENU, matching this
+                    // jet's X-fwd/Y-left/Z-up body frame; NED would invert the horizon.
+                    // The face is square and the column is narrow, so the pane's
+                    // height is what sets its size. Three shares against the
+                    // graphs' one apiece makes the instrument about twice the
+                    // size it is on an even split.
+                    horizon_gauge "bdx.world_pos" name="ADI" share=3.0
+                    graph "bdx.alpha" name="Angle of Attack (rad)"
+                    graph "bdx.thrust" name="Thrust (N)"
+                }
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#false show_frustums=#true active=#true far=100000
                 vsplit share=0.4 {
-                    vsplit {
-                        graph "bdx.alpha" name="Angle of Attack (rad)"
-                        graph "bdx.thrust" name="Thrust (N)"
-                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#false
-                        hsplit {
-                            viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#false
-                            sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
-                        }
-                    }
+                    viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#false
+                    viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#false
+                    sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
                 }
             }
             vsplit name="Flight Data" {

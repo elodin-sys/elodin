@@ -1,14 +1,15 @@
-//! Geo-position and orientation gauges: two EQL-bound panels that share the
-//! same telemetry-resolution machinery ([`EqlBinding`]). The position gauge
-//! shows three converted coordinates; the orientation gauge shows an attitude
-//! gimbal — split so numbers next to a gimbal are never mistaken for the
-//! orientation itself.
+//! EQL-bound gauge panels sharing the same telemetry-resolution machinery
+//! ([`EqlBinding`]). The position gauge shows three converted coordinates; the
+//! orientation gauge shows an attitude gimbal (split so numbers next to a
+//! gimbal are never mistaken for the orientation itself); the horizon gauge
+//! shows a cockpit-view artificial horizon.
 
 pub mod geo_position;
+pub mod horizon;
 pub mod orientation;
 
 use bevy::prelude::*;
-use bevy_egui::egui;
+use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Vec2};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::ComponentValue;
@@ -19,7 +20,13 @@ use crate::object_3d::{CompiledExpr, compile_eql_expr};
 use super::PaneName;
 
 pub use geo_position::{GeoPositionGaugeData, GeoPositionGaugeWidget};
+pub use horizon::{HorizonGaugeData, HorizonGaugeWidget};
 pub use orientation::{OrientationGaugeData, OrientationGaugeWidget};
+
+/// Max deviation of a bare 4-vector's length² from 1 to still count as a
+/// quaternion. Loose enough for telemetry drift / un-renormalized integration,
+/// tight enough that arbitrary 4-vectors (e.g. fin deflections) are rejected.
+pub(crate) const BARE_QUAT_UNIT_TOLERANCE: f64 = 0.1;
 
 /// Read a numeric component buffer as `f64`, accepting both `F32` and `F64`
 /// telemetry so gauges treat single- and double-precision poses identically.
@@ -177,6 +184,21 @@ fn gauge_title(eql: &str, name: &PaneName) -> String {
 /// Uniform inner padding for both gauge panels, so sibling gauges line up.
 pub(crate) const GAUGE_PANEL_MARGIN: i8 = 6;
 
+/// Claims the whole gauge panel as a click target, so clicking it can put the
+/// gauge in the inspector.
+///
+/// A gauge pane living directly in a split gets no tab bar, and the title it
+/// draws is painted text, so without this there is nothing to click and the
+/// inspector is unreachable. Call it *before* drawing the panel's contents:
+/// widgets registered later keep their own clicks.
+pub(crate) fn panel_select_target(ui: &mut egui::Ui, gauge: Entity) -> egui::Response {
+    ui.interact(
+        ui.max_rect(),
+        ui.id().with(("gauge_panel", gauge)),
+        egui::Sense::click(),
+    )
+}
+
 /// Panel header shared by both gauges: the [`gauge_title`] in muted 10px mono,
 /// followed by a small gap before the panel body.
 pub(crate) fn gauge_header(ui: &mut egui::Ui, title: &str) {
@@ -187,6 +209,27 @@ pub(crate) fn gauge_header(ui: &mut egui::Ui, title: &str) {
             .color(crate::ui::colors::get_scheme().text_secondary),
     );
     ui.add_space(3.0);
+}
+
+/// Draw `text` with a 1px halo so it reads over both hemisphere tones.
+pub(crate) fn text_with_halo(
+    painter: &egui::Painter,
+    pos: Pos2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    halo: Color32,
+) {
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        painter.text(
+            pos + Vec2::new(dx, dy),
+            Align2::CENTER_CENTER,
+            text,
+            font.clone(),
+            halo,
+        );
+    }
+    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
 
 /// Style the in-panel display ComboBox identically in both gauges: bordered

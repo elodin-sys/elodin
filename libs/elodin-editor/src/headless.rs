@@ -304,10 +304,7 @@ fn load_headless_scene(
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
 
-    if let Some(o) = schematic.origin {
-        geo_context.origin =
-            bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude);
-    }
+    geo_context.origin = crate::ui::schematic::schematic_geo_origin(&schematic);
 
     let mut entities = Vec::new();
     for elem in &schematic.elems {
