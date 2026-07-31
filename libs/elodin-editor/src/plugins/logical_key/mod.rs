@@ -1,4 +1,4 @@
-use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::input::keyboard::{Key, KeyboardFocusLost, KeyboardInput};
 use bevy::prelude::*;
 use std::collections::HashSet;
 
@@ -36,6 +36,7 @@ impl LogicalKeyState {
 fn update_logical_key_state(
     mut key_state: ResMut<LogicalKeyState>,
     mut keyboard_events: MessageReader<KeyboardInput>,
+    mut focus_lost: MessageReader<KeyboardFocusLost>,
 ) {
     key_state.just_pressed.clear();
     key_state.just_released.clear();
@@ -48,6 +49,14 @@ fn update_logical_key_state(
         } else if key_state.pressed.remove(&event.logical_key) {
             key_state.just_released.insert(event.logical_key.clone());
         }
+    }
+
+    // Leaving the window (Alt-Tab, Cmd-Tab) never delivers the key release, which
+    // would keep modifiers latched as held for the rest of the session.
+    if !focus_lost.is_empty() {
+        focus_lost.clear();
+        let released = std::mem::take(&mut key_state.pressed);
+        key_state.just_released.extend(released);
     }
 }
 

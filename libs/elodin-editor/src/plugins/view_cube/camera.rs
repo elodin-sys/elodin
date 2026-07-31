@@ -32,8 +32,10 @@ const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
 const ARROW_CACHE_MAX_DRIFT_RADIANS: f32 = 6.0_f32.to_radians();
 const VIEWPORT_RESET_ANCHOR_DEPTH: f64 = -2.0;
-const VIEWPORT_ZOOM_OUT_MULTIPLIER: f32 = 2.2;
-const VIEWPORT_ZOOM_IN_MULTIPLIER: f32 = 1.2;
+/// Orbit distance ratio applied per zoom button click. A single factor for both
+/// directions keeps the two steps mutual inverses, so a zoom-in click undoes a
+/// zoom-out click exactly.
+const VIEWPORT_ZOOM_STEP: f32 = 2.2;
 
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
@@ -749,9 +751,9 @@ fn apply_viewport_reset(transform: &mut Transform, editor_cam: &mut EditorCam) {
 fn apply_viewport_zoom(out: bool, transform: &mut Transform, editor_cam: &mut EditorCam) {
     let current_depth = (editor_cam.last_anchor_depth.abs() as f32).max(0.25);
     let target_depth = if out {
-        (current_depth * VIEWPORT_ZOOM_OUT_MULTIPLIER).max(0.5)
+        (current_depth * VIEWPORT_ZOOM_STEP).max(0.5)
     } else {
-        (current_depth / VIEWPORT_ZOOM_IN_MULTIPLIER).max(0.5)
+        (current_depth / VIEWPORT_ZOOM_STEP).max(0.5)
     };
     let depth_delta = target_depth - current_depth;
     if depth_delta.abs() <= 1.0e-6 {
@@ -1441,7 +1443,7 @@ mod tests {
         };
 
         let initial_translation = transform.translation;
-        let expected_target_depth = 2.0 * VIEWPORT_ZOOM_OUT_MULTIPLIER;
+        let expected_target_depth = 2.0 * VIEWPORT_ZOOM_STEP;
         let expected_delta = expected_target_depth - 2.0;
         let expected_translation =
             initial_translation + (transform.rotation * Vec3::Z) * expected_delta;
@@ -1454,5 +1456,24 @@ mod tests {
             editor_cam.current_motion,
             CurrentMotion::Stationary
         ));
+    }
+
+    /// The `+` and `−` clicks have to cancel each other, otherwise zoom-in reads
+    /// as broken next to a much coarser zoom-out.
+    #[test]
+    fn viewport_zoom_in_undoes_zoom_out() {
+        let start = Transform::from_translation(Vec3::new(0.5, 1.0, -0.25))
+            .with_rotation(Quat::from_rotation_y(0.3));
+        let mut transform = start;
+        let mut editor_cam = EditorCam {
+            last_anchor_depth: -4.0,
+            ..Default::default()
+        };
+
+        apply_viewport_zoom(true, &mut transform, &mut editor_cam);
+        apply_viewport_zoom(false, &mut transform, &mut editor_cam);
+
+        assert!((transform.translation - start.translation).length() < 1.0e-5);
+        assert!((editor_cam.last_anchor_depth + 4.0).abs() < 1.0e-5);
     }
 }
