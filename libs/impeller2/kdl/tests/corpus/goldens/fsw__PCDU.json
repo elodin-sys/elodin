@@ -1,0 +1,199 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.ADC_12V",
+                      "name": "PCDUMESSAGE.ADC_12V"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.AVIONICS_V",
+                      "name": "PCDUMESSAGE.AVIONICS_V"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.RADIO_V",
+                      "name": "PCDUMESSAGE.RADIO_V"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.MOTOR_V",
+                      "name": "PCDUMESSAGE.MOTOR_V"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.ESAD",
+                      "name": "PCDUMESSAGE.ESAD"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.VBUS",
+                      "name": "PCDUMESSAGE.VBUS"
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "ComponentMonitor": {
+                            "component_name": "PCDUMESSAGE.CHARGE",
+                            "name": "PCDUMESSAGE.CHARGE"
+                          }
+                        },
+                        {
+                          "ComponentMonitor": {
+                            "component_name": "PCDUMESSAGE.MOTOR",
+                            "name": "PCDUMESSAGE.MOTOR"
+                          }
+                        },
+                        {
+                          "ComponentMonitor": {
+                            "component_name": "PCDUMESSAGE.DISCHARGE",
+                            "name": "PCDUMESSAGE.DISCHARGE"
+                          }
+                        },
+                        {
+                          "ComponentMonitor": {
+                            "component_name": "PCDUMESSAGE.VIPER_FIRED",
+                            "name": "PCDUMESSAGE.VIPER_FIRED"
+                          }
+                        }
+                      ],
+                      "shares": {
+                        "0": 0.5,
+                        "1": 0.5,
+                        "2": 0.5,
+                        "3": 0.5
+                      }
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 0.125,
+                  "1": 0.14765000343322754,
+                  "2": 0.13936500251293182,
+                  "3": 0.1356229931116104,
+                  "4": 0.12707200646400452,
+                  "5": 0.3252899944782257,
+                  "6": 0.5
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.BOARD_TEMP",
+                      "name": "PCDUMESSAGE.BOARD_TEMP"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.AVIONICS_I",
+                      "name": "PCDUMESSAGE.AVIONICS_I"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.DISCHARGE_I",
+                      "name": "PCDUMESSAGE.DISCHARGE_I"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.ESAD_I",
+                      "name": "PCDUMESSAGE.ESAD_I"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.MOTOR_I",
+                      "name": "PCDUMESSAGE.MOTOR_I"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.RADIO_I",
+                      "name": "PCDUMESSAGE.RADIO_I"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "PCDUMESSAGE.VIPER_I",
+                      "name": "PCDUMESSAGE.VIPER_I"
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5,
+                  "2": 0.6117140054702759,
+                  "3": 0.5531830191612244,
+                  "4": 0.5959410071372986,
+                  "5": 0.6173210144042969,
+                  "6": 2.6218419075012207
+                }
+              }
+            }
+          ],
+          "shares": {}
+        }
+      }
+    },
+    {
+      "Window": {
+        "path": null,
+        "screen": null,
+        "screen_rect": null,
+        "title": null
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": {
+    "mode": "dark",
+    "scheme": "default"
+  },
+  "timeline": {
+    "follow_latest": false,
+    "future_color": {
+      "a": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "played_color": {
+      "a": 1.0,
+      "b": 0.20000000298023224,
+      "g": 0.8999999761581421,
+      "r": 1.0
+    },
+    "range": null
+  }
+}

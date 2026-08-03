@@ -1,0 +1,10 @@
+tabs {
+    hsplit name="Motor Panel" {
+        vsplit share=0.4 {
+            graph "drone.motor_input"
+            graph "drone.motor_pwm"
+            graph "drone.motor_rpm"
+        }
+        graph "drone.thrust"
+    }
+}

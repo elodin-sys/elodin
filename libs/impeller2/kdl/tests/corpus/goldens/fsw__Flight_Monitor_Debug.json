@@ -1,0 +1,739 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Dynamics",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "World Info",
+                    "panels": [
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                              "name": "Viewport",
+                              "near": null,
+                              "node_id": 0,
+                              "pos": "(0,0,0,0, 0.5,-5,1) + MFNAVELODINENUMESSAGE.WORLD_POS",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": true,
+                              "up": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])",
+                              "name": "Viewport",
+                              "near": null,
+                              "node_id": 0,
+                              "pos": "(0,0,0,0, 1,-10,4) + (0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": true,
+                              "up": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "ComponentMonitor": {
+                              "component_name": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                              "name": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "ComponentMonitor": {
+                              "component_name": "MFNAVELODINENUMESSAGE.VEL_ENU",
+                              "name": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "ComponentMonitor": {
+                              "component_name": "MFNAVELODINENUMESSAGE.WORLD_ACCEL",
+                              "name": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "ComponentMonitor": {
+                              "component_name": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG",
+                              "name": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFNAVELODINENUMESSAGE.TARG_POS_ENU",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.5,
+                      "1": 0.6391680240631104,
+                      "2": 0.47632700204849243,
+                      "3": 0.48206600546836853,
+                      "4": 0.4390240013599396,
+                      "5": 0.4131999909877777,
+                      "6": 0.5502150058746338
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Debug Info",
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "State Info",
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFNAVELODINENUMESSAGE.TIME_MONOTONIC",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "GUIDANCEMESSAGE.GUIDANCE_MODE",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "TARGETMESSAGE.TARGET_MODE",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.6671119928359985,
+                            "1": 0.7658380270004272,
+                            "2": 0.683230996131897,
+                            "3": 1.024312973022461
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Angles",
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFPIMUMESSAGE.GYRO",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFPIMUMESSAGE.ACCEL",
+                                    "name": null
+                                  }
+                                },
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.0,
+                            "1": 1.0,
+                            "2": 1.0
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "TRACKERMESSAGE.LOS_NED",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "GUIDANCEMESSAGE.ACC_CMD_NED",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.ACC_CMD_BODY",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.33180999755859375,
+                            "1": 0.34471601247787476,
+                            "2": 0.3234739899635315
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "TRACKERMESSAGE.LOS_RATE_NED",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.ACC_MEAS_BODY",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.16778700053691864,
+                            "1": 0.32186099886894226
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "TRACKERMESSAGE.RANGE_TO_GO",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.DYNAMIC_COMMANDED",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.6395840048789978,
+                            "1": 0.6680489778518677
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.PITCH_PID",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.YAW_PID",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.014780044555664,
+                            "1": 0.9852179884910583
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.ROLL_PID",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+                                    "name": null
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.0,
+                      "1": 1.0,
+                      "2": 1.0,
+                      "3": 1.0,
+                      "4": 1.0,
+                      "5": 1.0,
+                      "6": 1.0
+                    }
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.6613049507141113,
+                "1": 2.838696002960205
+              }
+            }
+          },
+          {
+            "Viewport": {
+              "active": false,
+              "aspect": null,
+              "bloom": null,
+              "create_frustum": false,
+              "effects": true,
+              "ev100": null,
+              "far": null,
+              "fov": 45.0,
+              "frame": null,
+              "frustums_color": {
+                "a": 1.0,
+                "b": 0.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "frustums_thickness": 0.006000000052154064,
+              "hdr": false,
+              "local_arrows": [],
+              "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",
+              "name": "Full_View",
+              "near": null,
+              "node_id": 0,
+              "pos": "(0,0,0,0, 0.5,-5,1) + MFNAVELODINENUMESSAGE.WORLD_POS",
+              "projection_color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "show_arrows": true,
+              "show_frustums": false,
+              "show_grid": true,
+              "show_view_cube": true,
+              "up": null
+            }
+          },
+          "Inspector"
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, MFNAVELODINENUMESSAGE.WORLD_POS[4],MFNAVELODINENUMESSAGE.WORLD_POS[5],MFNAVELODINENUMESSAGE.WORLD_POS[6])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/compass.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/fixed_wing.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/missile_FT10_20251205_2.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "eql": "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "eql": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.3137255012989044,
+          "r": 0.7058823704719543
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Nav Velocity (ENU)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 0.1,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Rocket Commanded Acceleration",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Rocket Measured Acceleration",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Target Visibility",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])",
+        "scale": 50.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0,0,1)"
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

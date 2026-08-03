@@ -1,0 +1,49 @@
+vsplit {
+    hsplit {
+        tabs {
+            component_monitor component_name=TRACKERMESSAGE.TIME_MONOTONIC
+        }
+        tabs {
+            component_monitor component_name=TRACKERMESSAGE.TARGET_MODE
+        }
+        tabs {
+            component_monitor component_name=TRACKERMESSAGE.RANGE_TO_GO
+        }
+    }
+    hsplit {
+        tabs share=0.6759572625160217 {
+            component_monitor component_name=TRACKERMESSAGE.LOS_NED
+        }
+        tabs share=1.324042797088623 {
+            graph "TRACKERMESSAGE.LOS_NED[0],TRACKERMESSAGE.LOS_NED[1],TRACKERMESSAGE.LOS_NED[2]" name=Graph {
+                color 107 39 23
+                color 36 60 102
+                color 72 109 72
+            }
+        }
+    }
+    hsplit {
+        tabs share=0.6806460022926331 {
+            component_monitor component_name=TRACKERMESSAGE.LOS_RATE_NED
+        }
+        tabs share=1.3193540573120117 {
+            graph "TRACKERMESSAGE.LOS_RATE_NED[0],TRACKERMESSAGE.LOS_RATE_NED[1],TRACKERMESSAGE.LOS_RATE_NED[2]" name=Graph {
+                color 126 191 127
+                color 90 130 144
+                color 100 72 168
+            }
+        }
+    }
+    hsplit {
+        tabs share=0.6790831089019775 {
+            component_monitor component_name=NAVNED.VEL_NED
+        }
+        tabs share=1.3209168910980225 {
+            graph "NAVNED.VEL_NED[0],NAVNED.VEL_NED[1],NAVNED.VEL_NED[2]" name=Graph {
+                color 156 88 58
+                color 182 136 48
+                color 130 54 33
+            }
+        }
+    }
+}

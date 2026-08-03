@@ -1,0 +1,51 @@
+vsplit {
+    hsplit {
+        tabs {
+            component_monitor component_name=NAVEKFSTATE.POS_ECEF
+        }
+        tabs {
+            component_monitor component_name=NAVEKFSTATE.STD_POS_ECEF
+        }
+        tabs {
+            graph "NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]" name=Graph {
+                color 36 60 102
+                color 72 109 72
+                color 55 72 90
+            }
+        }
+    }
+    hsplit {
+        tabs {
+            component_monitor component_name=NAVEKFSTATE.VEL_ECEF
+        }
+        tabs {
+            component_monitor component_name=NAVEKFSTATE.STD_VEL_ECEF
+        }
+        tabs {
+            graph "NAVEKFSTATE.VEL_ECEF[0],NAVEKFSTATE.VEL_ECEF[1],NAVEKFSTATE.VEL_ECEF[2]" name=Graph {
+                color 114 87 179
+                color 198 107 66
+                color 214 164 54
+            }
+        }
+    }
+    hsplit {
+        tabs share=0.5 {
+            component_monitor component_name=NAVEKFSTATE.TIME_MONOTONIC
+        }
+        tabs share=0.5 {
+            component_monitor component_name=STATEMACHINEOUTPUT.MISSILE_MODE
+        }
+        tabs {
+            component_monitor component_name=NAVEKFSTATE.QUAT_NED2IMU
+        }
+        tabs {
+            graph "NAVEKFSTATE.QUAT_NED2IMU[0],NAVEKFSTATE.QUAT_NED2IMU[1],NAVEKFSTATE.QUAT_NED2IMU[2],NAVEKFSTATE.QUAT_NED2IMU[3]" name=Graph {
+                color 87 53 30
+                color 44 17 10
+                color 16 22 46
+                color 34 60 34
+            }
+        }
+    }
+}

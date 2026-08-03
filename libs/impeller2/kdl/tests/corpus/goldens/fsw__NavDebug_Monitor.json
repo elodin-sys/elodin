@@ -1,0 +1,349 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVDEBUG.GYRO_BIAS",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVDEBUG.STD_GYRO",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.13333334028720856,
+                              "g": 0.23529411852359772,
+                              "r": 0.13333334028720856
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.1725490242242813,
+                              "g": 0.125490203499794,
+                              "r": 0.08627451211214066
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.6470588445663452,
+                              "g": 0.6078431606292725,
+                              "r": 0.4156862795352936
+                            }
+                          ],
+                          "eql": "NAVDEBUG.GYRO_BIAS[0],NAVDEBUG.GYRO_BIAS[1],NAVDEBUG.GYRO_BIAS[2]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.499673992395401,
+                  "1": 0.5003259778022766,
+                  "2": 0.5
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVDEBUG.ACCEL_BIAS",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVDEBUG.MAG_BIAS",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "NAVDEBUG.TIME_MONOTONIC",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        }
+                      ],
+                      "shares": {
+                        "0": 0.9083510041236877,
+                        "1": 1.043969988822937,
+                        "2": 1.0476800203323364
+                      }
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVDEBUG.STD_ACCEL",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVDEBUG.STD_MAG",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "NAVDEBUG.BARO_ALTITUDE_BIAS",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "NAVDEBUG.STD_BARO_ALTITUDE_BIAS",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        }
+                      ],
+                      "shares": {
+                        "0": 0.5998299717903137,
+                        "1": 0.7000849843025208,
+                        "2": 0.7000849843025208
+                      }
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.4156862795352936,
+                                    "g": 0.6117647290229797,
+                                    "r": 0.4156862795352936
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.47843137383461,
+                                    "g": 0.4156862795352936,
+                                    "r": 0.3137255012989044
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.6470588445663452,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.3607843220233917
+                                  }
+                                ],
+                                "eql": "NAVDEBUG.ACCEL_BIAS[0],NAVDEBUG.ACCEL_BIAS[1],NAVDEBUG.ACCEL_BIAS[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Graph",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.6470588445663452,
+                                    "g": 0.6078431606292725,
+                                    "r": 0.4156862795352936
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7019608020782471,
+                                    "g": 0.34117648005485535,
+                                    "r": 0.4470588266849518
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.25882354378700256,
+                                    "g": 0.41960784792900085,
+                                    "r": 0.7764706015586853
+                                  }
+                                ],
+                                "eql": "NAVDEBUG.MAG_BIAS[0],NAVDEBUG.MAG_BIAS[1],NAVDEBUG.MAG_BIAS[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Graph",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.4000000059604645,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.1411764770746231
+                                  }
+                                ],
+                                "eql": "NAVDEBUG.BARO_ALTITUDE_BIAS",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Graph",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {
+                        "0": 0.6272979974746704,
+                        "1": 0.6863510012626648,
+                        "2": 0.6863510012626648
+                      }
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 1.0,
+                  "1": 0.9959610104560852,
+                  "2": 1.0040390491485596
+                }
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.4310919940471649,
+            "1": 1.5689059495925903
+          }
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

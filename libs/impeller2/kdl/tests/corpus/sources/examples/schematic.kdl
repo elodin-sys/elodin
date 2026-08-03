@@ -1,0 +1,39 @@
+// Schematic for the elodin.db showcase (examples/db-client/main.py).
+// All components below are written by a plain-Python elodin.db process.
+coordinate frame=ENU
+theme mode=dark scheme=default
+timeline
+
+tabs {
+    hsplit name="Flight" {
+        viewport name="Chase" pos="drone.world_pos + (0,0,0,0, 0.4, 0.4, 0.25)" look_at="drone.world_pos" show_grid=#true active=#true share=0.55
+        vsplit share=0.45 {
+            graph "drone.imu.accel" name="Accelerometer (m/s^2)"
+            graph "drone.imu.gyro" name="Gyroscope (rad/s)"
+            graph "drone.nav.speed" name="Ground speed, stream-derived (m/s)"
+        }
+    }
+    vsplit name="Status" {
+        graph "drone.battery.voltage" name="Battery (V)"
+        graph "drone.motor.rpm" name="Motor RPM"
+        graph "drone.status.armed" name="Armed"
+        graph "drone.status.mode" name="Flight mode (1=hover, 2=cruise)"
+    }
+    vsplit name="Pose" {
+        graph "drone.world_pos" name="World pos (quaternion + xyz)"
+        graph "drone.nav.speed" name="Ground speed (m/s)"
+    }
+}
+
+object_3d drone.world_pos {
+    glb path="crazyflie.glb" scale=0.7
+    animate joint="Root.Propeller_0" rotation_vector="(0, drone.propeller_angle[0], 0)"
+    animate joint="Root.Propeller_1" rotation_vector="(0, drone.propeller_angle[1], 0)"
+    animate joint="Root.Propeller_2" rotation_vector="(0, drone.propeller_angle[2], 0)"
+    animate joint="Root.Propeller_3" rotation_vector="(0, drone.propeller_angle[3], 0)"
+}
+
+// Trajectory trail (last 3 of the 7 world_pos values are XYZ).
+line_3d drone.world_pos line_width=2.0 {
+    color yalk
+}

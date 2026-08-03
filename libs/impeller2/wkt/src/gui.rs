@@ -43,7 +43,7 @@ pub fn default_viewport_frustums_thickness() -> f32 {
     0.006
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
 #[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
 pub struct Schematic {
@@ -278,7 +278,7 @@ impl bevy::asset::VisitAssetDependencies for Schematic {
     fn visit_dependencies(&self, _visit: &mut impl FnMut(bevy::asset::UntypedAssetId)) {}
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum SchematicElem {
     Panel(Panel),
     Object3d(Object3D),
@@ -300,7 +300,7 @@ pub struct WindowRect {
     pub height: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct WindowSchematic {
     pub title: Option<String>,
     pub path: Option<String>,
@@ -309,7 +309,7 @@ pub struct WindowSchematic {
     pub screen_rect: Option<WindowRect>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ThemeConfig {
     pub mode: Option<String>,
     pub scheme: Option<String>,
@@ -347,7 +347,7 @@ impl Default for TimelineConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Panel {
     Viewport(Viewport),
@@ -434,7 +434,7 @@ impl Panel {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Split {
     pub panels: Vec<Panel>,
@@ -444,7 +444,7 @@ pub struct Split {
     pub name: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport {
     pub fov: f32,
@@ -560,7 +560,7 @@ impl Asset for Panel {
     const NAME: &'static str = "panel";
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Graph {
     pub eql: String,
@@ -585,7 +585,7 @@ pub enum GraphType {
     Bar,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Line3d {
     pub eql: String,
@@ -607,7 +607,7 @@ impl Asset for Line3d {
     const NAME: &'static str = "line_3d";
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct VectorArrow3d {
     pub vector: String,
@@ -633,7 +633,7 @@ pub struct VectorArrow3d {
     pub node_id: NodeId,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// The position of a label.
 pub enum LabelPosition {
     /// No label position.
@@ -782,7 +782,7 @@ impl Asset for VectorArrow3d {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Camera;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct BodyAxes {
     pub entity_id: EntityId,
@@ -793,7 +793,7 @@ impl Asset for BodyAxes {
     const NAME: &'static str = "body_axes";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Mesh {
     Sphere { radius: f32 },
@@ -816,7 +816,7 @@ impl Mesh {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Glb(pub String);
 
@@ -828,7 +828,7 @@ impl Asset for Glb {
     const NAME: &'static str = "glb";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Material {
     pub base_color: Color,
@@ -906,14 +906,14 @@ fn default_glb_animations() -> Vec<JointAnimation> {
     Vec::new()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct JointAnimation {
     pub joint_name: String,
     pub eql_expr: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
     Glb {
@@ -999,7 +999,7 @@ impl fmt::Display for Object3DMesh {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum Object3DIconSource {
     Path(String),
     Builtin(String),
@@ -1018,7 +1018,7 @@ pub fn default_icon_size() -> f32 {
     32.0
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct VisRange {
     #[serde(default)]
     pub min: f32,
@@ -1042,7 +1042,7 @@ impl Default for VisRange {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Object3DIcon {
     pub source: Object3DIconSource,
     #[serde(default = "default_icon_color")]
@@ -1206,7 +1206,7 @@ pub fn builtin_icon_char(name: &str) -> Option<char> {
     char::from_u32(cp)
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Object3D {
     pub eql: String,
@@ -1230,7 +1230,7 @@ impl Asset for Object3D {
     const NAME: &'static str = "object3d";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct WorldMesh {
     /// The terrain region identifier (e.g. "death_valley" or "globe").
@@ -1260,7 +1260,7 @@ impl Asset for WorldMesh {
     const NAME: &'static str = "world_mesh";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMonitor {
     /// The component name that we are monitoring.
@@ -1274,7 +1274,7 @@ pub struct ComponentMonitor {
 /// A gauge for a geographic position: reads an EQL-bound position expressed
 /// in `source` and displays it, converted, in `display` (a spatial frame or
 /// LLA) as three labelled values.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct GeoPositionGauge {
     /// EQL expression yielding a position (a 3-vector), or a pose whose tail 3
@@ -1297,7 +1297,7 @@ pub struct GeoPositionGauge {
 /// A gauge for an attitude: reads an EQL-bound quaternion (a bare `[x,y,z,w]`
 /// 4-vector, or the head of a `world_pos`-style 7-vector) expressed relative
 /// to `source` and renders it as a 3D gimbal against the `display` triad.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct OrientationGauge {
     /// EQL expression yielding a quaternion (4-vector), or a pose whose head 4
@@ -1331,7 +1331,7 @@ pub struct OrientationGauge {
 /// so the frame choice only matters as the `source` of the incoming attitude.
 /// In ECEF the local vertical is derived from the pose's own position, so the
 /// expression must yield a full pose there.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct HorizonGauge {
     /// EQL expression yielding a pose (`world_pos`-style 7-vector), or a bare
@@ -1400,7 +1400,7 @@ impl DisplayFrame {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct VideoStream {
     /// Message name containing H.264 video frames
     pub msg_name: String,
@@ -1408,7 +1408,7 @@ pub struct VideoStream {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SensorView {
     /// Message name for the sensor camera frame data (e.g. "drone.scene_cam")
     pub msg_name: String,
@@ -1416,7 +1416,7 @@ pub struct SensorView {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct LogStream {
     /// Message name for the log entry stream (e.g. "fsw.log")
     pub msg_name: String,
@@ -1470,7 +1470,7 @@ pub struct SensorCameraConfig {
     pub fps: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct QueryTable {
     pub name: Option<String>,
@@ -1478,14 +1478,14 @@ pub struct QueryTable {
     pub query_type: QueryType,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ActionPane {
     pub name: String,
     pub lua: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct QueryPlot {
     pub name: String,

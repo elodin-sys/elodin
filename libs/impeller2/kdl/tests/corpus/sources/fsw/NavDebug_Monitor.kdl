@@ -1,0 +1,72 @@
+vsplit {
+    hsplit share=0.43109235167503357 {
+        tabs share=0.49967432022094727 {
+            component_monitor component_name=NAVDEBUG.GYRO_BIAS
+        }
+        tabs share=0.5003257393836975 {
+            component_monitor component_name=NAVDEBUG.STD_GYRO
+        }
+        tabs share=0.5 {
+            graph "NAVDEBUG.GYRO_BIAS[0],NAVDEBUG.GYRO_BIAS[1],NAVDEBUG.GYRO_BIAS[2]" name=Graph {
+                color 34 60 34
+                color 22 32 44
+                color 106 155 165
+            }
+        }
+    }
+    hsplit share=1.5689057111740112 {
+        vsplit share=1.0 {
+            tabs share=0.9083510041236877 {
+                component_monitor component_name=NAVDEBUG.ACCEL_BIAS
+            }
+            tabs share=1.0439695119857788 {
+                component_monitor component_name=NAVDEBUG.MAG_BIAS
+            }
+            hsplit share=1.0476796627044678 {
+                tabs {
+                    component_monitor component_name=NAVDEBUG.TIME_MONOTONIC
+                }
+                tabs {
+                    component_monitor component_name=STATEMACHINEOUTPUT.MISSILE_MODE
+                }
+            }
+        }
+        vsplit share=0.9959614872932434 {
+            tabs share=0.5998302102088928 {
+                component_monitor component_name=NAVDEBUG.STD_ACCEL
+            }
+            tabs share=0.7000848054885864 {
+                component_monitor component_name=NAVDEBUG.STD_MAG
+            }
+            hsplit share=0.7000848054885864 {
+                tabs {
+                    component_monitor component_name=NAVDEBUG.BARO_ALTITUDE_BIAS
+                }
+                tabs {
+                    component_monitor component_name=NAVDEBUG.STD_BARO_ALTITUDE_BIAS
+                }
+            }
+        }
+        vsplit share=1.004038691520691 {
+            tabs share=0.6272977590560913 {
+                graph "NAVDEBUG.ACCEL_BIAS[0],NAVDEBUG.ACCEL_BIAS[1],NAVDEBUG.ACCEL_BIAS[2]" name=Graph {
+                    color 106 156 106
+                    color 80 106 122
+                    color 92 60 165
+                }
+            }
+            tabs share=0.6863510012626648 {
+                graph "NAVDEBUG.MAG_BIAS[0],NAVDEBUG.MAG_BIAS[1],NAVDEBUG.MAG_BIAS[2]" name=Graph {
+                    color 106 155 165
+                    color 114 87 179
+                    color 198 107 66
+                }
+            }
+            tabs share=0.6863510012626648 {
+                graph "NAVDEBUG.BARO_ALTITUDE_BIAS" name=Graph {
+                    color 36 60 102
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,1356 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Dynamics",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "World Info",
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "rocket.world_pos",
+                          "name": "Viewport",
+                          "near": null,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 0.5,-5,1) + rocket.world_pos",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": true,
+                          "show_view_cube": true,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "ComponentMonitor": {
+                              "component_name": "rocket.world_pos",
+                              "name": "rocket.world_pos"
+                            }
+                          },
+                          {
+                            "ComponentMonitor": {
+                              "component_name": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                              "name": "MFNAVELODINENUMESSAGE.WORLD_POS"
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                              "name": "GT_vs_NAV",
+                              "near": null,
+                              "node_id": 0,
+                              "pos": "(0,0,0,0, 0.5,-5,1) + MFNAVELODINENUMESSAGE.WORLD_POS",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": true,
+                              "up": null
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "target.world_pos",
+                              "name": "Viewport",
+                              "near": null,
+                              "node_id": 0,
+                              "pos": "(0,0,0,0, 1,-10,4) + target.world_pos",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": true,
+                              "up": null
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "rocket.world_vel",
+                          "name": "rocket.world_vel"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "rocket.world_accel",
+                          "name": "rocket.world_accel"
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.target_pos",
+                                "name": "rocket.target_pos"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.POS_ECEF",
+                                "name": "TARGETMESSAGE.POS_ECEF"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.018604040145874,
+                            "1": 0.9813939929008484
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.target_vel",
+                                "name": "rocket.target_vel"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.VEL_ECEF",
+                                "name": "TARGETMESSAGE.VEL_ECEF"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.9967300295829773,
+                            "1": 1.0032700300216675
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "rocket.fins_actual",
+                                    "name": "rocket.fins_actual"
+                                  }
+                                },
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "rocket.fins_actual_sim",
+                                    "name": "rocket.fins_actual_sim"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "rocket.dynamic_commanded",
+                                    "name": "rocket.dynamic_commanded"
+                                  }
+                                },
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "rocket.dynamic_commanded_sim",
+                                    "name": "rocket.dynamic_commanded_sim"
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.1424850225448608,
+                            "1": 0.8575170040130615
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.5,
+                      "1": 0.46260300278663635,
+                      "2": 0.47498801350593567,
+                      "3": 0.46624499559402466,
+                      "4": 0.4720740020275116,
+                      "5": 0.4749870002269745,
+                      "6": 0.6491010189056396
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                          "name": "STATEMACHINEOUTPUT.MISSILE_MODE"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFPIMUMESSAGE.ACCEL",
+                          "name": "MFPIMUMESSAGE.ACCEL"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVNED.YPR_NED2IMU",
+                          "name": "NAVNED.YPR_NED2IMU"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVNED.STD_YPR_NED2IMU",
+                          "name": "NAVNED.STD_YPR_NED2IMU"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "TRACKERMESSAGE.LOS_NED",
+                          "name": "TRACKERMESSAGE.LOS_NED"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GUIDANCEMESSAGE.ACC_CMD_NED",
+                          "name": "GUIDANCEMESSAGE.ACC_CMD_NED"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.ACC_CMD_BODY",
+                          "name": "CONTROLMESSAGE.ACC_CMD_BODY"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.YAW_PID",
+                          "name": "CONTROLMESSAGE.YAW_PID"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.YAW_FIN_CMD_DEG",
+                          "name": "CONTROLMESSAGE.YAW_FIN_CMD_DEG"
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 0.02294600009918213,
+                      "1": 0.023020999506115913,
+                      "2": 0.024515999481081963,
+                      "3": 0.022572999820113182,
+                      "4": 0.024515999481081963,
+                      "5": 0.02720700018107891,
+                      "6": 0.023158999159932137,
+                      "7": 0.03347799926996231,
+                      "8": 0.032868001610040665
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GUIDANCEMESSAGE.GUIDANCE_MODE",
+                          "name": "GUIDANCEMESSAGE.GUIDANCE_MODE"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFPIMUMESSAGE.GYRO",
+                          "name": "MFPIMUMESSAGE.GYRO"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVNED.POS_NED",
+                          "name": "NAVNED.POS_NED"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVNED.STD_POS_NED",
+                          "name": "NAVNED.STD_POS_NED"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "TRACKERMESSAGE.LOS_RATE_NED",
+                          "name": "TRACKERMESSAGE.LOS_RATE_NED"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                          "name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.ACC_MEAS_BODY",
+                          "name": "CONTROLMESSAGE.ACC_MEAS_BODY"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.PITCH_PID",
+                          "name": "CONTROLMESSAGE.PITCH_PID"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.PITCH_FIN_CMD_DEG",
+                          "name": "CONTROLMESSAGE.PITCH_FIN_CMD_DEG"
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 0.05338200181722641,
+                      "1": 0.05495699867606163,
+                      "2": 0.054607000201940536,
+                      "3": 0.053206998854875565,
+                      "4": 0.058107998222112656,
+                      "5": 0.06405799835920334,
+                      "6": 0.05564099922776222,
+                      "7": 0.07890799641609192,
+                      "8": 0.0757410004734993
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.TARGET_MODE",
+                                "name": "TARGETMESSAGE.TARGET_MODE"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSPOSMESSAGE1.SEQUENCE_TIME",
+                                "name": "GPSPOSMESSAGE1.SEQUENCE_TIME"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSVELMESSAGE1.SEQUENCE_TIME",
+                                "name": "GPSVELMESSAGE1.SEQUENCE_TIME"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.8378869891166687,
+                            "1": 0.5804489850997925,
+                            "2": 0.5816630125045776
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFPIMUMESSAGE.SEQUENCE_TIME",
+                                "name": "MFPIMUMESSAGE.SEQUENCE_TIME"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSPOSMESSAGE1.HACC",
+                                "name": "GPSPOSMESSAGE1.HACC"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSPOSMESSAGE1.VACC",
+                                "name": "GPSPOSMESSAGE1.VACC"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSVELMESSAGE1.SACC",
+                                "name": "GPSVELMESSAGE1.SACC"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.532522976398468,
+                            "1": 0.4875139892101288,
+                            "2": 0.489982008934021,
+                            "3": 0.489982008934021
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVNED.VEL_NED",
+                                "name": "NAVNED.VEL_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVNED.SEQUENCE_TIME",
+                                "name": "NAVNED.SEQUENCE_TIME"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.1364370584487915,
+                            "1": 0.8635630011558533
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVNED.STD_VEL_NED",
+                                "name": "NAVNED.STD_VEL_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "NAVEKFSTATE.SEQUENCE_TIME",
+                                "name": "NAVEKFSTATE.SEQUENCE_TIME"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.1231050491333008,
+                            "1": 0.876895010471344
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.RANGE_TO_GO",
+                                "name": "TRACKERMESSAGE.RANGE_TO_GO"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.SEQUENCE_TIME",
+                                "name": "TRACKERMESSAGE.SEQUENCE_TIME"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.71806401014328,
+                            "1": 0.5496950149536133
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.SEQUENCE_TIME",
+                                "name": "GUIDANCEMESSAGE.SEQUENCE_TIME"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.SEQUENCE_TIME",
+                                "name": "GUIDANCEMESSAGE.SEQUENCE_TIME"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.1384810209274292,
+                            "1": 0.8615189790725708
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "CONTROLMESSAGE.TIME_MONOTONIC",
+                                      "name": "CONTROLMESSAGE.TIME_MONOTONIC"
+                                    }
+                                  },
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "CONTROLMESSAGE.ROLL_PID",
+                                      "name": "CONTROLMESSAGE.ROLL_PID"
+                                    }
+                                  },
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "CONTROLMESSAGE.ROLL_FIN_CMD_DEG",
+                                      "name": "CONTROLMESSAGE.ROLL_FIN_CMD_DEG"
+                                    }
+                                  }
+                                ],
+                                "shares": {
+                                  "0": 0.1778849959373474,
+                                  "1": 0.2606169879436493,
+                                  "2": 0.2507590055465698
+                                }
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "CONTROLMESSAGE.SEQUENCE_TIME",
+                                      "name": "CONTROLMESSAGE.SEQUENCE_TIME"
+                                    }
+                                  },
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "CONTROLMESSAGE.MOTOR_OUTPUT",
+                                      "name": "CONTROLMESSAGE.MOTOR_OUTPUT"
+                                    }
+                                  }
+                                ],
+                                "shares": {
+                                  "0": 0.8944929838180542,
+                                  "1": 1.1055070161819458
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.1486910581588745,
+                            "1": 0.8513079881668091
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 0.04645400121808052,
+                      "1": 0.04815100133419037,
+                      "2": 0.04629899933934212,
+                      "3": 0.05031200125813484,
+                      "4": 0.05031200125813484,
+                      "5": 0.05864600092172623,
+                      "6": 0.18388499319553375
+                    }
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.1470750570297241,
+                "1": 0.4934220016002655,
+                "2": 0.4863109886646271,
+                "3": 0.8842509984970093
+              }
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Full_View",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Target_Compare",
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "target.world_pos",
+                          "name": "Target_Truth_View",
+                          "near": null,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 1,-10,4) + target.world_pos",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": true,
+                          "show_view_cube": true,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])",
+                              "name": "Target_RadarKF_View",
+                              "near": null,
+                              "node_id": 0,
+                              "pos": "(0,0,0,0, 1,-10,4) + (0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": true,
+                              "up": null
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(0,0,0,1,rocket.radar_missile_state_kalman[0],rocket.radar_missile_state_kalman[1],rocket.radar_missile_state_kalman[2])",
+                              "name": "Missile_RadarKF_View",
+                              "near": null,
+                              "node_id": 0,
+                              "pos": "(0,0,0,0, 1,-10,4) + (0,0,0,1,rocket.radar_missile_state_kalman[0],rocket.radar_missile_state_kalman[1],rocket.radar_missile_state_kalman[2])",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": true,
+                              "up": null
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "Viewport": {
+                    "active": false,
+                    "aspect": null,
+                    "bloom": null,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": null,
+                    "fov": 45.0,
+                    "frame": null,
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                    "name": "Main_View",
+                    "near": null,
+                    "node_id": 0,
+                    "pos": "(0,0,0,0, 0.5,-5,1) + MFNAVELODINENUMESSAGE.WORLD_POS",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": false,
+                    "show_grid": true,
+                    "show_view_cube": true,
+                    "up": null
+                  }
+                }
+              ],
+              "shares": {
+                "0": 0.30000001192092896,
+                "1": 0.699999988079071
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, MFNAVELODINENUMESSAGE.WORLD_POS[4],MFNAVELODINENUMESSAGE.WORLD_POS[5],MFNAVELODINENUMESSAGE.WORLD_POS[6])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/compass.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "rocket.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/missile_FT10_20251205_2.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)",
+                "joint_name": "Root.Fin_0"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[1], 0)",
+                "joint_name": "Root.Fin_1"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[2], 0)",
+                "joint_name": "Root.Fin_2"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[3], 0)",
+                "joint_name": "Root.Fin_3"
+              }
+            ],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/articulated-missile.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, MFNAVELODINENUMESSAGE.WORLD_POS[4],MFNAVELODINENUMESSAGE.WORLD_POS[5],MFNAVELODINENUMESSAGE.WORLD_POS[6])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Ellipsoid": {
+            "color": {
+              "a": 0.3921568691730499,
+              "b": 0.3921568691730499,
+              "g": 0.7843137383460999,
+              "r": 1.0
+            },
+            "error_confidence_interval": 70.0,
+            "error_covariance": null,
+            "error_covariance_cholesky": "(NAVCHOLCOVMESSAGE.CHOLPOS[0], NAVCHOLCOVMESSAGE.CHOLPOS[1], NAVCHOLCOVMESSAGE.CHOLPOS[2], NAVCHOLCOVMESSAGE.CHOLPOS[3], NAVCHOLCOVMESSAGE.CHOLPOS[4], NAVCHOLCOVMESSAGE.CHOLPOS[5])",
+            "grid_color": {
+              "a": 1.0,
+              "b": 1.0,
+              "g": 1.0,
+              "r": 1.0
+            },
+            "scale": "(1, 1, 1)",
+            "show_grid": true
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "target.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/shahed.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/shahed.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(rocket.world_pos[0],rocket.world_pos[1],rocket.world_pos[2],rocket.world_pos[3],rocket.radar_missile_state_kalman[0],rocket.radar_missile_state_kalman[1],rocket.radar_missile_state_kalman[2])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/missile_FT10_20251205_2.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "eql": "rocket.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "eql": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "eql": "target.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.21176470816135406,
+          "g": 0.6431372761726379,
+          "r": 0.8392156958580017
+        },
+        "eql": "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.6470588445663452,
+          "r": 1.0
+        },
+        "eql": "(0,0,0,1,rocket.radar_missile_state_kalman[0],rocket.radar_missile_state_kalman[1],rocket.radar_missile_state_kalman[2])",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.3137255012989044,
+          "r": 0.7058823704719543
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Truth Velocity (ENU)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "rocket.world_pos",
+        "scale": 0.1,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(rocket.world_vel[3], rocket.world_vel[4], rocket.world_vel[5])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.3137255012989044,
+          "r": 0.7058823704719543
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Nav Velocity (ENU)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 0.1,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.6470588445663452,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Missile Radar KF",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "(rocket.world_pos[0],rocket.world_pos[1],rocket.world_pos[2],rocket.world_pos[3],rocket.radar_missile_state_kalman[0],rocket.radar_missile_state_kalman[1],rocket.radar_missile_state_kalman[2])",
+        "scale": 2.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(1, 0, 0)"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Rocket Commanded Acceleration",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Rocket Measured Acceleration",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 0.3921568691730499,
+          "g": 0.3921568691730499,
+          "r": 0.3921568691730499
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Target SIM LOS",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "rocket.world_pos",
+        "scale": 0.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(target.world_pos[4], target.world_pos[5], target.world_pos[6]) - (rocket.world_pos[4],rocket.world_pos[5],rocket.world_pos[6])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 1.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Target Controls LOS",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "rocket.world_pos",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(rocket.sitl_los_enu[0], rocket.sitl_los_enu[1], rocket.sitl_los_enu[2])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Target Visibility",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "target.world_pos",
+        "scale": 50.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0,0,1)"
+      }
+    },
+    {
+      "Window": {
+        "path": null,
+        "screen": null,
+        "screen_rect": null,
+        "title": null
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": {
+    "mode": "dark",
+    "scheme": "default"
+  },
+  "timeline": null
+}

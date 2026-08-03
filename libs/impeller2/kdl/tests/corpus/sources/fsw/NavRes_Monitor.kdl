@@ -1,0 +1,28 @@
+vsplit {
+    hsplit {
+        tabs { component_monitor component_name=NAVRESIDUALGPSPOS.CHI_SQUARE }
+        tabs { component_monitor component_name=NAVRESIDUALGPSPOS.RESIDUAL }
+        tabs { component_monitor component_name=NAVRESIDUALGPSPOS.TIME_MONOTONIC }
+    }
+    hsplit {
+        tabs { component_monitor component_name=NAVRESIDUALGPSVEL.CHI_SQUARE }
+        tabs { component_monitor component_name=NAVRESIDUALGPSVEL.RESIDUAL }
+        tabs { component_monitor component_name=NAVRESIDUALGPSVEL.TIME_MONOTONIC }
+    }
+    hsplit {
+        tabs { component_monitor component_name=NAVRESIDUALSTATACCEL.CHI_SQUARE }
+        tabs { component_monitor component_name=NAVRESIDUALSTATACCEL.RESIDUAL }
+        tabs share=0.5 { component_monitor component_name=NAVRESIDUALSTATACCEL.TIME_MONOTONIC }
+        tabs share=0.5 { component_monitor component_name=STATEMACHINE.MISSILE_MODE }
+    }
+    hsplit {
+        tabs { component_monitor component_name=NAVRESIDUALMAG.CHI_SQUARE }
+        tabs { component_monitor component_name=NAVRESIDUALMAG.RESIDUAL }
+        tabs { component_monitor component_name=NAVRESIDUALMAG.TIME_MONOTONIC }
+    }
+    hsplit {
+        tabs { component_monitor component_name=NAVRESIDUALBARALTBIAS.CHI_SQUARE }
+        tabs { component_monitor component_name=NAVRESIDUALBARALTBIAS.RESIDUAL }
+        tabs { component_monitor component_name=NAVRESIDUALBARALTBIAS.TIME_MONOTONIC }
+    }
+}

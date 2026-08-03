@@ -1,0 +1,233 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.POS_ECEF",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1882352977991104,
+                                    "g": 0.5333333611488342,
+                                    "r": 0.7137255072593689
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.12941177189350128,
+                                    "g": 0.21176470816135406,
+                                    "r": 0.5098039507865906
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.48235294222831726,
+                                    "g": 0.29411765933036804,
+                                    "r": 0.1725490242242813
+                                  }
+                                ],
+                                "eql": "TARGETMESSAGE.POS_ECEF[0],TARGETMESSAGE.POS_ECEF[1],TARGETMESSAGE.POS_ECEF[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Graph",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "TARGETMESSAGE.TIME_MONOTONIC",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "TARGETMESSAGE.LATENCY",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              }
+                            ],
+                            "shares": {
+                              "0": 0.5,
+                              "1": 0.5
+                            }
+                          }
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.TOW",
+                                "name": null
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.TARGET_MODE",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.WEEK",
+                                "name": null
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 0.9274200201034546,
+                  "1": 0.7020879983901978,
+                  "2": 0.37049299478530884
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "TARGETMESSAGE.VEL_ECEF",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1882352977991104,
+                              "g": 0.5333333611488342,
+                              "r": 0.7137255072593689
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.12941177189350128,
+                              "g": 0.21176470816135406,
+                              "r": 0.5098039507865906
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.48235294222831726,
+                              "g": 0.29411765933036804,
+                              "r": 0.1725490242242813
+                            }
+                          ],
+                          "eql": "TARGETMESSAGE.POS_ECEF[0],TARGETMESSAGE.POS_ECEF[1],TARGETMESSAGE.POS_ECEF[2]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.6425960063934326,
+            "1": 0.3574039936065674
+          }
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

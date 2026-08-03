@@ -1,0 +1,163 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "HSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.PIMU_HZ",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.IMU_RAW_HZ",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.MAG_HZ",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.BARO_HZ",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5,
+                  "2": 0.25,
+                  "3": 0.25
+                }
+              }
+            },
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.INERTIAL_SENSE_LATENCY",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.MOSAIC_LATENCY",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "STMDEBUGMESSAGE.MOSAIC_POS_HZ",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "STMDEBUGMESSAGE.MOSAIC_VEL_HZ",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "STMDEBUGMESSAGE.MOSAIC_PVT_OUT_HZ",
+                                "name": null
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {
+                        "0": 0.5,
+                        "1": 0.5
+                      }
+                    }
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STMDEBUGMESSAGE.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5,
+                  "2": 0.5,
+                  "3": 0.5
+                }
+              }
+            }
+          ],
+          "shares": {}
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}
