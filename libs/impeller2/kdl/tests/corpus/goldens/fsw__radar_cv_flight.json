@@ -1,0 +1,893 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Radar CV Flight",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "3D + Truth",
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "rocket.world_pos",
+                          "name": "Viewport",
+                          "near": null,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 0.5,-5,1) + rocket.world_pos",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": true,
+                          "show_view_cube": true,
+                          "up": null
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Truth vs Estimate (Target, ENU)",
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.target_pos",
+                                "name": "Truth_Target_ENU"
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "rocket.radar_target_pos",
+                                      "name": "Radar_Target_Meas_ENU"
+                                    }
+                                  },
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "rocket.radar_target_meas_std",
+                                      "name": "Radar_Target_RAW_Meas_STD_ENU_m"
+                                    }
+                                  }
+                                ],
+                                "shares": {
+                                  "0": 0.5,
+                                  "1": 0.5
+                                }
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_target_state_kalman",
+                                "name": "Radar_Target_KF_ENU"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.8685479760169983,
+                            "1": 1.2575130462646484,
+                            "2": 0.8739389777183533
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Truth vs Estimate (Missile, ENU)",
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.world_pos",
+                                "name": "Truth_Missile_ENU"
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "rocket.radar_missile_pos",
+                                      "name": "Radar_Missile_RAW_Meas_ENU"
+                                    }
+                                  },
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "rocket.radar_missile_meas_std",
+                                      "name": "Radar_Missile_RAW_Meas_STD_ENU_m"
+                                    }
+                                  }
+                                ],
+                                "shares": {
+                                  "0": 0.5014410018920898,
+                                  "1": 0.5014410018920898
+                                }
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_missile_state_kalman",
+                                "name": "Radar_Missile_KF_ENU"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.8797010183334351,
+                            "1": 1.2491480112075806,
+                            "2": 0.871150016784668
+                          }
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "target.world_pos",
+                          "name": "target.world_pos"
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.25,
+                      "1": 0.47894299030303955,
+                      "2": 0.6080570220947266,
+                      "3": 0.3630000054836273
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Status + Model",
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.set_radar",
+                                "name": "Radar_Pulse"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.trigger_camera",
+                                "name": "CV_Pulse"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_target_valid",
+                                "name": "Radar_Target_Valid"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_missile_valid",
+                                "name": "Radar_Missile_Valid"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.5325279831886292,
+                            "1": 0.4727250039577484,
+                            "2": 0.4973739981651306,
+                            "3": 0.4973739981651306
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_target_fov_status",
+                                "name": "Radar_Target_FOV_Status"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_missile_fov_status",
+                                "name": "Radar_Missile_FOV_Status"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.cv_visibility_plot",
+                                "name": "CV_Visibility"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.cv_pixel_coords",
+                                "name": "CV_Pixel_Coords"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.cv_pixel_area",
+                                "name": "CV_Pixel_Area"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.8062509894371033,
+                            "1": 0.7685220241546631,
+                            "2": 0.42522698640823364
+                          }
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "rocket.radar_bias",
+                          "name": "Radar_Bias_AzElR"
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.cv_true_pixel_coords",
+                                "name": "uv_true"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.cv_true_pixel_flow",
+                                "name": "uvdot_true"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "rocket.radar_target_model_stats",
+                          "name": "Radar_Model_Stats"
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_target_projected_area",
+                                "name": "Radar_Target_Area_vs_MinRCS"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_missile_projected_area",
+                                "name": "Radar_Missile_Area_vs_MinRCS"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_target_pos_std",
+                                "name": "Radar_Target_KF_STD_Pos_ENU_m"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_target_vel_std",
+                                "name": "Radar_Target_KF_STD_Vel_ENU_mps"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_missile_pos_std",
+                                "name": "Radar_Missile_KF_STD_Pos_ENU_m"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "rocket.radar_missile_vel_std",
+                                "name": "Radar_Missile_KF_STD_Vel_ENU_mps"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.0,
+                      "1": 0.9782360196113586,
+                      "2": 1.0217640399932861,
+                      "3": 1.0,
+                      "4": 1.0,
+                      "5": 1.0,
+                      "6": 1.0,
+                      "7": 1.0,
+                      "8": 1.0
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Graphs",
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.6470588445663452,
+                              "g": 0.6078431606292725,
+                              "r": 0.4156862795352936
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.7019608020782471,
+                              "g": 0.34117648005485535,
+                              "r": 0.4470588266849518
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.25882354378700256,
+                              "g": 0.41960784792900085,
+                              "r": 0.7764706015586853
+                            }
+                          ],
+                          "eql": "rocket.radar_target_meas_std.std_x, rocket.radar_target_meas_std.std_y, rocket.radar_target_meas_std.std_z",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Radar Tgt Std [ENU m]",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.6470588445663452,
+                              "g": 0.6078431606292725,
+                              "r": 0.4156862795352936
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.7019608020782471,
+                              "g": 0.34117648005485535,
+                              "r": 0.4470588266849518
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.25882354378700256,
+                              "g": 0.41960784792900085,
+                              "r": 0.7764706015586853
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.21176470816135406,
+                              "g": 0.6431372761726379,
+                              "r": 0.8392156958580017
+                            }
+                          ],
+                          "eql": "rocket.radar_bias.az_bias, rocket.radar_bias.el_bias, RADARDEBIASMESSAGE.AZ_BIAS_RAD, RADARDEBIASMESSAGE.EL_BIAS_RAD",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Bias Truth vs Est [rad] (az/el)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.21176470816135406,
+                              "g": 0.6431372761726379,
+                              "r": 0.8392156958580017
+                            }
+                          ],
+                          "eql": "TRACKERMESSAGE.RANGE_TO_GO",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Range [m] (Tracker)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.6470588445663452,
+                              "g": 0.6078431606292725,
+                              "r": 0.4156862795352936
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.7019608020782471,
+                              "g": 0.34117648005485535,
+                              "r": 0.4470588266849518
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.25882354378700256,
+                              "g": 0.41960784792900085,
+                              "r": 0.7764706015586853
+                            }
+                          ],
+                          "eql": "rocket.radar_missile_meas_std.std_x, rocket.radar_missile_meas_std.std_y, rocket.radar_missile_meas_std.std_z",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Radar Msl Std [ENU m]",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.149999976158142,
+                "1": 0.949999988079071,
+                "2": 0.8999999761581421
+              }
+            }
+          },
+          {
+            "Viewport": {
+              "active": false,
+              "aspect": null,
+              "bloom": null,
+              "create_frustum": false,
+              "effects": true,
+              "ev100": null,
+              "far": null,
+              "fov": 45.0,
+              "frame": null,
+              "frustums_color": {
+                "a": 1.0,
+                "b": 0.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "frustums_thickness": 0.006000000052154064,
+              "hdr": false,
+              "local_arrows": [],
+              "look_at": "rocket.world_pos",
+              "name": "Full_View",
+              "near": null,
+              "node_id": 0,
+              "pos": "(0,0,0,0, 0.5,-5,1) + rocket.world_pos",
+              "projection_color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "show_arrows": true,
+              "show_frustums": false,
+              "show_grid": true,
+              "show_view_cube": true,
+              "up": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, MFNAVELODINENUMESSAGE.WORLD_POS[4],MFNAVELODINENUMESSAGE.WORLD_POS[5],MFNAVELODINENUMESSAGE.WORLD_POS[6])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/compass.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "rocket.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/missile_FT10_20251205_2.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/missile_FT10_20251205_2.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "target.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/shahed.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/fixed_wing.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "eql": "rocket.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "eql": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "eql": "target.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.21176470816135406,
+          "g": 0.6431372761726379,
+          "r": 0.8392156958580017
+        },
+        "eql": "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])",
+        "frame": null,
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.3137255012989044,
+          "r": 0.7058823704719543
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Truth Velocity (ENU)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "rocket.world_pos",
+        "scale": 0.1,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(rocket.world_vel[3], rocket.world_vel[4], rocket.world_vel[5])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": false,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.3137255012989044,
+          "r": 0.7058823704719543
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Nav Velocity (ENU)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 0.1,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Rocket Commanded Acceleration",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Rocket Measured Acceleration",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "MFNAVELODINENUMESSAGE.WORLD_POS",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])"
+      }
+    },
+    {
+      "Window": {
+        "path": null,
+        "screen": 0,
+        "screen_rect": {
+          "height": 98,
+          "width": 98,
+          "x": 2,
+          "y": 2
+        },
+        "title": null
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": {
+    "mode": "dark",
+    "scheme": "default"
+  },
+  "timeline": null
+}

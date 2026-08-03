@@ -1,0 +1,98 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Motor Panel",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "drone.motor_input",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": null,
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "drone.motor_pwm",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": null,
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "drone.motor_rpm",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": null,
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "Graph": {
+                    "auto_y_range": true,
+                    "colors": [],
+                    "eql": "drone.thrust",
+                    "graph_type": "Line",
+                    "locked": false,
+                    "name": null,
+                    "node_id": 0,
+                    "y_range": {
+                      "end": 1.0,
+                      "start": 0.0
+                    }
+                  }
+                }
+              ],
+              "shares": {
+                "0": 0.4000000059604645
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

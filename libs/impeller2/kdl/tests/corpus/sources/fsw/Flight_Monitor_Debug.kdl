@@ -1,0 +1,138 @@
+tabs {
+    hsplit name=Dynamics {
+        vsplit name="World Info" share=1.6613048315048218 {
+            tabs share=1.5 {
+                viewport name=Viewport pos="(0,0,0,0, 0.5,-5,1) + MFNAVELODINENUMESSAGE.WORLD_POS" look_at=MFNAVELODINENUMESSAGE.WORLD_POS show_grid=#true
+            }
+            tabs share=0.6391677260398865 {
+                viewport name=Viewport pos="(0,0,0,0, 1,-10,4) + (0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])" look_at="(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])" show_grid=#true
+            }
+            tabs share=0.4763270318508148 {
+                component_monitor component_name=MFNAVELODINENUMESSAGE.WORLD_POS
+            }
+            tabs share=0.4820657968521118 {
+                component_monitor component_name=MFNAVELODINENUMESSAGE.VEL_ENU
+            }
+            tabs share=0.43902403116226196 {
+                component_monitor component_name=MFNAVELODINENUMESSAGE.WORLD_ACCEL
+            }
+            tabs share=0.41319966316223145 {
+                component_monitor component_name=MFNAVELODINENUMESSAGE.GYRO_BODY_DEG
+            }
+            hsplit share=0.5502151846885681 {
+                tabs {
+                    component_monitor component_name=MFNAVELODINENUMESSAGE.TARG_POS_ENU
+                }
+                tabs {
+                    component_monitor component_name=MFNAVELODINENUMESSAGE.TARG_VEL_ENU
+                }
+            }
+        }
+        vsplit name="Debug Info" share=2.838695764541626 {
+            hsplit name="State Info" share=1.0 {
+                tabs share=0.6671124696731567 {
+                    component_monitor component_name=STATEMACHINEOUTPUT.MISSILE_MODE
+                }
+                tabs share=0.7658383846282959 {
+                    component_monitor component_name=MFNAVELODINENUMESSAGE.TIME_MONOTONIC
+                }
+                tabs share=0.6832308173179626 {
+                    component_monitor component_name=GUIDANCEMESSAGE.GUIDANCE_MODE
+                }
+                tabs share=1.0243128538131714 {
+                    component_monitor component_name=TARGETMESSAGE.TARGET_MODE
+                }
+            }
+            hsplit name=Angles share=1.0 {
+                tabs share=1.0 {
+                    component_monitor component_name=MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG
+                }
+                tabs share=1.0 {
+                    component_monitor component_name=MFPIMUMESSAGE.GYRO
+                }
+                tabs share=1.0 {
+                    component_monitor component_name=MFPIMUMESSAGE.ACCEL
+                    component_monitor component_name=GUIDANCEMESSAGE.BODY_ROLL_ANGLE
+                }
+            }
+            hsplit share=1.0 {
+                tabs share=0.3318096399307251 {
+                    component_monitor component_name=TRACKERMESSAGE.LOS_NED
+                }
+                tabs share=0.3447163701057434 {
+                    component_monitor component_name=GUIDANCEMESSAGE.ACC_CMD_NED
+                }
+                tabs share=0.3234739899635315 {
+                    component_monitor component_name=CONTROLMESSAGE.ACC_CMD_BODY
+                }
+            }
+            hsplit share=1.0 {
+                tabs share=0.16778704524040222 {
+                    component_monitor component_name=TRACKERMESSAGE.LOS_RATE_NED
+                }
+                tabs share=0.3218606412410736 {
+                    component_monitor component_name=CONTROLMESSAGE.ACC_MEAS_BODY
+                }
+            }
+            hsplit share=1.0 {
+                tabs share=0.6395843625068665 {
+                    component_monitor component_name=TRACKERMESSAGE.RANGE_TO_GO
+                }
+                tabs share=0.6680493950843811 {
+                    component_monitor component_name=CONTROLMESSAGE.DYNAMIC_COMMANDED
+                }
+            }
+            hsplit share=1.0 {
+                tabs share=1.014779806137085 {
+                    component_monitor component_name=CONTROLMESSAGE.PITCH_PID
+                }
+                tabs share=0.985217809677124 {
+                    component_monitor component_name=CONTROLMESSAGE.YAW_PID
+                }
+            }
+            hsplit share=1.0 {
+                tabs {
+                    component_monitor component_name=CONTROLMESSAGE.ROLL_PID
+                }
+                tabs {
+                    component_monitor component_name=CONTROLMESSAGE.FIN_DEFLECTION_DEG
+                }
+            }
+        }
+    }
+    viewport name=Full_View pos="(0,0,0,0, 0.5,-5,1) + MFNAVELODINENUMESSAGE.WORLD_POS" look_at=MFNAVELODINENUMESSAGE.WORLD_POS show_grid=#true
+    inspector
+}
+object_3d "(0,0,0,1, MFNAVELODINENUMESSAGE.WORLD_POS[4],MFNAVELODINENUMESSAGE.WORLD_POS[5],MFNAVELODINENUMESSAGE.WORLD_POS[6])" {
+    glb path="models/compass.glb"
+}
+object_3d "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])" {
+    glb path="models/fixed_wing.glb"
+}
+object_3d MFNAVELODINENUMESSAGE.WORLD_POS {
+    glb path="models/missile_FT10_20251205_2.glb"
+}
+line_3d "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])" perspective=#false {
+    color 255 0 0
+}
+line_3d MFNAVELODINENUMESSAGE.WORLD_POS perspective=#false {
+    color blue
+}
+vector_arrow "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])" origin=MFNAVELODINENUMESSAGE.WORLD_POS scale=0.1 name="Nav Velocity (ENU)" {
+    color 180 80 255
+}
+// vector_arrow "(0, GUIDANCEMESSAGE.ACC_CMD_NED[0], GUIDANCEMESSAGE.ACC_CMD_NED[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Guidance Cmd Accel (NED)" body_frame=#false {
+//     color 255 165 0
+// }
+vector_arrow "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Commanded Acceleration" body_frame=#true {
+    color 0 255 255
+}
+vector_arrow "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Measured Acceleration" body_frame=#true {
+    color 255 0 255
+}
+// vector_arrow "(TRACKERMESSAGE.LOS_NED[1], TRACKERMESSAGE.LOS_NED[0], -TRACKERMESSAGE.LOS_NED[2])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Target Controls LOS" body_frame=#false {
+//     color 255 255 255
+// }
+vector_arrow "(0,0,1)" origin="(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])" scale=50.0 name="Target Visibility" {
+    color 255 0 0
+}
