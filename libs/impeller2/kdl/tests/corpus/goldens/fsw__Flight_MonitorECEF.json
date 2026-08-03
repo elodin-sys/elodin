@@ -1,0 +1,1647 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Dynamics and Fin Cams",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "World Info",
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Viewport": {
+                                      "active": false,
+                                      "aspect": null,
+                                      "bloom": null,
+                                      "create_frustum": false,
+                                      "effects": true,
+                                      "ev100": null,
+                                      "far": 15000000.0,
+                                      "fov": 45.0,
+                                      "frame": "NED",
+                                      "frustums_color": {
+                                        "a": 1.0,
+                                        "b": 0.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "frustums_thickness": 0.006000000052154064,
+                                      "hdr": false,
+                                      "local_arrows": [],
+                                      "look_at": "(0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])",
+                                      "name": "Full View",
+                                      "near": 0.10000000149011612,
+                                      "node_id": 0,
+                                      "pos": "(0,0,0,0,2,0,-2) + (0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])",
+                                      "projection_color": {
+                                        "a": 1.0,
+                                        "b": 1.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "show_arrows": true,
+                                      "show_frustums": true,
+                                      "show_grid": true,
+                                      "show_view_cube": false,
+                                      "up": null
+                                    }
+                                  },
+                                  {
+                                    "Viewport": {
+                                      "active": false,
+                                      "aspect": null,
+                                      "bloom": null,
+                                      "create_frustum": false,
+                                      "effects": true,
+                                      "ev100": null,
+                                      "far": null,
+                                      "fov": 45.0,
+                                      "frame": "ECEF",
+                                      "frustums_color": {
+                                        "a": 1.0,
+                                        "b": 0.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "frustums_thickness": 0.006000000052154064,
+                                      "hdr": false,
+                                      "local_arrows": [],
+                                      "look_at": "NAVEKFSTATE.POS_ECEF",
+                                      "name": "Fixed Fin Cam",
+                                      "near": 0.10000000149011612,
+                                      "node_id": 0,
+                                      "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-2.2,0,0)",
+                                      "projection_color": {
+                                        "a": 1.0,
+                                        "b": 1.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "show_arrows": true,
+                                      "show_frustums": false,
+                                      "show_grid": true,
+                                      "show_view_cube": true,
+                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).WORLD_POS.direction(1,1,1)"
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Tabs": [
+                                      {
+                                        "Viewport": {
+                                          "active": false,
+                                          "aspect": null,
+                                          "bloom": null,
+                                          "create_frustum": false,
+                                          "effects": true,
+                                          "ev100": null,
+                                          "far": null,
+                                          "fov": 45.0,
+                                          "frame": null,
+                                          "frustums_color": {
+                                            "a": 1.0,
+                                            "b": 0.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "frustums_thickness": 0.006000000052154064,
+                                          "hdr": false,
+                                          "local_arrows": [],
+                                          "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)",
+                                          "name": "Strake Fin 1 Cam",
+                                          "near": 0.10000000149011612,
+                                          "node_id": 0,
+                                          "pos": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,-0.07,-0.07)",
+                                          "projection_color": {
+                                            "a": 1.0,
+                                            "b": 1.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "show_arrows": true,
+                                          "show_frustums": false,
+                                          "show_grid": true,
+                                          "show_view_cube": false,
+                                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                                        }
+                                      },
+                                      {
+                                        "Viewport": {
+                                          "active": false,
+                                          "aspect": null,
+                                          "bloom": null,
+                                          "create_frustum": false,
+                                          "effects": true,
+                                          "ev100": null,
+                                          "far": null,
+                                          "fov": 45.0,
+                                          "frame": null,
+                                          "frustums_color": {
+                                            "a": 1.0,
+                                            "b": 0.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "frustums_thickness": 0.006000000052154064,
+                                          "hdr": false,
+                                          "local_arrows": [],
+                                          "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)",
+                                          "name": "Strake Fin 3 Cam",
+                                          "near": 0.10000000149011612,
+                                          "node_id": 0,
+                                          "pos": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,0.07,0.07)",
+                                          "projection_color": {
+                                            "a": 1.0,
+                                            "b": 1.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "show_arrows": true,
+                                          "show_frustums": false,
+                                          "show_grid": true,
+                                          "show_view_cube": false,
+                                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "Viewport": {
+                                      "active": false,
+                                      "aspect": 1.0,
+                                      "bloom": null,
+                                      "create_frustum": false,
+                                      "effects": true,
+                                      "ev100": null,
+                                      "far": 15000000.0,
+                                      "fov": 45.0,
+                                      "frame": null,
+                                      "frustums_color": {
+                                        "a": 1.0,
+                                        "b": 0.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "frustums_thickness": 0.009999999776482582,
+                                      "hdr": false,
+                                      "local_arrows": [],
+                                      "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(10,0,0)",
+                                      "name": "Vehicle Camera",
+                                      "near": 0.10000000149011612,
+                                      "node_id": 0,
+                                      "pos": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(1.1,0,0)",
+                                      "projection_color": {
+                                        "a": 1.0,
+                                        "b": 1.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "show_arrows": true,
+                                      "show_frustums": false,
+                                      "show_grid": true,
+                                      "show_view_cube": false,
+                                      "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)"
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.800000011920929,
+                            "1": 0.800000011920929
+                          }
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                          "name": "MFNAVELODINENUMESSAGE.WORLD_POS"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.VEL_ENU",
+                          "name": "MFNAVELODINENUMESSAGE.VEL_ENU"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.WORLD_ACCEL",
+                          "name": "MFNAVELODINENUMESSAGE.WORLD_ACCEL"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG",
+                          "name": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG"
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "EKFTARGETMESSAGE.POS_ECEF",
+                                "name": "EKFTARGETMESSAGE.POS_ECEF"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU",
+                                "name": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.4284050464630127,
+                      "1": 0.37611401081085205,
+                      "2": 0.2876169979572296,
+                      "3": 0.30527999997138977,
+                      "4": 0.4131999909877777,
+                      "5": 0.5502150058746338
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Debug Info",
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "State Info",
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                                "name": "STATEMACHINEOUTPUT.MISSILE_MODE"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFNAVELODINENUMESSAGE.TIME_MONOTONIC",
+                                "name": "MFNAVELODINENUMESSAGE.TIME_MONOTONIC"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.GUIDANCE_MODE",
+                                "name": "GUIDANCEMESSAGE.GUIDANCE_MODE"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.TARGET_MODE",
+                                "name": "TARGETMESSAGE.TARGET_MODE"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.6671119928359985,
+                            "1": 0.7658380270004272,
+                            "2": 0.683230996131897,
+                            "3": 1.024312973022461
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Angles",
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG",
+                                "name": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFPIMUMESSAGE.GYRO",
+                                "name": "MFPIMUMESSAGE.GYRO"
+                              }
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFPIMUMESSAGE.ACCEL",
+                                    "name": "MFPIMUMESSAGE.ACCEL"
+                                  }
+                                },
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                                    "name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE"
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.0,
+                            "1": 1.0,
+                            "2": 1.0
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.LOS_NED",
+                                "name": "TRACKERMESSAGE.LOS_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.ACC_CMD_NED",
+                                "name": "GUIDANCEMESSAGE.ACC_CMD_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.ACC_CMD_BODY",
+                                "name": "CONTROLMESSAGE.ACC_CMD_BODY"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.33180999755859375,
+                            "1": 0.34471601247787476,
+                            "2": 0.3234739899635315
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.LOS_RATE_NED",
+                                "name": "TRACKERMESSAGE.LOS_RATE_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.ACC_MEAS_BODY",
+                                "name": "CONTROLMESSAGE.ACC_MEAS_BODY"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.16778700053691864,
+                            "1": 0.32186099886894226
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.RANGE_TO_GO",
+                                "name": "TRACKERMESSAGE.RANGE_TO_GO"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.DYNAMIC_COMMANDED",
+                                "name": "CONTROLMESSAGE.DYNAMIC_COMMANDED"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.6395840048789978,
+                            "1": 0.6680489778518677
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.PITCH_PID",
+                                "name": "CONTROLMESSAGE.PITCH_PID"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.YAW_PID",
+                                "name": "CONTROLMESSAGE.YAW_PID"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "1": 0.9852179884910583
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.ROLL_PID",
+                                "name": "CONTROLMESSAGE.ROLL_PID"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+                                "name": "CONTROLMESSAGE.FIN_DEFLECTION_DEG"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSPOSMESSAGE1.HACC",
+                                "name": "GPSPOSMESSAGE1.HACC"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSPOSMESSAGE1.VACC",
+                                "name": "GPSPOSMESSAGE1.VACC"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.0,
+                      "1": 1.0,
+                      "2": 1.0,
+                      "3": 1.0,
+                      "4": 1.0,
+                      "5": 1.0,
+                      "6": 1.0,
+                      "7": 1.0
+                    }
+                  }
+                },
+                {
+                  "Viewport": {
+                    "active": false,
+                    "aspect": null,
+                    "bloom": null,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": 15000000.0,
+                    "fov": 45.0,
+                    "frame": "NED",
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "(0,0,0,1,0.0, 0.0, 0.0)",
+                    "name": "Blank",
+                    "near": 0.10000000149011612,
+                    "node_id": 0,
+                    "pos": "(0,0,0,1,-8,0,-1.5)",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": false,
+                    "show_grid": true,
+                    "show_view_cube": true,
+                    "up": null
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.991292953491211,
+                "1": 1.941396951675415,
+                "2": 1.8673100471496582
+              }
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Fins and Strake Cams",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 15000000.0,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "name": "Full View",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0,0,1,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": true,
+                          "show_grid": true,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": "ECEF",
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                              "name": "Fixed Fin Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "NAVEKFSTATE.POS_ECEF.translate(-1.2,0,0)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": false,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)"
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": "ECEF",
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                              "name": "Fin Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "NAVEKFSTATE.POS_ECEF.translate(-1.2,0,0)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": false,
+                              "up": null
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)",
+                              "name": "Strake Fin 1 Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,-0.07,-0.07)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": false,
+                              "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": null,
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)",
+                              "name": "Strake Fin 3 Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,0.07,0.07)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": true,
+                              "show_view_cube": false,
+                              "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": 1.0,
+                          "bloom": null,
+                          "create_frustum": true,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 2000.0,
+                          "fov": 45.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.009999999776482582,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(10,0,0)",
+                          "name": "Vehicle Camera",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "MFNAVELODINENUMESSAGE.WORLD_POS.translate(1.1,0,0)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": true,
+                          "show_view_cube": false,
+                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)"
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "Viewport": {
+                    "active": false,
+                    "aspect": null,
+                    "bloom": null,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": null,
+                    "fov": 45.0,
+                    "frame": null,
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                    "name": "Blank",
+                    "near": 0.10000000149011612,
+                    "node_id": 0,
+                    "pos": "(0,0,0,1,0,-8,1.5)",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": true,
+                    "show_grid": true,
+                    "show_view_cube": false,
+                    "up": null
+                  }
+                }
+              ],
+              "shares": {
+                "0": 0.800000011920929,
+                "1": 0.800000011920929,
+                "2": 1.8673100471496582
+              }
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Dynamics",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "World Info",
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])",
+                          "name": "Missile",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 0.5,-5,1) + (0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": true,
+                          "show_grid": true,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+                          "name": "Target",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 1,-10,4) + (0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": true,
+                          "show_grid": true,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.WORLD_POS",
+                          "name": ".WORLD_POS"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.VEL_ENU",
+                          "name": "MFNAVELODINENUMESSAGE.VEL_ENU"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.WORLD_ACCEL",
+                          "name": "MFNAVELODINENUMESSAGE.WORLD_ACCEL"
+                        }
+                      },
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG",
+                          "name": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG"
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "EKFTARGETMESSAGE.POS_ECEF",
+                                "name": "EKFTARGETMESSAGE.POS_ECEF"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU",
+                                "name": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.5,
+                      "1": 0.6391680240631104,
+                      "2": 0.47632700204849243,
+                      "3": 0.48206600546836853,
+                      "4": 0.4390240013599396,
+                      "5": 0.4131999909877777,
+                      "6": 0.5502150058746338
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Debug Info",
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "State Info",
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                                "name": "STATEMACHINEOUTPUT.MISSILE_MODE"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFNAVELODINENUMESSAGE.TIME_MONOTONIC",
+                                "name": "MFNAVELODINENUMESSAGE.TIME_MONOTONIC"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.GUIDANCE_MODE",
+                                "name": "GUIDANCEMESSAGE.GUIDANCE_MODE"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TARGETMESSAGE.TARGET_MODE",
+                                "name": "TARGETMESSAGE.TARGET_MODE"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.6671119928359985,
+                            "1": 0.7658380270004272,
+                            "2": 0.683230996131897,
+                            "3": 1.024312973022461
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Angles",
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG",
+                                "name": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "MFPIMUMESSAGE.GYRO",
+                                "name": "MFPIMUMESSAGE.GYRO"
+                              }
+                            },
+                            {
+                              "Tabs": [
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "MFPIMUMESSAGE.ACCEL",
+                                    "name": "MFPIMUMESSAGE.ACCEL"
+                                  }
+                                },
+                                {
+                                  "ComponentMonitor": {
+                                    "component_name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                                    "name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE"
+                                  }
+                                }
+                              ]
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.0,
+                            "1": 1.0,
+                            "2": 1.0
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.LOS_NED",
+                                "name": "TRACKERMESSAGE.LOS_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.ACC_CMD_NED",
+                                "name": "GUIDANCEMESSAGE.ACC_CMD_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.ACC_CMD_BODY",
+                                "name": "CONTROLMESSAGE.ACC_CMD_BODY"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.33180999755859375,
+                            "1": 0.34471601247787476,
+                            "2": 0.3234739899635315
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.LOS_RATE_NED",
+                                "name": "TRACKERMESSAGE.LOS_RATE_NED"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.ACC_MEAS_BODY",
+                                "name": "CONTROLMESSAGE.ACC_MEAS_BODY"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.16778700053691864,
+                            "1": 0.32186099886894226
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "TRACKERMESSAGE.RANGE_TO_GO",
+                                "name": "TRACKERMESSAGE.RANGE_TO_GO"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.DYNAMIC_COMMANDED",
+                                "name": "CONTROLMESSAGE.DYNAMIC_COMMANDED"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.6395840048789978,
+                            "1": 0.6680489778518677
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.PITCH_PID",
+                                "name": "CONTROLMESSAGE.PITCH_PID"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.YAW_PID",
+                                "name": "CONTROLMESSAGE.YAW_PID"
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 1.014780044555664,
+                            "1": 0.9852179884910583
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.ROLL_PID",
+                                "name": "CONTROLMESSAGE.ROLL_PID"
+                              }
+                            },
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+                                "name": "CONTROLMESSAGE.FIN_DEFLECTION_DEG"
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.0,
+                      "1": 1.0,
+                      "2": 1.0,
+                      "3": 1.0,
+                      "4": 1.0,
+                      "5": 1.0,
+                      "6": 1.0
+                    }
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.6613049507141113,
+                "1": 2.838696002960205
+              }
+            }
+          },
+          {
+            "Viewport": {
+              "active": false,
+              "aspect": null,
+              "bloom": null,
+              "create_frustum": false,
+              "effects": true,
+              "ev100": null,
+              "far": null,
+              "fov": 45.0,
+              "frame": "ECEF",
+              "frustums_color": {
+                "a": 1.0,
+                "b": 0.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "frustums_thickness": 0.006000000052154064,
+              "hdr": false,
+              "local_arrows": [],
+              "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+              "name": "Full View",
+              "near": 0.10000000149011612,
+              "node_id": 0,
+              "pos": "(0,0,0,0, 0.5,-5,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+              "projection_color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "show_arrows": true,
+              "show_frustums": true,
+              "show_grid": true,
+              "show_view_cube": true,
+              "up": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.03921568766236305,
+            "g": 0.03921568766236305,
+            "r": 0.8313725590705872
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "star"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "fixed_wing.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.8313725590705872,
+            "g": 0.03921568766236305,
+            "r": 0.03921568766236305
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "star"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "fixed_wing.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Ellipsoid": {
+            "color": {
+              "a": 0.0784313753247261,
+              "b": 0.7372549176216125,
+              "g": 0.8313725590705872,
+              "r": 0.0
+            },
+            "error_confidence_interval": 70.0,
+            "error_covariance": "NAKEKFCOV.PPOS_ECEF",
+            "error_covariance_cholesky": null,
+            "grid_color": {
+              "a": 0.47058823704719543,
+              "b": 1.0,
+              "g": 1.0,
+              "r": 1.0
+            },
+            "scale": "(1, 1, 1)",
+            "show_grid": true
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.686274528503418,
+            "g": 0.3137255012989044,
+            "r": 0.2980392277240753
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "rocket_launch"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)",
+                "joint_name": "FinGhost_0"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[1], 0)",
+                "joint_name": "FinGhost_1"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[2], 0)",
+                "joint_name": "FinGhost_2"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[3], 0)",
+                "joint_name": "FinGhost_3"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_0"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE1.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_1"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE2.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_2"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_3"
+              }
+            ],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "articulated-missile-ghost-fins.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": "ENU",
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "compass.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "eql": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "eql": "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "eql": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,0,0,0)",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.4000000059604645,
+            "glow": 0.5,
+            "glow_color": null,
+            "path": "earth.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Window": {
+        "path": null,
+        "screen": null,
+        "screen_rect": null,
+        "title": null
+      }
+    }
+  ],
+  "environment": null,
+  "frame": "ENU",
+  "origin": {
+    "altitude": 0.0,
+    "latitude": 0.0,
+    "longitude": 0.0
+  },
+  "skybox": {
+    "name": "desert_night"
+  },
+  "telemetry_mode": false,
+  "theme": {
+    "mode": "dark",
+    "scheme": "default"
+  },
+  "timeline": null
+}

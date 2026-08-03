@@ -1,0 +1,941 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "HSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "Viewport": {
+                "active": true,
+                "aspect": null,
+                "bloom": {
+                  "intensity": 0.2199999988079071,
+                  "preset": "old_school",
+                  "threshold": 0.7799999713897705,
+                  "threshold_softness": 0.11999999731779099
+                },
+                "create_frustum": false,
+                "effects": true,
+                "ev100": 13.199999809265137,
+                "far": 1000000000.0,
+                "fov": 45.0,
+                "frame": null,
+                "frustums_color": {
+                  "a": 1.0,
+                  "b": 0.0,
+                  "g": 1.0,
+                  "r": 1.0
+                },
+                "frustums_thickness": 0.006000000052154064,
+                "hdr": true,
+                "local_arrows": [],
+                "look_at": "lander.world_pos",
+                "name": "Tranquility Base",
+                "near": 1.0,
+                "node_id": 0,
+                "pos": "lander.world_pos.translate_world(10.0, 10.0, 4.0)",
+                "projection_color": {
+                  "a": 1.0,
+                  "b": 1.0,
+                  "g": 1.0,
+                  "r": 1.0
+                },
+                "show_arrows": true,
+                "show_frustums": false,
+                "show_grid": false,
+                "show_view_cube": true,
+                "up": null
+              }
+            },
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.27450981736183167,
+                                "g": 0.6274510025978088,
+                                "r": 0.7686274647712708
+                              }
+                            ],
+                            "eql": "lander.altitude[0], lander_truth.altitude[0], lander_truth.slant_range[0]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "Altitude vs real + radar slant (m)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        },
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              }
+                            ],
+                            "eql": "lander_truth.vertical_speed[0], lander.vertical_speed[0]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "Descent rate (m/s)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  },
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              }
+                            ],
+                            "eql": "lander.horizontal_speed[0], lander_truth.horizontal_speed[0]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "Horizontal speed vs reconstructed (m/s)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        },
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              }
+                            ],
+                            "eql": "lander.pitch[0], lander_truth.pitch[0]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "Pitch vs gimbal-derived truth (deg)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  },
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              }
+                            ],
+                            "eql": "lander.throttle_cmd[0], lander.throttle[0]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "DPS throttle",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        },
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              }
+                            ],
+                            "eql": "lander.propellant[0], lander.rcs_propellant[0]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "Propellant remaining (kg)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  },
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 0.5,
+                                "r": 1.0
+                              }
+                            ],
+                            "eql": "lander.main_thrust_viz[2]",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "Engine thrust (fraction of max)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        },
+                        {
+                          "Graph": {
+                            "auto_y_range": true,
+                            "colors": [
+                              {
+                                "a": 1.0,
+                                "b": 0.6470588445663452,
+                                "g": 0.6078431606292725,
+                                "r": 0.4156862795352936
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.27450981736183167,
+                                "g": 0.6274510025978088,
+                                "r": 0.7686274647712708
+                              },
+                              {
+                                "a": 1.0,
+                                "b": 0.7019608020782471,
+                                "g": 0.34117648005485535,
+                                "r": 0.4470588266849518
+                              }
+                            ],
+                            "eql": "lander.rcs_torque",
+                            "graph_type": "Line",
+                            "locked": false,
+                            "name": "RCS torque command (roll/pitch/yaw, N·m)",
+                            "node_id": 0,
+                            "y_range": {
+                              "end": 1.0,
+                              "start": 0.0
+                            }
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {
+            "1": 0.5361570119857788
+          }
+        }
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "lander.world_pos",
+        "frame": "ENU",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "apollo-lunar-module.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              -2.5,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": [
+          {
+            "body_frame": true,
+            "cutoff": 0.019999999552965164,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/descent_plume.effect",
+            "emission_rate": null,
+            "extra_effects": [
+              "effects/apollo-lander/descent_glow.effect"
+            ],
+            "intensity": "lander.main_thrust_viz[2]",
+            "light": {
+              "color": [
+                1.0,
+                0.949999988079071,
+                0.8799999952316284
+              ],
+              "intensity": 3000000.0,
+              "offset": 0.800000011920929,
+              "range": 40.0,
+              "shadows": true,
+              "spot_angle": null
+            },
+            "name": "DPS",
+            "position": [
+              0.0,
+              -1.899999976158142,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[0]",
+            "light": null,
+            "name": "rcs_0",
+            "position": [
+              1.0889999866485596,
+              0.8700000047683716,
+              -1.50600004196167
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[1]",
+            "light": null,
+            "name": "rcs_1",
+            "position": [
+              1.3880000114440918,
+              0.8740000128746033,
+              -1.3609999418258667
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[2]",
+            "light": null,
+            "name": "rcs_2",
+            "position": [
+              -1.1799999475479126,
+              0.5270000100135803,
+              -1.36899995803833
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[3]",
+            "light": null,
+            "name": "rcs_3",
+            "position": [
+              -1.3600000143051147,
+              0.8550000190734863,
+              -1.3609999418258667
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[4]",
+            "light": null,
+            "name": "rcs_4",
+            "position": [
+              -1.062000036239624,
+              0.8579999804496765,
+              -1.5069999694824219
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[5]",
+            "light": null,
+            "name": "rcs_5",
+            "position": [
+              -1.2489999532699585,
+              1.1269999742507935,
+              1.2300000190734863
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[6]",
+            "light": null,
+            "name": "rcs_6",
+            "position": [
+              -1.4290000200271606,
+              0.9160000085830688,
+              1.2799999713897705
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[7]",
+            "light": null,
+            "name": "rcs_7",
+            "position": [
+              -1.2319999933242798,
+              0.9120000004768372,
+              1.4279999732971191
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[8]",
+            "light": null,
+            "name": "rcs_8",
+            "position": [
+              1.2970000505447388,
+              1.1269999742507935,
+              1.2430000305175781
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[9]",
+            "light": null,
+            "name": "rcs_9",
+            "position": [
+              1.2960000038146973,
+              0.6940000057220459,
+              1.2430000305175781
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[10]",
+            "light": null,
+            "name": "rcs_10",
+            "position": [
+              1.4839999675750732,
+              0.9049999713897705,
+              1.2599999904632568
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[11]",
+            "light": null,
+            "name": "rcs_11",
+            "position": [
+              1.3140000104904175,
+              0.9079999923706055,
+              1.4420000314712524
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[12]",
+            "light": null,
+            "name": "rcs_12",
+            "position": [
+              1.2070000171661377,
+              1.2009999752044678,
+              -1.36899995803833
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[13]",
+            "light": null,
+            "name": "rcs_13",
+            "position": [
+              1.2070000171661377,
+              0.5270000100135803,
+              -1.36899995803833
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[14]",
+            "light": null,
+            "name": "rcs_14",
+            "position": [
+              -1.2489999532699585,
+              0.6940000057220459,
+              1.2300000190734863
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.006000000052154064,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/rcs_puff.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "lander.rcs_thruster_viz[15]",
+            "light": null,
+            "name": "rcs_15",
+            "position": [
+              -1.1799999475479126,
+              1.2000000476837158,
+              -1.36899995803833
+            ],
+            "scale": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, 0,0,0)",
+        "frame": "ENU",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Mesh": {
+            "material": {
+              "base_color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "emissivity": 0.0
+            },
+            "mesh": {
+              "Sphere": {
+                "radius": 0.019999999552965164
+              }
+            }
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": [
+          {
+            "body_frame": true,
+            "cutoff": 0.004999999888241291,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/apollo-lander/ground_dust.effect",
+            "emission_rate": 2800.0,
+            "extra_effects": [],
+            "intensity": "lander.dust_viz[0]",
+            "light": null,
+            "name": "ground_dust",
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, 0,0,-1724837.623)",
+        "frame": "ENU",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "moon.glb",
+            "rotate": [
+              25.31999969482422,
+              21.200000762939453,
+              79.58999633789062
+            ],
+            "scale": 1798000.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, -199014543, 7506228, 337157270)",
+        "frame": "ENU",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "earth.glb",
+            "rotate": [
+              0.0,
+              90.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 0.7843137383460999,
+          "b": 0.9411764740943909,
+          "g": 0.5098039507865906,
+          "r": 0.27450981736183167
+        },
+        "eql": "lander.world_pos",
+        "frame": "ENU",
+        "future_color": null,
+        "line_width": 2.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 0.7843137383460999,
+          "b": 0.3529411852359772,
+          "g": 0.7843137383460999,
+          "r": 0.23529411852359772
+        },
+        "eql": "lander_truth.world_pos",
+        "frame": "ENU",
+        "future_color": null,
+        "line_width": 2.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    }
+  ],
+  "environment": {
+    "ambient_scale": 0.019999999552965164,
+    "atmosphere": {
+      "ground_albedo": [
+        0.20000000298023224,
+        0.2199999988079071,
+        0.18000000715255737
+      ],
+      "inner_radius": 6378140.0,
+      "origin": [
+        -199014543.0,
+        7506228.0,
+        337157270.0
+      ],
+      "outer_radius": 6478140.0,
+      "raymarched": true
+    },
+    "sky_color": {
+      "a": 1.0,
+      "b": 0.0,
+      "g": 0.0,
+      "r": 0.0
+    },
+    "sun": {
+      "azimuth_deg": 268.80999755859375,
+      "elevation_deg": 10.649999618530273,
+      "illuminance": 130000.0,
+      "shadows": true
+    }
+  },
+  "frame": "ENU",
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": true,
+  "theme": {
+    "mode": "dark",
+    "scheme": "default"
+  },
+  "timeline": {
+    "follow_latest": false,
+    "future_color": {
+      "a": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "played_color": {
+      "a": 1.0,
+      "b": 0.20000000298023224,
+      "g": 0.8999999761581421,
+      "r": 1.0
+    },
+    "range": "last_30s"
+  }
+}

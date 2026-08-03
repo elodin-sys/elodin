@@ -1,0 +1,428 @@
+theme mode=dark scheme=default
+
+// Denser "what's happening now" layout: combined line graphs instead of
+// component_monitor widgets, plus an Intercept tab for engagement views.
+timeline follow_latest=#true
+telemetry_mode #true
+
+skybox name=desert_night
+// This is the LLA according to the vehicle at the Mojave launch site.
+coordinate frame=ENU lat=35.3506640 lon=-117.80902 alt=589.2740
+tabs {
+    hsplit name="Dynamics and Fin Cams" {
+        vsplit name="World Info" share=1.991293 {
+            hsplit share=1.428405 {
+                vsplit share=0.8 {
+                    viewport frame=ECEF name="Full View" near=0.1 pos="(0,0,0,0,0,2,2) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#false show_view_cube=#false show_frustum=#true far=15000000.0
+                    viewport frame=ECEF name="Fixed Fin Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-1.2,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)" show_grid=#false show_view_cube=#false show_frustum=#false
+                }
+                vsplit share=0.8 {
+                    tabs {
+                    viewport frame=ECEF name="Strake Fin 1 Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,-0.07,-0.07)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)" show_grid=#false show_view_cube=#false
+                    viewport frame=ECEF name="Strake Fin 3 Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,0.07,0.07)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)" show_grid=#false show_view_cube=#false
+                    }
+                    // This ~2000m estimate for the vehicle camera far plane came from Anna.
+                    viewport frame=ECEF name="Vehicle Camera" aspect=1.0 far=2000 near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(1.1,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(0.9925,0,0.1218)" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)" show_grid=#false show_view_cube=#false create_frustum=#false frustums_thickness=0.01 far=15000000.0
+                }
+            }
+            // 2x2 vehicle kinematics (was one vertical stack — too short to read/inspect).
+            hsplit name="Vehicle Kinematics" share=1.382211 {
+                vsplit {
+                    graph "(NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).ecef_to_ned()" name="Vehicle Pos NED" {
+                        color 76 175 80
+                        color 33 150 243
+                        color 255 193 7
+                    }
+                    graph "MFNAVELODINENUMESSAGE.WORLD_ACCEL[0],MFNAVELODINENUMESSAGE.WORLD_ACCEL[1],MFNAVELODINENUMESSAGE.WORLD_ACCEL[2]" name="Vehicle Accel" {
+                        color 244 67 54
+                        color 255 152 0
+                        color 156 39 176
+                    }
+                }
+                vsplit {
+                    graph "MFNAVELODINENUMESSAGE.VEL_ENU[0],MFNAVELODINENUMESSAGE.VEL_ENU[1],MFNAVELODINENUMESSAGE.VEL_ENU[2]" name="Vehicle Vel ENU" {
+                        color 76 175 80
+                        color 33 150 243
+                        color 255 193 7
+                    }
+                    graph "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[0],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[1],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[2]" name="Gyro Body Deg" {
+                        color 108 60 40
+                        color 132 93 40
+                        color 82 31 20
+                    }
+                }
+            }
+            hsplit share=0.550215 {
+                graph "EKFTARGETMESSAGE.POS_ECEF[0],EKFTARGETMESSAGE.POS_ECEF[1],EKFTARGETMESSAGE.POS_ECEF[2]" name="Target Pos ECEF" {
+                    color 212 10 10
+                    color 255 87 34
+                    color 255 152 0
+                }
+                graph "MFNAVELODINENUMESSAGE.TARG_VEL_ENU[0],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[1],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[2]" name="Target Vel ENU" {
+                    color 10 10 212
+                    color 63 81 181
+                    color 33 150 243
+                }
+            }
+        }
+        vsplit name="Debug Info" share=1.941397 {
+            graph "STATEMACHINEOUTPUT.MISSILE_MODE,GUIDANCEMESSAGE.GUIDANCE_MODE,TARGETMESSAGE.TARGET_MODE,MFNAVELODINENUMESSAGE.TIME_MONOTONIC" name="Modes + Time" share=1.0 {
+                color 76 175 80
+                color 33 150 243
+                color 255 87 34
+                color 158 158 158
+            }
+            hsplit name=Angles share=1.0 {
+                graph "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[0],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[1],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[2],GUIDANCEMESSAGE.BODY_ROLL_ANGLE" name="YPR + Body Roll" {
+                    color 76 175 80
+                    color 33 150 243
+                    color 255 193 7
+                    color 233 30 99
+                }
+                graph "MFPIMUMESSAGE.GYRO.X,MFPIMUMESSAGE.GYRO.Y,MFPIMUMESSAGE.GYRO.Z" name="PIMU Gyro" {
+                    color 108 60 40
+                    color 132 93 40
+                    color 82 31 20
+                }
+                graph "MFPIMUMESSAGE.ACCEL.X,MFPIMUMESSAGE.ACCEL.Y,MFPIMUMESSAGE.ACCEL.Z" name="PIMU Accel" {
+                    color 155 113 48
+                    color 107 39 23
+                    color 36 60 102
+                }
+            }
+            hsplit share=1.0 {
+                graph "TRACKERMESSAGE.LOS_NED[0],TRACKERMESSAGE.LOS_NED[1],TRACKERMESSAGE.LOS_NED[2]" name="LOS NED" {
+                    color 255 255 255
+                    color 189 189 189
+                    color 117 117 117
+                }
+                graph "GUIDANCEMESSAGE.ACC_CMD_NED[0],GUIDANCEMESSAGE.ACC_CMD_NED[1],GUIDANCEMESSAGE.ACC_CMD_NED[2]" name="Acc Cmd NED" {
+                    color 0 188 212
+                    color 0 150 136
+                    color 63 81 181
+                }
+                graph "CONTROLMESSAGE.ACC_CMD_BODY[0],CONTROLMESSAGE.ACC_CMD_BODY[1]" name="Acc Cmd Body" {
+                    color 108 60 40
+                    color 132 93 40
+                }
+            }
+            hsplit share=1.0 {
+                graph "TRACKERMESSAGE.LOS_RATE_NED[0],TRACKERMESSAGE.LOS_RATE_NED[1],TRACKERMESSAGE.LOS_RATE_NED[2]" name="LOS Rate NED" {
+                    color 255 235 59
+                    color 255 193 7
+                    color 255 152 0
+                }
+                graph "CONTROLMESSAGE.ACC_MEAS_BODY[0],CONTROLMESSAGE.ACC_MEAS_BODY[1]" name="Acc Meas Body" {
+                    color 132 93 40
+                    color 82 31 20
+                }
+            }
+            hsplit share=1.0 {
+                graph "TRACKERMESSAGE.RANGE_TO_GO" name="Range To Go" {
+                    color 244 67 54
+                }
+                graph "CONTROLMESSAGE.DYNAMIC_COMMANDED" name="Dynamic Commanded" {
+                    color 156 39 176
+                }
+            }
+            hsplit share=1.0 {
+                graph "CONTROLMESSAGE.PITCH_PID" name="Pitch PID" {
+                    color 33 150 243
+                }
+                graph "CONTROLMESSAGE.YAW_PID" name="Yaw PID" {
+                    color 76 175 80
+                }
+            }
+            hsplit share=1.0 {
+                graph "CONTROLMESSAGE.ROLL_PID" name="Roll PID" {
+                    color 255 152 0
+                }
+                graph "CONTROLMESSAGE.FIN_DEFLECTION_DEG[0],CONTROLMESSAGE.FIN_DEFLECTION_DEG[1],CONTROLMESSAGE.FIN_DEFLECTION_DEG[2],CONTROLMESSAGE.FIN_DEFLECTION_DEG[3]" name="Fin Deflection Deg" {
+                    color 100 72 168
+                    color 176 98 62
+                    color 201 147 54
+                    color 157 75 42
+                }
+            }
+            graph "GPSPOSMESSAGE1.HACC,GPSPOSMESSAGE1.VACC" name="GPS HACC / VACC" share=1.0 {
+                color 0 150 136
+                color 255 87 34
+            }
+        }
+        viewport frame=ECEF name=Blank near=0.1 pos="(0,0,0,1,0,-8,1.5)" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_view_cube=#false share=1.86731 show_frustum=#true show_grid=#false far=15000000.0
+    }
+    hsplit name="Intercept" {
+        vsplit {
+            // Over-the-shoulder: subject fills the near field, counterpart ahead as icon.
+            viewport frame=ECEF name="Missile → Target" near=0.1 far=15000000.0 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-3.5,0.6,1.0)" look_at="(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" show_grid=#false show_view_cube=#false show_frustum=#false
+            viewport frame=ECEF name="Target → Missile" near=0.1 far=15000000.0 pos="(0,0,0,1,2.5,2.0,1.0) + (0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#false show_view_cube=#false show_frustum=#false
+        }
+        vsplit {
+            // Fixed top-down over mid-engagement corridor (SITL ~E=-2.5km, N=-0.9km).
+            // Dual XY query_plot overlay is not supported yet — see docs/design-query-plot-multi-series-xy.md.
+            // Corridor cams stay ENU-local (Mojave origin); hard-coded ECEF equivalents not available yet.
+            viewport name="Trajectory Top-Down" near=0.1 far=15000000.0 fov=60.0 pos="(0,0,0,1,-2450,-870,6500)" look_at="(0,0,0,1,-2450,-870,0)" show_grid=#false show_view_cube=#false show_frustum=#false
+            // Fixed side profile at ~1 km altitude; does not track missile/target.
+            // Corridor runs roughly launch→SW; camera sits south looking north at intercept altitude.
+            viewport name="Trajectory Side View" near=0.1 far=15000000.0 fov=50.0 pos="(0,0,0,1,-2450,-5200,1000)" look_at="(0,0,0,1,-2450,-870,1000)" show_grid=#false show_view_cube=#false show_frustum=#false
+        }
+    }
+    hsplit name="Fins and Strake Cams" {
+        vsplit share=0.8 {
+            viewport frame=ECEF name="Full View" near=0.1 pos="(0,0,0,0,0,1,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#false show_view_cube=#false show_frustum=#true far=15000000.0
+            tabs {
+                viewport frame=ECEF name="Fixed Fin Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-1.2,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)" show_grid=#false show_view_cube=#false show_frustum=#false
+                viewport frame=ECEF name="Fin Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-1.2,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#false show_view_cube=#false
+            }
+        }
+        vsplit share=0.8 {
+            tabs {
+            viewport frame=ECEF name="Strake Fin 1 Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,-0.07,-0.07)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)" show_grid=#false show_view_cube=#false
+            viewport frame=ECEF name="Strake Fin 3 Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,0.07,0.07)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)" show_grid=#false show_view_cube=#false
+            }
+            // This ~2000m estimate for the vehicle camera far plane came from Anna. Pointed up 7 degrees.
+            viewport frame=ECEF name="Vehicle Camera" aspect=1.0 far=2000 near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(1.1,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(0.9925,0,0.1218)" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)" show_grid=#false show_view_cube=#false create_frustum=#true frustums_thickness=0.01
+        }
+        viewport frame=ECEF name=Blank near=0.1 pos="(0,0,0,1,0,-8,1.5)" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_view_cube=#false share=1.86731 show_frustum=#true show_grid=#false
+    }
+    hsplit name=Dynamics {
+        vsplit name="World Info" share=1.661305 {
+            viewport frame=ECEF name=Missile near=0.1 pos="(0,0,0,0, 0.5,-5,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#false share=1.5 show_frustum=#true show_view_cube=#false
+            viewport frame=ECEF name=Target near=0.1 pos="(0,0,0,0, 1,-10,4) + (0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" look_at="(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" show_grid=#false share=0.639168 show_frustum=#true show_view_cube=#false
+            // 2x2 vehicle kinematics (same treatment as Dynamics and Fin Cams).
+            hsplit name="Vehicle Kinematics" share=1.810617 {
+                vsplit {
+                    graph "NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]" name="Vehicle Pos ECEF" {
+                        color 76 175 80
+                        color 33 150 243
+                        color 255 193 7
+                    }
+                    graph "MFNAVELODINENUMESSAGE.WORLD_ACCEL[0],MFNAVELODINENUMESSAGE.WORLD_ACCEL[1],MFNAVELODINENUMESSAGE.WORLD_ACCEL[2]" name="Vehicle Accel" {
+                        color 244 67 54
+                        color 255 152 0
+                        color 156 39 176
+                    }
+                }
+                vsplit {
+                    graph "MFNAVELODINENUMESSAGE.VEL_ENU[0],MFNAVELODINENUMESSAGE.VEL_ENU[1],MFNAVELODINENUMESSAGE.VEL_ENU[2]" name="Vehicle Vel ENU" {
+                        color 76 175 80
+                        color 33 150 243
+                        color 255 193 7
+                    }
+                    graph "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[0],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[1],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[2]" name="Gyro Body Deg" {
+                        color 108 60 40
+                        color 132 93 40
+                        color 82 31 20
+                    }
+                }
+            }
+            hsplit share=0.550215 {
+                graph "EKFTARGETMESSAGE.POS_ECEF[0],EKFTARGETMESSAGE.POS_ECEF[1],EKFTARGETMESSAGE.POS_ECEF[2]" name="Target Pos ECEF" {
+                    color 212 10 10
+                    color 255 87 34
+                    color 255 152 0
+                }
+                graph "MFNAVELODINENUMESSAGE.TARG_VEL_ENU[0],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[1],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[2]" name="Target Vel ENU" {
+                    color 10 10 212
+                    color 63 81 181
+                    color 33 150 243
+                }
+            }
+        }
+        vsplit name="Debug Info" share=2.838696 {
+            graph "STATEMACHINEOUTPUT.MISSILE_MODE,GUIDANCEMESSAGE.GUIDANCE_MODE,TARGETMESSAGE.TARGET_MODE,MFNAVELODINENUMESSAGE.TIME_MONOTONIC" name="Modes + Time" share=1.0 {
+                color 76 175 80
+                color 33 150 243
+                color 255 87 34
+                color 158 158 158
+            }
+            hsplit name=Angles share=1.0 {
+                graph "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[0],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[1],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[2],GUIDANCEMESSAGE.BODY_ROLL_ANGLE" name="YPR + Body Roll" {
+                    color 76 175 80
+                    color 33 150 243
+                    color 255 193 7
+                    color 233 30 99
+                }
+                graph "MFPIMUMESSAGE.GYRO.X,MFPIMUMESSAGE.GYRO.Y,MFPIMUMESSAGE.GYRO.Z" name="PIMU Gyro" {
+                    color 108 60 40
+                    color 132 93 40
+                    color 82 31 20
+                }
+                graph "MFPIMUMESSAGE.ACCEL.X,MFPIMUMESSAGE.ACCEL.Y,MFPIMUMESSAGE.ACCEL.Z" name="PIMU Accel" {
+                    color 155 113 48
+                    color 107 39 23
+                    color 36 60 102
+                }
+            }
+            hsplit share=1.0 {
+                graph "TRACKERMESSAGE.LOS_NED[0],TRACKERMESSAGE.LOS_NED[1],TRACKERMESSAGE.LOS_NED[2]" name="LOS NED" {
+                    color 255 255 255
+                    color 189 189 189
+                    color 117 117 117
+                }
+                graph "GUIDANCEMESSAGE.ACC_CMD_NED[0],GUIDANCEMESSAGE.ACC_CMD_NED[1],GUIDANCEMESSAGE.ACC_CMD_NED[2]" name="Acc Cmd NED" {
+                    color 0 188 212
+                    color 0 150 136
+                    color 63 81 181
+                }
+                graph "CONTROLMESSAGE.ACC_CMD_BODY[0],CONTROLMESSAGE.ACC_CMD_BODY[1]" name="Acc Cmd Body" {
+                    color 108 60 40
+                    color 132 93 40
+                }
+            }
+            hsplit share=1.0 {
+                graph "TRACKERMESSAGE.LOS_RATE_NED[0],TRACKERMESSAGE.LOS_RATE_NED[1],TRACKERMESSAGE.LOS_RATE_NED[2]" name="LOS Rate NED" {
+                    color 255 235 59
+                    color 255 193 7
+                    color 255 152 0
+                }
+                graph "CONTROLMESSAGE.ACC_MEAS_BODY[0],CONTROLMESSAGE.ACC_MEAS_BODY[1]" name="Acc Meas Body" {
+                    color 132 93 40
+                    color 82 31 20
+                }
+            }
+            hsplit share=1.0 {
+                graph "TRACKERMESSAGE.RANGE_TO_GO" name="Range To Go" {
+                    color 244 67 54
+                }
+                graph "CONTROLMESSAGE.DYNAMIC_COMMANDED" name="Dynamic Commanded" {
+                    color 156 39 176
+                }
+            }
+            hsplit share=1.0 {
+                graph "CONTROLMESSAGE.PITCH_PID" name="Pitch PID" {
+                    color 33 150 243
+                }
+                graph "CONTROLMESSAGE.YAW_PID" name="Yaw PID" {
+                    color 76 175 80
+                }
+            }
+            hsplit share=1.0 {
+                graph "CONTROLMESSAGE.ROLL_PID" name="Roll PID" {
+                    color 255 152 0
+                }
+                graph "CONTROLMESSAGE.FIN_DEFLECTION_DEG[0],CONTROLMESSAGE.FIN_DEFLECTION_DEG[1],CONTROLMESSAGE.FIN_DEFLECTION_DEG[2],CONTROLMESSAGE.FIN_DEFLECTION_DEG[3]" name="Fin Deflection Deg" {
+                    color 100 72 168
+                    color 176 98 62
+                    color 201 147 54
+                    color 157 75 42
+                }
+            }
+        }
+    }
+    viewport frame=ECEF name=Full_View near=0.1 pos="(0,0,0,0, 0.5,-5,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#false show_view_cube=#true show_frustum=#true
+}
+
+
+object_3d frame=ECEF "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" {
+    glb path="models/fixed_wing.glb"
+    icon builtin=star {
+        visibility_range min=50.0 fade_distance=50.0
+        color 212 10 10
+    }
+}
+// Blue star also on target ECEF (kept for visual contrast with red).
+object_3d frame="ECEF" "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" {
+    glb path="models/fixed_wing.glb"
+    icon builtin=star {
+        visibility_range min=50.0 fade_distance=50.0
+        color 10 10 212
+    }
+}
+
+// object_3d frame=ECEF "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" {
+//     // TODO: This scale isn't accounting for this being in the ECEF frame currently.
+//     ellipsoid scale="TARGETMESSAGE.STD_POS_ECEF" show_grid=#true {
+//     //ellipsoid scale="(12.0,12.0,12.0)" show_grid=#true {
+//         color 0 188 212 40
+//         grid_color 255 255 255 120
+//     }
+// }
+
+object_3d frame=ECEF orientation=absolute "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" {
+    // k ~= 1.91 for 70% confidence interval
+    // TODO: NED is not correct here. It ought to be ENU. We _should_ be able to express it like this:
+    // scale="k*(x[1], x[0], x[2])" but there is an Elodin bug that prevents that.
+    // NOTE: No minus for x[2] since these are standard variations.
+
+    ellipsoid error_covariance="NAKEKFCOV.PPOS_ECEF" show_grid=#true error_confidence_interval=95 {
+    //ellipsoid scale="1.91*(NAVNED.STD_POS_NED[1], NAVNED.STD_POS_NED[0], NAVNED.STD_POS_NED[2])" show_grid=#true {
+        color 0 212 188 20
+        grid_color 255 255 255 120
+    }
+}
+
+object_3d frame=ECEF "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" {
+    glb path="models/articulated-missile-ghost-fins.glb"
+    animate joint=FinGhost_0 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)"
+    animate joint=FinGhost_1 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[1], 0)"
+    animate joint=FinGhost_2 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[2], 0)"
+    animate joint=FinGhost_3 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[3], 0)"
+    animate joint=Root.Fin_0 rotation_vector="(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    animate joint=Root.Fin_1 rotation_vector="(0, CANOPENMOTORMESSAGE1.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    animate joint=Root.Fin_2 rotation_vector="(0, CANOPENMOTORMESSAGE2.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    animate joint=Root.Fin_3 rotation_vector="(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    icon builtin=rocket_launch {
+        color 76 175 80
+        visibility_range min=50.0 fade_distance=50.0
+    }
+    // TODO: This should be accel.norm() but that wasn't working for some reason.
+    thruster name="motor" effect="plume" intensity="MFIMUMESSAGE.ACCEL.Z/9.8 - 1.0" direction="(-1, 0, 0)" emission_rate=1300.0 cutoff=0.10 body_frame=#true position="(-0.6,0,0)"
+
+}
+
+object_3d frame=ECEF frame_orientation=ENU "(0,0,0,1, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" {
+    glb path="models/compass.glb"
+}
+line_3d frame=ECEF "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" perspective=#false {
+    color 255 0 0
+}
+
+line_3d frame=ECEF "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" perspective=#false {
+    color 0 0 255
+}
+
+// TODO: I don't see this in the scene.
+// line_3d frame=ECEF "(0, 0, 0, 1, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" perspective=#false {
+//     color 255 255 0
+// }
+
+line_3d frame=ECEF "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" perspective=#false {
+    color 0 255 0
+}
+
+// Requires running some scripts. Will avoid for now.
+//world_mesh "globe" frame=ECEF
+
+object_3d frame=ECEF "(0,0,0,1,0,0,0)" {
+    glb path="models/earth.glb" emissivity=0.4 glow=0.5
+}
+
+// vector_arrow "(1, 0, 0)" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Orientation X" body_frame=#true {
+//     color 255 0 0
+// }
+// vector_arrow "(0, 1, 0)" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Orientation Y" body_frame=#true {
+//     color 0 255 0
+// }
+// vector_arrow "(0, 0, 1)" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Orientation Z" body_frame=#true {
+//     color 0 0 255
+// }
+// vector_arrow "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])" origin="MFNAVELODINENUMESSAGE.WORLD_POS + (0,0,0,0,  0,0,0)" scale=0.1 name="Rocket Linear Velocity" {
+//     color 255 255 0
+// }
+// vector_arrow "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Commanded Acceleration" body_frame=#true {
+//     color 0 255 255
+// }
+// vector_arrow "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Measured Acceleration" body_frame=#true {
+//     color 255 0 255
+// }
+// vector_arrow "(TRACKERMESSAGE.LOS_NED[1], TRACKERMESSAGE.LOS_NED[0], 0) - (0, 0, TRACKERMESSAGE.LOS_NED[2])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Target Controls LOS" {
+//     color 255 255 255
+// }
+// vector_arrow "(0,0,1)" origin="(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" scale=50.0 name="Target Visibility" {
+//     color 255 0 0
+// }
+// window screen=1 {
+//     rect 0 0 100 100
+// }
+window

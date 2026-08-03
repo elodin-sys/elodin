@@ -1,0 +1,305 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.TIME_GPS",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.SATELLITES_USED",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.LATENCY",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.STATUS",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GPSPOSMESSAGE1.ALERT_FLAG",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINE.MISSILE_MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.015625,
+                  "1": 0.015625,
+                  "2": 0.015625,
+                  "3": 0.015625,
+                  "4": 0.015625,
+                  "5": 0.015625,
+                  "6": 0.015625,
+                  "7": 0.015625
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSPOSMESSAGE1.LLA",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GPSVELMESSAGE1.VEL_ECEF",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "GPSPOSMESSAGE1.HACC",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "GPSPOSMESSAGE1.VACC",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.5647059082984924,
+                                    "g": 0.5098039507865906,
+                                    "r": 0.3529411852359772
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.658823549747467,
+                                    "g": 0.2823529541492462,
+                                    "r": 0.3921568691730499
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.24313725531101227,
+                                    "g": 0.3843137323856354,
+                                    "r": 0.6901960968971252
+                                  }
+                                ],
+                                "eql": "GPSPOSMESSAGE1.LLA[0],GPSPOSMESSAGE1.LLA[1],GPSPOSMESSAGE1.LLA[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Graph",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.239215686917305,
+                                    "g": 0.40784314274787903,
+                                    "r": 0.239215686917305
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.2823529541492462,
+                                    "g": 0.22745098173618317,
+                                    "r": 0.1725490242242813
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.47843137383461,
+                                    "g": 0.13725490868091583,
+                                    "r": 0.20000000298023224
+                                  }
+                                ],
+                                "eql": "GPSVELMESSAGE1.VEL_ECEF[0],GPSVELMESSAGE1.VEL_ECEF[1],GPSVELMESSAGE1.VEL_ECEF[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Graph",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "GPSVELMESSAGE1.SACC",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "Tabs": [
+                                  {
+                                    "ComponentMonitor": {
+                                      "component_name": "GPSPOSMESSAGE1.POS_ECEF",
+                                      "name": null
+                                    }
+                                  }
+                                ]
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.3619979918003082,
+            "1": 1.6380020380020142
+          }
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

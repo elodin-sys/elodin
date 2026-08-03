@@ -1,0 +1,59 @@
+// Lean cinematic check schematic for visual_check.py (no FSW).
+// __ACTIVE_CAMERA__ is replaced with Chase or Landing per scenario.
+
+coordinate frame="ECEF"
+timeline follow_latest=#true range="last_5s"
+
+environment {
+    sun azimuth=146.58 elevation=55.41 illuminance=100000.0 shadows=#true
+    ambient scale=0.05
+    atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
+}
+
+tabs {
+    viewport name="Chase" fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false __CHASE_ACTIVE__ {
+        bloom preset="old_school" intensity=0.28
+    }
+    // Body frame on lz1: +Y = local up (surface_attitude). Stand off to see the deck.
+    viewport name="Landing" fov=40.0 near=1.0 far=40000000.0 pos="lz1.world_pos.translate(140.0, 50.0, 160.0)" look_at="lz1.world_pos" up="(0.1444, -0.8670, 0.4769)" hdr=#true ev100=12.5 show_grid=#false __LANDING_ACTIVE__ {
+        bloom preset="old_school" intensity=0.2
+    }
+}
+
+object_3d frame="ECEF" orientation=absolute earth.world_pos {
+    glb path="earth.glb"
+}
+
+object_3d orientation=absolute booster.world_pos {
+    glb path="falcon9.glb" rotate="(0, 0, -90)" scale=0.9944
+    thruster name="merlin" effect="effects/falcon9/merlin_core.effect" body_frame=#true position="(-1.2, 0, 0)" intensity="booster.plume_viz" {
+        effect "effects/falcon9/merlin_flame.effect"
+        light color="(1.0, 0.83, 0.58)" intensity=30000000.0 range=120.0 offset=6.0
+    }
+    thruster name="exhaust_smoke" effect="effects/falcon9/exhaust_smoke.effect" body_frame=#true position="(-8, 0, 0)" direction="(-1, 0, 0)" intensity="booster.smoke_viz[0]" cutoff=0.01
+    thruster name="rcs_0" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[0]" cutoff=0.003
+    thruster name="rcs_1" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[1]" cutoff=0.003
+    thruster name="rcs_2" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, -1)" intensity="booster.rcs_levels[2]" cutoff=0.003
+    thruster name="rcs_3" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 0, 1)" intensity="booster.rcs_levels[3]" cutoff=0.003
+    thruster name="rcs_4" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[4]" cutoff=0.003
+    thruster name="rcs_5" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, 1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[5]" cutoff=0.003
+    thruster name="rcs_6" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, 1, 0)" intensity="booster.rcs_levels[6]" cutoff=0.003
+    thruster name="rcs_7" effect="effects/falcon9/rcs_dart.effect" body_frame=#true position="(46.0, -1.83, 0.0)" direction="(0, -1, 0)" intensity="booster.rcs_levels[7]" cutoff=0.003
+}
+
+object_3d orientation=absolute pad.world_pos {
+    sphere radius=0.02
+    thruster name="pad_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.pad_smoke_viz[0]" cutoff=0.01
+}
+
+object_3d orientation=absolute lz1.world_pos {
+    // Y-up deck-centered barge (~52×96 m); see falcon9.kdl.
+    glb path="spacex_drone_barge.glb"
+    thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
+}
+
+object_3d orientation=absolute ground.world_pos {
+    cylinder radius=10000.0 height=4.0 {
+        color 51 56 46
+    }
+}
