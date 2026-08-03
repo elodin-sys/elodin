@@ -89,6 +89,12 @@ pub(crate) fn spawn_world_mesh_terrain(
 
     match config {
         WorldMeshConfig::Terrain(config) => {
+            if has_nonzero_translation(world_mesh.translate) {
+                bevy::log::warn!(
+                    "schematic world_mesh region={region:?} has a non-zero translation; the translation is rendered via the geo anchor, but terrain tile LOD selection remains origin-relative, so detail selection may be incorrect"
+                );
+            }
+
             let tile_atlas = TileAtlas::new(&config);
             let mut terrain_bundle = TerrainBundle::new(tile_atlas);
             terrain_bundle.visibility = world_mesh_visibility(world_mesh);
@@ -141,6 +147,10 @@ fn spawn_world_mesh_terrain_bundle(
     insert_geo_components(commands, anchor, world_mesh);
     insert_big_space_cell(commands, anchor);
     anchor
+}
+
+fn has_nonzero_translation(translate: Option<(f64, f64, f64)>) -> bool {
+    matches!(translate, Some((x, y, z)) if x != 0.0 || y != 0.0 || z != 0.0)
 }
 
 fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
@@ -525,6 +535,13 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy_geo_frames::{GeoContext, GeoFrame};
     use impeller2_wkt::{NodeId, WorldMesh};
+
+    #[test]
+    fn translation_warning_requires_a_nonzero_component() {
+        assert!(!has_nonzero_translation(None));
+        assert!(!has_nonzero_translation(Some((0.0, 0.0, 0.0))));
+        assert!(has_nonzero_translation(Some((0.0, -1.0, 0.0))));
+    }
 
     #[test]
     fn planar_lod_count_defaults_to_preprocessed_depth() {
