@@ -1,0 +1,78 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "FINHEALTHMESSAGE.MOTOR_1_HEALTH",
+                      "name": "FINHEALTHMESSAGE.MOTOR_1_HEALTH"
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "FINHEALTHMESSAGE.TIME_MONOTONIC",
+                      "name": "FINHEALTHMESSAGE.TIME_MONOTONIC"
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 0.4361410140991211,
+                  "1": 1.5638580322265625
+                }
+              }
+            },
+            {
+              "ComponentMonitor": {
+                "component_name": "FINHEALTHMESSAGE.MOTOR_0_HEALTH",
+                "name": "FINHEALTHMESSAGE.MOTOR_0_HEALTH"
+              }
+            },
+            {
+              "ComponentMonitor": {
+                "component_name": "FINHEALTHMESSAGE.MOTOR_2_HEALTH",
+                "name": "FINHEALTHMESSAGE.MOTOR_2_HEALTH"
+              }
+            },
+            {
+              "ComponentMonitor": {
+                "component_name": "FINHEALTHMESSAGE.MOTOR_3_HEALTH",
+                "name": "FINHEALTHMESSAGE.MOTOR_3_HEALTH"
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.5,
+            "1": 0.2988559901714325,
+            "2": 0.4511440098285675,
+            "3": 0.25
+          }
+        }
+      }
+    },
+    {
+      "Window": {
+        "path": null,
+        "screen": null,
+        "screen_rect": null,
+        "title": null
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}
