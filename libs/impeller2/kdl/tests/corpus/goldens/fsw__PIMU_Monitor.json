@@ -1,0 +1,295 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFPIMUMESSAGE.GYRO",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFPIMUMESSAGE.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1568627506494522,
+                              "g": 0.23529411852359772,
+                              "r": 0.42352941632270813
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.1568627506494522,
+                              "g": 0.364705890417099,
+                              "r": 0.5176470875740051
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.0784313753247261,
+                              "g": 0.12156862765550613,
+                              "r": 0.32156863808631897
+                            }
+                          ],
+                          "eql": "MFPIMUMESSAGE.GYRO.X, MFPIMUMESSAGE.GYRO.Y, MFPIMUMESSAGE.GYRO.Z",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "MFPIMUMESSAGE.GYRO[0]",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5414289832115173,
+                  "1": 0.6134420037269592,
+                  "2": 1.845126986503601
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MFPIMUMESSAGE.ACCEL",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1882352977991104,
+                              "g": 0.4431372582912445,
+                              "r": 0.6078431606292725
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.09019608050584793,
+                              "g": 0.15294118225574493,
+                              "r": 0.41960784792900085
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.4000000059604645,
+                              "g": 0.23529411852359772,
+                              "r": 0.1411764770746231
+                            }
+                          ],
+                          "eql": "MFPIMUMESSAGE.ACCEL.X, MFPIMUMESSAGE.ACCEL.Y, MFPIMUMESSAGE.ACCEL.Z",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "MFPIMUMESSAGE.ACCEL[0]",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5392959713935852,
+                  "1": 0.6177089810371399,
+                  "2": 1.8429930210113525
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MAGMESSAGE.MAG",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MAGMESSAGE.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.3450980484485626,
+                              "g": 0.16470588743686676,
+                              "r": 0.10980392247438431
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.239215686917305,
+                              "g": 0.40784314274787903,
+                              "r": 0.239215686917305
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.2823529541492462,
+                              "g": 0.22745098173618317,
+                              "r": 0.1725490242242813
+                            }
+                          ],
+                          "eql": "MAGMESSAGE.MAG.X, MAGMESSAGE.MAG.Y, MAGMESSAGE.MAG.Z",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "MAGMESSAGE.MAG[0]",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5286269783973694,
+                  "1": 0.6294450163841248,
+                  "2": 1.8419280052185059
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "BARMESSAGE.PRESSURE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "BARMESSAGE.TEMPERATURE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.3921568691730499,
+                              "g": 0.0941176488995552,
+                              "r": 0.14509804546833038
+                            }
+                          ],
+                          "eql": "BARMESSAGE.PRESSURE",
+                          "graph_type": "Point",
+                          "locked": false,
+                          "name": "BARMESSAGE.PRESSURE[0]",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.4210459887981415,
+                  "2": 1.4583569765090942
+                }
+              }
+            }
+          ],
+          "shares": {}
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

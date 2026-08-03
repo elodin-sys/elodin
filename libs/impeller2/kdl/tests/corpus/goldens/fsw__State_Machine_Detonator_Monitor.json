@@ -1,0 +1,202 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "DETONATORMESSAGE.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINEOUTPUT.SWITCH_FLAG",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINEOUTPUT.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "DETONATORMESSAGE.DETONATOR_STATE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.5647059082984924,
+                              "g": 0.5098039507865906,
+                              "r": 0.3529411852359772
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.658823549747467,
+                              "g": 0.2823529541492462,
+                              "r": 0.3921568691730499
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.24313725531101227,
+                              "g": 0.3843137323856354,
+                              "r": 0.6901960968971252
+                            }
+                          ],
+                          "eql": "GPSPOSMESSAGE1.LLA[0],GPSPOSMESSAGE1.LLA[1],GPSPOSMESSAGE1.LLA[2]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.3921568691730499,
+                              "g": 0.0941176488995552,
+                              "r": 0.14509804546833038
+                            }
+                          ],
+                          "eql": "BARMESSAGE.PRESSURE[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.3450980484485626,
+                              "g": 0.16470588743686676,
+                              "r": 0.10980392247438431
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.239215686917305,
+                              "g": 0.40784314274787903,
+                              "r": 0.239215686917305
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.2823529541492462,
+                              "g": 0.22745098173618317,
+                              "r": 0.1725490242242813
+                            }
+                          ],
+                          "eql": "NAVNED.POS_NED[0],NAVNED.POS_NED[1],NAVNED.POS_NED[2]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {}
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

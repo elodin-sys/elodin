@@ -1,0 +1,70 @@
+vsplit {
+    hsplit share=0.3619976341724396 {
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.TIME_MONOTONIC
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.TIME_GPS
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.SATELLITES_USED
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.LATENCY
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.STATUS
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.MODE
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=GPSPOSMESSAGE1.ALERT_FLAG
+        }
+        tabs share=0.015625 {
+            component_monitor component_name=STATEMACHINE.MISSILE_MODE
+        }
+    }
+    hsplit share=1.638001799583435 {
+        vsplit {
+            tabs {
+                component_monitor component_name=GPSPOSMESSAGE1.LLA
+            }
+            tabs {
+                component_monitor component_name=GPSVELMESSAGE1.VEL_ECEF
+            }
+            hsplit {
+                tabs {
+                    component_monitor component_name=GPSPOSMESSAGE1.HACC
+                }
+                tabs {
+                    component_monitor component_name=GPSPOSMESSAGE1.VACC
+                }
+            }
+        }
+        vsplit {
+            tabs {
+                graph "GPSPOSMESSAGE1.LLA[0],GPSPOSMESSAGE1.LLA[1],GPSPOSMESSAGE1.LLA[2]" name=Graph {
+                    color 90 130 144
+                    color 100 72 168
+                    color 176 98 62
+                }
+            }
+            tabs {
+                graph "GPSVELMESSAGE1.VEL_ECEF[0],GPSVELMESSAGE1.VEL_ECEF[1],GPSVELMESSAGE1.VEL_ECEF[2]" name=Graph {
+                    color 61 104 61
+                    color 44 58 72
+                    color 51 35 122
+                }
+            }
+            hsplit {
+                tabs {
+                    component_monitor component_name=GPSVELMESSAGE1.SACC
+                }
+                tabs {
+                    component_monitor component_name=GPSPOSMESSAGE1.POS_ECEF
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,49 @@
+vsplit {
+    hsplit share=0.6425960659980774 {
+        vsplit share=0.9274197220802307 {
+            tabs {
+                component_monitor component_name=TARGETMESSAGE.POS_ECEF
+            }
+            tabs {
+                graph "TARGETMESSAGE.POS_ECEF[0],TARGETMESSAGE.POS_ECEF[1],TARGETMESSAGE.POS_ECEF[2]" name=Graph {
+                    color 182 136 48
+                    color 130 54 33
+                    color 44 75 123
+                }
+            }
+        }
+        vsplit share=0.7020876407623291 {
+            hsplit {
+                tabs share=0.5 {
+                    component_monitor component_name=TARGETMESSAGE.TIME_MONOTONIC
+                }
+                tabs share=0.5 {
+                    component_monitor component_name=TARGETMESSAGE.LATENCY
+                }
+            }
+            tabs {
+                component_monitor component_name=TARGETMESSAGE.TOW
+            }
+        }
+        vsplit share=0.3704933822154999 {
+            tabs {
+                component_monitor component_name=TARGETMESSAGE.TARGET_MODE
+            }
+            tabs {
+                component_monitor component_name=TARGETMESSAGE.WEEK
+            }
+        }
+    }
+    hsplit share=0.3574037551879883 {
+        tabs {
+            component_monitor component_name=TARGETMESSAGE.VEL_ECEF
+        }
+        tabs {
+            graph "TARGETMESSAGE.POS_ECEF[0],TARGETMESSAGE.POS_ECEF[1],TARGETMESSAGE.POS_ECEF[2]" name=Graph {
+                color 182 136 48
+                color 130 54 33
+                color 44 75 123
+            }
+        }
+    }
+}

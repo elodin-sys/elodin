@@ -1,0 +1,966 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Viewport": {
+                      "active": true,
+                      "aspect": null,
+                      "bloom": {
+                        "intensity": 0.2800000011920929,
+                        "preset": "old_school",
+                        "threshold": null,
+                        "threshold_softness": null
+                      },
+                      "create_frustum": false,
+                      "effects": true,
+                      "ev100": 13.5,
+                      "far": 40000000.0,
+                      "fov": 24.0,
+                      "frame": null,
+                      "frustums_color": {
+                        "a": 1.0,
+                        "b": 0.0,
+                        "g": 1.0,
+                        "r": 1.0
+                      },
+                      "frustums_thickness": 0.006000000052154064,
+                      "hdr": true,
+                      "local_arrows": [],
+                      "look_at": "booster.world_pos.translate_world(1.433, -8.661, 4.788)",
+                      "name": "Chase",
+                      "near": 1.0,
+                      "node_id": 0,
+                      "pos": "booster.world_pos.translate_world(66.772, -143.641, -206.721)",
+                      "projection_color": {
+                        "a": 1.0,
+                        "b": 1.0,
+                        "g": 1.0,
+                        "r": 1.0
+                      },
+                      "show_arrows": true,
+                      "show_frustums": false,
+                      "show_grid": false,
+                      "show_view_cube": true,
+                      "up": "(0.1433, -0.8661, 0.4788)"
+                    }
+                  },
+                  {
+                    "VSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Graph": {
+                                  "auto_y_range": true,
+                                  "colors": [
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 0.0,
+                                      "r": 0.0
+                                    },
+                                    {
+                                      "a": 1.0,
+                                      "b": 0.0,
+                                      "g": 1.0,
+                                      "r": 0.0
+                                    }
+                                  ],
+                                  "eql": "booster.ground_speed[0], booster_truth.ground_speed[0]",
+                                  "graph_type": "Line",
+                                  "locked": false,
+                                  "name": "Speed vs recorded (m/s)",
+                                  "node_id": 0,
+                                  "y_range": {
+                                    "end": 1.0,
+                                    "start": 0.0
+                                  }
+                                }
+                              },
+                              {
+                                "Graph": {
+                                  "auto_y_range": true,
+                                  "colors": [
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 1.0,
+                                      "r": 1.0
+                                    }
+                                  ],
+                                  "eql": "booster.mach[0]",
+                                  "graph_type": "Line",
+                                  "locked": false,
+                                  "name": "Mach",
+                                  "node_id": 0,
+                                  "y_range": {
+                                    "end": 1.0,
+                                    "start": 0.0
+                                  }
+                                }
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        },
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Graph": {
+                                  "auto_y_range": true,
+                                  "colors": [
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 0.0,
+                                      "r": 0.0
+                                    },
+                                    {
+                                      "a": 1.0,
+                                      "b": 0.0,
+                                      "g": 1.0,
+                                      "r": 0.0
+                                    }
+                                  ],
+                                  "eql": "booster.altitude_geodetic[0], booster_truth.altitude_geodetic[0]",
+                                  "graph_type": "Line",
+                                  "locked": false,
+                                  "name": "Altitude vs recorded (m)",
+                                  "node_id": 0,
+                                  "y_range": {
+                                    "end": 1.0,
+                                    "start": 0.0
+                                  }
+                                }
+                              },
+                              {
+                                "Graph": {
+                                  "auto_y_range": true,
+                                  "colors": [
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 1.0,
+                                      "r": 0.0
+                                    },
+                                    {
+                                      "a": 1.0,
+                                      "b": 0.0,
+                                      "g": 0.5,
+                                      "r": 1.0
+                                    },
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 0.0,
+                                      "r": 0.0
+                                    },
+                                    {
+                                      "a": 1.0,
+                                      "b": 0.0,
+                                      "g": 0.0,
+                                      "r": 1.0
+                                    }
+                                  ],
+                                  "eql": "booster.tank_pressure_lox[0], booster.tank_pressure_rp1[0], booster.inlet_pressure_lox[0], booster.inlet_pressure_rp1[0]",
+                                  "graph_type": "Line",
+                                  "locked": false,
+                                  "name": "Tank + inlet pressures (Pa)",
+                                  "node_id": 0,
+                                  "y_range": {
+                                    "end": 1.0,
+                                    "start": 0.0
+                                  }
+                                }
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        },
+                        {
+                          "HSplit": {
+                            "active": false,
+                            "name": null,
+                            "panels": [
+                              {
+                                "Graph": {
+                                  "auto_y_range": true,
+                                  "colors": [
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 1.0,
+                                      "r": 0.0
+                                    },
+                                    {
+                                      "a": 1.0,
+                                      "b": 0.0,
+                                      "g": 0.5,
+                                      "r": 1.0
+                                    }
+                                  ],
+                                  "eql": "booster.propellant_lox[0], booster.propellant_rp1[0]",
+                                  "graph_type": "Line",
+                                  "locked": false,
+                                  "name": "Propellant (kg)",
+                                  "node_id": 0,
+                                  "y_range": {
+                                    "end": 1.0,
+                                    "start": 0.0
+                                  }
+                                }
+                              },
+                              {
+                                "Graph": {
+                                  "auto_y_range": true,
+                                  "colors": [
+                                    {
+                                      "a": 1.0,
+                                      "b": 1.0,
+                                      "g": 1.0,
+                                      "r": 1.0
+                                    }
+                                  ],
+                                  "eql": "booster.nitrogen_kg[0]",
+                                  "graph_type": "Line",
+                                  "locked": false,
+                                  "name": "RCS nitrogen (kg)",
+                                  "node_id": 0,
+                                  "y_range": {
+                                    "end": 1.0,
+                                    "start": 0.0
+                                  }
+                                }
+                              }
+                            ],
+                            "shares": {}
+                          }
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 0.7200000286102295,
+                  "1": 0.2800000011920929
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [
+                        {
+                          "a": 1.0,
+                          "b": 0.0,
+                          "g": 1.0,
+                          "r": 1.0
+                        }
+                      ],
+                      "eql": "booster.fsw_phase[0]",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "Mission phase (0..11)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [
+                        {
+                          "a": 1.0,
+                          "b": 0.0,
+                          "g": 0.5,
+                          "r": 1.0
+                        }
+                      ],
+                      "eql": "booster.thrust_total[0]",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "Cluster thrust (N)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [
+                        {
+                          "a": 1.0,
+                          "b": 0.0,
+                          "g": 0.0,
+                          "r": 1.0
+                        }
+                      ],
+                      "eql": "booster.qbar[0]",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "Dynamic pressure (Pa)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [],
+                      "eql": "booster.fin_state",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "Grid fins (rad)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [],
+                      "eql": "booster.rcs_levels",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "RCS thrusters (8)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [],
+                      "eql": "booster.engine_spool",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "Engine spool (%)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [],
+                      "eql": "booster.tvc_state",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "TVC gimbal (rad)",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.75,
+            "1": 0.25
+          }
+        }
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "earth.world_pos",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "earth.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "booster.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.9411764740943909,
+            "g": 0.5098039507865906,
+            "r": 0.27450981736183167
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "rocket_launch"
+          },
+          "visibility_range": null
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "falcon9.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              -90.0
+            ],
+            "scale": 0.9944000244140625,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": [
+          {
+            "body_frame": true,
+            "cutoff": 0.019999999552965164,
+            "direction": null,
+            "effect": "effects/falcon9/merlin_core.effect",
+            "emission_rate": null,
+            "extra_effects": [
+              "effects/falcon9/merlin_flame.effect"
+            ],
+            "intensity": "booster.plume_viz",
+            "light": {
+              "color": [
+                1.0,
+                0.8299999833106995,
+                0.5799999833106995
+              ],
+              "intensity": 30000000.0,
+              "offset": 6.0,
+              "range": 120.0,
+              "shadows": false,
+              "spot_angle": null
+            },
+            "name": "merlin",
+            "position": [
+              -1.2000000476837158,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.009999999776482582,
+            "direction": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/exhaust_smoke.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.smoke_viz[0]",
+            "light": null,
+            "name": "exhaust_smoke",
+            "position": [
+              -8.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[0]",
+            "light": null,
+            "name": "rcs_0",
+            "position": [
+              46.0,
+              1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[1]",
+            "light": null,
+            "name": "rcs_1",
+            "position": [
+              46.0,
+              1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[2]",
+            "light": null,
+            "name": "rcs_2",
+            "position": [
+              46.0,
+              -1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[3]",
+            "light": null,
+            "name": "rcs_3",
+            "position": [
+              46.0,
+              -1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[4]",
+            "light": null,
+            "name": "rcs_4",
+            "position": [
+              46.0,
+              1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[5]",
+            "light": null,
+            "name": "rcs_5",
+            "position": [
+              46.0,
+              1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[6]",
+            "light": null,
+            "name": "rcs_6",
+            "position": [
+              46.0,
+              -1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          },
+          {
+            "body_frame": true,
+            "cutoff": 0.003000000026077032,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/rcs_dart.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.rcs_levels[7]",
+            "light": null,
+            "name": "rcs_7",
+            "position": [
+              46.0,
+              -1.8300000429153442,
+              0.0
+            ],
+            "scale": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "pad.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Mesh": {
+            "material": {
+              "base_color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "emissivity": 0.0
+            },
+            "mesh": {
+              "Sphere": {
+                "radius": 0.019999999552965164
+              }
+            }
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": [
+          {
+            "body_frame": true,
+            "cutoff": 0.009999999776482582,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/pad_smoke.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.pad_smoke_viz[0]",
+            "light": null,
+            "name": "pad_smoke",
+            "position": [
+              0.0,
+              2.0,
+              0.0
+            ],
+            "scale": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "lz1.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "spacex_drone_barge.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": [
+          {
+            "body_frame": true,
+            "cutoff": 0.009999999776482582,
+            "direction": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "effect": "effects/falcon9/pad_smoke.effect",
+            "emission_rate": null,
+            "extra_effects": [],
+            "intensity": "booster.landing_smoke_viz[0]",
+            "light": null,
+            "name": "lz1_smoke",
+            "position": [
+              0.0,
+              2.0,
+              0.0
+            ],
+            "scale": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "ground.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Mesh": {
+            "material": {
+              "base_color": {
+                "a": 1.0,
+                "b": 0.18039216101169586,
+                "g": 0.21960784494876862,
+                "r": 0.20000000298023224
+              },
+              "emissivity": 0.0
+            },
+            "mesh": {
+              "Cylinder": {
+                "height": 4.0,
+                "radius": 10000.0
+              }
+            }
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "booster_truth.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.3529411852359772,
+            "g": 0.7843137383460999,
+            "r": 0.23529411852359772
+          },
+          "size": 24.0,
+          "source": {
+            "Builtin": "my_location"
+          },
+          "visibility_range": null
+        },
+        "mesh": {
+          "Mesh": {
+            "material": {
+              "base_color": {
+                "a": 0.6274510025978088,
+                "b": 0.3529411852359772,
+                "g": 0.7843137383460999,
+                "r": 0.23529411852359772
+              },
+              "emissivity": 0.0
+            },
+            "mesh": {
+              "Sphere": {
+                "radius": 0.5
+              }
+            }
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 0.7843137383460999,
+          "b": 0.9411764740943909,
+          "g": 0.5098039507865906,
+          "r": 0.27450981736183167
+        },
+        "eql": "booster.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 2.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 0.6274510025978088,
+          "b": 0.3529411852359772,
+          "g": 0.7843137383460999,
+          "r": 0.23529411852359772
+        },
+        "eql": "booster_truth.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 2.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    }
+  ],
+  "environment": {
+    "ambient_scale": 0.05000000074505806,
+    "atmosphere": {
+      "ground_albedo": [
+        0.20000000298023224,
+        0.2199999988079071,
+        0.18000000715255737
+      ],
+      "inner_radius": 6373250.0,
+      "origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "outer_radius": 6473250.0,
+      "raymarched": false
+    },
+    "sky_color": null,
+    "sun": {
+      "azimuth_deg": 146.5800018310547,
+      "elevation_deg": 55.40999984741211,
+      "illuminance": 100000.0,
+      "shadows": true
+    }
+  },
+  "frame": "ECEF",
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": true,
+  "theme": null,
+  "timeline": {
+    "follow_latest": true,
+    "future_color": {
+      "a": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "played_color": {
+      "a": 1.0,
+      "b": 0.20000000298023224,
+      "g": 0.8999999761581421,
+      "r": 1.0
+    },
+    "range": "last_30s"
+  }
+}

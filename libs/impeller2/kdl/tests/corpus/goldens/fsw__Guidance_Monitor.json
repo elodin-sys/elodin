@@ -1,0 +1,145 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "HSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.TIME_MONOTONIC",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.GUIDANCE_MODE",
+                                "name": null
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {
+                        "0": 0.5,
+                        "1": 0.5
+                      }
+                    }
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "GUIDANCEMESSAGE.ACC_CMD_NED",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "HSplit": {
+                      "active": false,
+                      "name": null,
+                      "panels": [
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                                "name": null
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "Tabs": [
+                            {
+                              "ComponentMonitor": {
+                                "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                                "name": null
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "shares": {}
+                    }
+                  }
+                ],
+                "shares": {
+                  "0": 0.7726359963417053,
+                  "1": 0.4773640036582947,
+                  "2": 1.0
+                }
+              }
+            },
+            {
+              "Tabs": [
+                {
+                  "Graph": {
+                    "auto_y_range": true,
+                    "colors": [
+                      {
+                        "a": 1.0,
+                        "b": 0.5254902243614197,
+                        "g": 0.14509804546833038,
+                        "r": 0.22745098173618317
+                      },
+                      {
+                        "a": 1.0,
+                        "b": 0.1568627506494522,
+                        "g": 0.23529411852359772,
+                        "r": 0.42352941632270813
+                      },
+                      {
+                        "a": 1.0,
+                        "b": 0.1568627506494522,
+                        "g": 0.364705890417099,
+                        "r": 0.5176470875740051
+                      }
+                    ],
+                    "eql": "GUIDANCEMESSAGE.ACC_CMD_NED[0],GUIDANCEMESSAGE.ACC_CMD_NED[1],GUIDANCEMESSAGE.ACC_CMD_NED[2]",
+                    "graph_type": "Line",
+                    "locked": false,
+                    "name": "Graph",
+                    "node_id": 0,
+                    "y_range": {
+                      "end": 1.0,
+                      "start": 0.0
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "shares": {}
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

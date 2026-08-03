@@ -1,0 +1,38 @@
+hsplit {
+    vsplit {
+        tabs share=0.5 {
+            component_monitor component_name=STMDEBUGMESSAGE.PIMU_HZ
+        }
+        tabs share=0.5 {
+            component_monitor component_name=STMDEBUGMESSAGE.IMU_RAW_HZ
+        }
+        tabs share=0.25 {
+            component_monitor component_name=STMDEBUGMESSAGE.MAG_HZ
+        }
+        tabs share=0.25 {
+            component_monitor component_name=STMDEBUGMESSAGE.BARO_HZ
+        }
+    }
+    vsplit {
+        tabs share=0.5 {
+            component_monitor component_name=STMDEBUGMESSAGE.INERTIAL_SENSE_LATENCY
+        }
+        tabs share=0.5 {
+            component_monitor component_name=STMDEBUGMESSAGE.MOSAIC_LATENCY
+        }
+        hsplit share=0.5 {
+            tabs share=0.5 {
+                component_monitor component_name=STMDEBUGMESSAGE.MOSAIC_POS_HZ
+            }
+            tabs share=0.5 {
+                component_monitor component_name=STMDEBUGMESSAGE.MOSAIC_VEL_HZ
+            }
+            tabs {
+                component_monitor component_name=STMDEBUGMESSAGE.MOSAIC_PVT_OUT_HZ
+            }
+        }
+        tabs share=0.5 {
+            component_monitor component_name=STMDEBUGMESSAGE.TIME_MONOTONIC
+        }
+    }
+}

@@ -1,0 +1,2869 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Dynamics and Fin Cams",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "World Info",
+                    "panels": [
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Viewport": {
+                                      "active": false,
+                                      "aspect": null,
+                                      "bloom": null,
+                                      "create_frustum": false,
+                                      "effects": true,
+                                      "ev100": null,
+                                      "far": 15000000.0,
+                                      "fov": 45.0,
+                                      "frame": "ECEF",
+                                      "frustums_color": {
+                                        "a": 1.0,
+                                        "b": 0.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "frustums_thickness": 0.006000000052154064,
+                                      "hdr": false,
+                                      "local_arrows": [],
+                                      "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                                      "name": "Full View",
+                                      "near": 0.10000000149011612,
+                                      "node_id": 0,
+                                      "pos": "(0,0,0,0,0,2,2) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                                      "projection_color": {
+                                        "a": 1.0,
+                                        "b": 1.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "show_arrows": true,
+                                      "show_frustums": true,
+                                      "show_grid": false,
+                                      "show_view_cube": false,
+                                      "up": null
+                                    }
+                                  },
+                                  {
+                                    "Viewport": {
+                                      "active": false,
+                                      "aspect": null,
+                                      "bloom": null,
+                                      "create_frustum": false,
+                                      "effects": true,
+                                      "ev100": null,
+                                      "far": null,
+                                      "fov": 45.0,
+                                      "frame": "ECEF",
+                                      "frustums_color": {
+                                        "a": 1.0,
+                                        "b": 0.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "frustums_thickness": 0.006000000052154064,
+                                      "hdr": false,
+                                      "local_arrows": [],
+                                      "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                                      "name": "Fixed Fin Cam",
+                                      "near": 0.10000000149011612,
+                                      "node_id": 0,
+                                      "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-1.2,0,0)",
+                                      "projection_color": {
+                                        "a": 1.0,
+                                        "b": 1.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "show_arrows": true,
+                                      "show_frustums": false,
+                                      "show_grid": false,
+                                      "show_view_cube": false,
+                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)"
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Tabs": [
+                                      {
+                                        "Viewport": {
+                                          "active": false,
+                                          "aspect": null,
+                                          "bloom": null,
+                                          "create_frustum": false,
+                                          "effects": true,
+                                          "ev100": null,
+                                          "far": null,
+                                          "fov": 45.0,
+                                          "frame": "ECEF",
+                                          "frustums_color": {
+                                            "a": 1.0,
+                                            "b": 0.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "frustums_thickness": 0.006000000052154064,
+                                          "hdr": false,
+                                          "local_arrows": [],
+                                          "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
+                                          "name": "Strake Fin 1 Cam",
+                                          "near": 0.10000000149011612,
+                                          "node_id": 0,
+                                          "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,-0.07,-0.07)",
+                                          "projection_color": {
+                                            "a": 1.0,
+                                            "b": 1.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "show_arrows": true,
+                                          "show_frustums": false,
+                                          "show_grid": false,
+                                          "show_view_cube": false,
+                                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                                        }
+                                      },
+                                      {
+                                        "Viewport": {
+                                          "active": false,
+                                          "aspect": null,
+                                          "bloom": null,
+                                          "create_frustum": false,
+                                          "effects": true,
+                                          "ev100": null,
+                                          "far": null,
+                                          "fov": 45.0,
+                                          "frame": "ECEF",
+                                          "frustums_color": {
+                                            "a": 1.0,
+                                            "b": 0.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "frustums_thickness": 0.006000000052154064,
+                                          "hdr": false,
+                                          "local_arrows": [],
+                                          "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
+                                          "name": "Strake Fin 3 Cam",
+                                          "near": 0.10000000149011612,
+                                          "node_id": 0,
+                                          "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,0.07,0.07)",
+                                          "projection_color": {
+                                            "a": 1.0,
+                                            "b": 1.0,
+                                            "g": 1.0,
+                                            "r": 1.0
+                                          },
+                                          "show_arrows": true,
+                                          "show_frustums": false,
+                                          "show_grid": false,
+                                          "show_view_cube": false,
+                                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "Viewport": {
+                                      "active": false,
+                                      "aspect": 1.0,
+                                      "bloom": null,
+                                      "create_frustum": false,
+                                      "effects": true,
+                                      "ev100": null,
+                                      "far": 15000000.0,
+                                      "fov": 45.0,
+                                      "frame": "ECEF",
+                                      "frustums_color": {
+                                        "a": 1.0,
+                                        "b": 0.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "frustums_thickness": 0.009999999776482582,
+                                      "hdr": false,
+                                      "local_arrows": [],
+                                      "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(0.9925,0,0.1218)",
+                                      "name": "Vehicle Camera",
+                                      "near": 0.10000000149011612,
+                                      "node_id": 0,
+                                      "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(1.1,0,0)",
+                                      "projection_color": {
+                                        "a": 1.0,
+                                        "b": 1.0,
+                                        "g": 1.0,
+                                        "r": 1.0
+                                      },
+                                      "show_arrows": true,
+                                      "show_frustums": false,
+                                      "show_grid": false,
+                                      "show_view_cube": false,
+                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)"
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            }
+                          ],
+                          "shares": {
+                            "0": 0.800000011920929,
+                            "1": 0.800000011920929
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Vehicle Kinematics",
+                          "panels": [
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.3137255012989044,
+                                          "g": 0.686274528503418,
+                                          "r": 0.2980392277240753
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.9529411792755127,
+                                          "g": 0.5882353186607361,
+                                          "r": 0.12941177189350128
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.027450980618596077,
+                                          "g": 0.7568627595901489,
+                                          "r": 1.0
+                                        }
+                                      ],
+                                      "eql": "(NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).ecef_to_ned()",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Vehicle Pos NED",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.21176470816135406,
+                                          "g": 0.26274511218070984,
+                                          "r": 0.95686274766922
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.0,
+                                          "g": 0.5960784554481506,
+                                          "r": 1.0
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.6901960968971252,
+                                          "g": 0.15294118225574493,
+                                          "r": 0.6117647290229797
+                                        }
+                                      ],
+                                      "eql": "MFNAVELODINENUMESSAGE.WORLD_ACCEL[0],MFNAVELODINENUMESSAGE.WORLD_ACCEL[1],MFNAVELODINENUMESSAGE.WORLD_ACCEL[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Vehicle Accel",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.3137255012989044,
+                                          "g": 0.686274528503418,
+                                          "r": 0.2980392277240753
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.9529411792755127,
+                                          "g": 0.5882353186607361,
+                                          "r": 0.12941177189350128
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.027450980618596077,
+                                          "g": 0.7568627595901489,
+                                          "r": 1.0
+                                        }
+                                      ],
+                                      "eql": "MFNAVELODINENUMESSAGE.VEL_ENU[0],MFNAVELODINENUMESSAGE.VEL_ENU[1],MFNAVELODINENUMESSAGE.VEL_ENU[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Vehicle Vel ENU",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.1568627506494522,
+                                          "g": 0.23529411852359772,
+                                          "r": 0.42352941632270813
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.1568627506494522,
+                                          "g": 0.364705890417099,
+                                          "r": 0.5176470875740051
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.0784313753247261,
+                                          "g": 0.12156862765550613,
+                                          "r": 0.32156863808631897
+                                        }
+                                      ],
+                                      "eql": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[0],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[1],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Gyro Body Deg",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.03921568766236305,
+                                    "g": 0.03921568766236305,
+                                    "r": 0.8313725590705872
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.13333334028720856,
+                                    "g": 0.34117648005485535,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0,
+                                    "g": 0.5960784554481506,
+                                    "r": 1.0
+                                  }
+                                ],
+                                "eql": "EKFTARGETMESSAGE.POS_ECEF[0],EKFTARGETMESSAGE.POS_ECEF[1],EKFTARGETMESSAGE.POS_ECEF[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Target Pos ECEF",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.8313725590705872,
+                                    "g": 0.03921568766236305,
+                                    "r": 0.03921568766236305
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7098039388656616,
+                                    "g": 0.3176470696926117,
+                                    "r": 0.24705882370471954
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.9529411792755127,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.12941177189350128
+                                  }
+                                ],
+                                "eql": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU[0],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[1],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Target Vel ENU",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.4284050464630127,
+                      "1": 1.3822109699249268,
+                      "2": 0.5502150058746338
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Debug Info",
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.3137255012989044,
+                              "g": 0.686274528503418,
+                              "r": 0.2980392277240753
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.9529411792755127,
+                              "g": 0.5882353186607361,
+                              "r": 0.12941177189350128
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.13333334028720856,
+                              "g": 0.34117648005485535,
+                              "r": 1.0
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.6196078658103943,
+                              "g": 0.6196078658103943,
+                              "r": 0.6196078658103943
+                            }
+                          ],
+                          "eql": "STATEMACHINEOUTPUT.MISSILE_MODE,GUIDANCEMESSAGE.GUIDANCE_MODE,TARGETMESSAGE.TARGET_MODE,MFNAVELODINENUMESSAGE.TIME_MONOTONIC",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Modes + Time",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Angles",
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.3137255012989044,
+                                    "g": 0.686274528503418,
+                                    "r": 0.2980392277240753
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.9529411792755127,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.12941177189350128
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.027450980618596077,
+                                    "g": 0.7568627595901489,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.38823530077934265,
+                                    "g": 0.11764705926179886,
+                                    "r": 0.9137254953384399
+                                  }
+                                ],
+                                "eql": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[0],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[1],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[2],GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "YPR + Body Roll",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.42352941632270813
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.364705890417099,
+                                    "r": 0.5176470875740051
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0784313753247261,
+                                    "g": 0.12156862765550613,
+                                    "r": 0.32156863808631897
+                                  }
+                                ],
+                                "eql": "MFPIMUMESSAGE.GYRO.X,MFPIMUMESSAGE.GYRO.Y,MFPIMUMESSAGE.GYRO.Z",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "PIMU Gyro",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1882352977991104,
+                                    "g": 0.4431372582912445,
+                                    "r": 0.6078431606292725
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.09019608050584793,
+                                    "g": 0.15294118225574493,
+                                    "r": 0.41960784792900085
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.4000000059604645,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.1411764770746231
+                                  }
+                                ],
+                                "eql": "MFPIMUMESSAGE.ACCEL.X,MFPIMUMESSAGE.ACCEL.Y,MFPIMUMESSAGE.ACCEL.Z",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "PIMU Accel",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 1.0,
+                                    "g": 1.0,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7411764860153198,
+                                    "g": 0.7411764860153198,
+                                    "r": 0.7411764860153198
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.4588235318660736,
+                                    "g": 0.4588235318660736,
+                                    "r": 0.4588235318660736
+                                  }
+                                ],
+                                "eql": "TRACKERMESSAGE.LOS_NED[0],TRACKERMESSAGE.LOS_NED[1],TRACKERMESSAGE.LOS_NED[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "LOS NED",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.8313725590705872,
+                                    "g": 0.7372549176216125,
+                                    "r": 0.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.5333333611488342,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7098039388656616,
+                                    "g": 0.3176470696926117,
+                                    "r": 0.24705882370471954
+                                  }
+                                ],
+                                "eql": "GUIDANCEMESSAGE.ACC_CMD_NED[0],GUIDANCEMESSAGE.ACC_CMD_NED[1],GUIDANCEMESSAGE.ACC_CMD_NED[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Acc Cmd NED",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.42352941632270813
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.364705890417099,
+                                    "r": 0.5176470875740051
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.ACC_CMD_BODY[0],CONTROLMESSAGE.ACC_CMD_BODY[1]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Acc Cmd Body",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.23137255012989044,
+                                    "g": 0.9215686321258545,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.027450980618596077,
+                                    "g": 0.7568627595901489,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0,
+                                    "g": 0.5960784554481506,
+                                    "r": 1.0
+                                  }
+                                ],
+                                "eql": "TRACKERMESSAGE.LOS_RATE_NED[0],TRACKERMESSAGE.LOS_RATE_NED[1],TRACKERMESSAGE.LOS_RATE_NED[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "LOS Rate NED",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.364705890417099,
+                                    "r": 0.5176470875740051
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0784313753247261,
+                                    "g": 0.12156862765550613,
+                                    "r": 0.32156863808631897
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.ACC_MEAS_BODY[0],CONTROLMESSAGE.ACC_MEAS_BODY[1]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Acc Meas Body",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.21176470816135406,
+                                    "g": 0.26274511218070984,
+                                    "r": 0.95686274766922
+                                  }
+                                ],
+                                "eql": "TRACKERMESSAGE.RANGE_TO_GO",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Range To Go",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.6901960968971252,
+                                    "g": 0.15294118225574493,
+                                    "r": 0.6117647290229797
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.DYNAMIC_COMMANDED",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Dynamic Commanded",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.9529411792755127,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.12941177189350128
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.PITCH_PID",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Pitch PID",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.3137255012989044,
+                                    "g": 0.686274528503418,
+                                    "r": 0.2980392277240753
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.YAW_PID",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Yaw PID",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0,
+                                    "g": 0.5960784554481506,
+                                    "r": 1.0
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.ROLL_PID",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Roll PID",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.658823549747467,
+                                    "g": 0.2823529541492462,
+                                    "r": 0.3921568691730499
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.24313725531101227,
+                                    "g": 0.3843137323856354,
+                                    "r": 0.6901960968971252
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.21176470816135406,
+                                    "g": 0.5764706134796143,
+                                    "r": 0.7882353067398071
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.16470588743686676,
+                                    "g": 0.29411765933036804,
+                                    "r": 0.615686297416687
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.FIN_DEFLECTION_DEG[0],CONTROLMESSAGE.FIN_DEFLECTION_DEG[1],CONTROLMESSAGE.FIN_DEFLECTION_DEG[2],CONTROLMESSAGE.FIN_DEFLECTION_DEG[3]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Fin Deflection Deg",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.5333333611488342,
+                              "g": 0.5882353186607361,
+                              "r": 0.0
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.13333334028720856,
+                              "g": 0.34117648005485535,
+                              "r": 1.0
+                            }
+                          ],
+                          "eql": "GPSPOSMESSAGE1.HACC,GPSPOSMESSAGE1.VACC",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "GPS HACC / VACC",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.0,
+                      "1": 1.0,
+                      "2": 1.0,
+                      "3": 1.0,
+                      "4": 1.0,
+                      "5": 1.0,
+                      "6": 1.0,
+                      "7": 1.0
+                    }
+                  }
+                },
+                {
+                  "Viewport": {
+                    "active": false,
+                    "aspect": null,
+                    "bloom": null,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": 15000000.0,
+                    "fov": 45.0,
+                    "frame": "ECEF",
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                    "name": "Blank",
+                    "near": 0.10000000149011612,
+                    "node_id": 0,
+                    "pos": "(0,0,0,1,0,-8,1.5)",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": true,
+                    "show_grid": false,
+                    "show_view_cube": false,
+                    "up": null
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.991292953491211,
+                "1": 1.941396951675415,
+                "2": 1.8673100471496582
+              }
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Intercept",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 15000000.0,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+                          "name": "Missile → Target",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-3.5,0.6,1.0)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 15000000.0,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "name": "Target → Missile",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,1,2.5,2.0,1.0) + (0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 15000000.0,
+                          "fov": 60.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0,0,0,1,-2450,-870,0)",
+                          "name": "Trajectory Top-Down",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,1,-2450,-870,6500)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 15000000.0,
+                          "fov": 50.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0,0,0,1,-2450,-870,1000)",
+                          "name": "Trajectory Side View",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,1,-2450,-5200,1000)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                }
+              ],
+              "shares": {}
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Fins and Strake Cams",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 15000000.0,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "name": "Full View",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0,0,1,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": true,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": "ECEF",
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                              "name": "Fixed Fin Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-1.2,0,0)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": false,
+                              "show_view_cube": false,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)"
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": "ECEF",
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                              "name": "Fin Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-1.2,0,0)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": false,
+                              "show_view_cube": false,
+                              "up": null
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Tabs": [
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": "ECEF",
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
+                              "name": "Strake Fin 1 Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,-0.07,-0.07)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": false,
+                              "show_view_cube": false,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                            }
+                          },
+                          {
+                            "Viewport": {
+                              "active": false,
+                              "aspect": null,
+                              "bloom": null,
+                              "create_frustum": false,
+                              "effects": true,
+                              "ev100": null,
+                              "far": null,
+                              "fov": 45.0,
+                              "frame": "ECEF",
+                              "frustums_color": {
+                                "a": 1.0,
+                                "b": 0.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "frustums_thickness": 0.006000000052154064,
+                              "hdr": false,
+                              "local_arrows": [],
+                              "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
+                              "name": "Strake Fin 3 Cam",
+                              "near": 0.10000000149011612,
+                              "node_id": 0,
+                              "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-0.2,0.07,0.07)",
+                              "projection_color": {
+                                "a": 1.0,
+                                "b": 1.0,
+                                "g": 1.0,
+                                "r": 1.0
+                              },
+                              "show_arrows": true,
+                              "show_frustums": false,
+                              "show_grid": false,
+                              "show_view_cube": false,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": 1.0,
+                          "bloom": null,
+                          "create_frustum": true,
+                          "effects": true,
+                          "ev100": null,
+                          "far": 2000.0,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.009999999776482582,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(0.9925,0,0.1218)",
+                          "name": "Vehicle Camera",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(1.1,0,0)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)"
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "Viewport": {
+                    "active": false,
+                    "aspect": null,
+                    "bloom": null,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": null,
+                    "fov": 45.0,
+                    "frame": "ECEF",
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                    "name": "Blank",
+                    "near": 0.10000000149011612,
+                    "node_id": 0,
+                    "pos": "(0,0,0,1,0,-8,1.5)",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": true,
+                    "show_grid": false,
+                    "show_view_cube": false,
+                    "up": null
+                  }
+                }
+              ],
+              "shares": {
+                "0": 0.800000011920929,
+                "1": 0.800000011920929,
+                "2": 1.8673100471496582
+              }
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Dynamics",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "World Info",
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "name": "Missile",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 0.5,-5,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": true,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": "ECEF",
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+                          "name": "Target",
+                          "near": 0.10000000149011612,
+                          "node_id": 0,
+                          "pos": "(0,0,0,0, 1,-10,4) + (0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": true,
+                          "show_grid": false,
+                          "show_view_cube": false,
+                          "up": null
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Vehicle Kinematics",
+                          "panels": [
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.3137255012989044,
+                                          "g": 0.686274528503418,
+                                          "r": 0.2980392277240753
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.9529411792755127,
+                                          "g": 0.5882353186607361,
+                                          "r": 0.12941177189350128
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.027450980618596077,
+                                          "g": 0.7568627595901489,
+                                          "r": 1.0
+                                        }
+                                      ],
+                                      "eql": "NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Vehicle Pos ECEF",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.21176470816135406,
+                                          "g": 0.26274511218070984,
+                                          "r": 0.95686274766922
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.0,
+                                          "g": 0.5960784554481506,
+                                          "r": 1.0
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.6901960968971252,
+                                          "g": 0.15294118225574493,
+                                          "r": 0.6117647290229797
+                                        }
+                                      ],
+                                      "eql": "MFNAVELODINENUMESSAGE.WORLD_ACCEL[0],MFNAVELODINENUMESSAGE.WORLD_ACCEL[1],MFNAVELODINENUMESSAGE.WORLD_ACCEL[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Vehicle Accel",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            },
+                            {
+                              "VSplit": {
+                                "active": false,
+                                "name": null,
+                                "panels": [
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.3137255012989044,
+                                          "g": 0.686274528503418,
+                                          "r": 0.2980392277240753
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.9529411792755127,
+                                          "g": 0.5882353186607361,
+                                          "r": 0.12941177189350128
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.027450980618596077,
+                                          "g": 0.7568627595901489,
+                                          "r": 1.0
+                                        }
+                                      ],
+                                      "eql": "MFNAVELODINENUMESSAGE.VEL_ENU[0],MFNAVELODINENUMESSAGE.VEL_ENU[1],MFNAVELODINENUMESSAGE.VEL_ENU[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Vehicle Vel ENU",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "Graph": {
+                                      "auto_y_range": true,
+                                      "colors": [
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.1568627506494522,
+                                          "g": 0.23529411852359772,
+                                          "r": 0.42352941632270813
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.1568627506494522,
+                                          "g": 0.364705890417099,
+                                          "r": 0.5176470875740051
+                                        },
+                                        {
+                                          "a": 1.0,
+                                          "b": 0.0784313753247261,
+                                          "g": 0.12156862765550613,
+                                          "r": 0.32156863808631897
+                                        }
+                                      ],
+                                      "eql": "MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[0],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[1],MFNAVELODINENUMESSAGE.GYRO_BODY_DEG[2]",
+                                      "graph_type": "Line",
+                                      "locked": false,
+                                      "name": "Gyro Body Deg",
+                                      "node_id": 0,
+                                      "y_range": {
+                                        "end": 1.0,
+                                        "start": 0.0
+                                      }
+                                    }
+                                  }
+                                ],
+                                "shares": {}
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.03921568766236305,
+                                    "g": 0.03921568766236305,
+                                    "r": 0.8313725590705872
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.13333334028720856,
+                                    "g": 0.34117648005485535,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0,
+                                    "g": 0.5960784554481506,
+                                    "r": 1.0
+                                  }
+                                ],
+                                "eql": "EKFTARGETMESSAGE.POS_ECEF[0],EKFTARGETMESSAGE.POS_ECEF[1],EKFTARGETMESSAGE.POS_ECEF[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Target Pos ECEF",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.8313725590705872,
+                                    "g": 0.03921568766236305,
+                                    "r": 0.03921568766236305
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7098039388656616,
+                                    "g": 0.3176470696926117,
+                                    "r": 0.24705882370471954
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.9529411792755127,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.12941177189350128
+                                  }
+                                ],
+                                "eql": "MFNAVELODINENUMESSAGE.TARG_VEL_ENU[0],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[1],MFNAVELODINENUMESSAGE.TARG_VEL_ENU[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Target Vel ENU",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.5,
+                      "1": 0.6391680240631104,
+                      "2": 1.8106169700622559,
+                      "3": 0.5502150058746338
+                    }
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": "Debug Info",
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.3137255012989044,
+                              "g": 0.686274528503418,
+                              "r": 0.2980392277240753
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.9529411792755127,
+                              "g": 0.5882353186607361,
+                              "r": 0.12941177189350128
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.13333334028720856,
+                              "g": 0.34117648005485535,
+                              "r": 1.0
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.6196078658103943,
+                              "g": 0.6196078658103943,
+                              "r": 0.6196078658103943
+                            }
+                          ],
+                          "eql": "STATEMACHINEOUTPUT.MISSILE_MODE,GUIDANCEMESSAGE.GUIDANCE_MODE,TARGETMESSAGE.TARGET_MODE,MFNAVELODINENUMESSAGE.TIME_MONOTONIC",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Modes + Time",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": "Angles",
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.3137255012989044,
+                                    "g": 0.686274528503418,
+                                    "r": 0.2980392277240753
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.9529411792755127,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.12941177189350128
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.027450980618596077,
+                                    "g": 0.7568627595901489,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.38823530077934265,
+                                    "g": 0.11764705926179886,
+                                    "r": 0.9137254953384399
+                                  }
+                                ],
+                                "eql": "MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[0],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[1],MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG[2],GUIDANCEMESSAGE.BODY_ROLL_ANGLE",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "YPR + Body Roll",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.42352941632270813
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.364705890417099,
+                                    "r": 0.5176470875740051
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0784313753247261,
+                                    "g": 0.12156862765550613,
+                                    "r": 0.32156863808631897
+                                  }
+                                ],
+                                "eql": "MFPIMUMESSAGE.GYRO.X,MFPIMUMESSAGE.GYRO.Y,MFPIMUMESSAGE.GYRO.Z",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "PIMU Gyro",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1882352977991104,
+                                    "g": 0.4431372582912445,
+                                    "r": 0.6078431606292725
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.09019608050584793,
+                                    "g": 0.15294118225574493,
+                                    "r": 0.41960784792900085
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.4000000059604645,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.1411764770746231
+                                  }
+                                ],
+                                "eql": "MFPIMUMESSAGE.ACCEL.X,MFPIMUMESSAGE.ACCEL.Y,MFPIMUMESSAGE.ACCEL.Z",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "PIMU Accel",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 1.0,
+                                    "g": 1.0,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7411764860153198,
+                                    "g": 0.7411764860153198,
+                                    "r": 0.7411764860153198
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.4588235318660736,
+                                    "g": 0.4588235318660736,
+                                    "r": 0.4588235318660736
+                                  }
+                                ],
+                                "eql": "TRACKERMESSAGE.LOS_NED[0],TRACKERMESSAGE.LOS_NED[1],TRACKERMESSAGE.LOS_NED[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "LOS NED",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.8313725590705872,
+                                    "g": 0.7372549176216125,
+                                    "r": 0.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.5333333611488342,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.7098039388656616,
+                                    "g": 0.3176470696926117,
+                                    "r": 0.24705882370471954
+                                  }
+                                ],
+                                "eql": "GUIDANCEMESSAGE.ACC_CMD_NED[0],GUIDANCEMESSAGE.ACC_CMD_NED[1],GUIDANCEMESSAGE.ACC_CMD_NED[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Acc Cmd NED",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.23529411852359772,
+                                    "r": 0.42352941632270813
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.364705890417099,
+                                    "r": 0.5176470875740051
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.ACC_CMD_BODY[0],CONTROLMESSAGE.ACC_CMD_BODY[1]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Acc Cmd Body",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.23137255012989044,
+                                    "g": 0.9215686321258545,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.027450980618596077,
+                                    "g": 0.7568627595901489,
+                                    "r": 1.0
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0,
+                                    "g": 0.5960784554481506,
+                                    "r": 1.0
+                                  }
+                                ],
+                                "eql": "TRACKERMESSAGE.LOS_RATE_NED[0],TRACKERMESSAGE.LOS_RATE_NED[1],TRACKERMESSAGE.LOS_RATE_NED[2]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "LOS Rate NED",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.1568627506494522,
+                                    "g": 0.364705890417099,
+                                    "r": 0.5176470875740051
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0784313753247261,
+                                    "g": 0.12156862765550613,
+                                    "r": 0.32156863808631897
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.ACC_MEAS_BODY[0],CONTROLMESSAGE.ACC_MEAS_BODY[1]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Acc Meas Body",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.21176470816135406,
+                                    "g": 0.26274511218070984,
+                                    "r": 0.95686274766922
+                                  }
+                                ],
+                                "eql": "TRACKERMESSAGE.RANGE_TO_GO",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Range To Go",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.6901960968971252,
+                                    "g": 0.15294118225574493,
+                                    "r": 0.6117647290229797
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.DYNAMIC_COMMANDED",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Dynamic Commanded",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.9529411792755127,
+                                    "g": 0.5882353186607361,
+                                    "r": 0.12941177189350128
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.PITCH_PID",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Pitch PID",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.3137255012989044,
+                                    "g": 0.686274528503418,
+                                    "r": 0.2980392277240753
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.YAW_PID",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Yaw PID",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      },
+                      {
+                        "HSplit": {
+                          "active": false,
+                          "name": null,
+                          "panels": [
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.0,
+                                    "g": 0.5960784554481506,
+                                    "r": 1.0
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.ROLL_PID",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Roll PID",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            },
+                            {
+                              "Graph": {
+                                "auto_y_range": true,
+                                "colors": [
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.658823549747467,
+                                    "g": 0.2823529541492462,
+                                    "r": 0.3921568691730499
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.24313725531101227,
+                                    "g": 0.3843137323856354,
+                                    "r": 0.6901960968971252
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.21176470816135406,
+                                    "g": 0.5764706134796143,
+                                    "r": 0.7882353067398071
+                                  },
+                                  {
+                                    "a": 1.0,
+                                    "b": 0.16470588743686676,
+                                    "g": 0.29411765933036804,
+                                    "r": 0.615686297416687
+                                  }
+                                ],
+                                "eql": "CONTROLMESSAGE.FIN_DEFLECTION_DEG[0],CONTROLMESSAGE.FIN_DEFLECTION_DEG[1],CONTROLMESSAGE.FIN_DEFLECTION_DEG[2],CONTROLMESSAGE.FIN_DEFLECTION_DEG[3]",
+                                "graph_type": "Line",
+                                "locked": false,
+                                "name": "Fin Deflection Deg",
+                                "node_id": 0,
+                                "y_range": {
+                                  "end": 1.0,
+                                  "start": 0.0
+                                }
+                              }
+                            }
+                          ],
+                          "shares": {}
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 1.0,
+                      "1": 1.0,
+                      "2": 1.0,
+                      "3": 1.0,
+                      "4": 1.0,
+                      "5": 1.0,
+                      "6": 1.0
+                    }
+                  }
+                }
+              ],
+              "shares": {
+                "0": 1.6613049507141113,
+                "1": 2.838696002960205
+              }
+            }
+          },
+          {
+            "Viewport": {
+              "active": false,
+              "aspect": null,
+              "bloom": null,
+              "create_frustum": false,
+              "effects": true,
+              "ev100": null,
+              "far": null,
+              "fov": 45.0,
+              "frame": "ECEF",
+              "frustums_color": {
+                "a": 1.0,
+                "b": 0.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "frustums_thickness": 0.006000000052154064,
+              "hdr": false,
+              "local_arrows": [],
+              "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+              "name": "Full_View",
+              "near": 0.10000000149011612,
+              "node_id": 0,
+              "pos": "(0,0,0,0, 0.5,-5,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+              "projection_color": {
+                "a": 1.0,
+                "b": 1.0,
+                "g": 1.0,
+                "r": 1.0
+              },
+              "show_arrows": true,
+              "show_frustums": true,
+              "show_grid": false,
+              "show_view_cube": true,
+              "up": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.03921568766236305,
+            "g": 0.03921568766236305,
+            "r": 0.8313725590705872
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "star"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/fixed_wing.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.8313725590705872,
+            "g": 0.03921568766236305,
+            "r": 0.03921568766236305
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "star"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/fixed_wing.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Ellipsoid": {
+            "color": {
+              "a": 0.0784313753247261,
+              "b": 0.7372549176216125,
+              "g": 0.8313725590705872,
+              "r": 0.0
+            },
+            "error_confidence_interval": 70.0,
+            "error_covariance": "NAKEKFCOV.PPOS_ECEF",
+            "error_covariance_cholesky": null,
+            "grid_color": {
+              "a": 0.47058823704719543,
+              "b": 1.0,
+              "g": 1.0,
+              "r": 1.0
+            },
+            "scale": "(1, 1, 1)",
+            "show_grid": true
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.3137255012989044,
+            "g": 0.686274528503418,
+            "r": 0.2980392277240753
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "rocket_launch"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)",
+                "joint_name": "FinGhost_0"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[1], 0)",
+                "joint_name": "FinGhost_1"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[2], 0)",
+                "joint_name": "FinGhost_2"
+              },
+              {
+                "eql_expr": "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[3], 0)",
+                "joint_name": "FinGhost_3"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_0"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE1.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_1"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE2.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_2"
+              },
+              {
+                "eql_expr": "(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)",
+                "joint_name": "Root.Fin_3"
+              }
+            ],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/articulated-missile-ghost-fins.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": [
+          {
+            "body_frame": true,
+            "cutoff": 0.10000000149011612,
+            "direction": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "effect": "plume",
+            "emission_rate": 1300.0,
+            "extra_effects": [],
+            "intensity": "MFIMUMESSAGE.ACCEL.Z/9.8 - 1.0",
+            "light": null,
+            "name": "motor",
+            "position": [
+              -0.6000000238418579,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "frame_orientation": "ENU",
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "models/compass.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "eql": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "eql": "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "eql": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
+        "frame": "ECEF",
+        "future_color": null,
+        "line_width": 1.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "(0,0,0,1,0,0,0)",
+        "frame": "ECEF",
+        "frame_orientation": null,
+        "icon": null,
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.4000000059604645,
+            "glow": 0.5,
+            "glow_color": null,
+            "path": "models/earth.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "relative",
+        "thrusters": []
+      }
+    },
+    {
+      "Window": {
+        "path": null,
+        "screen": null,
+        "screen_rect": null,
+        "title": null
+      }
+    }
+  ],
+  "environment": null,
+  "frame": "ENU",
+  "origin": {
+    "altitude": 589.274,
+    "latitude": 35.350664,
+    "longitude": -117.80902
+  },
+  "skybox": {
+    "name": "desert_night"
+  },
+  "telemetry_mode": true,
+  "theme": {
+    "mode": "dark",
+    "scheme": "default"
+  },
+  "timeline": {
+    "follow_latest": true,
+    "future_color": {
+      "a": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "played_color": {
+      "a": 1.0,
+      "b": 0.20000000298023224,
+      "g": 0.8999999761581421,
+      "r": 1.0
+    },
+    "range": null
+  }
+}

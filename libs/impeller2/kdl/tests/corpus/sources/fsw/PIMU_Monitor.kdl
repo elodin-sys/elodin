@@ -1,0 +1,60 @@
+vsplit {
+    hsplit {
+        tabs share=0.5414294004440308 {
+            component_monitor component_name=MFPIMUMESSAGE.GYRO
+        }
+        tabs share=0.6134421229362488 {
+            component_monitor component_name=MFPIMUMESSAGE.TIME_MONOTONIC
+        }
+        tabs share=1.8451272249221802 {
+            graph "MFPIMUMESSAGE.GYRO.X, MFPIMUMESSAGE.GYRO.Y, MFPIMUMESSAGE.GYRO.Z" name="MFPIMUMESSAGE.GYRO[0]" {
+                color 108 60 40
+                color 132 93 40
+                color 82 31 20
+            }
+        }
+    }
+    hsplit {
+        tabs share=0.5392956733703613 {
+            component_monitor component_name=MFPIMUMESSAGE.ACCEL
+        }
+        tabs share=0.6177093982696533 {
+            component_monitor component_name=STATEMACHINEOUTPUT.MISSILE_MODE
+        }
+        tabs share=1.8429932594299316 {
+            graph "MFPIMUMESSAGE.ACCEL.X, MFPIMUMESSAGE.ACCEL.Y, MFPIMUMESSAGE.ACCEL.Z" name="MFPIMUMESSAGE.ACCEL[0]" {
+                color 155 113 48
+                color 107 39 23
+                color 36 60 102
+            }
+        }
+    }
+    hsplit {
+        tabs share=0.528627336025238 {
+            component_monitor component_name=MAGMESSAGE.MAG
+        }
+        tabs share=0.629445493221283 {
+            component_monitor component_name=MAGMESSAGE.TIME_MONOTONIC
+        }
+        tabs share=1.8419280052185059 {
+            graph "MAGMESSAGE.MAG.X, MAGMESSAGE.MAG.Y, MAGMESSAGE.MAG.Z" name="MAGMESSAGE.MAG[0]" {
+                color 28 42 88
+                color 61 104 61
+                color 44 58 72
+            }
+        }
+    }
+    hsplit {
+        tabs share=0.5 {
+            component_monitor component_name=BARMESSAGE.PRESSURE
+        }
+        tabs share=0.42104560136795044 {
+            component_monitor component_name=BARMESSAGE.TEMPERATURE
+        }
+        tabs share=1.458357334136963 {
+            graph BARMESSAGE.PRESSURE name="BARMESSAGE.PRESSURE[0]" type=point {
+                color 37 24 100
+            }
+        }
+    }
+}
