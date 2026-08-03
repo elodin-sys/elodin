@@ -47,9 +47,16 @@ const SPHERICAL_MAX_HEIGHT_M: f32 = 9_000.0;
 const SPHERICAL_FALLBACK_GRID_SECTORS: u32 = 64;
 const SPHERICAL_FALLBACK_GRID_STACKS: u32 = 32;
 
-/// Marker for terrain entities spawned from a schematic `world_mesh` element.
+/// Marker for terrain renderer entities spawned from a schematic `world_mesh` element.
 #[derive(Component)]
 pub struct WorldMeshTerrain;
+
+/// Spatial anchor for a real terrain renderer.
+///
+/// Geo-frame and big-space systems own this entity's transform. The renderer
+/// stays below it so its [`TerrainBundle`] model-local transform is preserved.
+#[derive(Component)]
+struct WorldMeshTerrainAnchor;
 
 /// Editor integration layer for the real `bevy_world_mesh` terrain renderer.
 ///
@@ -84,23 +91,12 @@ pub(crate) fn spawn_world_mesh_terrain(
         WorldMeshConfig::Terrain(config) => {
             let tile_atlas = TileAtlas::new(&config);
             let mut terrain_bundle = TerrainBundle::new(tile_atlas);
-            apply_world_mesh_transform_and_visibility(&mut terrain_bundle, world_mesh);
+            terrain_bundle.visibility = world_mesh_visibility(world_mesh);
 
             let material =
                 world_mesh_materials.add(bevy_world_mesh::prelude::WorldMeshMaterial::default());
 
-            let entity = commands
-                .spawn((
-                    terrain_bundle,
-                    MeshMaterial3d(material),
-                    WorldMeshTerrain,
-                    Name::new(format!("world_mesh terrain ({region})")),
-                ))
-                .id();
-
-            insert_geo_components(commands, entity, world_mesh);
-            insert_big_space_cell(commands, entity);
-            entity
+            spawn_world_mesh_terrain_bundle(commands, terrain_bundle, material, world_mesh, &region)
         }
         WorldMeshConfig::Fallback(fallback) => {
             spawn_world_mesh_fallback(commands, meshes, materials, world_mesh, &region, fallback)
@@ -118,12 +114,33 @@ enum WorldMeshFallback {
     Globe,
 }
 
-fn apply_world_mesh_transform_and_visibility(
-    terrain_bundle: &mut TerrainBundle,
+fn spawn_world_mesh_terrain_bundle(
+    commands: &mut Commands,
+    terrain_bundle: TerrainBundle,
+    material: Handle<bevy_world_mesh::prelude::WorldMeshMaterial>,
     world_mesh: &impeller2_wkt::WorldMesh,
-) {
-    terrain_bundle.transform = world_mesh_transform(world_mesh);
-    terrain_bundle.visibility = world_mesh_visibility(world_mesh);
+    region: &str,
+) -> Entity {
+    let anchor = commands
+        .spawn((
+            WorldMeshTerrainAnchor,
+            world_mesh_transform(world_mesh),
+            Visibility::Visible,
+            Name::new(format!("world_mesh terrain ({region})")),
+        ))
+        .id();
+
+    commands.spawn((
+        terrain_bundle,
+        MeshMaterial3d(material),
+        WorldMeshTerrain,
+        ChildOf(anchor),
+        Name::new(format!("world_mesh terrain renderer ({region})")),
+    ));
+
+    insert_geo_components(commands, anchor, world_mesh);
+    insert_big_space_cell(commands, anchor);
+    anchor
 }
 
 fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
@@ -505,7 +522,8 @@ fn sync_terrain_view_positions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_geo_frames::GeoFrame;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy_geo_frames::{GeoContext, GeoFrame};
     use impeller2_wkt::{NodeId, WorldMesh};
 
     #[test]
@@ -524,17 +542,125 @@ mod tests {
     }
 
     #[test]
-    fn framed_world_mesh_transform_stays_at_origin_for_geo_pipeline() {
+    fn planar_model_transform_survives_geo_and_big_space_integration() {
+        let model_translation = Vec3::new(0.0, -40.0, 0.0);
+        let model_scale = Vec3::splat(250.0);
+        let (mut app, anchor, renderer) = spawn_model_terrain(
+            TerrainModel::planar(model_translation.as_dvec3(), 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0))),
+        );
+
+        apply_geo_transforms(&mut app);
+
+        let transform = app.world().get::<Transform>(renderer).unwrap();
+        assert_eq!(transform.translation, model_translation);
+        assert_eq!(transform.scale, model_scale);
+        assert_eq!(
+            app.world().get::<ChildOf>(renderer).unwrap().parent(),
+            anchor
+        );
+        assert!(app.world().get::<GeoPosition>(renderer).is_none());
+        assert!(app.world().get::<GeoRotation>(renderer).is_none());
+        assert!(app.world().get::<GeoPosition>(anchor).is_some());
+        assert!(app.world().get::<TileAtlas>(renderer).is_some());
+        #[cfg(feature = "big_space")]
+        {
+            assert!(
+                app.world()
+                    .get::<crate::spatial::GridCell>(anchor)
+                    .is_some()
+            );
+            assert!(
+                app.world()
+                    .get::<crate::spatial::GridCell>(renderer)
+                    .is_none()
+            );
+        }
+
+        assert!(app.world_mut().despawn(anchor));
+        assert!(
+            app.world().get_entity(renderer).is_err(),
+            "despawning the schematic root must clean up its renderer child"
+        );
+    }
+
+    #[test]
+    fn globe_ellipsoid_scale_survives_geo_and_big_space_integration() {
+        let major_axis = 6_378_137.0;
+        let minor_axis = 6_356_752.0;
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::ellipsoid(
+                DVec3::ZERO,
+                major_axis,
+                minor_axis,
+                SPHERICAL_MIN_HEIGHT_M,
+                SPHERICAL_MAX_HEIGHT_M,
+            ),
+            world_mesh(Some(GeoFrame::ECEF), Some((10.0, 20.0, 30.0))),
+        );
+
+        apply_geo_transforms(&mut app);
+
+        let transform = app.world().get::<Transform>(renderer).unwrap();
+        assert_eq!(transform.translation, Vec3::ZERO);
+        assert_eq!(
+            transform.scale,
+            Vec3::new(major_axis as f32, minor_axis as f32, major_axis as f32)
+        );
+    }
+
+    #[test]
+    fn framed_world_mesh_anchor_stays_at_origin_for_geo_pipeline() {
         let world_mesh = world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0)));
 
         assert_eq!(world_mesh_transform(&world_mesh).translation, Vec3::ZERO);
     }
 
     #[test]
-    fn unframed_world_mesh_transform_uses_default_geo_frame() {
+    fn unframed_world_mesh_anchor_uses_default_geo_frame() {
         let world_mesh = world_mesh(None, Some((1.0, 2.0, 3.0)));
 
         assert_eq!(world_mesh_transform(&world_mesh).translation, Vec3::ZERO);
+    }
+
+    fn spawn_model_terrain(model: TerrainModel, world_mesh: WorldMesh) -> (App, Entity, Entity) {
+        let config = TerrainConfig {
+            model,
+            path: "terrain-transform-regression-test".to_string(),
+            ..default()
+        };
+        let terrain_bundle = TerrainBundle::new(TileAtlas::new(&config));
+        let mut app = App::new();
+        app.insert_resource(GeoContext::default());
+
+        let anchor = {
+            let mut commands = app.world_mut().commands();
+            spawn_world_mesh_terrain_bundle(
+                &mut commands,
+                terrain_bundle,
+                Handle::default(),
+                &world_mesh,
+                &world_mesh.region,
+            )
+        };
+        app.world_mut().flush();
+
+        let renderer = {
+            let world = app.world_mut();
+            let mut renderers =
+                world.query_filtered::<Entity, (With<WorldMeshTerrain>, With<TileAtlas>)>();
+            renderers.single(world).expect("one terrain renderer")
+        };
+        (app, anchor, renderer)
+    }
+
+    fn apply_geo_transforms(app: &mut App) {
+        app.world_mut()
+            .run_system_once(bevy_geo_frames::apply_transforms)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(bevy_geo_frames::apply_geo_rotation)
+            .unwrap();
     }
 
     fn world_mesh(frame: Option<GeoFrame>, translate: Option<(f64, f64, f64)>) -> WorldMesh {
