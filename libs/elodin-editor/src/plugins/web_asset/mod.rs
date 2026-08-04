@@ -339,7 +339,10 @@ mod tests {
         );
         // Different host or port: not a DB asset.
         assert_eq!(db_asset_key("10.0.0.5:2241/textures/x.png", endpoint), None);
-        assert_eq!(db_asset_key("127.0.0.1:8080/textures/x.png", endpoint), None);
+        assert_eq!(
+            db_asset_key("127.0.0.1:8080/textures/x.png", endpoint),
+            None
+        );
         // Parent-dir escapes rejected.
         assert_eq!(db_asset_key("127.0.0.1:2241/../secrets", endpoint), None);
         // Empty key rejected.
@@ -367,10 +370,8 @@ mod tests {
 
     #[test]
     fn read_serves_local_file_when_db_endpoint_is_unreachable() {
-        let root = std::env::temp_dir().join(format!(
-            "elodin-web-asset-fallback-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("elodin-web-asset-fallback-{}", std::process::id()));
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/x.png"), b"png-bytes").unwrap();
 
@@ -395,8 +396,7 @@ mod tests {
 
         // A URL outside the DB endpoint must not fall back.
         bevy::tasks::block_on(async {
-            let result =
-                AssetReader::read(&client, Path::new("127.0.0.1:2/textures/x.png")).await;
+            let result = AssetReader::read(&client, Path::new("127.0.0.1:2/textures/x.png")).await;
             assert!(result.is_err(), "non-DB URLs must not serve local files");
         });
 

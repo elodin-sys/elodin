@@ -947,8 +947,7 @@ impl LoadSchematicParams<'_, '_> {
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
         let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
-        let local_root =
-            crate::object_3d::local_assets_root(self.initial_kdl.as_deref());
+        let local_root = crate::object_3d::local_assets_root(self.initial_kdl.as_deref());
         let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
