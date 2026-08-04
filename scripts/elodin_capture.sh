@@ -16,6 +16,7 @@ Options:
       --height PIXELS      Capture height (default: 720)
       --refresh HZ         Gamescope refresh rate (default: 30)
       --bitrate KBIT       H.264 bitrate (default: 8000)
+      --port PORT           Simulation DB port (default: 2240; assets use PORT+1)
       --encoder NAME       auto, vaapi, nvenc, or x264 (default: auto)
       --editor PATH        Editor executable (default: target/release/elodin)
       --ready-regex REGEX  Editor-log readiness expression
@@ -46,6 +47,7 @@ width=1280
 height=720
 refresh=30
 bitrate=8000
+port=2240
 encoder=auto
 editor="${ELODIN_EDITOR_BIN:-$PWD/target/release/elodin}"
 ready_regex='running server with cancellation'
@@ -84,6 +86,11 @@ while (($#)); do
     --bitrate)
       (($# >= 2)) || fail "$1 requires a value"
       bitrate=$2
+      shift 2
+      ;;
+    --port)
+      (($# >= 2)) || fail "$1 requires a value"
+      port=$2
       shift 2
       ;;
     --encoder)
@@ -143,13 +150,16 @@ done
   exit 2
 }
 [[ -f "$simulation" ]] || fail "simulation not found: $simulation"
+[[ "$simulation" == *.py ]] \
+  || fail "headless capture requires a Python simulation file; existing s10.toml plans control their own ports"
 [[ -x "$editor" ]] || fail "editor not found at $editor; run 'cargo build --release -p elodin' or pass --editor"
 is_positive_number "$duration" || fail "duration must be positive"
 is_positive_number "$warmup" || [[ "$warmup" == 0 ]] || fail "warmup must be non-negative"
-for value_name in width height refresh bitrate ready_timeout; do
+for value_name in width height refresh bitrate ready_timeout port; do
   value=${!value_name}
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || fail "$value_name must be a positive integer"
 done
+((port <= 65534)) || fail "port must be between 1 and 65534 (assets use port + 1)"
 case "$encoder" in
   auto | vaapi | nvenc | x264) ;;
   *) fail "encoder must be auto, vaapi, nvenc, or x264" ;;
@@ -280,6 +290,7 @@ echo "GPU path: $selected_gpu"
 echo "Gamescope: $(command -v gamescope)"
 echo "Xwayland: $(command -v Xwayland)"
 echo "GBM backends: ${GBM_BACKENDS_PATH:-driver default}"
+echo "Simulation DB address: 127.0.0.1:$port (assets: 127.0.0.1:$((port + 1)))"
 
 child_path=$PATH
 if [[ -x "$PWD/.venv/bin/python" ]]; then
@@ -303,7 +314,7 @@ preexisting_gamescope_serials=$(pw-dump 2>/dev/null | jq -c '
 
 setsid gamescope --backend headless \
   -w "$width" -h "$height" -W "$width" -H "$height" -r "$refresh" \
-  -- env PATH="$child_path" "$editor" editor "$simulation" \
+  -- env PATH="$child_path" "$editor" editor --addr "127.0.0.1:$port" "$simulation" \
   >"$gamescope_log" 2>&1 &
 gamescope_pid=$!
 gamescope_pgid=$gamescope_pid

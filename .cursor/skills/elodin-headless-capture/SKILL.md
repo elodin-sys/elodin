@@ -51,6 +51,14 @@ processes:
 ./scripts/elodin_capture.sh --duration 10 --output /tmp/elodin.mp4 examples/cube-sat/main.py
 ```
 
+Use `--port PORT` to isolate the capture from another editor/simulation. The
+simulation DB uses `PORT` and its asset server uses `PORT + 1`, so both must be
+available:
+
+```bash
+./scripts/elodin_capture.sh --port 32400 --output /tmp/elodin.mp4 examples/cube-sat/main.py
+```
+
 Run it inside `nix develop`. The default readiness check waits for the
 simulation database server and then allows a two-second warmup. Use
 `--ready-regex` or `--warmup` for examples with unusual startup behavior. Use
@@ -197,5 +205,5 @@ buffers.
   the source format directly.
 - **Partially loaded recording:** wait longer before starting GStreamer, or use
   a lighter example and lower resolution.
-- **Stale editor process or port 2240 conflict:** stop the previous Gamescope
-  child before starting another editor.
+- **Stale editor process or DB/assets port conflict:** stop the previous
+  Gamescope child or choose another free DB/assets pair with `--port`.
