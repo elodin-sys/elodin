@@ -46,13 +46,22 @@ fn client_asset_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Socket address of the DB assets HTTP server for a DB TCP address
+/// (TCP port + offset; unspecified bind IPs mapped to loopback).
+pub fn assets_http_addr(connection_addr: SocketAddr) -> SocketAddr {
+    SocketAddr::new(
+        client_asset_ip(connection_addr.ip()),
+        connection_addr
+            .port()
+            .saturating_add(impeller2::ASSETS_HTTP_PORT_OFFSET),
+    )
+}
+
 pub fn assets_http_base(connection_addr: SocketAddr) -> String {
-    let port = connection_addr
-        .port()
-        .saturating_add(impeller2::ASSETS_HTTP_PORT_OFFSET);
-    match client_asset_ip(connection_addr.ip()) {
-        IpAddr::V4(v4) => format!("http://{v4}:{port}"),
-        IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
+    let addr = assets_http_addr(connection_addr);
+    match addr.ip() {
+        IpAddr::V4(v4) => format!("http://{v4}:{}", addr.port()),
+        IpAddr::V6(v6) => format!("http://[{v6}]:{}", addr.port()),
     }
 }
 
@@ -67,8 +76,41 @@ pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> 
     }
 }
 
-pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+/// Like [`resolve_db_asset_url`], but when `local_root` is set (local
+/// iteration via CLI `--kdl`) a `db:` key that exists under the local assets
+/// root resolves to the bare relative path instead, so it loads — and
+/// hot-reloads — from disk rather than the DB.
+pub fn resolve_db_asset_url_prefer_local(
+    path: &str,
+    connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
+) -> String {
+    if let Some(root) = local_root
+        && let Some(key) = path.strip_prefix("db:")
+    {
+        let key = key.trim_start_matches('/');
+        if root.join(key).is_file() {
+            bevy::log::info!(
+                key = %key,
+                root = %root.display(),
+                "db asset shadowed by local file (--kdl session)"
+            );
+            return key.to_string();
+        }
+    }
     resolve_db_asset_url(path, connection_addr)
+}
+
+/// Local assets root override for `db:` keys: set when the session was opened
+/// with a CLI `--kdl` schematic (local iteration), `None` otherwise.
+pub fn local_assets_root(
+    initial_kdl: Option<&crate::plugins::kdl_document::InitialKdlPath>,
+) -> Option<std::path::PathBuf> {
+    if initial_kdl?.0.is_some() {
+        crate::plugins::env_asset_source::resolve_assets_dir()
+    } else {
+        None
+    }
 }
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
@@ -1696,6 +1738,7 @@ pub fn create_object_3d_entity(
     assets: &AssetServer,
     geo_context: &GeoContext,
     connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) -> Result<Entity, CompileError> {
     // Compile only the field-selected driver. Failed Cholesky/covariance compiles leave the
     // expr as None but keep Mat3 spawning (spawn_mesh keys off field presence); update must
@@ -1797,6 +1840,7 @@ pub fn create_object_3d_entity(
         mat3_material_assets,
         assets,
         connection_addr,
+        local_root,
     );
     Ok(entity_id)
 }
@@ -1813,10 +1857,11 @@ pub fn spawn_billboard_icon(
     asset_server: &Res<AssetServer>,
     icon_cache: &mut ResMut<IconTextureCache>,
     connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) {
     let texture_handle: Handle<Image> = match &icon.source {
         Object3DIconSource::Path(path) => {
-            let url = resolve_db_asset_url(path, connection_addr);
+            let url = resolve_db_asset_url_prefer_local(path, connection_addr, local_root);
             asset_server.load(url)
         }
         Object3DIconSource::Builtin(name) => {
@@ -1875,6 +1920,7 @@ pub fn spawn_mesh(
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
@@ -1887,7 +1933,7 @@ pub fn spawn_mesh(
             glow: _,
             glow_color: _,
         } => {
-            let resolved = resolve_glb_asset_url(path, connection_addr);
+            let resolved = resolve_db_asset_url_prefer_local(path, connection_addr, local_root);
             let url = format!("{resolved}#Scene0");
             let scene = assets.load(&url);
 
@@ -2752,5 +2798,60 @@ mod db_asset_url_tests {
             resolve_db_asset_url("db:icons/marker.png", Some(conn)),
             "http://127.0.0.1:2241/icons/marker.png"
         );
+    }
+
+    #[test]
+    fn assets_http_addr_offsets_port_and_maps_unspecified_to_loopback() {
+        let conn: SocketAddr = "0.0.0.0:2240".parse().unwrap();
+        assert_eq!(
+            super::assets_http_addr(conn),
+            "127.0.0.1:2241".parse::<SocketAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn prefer_local_resolves_existing_file_to_bare_path() {
+        let root = std::env::temp_dir().join(format!(
+            "elodin-prefer-local-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(root.join("textures")).unwrap();
+        std::fs::write(root.join("textures/soft_circle.png"), b"png").unwrap();
+        let conn: SocketAddr = "10.0.0.5:2240".parse().unwrap();
+
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local(
+                "db:textures/soft_circle.png",
+                Some(conn),
+                Some(&root)
+            ),
+            "textures/soft_circle.png"
+        );
+        // Missing locally: falls through to the DB URL.
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local(
+                "db:textures/missing.png",
+                Some(conn),
+                Some(&root)
+            ),
+            "http://10.0.0.5:2241/textures/missing.png"
+        );
+        // Bare (non-db:) paths pass through untouched.
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local("models/x.glb", Some(conn), Some(&root)),
+            "models/x.glb"
+        );
+        // No local root (no --kdl): DB URL as before.
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local(
+                "db:textures/soft_circle.png",
+                Some(conn),
+                None
+            ),
+            "http://10.0.0.5:2241/textures/soft_circle.png"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

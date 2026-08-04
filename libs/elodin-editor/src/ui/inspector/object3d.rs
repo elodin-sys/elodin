@@ -63,6 +63,10 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
         let connection_addr = world
             .get_resource::<impeller2_bevy::ConnectionAddr>()
             .map(|addr| addr.0);
+        let local_root = crate::object_3d::local_assets_root(
+            world
+                .get_resource::<crate::plugins::kdl_document::InitialKdlPath>(),
+        );
         let InspectorObject3D {
             mut object_3d,
             metadata_query,
@@ -664,6 +668,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     &mut mat3_material_assets,
                     &assets,
                     connection_addr,
+                    local_root.as_deref(),
                 );
             }
         });
