@@ -5983,6 +5983,7 @@ dependencies = [
  "impeller2",
  "impeller2-wkt",
  "jiff",
+ "map_3d",
  "peg",
  "smallvec",
  "thiserror 1.0.69",

@@ -59,6 +59,7 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | **Formula: abs(x)** | `expr.abs()` | Absolute value | No args. Computes absolute value using PostgreSQL `abs()` function. |
 | **Formula: arccos(x)** | `expr.arccos()` | Inverse cosine (arccosine) | No args. Computes arccosine using PostgreSQL `acos()` function. |
 | **Formula: sign(x)** | `expr.sign()` | Sign function | No args. Returns -1, 0, or 1 based on the sign of x. Uses SQL CASE statement (DataFusion compatible). |
+| **Formula: ecef_to_ned() / …** | `pos.ecef_to_ned()`, `vel.ecef_to_ned_direction()` | Directed ENU/NED/ECEF conversion | Source and target frames are in the method name. Point forms accept 3- or 7-vecs (SQL emits transformed xyz; pose attitude is editor-runtime). Direction forms are rotation-only on 3-vecs. ECEF ↔ local needs `Context.geo_origin` (schematic `coordinate`). |
 | **Whitespace**           | spaces / tabs / newlines        | Ignored separators                       | Grammar skips whitespace where sensible. |
 | **Format string**        | `text ${expr} text`             | Parse into segments + embedded ASTs      | Separate entrypoint `fmt_string` returns `Vec<FmtNode>`. Raw `$` not allowed in plain segments. |
 | **Not supported**        | comments                        | —                                       | No comment syntax. |

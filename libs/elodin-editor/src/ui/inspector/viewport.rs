@@ -19,7 +19,7 @@ use nox::ArrayBuf;
 
 use crate::EqlContext;
 use crate::WorldPosExt;
-use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
+use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
@@ -440,6 +440,7 @@ pub struct InspectorViewport<'w, 's> {
     editor_cams: Query<'w, 's, &'static mut EditorCam>,
     object_3d_states: Query<'w, 's, &'static Object3DState>,
     eql_ctx: ResMut<'w, EqlContext>,
+    geo_context: Res<'w, GeoContext>,
 }
 
 impl WidgetSystem for InspectorViewport<'_, '_> {
@@ -465,6 +466,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             mut editor_cams,
             object_3d_states,
             eql_ctx,
+            geo_context,
         } = state_mut;
 
         let Ok(mut cam) = camera_query.get_mut(camera) else {
@@ -499,13 +501,13 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         );
 
         ui.label(egui::RichText::new("POSITION").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.pos, &eql_ctx.0);
+        eql_input(ui, &mut viewport.pos, &eql_ctx.0, &geo_context);
         ui.separator();
         ui.label(egui::RichText::new("LOOK AT").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.look_at, &eql_ctx.0);
+        eql_input(ui, &mut viewport.look_at, &eql_ctx.0, &geo_context);
         ui.separator();
         ui.label(egui::RichText::new("UP").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.up, &eql_ctx.0);
+        eql_input(ui, &mut viewport.up, &eql_ctx.0, &geo_context);
         ui.separator();
 
         if ui.add(EButton::highlight("Reset Pos")).clicked() {
@@ -802,7 +804,12 @@ pub fn retry_viewport_eql_compile(
     }
 }
 
-fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Context) {
+fn eql_input(
+    ui: &mut egui::Ui,
+    editable_expr: &mut EditableEQL,
+    ctx: &eql::Context,
+    geo: &GeoContext,
+) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         configure_input_with_border(ui.style_mut());
@@ -815,7 +822,8 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
             }
             match ctx.parse_str(&editable_expr.eql) {
                 Ok(expr) => {
-                    editable_expr.compiled_expr = compile_eql_expr(expr).ok();
+                    editable_expr.compiled_expr =
+                        crate::object_3d::compile_eql_expr_with_geo(expr, geo).ok();
                 }
                 Err(err) => {
                     ui.colored_label(get_scheme().error, err.to_string());

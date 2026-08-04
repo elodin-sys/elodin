@@ -19,3 +19,6 @@ thiserror = "1"
 # time
 hifitime = "4"
 jiff = "0.2"
+
+# geo (ECEF ↔ ENU/NED for SQL emission; patched to sphere branch in workspace)
+map_3d = "0.1.5"

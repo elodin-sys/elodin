@@ -459,6 +459,7 @@ impl LoadSchematicParams<'_, '_> {
         {
             self.geo_context.origin = origin;
         }
+        // `sync_eql_geo_origin` copies this into `EqlContext` for query_plot SQL.
 
         // Drop any remote window fetches still in flight from a prior load so
         // their windows can't spawn into this freshly-cleared document.
@@ -1110,6 +1111,7 @@ impl LoadSchematicParams<'_, '_> {
                     &mut self.materials,
                     &mut self.render_layer_alloc,
                     &self.eql.0,
+                    &self.geo_context,
                     viewport,
                     label,
                 );

@@ -364,6 +364,7 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(Update, update_eql_context)
+            .add_systems(Update, sync_eql_geo_origin.after(update_eql_context))
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(
                 Update,
@@ -2411,6 +2412,7 @@ pub fn update_eql_context(
     }
     let earliest = eql_context.0.earliest_timestamp;
     let latest = eql_context.0.last_timestamp;
+    let geo_origin = eql_context.0.geo_origin;
     eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
@@ -2434,6 +2436,20 @@ pub fn update_eql_context(
         earliest,
         latest,
     );
+    eql_context.0.geo_origin = geo_origin;
+}
+
+/// Keep `EqlContext.geo_origin` aligned with the schematic [`GeoContext`] so
+/// `ecef_to_ned()` and friends can emit SQL for query plots.
+pub fn sync_eql_geo_origin(geo: Res<GeoContext>, mut eql: ResMut<EqlContext>) {
+    let origin = eql::GeoOrigin::new(
+        geo.origin.latitude.to_degrees(),
+        geo.origin.longitude.to_degrees(),
+        geo.origin.altitude,
+    );
+    if eql.0.geo_origin != Some(origin) {
+        eql.0.geo_origin = Some(origin);
+    }
 }
 
 pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<EqlContext>) {
