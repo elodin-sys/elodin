@@ -10025,6 +10025,7 @@ version = "0.19.0"
 dependencies = [
  "approx",
  "arrow",
+ "bevy_geo_frames",
  "bytemuck",
  "byteorder",
  "bytes",
