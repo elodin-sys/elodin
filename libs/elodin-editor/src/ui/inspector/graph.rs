@@ -6,7 +6,7 @@ use std::{
 
 use bevy::ecs::{
     entity::Entity,
-    system::{Local, Query, Res, SystemParam, SystemState},
+    system::{Commands, Local, Query, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
@@ -49,6 +49,7 @@ pub struct InspectorGraph<'w, 's> {
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     eql_context: Res<'w, EqlContext>,
+    commands: Commands<'w, 's>,
     add_component_state: Local<'s, HashMap<Entity, AddComponentState>>,
 }
 
@@ -72,6 +73,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             mut graph_states,
             mut query_plots,
             eql_context,
+            mut commands,
             mut add_component_state,
         } = state_mut;
 
@@ -313,10 +315,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             add_component_widget(
                 ui,
                 icons.search,
+                graph_id,
                 graph_state,
                 &metadata_store,
                 &schema_store,
                 &eql_context.0,
+                &mut commands,
                 add_component_state.entry(graph_id).or_default(),
             );
         }
@@ -409,10 +413,12 @@ fn component_value(
 fn add_component_widget(
     ui: &mut egui::Ui,
     search_icon: egui::TextureId,
+    graph_id: Entity,
     graph_state: &mut GraphState,
     metadata_store: &ComponentMetadataRegistry,
     schema_store: &ComponentSchemaRegistry,
     eql_context: &eql::Context,
+    commands: &mut Commands,
     add_state: &mut AddComponentState,
 ) {
     let mut component_names = Vec::new();
@@ -467,10 +473,12 @@ fn add_component_widget(
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             if ui.add(EButton::highlight("ADD").width(88.0)).clicked() {
                                 let _ = add_components_from_eql(
+                                    graph_id,
                                     graph_state,
                                     metadata_store,
                                     schema_store,
                                     eql_context,
+                                    commands,
                                     component_name,
                                 );
                             }
@@ -522,10 +530,12 @@ fn add_component_widget(
                 let query = add_state.expression.trim().to_string();
                 if !query.is_empty()
                     && add_components_from_eql(
+                        graph_id,
                         graph_state,
                         metadata_store,
                         schema_store,
                         eql_context,
+                        commands,
                         &query,
                     )
                     .unwrap_or(false)
@@ -549,20 +559,42 @@ fn collect_component_names(
 }
 
 fn add_components_from_eql(
+    graph_id: Entity,
     graph_state: &mut GraphState,
     metadata_store: &ComponentMetadataRegistry,
     schema_store: &ComponentSchemaRegistry,
     eql_context: &eql::Context,
+    commands: &mut Commands,
     query: &str,
 ) -> Result<bool, String> {
     let expr = eql_context
         .parse_str(query)
         .map_err(|err| format!("Invalid EQL expression: {err}"))?;
 
-    if let Some(name) = expr.frame_conversion_name() {
-        return Err(format!(
-            "{name}() is not supported in a graph — use a query plot to convert frames."
-        ));
+    if expr.frame_conversion_name().is_some() {
+        // Frame converters need SQL evaluation — attach QueryPlotData and clear SeriesStore lines.
+        graph_state.components.clear();
+        graph_state.enabled_lines.clear();
+        let color = get_scheme().highlight;
+        commands.entity(graph_id).insert(QueryPlotData {
+            data: impeller2_wkt::QueryPlot {
+                name: graph_state.label.clone(),
+                query: query.to_string(),
+                refresh_interval: Duration::from_millis(500),
+                auto_refresh: true,
+                color: impeller2_wkt::Color::from_color32(color),
+                query_type: QueryType::EQL,
+                plot_mode: impeller2_wkt::PlotMode::TimeSeries,
+                x_label: None,
+                y_label: None,
+                node_id: Default::default(),
+            },
+            auto_color: true,
+            series_colors: Vec::new(),
+            last_refresh: None,
+            ..Default::default()
+        });
+        return Ok(true);
     }
 
     let mut requested_components = expr.to_graph_components();
@@ -601,14 +633,13 @@ fn add_components_from_eql(
         }
 
         for index in indexes {
-            let Some((enabled, color)) = component_values.get_mut(index) else {
-                continue;
-            };
-            if !*enabled {
-                *enabled = true;
-                *color = get_color_by_index_all(next_color_index);
-                next_color_index += 1;
-                added_lines += 1;
+            if let Some((enabled, color)) = component_values.get_mut(index) {
+                if !*enabled {
+                    *enabled = true;
+                    *color = get_color_by_index_all(next_color_index);
+                    next_color_index += 1;
+                    added_lines += 1;
+                }
             }
         }
     }

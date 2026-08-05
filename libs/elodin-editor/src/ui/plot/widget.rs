@@ -1487,7 +1487,7 @@ pub fn auto_y_bounds(
 
 #[allow(clippy::type_complexity)]
 pub fn sync_graphs(
-    mut graph_states: Query<&mut GraphState>,
+    mut graph_states: Query<&mut GraphState, Without<crate::ui::query_plot::QueryPlotData>>,
     metadata_store: Res<ComponentMetadataRegistry>,
     schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,

@@ -1180,11 +1180,27 @@ impl Pane {
                     PointerOwner::Graph { graph: pane.id },
                 );
 
-                ui.add_widget_with::<PlotWidget>(
-                    world,
-                    "graph",
-                    (pane.id, icons.scrub, target_window),
-                );
+                let has_query = world.get::<super::query_plot::QueryPlotData>(pane.id).is_some();
+                if has_query {
+                    ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
+                        world,
+                        "graph_sql",
+                        (
+                            super::query_plot::QueryPlotPane {
+                                entity: pane.id,
+                                rect: pane.rect,
+                                scrub_icon: Some(icons.scrub),
+                            },
+                            target_window,
+                        ),
+                    );
+                } else {
+                    ui.add_widget_with::<PlotWidget>(
+                        world,
+                        "graph",
+                        (pane.id, icons.scrub, target_window),
+                    );
+                }
 
                 egui_tiles::UiResponse::None
             }

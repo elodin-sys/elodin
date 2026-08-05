@@ -828,15 +828,13 @@ fn const_value(expr: &eql::Expr) -> Option<f64> {
 pub trait EqlExt {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
     fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)>;
+    /// First geo-frame converter in the expression, if any (`ecef_to_ned`, …).
+    /// Schematic load attaches SQL-backed `QueryPlotData` when this is `Some`.
     fn frame_conversion_name(&self) -> Option<&'static str>;
 }
 
 impl EqlExt for eql::Expr {
     /// Name of the first geo-frame converter in the expression, if any.
-    ///
-    /// Graph panes stream raw component elements by path/index, so they cannot
-    /// apply a conversion; callers report this instead of plotting source-frame
-    /// values as if they were converted.
     fn frame_conversion_name(&self) -> Option<&'static str> {
         match self {
             eql::Expr::Formula(formula, expr) => {
@@ -1147,7 +1145,8 @@ mod frame_conversion_tests {
             )
             .unwrap();
         assert_eq!(expr.frame_conversion_name(), Some("ecef_to_ned"));
-        // Graph panes would otherwise plot the raw ECEF elements.
+        // SeriesStore extraction would yield the raw ECEF elements; the graph
+        // loader routes converters through SQL-backed QueryPlotData instead.
         assert_eq!(expr.to_graph_components().len(), 3);
     }
 

@@ -1256,40 +1256,35 @@ impl LoadSchematicParams<'_, '_> {
                         }
                     })
                     .ok()?;
-                if let Some(formula) = eql.frame_conversion_name() {
-                    warn!(
-                        eql = %graph.eql,
-                        name = ?graph.name,
-                        "{formula}() is not supported in a graph, use a query_plot; skipping graph"
-                    );
-                    return None;
-                }
-                let mut component_vec = eql.to_graph_components();
-                component_vec.sort();
+                let graph_label = graph_label(graph);
+                let uses_sql = eql.frame_conversion_name().is_some();
+
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
-                for (j, (component, i)) in component_vec.iter().enumerate() {
-                    let line_color = graph
-                        .colors
-                        .get(j)
-                        .copied()
-                        .map(EColor::into_color32)
-                        .unwrap_or_else(|| colors::get_color_by_index_all(j));
-                    if let Some(elements) = components_tree.get_mut(component) {
-                        elements[*i] = (true, line_color);
-                    } else {
-                        let Some(schema) = self.schema_reg.0.get(&component.id) else {
-                            continue;
-                        };
-                        let len: usize = schema.shape().iter().copied().product();
-                        let mut elements: Vec<(bool, Color32)> =
-                            (0..len).map(|_| (false, line_color)).collect();
-                        elements[*i] = (true, line_color);
-                        components_tree.insert(component.clone(), elements);
+                if !uses_sql {
+                    let mut component_vec = eql.to_graph_components();
+                    component_vec.sort();
+                    for (j, (component, i)) in component_vec.iter().enumerate() {
+                        let line_color = graph
+                            .colors
+                            .get(j)
+                            .copied()
+                            .map(EColor::into_color32)
+                            .unwrap_or_else(|| colors::get_color_by_index_all(j));
+                        if let Some(elements) = components_tree.get_mut(component) {
+                            elements[*i] = (true, line_color);
+                        } else {
+                            let Some(schema) = self.schema_reg.0.get(&component.id) else {
+                                continue;
+                            };
+                            let len: usize = schema.shape().iter().copied().product();
+                            let mut elements: Vec<(bool, Color32)> =
+                                (0..len).map(|_| (false, line_color)).collect();
+                            elements[*i] = (true, line_color);
+                            components_tree.insert(component.clone(), elements);
+                        }
                     }
                 }
-
-                let graph_label = graph_label(graph);
 
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
@@ -1303,7 +1298,39 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
-                let graph_id = self.commands.spawn(bundle).id();
+
+                let mut entity_cmds = self.commands.spawn(bundle);
+                if uses_sql {
+                    let series_colors: Vec<_> = graph
+                        .colors
+                        .iter()
+                        .copied()
+                        .map(EColor::into_color32)
+                        .collect();
+                    let default_color = series_colors
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| colors::get_scheme().highlight);
+                    entity_cmds.insert(QueryPlotData {
+                        data: impeller2_wkt::QueryPlot {
+                            name: graph_label.clone(),
+                            query: graph.eql.clone(),
+                            refresh_interval: std::time::Duration::from_millis(500),
+                            auto_refresh: true,
+                            color: impeller2_wkt::Color::from_color32(default_color),
+                            query_type: impeller2_wkt::QueryType::EQL,
+                            plot_mode: impeller2_wkt::PlotMode::TimeSeries,
+                            x_label: None,
+                            y_label: None,
+                            node_id: Default::default(),
+                        },
+                        auto_color: series_colors.is_empty(),
+                        series_colors,
+                        last_refresh: None,
+                        ..Default::default()
+                    });
+                }
+                let graph_id = entity_cmds.id();
                 if matches!(context, PanelContext::Window(_)) {
                     self.commands.entity(graph_id).remove::<MainCamera>();
                 }
