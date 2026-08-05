@@ -39,6 +39,7 @@ import elodin.jaxsim
 
 from .elodin import *
 from . import monte_carlo as monte_carlo
+from . import ui as ui
 
 __doc__ = elodin.__doc__
 

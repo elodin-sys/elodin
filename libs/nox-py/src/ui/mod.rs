@@ -1,0 +1,255 @@
+//! `elodin.ui` — typed schematic builders that emit canonical KDL.
+//!
+//! Phase 1: 1:1 builders over [`impeller2_wkt`] panel/object types; EQL remains
+//! strings. Expression typing lands in Phase 2.
+
+mod builders;
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::str::FromStr;
+
+use impeller2::types::IntoLenPacket;
+use impeller2_kdl::{parse_schematic, serialize_schematic};
+use impeller2_wkt::{Schematic, SetDbConfig, StoreAsset};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::prelude::*;
+
+pub use builders::*;
+
+const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
+
+/// Python-facing schematic: wraps [`Schematic`] and emits canonical KDL.
+#[pyclass(name = "Schematic", module = "elodin.ui")]
+#[derive(Clone, Debug)]
+pub struct PySchematic {
+    pub(crate) inner: Schematic,
+}
+
+impl PySchematic {
+    pub fn from_inner(inner: Schematic) -> Self {
+        Self { inner }
+    }
+
+    pub fn emit_kdl_string(&self) -> String {
+        serialize_schematic(&self.inner)
+    }
+}
+
+#[pymethods]
+impl PySchematic {
+    /// Parse KDL text into a schematic (FR-11).
+    #[staticmethod]
+    fn from_kdl(text: &str) -> PyResult<Self> {
+        let inner = parse_schematic(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Emit deterministic KDL (FR-2 / FR-3).
+    fn emit_kdl(&self) -> String {
+        self.emit_kdl_string()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Schematic(elems={}, theme={}, timeline={}, frame={:?})",
+            self.inner.elems.len(),
+            self.inner.theme.is_some(),
+            self.inner.timeline.is_some(),
+            self.inner.frame,
+        )
+    }
+
+    fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
+        if let Ok(other) = other.extract::<PyRef<'_, PySchematic>>() {
+            Ok(self.inner == other.inner)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
+/// Build a schematic from panels/objects plus optional globals.
+#[pyfunction]
+#[pyo3(signature = (*elems, coordinate=None, theme=None, timeline=None, skybox=None, telemetry_mode=false))]
+fn schematic(
+    elems: Vec<Bound<'_, PyAny>>,
+    coordinate: Option<Bound<'_, PyAny>>,
+    theme: Option<Bound<'_, PyAny>>,
+    timeline: Option<Bound<'_, PyAny>>,
+    skybox: Option<String>,
+    telemetry_mode: bool,
+) -> PyResult<PySchematic> {
+    let mut inner = Schematic {
+        telemetry_mode,
+        ..Schematic::default()
+    };
+
+    if let Some(coord) = coordinate {
+        let c = builders::extract_coordinate(&coord)?;
+        inner.frame = Some(c.frame);
+        inner.origin = c.origin;
+        inner.body = c.body;
+    }
+    if let Some(t) = theme {
+        inner.theme = Some(builders::extract_theme(&t)?);
+    }
+    if let Some(t) = timeline {
+        inner.timeline = Some(builders::extract_timeline(&t)?);
+    }
+    if let Some(name) = skybox {
+        inner.skybox = Some(impeller2_wkt::SkyboxConfig { name });
+    }
+
+    for elem in elems {
+        push_elem(&mut inner, &elem)?;
+    }
+
+    Ok(PySchematic { inner })
+}
+
+fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> {
+    if let Ok(panel) = obj.extract::<PyRef<'_, PyPanel>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::Panel(panel.inner.clone()));
+        return Ok(());
+    }
+    if let Ok(obj3d) = obj.extract::<PyRef<'_, PyObject3D>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::Object3d(obj3d.inner.clone()));
+        return Ok(());
+    }
+    if let Ok(line) = obj.extract::<PyRef<'_, PyLine3d>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::Line3d(line.inner.clone()));
+        return Ok(());
+    }
+    if let Ok(arrow) = obj.extract::<PyRef<'_, PyVectorArrow>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::VectorArrow(
+                arrow.inner.clone(),
+            ));
+        return Ok(());
+    }
+    if let Ok(mesh) = obj.extract::<PyRef<'_, PyWorldMesh>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::WorldMesh(mesh.inner.clone()));
+        return Ok(());
+    }
+    if let Ok(window) = obj.extract::<PyRef<'_, PyWindow>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::Window(window.inner.clone()));
+        return Ok(());
+    }
+    Err(PyTypeError::new_err(
+        "schematic elements must be Panel, Object3D, Line3d, VectorArrow, WorldMesh, or Window",
+    ))
+}
+
+/// Write schematic KDL to a filesystem path (FR-5).
+#[pyfunction]
+fn write(schematic: &PySchematic, path: PathBuf) -> PyResult<()> {
+    let kdl = schematic.emit_kdl_string();
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            PyRuntimeError::new_err(format!("create_dir_all {}: {e}", parent.display()))
+        })?;
+    }
+    std::fs::write(&path, kdl)
+        .map_err(|e| PyRuntimeError::new_err(format!("write {}: {e}", path.display())))?;
+    Ok(())
+}
+
+/// Push schematic to a live DB: StoreAsset + set `schematic.active` (FR-5).
+#[pyfunction]
+#[pyo3(signature = (schematic, db, key = None))]
+fn push(schematic: &PySchematic, db: &str, key: Option<String>) -> PyResult<()> {
+    let key = key.unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string());
+    let addr = SocketAddr::from_str(db)
+        .map_err(|e| PyValueError::new_err(format!("invalid db address {db:?}: {e}")))?;
+    let bytes = schematic.emit_kdl_string().into_bytes();
+    let store = StoreAsset {
+        key: key.clone(),
+        bytes,
+    };
+    let mut metadata = HashMap::new();
+    metadata.insert("schematic.active".to_string(), key);
+    let config = SetDbConfig {
+        recording: None,
+        metadata,
+    };
+
+    crate::db::block_on(move || async move {
+        let mut client = impeller2_stellar::Client::connect(addr)
+            .await
+            .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
+        client
+            .send((&store).into_len_packet())
+            .await
+            .0
+            .map_err(|e| PyRuntimeError::new_err(format!("StoreAsset: {e}")))?;
+        client
+            .send((&config).into_len_packet())
+            .await
+            .0
+            .map_err(|e| PyRuntimeError::new_err(format!("SetDbConfig: {e}")))?;
+        Ok::<(), PyErr>(())
+    })?;
+    Ok(())
+}
+
+/// Parse `default_content` for [`crate::WorldBuilder::schematic`]: `str` or [`PySchematic`].
+pub fn extract_schematic_content(obj: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(s);
+    }
+    if let Ok(schematic) = obj.extract::<PyRef<'_, PySchematic>>() {
+        return Ok(schematic.emit_kdl_string());
+    }
+    Err(PyTypeError::new_err(
+        "schematic content must be str or elodin.ui.Schematic",
+    ))
+}
+
+pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child = PyModule::new(parent_module.py(), "ui")?;
+    child.add_class::<PySchematic>()?;
+    child.add_class::<PyPanel>()?;
+    child.add_class::<PyObject3D>()?;
+    child.add_class::<PyLine3d>()?;
+    child.add_class::<PyVectorArrow>()?;
+    child.add_class::<PyWorldMesh>()?;
+    child.add_class::<PyWindow>()?;
+    child.add_class::<PyMesh>()?;
+    child.add_class::<PyJoint>()?;
+    child.add_class::<PyCoordinate>()?;
+    child.add_class::<PyTheme>()?;
+    child.add_class::<PyTimeline>()?;
+    child.add_function(wrap_pyfunction!(schematic, &child)?)?;
+    child.add_function(wrap_pyfunction!(from_kdl, &child)?)?;
+    child.add_function(wrap_pyfunction!(write, &child)?)?;
+    child.add_function(wrap_pyfunction!(push, &child)?)?;
+    builders::register_builders(&child)?;
+    parent_module.add_submodule(&child)?;
+    // Ensure `import elodin.ui` resolves via sys.modules (same pattern as db).
+    parent_module
+        .py()
+        .import("sys")?
+        .getattr("modules")?
+        .set_item("elodin.ui", &child)?;
+    Ok(())
+}
+
+#[pyfunction]
+fn from_kdl(text: &str) -> PyResult<PySchematic> {
+    PySchematic::from_kdl(text)
+}
