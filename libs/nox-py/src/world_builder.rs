@@ -1562,14 +1562,23 @@ impl WorldBuilder {
     /// If a `path` is given and the file exists, the file's contents will be
     /// used as the schematic.
     ///
-    /// In all other cases, `default_content` is used as the schematic.
+    /// In all other cases, `default_content` is used as the schematic. Accepts a
+    /// KDL `str` or an `elodin.ui.Schematic` object (serialized to KDL).
     ///
     /// Primarily this affords the code a means of specifying a default
     /// schematic and location for saving custom schematics. It is expected that
     /// the user may make changes and save the schematic to the given path, but
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
-    pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
+    pub fn schematic(
+        &mut self,
+        default_content: Option<&Bound<'_, PyAny>>,
+        path: Option<String>,
+    ) -> PyResult<()> {
+        let default_content = match default_content {
+            None => None,
+            Some(obj) => Some(crate::ui::extract_schematic_content(obj)?),
+        };
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
             .as_ref()
@@ -1601,6 +1610,7 @@ impl WorldBuilder {
                 }
             });
         self.world.metadata.schematic = file_contents.or(default_content);
+        Ok(())
     }
 
     pub fn discover_components(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
