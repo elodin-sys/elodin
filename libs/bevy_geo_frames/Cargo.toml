@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 bevy.workspace = true
 bevy.optional = true
+bevy_math.workspace = true
 big_space = { workspace = true, optional = true }
 map_3d = "0.1.5"
 serde = { version = "1", features = ["derive"], optional = true }

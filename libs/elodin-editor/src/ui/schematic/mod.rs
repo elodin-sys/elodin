@@ -828,9 +828,33 @@ fn const_value(expr: &eql::Expr) -> Option<f64> {
 pub trait EqlExt {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
     fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)>;
+    fn frame_conversion_name(&self) -> Option<&'static str>;
 }
 
 impl EqlExt for eql::Expr {
+    /// Name of the first geo-frame converter in the expression, if any.
+    ///
+    /// Graph panes stream raw component elements by path/index, so they cannot
+    /// apply a conversion; callers report this instead of plotting source-frame
+    /// values as if they were converted.
+    fn frame_conversion_name(&self) -> Option<&'static str> {
+        match self {
+            eql::Expr::Formula(formula, expr) => {
+                if formula.frame_conversion().is_some() {
+                    Some(formula.name())
+                } else {
+                    expr.frame_conversion_name()
+                }
+            }
+            eql::Expr::ArrayAccess(expr, _) => expr.frame_conversion_name(),
+            eql::Expr::Tuple(exprs) => exprs.iter().find_map(|e| e.frame_conversion_name()),
+            eql::Expr::BinaryOp(left, right, _) => left
+                .frame_conversion_name()
+                .or_else(|| right.frame_conversion_name()),
+            _ => None,
+        }
+    }
+
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)> {
         self.to_graph_component_affines()
             .into_iter()
@@ -1095,6 +1119,45 @@ mod element_affine_tests {
                 .map(|(path, index, _)| (path.clone(), *index))
                 .collect::<Vec<_>>()
         );
+    }
+}
+
+#[cfg(test)]
+mod frame_conversion_tests {
+    use super::*;
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use std::sync::Arc;
+
+    fn ctx() -> eql::Context {
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ));
+        eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000))
+    }
+
+    #[test]
+    fn detects_converter_under_element_tuple() {
+        let ctx = ctx();
+        let expr = ctx
+            .parse_str(
+                "(rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_ned()",
+            )
+            .unwrap();
+        assert_eq!(expr.frame_conversion_name(), Some("ecef_to_ned"));
+        // Graph panes would otherwise plot the raw ECEF elements.
+        assert_eq!(expr.to_graph_components().len(), 3);
+    }
+
+    #[test]
+    fn plain_tuple_has_no_conversion() {
+        let ctx = ctx();
+        let expr = ctx
+            .parse_str("(rocket.world_pos[4], rocket.world_pos[5])")
+            .unwrap();
+        assert_eq!(expr.frame_conversion_name(), None);
     }
 }
 

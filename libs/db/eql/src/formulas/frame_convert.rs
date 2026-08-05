@@ -1,7 +1,8 @@
 //! Directed geo-frame conversions: `ecef_to_ned()`, `ned_to_ecef_direction()`, etc.
 
-use crate::geo::{self, Affine3, FrameId, GeoOrigin};
 use crate::{Context, Error, Expr};
+use bevy_geo_frames::{GeoFrame, GeoOrigin};
+use bevy_math::{DMat3, DMat4};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,8 +16,8 @@ pub enum FrameConvertKind {
 /// Metadata for editor runtime and SQL emission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameConversion {
-    pub from: FrameId,
-    pub to: FrameId,
+    pub from: GeoFrame,
+    pub to: GeoFrame,
     pub kind: FrameConvertKind,
 }
 
@@ -27,7 +28,7 @@ pub struct FrameConvert {
 }
 
 impl FrameConvert {
-    const fn new(name: &'static str, from: FrameId, to: FrameId, kind: FrameConvertKind) -> Self {
+    const fn new(name: &'static str, from: GeoFrame, to: GeoFrame, kind: FrameConvertKind) -> Self {
         Self {
             conversion: FrameConversion { from, to, kind },
             name,
@@ -37,75 +38,75 @@ impl FrameConvert {
 
 pub const ECEF_TO_NED: FrameConvert = FrameConvert::new(
     "ecef_to_ned",
-    FrameId::Ecef,
-    FrameId::Ned,
+    GeoFrame::ECEF,
+    GeoFrame::NED,
     FrameConvertKind::Point,
 );
 pub const NED_TO_ECEF: FrameConvert = FrameConvert::new(
     "ned_to_ecef",
-    FrameId::Ned,
-    FrameId::Ecef,
+    GeoFrame::NED,
+    GeoFrame::ECEF,
     FrameConvertKind::Point,
 );
 pub const ENU_TO_NED: FrameConvert = FrameConvert::new(
     "enu_to_ned",
-    FrameId::Enu,
-    FrameId::Ned,
+    GeoFrame::ENU,
+    GeoFrame::NED,
     FrameConvertKind::Point,
 );
 pub const NED_TO_ENU: FrameConvert = FrameConvert::new(
     "ned_to_enu",
-    FrameId::Ned,
-    FrameId::Enu,
+    GeoFrame::NED,
+    GeoFrame::ENU,
     FrameConvertKind::Point,
 );
 pub const ECEF_TO_ENU: FrameConvert = FrameConvert::new(
     "ecef_to_enu",
-    FrameId::Ecef,
-    FrameId::Enu,
+    GeoFrame::ECEF,
+    GeoFrame::ENU,
     FrameConvertKind::Point,
 );
 pub const ENU_TO_ECEF: FrameConvert = FrameConvert::new(
     "enu_to_ecef",
-    FrameId::Enu,
-    FrameId::Ecef,
+    GeoFrame::ENU,
+    GeoFrame::ECEF,
     FrameConvertKind::Point,
 );
 
 pub const ECEF_TO_NED_DIRECTION: FrameConvert = FrameConvert::new(
     "ecef_to_ned_direction",
-    FrameId::Ecef,
-    FrameId::Ned,
+    GeoFrame::ECEF,
+    GeoFrame::NED,
     FrameConvertKind::Direction,
 );
 pub const NED_TO_ECEF_DIRECTION: FrameConvert = FrameConvert::new(
     "ned_to_ecef_direction",
-    FrameId::Ned,
-    FrameId::Ecef,
+    GeoFrame::NED,
+    GeoFrame::ECEF,
     FrameConvertKind::Direction,
 );
 pub const ENU_TO_NED_DIRECTION: FrameConvert = FrameConvert::new(
     "enu_to_ned_direction",
-    FrameId::Enu,
-    FrameId::Ned,
+    GeoFrame::ENU,
+    GeoFrame::NED,
     FrameConvertKind::Direction,
 );
 pub const NED_TO_ENU_DIRECTION: FrameConvert = FrameConvert::new(
     "ned_to_enu_direction",
-    FrameId::Ned,
-    FrameId::Enu,
+    GeoFrame::NED,
+    GeoFrame::ENU,
     FrameConvertKind::Direction,
 );
 pub const ECEF_TO_ENU_DIRECTION: FrameConvert = FrameConvert::new(
     "ecef_to_enu_direction",
-    FrameId::Ecef,
-    FrameId::Enu,
+    GeoFrame::ECEF,
+    GeoFrame::ENU,
     FrameConvertKind::Direction,
 );
 pub const ENU_TO_ECEF_DIRECTION: FrameConvert = FrameConvert::new(
     "enu_to_ecef_direction",
-    FrameId::Enu,
-    FrameId::Ecef,
+    GeoFrame::ENU,
+    GeoFrame::ECEF,
     FrameConvertKind::Direction,
 );
 
@@ -126,12 +127,61 @@ pub fn all_frame_converts() -> [FrameConvert; 12] {
     ]
 }
 
+/// Row-major `R` and translation `t` for `out = R * in + t` (SQL emission).
+struct Affine3 {
+    r: [[f64; 3]; 3],
+    t: [f64; 3],
+}
+
+fn needs_geo_origin(from: GeoFrame, to: GeoFrame) -> bool {
+    matches!((from, to), (GeoFrame::ECEF, _) | (_, GeoFrame::ECEF))
+}
+
+fn frame_name(frame: GeoFrame) -> &'static str {
+    match frame {
+        GeoFrame::ENU => "ENU",
+        GeoFrame::NED => "NED",
+        GeoFrame::ECEF => "ECEF",
+    }
+}
+
+fn require_origin(conv: FrameConversion, origin: Option<GeoOrigin>) -> Result<GeoOrigin, Error> {
+    if needs_geo_origin(conv.from, conv.to) {
+        origin.ok_or_else(|| {
+            Error::InvalidMethodCall(format!(
+                "{}→{} conversion requires a geo origin (schematic `coordinate` lat/lon/alt)",
+                frame_name(conv.from),
+                frame_name(conv.to)
+            ))
+        })
+    } else {
+        Ok(origin.unwrap_or_default())
+    }
+}
+
+fn affine_from_mat3(r: DMat3) -> Affine3 {
+    Affine3 {
+        r: [
+            [r.x_axis.x, r.y_axis.x, r.z_axis.x],
+            [r.x_axis.y, r.y_axis.y, r.z_axis.y],
+            [r.x_axis.z, r.y_axis.z, r.z_axis.z],
+        ],
+        t: [0.0, 0.0, 0.0],
+    }
+}
+
+fn affine_from_mat4(m: DMat4) -> Affine3 {
+    let mut a = affine_from_mat3(DMat3::from_mat4(m));
+    a.t = [m.w_axis.x, m.w_axis.y, m.w_axis.z];
+    a
+}
+
 fn affine_for(conv: FrameConversion, origin: Option<GeoOrigin>) -> Result<Affine3, Error> {
-    let result = match conv.kind {
-        FrameConvertKind::Point => geo::point_affine(conv.from, conv.to, origin),
-        FrameConvertKind::Direction => geo::direction_affine(conv.from, conv.to, origin),
-    };
-    result.map_err(Error::InvalidMethodCall)
+    let origin = require_origin(conv, origin)?;
+    Ok(match conv.kind {
+        FrameConvertKind::Point => affine_from_mat4(conv.to.plane_M_(&conv.from, &origin)),
+        FrameConvertKind::Direction => affine_from_mat3(conv.to.plane_R_(&conv.from, &origin)),
+    })
 }
 
 fn fmt_sql_f64(v: f64) -> String {
@@ -158,12 +208,7 @@ fn sql_linear_combo(coeffs: [f64; 3], fields: [&str; 3], translation: f64) -> St
     parts.join(" + ")
 }
 
-fn component_elem_count(expr: &Expr) -> Result<usize, Error> {
-    let Expr::ComponentPart(part) = expr else {
-        return Err(Error::InvalidMethodCall(
-            "frame conversion SQL expects a component receiver".to_string(),
-        ));
-    };
+fn component_elem_count(part: &crate::ComponentPart) -> Result<usize, Error> {
     let comp = part.component.as_ref().ok_or_else(|| {
         Error::InvalidFieldAccess("frame conversion on non-leaf component".to_string())
     })?;
@@ -189,6 +234,56 @@ fn position_start_index(n_elems: usize, kind: FrameConvertKind) -> Result<usize,
     }
 }
 
+/// Tuples parse as nested pairs (`(a, b, c)` → `((a, b), c)`), so flatten.
+fn flatten_tuple<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    match expr {
+        Expr::Tuple(elements) => elements.iter().for_each(|e| flatten_tuple(e, out)),
+        e => out.push(e),
+    }
+}
+
+fn tuple_elements(expr: &Expr) -> Vec<&Expr> {
+    let mut out = Vec::new();
+    flatten_tuple(expr, &mut out);
+    out
+}
+
+/// The three source-frame SQL scalars a conversion consumes: either the xyz
+/// slice of a component (`world_pos.ecef_to_ned()`) or an explicit 3-tuple
+/// (`(world_pos[4], world_pos[5], world_pos[6]).ecef_to_ned()`).
+fn source_fields(expr: &Expr, kind: FrameConvertKind) -> Result<[String; 3], Error> {
+    match expr {
+        Expr::ComponentPart(part) => {
+            let start = position_start_index(component_elem_count(part)?, kind)?;
+            let field = |i: usize| {
+                Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), start + i)
+                    .to_qualified_field()
+            };
+            Ok([field(0)?, field(1)?, field(2)?])
+        }
+        Expr::Tuple(_) => {
+            let elements = tuple_elements(expr);
+            let [x, y, z] = elements[..] else {
+                return Err(tuple_arity_error(elements.len()));
+            };
+            Ok([
+                x.to_qualified_field()?,
+                y.to_qualified_field()?,
+                z.to_qualified_field()?,
+            ])
+        }
+        _ => Err(Error::InvalidMethodCall(
+            "frame conversion SQL expects a component or 3-tuple receiver".to_string(),
+        )),
+    }
+}
+
+fn tuple_arity_error(got: usize) -> Error {
+    Error::InvalidMethodCall(format!(
+        "frame conversion on a tuple expects 3 elements, got {got}"
+    ))
+}
+
 impl super::Formula for FrameConvert {
     fn name(&self) -> &'static str {
         self.name
@@ -204,6 +299,18 @@ impl super::Formula for FrameConvert {
                 "{}() takes no arguments",
                 self.name
             )));
+        }
+        match &recv {
+            Expr::ComponentPart(part) => {
+                position_start_index(component_elem_count(part)?, self.conversion.kind)?;
+            }
+            Expr::Tuple(_) => {
+                let n = tuple_elements(&recv).len();
+                if n != 3 {
+                    return Err(tuple_arity_error(n));
+                }
+            }
+            _ => {}
         }
         Ok(Expr::Formula(Arc::new(*self), Box::new(recv)))
     }
@@ -232,36 +339,17 @@ impl super::Formula for FrameConvert {
         Vec::new()
     }
 
-    fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
-        // Used when nested; emit a bracket list of transformed components.
-        let n = component_elem_count(expr)?;
-        let start = position_start_index(n, self.conversion.kind)?;
-        // Without Context we can't bake ECEF; require the select/to_sql path.
-        let _ = start;
+    fn to_qualified_field(&self, _expr: &Expr) -> Result<String, Error> {
+        // Nested use would need the geo origin, which only `to_sql` receives.
         Err(Error::InvalidMethodCall(format!(
-            "{}() must be compiled via to_sql (needs geo origin for ECEF conversions)",
+            "{}() must be the outermost formula in a query (needs the geo origin)",
             self.name
         )))
     }
 
     fn to_sql(&self, expr: &Expr, context: &Context) -> Result<String, Error> {
-        let n = component_elem_count(expr)?;
-        let start = position_start_index(n, self.conversion.kind)?;
         let affine = affine_for(self.conversion, context.geo_origin)?;
-
-        let Expr::ComponentPart(part) = expr else {
-            return Err(Error::InvalidMethodCall(
-                "frame conversion SQL expects a component receiver".to_string(),
-            ));
-        };
-
-        let mut fields = Vec::with_capacity(3);
-        for i in 0..3 {
-            fields.push(
-                Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), start + i)
-                    .to_qualified_field()?,
-            );
-        }
+        let fields = source_fields(expr, self.conversion.kind)?;
         let field_refs = [fields[0].as_str(), fields[1].as_str(), fields[2].as_str()];
 
         let t = match self.conversion.kind {
@@ -291,6 +379,7 @@ impl super::Formula for FrameConvert {
 mod tests {
     use super::*;
     use crate::{Component, Context};
+    use bevy_math::DVec3;
     use impeller2::schema::Schema;
     use impeller2::types::{ComponentId, PrimType, Timestamp};
     use std::sync::Arc;
@@ -302,7 +391,7 @@ mod tests {
             Schema::new(PrimType::F64, vec![dim]).unwrap(),
         ));
         let mut ctx = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
-        ctx.geo_origin = Some(GeoOrigin::new(28.5, -80.6, 0.0));
+        ctx.geo_origin = Some(GeoOrigin::new_from_degrees(28.5, -80.6, 0.0));
         ctx
     }
 
@@ -313,7 +402,7 @@ mod tests {
         match expr {
             Expr::Formula(f, _) => {
                 assert_eq!(f.name(), "ecef_to_ned");
-                assert_eq!(f.frame_conversion().unwrap().from, FrameId::Ecef);
+                assert_eq!(f.frame_conversion().unwrap().from, GeoFrame::ECEF);
             }
             _ => panic!("expected formula"),
         }
@@ -351,6 +440,22 @@ mod tests {
     }
 
     #[test]
+    fn ecef_to_ned_sql_from_element_tuple() {
+        let ctx = ctx_with_pos(7);
+        let expr = ctx
+            .parse_str(
+                "(rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_ned()",
+            )
+            .unwrap();
+        let sql = expr.to_sql(&ctx).unwrap();
+        assert!(sql.starts_with("select "), "{sql}");
+        for idx in ["[5]", "[6]", "[7]"] {
+            assert!(sql.contains(idx), "missing {idx}: {sql}");
+        }
+        assert!(sql.contains(" as 'ecef_to_ned.x'"), "{sql}");
+    }
+
+    #[test]
     fn ecef_to_ned_sql_with_origin() {
         let ctx = ctx_with_pos(3);
         let expr = ctx.parse_str("rocket.world_pos.ecef_to_ned()").unwrap();
@@ -360,5 +465,33 @@ mod tests {
             sql.contains(" as 'ecef_to_ned(rocket.world_pos).x'"),
             "{sql}"
         );
+    }
+
+    #[test]
+    fn affine_matches_geo_frame_m() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let affine = affine_for(
+            FrameConversion {
+                from: GeoFrame::NED,
+                to: GeoFrame::ECEF,
+                kind: FrameConvertKind::Point,
+            },
+            Some(origin),
+        )
+        .unwrap();
+        let ned = DVec3::new(10.0, -3.0, 2.0);
+        let via_sql = [
+            affine.r[0][0] * ned.x + affine.r[0][1] * ned.y + affine.r[0][2] * ned.z + affine.t[0],
+            affine.r[1][0] * ned.x + affine.r[1][1] * ned.y + affine.r[1][2] * ned.z + affine.t[1],
+            affine.r[2][0] * ned.x + affine.r[2][1] * ned.y + affine.r[2][2] * ned.z + affine.t[2],
+        ];
+        let via_m = GeoFrame::ECEF
+            .plane_M_(&GeoFrame::NED, &origin)
+            .transform_point3(ned);
+        let err = ((via_sql[0] - via_m.x).powi(2)
+            + (via_sql[1] - via_m.y).powi(2)
+            + (via_sql[2] - via_m.z).powi(2))
+        .sqrt();
+        assert!(err < 1e-9, "sql affine vs plane_M_ err={err}");
     }
 }

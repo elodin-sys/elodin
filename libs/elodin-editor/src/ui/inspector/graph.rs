@@ -559,6 +559,12 @@ fn add_components_from_eql(
         .parse_str(query)
         .map_err(|err| format!("Invalid EQL expression: {err}"))?;
 
+    if let Some(name) = expr.frame_conversion_name() {
+        return Err(format!(
+            "{name}() is not supported in a graph — use a query plot to convert frames."
+        ));
+    }
+
     let mut requested_components = expr.to_graph_components();
     requested_components.sort();
     requested_components.dedup();

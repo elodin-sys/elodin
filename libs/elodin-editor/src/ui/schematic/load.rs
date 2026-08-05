@@ -1256,6 +1256,14 @@ impl LoadSchematicParams<'_, '_> {
                         }
                     })
                     .ok()?;
+                if let Some(formula) = eql.frame_conversion_name() {
+                    warn!(
+                        eql = %graph.eql,
+                        name = ?graph.name,
+                        "{formula}() is not supported in a graph, use a query_plot; skipping graph"
+                    );
+                    return None;
+                }
                 let mut component_vec = eql.to_graph_components();
                 component_vec.sort();
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =

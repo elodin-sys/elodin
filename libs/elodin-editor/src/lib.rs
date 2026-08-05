@@ -2442,13 +2442,14 @@ pub fn update_eql_context(
 /// Keep `EqlContext.geo_origin` aligned with the schematic [`GeoContext`] so
 /// `ecef_to_ned()` and friends can emit SQL for query plots.
 pub fn sync_eql_geo_origin(geo: Res<GeoContext>, mut eql: ResMut<EqlContext>) {
-    let origin = eql::GeoOrigin::new(
-        geo.origin.latitude.to_degrees(),
-        geo.origin.longitude.to_degrees(),
-        geo.origin.altitude,
-    );
-    if eql.0.geo_origin != Some(origin) {
-        eql.0.geo_origin = Some(origin);
+    let dirty = eql.0.geo_origin.is_none_or(|o| {
+        o.latitude != geo.origin.latitude
+            || o.longitude != geo.origin.longitude
+            || o.altitude != geo.origin.altitude
+            || o.ellipsoid.parameters() != geo.origin.ellipsoid.parameters()
+    });
+    if dirty {
+        eql.0.geo_origin = Some(geo.origin);
     }
 }
 

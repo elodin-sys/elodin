@@ -15,12 +15,11 @@ use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
 
 pub mod formulas;
-pub mod geo;
 
 use formulas::{FormulaRegistry, create_default_registry};
 
+pub use bevy_geo_frames::GeoFrame;
 pub use formulas::{CastTarget, Formula, FrameConversion, FrameConvertKind};
-pub use geo::{FrameId, GeoOrigin};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -487,7 +486,7 @@ pub struct Context {
     pub last_timestamp: Timestamp,
     pub formula_registry: FormulaRegistry,
     /// Schematic / editor geo origin for ECEF ↔ ENU/NED EQL converters.
-    pub geo_origin: Option<geo::GeoOrigin>,
+    pub geo_origin: Option<bevy_geo_frames::GeoOrigin>,
 }
 
 impl Default for Context {
@@ -573,7 +572,7 @@ impl Context {
     }
 
     /// Set the geo origin used by `ecef_to_ned()` / friends when emitting SQL.
-    pub fn with_geo_origin(mut self, origin: geo::GeoOrigin) -> Self {
+    pub fn with_geo_origin(mut self, origin: bevy_geo_frames::GeoOrigin) -> Self {
         self.geo_origin = Some(origin);
         self
     }

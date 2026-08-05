@@ -806,14 +806,6 @@ fn compile_formula(
     })
 }
 
-fn eql_frame_to_geo(frame: eql::FrameId) -> GeoFrame {
-    match frame {
-        eql::FrameId::Enu => GeoFrame::ENU,
-        eql::FrameId::Ned => GeoFrame::NED,
-        eql::FrameId::Ecef => GeoFrame::ECEF,
-    }
-}
-
 fn compile_frame_conversion(
     conv: eql::FrameConversion,
     inner_expr: eql::Expr,
@@ -822,8 +814,8 @@ fn compile_frame_conversion(
     use eql::FrameConvertKind;
     use nox::ArrayBuf;
 
-    let from = eql_frame_to_geo(conv.from);
-    let to = eql_frame_to_geo(conv.to);
+    let from = conv.from;
+    let to = conv.to;
     let geo = geo.clone();
     let receiver_compiled = compile_eql_expr_with_geo(inner_expr, &geo)?;
 

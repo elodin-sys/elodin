@@ -5,10 +5,10 @@
 //! a right-multiplication as $v_{bevy} = {bevy}_R_{enu} * v_{enu}$. This
 //! convention was chosen so that frames can be easily checked by adjacency.
 #![allow(non_snake_case)]
-use crate::{GeoFrame, RotationKind};
+use crate::Ellipsoid;
+use crate::{GeoFrame, GeoOrigin, RotationKind};
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
-pub use map_3d::Ellipsoid;
 
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;
@@ -46,42 +46,6 @@ pub enum Present {
     /// Here the latitude and longitude place us on the sphere, and then we use
     /// the coordinates from there.
     Sphere,
-}
-
-/// Where the Bevy world origin lives on Earth.
-///
-/// Used to turn ECEF positions into local ENU, then ENU → Bevy.
-#[derive(Default, Debug, Clone, Copy, Reflect)]
-pub struct GeoOrigin {
-    /// Geodetic latitude [rad]
-    pub latitude: f64,
-    /// Geodetic longitude [rad]
-    pub longitude: f64,
-    /// Altitude above mean radius [m]
-    pub altitude: f64,
-    #[reflect(ignore)]
-    /// Planet/body shape model (currently used primarily for reference radius).
-    pub ellipsoid: Ellipsoid,
-}
-
-impl GeoOrigin {
-    /// Uses default Earth radius.
-    pub fn new_from_degrees(latitude_deg: f64, longitude_deg: f64, altitude: f64) -> Self {
-        let latitude = latitude_deg.to_radians();
-        let longitude = longitude_deg.to_radians();
-        Self {
-            latitude,
-            longitude,
-            altitude,
-            ..default()
-        }
-    }
-
-    /// Provide an ellipsoid.
-    pub fn with_ellipsoid(mut self, shape: Ellipsoid) -> Self {
-        self.ellipsoid = shape;
-        self
-    }
 }
 
 /// Global geospatial context:
@@ -145,19 +109,6 @@ impl GeoContext {
 }
 
 impl GeoFrame {
-    fn origin_ecef(origin: &GeoOrigin) -> DVec3 {
-        map_3d::enu2ecef(
-            0.0,
-            0.0,
-            0.0,
-            origin.latitude,
-            origin.longitude,
-            origin.altitude,
-            &origin.ellipsoid,
-        )
-        .into()
-    }
-
     fn bevy_R_enu_plane() -> DMat3 {
         // Columns are frame basis vectors expressed in Bevy world space.
         // ENU: e_hat = +X, n_hat = -Z, u_hat = +Y
@@ -175,9 +126,14 @@ impl GeoFrame {
     /// The general transformation matrix for ${self}_M_{from}$ of the two
     /// coordinate frames.
     pub fn _M_(&self, from: &GeoFrame, context: &GeoContext) -> DMat4 {
-        let R = self._R_(from, context);
-        let O = self._O_(from, context);
-        DMat4::from_mat3_translation(R, O)
+        match context.present {
+            Present::Plane => self.plane_M_(from, &context.origin),
+            Present::Sphere => {
+                let R = self._R_(from, context);
+                let O = self._O_(from, context);
+                DMat4::from_mat3_translation(R, O)
+            }
+        }
     }
 
     /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
@@ -207,16 +163,7 @@ impl GeoFrame {
     /// Provides the origin vector ${self}_O_{from}$ of the coordinate frame.
     pub fn _O_(&self, from: &Self, context: &GeoContext) -> DVec3 {
         match context.present {
-            Present::Plane => {
-                let origin_ecef = Self::origin_ecef(&context.origin);
-                match (from, *self) {
-                    (GeoFrame::ECEF, GeoFrame::ENU | GeoFrame::NED) => {
-                        -self._R_(from, context) * origin_ecef
-                    }
-                    (GeoFrame::ENU | GeoFrame::NED, GeoFrame::ECEF) => origin_ecef,
-                    _ => DVec3::ZERO,
-                }
-            }
+            Present::Plane => self.plane_O_(from, &context.origin),
             Present::Sphere => {
                 match (from, *self) {
                     (GeoFrame::ECEF, GeoFrame::ENU | GeoFrame::NED) => {
@@ -233,7 +180,7 @@ impl GeoFrame {
         }
     }
 
-    /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
+    /// Provides the origin vector ${ecef}_O_{from}$ of the coordinate frame.
     pub fn ecef_O_(from: &Self, context: &GeoContext) -> DVec3 {
         match context.present {
             Present::Plane => match from {
@@ -254,16 +201,7 @@ impl GeoFrame {
     /// The general rotation matrix for ${self}_R_{from}$ of the two
     /// coordinate frames.
     pub fn _R_(&self, from: &GeoFrame, context: &GeoContext) -> DMat3 {
-        use crate::GeoFrame::*;
-        match (*from, *self) {
-            (x, y) if x == y => DMat3::IDENTITY,
-            (ENU, NED) => Self::ned_R_enu(),
-            (NED, ENU) => Self::enu_R_ned(),
-            // ecef_R_(x) maps x -> ECEF, so self_R_ecef is its inverse.
-            (ECEF, x) => Self::ecef_R_(&x, &context.origin).inverse(),
-            (x, ECEF) => Self::ecef_R_(&x, &context.origin),
-            (x, y) => unreachable!("{x:?} -> {y:?}"),
-        }
+        self.plane_R_(from, &context.origin)
     }
 
     /// Provides the rotation matrix ${bevy}_R_{from}$.
@@ -291,48 +229,6 @@ impl GeoFrame {
         let R = Self::ecef_R_(from, &context.origin);
         let O = Self::ecef_O_(from, context);
         DMat4::from_mat3_translation(R, O)
-    }
-
-    /// Provides the matrix ${ecef}_R_{self}$.
-    ///
-    /// Given from this [reference.](https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates)
-    pub fn ecef_R_(from: &Self, origin: &GeoOrigin) -> DMat3 {
-        use std::f64::consts::FRAC_PI_2;
-        if *from == GeoFrame::ECEF {
-            return DMat3::IDENTITY;
-        }
-
-        // The reference uses this formula.
-        //
-        // $ \begin{bmatrix} x \\ y \\ z \end{bmatrix} = R_3[-(\pi/2 + \lambda)]~R_1[-(\pi/2 - \varphi)]\begin{bmatrix} E \\ N \\ U \end{bmatrix}
-        //
-        // Implementing on inspection results in this code:
-        //
-        // let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
-        //      * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
-        //
-        // However, the matrix implementations differ. Essentially the signs are
-        // flipped in the rotation matrices.
-        //
-        // `DMat3::from_rotation_x(-\theta) = R_1[\theta]`
-        let ecef_R_enu = DMat3::from_rotation_z(FRAC_PI_2 + origin.longitude)
-            * DMat3::from_rotation_x(FRAC_PI_2 - origin.latitude);
-        match from {
-            GeoFrame::ECEF => DMat3::IDENTITY,
-            GeoFrame::ENU => ecef_R_enu,
-            GeoFrame::NED => ecef_R_enu * Self::enu_R_ned(),
-        }
-    }
-
-    #[inline]
-    fn enu_R_ned() -> DMat3 {
-        DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
-    }
-
-    #[allow(dead_code)]
-    #[inline]
-    fn ned_R_enu() -> DMat3 {
-        DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
     }
 }
 

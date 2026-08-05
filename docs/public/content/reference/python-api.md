@@ -1368,6 +1368,8 @@ Directed converters re-express positions (and free directions) between `ENU`, `N
 
 These work in viewport / object_3d EQL and in `query_plot` EQL (translated to SQL with the schematic origin baked in). ENU ↔ NED needs no origin; ECEF conversions error if origin is unset.
 
+A plain `graph` plots raw component elements straight from the database and cannot apply a conversion, so it rejects these formulas — use `query_plot` instead. Both the whole component (`rocket.world_pos.ecef_to_ned()`) and an explicit element triple (`(rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_ned()`) are accepted.
+
 ```kdl
 coordinate frame="ECEF" lat=28.5 lon=-80.6
 
