@@ -51,6 +51,11 @@ elodin-db.features = ["grpc"]
 futures-lite = "2.5.0"
 
 impeller2-kdl.path = "../impeller2/kdl"
+
+bevy_geo_frames.path = "../bevy_geo_frames"
+bevy_geo_frames.default-features = false
+bevy_geo_frames.features = ["strum", "serde"]
+
 # async
 stellarator.path = "../stellarator"
 tokio.version = "1.34"
