@@ -133,11 +133,7 @@ fn skip_initial_points(points: &[(f64, f64)], is_xy_mode: bool) -> usize {
 }
 
 fn column_label(batch: &RecordBatch, col: usize) -> String {
-    batch
-        .schema()
-        .field(col)
-        .name()
-        .to_string()
+    batch.schema().field(col).name().to_string()
 }
 
 /// Build one XY line per Y column. Column 0 is X (time); columns 1..N are series.
@@ -155,8 +151,7 @@ pub fn process_sql_record_batch(
     let x_col = batch.column(0);
     let (x_values, earliest_abs_timestamp_micros) = extract_x_column(x_col);
 
-    let earliest_timestamp =
-        earliest_abs_timestamp_micros.map(impeller2::types::Timestamp);
+    let earliest_timestamp = earliest_abs_timestamp_micros.map(impeller2::types::Timestamp);
 
     let finite_x_values: Vec<f64> = x_values
         .iter()
@@ -201,16 +196,13 @@ pub fn process_sql_record_batch(
             xy_line.push_y_value((y_value - y_offset) as f32);
         }
 
-        let color = series_colors
-            .get(col_idx - 1)
-            .copied()
-            .unwrap_or_else(|| {
-                if col_idx == 1 {
-                    default_color
-                } else {
-                    crate::ui::colors::get_color_by_index_all(col_idx - 1)
-                }
-            });
+        let color = series_colors.get(col_idx - 1).copied().unwrap_or_else(|| {
+            if col_idx == 1 {
+                default_color
+            } else {
+                crate::ui::colors::get_color_by_index_all(col_idx - 1)
+            }
+        });
 
         series.push(SqlPlotSeries {
             label,
@@ -435,4 +427,3 @@ mod tests {
         assert!(plot.x_offset.is_finite());
     }
 }
-

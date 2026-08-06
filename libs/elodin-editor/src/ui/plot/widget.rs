@@ -184,6 +184,13 @@ impl XAxisMode {
     }
 }
 
+/// One XY series for query-plot rendering / hover modal.
+pub struct XYPlotSeries {
+    pub handle: Handle<XYLine>,
+    pub label: String,
+    pub color: egui::Color32,
+}
+
 /// Data source for plot rendering - either timeseries (Line) or XY (XYLine) data
 pub enum PlotDataSource<'a> {
     Timeseries {
@@ -193,9 +200,9 @@ pub enum PlotDataSource<'a> {
     },
     XY {
         xy_lines: &'a Assets<XYLine>,
-        xy_line_handle: Handle<XYLine>,
+        /// Plot title shown at the top of the hover modal.
         query_label: String,
-        query_color: egui::Color32,
+        series: Vec<XYPlotSeries>,
     },
 }
 
@@ -791,89 +798,77 @@ impl TimeseriesPlot {
                     }
                     PlotDataSource::XY {
                         xy_lines,
-                        xy_line_handle,
                         query_label,
-                        query_color,
+                        series,
                     } => {
-                        if let Some(xy_line) = xy_lines.get(xy_line_handle) {
-                            // Show query label
-                            ui.label(
-                                egui::RichText::new(query_label.clone())
-                                    .size(11.0)
-                                    .color(with_opacity(get_scheme().text_primary, 0.6)),
-                            );
-                            ui.add_space(8.0);
-                            ui.add(egui::Separator::default().grow(16.0 * 2.0));
-                            ui.add_space(8.0);
+                        // Show query label
+                        ui.label(
+                            egui::RichText::new(query_label.clone())
+                                .size(11.0)
+                                .color(with_opacity(get_scheme().text_primary, 0.6)),
+                        );
+                        ui.add_space(8.0);
+                        ui.add(egui::Separator::default().grow(16.0 * 2.0));
+                        ui.add_space(8.0);
 
-                            // Show X-axis value based on mode
-                            match self.x_axis_mode {
-                                XAxisMode::Numeric => {
-                                    // For numeric XY plots, show X as a number
-                                    if let Some(x_value) = relative_seconds {
-                                        ui.label(format!("X: {}", format_num(x_value)));
-                                    }
-                                }
-                                XAxisMode::TimestampRelative => {
-                                    // For relative time, show as duration
-                                    if let Some(relative_seconds) = relative_seconds {
-                                        let duration = hifitime::Duration::from_nanoseconds(
-                                            relative_seconds * 1_000_000_000.0,
-                                        );
-                                        ui.label(PrettyDuration(duration).to_string());
-                                    }
-                                }
-                                XAxisMode::TimestampAbsolute => {
-                                    // For absolute time, show as epoch
-                                    let time: hifitime::Epoch = timestamp.into();
-                                    ui.add(time_label(time));
+                        // Show X-axis value based on mode
+                        match self.x_axis_mode {
+                            XAxisMode::Numeric => {
+                                if let Some(x_value) = relative_seconds {
+                                    ui.label(format!("X: {}", format_num(x_value)));
                                 }
                             }
-
-                            // Find and show nearest value
-                            if let Some(relative_seconds) = relative_seconds {
-                                let mut nearest_value = None;
-                                let mut min_dist = f64::INFINITY;
-                                for (x_chunk, y_chunk) in
-                                    xy_line.x_values.iter().zip(xy_line.y_values.iter())
-                                {
-                                    for (x_val, y_val) in
-                                        x_chunk.cpu().iter().zip(y_chunk.cpu().iter())
-                                    {
-                                        let dist = (*x_val as f64 - relative_seconds).abs();
-                                        if dist < min_dist {
-                                            min_dist = dist;
-                                            nearest_value = Some(*y_val);
-                                        }
-                                    }
+                            XAxisMode::TimestampRelative => {
+                                if let Some(relative_seconds) = relative_seconds {
+                                    let duration = hifitime::Duration::from_nanoseconds(
+                                        relative_seconds * 1_000_000_000.0,
+                                    );
+                                    ui.label(PrettyDuration(duration).to_string());
                                 }
-
-                                ui.horizontal(|ui| {
-                                    ui.style_mut().override_font_id =
-                                        Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(8.0, 8.0),
-                                        egui::Sense::click(),
-                                    );
-                                    ui.painter().rect(
-                                        rect,
-                                        egui::CornerRadius::same(2),
-                                        *query_color,
-                                        egui::Stroke::NONE,
-                                        egui::StrokeKind::Middle,
-                                    );
-                                    ui.add_space(6.);
-                                    ui.label(RichText::new(query_label.clone()).size(11.0));
-                                    let value = nearest_value
-                                        .map(|v| format_num(v as f64))
-                                        .unwrap_or_else(|| "N/A".to_string());
-                                    ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                        ui.add_space(3.0);
-                                        ui.label(RichText::new(value).size(11.0));
-                                        ui.add_space(3.0);
-                                    })
-                                });
                             }
+                            XAxisMode::TimestampAbsolute => {
+                                let time: hifitime::Epoch = timestamp.into();
+                                ui.add(time_label(time));
+                            }
+                        }
+
+                        let Some(relative_seconds) = relative_seconds else {
+                            return;
+                        };
+
+                        ui.add_space(8.0);
+                        for series in series {
+                            let Some(xy_line) = xy_lines.get(&series.handle) else {
+                                continue;
+                            };
+                            let nearest_value =
+                                nearest_xy_value(xy_line, relative_seconds).map(|(_, y)| y);
+
+                            ui.horizontal(|ui| {
+                                ui.style_mut().override_font_id =
+                                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(8.0, 8.0),
+                                    egui::Sense::click(),
+                                );
+                                ui.painter().rect(
+                                    rect,
+                                    egui::CornerRadius::same(2),
+                                    series.color,
+                                    egui::Stroke::NONE,
+                                    egui::StrokeKind::Middle,
+                                );
+                                ui.add_space(6.);
+                                ui.label(RichText::new(series.label.clone()).size(11.0));
+                                let value = nearest_value
+                                    .map(|v| format_num(v as f64))
+                                    .unwrap_or_else(|| "N/A".to_string());
+                                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                                    ui.add_space(3.0);
+                                    ui.label(RichText::new(value).size(11.0));
+                                    ui.add_space(3.0);
+                                })
+                            });
                         }
                     }
                 }
@@ -967,13 +962,13 @@ impl TimeseriesPlot {
         let (has_data, xy_point_count) = match &data_source {
             PlotDataSource::Timeseries { .. } => (!graph_state.components.is_empty(), 0),
             PlotDataSource::XY {
-                xy_lines,
-                xy_line_handle,
-                ..
+                xy_lines, series, ..
             } => {
-                let count = xy_lines
-                    .get(xy_line_handle)
+                let count = series
+                    .iter()
+                    .filter_map(|s| xy_lines.get(&s.handle))
                     .map(|line| line.point_count())
+                    .max()
                     .unwrap_or(0);
                 (count > 1, count)
             }
@@ -1091,39 +1086,25 @@ impl TimeseriesPlot {
                     }
                 }
                 PlotDataSource::XY {
-                    xy_lines,
-                    xy_line_handle,
-                    query_color,
-                    ..
+                    xy_lines, series, ..
                 } => {
-                    if let Some(xy_line) = xy_lines.get(xy_line_handle)
-                        && let Some(relative_seconds) = relative_seconds
-                    {
-                        // Find nearest point across all chunks
-                        let mut nearest_x = 0.0;
-                        let mut nearest_y = 0.0;
-                        let mut min_dist = f64::INFINITY;
-                        for (x_chunk, y_chunk) in
-                            xy_line.x_values.iter().zip(xy_line.y_values.iter())
-                        {
-                            for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
-                                let dist = (*x_val as f64 - relative_seconds).abs();
-                                if dist < min_dist {
-                                    min_dist = dist;
-                                    nearest_x = *x_val as f64;
-                                    nearest_y = *y_val as f64;
-                                }
-                            }
-                        }
-                        // Draw circle at nearest point
-                        if min_dist < f64::INFINITY {
+                    if let Some(relative_seconds) = relative_seconds {
+                        for series in series {
+                            let Some(xy_line) = xy_lines.get(&series.handle) else {
+                                continue;
+                            };
+                            let Some((nearest_x, nearest_y)) =
+                                nearest_xy_value(xy_line, relative_seconds)
+                            else {
+                                continue;
+                            };
                             let value = DVec2::new(nearest_x, nearest_y);
                             let pos = self.bounds.value_to_screen_pos(self.rect, value);
                             ui.painter().circle(
                                 pos,
                                 4.5,
                                 get_scheme().bg_secondary,
-                                egui::Stroke::new(2.0, *query_color),
+                                egui::Stroke::new(2.0, series.color),
                             );
                         }
                     }
@@ -1198,6 +1179,22 @@ impl TimeseriesPlot {
                 ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
         }
     }
+}
+
+/// Nearest `(x, y)` sample on an XY line to the scrub X value.
+fn nearest_xy_value(xy_line: &XYLine, x: f64) -> Option<(f64, f64)> {
+    let mut nearest = None;
+    let mut min_dist = f64::INFINITY;
+    for (x_chunk, y_chunk) in xy_line.x_values.iter().zip(xy_line.y_values.iter()) {
+        for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
+            let dist = (*x_val as f64 - x).abs();
+            if dist < min_dist {
+                min_dist = dist;
+                nearest = Some((*x_val as f64, *y_val as f64));
+            }
+        }
+    }
+    nearest
 }
 
 pub fn draw_y_axis(

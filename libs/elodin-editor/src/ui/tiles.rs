@@ -1180,7 +1180,9 @@ impl Pane {
                     PointerOwner::Graph { graph: pane.id },
                 );
 
-                let has_query = world.get::<super::query_plot::QueryPlotData>(pane.id).is_some();
+                let has_query = world
+                    .get::<super::query_plot::QueryPlotData>(pane.id)
+                    .is_some();
                 if has_query {
                     ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
                         world,

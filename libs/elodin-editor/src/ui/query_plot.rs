@@ -139,11 +139,6 @@ impl QueryPlotData {
     fn offset(&self) -> DVec2 {
         DVec2::new(self.x_offset, self.y_offset)
     }
-
-    /// Primary series handle for cursor/modal chrome (first Y column).
-    fn primary_handle(&self) -> Option<Handle<XYLine>> {
-        self.series.first().map(|s| s.handle.clone())
-    }
 }
 
 pub fn sync_bounds_query(
@@ -229,9 +224,8 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         match eql_to_sql_with_time(&state.eql_context.0, &plot.data.query) {
                             Ok(sql) => sql,
                             Err(err) => {
-                                plot.state = QueryPlotState::Error(ErrorResponse {
-                                    description: err,
-                                });
+                                plot.state =
+                                    QueryPlotState::Error(ErrorResponse { description: err });
                                 return;
                             }
                         }
@@ -269,18 +263,13 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 );
             }
 
-            if let Some(xy_line_handle) = plot.primary_handle() {
+            if !plot.series.is_empty() {
                 let Ok(mut graph_state) = state.graphs_state.get_mut(entity) else {
                     return;
                 };
 
                 // Store values we need before borrowing plot
                 let query_label = plot.data.name.clone();
-                let query_color = plot
-                    .series
-                    .first()
-                    .map(|s| s.color)
-                    .unwrap_or_else(|| plot.data.color.into_color32());
                 let plot_mode = plot.data.plot_mode;
                 let x_label = plot.data.x_label.clone();
                 let y_label = plot.data.y_label.clone();
@@ -293,7 +282,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 let series_snapshot: Vec<_> = plot
                     .series
                     .iter()
-                    .map(|s| (s.handle.clone(), s.entity, s.color))
+                    .map(|s| (s.handle.clone(), s.entity, s.color, s.label.clone()))
                     .collect();
 
                 // X-range is already relative (time starts from 0), Y-range needs offset subtracted
@@ -321,13 +310,14 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     .try_insert(Projection::Orthographic(bounds.as_projection()));
 
                 let mut updated_entities = Vec::with_capacity(series_snapshot.len());
-                for (handle, existing, color) in series_snapshot {
+                let mut xy_series = Vec::with_capacity(series_snapshot.len());
+                for (handle, existing, color, label) in series_snapshot {
                     let line_entity = existing.unwrap_or_else(|| state.commands.spawn_empty().id());
                     state
                         .commands
                         .entity(line_entity)
                         .insert(LineBundle {
-                            line: LineHandle::XY(handle),
+                            line: LineHandle::XY(handle.clone()),
                             uniform: LineUniform::new(line_width, color.into_bevy()),
                             config: LineConfig {
                                 render_layers: render_layers.clone(),
@@ -338,6 +328,11 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         .insert(ChildOf(entity))
                         .insert(LineWidgetWidth(widget_width));
                     updated_entities.push(line_entity);
+                    xy_series.push(crate::ui::plot::XYPlotSeries {
+                        handle,
+                        label,
+                        color,
+                    });
                 }
                 for (series, entity) in plot.series.iter_mut().zip(updated_entities) {
                     series.entity = Some(entity);
@@ -366,9 +361,8 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
 
                 let data_source = PlotDataSource::XY {
                     xy_lines: &state.xy_lines,
-                    xy_line_handle,
                     query_label,
-                    query_color,
+                    series: xy_series,
                 };
 
                 let Ok(mut window_state) = state.window_states.get_mut(target_window) else {
