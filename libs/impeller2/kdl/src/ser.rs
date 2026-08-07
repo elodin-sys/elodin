@@ -368,6 +368,10 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
             .push(KdlEntry::new_prop("up", up.clone()));
     }
 
+    if viewport.smoothing != 0.0 {
+        push_rounded_float_prop(&mut node, "smoothing", viewport.smoothing as f64);
+    }
+
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
     }
@@ -1501,6 +1505,37 @@ environment {
     }
 
     #[test]
+    fn test_viewport_smoothing_roundtrip() {
+        let kdl = r#"viewport name="main" smoothing=0.3"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!((viewport.smoothing - 0.3).abs() < f32::EPSILON);
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(serialized.contains("smoothing=0.3"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!((viewport.smoothing - 0.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_viewport_zero_smoothing_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport::default())));
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("smoothing"),
+            "default smoothing should be omitted, got:\n{serialized}"
+        );
+    }
+
+    #[test]
     fn test_serialize_simple_viewport() {
         let mut schematic = Schematic::default();
         schematic
@@ -1528,6 +1563,7 @@ environment {
                 look_at: None,
                 frame: None,
                 up: None,
+                smoothing: 0.0,
                 local_arrows: Vec::new(),
                 node_id: NodeId::default(),
             })));
@@ -1576,6 +1612,7 @@ environment {
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 frame: None,
                 up: None,
+                smoothing: 0.0,
                 local_arrows: Vec::new(),
                 node_id: NodeId::default(),
             })));
@@ -2290,6 +2327,7 @@ object_3d lander.world_pos {
                 look_at: None,
                 frame: None,
                 up: None,
+                smoothing: 0.0,
                 local_arrows: Vec::new(),
                 node_id: NodeId::default(),
             }),

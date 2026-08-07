@@ -907,6 +907,21 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
             }
         });
 
+    let smoothing = node
+        .get("smoothing")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
+    if !smoothing.is_finite() || smoothing < 0.0 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "smoothing".to_string(),
+            node: "viewport".to_string(),
+            expected: "smoothing must be >= 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+
     let mut local_arrows = Vec::new();
     if let Some(children) = node.children() {
         for child in children.nodes() {
@@ -939,6 +954,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         look_at,
         frame,
         up,
+        smoothing,
         local_arrows,
         node_id: NodeId::default(),
     }))
@@ -2682,6 +2698,43 @@ timeline follow_latest=#true {
             panic!("Expected viewport panel");
         };
         assert_eq!(viewport.aspect, Some(1.7778));
+    }
+
+    #[test]
+    fn test_parse_viewport_smoothing() {
+        let kdl = r#"viewport smoothing=0.3"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!((viewport.smoothing - 0.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_viewport_smoothing_defaults_to_zero() {
+        let kdl = r#"viewport"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.smoothing, 0.0);
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_negative_smoothing() {
+        let kdl = r#"viewport smoothing=-0.5"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "smoothing");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
     }
 
     #[test]

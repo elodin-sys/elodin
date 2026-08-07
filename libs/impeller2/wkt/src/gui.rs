@@ -487,6 +487,10 @@ pub struct Viewport {
     pub look_at: Option<String>,
     /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)" for body-frame direction).
     pub up: Option<String>,
+    /// Follow-camera low-pass time constant in seconds. 0 (default) disables
+    /// smoothing; the camera pose is applied straight from telemetry.
+    #[serde(default)]
+    pub smoothing: f32,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     #[serde(default)]
@@ -520,6 +524,7 @@ impl Default for Viewport {
             look_at: None,
             frame: None,
             up: None,
+            smoothing: 0.0,
             local_arrows: Vec::new(),
             node_id: NodeId::default(),
         }
