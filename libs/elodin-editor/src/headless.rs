@@ -329,6 +329,9 @@ fn load_headless_scene(
                     &asset_server,
                     &geo_context,
                     connection_addr,
+                    // Headless render server is always DB-driven; no --kdl
+                    // local-iteration override.
+                    None,
                 ) {
                     entities.push(entity);
                 }

@@ -273,6 +273,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
+    /// Optional: absent in minimal test apps (no kdl_document plugin).
+    initial_kdl: Option<Res<'w, crate::plugins::kdl_document::InitialKdlPath>>,
     pub geo_context: ResMut<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
@@ -945,6 +947,7 @@ impl LoadSchematicParams<'_, '_> {
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
         let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let local_root = crate::object_3d::local_assets_root(self.initial_kdl.as_deref());
         let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
@@ -956,6 +959,7 @@ impl LoadSchematicParams<'_, '_> {
             &self.asset_server,
             &self.geo_context,
             connection_addr,
+            local_root.as_deref(),
         );
         match result {
             Ok(entity) => {
@@ -977,6 +981,7 @@ impl LoadSchematicParams<'_, '_> {
                         &self.asset_server,
                         &mut self.icon_cache,
                         connection_addr,
+                        local_root.as_deref(),
                     );
                 }
             }

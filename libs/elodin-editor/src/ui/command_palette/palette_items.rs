@@ -1928,6 +1928,8 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &assets,
                     &geo_context,
                     connection_addr,
+                    // Color-mesh source: no asset URL to resolve.
+                    None,
                 );
 
                 PaletteEvent::Exit
@@ -1994,10 +1996,12 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                                                   assets: Res<AssetServer>,
                                                   geo_context: Res<GeoContext>,
-                                                  connection_addr: Option<Res<ConnectionAddr>>
+                                                  connection_addr: Option<Res<ConnectionAddr>>,
+                                                  initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>
                                                 | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
                                                 let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+                                                let local_root = crate::object_3d::local_assets_root(initial_kdl.as_deref());
 
                                                 let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
@@ -2010,6 +2014,7 @@ pub fn create_3d_object() -> PaletteItem {
                     &assets,
                     &geo_context,
                     connection_addr,
+                    local_root.as_deref(),
                 );
 
                                                 PaletteEvent::Exit
