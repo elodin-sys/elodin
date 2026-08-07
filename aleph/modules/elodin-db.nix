@@ -146,7 +146,9 @@ in {
           /run/current-system/sw/bin/systemctl stop 'elodin-db@*' elodin-db-default.service elodin-db.service 2>/dev/null || true
           /run/current-system/sw/bin/pkill -9 -f 'elodin-db run' 2>/dev/null || true
           sleep 1
-          /run/current-system/sw/bin/systemctl start elodin-db-default.service || true
+          if [ "$(/run/current-system/sw/bin/systemctl show -p LoadState --value elodin-db-default.service 2>/dev/null)" = loaded ]; then
+            /run/current-system/sw/bin/systemctl start elodin-db-default.service || true
+          fi
         fi
       '';
     };

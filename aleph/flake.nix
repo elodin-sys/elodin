@@ -171,12 +171,20 @@
           ];
         };
       });
-      apps = forAllSystems (pkgs: {
-        deploy = {
-          type = "app";
-          program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
+      apps =
+        nixpkgs.lib.recursiveUpdate
+        (forAllSystems (pkgs: {
+          deploy = {
+            type = "app";
+            program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
+          };
+        }))
+        {
+          x86_64-linux.flash-initrd = {
+            type = "app";
+            program = "${self.packages.x86_64-linux.flash-initrd}/flash-initrd";
+          };
         };
-      });
     }
     // rec {
       nixosModules = baseModules // fswModules // stmModules // stmConfigurationModules // devModules // configurationPresets;
@@ -211,6 +219,10 @@
           sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
         '';
+
+        flash-initrd = import ./lib/mk-initrd-flash.nix {
+          inherit nixpkgs alephSystem baseModules secureBzip2Overlay;
+        };
       };
       lib.installerSystem = installerSystem;
       templates.default = {
