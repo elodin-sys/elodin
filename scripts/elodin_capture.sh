@@ -312,9 +312,22 @@ preexisting_gamescope_serials=$(pw-dump 2>/dev/null | jq -c '
   ]
 ')
 
+# NVIDIA's proprietary Vulkan WSI cannot present to Gamescope's nested Xwayland
+# (X11) surface, but its Wayland WSI can. Render the editor as a native Wayland
+# client of Gamescope's compositor: override the dev-shell's forced
+# WINIT_UNIX_BACKEND=x11, and expose xdg-shell in that compositor with
+# --expose-wayland. Mesa keeps the default X11/Xwayland path. Requires the
+# editor to be built with Bevy's `wayland` feature.
+child_env=(PATH="$child_path")
+gamescope_extra=()
+if [[ "$selected_gpu" == nvidia ]]; then
+  child_env+=(WINIT_UNIX_BACKEND=wayland)
+  gamescope_extra+=(--expose-wayland)
+fi
+
 setsid gamescope --backend headless \
-  -w "$width" -h "$height" -W "$width" -H "$height" -r "$refresh" \
-  -- env PATH="$child_path" "$editor" editor --addr "127.0.0.1:$port" "$simulation" \
+  -w "$width" -h "$height" -W "$width" -H "$height" -r "$refresh" "${gamescope_extra[@]}" \
+  -- env "${child_env[@]}" "$editor" editor --addr "127.0.0.1:$port" "$simulation" \
   >"$gamescope_log" 2>&1 &
 gamescope_pid=$!
 gamescope_pgid=$gamescope_pid

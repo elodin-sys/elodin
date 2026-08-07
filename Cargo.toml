@@ -168,6 +168,7 @@ features = [
   "ui_picking",
   "webgl2",
   "x11",
+  "wayland",
   "debug",
   "zstd_rust",
 ]
