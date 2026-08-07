@@ -51,11 +51,9 @@ pub struct TerrainPlugin;
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "high_precision")]
-        app.add_plugins(
-            big_space::prelude::BigSpaceDefaultPlugins
-                .build()
-                .disable::<big_space::debug::BigSpaceDebugPlugin>(),
-        );
+        // BigSpaceDebugPlugin is no longer part of BigSpaceDefaultPlugins;
+        // trying to disable the absent plugin panics during preprocessing.
+        app.add_plugins(big_space::prelude::BigSpaceDefaultPlugins);
 
         // `check_visibility` became non-generic in Bevy 0.16. Our terrain
         // entity carries `NoFrustumCulling` on the bundle, so it is always

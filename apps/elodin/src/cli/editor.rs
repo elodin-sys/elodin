@@ -16,13 +16,22 @@ use super::Cli;
 
 const DEFAULT_SIM: Simulator = Simulator::None;
 
-#[derive(clap::Args, Clone, Default)]
+fn default_sim_addr() -> SocketAddr {
+    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240)
+}
+
+#[derive(clap::Args, Clone)]
 #[command(
     after_help = "Environment:\n  BLOCKADE_API_KEY    Optional. Enables Skybox AI generation from the command palette. Get one from https://skybox.blockadelabs.com/api and keep it out of source control."
 )]
 pub struct Args {
     #[clap(name = "addr/path", default_value_t = DEFAULT_SIM)]
     sim: Simulator,
+
+    /// Address to use when launching a Python simulation file. Assets use its port + 1.
+    /// Existing s10.toml plans control their own addresses.
+    #[clap(long, default_value = "[::]:2240")]
+    addr: SocketAddr,
 
     /// Open this KDL schematic file after connecting to the database.
     #[clap(long)]
@@ -53,10 +62,52 @@ enum Simulator {
 #[derive(Resource)]
 struct WindowStateFile(std::fs::File);
 
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            sim: DEFAULT_SIM,
+            addr: default_sim_addr(),
+            kdl: None,
+            replay: false,
+        }
+    }
+}
+
 impl Default for Simulator {
     fn default() -> Self {
         DEFAULT_SIM
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn recipe_sim_addr(recipe: &s10::Recipe) -> Option<SocketAddr> {
+    match recipe {
+        s10::Recipe::Sim(sim) => Some(sim.addr),
+        s10::Recipe::Group(group) => group.recipes.values().find_map(recipe_sim_addr),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn use_plan_addr(args: &mut Args) -> miette::Result<()> {
+    let Simulator::File(path) = &args.sim else {
+        return Ok(());
+    };
+    if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+        return Ok(());
+    }
+    if args.addr != default_sim_addr() {
+        return Err(miette!(
+            "--addr cannot override an existing s10.toml plan; edit the plan instead"
+        ));
+    }
+
+    let contents = std::fs::read_to_string(path).into_diagnostic()?;
+    let recipe: s10::Recipe = toml::from_str(&contents).into_diagnostic()?;
+    if let Some(addr) = recipe_sim_addr(&recipe) {
+        args.addr = addr;
+    }
+    Ok(())
 }
 
 impl fmt::Display for Simulator {
@@ -98,6 +149,7 @@ impl Cli {
         cancel_token: CancelToken,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
+        let sim_addr = args.addr;
         let dirs = self.dirs().into_diagnostic()?;
         let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
@@ -122,10 +174,11 @@ impl Cli {
                 match &sim {
                     Simulator::File(path) => {
                         let mut res = None;
-                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe(
+                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe_at(
                             cache_dir,
                             path.clone(),
                             cancel_token.clone(),
+                            sim_addr,
                         ));
                         tokio::select! {
                             r = &mut recipe_fut => res = Some(r),
@@ -169,7 +222,10 @@ impl Cli {
         }))
     }
 
-    pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
+    pub fn editor(self, mut args: Args, rt: Runtime) -> miette::Result<()> {
+        #[cfg(not(target_os = "windows"))]
+        use_plan_addr(&mut args)?;
+
         let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let mut app = self.editor_app()?;
@@ -181,9 +237,7 @@ impl Cli {
                 app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(addr)));
             }
             Simulator::File(_) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(
-                    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
-                )));
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
             }
             Simulator::ReplayDir(_) => {
                 // TODO
@@ -208,7 +262,9 @@ impl Cli {
     /// are configured) is started as a separate s10-managed process — see the
     /// auto-registered recipe in `world_builder.rs`.
     #[cfg(not(target_os = "windows"))]
-    pub fn run_headless(self, args: Args, rt: Runtime) -> miette::Result<()> {
+    pub fn run_headless(self, mut args: Args, rt: Runtime) -> miette::Result<()> {
+        use_plan_addr(&mut args)?;
+
         let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let result = thread.join().map_err(|_| miette!("join error"));
