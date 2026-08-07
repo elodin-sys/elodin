@@ -659,10 +659,27 @@ pub fn create_orientation_gauge(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_horizon_gauge(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Horizon Gauge",
+        TILES_LABEL,
+        move |_: In<String>, eql: Res<EqlContext>| {
+            PalettePage::new(gauge_parts(
+                &eql.0.component_parts,
+                tile_id,
+                GaugeKind::Horizon,
+            ))
+            .prompt("Select a pose component to monitor")
+            .into_event()
+        },
+    )
+}
+
 #[derive(Clone, Copy)]
 enum GaugeKind {
     Position,
     Orientation,
+    Horizon,
 }
 
 fn gauge_parts(
@@ -690,6 +707,8 @@ fn gauge_parts(
                                 .create_geo_position_gauge_tile(component.name.clone(), tile_id),
                             GaugeKind::Orientation => tile_state
                                 .create_orientation_gauge_tile(component.name.clone(), tile_id),
+                            GaugeKind::Horizon => tile_state
+                                .create_horizon_gauge_tile(component.name.clone(), tile_id),
                         }
                         PaletteEvent::Exit
                     } else {
@@ -1909,6 +1928,8 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &assets,
                     &geo_context,
                     connection_addr,
+                    // Color-mesh source: no asset URL to resolve.
+                    None,
                 );
 
                 PaletteEvent::Exit
@@ -1975,10 +1996,12 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                                                   assets: Res<AssetServer>,
                                                   geo_context: Res<GeoContext>,
-                                                  connection_addr: Option<Res<ConnectionAddr>>
+                                                  connection_addr: Option<Res<ConnectionAddr>>,
+                                                  initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>
                                                 | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
                                                 let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+                                                let local_root = crate::object_3d::local_assets_root(initial_kdl.as_deref());
 
                                                 let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
@@ -1991,6 +2014,7 @@ pub fn create_3d_object() -> PaletteItem {
                     &assets,
                     &geo_context,
                     connection_addr,
+                    local_root.as_deref(),
                 );
 
                                                 PaletteEvent::Exit
@@ -2165,6 +2189,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_monitor(Some(tile_id)),
         create_geo_position_gauge(Some(tile_id)),
         create_orientation_gauge(Some(tile_id)),
+        create_horizon_gauge(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
@@ -2237,6 +2262,7 @@ impl Default for PalettePage {
             create_monitor(None),
             create_geo_position_gauge(None),
             create_orientation_gauge(None),
+            create_horizon_gauge(None),
             create_viewport(None),
             create_query_table(None),
             create_query_plot(None),

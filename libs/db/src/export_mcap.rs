@@ -1812,7 +1812,8 @@ impl<'a> LayoutBuilder<'a> {
             | Panel::SchematicTree(_)
             | Panel::DataOverview(_)
             | Panel::GeoPositionGauge(_)
-            | Panel::OrientationGauge(_) => None,
+            | Panel::OrientationGauge(_)
+            | Panel::HorizonGauge(_) => None,
         }
     }
 
@@ -3642,6 +3643,7 @@ mod tests {
                 timeline: None,
                 frame: None,
                 origin: None,
+                body: None,
                 skybox: None,
                 environment: None,
                 telemetry_mode: false,

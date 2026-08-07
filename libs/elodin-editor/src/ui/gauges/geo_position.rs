@@ -9,7 +9,11 @@ use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
 
 use super::{EqlBinding, GaugePane};
-use crate::ui::widgets::{SystemStateExt, WidgetSystem};
+use crate::ui::{
+    SelectedObject,
+    tiles::WindowState,
+    widgets::{SystemStateExt, WidgetSystem},
+};
 
 /// Backing data for a geo-position gauge pane; the EQL lives in the sibling
 /// [`EqlBinding`] component.
@@ -45,17 +49,18 @@ pub struct GeoPositionGaugeWidget<'w, 's> {
     current_timestamp: Res<'w, CurrentTimestamp>,
     geo_context: Res<'w, GeoContext>,
     coordinate: Res<'w, crate::Coordinate>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
-    type Args = GaugePane;
+    type Args = (GaugePane, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        pane: Self::Args,
+        (pane, target_window): Self::Args,
     ) -> Self::Output {
         let GeoPositionGaugeWidget {
             mut gauges,
@@ -65,6 +70,7 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
             current_timestamp,
             geo_context,
             coordinate,
+            mut window_states,
         } = state.params_mut(world);
         let Ok((mut data, binding)) = gauges.get_mut(pane.entity) else {
             return;
@@ -76,6 +82,16 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
         // Keep inherit (`source = None`) live against `Coordinate` changes.
         let source = data.effective_source(coordinate.0);
         let combo_id = egui::Id::new(("geo_position_gauge_display", pane.entity));
+
+        // Clicking the panel selects it, since a pane in a split has no tab.
+        let panel = super::panel_select_target(ui, pane.entity);
+        if panel.clicked()
+            && let Ok(mut window_state) = window_states.get_mut(target_window)
+        {
+            window_state.ui_state.selected_object = SelectedObject::GeoPositionGauge {
+                gauge_id: pane.entity,
+            };
+        }
 
         // Value cards read like the component monitor; the in-panel display
         // dropdown mirrors the orientation gauge so the frame can be switched

@@ -23,7 +23,14 @@ use crate::plugins::render_layer_alloc::{
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<ViewCubeFrames>()
         .add_systems(Startup, spawn_frame_view_cubes)
-        .add_systems(PreUpdate, swap_zoom_buttons_on_alt);
+        .add_systems(
+            PreUpdate,
+            // Reads keyboard state and is read back by the picking observers, so
+            // it has to be pinned between the two.
+            sync_zoom_button_mode
+                .after(bevy::input::InputSystems)
+                .before(bevy::picking::PickingSystems::Hover),
+        );
 }
 
 // ============================================================================
@@ -629,9 +636,10 @@ fn spawn_rotation_arrows(
     }
 }
 
-#[derive(Debug, Resource)]
-struct ZoomIconMaterials {
-    icon_material: Handle<StandardMaterial>,
+/// Icon textures of a zoom button, kept on the icon entity: every viewport
+/// overlay spawns its own material, so this state cannot be shared globally.
+#[derive(Debug, Component)]
+struct ZoomButtonIcon {
     zoom_in: Handle<Image>,
     zoom_out: Handle<Image>,
 }
@@ -714,7 +722,7 @@ fn spawn_viewport_action_buttons(
             Transform::from_translation(Vec3::new(0.40, -0.39, depth)),
             Pickable::IGNORE,
             ViewportActionButton::ZoomOut,
-            Name::new("viewport_action_button_ZoomOut"),
+            Name::new("viewport_action_button_zoom"),
         ))
         .id();
     let mut zoom_button_cmd = commands.entity(zoom_button);
@@ -731,18 +739,17 @@ fn spawn_viewport_action_buttons(
         cull_mode: None,
         ..default()
     });
-    commands.insert_resource(ZoomIconMaterials {
-        icon_material: zoom_icon_material.clone(),
-        zoom_out: zoom_out_icon,
-        zoom_in: zoom_in_icon,
-    });
     let mut zoom_icon_cmd = commands.spawn((
         Mesh3d(zoom_icon_mesh),
         MeshMaterial3d(zoom_icon_material),
         Transform::from_translation(Vec3::new(0.0, 0.0, 0.002)),
         Pickable::IGNORE,
         ChildOf(zoom_button),
-        Name::new("viewport_action_button_ZoomOut_icon"),
+        ZoomButtonIcon {
+            zoom_in: zoom_in_icon,
+            zoom_out: zoom_out_icon,
+        },
+        Name::new("viewport_action_button_zoom_icon"),
     ));
     if let Some(layers) = render_layers {
         zoom_icon_cmd.insert(layers.clone());
@@ -754,51 +761,201 @@ fn spawn_viewport_action_buttons(
         Transform::from_translation(Vec3::ZERO),
         ChildOf(zoom_button),
         Pickable::default(),
-        Name::new("viewport_action_button_ZoomOut_hitbox"),
+        Name::new("viewport_action_button_zoom_hitbox"),
     ));
     if let Some(layers) = render_layers {
         zoom_hitbox_cmd.insert(layers.clone());
     }
 }
 
-fn swap_zoom_buttons_on_alt(
-    mut buttons: Query<&mut ViewportActionButton>,
+/// Track whether the zoom button acts as zoom-in (Alt/Option held) or zoom-out.
+///
+/// Derived from the held state rather than press/release edges: a dropped edge
+/// (window focus change, compositor grabbing Alt on Linux, Alt-Tab) would
+/// otherwise latch the button in the wrong mode for the rest of the session.
+fn sync_zoom_button_mode(
     keys: Res<ButtonInput<KeyCode>>,
-    zoom_icon_materials: Option<Res<ZoomIconMaterials>>,
+    mut buttons: Query<&mut ViewportActionButton>,
+    icons: Query<(&ZoomButtonIcon, &MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let pressed = if keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight) {
-        Some(true)
-    } else if keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight) {
-        Some(false)
+    let zoom_in = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+    let mode = if zoom_in {
+        ViewportActionButton::ZoomIn
     } else {
-        None
+        ViewportActionButton::ZoomOut
     };
-    if let Some(pressed) = pressed {
-        for mut action in &mut buttons {
-            match *action {
-                ViewportActionButton::ZoomIn | ViewportActionButton::ZoomOut => {
-                    if pressed {
-                        *action = ViewportActionButton::ZoomIn;
-                    } else {
-                        *action = ViewportActionButton::ZoomOut;
-                    }
-                }
-                _ => (),
+
+    for mut action in &mut buttons {
+        let is_zoom = matches!(
+            *action,
+            ViewportActionButton::ZoomIn | ViewportActionButton::ZoomOut
+        );
+        if is_zoom && *action != mode {
+            *action = mode;
+        }
+    }
+
+    for (icon, handle) in icons.iter() {
+        let texture = if zoom_in {
+            &icon.zoom_in
+        } else {
+            &icon.zoom_out
+        };
+        // Only reach for `get_mut` on a real change, otherwise every frame would
+        // flag the material as modified and force a GPU re-upload.
+        let stale = materials
+            .get(&handle.0)
+            .is_some_and(|material| material.base_color_texture.as_ref() != Some(texture));
+        if stale && let Some(mut material) = materials.get_mut(&handle.0) {
+            material.base_color_texture = Some(texture.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod zoom_button_tests {
+    use super::*;
+
+    struct ZoomButton {
+        button: Entity,
+        material: Handle<StandardMaterial>,
+        zoom_in: Handle<Image>,
+        zoom_out: Handle<Image>,
+    }
+
+    impl ZoomButton {
+        fn spawn(app: &mut App) -> Self {
+            let images = app.world().resource::<Assets<Image>>();
+            let zoom_in = images.reserve_handle();
+            let zoom_out = images.reserve_handle();
+            let material = app
+                .world_mut()
+                .resource_mut::<Assets<StandardMaterial>>()
+                .add(StandardMaterial {
+                    base_color_texture: Some(zoom_out.clone()),
+                    ..default()
+                });
+
+            let button = app.world_mut().spawn(ViewportActionButton::ZoomOut).id();
+            app.world_mut().spawn((
+                MeshMaterial3d(material.clone()),
+                ZoomButtonIcon {
+                    zoom_in: zoom_in.clone(),
+                    zoom_out: zoom_out.clone(),
+                },
+                ChildOf(button),
+            ));
+
+            Self {
+                button,
+                material,
+                zoom_in,
+                zoom_out,
             }
         }
-        let Some(zoom_icon_materials) = zoom_icon_materials else {
-            return;
-        };
 
-        let Some(mut zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
-            return;
-        };
-        let zoom_icon: Handle<Image> = if pressed {
-            zoom_icon_materials.zoom_in.clone()
+        fn action(&self, app: &App) -> ViewportActionButton {
+            *app.world()
+                .entity(self.button)
+                .get::<ViewportActionButton>()
+                .unwrap()
+        }
+
+        fn icon(&self, app: &App) -> Handle<Image> {
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&self.material)
+                .unwrap()
+                .base_color_texture
+                .clone()
+                .unwrap()
+        }
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, sync_zoom_button_mode);
+        app
+    }
+
+    fn set_alt(app: &mut App, held: bool) {
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        if held {
+            keys.press(KeyCode::AltLeft);
         } else {
-            zoom_icon_materials.zoom_out.clone()
-        };
-        zoom_material.base_color_texture = Some(zoom_icon);
+            keys.release(KeyCode::AltLeft);
+        }
+    }
+
+    /// Each viewport overlay owns its icon material, so all of them have to
+    /// follow the modifier, not just the last one spawned.
+    #[test]
+    fn every_zoom_button_follows_alt() {
+        let mut app = app();
+        let first = ZoomButton::spawn(&mut app);
+        let second = ZoomButton::spawn(&mut app);
+
+        set_alt(&mut app, true);
+        app.update();
+
+        for button in [&first, &second] {
+            assert_eq!(button.action(&app), ViewportActionButton::ZoomIn);
+            assert_eq!(button.icon(&app), button.zoom_in);
+        }
+
+        set_alt(&mut app, false);
+        app.update();
+
+        for button in [&first, &second] {
+            assert_eq!(button.action(&app), ViewportActionButton::ZoomOut);
+            assert_eq!(button.icon(&app), button.zoom_out);
+        }
+    }
+
+    /// A press edge consumed elsewhere (focus change, window manager) must not
+    /// leave the button stuck in the wrong mode.
+    #[test]
+    fn zoom_mode_recovers_from_missed_key_edges() {
+        let mut app = app();
+        let button = ZoomButton::spawn(&mut app);
+
+        set_alt(&mut app, true);
+        // Clearing drops `just_pressed`/`just_released` while Alt stays held.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.update();
+
+        assert_eq!(button.action(&app), ViewportActionButton::ZoomIn);
+        assert_eq!(button.icon(&app), button.zoom_in);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.update();
+
+        assert_eq!(button.action(&app), ViewportActionButton::ZoomOut);
+        assert_eq!(button.icon(&app), button.zoom_out);
+    }
+
+    #[test]
+    fn reset_button_is_not_affected_by_alt() {
+        let mut app = app();
+        let reset = app.world_mut().spawn(ViewportActionButton::Reset).id();
+
+        set_alt(&mut app, true);
+        app.update();
+
+        assert_eq!(
+            *app.world()
+                .entity(reset)
+                .get::<ViewportActionButton>()
+                .unwrap(),
+            ViewportActionButton::Reset
+        );
     }
 }

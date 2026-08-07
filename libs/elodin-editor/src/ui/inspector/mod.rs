@@ -36,7 +36,7 @@ pub use widgets::*;
 use self::{
     data_overview::InspectorDataOverview,
     entity::InspectorEntity,
-    gauges::{InspectorGeoPositionGauge, InspectorOrientationGauge},
+    gauges::{InspectorGeoPositionGauge, InspectorHorizonGauge, InspectorOrientationGauge},
     graph::InspectorGraph,
     monitor::InspectorMonitor,
     object3d::InspectorObject3D,
@@ -181,6 +181,14 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                     ui.add_widget_with::<InspectorOrientationGauge>(
                                         world,
                                         "inspector_orientation_gauge",
+                                        gauge_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::HorizonGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorHorizonGauge>(
+                                        world,
+                                        "inspector_horizon_gauge",
                                         gauge_id,
                                     );
                                     Default::default()

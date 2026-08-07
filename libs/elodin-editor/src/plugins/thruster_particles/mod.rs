@@ -55,8 +55,10 @@ use impeller2_wkt::{ComponentValue as WktComponentValue, CurrentTimestamp, Thrus
 use crate::EqlContext;
 use crate::WorldPosExt;
 use crate::object_3d::{
-    CompiledExpr, Object3DState, WorldPosReceived, compile_eql_expr, resolve_db_asset_url,
+    CompiledExpr, Object3DState, WorldPosReceived, compile_eql_expr, local_assets_root,
+    resolve_db_asset_url_prefer_local,
 };
+use crate::plugins::kdl_document::InitialKdlPath;
 use crate::plugins::render_layer_alloc::THRUSTER_PARTICLES_RENDER_LAYER;
 use crate::ui::Paused;
 use crate::vector_arrow::component_value_tail_to_vec3;
@@ -505,6 +507,7 @@ fn sweep_trail_anchors(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_kdl_thrusters(
     mut commands: Commands,
     objects: Query<(Entity, &Object3DState), Without<KdlThrusterRig>>,
@@ -512,9 +515,11 @@ fn ensure_kdl_thrusters(
     mut file_effects: ResMut<FileEffectAssets>,
     asset_server: Res<AssetServer>,
     connection_addr: Option<Res<ConnectionAddr>>,
+    initial_kdl: Option<Res<InitialKdlPath>>,
     eql: Res<EqlContext>,
 ) {
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let local_root = local_assets_root(initial_kdl.as_deref());
     for (object, state) in &objects {
         if state.data.thrusters.is_empty() {
             continue;
@@ -549,7 +554,11 @@ fn ensure_kdl_thrusters(
                     // bare paths fall back to the Bevy asset root (offline
                     // --kdl dev). Retained in FileEffectAssets so seek/schematic
                     // rebuilds clone the same strong handle instead of unloading.
-                    let url = resolve_db_asset_url(effect, connection_addr);
+                    let url = resolve_db_asset_url_prefer_local(
+                        effect,
+                        connection_addr,
+                        local_root.as_deref(),
+                    );
                     jet.pending_effect = Some(file_effects.get_or_load(url, &asset_server));
                 }
                 let base_name = config
@@ -658,16 +667,19 @@ fn slot_image(
     assets: &ThrusterEffectAssets,
     asset_server: &AssetServer,
     connection_addr: Option<std::net::SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) -> Handle<Image> {
     match slot {
         "mask" => assets.mask.clone(),
-        "smoke" => asset_server.load(resolve_db_asset_url(
+        "smoke" => asset_server.load(resolve_db_asset_url_prefer_local(
             "db:textures/smoke_puff.png",
             connection_addr,
+            local_root,
         )),
-        _ => asset_server.load(resolve_db_asset_url(
+        _ => asset_server.load(resolve_db_asset_url_prefer_local(
             "db:textures/soft_circle.png",
             connection_addr,
+            local_root,
         )),
     }
 }
@@ -732,6 +744,7 @@ fn spawn_trail_anchor(
 /// anchor entity — but only once the owner has a telemetry `WorldPos`
 /// (`WorldPosReceived`), so the freeze does not capture the spawn default
 /// at ECEF origin.
+#[allow(clippy::too_many_arguments)]
 fn bind_file_effect_assets(
     mut commands: Commands,
     mut jets: Query<(Entity, &mut KdlThrusterJet, &KdlThrusterJetOf)>,
@@ -740,8 +753,10 @@ fn bind_file_effect_assets(
     assets: Res<ThrusterEffectAssets>,
     asset_server: Res<AssetServer>,
     connection_addr: Option<Res<ConnectionAddr>>,
+    initial_kdl: Option<Res<InitialKdlPath>>,
 ) {
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let local_root = local_assets_root(initial_kdl.as_deref());
     for (entity, mut jet, owner) in &mut jets {
         let Some(handle) = jet.pending_effect.clone() else {
             continue;
@@ -766,7 +781,15 @@ fn bind_file_effect_assets(
             .texture_layout()
             .layout
             .iter()
-            .map(|slot| slot_image(&slot.name, &assets, &asset_server, connection_addr))
+            .map(|slot| {
+                slot_image(
+                    &slot.name,
+                    &assets,
+                    &asset_server,
+                    connection_addr,
+                    local_root.as_deref(),
+                )
+            })
             .collect();
         jet.has_intensity_property = asset
             .properties()
@@ -1213,8 +1236,8 @@ fn apply_kdl_spawner(
     jet: &KdlThrusterJet,
 ) {
     if intensity <= jet.cutoff {
+        // Stop spawning only — keep Visible so trails/smoke already emitted can age out.
         spawner.active = false;
-        *visibility = Visibility::Hidden;
         return;
     }
     let settings = match (jet.base_rate, jet.authored_settings) {

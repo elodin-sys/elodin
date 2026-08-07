@@ -20,9 +20,9 @@ use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, GeoPositionGauge, Line3d, OrientationGauge, Panel,
-    Schematic, SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport,
-    WindowSchematic, WorldMesh,
+    ActionPane, ComponentMonitor, ComponentPath, GeoPositionGauge, HorizonGauge, Line3d,
+    OrientationGauge, Panel, Schematic, SchematicElem, Split, VectorArrow3d,
+    VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
 };
 
 pub mod bindings;
@@ -57,6 +57,7 @@ pub struct SchematicParam<'w, 's> {
     pub monitors: Query<'w, 's, &'static monitor::MonitorData>,
     pub geo_position_gauges: Query<'w, 's, &'static gauges::GeoPositionGaugeData>,
     pub orientation_gauges: Query<'w, 's, &'static gauges::OrientationGaugeData>,
+    pub horizon_gauges: Query<'w, 's, &'static gauges::HorizonGaugeData>,
     pub eql_bindings: Query<'w, 's, &'static gauges::EqlBinding>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
@@ -103,9 +104,9 @@ impl SchematicParam<'_, '_> {
                 .ok()
                 .map(|state| state.label.clone()),
             Pane::Monitor(monitor) => Some(monitor.name.clone()),
-            Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge) => {
-                Some(gauge.name.clone())
-            }
+            Pane::GeoPositionGauge(gauge)
+            | Pane::OrientationGauge(gauge)
+            | Pane::HorizonGauge(gauge) => Some(gauge.name.clone()),
             Pane::QueryTable(table) => Some(table.name.clone()),
             Pane::QueryPlot(plot) => self
                 .graph_states
@@ -343,6 +344,21 @@ impl SchematicParam<'_, '_> {
                         }))
                     }
 
+                    Pane::HorizonGauge(gauge) => {
+                        let data = self.horizon_gauges.get(gauge.entity).ok()?;
+                        let binding = self.eql_bindings.get(gauge.entity).ok()?;
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, gauge.entity);
+                        Some(Panel::HorizonGauge(HorizonGauge {
+                            eql: binding.eql.clone(),
+                            source: data.source,
+                            // None when identity so the default stays implicit.
+                            reference: data.reference_kdl(),
+                            name: pane_name,
+                            node_id,
+                        }))
+                    }
+
                     Pane::QueryTable(query_table) => {
                         let query_table_data = self.query_tables.get(query_table.entity).ok()?;
                         let mut data = query_table_data.data.clone();
@@ -478,6 +494,9 @@ pub fn tiles_to_schematic(
             longitude: origin.longitude.to_degrees(),
             altitude: origin.altitude,
         });
+    // The ellipsoid rides along with the origin: without it a lunar schematic
+    // would reload as WGS84, breaking ECEF verticals and LLA conversions.
+    schematic.body = load::ellipsoid_body(origin.ellipsoid);
     bindings.clear_ephemeral();
 
     if let Some(root_panels) =

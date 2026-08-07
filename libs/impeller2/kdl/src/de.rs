@@ -55,6 +55,7 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
             SchematicElem::Coordinate(coordinate) => {
                 schematic.frame = Some(coordinate.frame);
                 schematic.origin = coordinate.origin;
+                schematic.body = coordinate.body;
             }
             other => schematic.elems.push(other),
         }
@@ -202,10 +203,9 @@ fn parse_telemetry_mode(node: &KdlNode, src: &str) -> Result<bool, KdlSchematicE
 fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlSchematicError> {
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
-        | "geo_position_gauge" | "orientation_gauge" | "action_pane" | "query_table"
-        | "query_plot" | "inspector" | "hierarchy" | "schematic_tree" | "data_overview" => {
-            Ok(SchematicElem::Panel(parse_panel(node, src)?))
-        }
+        | "geo_position_gauge" | "orientation_gauge" | "horizon_gauge" | "action_pane"
+        | "query_table" | "query_plot" | "inspector" | "hierarchy" | "schematic_tree"
+        | "data_overview" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "timeline" => Ok(SchematicElem::Timeline(parse_timeline(node, src)?)),
@@ -517,7 +517,25 @@ fn parse_coordinate(node: &KdlNode, src: &str) -> Result<CoordinateConfig, KdlSc
         }
     };
 
-    Ok(CoordinateConfig { frame, origin })
+    let body =
+        match node.get("body").and_then(|v| v.as_string()) {
+            Some(s) => Some(CelestialBody::from_str_ci(s).ok_or_else(|| {
+                KdlSchematicError::InvalidValue {
+                    property: "body".to_string(),
+                    node: "coordinate".to_string(),
+                    expected: "earth or moon".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                }
+            })?),
+            None => None,
+        };
+
+    Ok(CoordinateConfig {
+        frame,
+        origin,
+        body,
+    })
 }
 
 fn parse_world_mesh(node: &KdlNode, src: &str) -> Result<WorldMesh, KdlSchematicError> {
@@ -644,6 +662,7 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "component_monitor" => parse_component_monitor(node, kdl_src),
         "geo_position_gauge" => parse_geo_position_gauge(node, kdl_src),
         "orientation_gauge" => parse_orientation_gauge(node, kdl_src),
+        "horizon_gauge" => parse_horizon_gauge(node, kdl_src),
         "action_pane" => parse_action_pane(node, kdl_src),
         "query_table" => parse_query_table(node),
         "query_plot" => parse_query_plot(node, kdl_src),
@@ -1143,13 +1162,7 @@ fn parse_orientation_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 
     // Optional `reference x y z w` child: the body→source attitude shown as
     // neutral by the gimbal.
-    let reference = node
-        .children()
-        .into_iter()
-        .flat_map(|c| c.nodes())
-        .find(|child| child.name().value() == "reference")
-        .map(|child| parse_reference_quat(child, src))
-        .transpose()?;
+    let reference = parse_optional_reference(node, src, "orientation_gauge")?;
 
     Ok(Panel::OrientationGauge(OrientationGauge {
         eql,
@@ -1161,10 +1174,44 @@ fn parse_orientation_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
     }))
 }
 
-fn parse_reference_quat(node: &KdlNode, src: &str) -> Result<[f64; 4], KdlSchematicError> {
+fn parse_horizon_gauge(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let name = parse_name(node);
+    // No `display`: a horizon is intrinsically local, so there is nothing to
+    // re-express the attitude into.
+    let (eql, source) = parse_gauge_eql_source(node, src, "horizon_gauge")?;
+    let reference = parse_optional_reference(node, src, "horizon_gauge")?;
+
+    Ok(Panel::HorizonGauge(HorizonGauge {
+        eql,
+        source,
+        reference,
+        name,
+        node_id: NodeId::default(),
+    }))
+}
+
+/// The optional `reference x y z w` child of a gauge node, if present.
+fn parse_optional_reference(
+    node: &KdlNode,
+    src: &str,
+    node_name: &str,
+) -> Result<Option<[f64; 4]>, KdlSchematicError> {
+    node.children()
+        .into_iter()
+        .flat_map(|c| c.nodes())
+        .find(|child| child.name().value() == "reference")
+        .map(|child| parse_reference_quat(child, src, node_name))
+        .transpose()
+}
+
+fn parse_reference_quat(
+    node: &KdlNode,
+    src: &str,
+    node_name: &str,
+) -> Result<[f64; 4], KdlSchematicError> {
     let invalid = || KdlSchematicError::InvalidValue {
         property: "reference".to_string(),
-        node: "orientation_gauge".to_string(),
+        node: node_name.to_string(),
         expected: "four numeric entries: reference x y z w".to_string(),
         src: src.to_string(),
         span: node.span(),
@@ -3737,14 +3784,14 @@ object_3d "a.world_pos" {
 
         let kdl = r#"
         orientation_gauge "a.q" display="NED" {
-            reference 0.0 0.7071 0.0 0.7071
+            reference 0.0 0.6 0.0 0.8
         }
         "#;
         let parsed = parse_schematic(kdl).unwrap();
         let SchematicElem::Panel(Panel::OrientationGauge(g)) = &parsed.elems[0] else {
             panic!("Expected orientation_gauge");
         };
-        assert_eq!(g.reference, Some([0.0, 0.7071, 0.0, 0.7071]));
+        assert_eq!(g.reference, Some([0.0, 0.6, 0.0, 0.8]));
         assert_eq!(g.display, Some(GeoFrame::NED));
 
         let serialized = crate::serialize_schematic(&parsed);
@@ -3759,6 +3806,83 @@ object_3d "a.world_pos" {
         assert!(parse_schematic(r#"orientation_gauge "a.q" { reference 1 0 0 }"#).is_err());
         // LLA is geodetic, not a rotation frame.
         assert!(parse_schematic(r#"orientation_gauge "a.q" display="LLA""#).is_err());
+    }
+
+    #[test]
+    fn test_horizon_gauge_round_trip() {
+        // Bare form: positional eql, everything else inherited.
+        let plain = parse_schematic(r#"horizon_gauge "bdx.world_pos""#).unwrap();
+        let SchematicElem::Panel(Panel::HorizonGauge(g)) = &plain.elems[0] else {
+            panic!("Expected horizon_gauge");
+        };
+        assert_eq!(g.eql, "bdx.world_pos");
+        assert_eq!(g.source, None);
+        assert_eq!(g.reference, None);
+        assert!(!crate::serialize_schematic(&plain).contains("reference"));
+
+        let kdl = r#"
+        horizon_gauge "bdx.world_pos" name="ADI" source="ECEF" {
+            reference 0.0 0.6 0.0 0.8
+        }
+        "#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::HorizonGauge(g)) = &parsed.elems[0] else {
+            panic!("Expected horizon_gauge");
+        };
+        assert_eq!(g.name.as_deref(), Some("ADI"));
+        assert_eq!(g.source, Some(GeoFrame::ECEF));
+        assert_eq!(g.reference, Some([0.0, 0.6, 0.0, 0.8]));
+
+        let serialized = crate::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::HorizonGauge(g2)) = &reparsed.elems[0] else {
+            panic!("Expected horizon_gauge after round-trip");
+        };
+        assert_eq!(g2.eql, g.eql);
+        assert_eq!(g2.name, g.name);
+        assert_eq!(g2.source, g.source);
+        assert_eq!(g2.reference, g.reference);
+
+        // Wrong reference arity is a parse error, and the eql is mandatory.
+        assert!(parse_schematic(r#"horizon_gauge "a.q" { reference 1 0 0 }"#).is_err());
+        assert!(parse_schematic(r#"horizon_gauge"#).is_err());
+        // The horizon has no display frame to re-express into: `display` is not
+        // a property of this node, so it is simply ignored rather than honoured.
+        let ignored = parse_schematic(r#"horizon_gauge "a.q" display="NED""#).unwrap();
+        assert!(!crate::serialize_schematic(&ignored).contains("display"));
+    }
+
+    #[test]
+    fn test_parse_coordinate_body() {
+        // Default: no body property means Earth's WGS84, left implicit.
+        let earth = parse_schematic(r#"coordinate frame="ECEF""#).unwrap();
+        assert_eq!(earth.body, None);
+        assert!(!crate::serialize_schematic(&earth).contains("body"));
+
+        for (spelling, expected) in [
+            ("moon", CelestialBody::Moon),
+            ("Moon", CelestialBody::Moon),
+            ("earth", CelestialBody::Earth),
+        ] {
+            let kdl = format!(r#"coordinate frame="ECEF" body="{spelling}""#);
+            let schematic = parse_schematic(&kdl).unwrap();
+            assert_eq!(schematic.body, Some(expected));
+            // Round-trips through the canonical lowercase spelling.
+            let reparsed = parse_schematic(&crate::serialize_schematic(&schematic)).unwrap();
+            assert_eq!(reparsed.body, Some(expected));
+        }
+
+        // The body travels with the origin and frame.
+        let full = parse_schematic(r#"coordinate frame="ECEF" lat=0 lon=0 body="moon""#).unwrap();
+        assert_eq!(full.frame, Some(GeoFrame::ECEF));
+        assert_eq!(full.body, Some(CelestialBody::Moon));
+        let reparsed = parse_schematic(&crate::serialize_schematic(&full)).unwrap();
+        assert_eq!(reparsed.origin, full.origin);
+        assert_eq!(reparsed.body, full.body);
+
+        // Unknown bodies are rejected rather than silently treated as Earth.
+        assert!(parse_schematic(r#"coordinate frame="ECEF" body="mars""#).is_err());
+        assert!(parse_schematic(r#"coordinate frame="ECEF" body="""#).is_err());
     }
 
     #[test]

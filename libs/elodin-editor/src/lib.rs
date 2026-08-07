@@ -1244,8 +1244,10 @@ pub fn sync_object_3d(
     assets: Res<AssetServer>,
     geo_context: Res<GeoContext>,
     connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    initial_kdl: Option<Res<plugins::kdl_document::InitialKdlPath>>,
 ) {
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let local_root = object_3d::local_assets_root(initial_kdl.as_deref());
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
             continue;
@@ -1303,6 +1305,7 @@ pub fn sync_object_3d(
             &assets,
             &geo_context,
             connection_addr,
+            local_root.as_deref(),
         ) {
             synced_object_3d.0.insert(entity, object_entity);
         }

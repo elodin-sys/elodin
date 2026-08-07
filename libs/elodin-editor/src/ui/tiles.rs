@@ -44,7 +44,7 @@ use super::{
     colors::{self, EColor, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     data_overview::{DataOverviewPane, DataOverviewWidget},
-    gauges::{GaugePane, GeoPositionGaugeWidget, OrientationGaugeWidget},
+    gauges::{GaugePane, GeoPositionGaugeWidget, HorizonGaugeWidget, OrientationGaugeWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
     input_owner::{PointerOwner, PointerOwnerPriority, UiBlocker, UiInputOwners},
@@ -768,6 +768,11 @@ impl TileState {
             .push(TreeAction::AddOrientationGauge(tile_id, eql));
     }
 
+    pub fn create_horizon_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddHorizonGauge(tile_id, eql));
+    }
+
     pub fn create_action_tile(
         &mut self,
         button_name: String,
@@ -842,6 +847,7 @@ impl TileState {
                             Pane::OrientationGauge(gauge) => {
                                 ("OrientationGauge", gauge.name.as_str())
                             }
+                            Pane::HorizonGauge(gauge) => ("HorizonGauge", gauge.name.as_str()),
                             Pane::QueryTable(table) => ("QueryTable", table.name.as_str()),
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
                             Pane::ActionTile(action) => ("Action", action.name.as_str()),
@@ -962,7 +968,11 @@ impl TileState {
                         e.despawn();
                     }
                 }
-                Tile::Pane(Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge)) => {
+                Tile::Pane(
+                    Pane::GeoPositionGauge(gauge)
+                    | Pane::OrientationGauge(gauge)
+                    | Pane::HorizonGauge(gauge),
+                ) => {
                     if let Ok(mut e) = commands.get_entity(gauge.entity) {
                         e.despawn();
                     }
@@ -1033,6 +1043,7 @@ pub enum Pane {
     Monitor(MonitorPane),
     GeoPositionGauge(GaugePane),
     OrientationGauge(GaugePane),
+    HorizonGauge(GaugePane),
     QueryTable(QueryTablePane),
     QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
@@ -1061,6 +1072,7 @@ impl Pane {
             Pane::Monitor(_)
             | Pane::GeoPositionGauge(_)
             | Pane::OrientationGauge(_)
+            | Pane::HorizonGauge(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
             | Pane::LogStream(_)
@@ -1079,7 +1091,9 @@ impl Pane {
             }
             Pane::Viewport(viewport) => viewport.name.to_string(),
             Pane::Monitor(monitor) => monitor.name.to_string(),
-            Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge) => gauge.name.to_string(),
+            Pane::GeoPositionGauge(gauge)
+            | Pane::OrientationGauge(gauge)
+            | Pane::HorizonGauge(gauge) => gauge.name.to_string(),
             Pane::QueryTable(table) => table.name.to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
@@ -1109,7 +1123,9 @@ impl Pane {
             Pane::Monitor(monitor) => {
                 monitor.name = title.to_string();
             }
-            Pane::GeoPositionGauge(gauge) | Pane::OrientationGauge(gauge) => {
+            Pane::GeoPositionGauge(gauge)
+            | Pane::OrientationGauge(gauge)
+            | Pane::HorizonGauge(gauge) => {
                 gauge.name = title.to_string();
             }
             Pane::QueryTable(table) => {
@@ -1404,7 +1420,7 @@ impl Pane {
                 ui.add_widget_with::<GeoPositionGaugeWidget>(
                     world,
                     "geo_position_gauge",
-                    pane.clone(),
+                    (pane.clone(), target_window),
                 );
                 egui_tiles::UiResponse::None
             }
@@ -1420,7 +1436,23 @@ impl Pane {
                 ui.add_widget_with::<OrientationGaugeWidget>(
                     world,
                     "orientation_gauge",
-                    pane.clone(),
+                    (pane.clone(), target_window),
+                );
+                egui_tiles::UiResponse::None
+            }
+            Pane::HorizonGauge(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
+                ui.add_widget_with::<HorizonGaugeWidget>(
+                    world,
+                    "horizon_gauge",
+                    (pane.clone(), target_window),
                 );
                 egui_tiles::UiResponse::None
             }
@@ -2018,6 +2050,7 @@ pub enum TreeAction {
     AddMonitor(Option<TileId>, PaneName),
     AddGeoPositionGauge(Option<TileId>, PaneName),
     AddOrientationGauge(Option<TileId>, PaneName),
+    AddHorizonGauge(Option<TileId>, PaneName),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
@@ -2899,7 +2932,7 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
         // Creatable panels shown on the empty layout, laid out as a centred
         // grid (rows of PER_ROW) so the list can grow without overflowing.
         type ItemFactory = fn(Option<TileId>) -> palette_items::PaletteItem;
-        const BUTTONS: [(&str, &str, ItemFactory); 5] = [
+        const BUTTONS: [(&str, &str, ItemFactory); 6] = [
             ("Viewport", "3D Output", palette_items::create_viewport),
             ("Graph", "Point Graph", palette_items::create_graph),
             ("Monitor", "Component Values", palette_items::create_monitor),
@@ -2912,6 +2945,11 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                 "Orientation Gauge",
                 "Attitude Gimbal",
                 palette_items::create_orientation_gauge,
+            ),
+            (
+                "Horizon Gauge",
+                "Artificial Horizon",
+                palette_items::create_horizon_gauge,
             ),
         ];
         const PER_ROW: usize = 3;
@@ -3125,7 +3163,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         };
 
                         if let egui_tiles::Tile::Pane(
-                            Pane::GeoPositionGauge(pane) | Pane::OrientationGauge(pane),
+                            Pane::GeoPositionGauge(pane)
+                            | Pane::OrientationGauge(pane)
+                            | Pane::HorizonGauge(pane),
                         ) = tile
                         {
                             state_mut.commands.entity(pane.entity).despawn();
@@ -3321,6 +3361,26 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddHorizonGauge(parent_tile_id, eql) => {
+                        if read_only {
+                            continue;
+                        }
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::gauges::HorizonGaugeData::new(None),
+                                super::gauges::EqlBinding::new(eql.clone()),
+                            ))
+                            .id();
+                        let pane = Pane::HorizonGauge(GaugePane::new(entity, eql.clone()));
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.selected_object =
+                                SelectedObject::HorizonGauge { gauge_id: entity };
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                     TreeAction::AddVideoStream(parent_tile_id, msg_name, name) => {
                         if read_only {
                             continue;
@@ -3413,6 +3473,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         gauge_id: gauge.entity,
                                     };
                                 }
+                                Pane::HorizonGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::HorizonGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
                                 Pane::QueryTable(table) => {
                                     ui_state.selected_object = SelectedObject::QueryTable {
                                         table_id: table.entity,
@@ -3467,6 +3532,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 Pane::OrientationGauge(gauge) => {
                                     ui_state.selected_object = SelectedObject::OrientationGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::HorizonGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::HorizonGauge {
                                         gauge_id: gauge.entity,
                                     };
                                 }
@@ -3646,7 +3716,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     Pane::Monitor(_) => {}
-                    Pane::GeoPositionGauge(_) | Pane::OrientationGauge(_) => {}
+                    Pane::GeoPositionGauge(_)
+                    | Pane::OrientationGauge(_)
+                    | Pane::HorizonGauge(_) => {}
                     Pane::QueryTable(_) => {}
                     Pane::QueryPlot(query_plot) => {
                         if visible {

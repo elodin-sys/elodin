@@ -64,8 +64,8 @@ with pkgs; let
         gst_all_1.gstreamer
         gst_all_1.gst-plugins-base
         gst_all_1.gst-plugins-good
-        gst_all_1.gst-plugins-bad # For h264parse
-        gst_all_1.gst-plugins-ugly # For x264enc (H.264 encoding)
+        gst_all_1.gst-plugins-bad # For h264parse and hardware encoders
+        gst_all_1.gst-plugins-ugly # For portable x264 H.264 encoding
         config.packages.elodinsink # GStreamer plugin for Elodin-DB video streaming
         flip-link
 
@@ -96,6 +96,10 @@ with pkgs; let
         common.linuxGraphicsAudioDeps
         ++ [
           # Additional Linux-specific tools not in common
+          gamescope
+          xwayland
+          util-linux # Provides setsid for capture process-group cleanup
+          libva-utils
           alsa-oss
           alsa-utils
           gtk3
@@ -128,15 +132,18 @@ with pkgs; let
     # the surplus so Python can import the extension without ENOMEM.
     GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
 
-    # GStreamer plugin path for elodinsink
-    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
-      gst_all_1.gstreamer
-      gst_all_1.gst-plugins-base
-      gst_all_1.gst-plugins-good
-      gst_all_1.gst-plugins-bad
-      gst_all_1.gst-plugins-ugly
-      config.packages.elodinsink
-    ];
+    # GStreamer plugin path for capture and elodinsink
+    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+      [
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        gst_all_1.gst-plugins-bad
+        gst_all_1.gst-plugins-ugly
+        config.packages.elodinsink
+      ]
+      ++ lib.optionals pkgs.stdenv.isLinux [pipewire]
+    );
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
