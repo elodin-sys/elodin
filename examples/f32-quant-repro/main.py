@@ -214,5 +214,5 @@ if __name__ == "__main__":
         system(),
         simulation_rate=1.0 / SIM_TIME_STEP,
         max_ticks=MAX_TICKS,
-        db_path=db_path,
+        # db_path=db_path,
     )

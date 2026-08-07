@@ -762,47 +762,337 @@ fn component_expr(
     format!("{base}[{index}]")
 }
 
+/// The `value * scale + offset` an expression applies to a component element.
+///
+/// Consumers that plot a bare element (2D graphs, monitors) ignore this;
+/// `line_3d` applies it so `ball.pos[0] + 1.5` offsets the trail rather than
+/// silently rendering the unshifted component.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElementAffine {
+    pub scale: f64,
+    pub offset: f64,
+}
+
+impl Default for ElementAffine {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            offset: 0.0,
+        }
+    }
+}
+
+impl ElementAffine {
+    pub fn apply(self, value: f64) -> f64 {
+        value * self.scale + self.offset
+    }
+
+    pub fn is_identity(self) -> bool {
+        self == Self::default()
+    }
+
+    fn scaled(self, k: f64) -> Self {
+        Self {
+            scale: self.scale * k,
+            offset: self.offset * k,
+        }
+    }
+
+    fn shifted(self, k: f64) -> Self {
+        Self {
+            scale: self.scale,
+            offset: self.offset + k,
+        }
+    }
+}
+
+/// Fold an expression made only of float literals into its value.
+fn const_value(expr: &eql::Expr) -> Option<f64> {
+    match expr {
+        eql::Expr::FloatLiteral(f) => Some(*f),
+        eql::Expr::BinaryOp(left, right, op) => {
+            let (left, right) = (const_value(left)?, const_value(right)?);
+            Some(match op {
+                eql::BinaryOp::Add => left + right,
+                eql::BinaryOp::Sub => left - right,
+                eql::BinaryOp::Mul => left * right,
+                eql::BinaryOp::Div => left / right,
+            })
+        }
+        _ => None,
+    }
+}
+
 pub trait EqlExt {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
+    fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)>;
 }
 
 impl EqlExt for eql::Expr {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)> {
+        self.to_graph_component_affines()
+            .into_iter()
+            .map(|(path, index, _)| (path, index))
+            .collect()
+    }
+
+    fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)> {
         match self {
             eql::Expr::ComponentPart(component_part) => {
                 let Some(component) = &component_part.component else {
                     return vec![];
                 };
                 (0..component.element_names.len())
-                    .map(|i| (ComponentPath::from_name(&component_part.name), i))
+                    .map(|i| {
+                        (
+                            ComponentPath::from_name(&component_part.name),
+                            i,
+                            ElementAffine::default(),
+                        )
+                    })
                     .collect()
             }
             eql::Expr::ArrayAccess(expr, i) => {
                 // Handle array access - recursively get components from the inner expression
                 match &**expr {
                     eql::Expr::ComponentPart(component_part) => {
-                        vec![(ComponentPath::from_name(&component_part.name), *i)]
+                        vec![(
+                            ComponentPath::from_name(&component_part.name),
+                            *i,
+                            ElementAffine::default(),
+                        )]
                     }
                     // For formulas or binary ops, extract components recursively
-                    _ => expr.to_graph_components(),
+                    _ => expr.to_graph_component_affines(),
                 }
             }
             eql::Expr::Tuple(exprs) => exprs
                 .iter()
-                .flat_map(|expr| expr.to_graph_components().into_iter())
+                .flat_map(|expr| expr.to_graph_component_affines().into_iter())
                 .collect(),
-            eql::Expr::BinaryOp(left, right, _) => {
-                // Extract components from both operands
-                let mut components = left.to_graph_components();
-                components.extend(right.to_graph_components());
+            eql::Expr::BinaryOp(left, right, op) => {
+                // Arithmetic against a constant stays exactly representable, so
+                // fold it into the affine. Anything else (component against
+                // component, non-affine ops) falls back to listing both sides'
+                // components untransformed.
+                if let Some(k) = const_value(right) {
+                    let folded = match op {
+                        eql::BinaryOp::Add => Some(Folded::Shift(k)),
+                        eql::BinaryOp::Sub => Some(Folded::Shift(-k)),
+                        eql::BinaryOp::Mul => Some(Folded::Scale(k)),
+                        eql::BinaryOp::Div if k != 0.0 => Some(Folded::Scale(1.0 / k)),
+                        eql::BinaryOp::Div => None,
+                    };
+                    if let Some(folded) = folded {
+                        return folded.apply_to(left.to_graph_component_affines());
+                    }
+                } else if let Some(k) = const_value(left) {
+                    // `k - expr` is `-expr + k`; `k / expr` is not affine.
+                    let folded = match op {
+                        eql::BinaryOp::Add => Some(vec![Folded::Shift(k)]),
+                        eql::BinaryOp::Sub => Some(vec![Folded::Scale(-1.0), Folded::Shift(k)]),
+                        eql::BinaryOp::Mul => Some(vec![Folded::Scale(k)]),
+                        eql::BinaryOp::Div => None,
+                    };
+                    if let Some(folded) = folded {
+                        let mut components = right.to_graph_component_affines();
+                        for step in folded {
+                            components = step.apply_to(components);
+                        }
+                        return components;
+                    }
+                }
+                let mut components = left.to_graph_component_affines();
+                components.extend(right.to_graph_component_affines());
                 components
             }
             eql::Expr::Formula(_, expr) => {
-                // Extract components from the formula's receiver/operand
-                expr.to_graph_components()
+                // Extract components from the formula's receiver/operand. The
+                // formula itself is not affine, so the transform is dropped.
+                expr.to_graph_component_affines()
+                    .into_iter()
+                    .map(|(path, index, _)| (path, index, ElementAffine::default()))
+                    .collect()
             }
             _ => vec![],
         }
+    }
+}
+
+/// A constant folded out of a [`eql::Expr::BinaryOp`], ready to compose onto the
+/// other operand's affines.
+enum Folded {
+    Scale(f64),
+    Shift(f64),
+}
+
+impl Folded {
+    fn apply_to(
+        &self,
+        components: Vec<(ComponentPath, usize, ElementAffine)>,
+    ) -> Vec<(ComponentPath, usize, ElementAffine)> {
+        components
+            .into_iter()
+            .map(|(path, index, affine)| {
+                let affine = match self {
+                    Folded::Scale(k) => affine.scaled(*k),
+                    Folded::Shift(k) => affine.shifted(*k),
+                };
+                (path, index, affine)
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod element_affine_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// `<name>[<index>]`, the shape `line_3d` axes come in.
+    fn element(name: &str, index: usize) -> eql::Expr {
+        eql::Expr::ArrayAccess(
+            Box::new(eql::Expr::ComponentPart(Arc::new(eql::ComponentPart {
+                name: name.to_string(),
+                id: impeller2::types::ComponentId::new(name),
+                component: None,
+                children: Default::default(),
+            }))),
+            index,
+        )
+    }
+
+    fn binary(left: eql::Expr, right: eql::Expr, op: eql::BinaryOp) -> eql::Expr {
+        eql::Expr::BinaryOp(Box::new(left), Box::new(right), op)
+    }
+
+    fn affines(expr: &eql::Expr) -> Vec<ElementAffine> {
+        expr.to_graph_component_affines()
+            .into_iter()
+            .map(|(_, _, affine)| affine)
+            .collect()
+    }
+
+    fn only_affine(expr: &eql::Expr) -> ElementAffine {
+        let affines = affines(expr);
+        assert_eq!(affines.len(), 1, "{affines:?}");
+        affines[0]
+    }
+
+    #[test]
+    fn bare_element_is_identity() {
+        assert!(only_affine(&element("ball.pos", 0)).is_identity());
+    }
+
+    #[test]
+    fn constant_offsets_fold_in() {
+        // `pos[0] + 1.5` is what separates two otherwise-coincident trails.
+        let shifted = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(1.5),
+            eql::BinaryOp::Add,
+        );
+        assert_eq!(only_affine(&shifted).apply(10.0), 11.5);
+
+        // Addition commutes.
+        let flipped = binary(
+            eql::Expr::FloatLiteral(1.5),
+            element("ball.pos", 0),
+            eql::BinaryOp::Add,
+        );
+        assert_eq!(only_affine(&flipped).apply(10.0), 11.5);
+
+        let subtracted = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(1.5),
+            eql::BinaryOp::Sub,
+        );
+        assert_eq!(only_affine(&subtracted).apply(10.0), 8.5);
+
+        // `k - expr` negates the element.
+        let negated = binary(
+            eql::Expr::FloatLiteral(1.5),
+            element("ball.pos", 0),
+            eql::BinaryOp::Sub,
+        );
+        assert_eq!(only_affine(&negated).apply(10.0), -8.5);
+    }
+
+    #[test]
+    fn constant_scales_fold_in() {
+        let scaled = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(3.0),
+            eql::BinaryOp::Mul,
+        );
+        assert_eq!(only_affine(&scaled).apply(10.0), 30.0);
+
+        let divided = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(4.0),
+            eql::BinaryOp::Div,
+        );
+        assert_eq!(only_affine(&divided).apply(10.0), 2.5);
+    }
+
+    #[test]
+    fn nested_constants_compose_in_order() {
+        // `(pos[0] + 1) * 2` scales the existing offset too.
+        let expr = binary(
+            binary(
+                element("ball.pos", 0),
+                eql::Expr::FloatLiteral(1.0),
+                eql::BinaryOp::Add,
+            ),
+            eql::Expr::FloatLiteral(2.0),
+            eql::BinaryOp::Mul,
+        );
+        assert_eq!(only_affine(&expr).apply(10.0), 22.0);
+    }
+
+    #[test]
+    fn division_by_zero_is_not_folded() {
+        let expr = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(0.0),
+            eql::BinaryOp::Div,
+        );
+        assert!(only_affine(&expr).is_identity());
+    }
+
+    #[test]
+    fn component_arithmetic_stays_untransformed() {
+        // Two components can't collapse to one affine, so both are listed as-is
+        // (the pre-existing behavior).
+        let expr = binary(element("a.pos", 0), element("b.pos", 1), eql::BinaryOp::Add);
+        let affines = affines(&expr);
+        assert_eq!(affines.len(), 2);
+        assert!(affines.iter().all(|a| a.is_identity()));
+    }
+
+    #[test]
+    fn to_graph_components_matches_the_affine_traversal() {
+        // The plain accessor must stay a projection of the affine one; graphs and
+        // monitors rely on its exact ordering.
+        let expr = eql::Expr::Tuple(vec![
+            eql::Expr::FloatLiteral(0.0),
+            binary(
+                element("ball.pos", 0),
+                eql::Expr::FloatLiteral(1.5),
+                eql::BinaryOp::Add,
+            ),
+            element("ball.pos", 1),
+        ]);
+        let plain = expr.to_graph_components();
+        let with_affine = expr.to_graph_component_affines();
+        assert_eq!(plain.len(), 2);
+        assert_eq!(
+            plain,
+            with_affine
+                .iter()
+                .map(|(path, index, _)| (path.clone(), *index))
+                .collect::<Vec<_>>()
+        );
     }
 }
 
