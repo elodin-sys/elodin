@@ -1545,6 +1545,15 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         chunk.data.cpu().first().copied()
     }
 
+    /// Timestamp of the sample returned by [`Self::first_sample`].
+    pub fn first_timestamp(&self) -> Option<Timestamp> {
+        let (_, chunk) = self.tree.first_key_value()?;
+        if chunk.data.cpu().is_empty() {
+            return None;
+        }
+        chunk.timestamps.first().copied()
+    }
+
     pub fn chunk_count(&self) -> usize {
         self.tree.iter().count()
     }
@@ -1921,17 +1930,19 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         written_u32s
     }
 
-    /// Collect CPU sample values for the same visible strip that
+    /// Visit `(chunk, offset)` for every sample in the visible strip that
     /// [`Self::write_to_index_buffer_with_step`] would index (same step / clip).
     ///
-    /// Does not require GPU-resident chunks — used by `line_3d` to build
-    /// floating-origin-local XYZ buffers.
-    pub fn collect_strip_values(&self, line_visible_range: Range<Timestamp>, step: usize) -> Vec<D>
-    where
-        D: Copy,
-    {
+    /// Shared by [`Self::collect_strip_values`] and
+    /// [`Self::collect_strip_timestamps`] so the two stay index-aligned: the
+    /// `line_3d` path pairs a timestamp with its value across both.
+    fn for_each_strip_sample(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        mut f: impl FnMut(&Chunk<D>, usize),
+    ) {
         let step = step.max(1);
-        let mut out = Vec::new();
         for chunk in self.range_iter(line_visible_range.clone()) {
             let Some((start_offset, end_offset)) =
                 chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
@@ -1942,7 +1953,6 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             if vis_len == 0 {
                 continue;
             }
-            let values = chunk.data.cpu();
             let index_chunk = IndexChunk {
                 range: 0..u32::MAX,
                 len: vis_len,
@@ -1951,28 +1961,59 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             let mut index_iter = index_chunk.into_index_iter();
             let mut last_written: Option<u32> = None;
             if let Some(index) = index_iter.next() {
-                let i = start_offset + index as usize;
-                if let Some(&v) = values.get(i) {
-                    out.push(v);
-                }
+                f(chunk, start_offset + index as usize);
                 last_written = Some(index);
             }
             for index in index_iter.step_by(step) {
-                let i = start_offset + index as usize;
-                if let Some(&v) = values.get(i) {
-                    out.push(v);
-                }
+                f(chunk, start_offset + index as usize);
                 last_written = Some(index);
             }
             if let Some(end) = end
                 && last_written != Some(end)
             {
-                let i = start_offset + end as usize;
-                if let Some(&v) = values.get(i) {
-                    out.push(v);
-                }
+                f(chunk, start_offset + end as usize);
             }
         }
+    }
+
+    /// Collect CPU sample values for the visible strip.
+    ///
+    /// Does not require GPU-resident chunks — used by `line_3d` to build
+    /// floating-origin-local XYZ buffers.
+    pub fn collect_strip_values(&self, line_visible_range: Range<Timestamp>, step: usize) -> Vec<D>
+    where
+        D: Copy,
+    {
+        let mut out = Vec::new();
+        self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
+            if let Some(&v) = chunk.data.cpu().get(i) {
+                out.push(v);
+            }
+        });
+        out
+    }
+
+    /// Collect the timestamps of the visible strip, index-aligned with
+    /// [`Self::collect_strip_values`].
+    ///
+    /// `line_3d` uses these to re-read each sample from the f64 telemetry cache,
+    /// so ECEF-scale coordinates keep full precision until after the anchor
+    /// subtraction.
+    pub fn collect_strip_timestamps(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+    ) -> Vec<Timestamp> {
+        let mut out = Vec::new();
+        self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
+            // Guard on `data` so a value-less index is skipped in both
+            // collectors and the two stay aligned.
+            if chunk.data.cpu().len() > i
+                && let Some(&ts) = chunk.timestamps.get(i)
+            {
+                out.push(ts);
+            }
+        });
         out
     }
 
@@ -2565,6 +2606,32 @@ mod tests {
         let step3 = tree.collect_strip_values(range, 3);
         // first, then step_by(3) on remainder, then last if needed
         assert_eq!(step3, vec![0.0, 1.0, 4.0, 7.0, 9.0]);
+    }
+
+    #[test]
+    fn collect_strip_timestamps_aligns_with_values() {
+        // `line_3d` pairs strip timestamps with cached f64 samples by index, so
+        // the two collectors must select exactly the same samples. Multiple
+        // chunks exercise the per-chunk first/last sentinel handling.
+        let mut tree = LineTree::<f32>::default();
+        let n = 40;
+        for base in [0usize, 20] {
+            let ts: Vec<Timestamp> = (base..base + 20)
+                .map(|i| Timestamp(i as i64 * 1_000))
+                .collect();
+            let vals: Vec<f32> = (base..base + 20).map(|i| i as f32).collect();
+            tree.insert(Chunk::from_iter(&ts, Timestamp(0), vals.iter().copied()).expect("chunk"));
+        }
+        let range = Timestamp(0)..Timestamp((n as i64 - 1) * 1_000);
+        for step in [1usize, 2, 3, 7, 100] {
+            let values = tree.collect_strip_values(range.clone(), step);
+            let timestamps = tree.collect_strip_timestamps(range.clone(), step);
+            assert_eq!(values.len(), timestamps.len(), "step={step}");
+            // Values are the sample index, so each timestamp must be its value.
+            for (value, ts) in values.iter().zip(&timestamps) {
+                assert_eq!(Timestamp(*value as i64 * 1_000), *ts, "step={step}");
+            }
+        }
     }
 
     #[test]

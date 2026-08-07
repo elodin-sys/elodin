@@ -1,3 +1,4 @@
+use crate::ui::schematic::ElementAffine;
 use crate::ui::widgets::SystemStateExt;
 use crate::{
     SelectedTimeRange,
@@ -24,7 +25,7 @@ use bevy::{
         },
         world::{FromWorld, Mut, World},
     },
-    math::{DVec3, Mat4, Vec4},
+    math::{DVec3, Mat4, Vec3, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup, ViewKeyCache},
     prelude::{Color, Reflect, Resource},
@@ -50,6 +51,8 @@ use bevy_render::{
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
 };
 use binding_types::storage_buffer_read_only_sized;
+use impeller2::types::{ComponentId, Timestamp};
+use impeller2_bevy::TelemetryCache;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, Line3d};
 use std::num::NonZeroU64;
 use zerocopy::IntoBytes;
@@ -176,6 +179,53 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
+
+/// One axis of a `line_3d`: which component element feeds it, and the affine
+/// transform its EQL expression applies.
+#[derive(Debug, Clone, Copy)]
+pub struct LineAxisSource {
+    pub component_id: ComponentId,
+    pub element: usize,
+    pub affine: ElementAffine,
+}
+
+/// The f64 sample source behind each axis of a `line_3d`.
+///
+/// [`Line`] stores `f32`, so an ECEF coordinate (~6.4e6 m, one ULP ≈ 0.5 m) is
+/// already quantized before the anchor subtraction can bring it back to a small
+/// number. Re-reading the sample from [`TelemetryCache`] keeps full precision
+/// until after that subtraction, which is what makes the trail smooth.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LineSources(pub [LineAxisSource; 3]);
+
+/// Read one axis's cached element as f64 at `ts`, with its EQL affine applied.
+///
+/// Prefers the exact sample; a strip timestamp always comes from a [`Line`] that
+/// was fed by this cache, so the fallback only matters if the cache was trimmed
+/// while the LineTree kept the sample.
+fn cached_axis_f64(cache: &TelemetryCache, source: LineAxisSource, ts: Timestamp) -> Option<f64> {
+    let value = match cache.series(&source.component_id).and_then(|s| s.get(&ts)) {
+        Some(value) => value,
+        None => cache.get_at_or_before(&source.component_id, ts)?,
+    };
+    Some(source.affine.apply(value.get(source.element)?.as_f64()))
+}
+
+/// Full-precision strip values for one axis, index-aligned with
+/// [`crate::ui::plot::data::LineTree::collect_strip_values`].
+///
+/// Returns `None` when any sample is missing from the cache so the caller can
+/// fall back to the f32 LineTree rather than render a partial trail.
+fn axis_strip_values_f64(
+    cache: &TelemetryCache,
+    source: LineAxisSource,
+    timestamps: &[Timestamp],
+) -> Option<Vec<f64>> {
+    timestamps
+        .iter()
+        .map(|&ts| cached_axis_f64(cache, source, ts))
+        .collect()
+}
 
 /// Default opacity applied to the future (not-yet-played) trail segment when a
 /// line does not set its own `future_color`, so the future reads as dimmer than
@@ -499,6 +549,7 @@ type ExtractLinesParams = (
     Res<'static, CurrentTimestamp>,
     Res<'static, TimelineSettings>,
     Res<'static, crate::ui::timeline::LatestFollow>,
+    Res<'static, TelemetryCache>,
 );
 
 #[derive(Resource)]
@@ -522,6 +573,7 @@ type LineQueryMut = (
     Option<&'static LineTrailColors>,
     Option<&'static GeoPosition>,
     Option<&'static Line3d>,
+    Option<&'static LineSources>,
     Option<&'static mut GpuLineIndexCache>,
 );
 
@@ -551,15 +603,47 @@ fn resolve_line_frame(geo_pos: Option<&GeoPosition>, line: Option<&Line3d>) -> G
 }
 
 /// First sample currently in the LineTree (visible window), in frame coords.
-/// Must match the entity `GeoPosition` written by `sync_line_3d_anchor`.
-fn line_first_point_frame(
+///
+/// Read back from [`TelemetryCache`] in f64 when the line's sources are known, so
+/// the anchor carries the same precision as the vertices subtracted from it.
+/// Falls back to the f32 LineTree sample when the cache has no entry.
+///
+/// Shared by `extract_lines` and `sync_line_3d_anchor` (which writes the entity
+/// `GeoPosition`): the two must agree or the trail lands away from the craft.
+pub(super) fn line_first_point_frame(
+    cache: &TelemetryCache,
+    sources: Option<&LineSources>,
     line_assets: &Assets<Line>,
     handles: &[Handle<Line>; 3],
 ) -> Option<DVec3> {
-    let x = line_assets.get(&handles[0])?.data.first_sample()?;
-    let y = line_assets.get(&handles[1])?.data.first_sample()?;
-    let z = line_assets.get(&handles[2])?.data.first_sample()?;
-    Some(DVec3::new(x as f64, y as f64, z as f64))
+    let mut point = [0.0f64; 3];
+    for (axis, value) in point.iter_mut().enumerate() {
+        let line = line_assets.get(&handles[axis])?;
+        let source = sources.map(|s| s.0[axis]);
+        *value = source
+            .and_then(|source| {
+                let ts = line.data.first_timestamp()?;
+                cached_axis_f64(cache, source, ts)
+            })
+            .or_else(|| {
+                let sample = line.data.first_sample()? as f64;
+                Some(match source {
+                    Some(source) => source.affine.apply(sample),
+                    None => sample,
+                })
+            })?;
+    }
+    Some(DVec3::from_array(point))
+}
+
+/// Vertex position for one sample: its frame-space offset from the line's anchor.
+///
+/// The subtraction stays in f64 and only the small residual is cast, so an ECEF
+/// sample keeps sub-millimetre resolution instead of the ~0.5 m f32 ULP it would
+/// have at 6.4e6 m. This only holds if `sample` itself arrived in f64 — see
+/// [`LineSources`].
+fn anchor_local(sample: DVec3, anchor: DVec3) -> Vec3 {
+    (sample - anchor).as_vec3()
 }
 
 /// Build dense first-point-relative XYZ value buffers + remapped strip indices.
@@ -570,9 +654,9 @@ fn line_first_point_frame(
 /// Index layout matches the historical NaN-sentinel strip: leading/trailing
 /// `0` (NaN slot), samples at `1..n`.
 fn write_anchor_local_line_buffers(
-    xs: &[f32],
-    ys: &[f32],
-    zs: &[f32],
+    xs: &[f64],
+    ys: &[f64],
+    zs: &[f64],
     anchor: DVec3,
     render_device: &RenderDevice,
     render_queue: &RenderQueue,
@@ -588,10 +672,10 @@ fn write_anchor_local_line_buffers(
     let mut y_local = vec![f32::NAN; n + 1];
     let mut z_local = vec![f32::NAN; n + 1];
     for i in 0..n {
-        let local = DVec3::new(xs[i] as f64, ys[i] as f64, zs[i] as f64) - anchor;
-        x_local[i + 1] = local.x as f32;
-        y_local[i + 1] = local.y as f32;
-        z_local[i + 1] = local.z as f32;
+        let local = anchor_local(DVec3::new(xs[i], ys[i], zs[i]), anchor);
+        x_local[i + 1] = local.x;
+        y_local[i + 1] = local.y;
+        z_local[i + 1] = local.z;
     }
 
     // Single contiguous strip with NaN sentinels (one logical chunk).
@@ -656,6 +740,7 @@ fn extract_lines(
             current_timestamp,
             timeline_settings,
             latest_follow,
+            telemetry_cache,
         ) = cached_state.state.params_mut(world);
         let selected_range = if crate::is_short_accuracy_window(&selected_time_range.0) {
             selected_time_range.0.clone()
@@ -713,6 +798,7 @@ fn extract_lines(
             trail_colors,
             geo_pos,
             line_3d,
+            line_sources,
             mut index_cache,
         ) in lines.iter_mut()
         {
@@ -730,7 +816,12 @@ fn extract_lines(
 
             // Frame-space first sample. Entity GeoPosition is synced to this;
             // GeoRotation carries the frame→Bevy basis into GlobalTransform.
-            let Some(line_anchor) = line_first_point_frame(&line_assets, &line_handles.0) else {
+            let Some(line_anchor) = line_first_point_frame(
+                &telemetry_cache,
+                line_sources,
+                &line_assets,
+                &line_handles.0,
+            ) else {
                 continue 'outer;
             };
             let anchor_key = anchor_cache_key(frame, line_anchor);
@@ -806,18 +897,32 @@ fn extract_lines(
                     step = step.saturating_mul(2).max(2);
                 }
 
-                let xs = line_assets
-                    .get(&line_handles.0[0])
-                    .map(|l| l.data.collect_strip_values(range.clone(), step))
-                    .unwrap_or_default();
-                let ys = line_assets
-                    .get(&line_handles.0[1])
-                    .map(|l| l.data.collect_strip_values(range.clone(), step))
-                    .unwrap_or_default();
-                let zs = line_assets
-                    .get(&line_handles.0[2])
-                    .map(|l| l.data.collect_strip_values(range.clone(), step))
-                    .unwrap_or_default();
+                // Prefer the f64 cache so the anchor subtraction happens before
+                // any f32 cast; fall back to the LineTree's own f32 samples when
+                // the sources or cached values are unavailable.
+                let axis_values = |axis: usize| -> Vec<f64> {
+                    let Some(line) = line_assets.get(&line_handles.0[axis]) else {
+                        return Vec::new();
+                    };
+                    let source = line_sources.map(|s| s.0[axis]);
+                    if let Some(source) = source {
+                        let timestamps = line.data.collect_strip_timestamps(range.clone(), step);
+                        if let Some(values) =
+                            axis_strip_values_f64(&telemetry_cache, source, &timestamps)
+                        {
+                            return values;
+                        }
+                    }
+                    let affine = source.map(|s| s.affine).unwrap_or_default();
+                    line.data
+                        .collect_strip_values(range.clone(), step)
+                        .into_iter()
+                        .map(|v| affine.apply(f64::from(v)))
+                        .collect()
+                };
+                let xs = axis_values(0);
+                let ys = axis_values(1);
+                let zs = axis_values(2);
 
                 let (value_buffers, index_buffers, count) = write_anchor_local_line_buffers(
                     &xs,
@@ -1069,6 +1174,112 @@ mod tests {
         assert!((placed_tip.as_dvec3() - expected_tip).length() < 1e-3);
         let placed_start = model.transform_point3(bevy::math::Vec3::ZERO);
         assert!((placed_start.as_dvec3() - translation).length() < 1e-3);
+    }
+
+    /// A smooth ECEF trajectory: ~6.37e6 m from the geocentre, advancing 5 cm per
+    /// sample. That step is well under the ~0.5 m f32 ULP at this magnitude.
+    fn ecef_ramp(samples: usize) -> Vec<DVec3> {
+        let base = DVec3::new(-2_430_601.8, -4_702_442.7, 3_546_587.4);
+        (0..samples)
+            .map(|i| base + DVec3::new(0.05, 0.03, 0.04) * i as f64)
+            .collect()
+    }
+
+    /// Populate a [`TelemetryCache`] the way live/replay ingest does for a
+    /// 3-element f64 component, and return the strip timestamps a LineTree
+    /// would have selected (one per sample, step=1).
+    fn ecef_cache(samples: &[DVec3]) -> (TelemetryCache, Vec<Timestamp>, [LineAxisSource; 3]) {
+        let component_id = ComponentId::new("ball.pos_ecef");
+        let mut cache = TelemetryCache::default();
+        let timestamps: Vec<Timestamp> = (0..samples.len())
+            .map(|i| Timestamp(i as i64 * 10_000))
+            .collect();
+        for (&ts, sample) in timestamps.iter().zip(samples) {
+            cache.insert(
+                component_id,
+                ts,
+                impeller2_wkt::ComponentValue::F64(
+                    nox::array![sample.x, sample.y, sample.z].to_dyn(),
+                ),
+            );
+        }
+        let sources = [0, 1, 2].map(|element| LineAxisSource {
+            component_id,
+            element,
+            affine: ElementAffine::default(),
+        });
+        (cache, timestamps, sources)
+    }
+
+    /// Read XYZ through [`axis_strip_values_f64`] and subtract the first sample,
+    /// matching what `write_anchor_local_line_buffers` does with the fix in place.
+    fn locals_from_cache(
+        cache: &TelemetryCache,
+        sources: &[LineAxisSource; 3],
+        timestamps: &[Timestamp],
+    ) -> Vec<Vec3> {
+        let xs = axis_strip_values_f64(cache, sources[0], timestamps).expect("x");
+        let ys = axis_strip_values_f64(cache, sources[1], timestamps).expect("y");
+        let zs = axis_strip_values_f64(cache, sources[2], timestamps).expect("z");
+        assert_eq!(xs.len(), timestamps.len());
+        let anchor = DVec3::new(xs[0], ys[0], zs[0]);
+        xs.into_iter()
+            .zip(ys)
+            .zip(zs)
+            .map(|((x, y), z)| anchor_local(DVec3::new(x, y, z), anchor))
+            .collect()
+    }
+
+    #[test]
+    fn f64_samples_keep_ecef_trail_smooth() {
+        // Regression for the fix path: TelemetryCache → axis_strip_values_f64 →
+        // anchor subtraction. If axis_values went back to reading f32 from the
+        // LineTree, this would staircase and fail.
+        let samples = ecef_ramp(64);
+        let (cache, timestamps, sources) = ecef_cache(&samples);
+        let locals = locals_from_cache(&cache, &sources, &timestamps);
+        let expected_step = (samples[1] - samples[0]).length() as f32;
+        for pair in locals.windows(2) {
+            let step = (pair[1] - pair[0]).length();
+            assert!(
+                (step - expected_step).abs() < expected_step * 1e-3,
+                "step={step} expected={expected_step}"
+            );
+        }
+    }
+
+    #[test]
+    fn f32_samples_staircase_the_ecef_trail() {
+        // Contrast: the same ECEF ramp, but cast to f32 before the subtraction
+        // — what the LineTree path does. Most steps collapse to zero and the
+        // survivors jump a full ULP; that's the sawtooth the f64 path above
+        // avoids. Kept so a "revert to LineTree f32" can't sneak past by only
+        // exercising anchor_local.
+        let samples = ecef_ramp(64);
+        let (cache, timestamps, sources) = ecef_cache(&samples);
+        // Full-fidelity strip from the cache, then the old cast.
+        let xs = axis_strip_values_f64(&cache, sources[0], &timestamps).expect("x");
+        let ys = axis_strip_values_f64(&cache, sources[1], &timestamps).expect("y");
+        let zs = axis_strip_values_f64(&cache, sources[2], &timestamps).expect("z");
+        let quantized: Vec<DVec3> = xs
+            .into_iter()
+            .zip(ys)
+            .zip(zs)
+            .map(|((x, y), z)| DVec3::new(x as f32 as f64, y as f32 as f64, z as f32 as f64))
+            .collect();
+        let anchor = quantized[0];
+        let locals: Vec<Vec3> = quantized.iter().map(|&s| anchor_local(s, anchor)).collect();
+        let expected_step = (samples[1] - samples[0]).length() as f32;
+        let stalled = locals
+            .windows(2)
+            .filter(|pair| (pair[1] - pair[0]).length() == 0.0)
+            .count();
+        let overshoot = locals
+            .windows(2)
+            .filter(|pair| (pair[1] - pair[0]).length() > expected_step * 2.0)
+            .count();
+        assert!(stalled > 0, "expected repeated samples, stalled={stalled}");
+        assert!(overshoot > 0, "expected ULP jumps, overshoot={overshoot}");
     }
 
     #[test]

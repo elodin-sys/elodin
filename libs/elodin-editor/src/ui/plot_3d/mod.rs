@@ -7,12 +7,12 @@ use bevy::{
         query::{With, Without},
         system::{Commands, Query, Res, ResMut},
     },
-    math::{DVec3, Vec4},
+    math::Vec4,
     prelude::{Color, GlobalTransform, IntoScheduleConfigs, Transform, warn_once},
     transform::TransformSystems,
 };
 use bevy_geo_frames::GeoPosition;
-use impeller2_bevy::ComponentMetadataRegistry;
+use impeller2_bevy::{ComponentMetadataRegistry, TelemetryCache};
 use impeller2_wkt::Line3d;
 
 use gpu::{LineConfig, LineUniform};
@@ -56,29 +56,23 @@ fn line_trail_colors(line_plot: &Line3d) -> gpu::LineTrailColors {
 /// Scheduled after [`queue_timestamp_read`] so a rolling-window rebuild and the
 /// pose update land in the same frame (before PostUpdate geo→Transform).
 fn sync_line_3d_anchor(
-    mut lines: Query<(&gpu::LineHandles, &mut GeoPosition), With<Line3d>>,
+    mut lines: Query<
+        (
+            &gpu::LineHandles,
+            Option<&gpu::LineSources>,
+            &mut GeoPosition,
+        ),
+        With<Line3d>,
+    >,
     line_assets: Res<Assets<Line>>,
+    telemetry_cache: Res<TelemetryCache>,
 ) {
-    for (handles, mut geo) in &mut lines {
-        let Some(x) = line_assets
-            .get(&handles.0[0])
-            .and_then(|l| l.data.first_sample())
+    for (handles, sources, mut geo) in &mut lines {
+        let Some(first) =
+            gpu::line_first_point_frame(&telemetry_cache, sources, &line_assets, &handles.0)
         else {
             continue;
         };
-        let Some(y) = line_assets
-            .get(&handles.0[1])
-            .and_then(|l| l.data.first_sample())
-        else {
-            continue;
-        };
-        let Some(z) = line_assets
-            .get(&handles.0[2])
-            .and_then(|l| l.data.first_sample())
-        else {
-            continue;
-        };
-        let first = DVec3::new(x as f64, y as f64, z as f64);
         if geo.1 != first {
             geo.1 = first;
         }
@@ -116,10 +110,11 @@ pub fn sync_line_plot_3d(
                 continue;
             }
         };
-        let graph_components = parsed.to_graph_components();
+        let graph_components = parsed.to_graph_component_affines();
         let skip = if graph_components.len() == 7 { 4 } else { 0 };
         let mut handles: [Option<Handle<Line>>; 3] = [None, None, None];
-        for (i, (c, index)) in graph_components.iter().skip(skip).take(3).enumerate() {
+        let mut sources: [Option<gpu::LineAxisSource>; 3] = [None, None, None];
+        for (i, (c, index, affine)) in graph_components.iter().skip(skip).take(3).enumerate() {
             let Some(metadata) = metadata_store.get_metadata(&c.id) else {
                 continue;
             };
@@ -138,6 +133,11 @@ pub fn sync_line_plot_3d(
                     )
                 });
             handles[i] = data.lines.get(index).cloned();
+            sources[i] = Some(gpu::LineAxisSource {
+                component_id: c.id,
+                element: *index,
+                affine: *affine,
+            });
         }
         let [Some(x), Some(y), Some(z)] = handles else {
             continue;
@@ -145,6 +145,9 @@ pub fn sync_line_plot_3d(
 
         let trail = line_trail_colors(line_plot);
         if let Ok(mut entity) = commands.get_entity(entity) {
+            if let [Some(sx), Some(sy), Some(sz)] = sources {
+                entity.try_insert(gpu::LineSources([sx, sy, sz]));
+            }
             // Pose comes from GeoPosition(first sample) + GeoRotation::absolute;
             // vertices are frame-relative to that first point.
             entity.try_insert((
@@ -225,6 +228,7 @@ impl bevy::app::Plugin for LinePlot3dPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::math::DVec3;
 
     #[test]
     fn line_color_linear_preserves_alpha() {
