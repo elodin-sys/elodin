@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 
 use bevy::ecs::system::{SystemParam, SystemState};
-use bevy::math::DVec3;
+use bevy::math::{DQuat, DVec3};
 use bevy::picking::prelude::Pickable;
 use bevy::prelude::*;
 use bevy::{
@@ -61,6 +61,40 @@ pub struct Viewport {
     pub up: EditableEQL,
     /// Optional geo frame for interpreting position and rotation.
     pub frame: Option<GeoFrame>,
+    /// Follow low-pass time constant in seconds; 0 disables smoothing.
+    pub smoothing: f32,
+    smoothing_state: Option<FollowSmoothingState>,
+}
+
+/// Last smoothed follow pose, kept across frames to low-pass the raw telemetry
+/// targets.
+///
+/// - `raw_target` is the previous unsmoothed target and `step_ema` a smoothed
+///   *magnitude* of recent per-frame motion, used only for seek detection so a
+///   timeline scrub can be told apart from ordinary — even fast — motion
+///   without a single noisy frame tripping a false snap.
+/// - `vel_ema` / `look_vel_ema` are low-passed *signed* velocities (m/s) of the
+///   pos and look-at targets. They drive the One Euro adaptive cutoff: because
+///   they are signed, zero-mean telemetry noise averages toward zero and does
+///   not inflate the speed estimate the way a magnitude EMA would, so the
+///   filter stays heavy while the vehicle is merely jittering in place. Both
+///   endpoints are tracked so a fixed-`pos` viewport still opens its cutoff (and
+///   snaps on a scrub) when only the look-at moves.
+/// - `raw_att` / `att_step_ema` play the same seek-detection role for the
+///   attitude: with a fixed `pos` and no `look_at` the camera rides the pose
+///   orientation, so a scrub that mainly changes attitude (hover, pad dwell)
+///   must still snap instead of slowly slerping across the jump.
+struct FollowSmoothingState {
+    pos: DVec3,
+    look_at: Option<DVec3>,
+    att: Option<DQuat>,
+    raw_target: DVec3,
+    raw_look_at: Option<DVec3>,
+    raw_att: Option<DQuat>,
+    step_ema: f64,
+    att_step_ema: f64,
+    vel_ema: DVec3,
+    look_vel_ema: DVec3,
 }
 
 impl Viewport {
@@ -70,6 +104,7 @@ impl Viewport {
         look_at: EditableEQL,
         up: EditableEQL,
         frame: Option<GeoFrame>,
+        smoothing: f32,
     ) -> Self {
         Self {
             parent_entity,
@@ -77,7 +112,322 @@ impl Viewport {
             look_at,
             up,
             frame,
+            smoothing,
+            smoothing_state: None,
         }
+    }
+
+    /// Low-pass the raw follow targets with a One Euro filter. Returns the pose
+    /// to apply this frame and updates the internal state.
+    ///
+    /// The filter time constant is speed-adaptive: heavy smoothing when the
+    /// target is slow or still (so telemetry noise — and the floating-origin
+    /// jitter it causes — is strongly rejected, collapsing a stationary noisy
+    /// target to nearly a point), and progressively lighter as it moves faster
+    /// so the camera keeps up during flight. Concretely the steady-state follow
+    /// lag is *bounded* by a small fraction of the framing distance instead of
+    /// growing without limit like a fixed-`smoothing` first-order filter (`lag =
+    /// smoothing * speed`), which is what made `smoothing=1.0` trail visibly
+    /// during a fast climb. The bound is a fraction rather than the framing
+    /// distance itself because the subject is drawn from raw telemetry, so any
+    /// lag reads as a framing error: trailing by a whole framing distance throws
+    /// the subject ~45 degrees off centre, which looks far worse than the noise
+    /// being filtered. At zero speed it reduces exactly to a fixed first-order
+    /// low-pass with time constant `smoothing`, so the parameter's meaning at
+    /// rest is unchanged.
+    ///
+    /// Snaps straight to the target on the first frame, on non-finite values,
+    /// and on a *seek* — a jump both larger than the framing distance and a
+    /// sudden discontinuity versus recent per-frame motion (timeline scrub) —
+    /// so a scrub doesn't slowly glide across the world.
+    fn smooth_follow(
+        &mut self,
+        target_pos: DVec3,
+        target_look_at: Option<DVec3>,
+        target_att: Option<DQuat>,
+        dt: f64,
+    ) -> (DVec3, Option<DVec3>, Option<DQuat>) {
+        if self.smoothing <= 0.0 {
+            self.smoothing_state = None;
+            return (target_pos, target_look_at, target_att);
+        }
+        let att_finite = target_att.is_some_and(|q| {
+            q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && q.w.is_finite()
+        });
+        if !target_pos.is_finite()
+            || target_look_at.is_some_and(|t| !t.is_finite())
+            || target_att.is_some_and(|_| !att_finite)
+        {
+            self.smoothing_state = None;
+            return (target_pos, target_look_at, target_att);
+        }
+        // The framing distance is the natural scale for the seek test. Use the
+        // *previous* frame's raw framing rather than the current one: a look-at
+        // that jumps on its own inflates the current framing, so a genuine
+        // scrub would measure smaller than the floor and never snap.
+        let framing = match &self.smoothing_state {
+            Some(prev) => prev
+                .raw_look_at
+                .map(|look| (look - prev.raw_target).length()),
+            None => target_look_at.map(|look| (look - target_pos).length()),
+        }
+        .filter(|d| d.is_finite() && *d > 0.0);
+        let max_lag = framing.unwrap_or(DEFAULT_MAX_LAG);
+        // Cap on the follow lag. With a `look_at` the lag *is* a framing error:
+        // the subject is drawn at its raw position, so trailing it by the whole
+        // framing distance throws it ~45 degrees off centre. Bound the lag to a
+        // small fraction of the framing so the subject stays near the centre —
+        // `atan(FRAMING_LAG_RATIO)` is the worst-case angle. It doubles as the
+        // scale that fades the filter out with speed, so a tight budget makes it
+        // transparent in flight and full-strength only when the target is slow.
+        // Riding the pose has no framing to protect, so the absolute default
+        // stands.
+        let lag_cap = match framing {
+            Some(d) => d * FRAMING_LAG_RATIO,
+            None => DEFAULT_MAX_LAG,
+        };
+
+        // Seek detection watches *both* endpoints against the previous framing:
+        // a viewport with a fixed pos and a telemetry look-at (or vice versa)
+        // must still snap when its moving end jumps on a scrub. Steady motion
+        // has consistent per-frame steps (bounded acceleration); a scrub jumps
+        // far in a single frame. Comparing against a smoothed step magnitude
+        // (not just the last frame) keeps smoothing active throughout fast
+        // flight while still snapping on a real scrub, and stops a single noisy
+        // frame from tripping a false snap.
+        let (pos_step, look_step, att_step) = match &self.smoothing_state {
+            Some(prev) => {
+                let pos_step = (target_pos - prev.raw_target).length();
+                let look_step = match (prev.raw_look_at, target_look_at) {
+                    (Some(a), Some(b)) => (b - a).length(),
+                    _ => 0.0,
+                };
+                let att_step = match (prev.raw_att, target_att) {
+                    (Some(a), Some(b)) => a.angle_between(b),
+                    _ => 0.0,
+                };
+                (pos_step, look_step, att_step)
+            }
+            None => (0.0, 0.0, 0.0),
+        };
+        let step = pos_step.max(look_step);
+        // Attitude jumps get their own seek test: translation may be exactly
+        // zero on a scrub (fixed pos, no look_at, vehicle hovering) yet the
+        // orientation still jumps with the playhead. Rotation has an absolute
+        // scale, so a fixed angular floor replaces the framing distance.
+        let seek = match &self.smoothing_state {
+            Some(prev) => {
+                let pos_seek = step > max_lag && step > prev.step_ema * SEEK_STEP_RATIO;
+                // Attitude seek only applies when the camera actually rides the
+                // pose: with a `look_at` the orientation comes from the viewing
+                // vector, not `target_att`, so a telemetry attitude jump is
+                // irrelevant and must not hitch a chase camera that was merely
+                // lagging in translation. Its scrubs trip `pos_seek` via
+                // `look_step` instead.
+                let att_seek = target_look_at.is_none()
+                    && att_step > ATT_SEEK_FLOOR
+                    && att_step > prev.att_step_ema * SEEK_STEP_RATIO;
+                pos_seek || att_seek
+            }
+            None => true,
+        };
+
+        let (state, out_pos, out_look_at, out_att) = match (&self.smoothing_state, seek) {
+            (Some(prev), false) => {
+                // The One Euro speed estimate, taken from the *eased* pose of
+                // the previous frames rather than the raw telemetry. Raw
+                // per-frame differences are dominated by noise while the
+                // target is still — 0.5 m of jitter at 60 Hz reads as 30 m/s
+                // — which would open the cutoff exactly where the heaviest
+                // filtering is wanted, and it is only the huge lag budget of
+                // an unbounded framing that hid it. The eased pose has that
+                // noise already removed and travels at the true speed in
+                // steady motion, so the cutoff tracks real motion only.
+                // Tracking the look-at too lets a fixed-pos viewport open its
+                // cutoff for a fast look-at.
+                let speed = prev.vel_ema.length().max(prev.look_vel_ema.length());
+
+                // One Euro adaptive time constant, expressed via inverse time
+                // constants ("rates") so the 2*pi cancels: at rest the rate
+                // is 1/smoothing (unchanged); adding speed/lag_cap raises it
+                // so the steady-state lag `speed * tau_eff` approaches
+                // `lag_cap` as speed grows.
+                let rate = 1.0 / self.smoothing as f64 + speed / lag_cap;
+                let tau_eff = 1.0 / rate;
+                let alpha = smoothing_alpha(dt, tau_eff);
+
+                // The adaptive cutoff only *approaches* the bounded lag
+                // asymptotically, so right after a snap — while the speed
+                // estimate is still rebuilding — a sustained scrub would
+                // trail far behind. Clamp the eased result so each endpoint
+                // trails its raw target by at most a small multiple of the
+                // lag cap, making the documented bound hold every frame
+                // instead of only in the limit.
+                let max_catchup = lag_cap * CATCHUP_LAG_RATIO;
+                let pos = clamp_lag(prev.pos.lerp(target_pos, alpha), target_pos, max_catchup);
+                let look_at = match (prev.look_at, target_look_at) {
+                    (Some(prev_look), Some(target)) => Some(clamp_lag(
+                        prev_look.lerp(target, alpha),
+                        target,
+                        max_catchup,
+                    )),
+                    _ => target_look_at,
+                };
+                // With no `look_at` the camera rides the telemetry attitude,
+                // so it must be eased too or the view keeps jittering while
+                // the position settles. `slerp` takes the shortest arc; the
+                // same adaptive alpha keeps translation and rotation in step.
+                let att = match (prev.att, target_att) {
+                    (Some(prev_att), Some(target)) => Some(prev_att.slerp(target, alpha)),
+                    _ => target_att,
+                };
+                // Feed the speed estimate from this frame's eased increments,
+                // so the next frame sees the smoothed trajectory's velocity.
+                let alpha_v = smoothing_alpha(dt, DERIV_TAU);
+                let inst_vel = if dt > 0.0 {
+                    (pos - prev.pos) / dt
+                } else {
+                    DVec3::ZERO
+                };
+                let inst_look_vel = match (prev.look_at, look_at) {
+                    (Some(a), Some(b)) if dt > 0.0 => (b - a) / dt,
+                    _ => DVec3::ZERO,
+                };
+                let vel_ema = prev.vel_ema.lerp(inst_vel, alpha_v);
+                let look_vel_ema = prev.look_vel_ema.lerp(inst_look_vel, alpha_v);
+                let step_ema = prev.step_ema + STEP_EMA_ALPHA * (step - prev.step_ema);
+                let att_step_ema =
+                    prev.att_step_ema + STEP_EMA_ALPHA * (att_step - prev.att_step_ema);
+
+                (
+                    FollowSmoothingState {
+                        pos,
+                        look_at,
+                        att,
+                        raw_target: target_pos,
+                        raw_look_at: target_look_at,
+                        raw_att: target_att,
+                        step_ema,
+                        att_step_ema,
+                        vel_ema,
+                        look_vel_ema,
+                    },
+                    pos,
+                    look_at,
+                    att,
+                )
+            }
+            // First frame or a seek: snap, and seed the step estimates with
+            // this jump so the frames right after a scrub aren't misread as
+            // more seeks (the estimates decay back toward the real motion).
+            // The velocity estimates reset to zero so a scrub can't leave a
+            // stale high speed that would under-smooth the frames after it.
+            _ => (
+                FollowSmoothingState {
+                    pos: target_pos,
+                    look_at: target_look_at,
+                    att: target_att,
+                    raw_target: target_pos,
+                    raw_look_at: target_look_at,
+                    raw_att: target_att,
+                    step_ema: step,
+                    att_step_ema: att_step,
+                    vel_ema: DVec3::ZERO,
+                    look_vel_ema: DVec3::ZERO,
+                },
+                target_pos,
+                target_look_at,
+                target_att,
+            ),
+        };
+
+        self.smoothing_state = Some(state);
+        (out_pos, out_look_at, out_att)
+    }
+}
+
+/// A raw target jump counts as a seek (and snaps) only when it exceeds this
+/// multiple of the previous frame's step, i.e. a sudden discontinuity rather
+/// than continuous — even if fast — motion.
+const SEEK_STEP_RATIO: f64 = 8.0;
+
+/// Blend factor for the smoothed per-frame step magnitude used by seek
+/// detection. Small enough that one noisy frame barely moves the estimate.
+const STEP_EMA_ALPHA: f64 = 0.2;
+
+/// Minimum single-frame attitude jump (radians) that can count as a seek —
+/// about 20 degrees. Telemetry attitude noise and smoothed flight rotation stay
+/// far below this in one frame; a timeline scrub lands far above it.
+const ATT_SEEK_FLOOR: f64 = 0.35;
+
+/// Time constant (seconds) of the One Euro derivative low-pass. It measures the
+/// already-smoothed pose, so it needs no extra margin against telemetry noise
+/// and can stay short enough to pick up a launch within a few frames — the
+/// cutoff only opens once this estimate rises, and the catch-up clamp covers
+/// the transient meanwhile.
+///
+/// It also sets how far the estimate trails under acceleration
+/// (`DERIV_TAU * accel`), and the cutoff opens late by that much, so a hard
+/// launch wants it short. Shortening it also makes the speed estimate noisier,
+/// which opens the cutoff while parked and lets scene jitter back in, so this is
+/// a balance point rather than a minimum.
+const DERIV_TAU: f64 = 0.10;
+
+/// Fraction of the framing distance the eased pose may trail its raw target by.
+/// The subject is drawn from raw telemetry, so this lag reads directly as a
+/// framing error of at most `atan(FRAMING_LAG_RATIO)` — under 2 degrees — which
+/// keeps a chase camera pointed at its subject during fast flight.
+///
+/// It is also the knob that decides *how fast* the adaptive cutoff opens, since
+/// the speed term of the rate is `speed / lag_cap`: a tight budget means the
+/// filter fades out early in the speed range and is all but transparent in
+/// flight, which is deliberate. Smoothing cannot steady the world and hold the
+/// subject centred at the same time — the two are the same lag seen from either
+/// end — and in flight framing wins: the scene is streaming past anyway, so the
+/// jitter it hides is hardly noticeable, whereas a subject sliding off centre is
+/// glaring. At a wider budget (0.15) the filter kept working through a climb and
+/// steadied the background 3-4x, but parked the subject several degrees off
+/// centre, which read as worse than no smoothing at all during liftoff.
+///
+/// It cannot be tightened much further, because sensor noise has a speed of its
+/// own and a small budget lets that speed open the cutoff too, which costs the
+/// parked case — the one that needs the filter most. Measured on a
+/// degraded-sensor recording at 35 m framing, parked scene motion runs 1.2 px per
+/// frame here against 23 px unsmoothed, but 2.4 px at 0.02 and 9.4 px at 0.008.
+///
+/// The bound is also what ties a usable `smoothing` to a framing distance:
+/// filtering a fast subject needs a lag budget of at least a frame of its
+/// motion, so a 250 m/s vehicle needs tens of metres of framing, not a close-up.
+const FRAMING_LAG_RATIO: f64 = 0.03;
+
+/// Fallback cap (metres) on the adaptive follow lag when there is no `look_at`
+/// to define a framing distance.
+const DEFAULT_MAX_LAG: f64 = 5.0;
+
+/// The eased pose may trail its raw target by at most this multiple of the
+/// framing distance. Bounds the transient lag of a sustained timeline scrub —
+/// before the speed estimate rebuilds after a snap — while staying wide enough
+/// that ordinary at-rest noise and slow tracking never reach it.
+const CATCHUP_LAG_RATIO: f64 = 2.0;
+
+/// Framerate-independent exponential low-pass factor for a first-order
+/// filter with time constant `time_constant` (seconds).
+fn smoothing_alpha(dt: f64, time_constant: f64) -> f64 {
+    if time_constant <= 0.0 {
+        return 1.0;
+    }
+    1.0 - (-dt.max(0.0) / time_constant).exp()
+}
+
+/// Clamp `smoothed` so it trails `target` by at most `max_lag` metres, holding
+/// the follow lag bounded even before the adaptive cutoff has caught up.
+fn clamp_lag(smoothed: DVec3, target: DVec3, max_lag: f64) -> DVec3 {
+    let delta = smoothed - target;
+    let len = delta.length();
+    if len > max_lag && len > 0.0 {
+        target + delta / len * max_lag
+    } else {
+        smoothed
     }
 }
 
@@ -463,56 +813,132 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
 }
 
 pub fn set_viewport_pos(
-    mut viewports: Query<(&Viewport, &mut EditorCam)>,
+    mut viewports: Query<(&mut Viewport, &mut EditorCam)>,
     mut pos: Query<&mut WorldPos>,
     entity_map: Res<EntityMap>,
     values: Query<&'static ComponentValue>,
     geo_context: Res<GeoContext>,
+    time: Res<Time>,
 ) {
-    for (viewport, mut editor_cam) in viewports.iter_mut() {
+    for (mut viewport, mut editor_cam) in viewports.iter_mut() {
         let Ok(mut pos) = pos.get_mut(viewport.parent_entity) else {
             continue;
         };
-        if let Some(compiled_expr) = &viewport.pos.compiled_expr {
-            match compiled_expr.execute(&entity_map, &values) {
-                Ok(val) => {
-                    if let Some(world_pos) = val.as_world_pos() {
-                        *pos = world_pos;
-                    } else {
-                        bevy::log::warn!("viewport pos expression didn't produce a WorldPos");
-                    }
-                }
-                Err(e) => {
-                    // Missing ComponentValue is normal while connecting / before the
-                    // series has samples at the playhead — not an actionable error.
-                    bevy::log::debug!("viewport pos formula execution error: {e}");
-                }
-            }
-            if let Some(compiled_expr) = &viewport.look_at.compiled_expr
-                && let Ok(val) = compiled_expr.execute(&entity_map, &values)
-                && let Some(look_at) = val.as_world_pos()
-            {
-                let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
-                // Everything stays in the viewport's frame: direction and up
-                // are frame coordinates, and `GeoRotation::look_at` yields the
-                // attitude expressed in that frame. `sync_pos` carries it into
-                // the entity's `GeoRotation` unchanged.
-                let dir = look_at.pos() - pos.pos();
-                let target_distance = dir.length();
+        let Some(executed) = viewport
+            .pos
+            .compiled_expr
+            .as_ref()
+            .map(|expr| expr.execute(&entity_map, &values))
+        else {
+            continue;
+        };
 
-                if !is_valid_viewport_target_distance(target_distance) {
-                    continue;
-                }
-                refresh_default_anchor_depth(&mut editor_cam, target_distance);
-                let up = viewport
-                    .up
-                    .compiled_expr
-                    .as_ref()
-                    .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
-                    .and_then(|v| extract_vec3(&v))
-                    .filter(|v| v.length_squared() > 1e-20);
-                pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
+        let look_at_executed = viewport
+            .look_at
+            .compiled_expr
+            .as_ref()
+            .map(|expr| expr.execute(&entity_map, &values));
+        let target_look_at = look_at_executed
+            .as_ref()
+            .and_then(|executed| executed.as_ref().ok())
+            .and_then(|val| val.as_world_pos())
+            .map(|world_pos| world_pos.pos());
+        // A configured look_at whose sample is missing this frame is a gap, not a
+        // switch to body-attitude mode: a gap must freeze the last good pose like
+        // a pos gap, not flip attitude, drop the smoothed look_at, and re-arm the
+        // attitude seek.
+        //
+        // Only a failed *execution* counts. A value that resolves but is not a
+        // 7-vector pose — a bare 3-vector, which `as_world_pos` rejects and the
+        // reference docs still show — is not a gap: it has always meant "track
+        // pos, don't aim", and freezing the camera for it would strand the
+        // viewport on its first pose forever, `smoothing=0` included.
+        let look_at_gap = matches!(look_at_executed, Some(Err(_)));
+        // Only aim (below) when this frame's pos actually resolves. On a missing
+        // sample we hold the last good pose rather than re-aiming a raw, unsmoothed
+        // look_at against a frozen position, which would jump the view direction.
+        let mut look_at_point = None;
+
+        match executed {
+            Ok(_) if look_at_gap => {
+                // pos resolved but the configured look_at target has no sample
+                // this frame. Hold the last good pose (leave `pos` untouched, skip
+                // aiming) and reseed on resume, mirroring the pos-gap path, so a
+                // chase camera doesn't hitch during normal missing-sample frames.
+                viewport.smoothing_state = None;
             }
+            Ok(val) => {
+                if let Some(world_pos) = val.as_world_pos() {
+                    // Low-pass pos, look_at and attitude together so noisy
+                    // telemetry doesn't shake the whole view; the viewing
+                    // direction stays intact. With a `look_at` the attitude is
+                    // recomputed from it below, so the smoothed attitude only
+                    // matters when the camera rides the pose directly.
+                    // `smoothing == 0` is a plain passthrough.
+                    let (smoothed_pos, smoothed_look_at, smoothed_att) = viewport.smooth_follow(
+                        world_pos.pos(),
+                        target_look_at,
+                        Some(world_pos.att()),
+                        time.delta_secs_f64(),
+                    );
+                    // Preserve the last good attitude before overwriting the
+                    // pose: with a `look_at`, pos and look_at ease independently,
+                    // so the smoothed viewing vector can null out for a frame even
+                    // when the raw targets never do (e.g. the subject crossing the
+                    // camera). The look_at attitude write below is then skipped,
+                    // and without this the view would flash to the body pose
+                    // attitude for that frame.
+                    let prev_att = pos.att;
+                    *pos = world_pos;
+                    pos.pos = nox::Vector3::new(smoothed_pos.x, smoothed_pos.y, smoothed_pos.z);
+                    if target_look_at.is_some() {
+                        // Attitude is driven by `look_at` below; hold the previous
+                        // value so a transient collapse keeps the last good
+                        // orientation instead of the body pose attitude.
+                        pos.att = prev_att;
+                    } else if let Some(att) = smoothed_att {
+                        pos.att =
+                            nox::Quaternion(nox::Tensor::from_buf([att.x, att.y, att.z, att.w]));
+                    }
+                    look_at_point = smoothed_look_at;
+                } else {
+                    bevy::log::warn!("viewport pos expression didn't produce a WorldPos");
+                    viewport.smoothing_state = None;
+                }
+            }
+            Err(e) => {
+                // Missing ComponentValue is normal while connecting / before the
+                // series has samples at the playhead — not an actionable error.
+                // Hold the last good pose (leave `pos` frozen, skip aiming) and
+                // drop the smoothing state so a resumed stream reseeds cleanly
+                // instead of reading the gap as one huge frame, which would
+                // inflate the speed estimate or trip a false snap.
+                bevy::log::debug!("viewport pos formula execution error: {e}");
+                viewport.smoothing_state = None;
+            }
+        }
+
+        if let Some(look_at) = look_at_point {
+            let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
+            // Everything stays in the viewport's frame: direction and up
+            // are frame coordinates, and `GeoRotation::look_at` yields the
+            // attitude expressed in that frame. `sync_pos` carries it into
+            // the entity's `GeoRotation` unchanged.
+            let dir = look_at - pos.pos();
+            let target_distance = dir.length();
+
+            if !is_valid_viewport_target_distance(target_distance) {
+                continue;
+            }
+            refresh_default_anchor_depth(&mut editor_cam, target_distance);
+            let up = viewport
+                .up
+                .compiled_expr
+                .as_ref()
+                .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
+                .and_then(|v| extract_vec3(&v))
+                .filter(|v| v.length_squared() > 1e-20);
+            pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
         }
     }
 }
@@ -605,6 +1031,483 @@ mod tests {
     use crate::WorldPosExt;
     use bevy::math::{Mat3, Quat, Vec3};
 
+    fn smoothing_viewport(smoothing: f32) -> Viewport {
+        Viewport::new(
+            Entity::PLACEHOLDER,
+            EditableEQL::default(),
+            EditableEQL::default(),
+            EditableEQL::default(),
+            None,
+            smoothing,
+        )
+    }
+
+    #[test]
+    fn smoothing_alpha_is_bounded() {
+        for dt in [0.0, 1.0 / 240.0, 1.0 / 30.0, 0.5, 10.0] {
+            for tau in [0.05, 0.3, 2.0] {
+                let alpha = smoothing_alpha(dt, tau);
+                assert!((0.0..=1.0).contains(&alpha), "alpha={alpha} out of bounds");
+            }
+        }
+        assert_eq!(smoothing_alpha(1.0 / 60.0, 0.0), 1.0);
+    }
+
+    #[test]
+    fn smoothing_alpha_is_framerate_independent() {
+        // Two half-steps must land exactly where one full step does.
+        let tau = 0.3;
+        let dt = 1.0 / 30.0;
+        let full = smoothing_alpha(dt, tau);
+        let half = smoothing_alpha(dt / 2.0, tau);
+        let two_halves = 1.0 - (1.0 - half) * (1.0 - half);
+        assert!((full - two_halves).abs() < 1e-12);
+    }
+
+    #[test]
+    fn smooth_follow_zero_smoothing_is_passthrough() {
+        let mut viewport = smoothing_viewport(0.0);
+        let target = DVec3::new(1.0, 2.0, 3.0);
+        let (pos, look_at, _) = viewport.smooth_follow(target, Some(DVec3::ZERO), None, 1.0 / 60.0);
+        assert_eq!(pos, target);
+        assert_eq!(look_at, Some(DVec3::ZERO));
+    }
+
+    #[test]
+    fn smooth_follow_snaps_on_first_frame_then_lags() {
+        let mut viewport = smoothing_viewport(0.3);
+        let look_at = DVec3::ZERO;
+        let start = DVec3::new(10.0, 0.0, 0.0);
+        let (pos, _, _) = viewport.smooth_follow(start, Some(look_at), None, 1.0 / 60.0);
+        assert_eq!(pos, start, "first frame must snap to the target");
+
+        // A small (sub-framing-distance) jump is eased, not applied 1:1.
+        let target = start + DVec3::new(1.0, 0.0, 0.0);
+        let (pos, _, _) = viewport.smooth_follow(target, Some(look_at), None, 1.0 / 60.0);
+        assert!(pos.x > start.x && pos.x < target.x, "pos={pos} should lag");
+    }
+
+    #[test]
+    fn smooth_follow_snaps_on_large_jump() {
+        let mut viewport = smoothing_viewport(0.3);
+        // Camera 10 m behind the vehicle (framing distance 10 m).
+        viewport.smooth_follow(
+            DVec3::new(10.0, 0.0, 0.0),
+            Some(DVec3::ZERO),
+            None,
+            1.0 / 60.0,
+        );
+
+        // Seek: vehicle and camera jump together, far beyond the framing distance.
+        let look_at = DVec3::new(500.0, 0.0, 0.0);
+        let target = DVec3::new(510.0, 0.0, 0.0);
+        let (pos, smoothed_look_at, _) =
+            viewport.smooth_follow(target, Some(look_at), None, 1.0 / 60.0);
+        assert_eq!(pos, target, "large jumps must snap, not lag");
+        assert_eq!(smoothed_look_at, Some(look_at));
+    }
+
+    #[test]
+    fn smooth_follow_converges_to_static_target() {
+        let mut viewport = smoothing_viewport(0.3);
+        let target = DVec3::new(5.0, -2.0, 1.0);
+        let mut pos = DVec3::ZERO;
+        viewport.smooth_follow(
+            DVec3::new(4.5, -2.0, 1.0),
+            Some(DVec3::ZERO),
+            None,
+            1.0 / 60.0,
+        );
+        for _ in 0..600 {
+            (pos, _, _) = viewport.smooth_follow(target, Some(DVec3::ZERO), None, 1.0 / 60.0);
+        }
+        assert!((pos - target).length() < 1e-3, "pos={pos} did not converge");
+    }
+
+    /// Continuous fast motion — steps far larger than the framing distance on
+    /// every frame — must keep being eased, not snapped. Before the smoothing
+    /// fix the framing-distance snap fired every frame during flight so both
+    /// viewports jittered identically.
+    #[test]
+    fn smooth_follow_eases_fast_continuous_motion() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        // 3 m per frame with a 2 m framing distance: every step exceeds the snap
+        // threshold, yet these frames must go through the easing path rather than
+        // being snapped. At this speed relative to the framing the filter is
+        // deliberately transparent — the lag budget is a couple of centimetres —
+        // so the pose itself cannot distinguish the two. The state can: a snap
+        // resets the velocity estimate, easing keeps building it.
+        let step = DVec3::new(3.0, 0.0, 0.0);
+        let mut pos = DVec3::ZERO;
+        let mut target = DVec3::ZERO;
+        for _ in 0..120 {
+            target += step;
+            let look_at = target - DVec3::new(2.0, 0.0, 0.0);
+            (pos, _, _) = viewport.smooth_follow(target, Some(look_at), None, dt);
+        }
+        assert!(pos.x > 0.0, "pos should advance");
+        assert!(
+            pos.x <= target.x,
+            "pos={pos} must not overshoot the raw target={target}"
+        );
+        let state = viewport.smoothing_state.as_ref().expect("state kept");
+        assert!(
+            state.vel_ema.length() > 0.0,
+            "the easing path must have run every frame, not the snap path"
+        );
+    }
+
+    /// Liftoff regression: through a sustained *acceleration* the subject must
+    /// stay near the centre of frame. This is the case a bounded-but-generous lag
+    /// budget got wrong — the filter kept working through the climb and parked
+    /// the subject several degrees off centre, which read as worse than no
+    /// smoothing at all. Fading the filter out early in the speed range is what
+    /// keeps it framed.
+    #[test]
+    fn smooth_follow_keeps_the_subject_framed_through_acceleration() {
+        let mut viewport = smoothing_viewport(1.0);
+        let dt = 1.0 / 60.0;
+        let framing = 35.0;
+        let offset = DVec3::new(0.0, -framing, 0.0);
+        let mut target = DVec3::ZERO;
+        let mut speed = 0.0f64;
+        let mut worst = 0.0f64;
+        for i in 0..600 {
+            speed = (speed + 30.0 * dt).min(120.0); // 3 g climb, then hold
+            target += DVec3::new(0.0, 0.0, speed * dt);
+            let (pos, look_at, _) = viewport.smooth_follow(target + offset, Some(target), None, dt);
+            // Angle between the view axis and the raw subject: the framing error
+            // a viewer actually sees. Skip the first frames while the velocity
+            // estimate builds.
+            if i > 30 {
+                let axis = (look_at.unwrap() - pos).normalize();
+                let subject = (target - pos).normalize();
+                worst = worst.max(axis.dot(subject).clamp(-1.0, 1.0).acos());
+            }
+        }
+        // With a 0.15 budget this sat around `atan(0.15)` ~ 8.5 degrees for the
+        // whole climb. The residual now comes from the cutoff opening a little
+        // late, by `DERIV_TAU * accel`, so it is worst in the first moments.
+        assert!(
+            worst.to_degrees() < 3.0,
+            "subject drifted {:.2} degrees off centre during acceleration",
+            worst.to_degrees()
+        );
+    }
+
+    /// One Euro win: at high steady speed the follow lag is *bounded* by a
+    /// fraction of the framing distance instead of growing like a fixed
+    /// first-order filter (`lag = smoothing * speed`). Here `smoothing=0.3` at
+    /// 50 m/s would lag a fixed filter by ~15 m; the adaptive filter must stay
+    /// far inside the 2 m framing.
+    #[test]
+    fn smooth_follow_bounds_lag_at_high_speed() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        let speed = 50.0;
+        let framing = 2.0;
+        let mut pos = DVec3::ZERO;
+        let mut target = DVec3::ZERO;
+        for _ in 0..600 {
+            target += DVec3::new(speed * dt, 0.0, 0.0);
+            let look_at = target - DVec3::new(framing, 0.0, 0.0);
+            (pos, _, _) = viewport.smooth_follow(target, Some(look_at), None, dt);
+        }
+        let lag = target.x - pos.x;
+        let fixed_lag = 0.3 * speed; // what the old fixed filter would trail by
+        assert!(lag > 0.0, "must still lag (be eased), got {lag}");
+        assert!(
+            lag < fixed_lag * 0.5,
+            "adaptive lag {lag} should be far under the fixed-filter lag {fixed_lag}"
+        );
+        let bound = framing * FRAMING_LAG_RATIO * CATCHUP_LAG_RATIO;
+        assert!(
+            lag < bound,
+            "adaptive lag {lag} should stay within the framing-error bound {bound}"
+        );
+    }
+
+    /// A chase camera keeps its subject framed during fast flight. The subject
+    /// is drawn from raw telemetry while the camera is eased, so follow lag
+    /// shows up directly as an angular framing error — bounding the lag by the
+    /// whole framing distance let the subject slide ~30 degrees off centre,
+    /// which reads as far worse than the noise being filtered.
+    #[test]
+    fn smooth_follow_keeps_the_subject_framed_at_high_speed() {
+        let dt = 1.0 / 60.0;
+        let speed = 250.0;
+        // The rig a follow viewport describes: camera offset from the subject in
+        // world coordinates, aimed back at the subject.
+        let offset = DVec3::new(12.0, 12.0, -8.0);
+        let mut viewport = smoothing_viewport(1.0);
+        let mut worst = 0.0_f64;
+        for i in 0..1200 {
+            let subject = DVec3::new(0.0, 0.0, speed * i as f64 * dt);
+            let (pos, look_at, _) =
+                viewport.smooth_follow(subject + offset, Some(subject), None, dt);
+            if i > 600 {
+                let axis = (look_at.unwrap() - pos).normalize();
+                let to_subject = (subject - pos).normalize();
+                worst = worst.max(to_subject.dot(axis).clamp(-1.0, 1.0).acos());
+            }
+        }
+        let limit = FRAMING_LAG_RATIO.atan() * 1.5;
+        assert!(
+            worst < limit,
+            "subject drifted {} deg off centre, past the {} deg framing bound",
+            worst.to_degrees(),
+            limit.to_degrees()
+        );
+    }
+
+    /// High-frequency noise on a *stationary* target is strongly damped — the
+    /// primary goal, since the floating-origin jitter that shimmers rigid
+    /// geometry is worst at rest. The adaptive filter must not read zero-mean
+    /// noise as speed and lighten up.
+    #[test]
+    fn smooth_follow_damps_noise_at_rest() {
+        let dt = 1.0 / 60.0;
+        let mut rng: u64 = 0x1234_5678_9abc_def0;
+        let mut white = || {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((rng >> 40) as f64 / (1u64 << 23) as f64) - 1.0
+        };
+        let mut viewport = smoothing_viewport(0.3);
+        let center = DVec3::new(100.0, 0.0, 0.0);
+        // The framing distance has to be large compared to the noise: the lag
+        // budget is a fraction of it, and a camera cannot filter jitter it is not
+        // allowed to trail by. Sub-metre noise at 20 m of framing is the real
+        // ratio; the same noise at 2 m would be 16 degrees of angular jitter,
+        // which no bounded-framing filter can absorb.
+        let look_at = center - DVec3::new(20.0, 0.0, 0.0);
+        let mut input_noise = 0.0;
+        let mut residual_noise = 0.0;
+        for i in 0..2400 {
+            let n = DVec3::new(white(), white(), white());
+            let (pos, _, _) = viewport.smooth_follow(center + n, Some(look_at + n), None, dt);
+            if i > 1200 {
+                input_noise += n.length();
+                residual_noise += (pos - center).length();
+            }
+        }
+        assert!(
+            residual_noise < input_noise * 0.4,
+            "residual noise {residual_noise} should be far under the input {input_noise}"
+        );
+    }
+
+    /// Noise on a slowly moving target is still strongly damped: at low speed
+    /// the adaptive cutoff stays near its resting (heavy) value. Isolated from
+    /// the velocity lag by differencing the clean and noisy runs of the same
+    /// filter — the surviving difference is the noise it let through.
+    #[test]
+    fn smooth_follow_damps_noise_on_slow_target() {
+        let dt = 1.0 / 60.0;
+        let speed = 2.0;
+        let mut rng: u64 = 0x1234_5678_9abc_def0;
+        let mut white = || {
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((rng >> 40) as f64 / (1u64 << 23) as f64) - 1.0
+        };
+        let mut vp_noisy = smoothing_viewport(0.3);
+        let mut vp_clean = smoothing_viewport(0.3);
+        let mut input_noise = 0.0;
+        let mut residual_noise = 0.0;
+        for i in 0..2400 {
+            let clean = DVec3::new(speed * i as f64 * dt, 0.0, 0.0);
+            // Framing large compared to the noise, as above.
+            let look_clean = clean - DVec3::new(20.0, 0.0, 0.0);
+            let n = DVec3::new(white(), white(), white());
+            let (p_noisy, _, _) = vp_noisy.smooth_follow(clean + n, Some(look_clean + n), None, dt);
+            let (p_clean, _, _) = vp_clean.smooth_follow(clean, Some(look_clean), None, dt);
+            if i > 1200 {
+                input_noise += n.length();
+                residual_noise += (p_noisy - p_clean).length();
+            }
+        }
+        assert!(
+            residual_noise < input_noise * 0.4,
+            "residual noise {residual_noise} should be far under the input {input_noise}"
+        );
+    }
+
+    /// With no `look_at` the camera rides the telemetry attitude directly, so
+    /// a noisy attitude must be eased rather than passed through raw. Before the
+    /// fix `*pos = world_pos` copied the raw attitude while only translation was
+    /// smoothed, so the view kept jittering.
+    #[test]
+    fn smooth_follow_eases_attitude_without_look_at() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        let pos = DVec3::new(100.0, 0.0, 0.0);
+        // First frame snaps to the identity attitude.
+        let (_, _, att) = viewport.smooth_follow(pos, None, Some(DQuat::IDENTITY), dt);
+        assert_eq!(att, Some(DQuat::IDENTITY));
+
+        // A rotated pose one frame later (below the attitude seek floor) must
+        // be eased between the previous and target attitude, not applied 1:1.
+        let target = DQuat::from_rotation_z(0.2);
+        let (_, look_at, att) = viewport.smooth_follow(pos, None, Some(target), dt);
+        assert_eq!(look_at, None, "no look_at stays absent");
+        let att = att.expect("attitude is smoothed");
+        let eased = att.angle_between(DQuat::IDENTITY);
+        let full = target.angle_between(DQuat::IDENTITY);
+        assert!(
+            eased > 0.0 && eased < full,
+            "attitude angle {eased} should lag between identity and target {full}"
+        );
+    }
+
+    /// A timeline scrub must snap even without a `look_at`: previously the seek
+    /// floor defaulted to infinity, so a huge single-frame jump was eased and
+    /// the camera glided across the world instead of jumping.
+    #[test]
+    fn smooth_follow_snaps_on_large_jump_without_look_at() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        // Seed with slow steady motion so the smoothed step estimate is small.
+        let mut p = DVec3::ZERO;
+        for _ in 0..10 {
+            p += DVec3::new(0.01, 0.0, 0.0);
+            viewport.smooth_follow(p, None, Some(DQuat::IDENTITY), dt);
+        }
+        let target = DVec3::new(1000.0, 0.0, 0.0);
+        let (pos, _, _) = viewport.smooth_follow(target, None, Some(DQuat::IDENTITY), dt);
+        assert_eq!(pos, target, "a large jump must snap even without a look_at");
+    }
+
+    /// A viewport with a fixed `pos` and a telemetry `look_at` must still snap
+    /// when the look-at scrubs far in one frame. Seek detection used to watch
+    /// only `pos`, so such a scrub slowly panned instead of snapping.
+    #[test]
+    fn smooth_follow_snaps_on_look_at_jump_with_fixed_pos() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        let pos = DVec3::ZERO;
+        // Settle a stable, nearby look-at (framing ~10 m).
+        for _ in 0..15 {
+            viewport.smooth_follow(pos, Some(DVec3::new(10.0, 0.0, 0.0)), None, dt);
+        }
+        // The look-at scrubs far away in one frame while pos stays put.
+        let target_look = DVec3::new(1000.0, 0.0, 0.0);
+        let (_, look_at, _) = viewport.smooth_follow(pos, Some(target_look), None, dt);
+        assert_eq!(
+            look_at,
+            Some(target_look),
+            "a look_at scrub must snap even with a fixed pos"
+        );
+    }
+
+    /// With a fixed `pos` and no `look_at` the camera rides the pose attitude,
+    /// so a scrub that mainly changes orientation (hover, pad dwell) must snap
+    /// too. Seek detection used to watch only translation, so the view slowly
+    /// slerped across the jump instead.
+    #[test]
+    fn smooth_follow_snaps_on_attitude_jump_with_fixed_pos() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        let pos = DVec3::ZERO;
+        // Settle on a steady attitude so the angular step estimate is small.
+        for _ in 0..15 {
+            viewport.smooth_follow(pos, None, Some(DQuat::IDENTITY), dt);
+        }
+        // Scrub: the orientation flips far in one frame while pos stays put.
+        let target = DQuat::from_rotation_z(2.0);
+        let (_, _, att) = viewport.smooth_follow(pos, None, Some(target), dt);
+        let att = att.expect("attitude present");
+        assert!(
+            att.angle_between(target) < 1e-9,
+            "an attitude scrub must snap, got {} rad short of the target",
+            att.angle_between(target)
+        );
+
+        // And steady rotation right after must go back to being eased.
+        let next = DQuat::from_rotation_z(2.1);
+        let (_, _, att) = viewport.smooth_follow(pos, None, Some(next), dt);
+        let att = att.expect("attitude present");
+        let eased = att.angle_between(target);
+        let full = next.angle_between(target);
+        assert!(
+            eased > 0.0 && eased < full,
+            "steady rotation must ease ({eased} of {full} rad), not snap"
+        );
+    }
+
+    /// A chase camera driven by a `look_at` must ignore telemetry attitude
+    /// jumps: its orientation comes from the viewing vector, not the pose
+    /// attitude, so an attitude scrub must not force a full snap and hitch a
+    /// camera that was only lagging in translation.
+    #[test]
+    fn smooth_follow_attitude_seek_ignored_with_look_at() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        let pos = DVec3::new(10.0, 0.0, 0.0);
+        let look = DVec3::ZERO;
+        // Settle a stable framing (~10 m) with a steady attitude.
+        for _ in 0..15 {
+            viewport.smooth_follow(pos, Some(look), Some(DQuat::IDENTITY), dt);
+        }
+        // Attitude flips far in one frame while pos/look_at nudge sub-framing.
+        let next_pos = pos + DVec3::new(0.05, 0.0, 0.0);
+        let next_look = look + DVec3::new(0.05, 0.0, 0.0);
+        let (out_pos, _, _) = viewport.smooth_follow(
+            next_pos,
+            Some(next_look),
+            Some(DQuat::from_rotation_z(2.0)),
+            dt,
+        );
+        let pos_lag = (out_pos - next_pos).length();
+        assert!(
+            pos_lag > 1e-6,
+            "attitude jump must not snap a look_at camera; pos should ease (lag={pos_lag})"
+        );
+    }
+
+    /// Dragging the playhead makes the target jump every frame. After the first
+    /// snap the speed estimate rebuilds over `DERIV_TAU`, so a fixed first-order
+    /// filter would trail far behind meanwhile. The catch-up clamp must keep the
+    /// lag within `CATCHUP_LAG_RATIO * FRAMING_LAG_RATIO * framing` every frame.
+    #[test]
+    fn smooth_follow_bounds_lag_during_sustained_scrub() {
+        let mut viewport = smoothing_viewport(0.3);
+        let dt = 1.0 / 60.0;
+        let framing = 2.0;
+        let mut target = DVec3::new(100.0, 0.0, 0.0);
+        // Settle at rest so the smoothed step estimate is small.
+        for _ in 0..30 {
+            viewport.smooth_follow(
+                target,
+                Some(target - DVec3::new(framing, 0.0, 0.0)),
+                None,
+                dt,
+            );
+        }
+        // Sustained scrub: steps several times the framing distance every frame,
+        // consistent enough that the ratio test stops flagging them as seeks.
+        let mut max_lag = 0.0_f64;
+        for _ in 0..120 {
+            target += DVec3::new(10.0, 0.0, 0.0);
+            let (pos, _, _) = viewport.smooth_follow(
+                target,
+                Some(target - DVec3::new(framing, 0.0, 0.0)),
+                None,
+                dt,
+            );
+            max_lag = max_lag.max(target.x - pos.x);
+        }
+        assert!(max_lag > 0.0, "the camera should trail during the scrub");
+        let bound = framing * FRAMING_LAG_RATIO * CATCHUP_LAG_RATIO;
+        assert!(
+            max_lag <= bound + 1e-6,
+            "sustained scrub lag {max_lag} must stay within the catch-up bound {bound}"
+        );
+    }
+
     #[test]
     fn refresh_default_anchor_depth_uses_viewport_look_at_distance() {
         let mut editor_cam = EditorCam::default();
@@ -669,6 +1572,7 @@ mod tests {
             let mut app = bevy::app::App::new();
             app.insert_resource(GeoContext::default());
             app.init_resource::<super::EntityMap>();
+            app.init_resource::<Time>();
             crate::register_world_pos_components(&mut app);
             app.add_systems(
                 bevy::app::Update,
@@ -699,6 +1603,7 @@ mod tests {
                         editable("(0,0,0,0, 0,-3,0)"),
                         editable(up_eql),
                         Some(frame),
+                        0.0,
                     ),
                     EditorCam::default(),
                 ))
@@ -721,6 +1626,80 @@ mod tests {
             assert!(
                 (fwd.x - -1.0).abs() < 1e-5 && fwd.y.abs() < 1e-5,
                 "up={up_eql}: camera fwd = {fwd:?}, expected -X"
+            );
+        }
+    }
+
+    /// A `look_at` that resolves to something other than a 7-vector pose — a
+    /// bare 3-vector, which the reference docs still show — must not be mistaken
+    /// for a missing sample. Gap handling freezes the pose, so treating it as one
+    /// would strand the viewport on its first position forever, whatever the
+    /// `smoothing` value.
+    #[test]
+    fn non_pose_look_at_still_tracks_pos() {
+        use crate::object_3d::{EditableEQL, compile_eql_expr};
+        use bevy::math::{DQuat, DVec3};
+        use bevy::prelude::IntoScheduleConfigs;
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+
+        let eql_ctx = eql::Context::default();
+        let editable = |s: &str| EditableEQL {
+            eql: s.to_string(),
+            compiled_expr: Some(
+                compile_eql_expr(
+                    eql_ctx
+                        .parse_str(s)
+                        .unwrap_or_else(|e| panic!("parse {s:?}: {e}")),
+                )
+                .unwrap_or_else(|e| panic!("compile {s:?}: {e}")),
+            ),
+        };
+
+        for smoothing in [0.0, 1.0] {
+            let mut app = bevy::app::App::new();
+            app.insert_resource(GeoContext::default());
+            app.init_resource::<super::EntityMap>();
+            app.init_resource::<Time>();
+            crate::register_world_pos_components(&mut app);
+            app.add_systems(
+                bevy::app::Update,
+                (super::set_viewport_pos, crate::sync_pos).chain(),
+            );
+
+            let frame = GeoFrame::ENU;
+            let parent = app
+                .world_mut()
+                .spawn((
+                    super::WorldPos::default(),
+                    GeoPosition(frame, DVec3::ZERO),
+                    GeoRotation::relative(frame, DQuat::IDENTITY),
+                ))
+                .id();
+            let viewport_entity = app
+                .world_mut()
+                .spawn((
+                    super::Viewport::new(
+                        parent,
+                        editable("(0,0,0,1, 1,2,3)"),
+                        // Three elements: executes fine, but is not a pose.
+                        editable("(0,0,0)"),
+                        editable("(0,0,1)"),
+                        Some(frame),
+                        smoothing,
+                    ),
+                    EditorCam::default(),
+                ))
+                .id();
+            app.update();
+
+            let pos = app.world().get::<super::WorldPos>(parent).unwrap().pos();
+            assert!(
+                (pos - DVec3::new(1.0, 2.0, 3.0)).length() < 1e-9,
+                "smoothing={smoothing}: pos should follow the expression, got {pos:?}"
+            );
+            assert!(
+                app.world().get::<EditorCam>(viewport_entity).is_some(),
+                "viewport should still exist"
             );
         }
     }
@@ -1025,6 +2004,8 @@ mod tests {
                 compiled_expr: None,
             },
             frame: None,
+            smoothing: 0.0,
+            smoothing_state: None,
         }
     }
 
