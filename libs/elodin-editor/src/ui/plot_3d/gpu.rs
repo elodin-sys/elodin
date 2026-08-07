@@ -1185,13 +1185,59 @@ mod tests {
             .collect()
     }
 
+    /// Populate a [`TelemetryCache`] the way live/replay ingest does for a
+    /// 3-element f64 component, and return the strip timestamps a LineTree
+    /// would have selected (one per sample, step=1).
+    fn ecef_cache(samples: &[DVec3]) -> (TelemetryCache, Vec<Timestamp>, [LineAxisSource; 3]) {
+        let component_id = ComponentId::new("ball.pos_ecef");
+        let mut cache = TelemetryCache::default();
+        let timestamps: Vec<Timestamp> = (0..samples.len())
+            .map(|i| Timestamp(i as i64 * 10_000))
+            .collect();
+        for (&ts, sample) in timestamps.iter().zip(samples) {
+            cache.insert(
+                component_id,
+                ts,
+                impeller2_wkt::ComponentValue::F64(
+                    nox::array![sample.x, sample.y, sample.z].to_dyn(),
+                ),
+            );
+        }
+        let sources = [0, 1, 2].map(|element| LineAxisSource {
+            component_id,
+            element,
+            affine: ElementAffine::default(),
+        });
+        (cache, timestamps, sources)
+    }
+
+    /// Read XYZ through [`axis_strip_values_f64`] and subtract the first sample,
+    /// matching what `write_anchor_local_line_buffers` does with the fix in place.
+    fn locals_from_cache(
+        cache: &TelemetryCache,
+        sources: &[LineAxisSource; 3],
+        timestamps: &[Timestamp],
+    ) -> Vec<Vec3> {
+        let xs = axis_strip_values_f64(cache, sources[0], timestamps).expect("x");
+        let ys = axis_strip_values_f64(cache, sources[1], timestamps).expect("y");
+        let zs = axis_strip_values_f64(cache, sources[2], timestamps).expect("z");
+        assert_eq!(xs.len(), timestamps.len());
+        let anchor = DVec3::new(xs[0], ys[0], zs[0]);
+        xs.into_iter()
+            .zip(ys)
+            .zip(zs)
+            .map(|((x, y), z)| anchor_local(DVec3::new(x, y, z), anchor))
+            .collect()
+    }
+
     #[test]
     fn f64_samples_keep_ecef_trail_smooth() {
-        // The fix: sourcing samples in f64 lets the anchor subtraction recover the
-        // motion, so every step survives and the spacing stays uniform.
+        // Regression for the fix path: TelemetryCache → axis_strip_values_f64 →
+        // anchor subtraction. If axis_values went back to reading f32 from the
+        // LineTree, this would staircase and fail.
         let samples = ecef_ramp(64);
-        let anchor = samples[0];
-        let locals: Vec<Vec3> = samples.iter().map(|&s| anchor_local(s, anchor)).collect();
+        let (cache, timestamps, sources) = ecef_cache(&samples);
+        let locals = locals_from_cache(&cache, &sources, &timestamps);
         let expected_step = (samples[1] - samples[0]).length() as f32;
         for pair in locals.windows(2) {
             let step = (pair[1] - pair[0]).length();
@@ -1204,13 +1250,22 @@ mod tests {
 
     #[test]
     fn f32_samples_staircase_the_ecef_trail() {
-        // The bug this replaced: casting to f32 before the subtraction quantizes
-        // the sample to ~0.5 m, so most steps collapse to zero and the survivors
-        // jump a full ULP — the sawtooth seen on the ECEF trail.
+        // Contrast: the same ECEF ramp, but cast to f32 before the subtraction
+        // — what the LineTree path does. Most steps collapse to zero and the
+        // survivors jump a full ULP; that's the sawtooth the f64 path above
+        // avoids. Kept so a "revert to LineTree f32" can't sneak past by only
+        // exercising anchor_local.
         let samples = ecef_ramp(64);
-        let quantized: Vec<DVec3> = samples
-            .iter()
-            .map(|s| DVec3::new(s.x as f32 as f64, s.y as f32 as f64, s.z as f32 as f64))
+        let (cache, timestamps, sources) = ecef_cache(&samples);
+        // Full-fidelity strip from the cache, then the old cast.
+        let xs = axis_strip_values_f64(&cache, sources[0], &timestamps).expect("x");
+        let ys = axis_strip_values_f64(&cache, sources[1], &timestamps).expect("y");
+        let zs = axis_strip_values_f64(&cache, sources[2], &timestamps).expect("z");
+        let quantized: Vec<DVec3> = xs
+            .into_iter()
+            .zip(ys)
+            .zip(zs)
+            .map(|((x, y), z)| DVec3::new(x as f32 as f64, y as f32 as f64, z as f32 as f64))
             .collect();
         let anchor = quantized[0];
         let locals: Vec<Vec3> = quantized.iter().map(|&s| anchor_local(s, anchor)).collect();
