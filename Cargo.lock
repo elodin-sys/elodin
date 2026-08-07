@@ -8034,6 +8034,7 @@ dependencies = [
  "stellarator-buf",
  "thingbuf",
  "thiserror 2.0.18",
+ "tracing",
  "zerocopy",
 ]
 

@@ -405,7 +405,19 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                             let data = table
                                 .get(offset..offset + field.len as usize)
                                 .ok_or(Error::BufferUnderflow)?;
-                            Some(ComponentView::try_from_bytes_shape(data, shape, schema.ty)?)
+                            let view = ComponentView::try_from_bytes_shape(data, shape, schema.ty)
+                                .map_err(|err| match err {
+                                    // Attach diagnostic context so a decode failure names the
+                                    // offending component instead of a bare "invalid component data".
+                                    Error::InvalidComponentData => Error::InvalidComponentValue {
+                                        component_id,
+                                        prim_type: schema.ty,
+                                        elems: shape.iter().product(),
+                                        buf_len: data.len(),
+                                    },
+                                    other => other,
+                                })?;
+                            Some(view)
                         } else {
                             None
                         };
@@ -470,11 +482,20 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
         Ok(())
     }
 
-    /// Parses the passed in table, and sinks the values into the sink
     /// Parses the provided table and applies the values to the sink
     ///
     /// This evaluates each field in the VTable against the provided table data and
-    /// applies the resulting values to the sink
+    /// applies the resulting values to the sink.
+    ///
+    /// A field whose bytes aren't a valid value (e.g. a `bool` byte that isn't
+    /// `0x00`/`0x01`) is skipped and logged rather than discarding the whole
+    /// table, so a single malformed component never costs every other component
+    /// in the packet.
+    ///
+    /// Structural failures are *not* skipped: a truncated table, a schema
+    /// mismatch or a misaligned field means the packet or the vtable itself is
+    /// broken rather than one component being bad, so those still fail the whole
+    /// table and never let a caller persist a partial row as a success.
     pub fn apply<D: Decomponentize>(
         &self,
         table: &[u8],
@@ -486,14 +507,54 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                 view,
                 timestamp,
                 ..
-            } = res?;
-            let view = view.expect("table not found");
+            } = match res {
+                Ok(field) => field,
+                Err(err @ (Error::InvalidComponentValue { .. } | Error::InvalidComponentData)) => {
+                    warn_skipped(&err);
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
+            let Some(view) = view else { continue };
             if let Err(err) = sink.apply_value(component_id, view, timestamp) {
                 return Ok(Err(err));
             }
         }
         Ok(Ok(()))
     }
+}
+
+/// Default reporter for fields skipped by [`VTable::apply`], warning at most
+/// once per offending component.
+///
+/// A malformed component repeats on every packet, so warning unconditionally
+/// would flood the logs at telemetry rates. Deduplicating needs state that a
+/// `&self` call in a `no_std` core can't carry, so under `std` we keep a
+/// process-wide set of already-reported components. The lock is only taken when
+/// a field actually fails, leaving the happy path untouched.
+fn warn_skipped(err: &Error) {
+    #[cfg(feature = "std")]
+    {
+        use std::collections::HashSet;
+        use std::sync::{Mutex, OnceLock};
+
+        static REPORTED: OnceLock<Mutex<HashSet<Option<ComponentId>>>> = OnceLock::new();
+
+        // Errors carrying no component id (e.g. a malformed vtable) share the
+        // `None` slot so they can't flood the logs either.
+        let key = match err {
+            Error::InvalidComponentValue { component_id, .. } => Some(*component_id),
+            _ => None,
+        };
+        let mut reported = REPORTED
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !reported.insert(key) {
+            return;
+        }
+    }
+    tracing::warn!(%err, "skipped malformed component while applying table");
 }
 
 #[cfg(feature = "alloc")]
@@ -873,6 +934,71 @@ mod tests {
         let bar = sink.f64_components.get(&ComponentId::new("bar")).unwrap();
         assert_eq!(bar.buf.as_buf(), &[5.0]);
         assert_eq!(sink.timestamp, Some(foo.timestamp));
+    }
+
+    #[test]
+    fn apply_skips_malformed_bool_and_keeps_other_fields() {
+        use super::builder::*;
+
+        // `flag` is declared as a `bool` in the schema but carries 0x02, which is
+        // not a valid `bool` — the only byte pattern any component type can
+        // reject, since every numeric primitive is validity-free.
+        #[derive(IntoBytes, Immutable)]
+        #[repr(C)]
+        struct Bad {
+            value: f64,
+            flag: u8,
+            _pad: [u8; 7],
+        }
+
+        let v = build_checked([
+            raw_field(0, 8, schema(PrimType::F64, &[1], component("value"))),
+            raw_field(8, 1, schema(PrimType::Bool, &[1], component("flag"))),
+        ])
+        .expect("aligned vtable must build successfully");
+
+        let bad = Bad {
+            value: 42.0,
+            flag: 0x02,
+            _pad: [0; 7],
+        };
+
+        // Repeat to mimic a malformed component recurring on every packet.
+        for _ in 0..3 {
+            let mut sink = TestSink::default();
+            v.apply(bad.as_bytes(), &mut sink)
+                .expect("a malformed field must not fail the table")
+                .expect("sink must not error");
+
+            // `value` still lands even though `flag` was skipped. `TestSink`
+            // panics on a `Bool` view, so this also catches `flag` being applied.
+            let value = sink.f64_components.get(&ComponentId::new("value")).unwrap();
+            assert_eq!(value.buf.as_buf(), &[42.0]);
+        }
+    }
+
+    #[test]
+    fn apply_still_fails_on_a_structurally_broken_table() {
+        use super::builder::*;
+
+        let v = build_checked([raw_field(
+            0,
+            8,
+            schema(PrimType::F64, &[1], component("value")),
+        )])
+        .expect("aligned vtable must build successfully");
+
+        // Too short for the declared field: the packet is broken, not one value,
+        // so this must not be silently skipped as a partial success.
+        let mut sink = TestSink::default();
+        let err = v
+            .apply(&[0u8; 4], &mut sink)
+            .expect_err("a truncated table must fail");
+        assert!(
+            matches!(err, crate::error::Error::BufferUnderflow),
+            "unexpected error: {err:?}"
+        );
+        assert!(sink.f64_components.is_empty());
     }
 
     #[test]

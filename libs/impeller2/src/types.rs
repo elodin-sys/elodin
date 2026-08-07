@@ -833,6 +833,10 @@ pub struct OwnedTable<B: IoBuf> {
 }
 
 impl<B: IoBuf> OwnedTable<B> {
+    /// Looks up this table's VTable and applies it to `sink`.
+    ///
+    /// Fields that fail to decode are skipped and logged, so one malformed
+    /// component never discards the rest of the table.
     pub fn sink<D: crate::com_de::Decomponentize>(
         &self,
         registry: &impl crate::registry::VTableRegistry,
