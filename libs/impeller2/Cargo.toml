@@ -39,6 +39,8 @@ stellarator-buf.path = "../stellarator/buf"
 
 # errors
 thiserror = { version = "2.0", default-features = false }
+# no_std-compatible: lets the core report skipped fields without a std logger
+tracing = { version = "0.1", default-features = false }
 miette.version = "7.2"
 miette.optional = true
 

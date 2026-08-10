@@ -70,6 +70,25 @@ pub enum Error {
         )
     )]
     InvalidComponentData,
+
+    #[error(
+        "invalid data for component {component_id} (type {prim_type}, {elems} elems, {buf_len} bytes): the raw bytes are not a valid {prim_type}"
+    )]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(
+            code(impeller::invalid_component_value),
+            help(
+                "the producer wrote bytes that don't match the component's declared type; a `bool` must be 0x00 or 0x01. Check that the writer's type matches the registered schema for this component."
+            )
+        )
+    )]
+    InvalidComponentValue {
+        component_id: ComponentId,
+        prim_type: PrimType,
+        elems: usize,
+        buf_len: usize,
+    },
     #[error("vtable not found for packet ID {0:?}")]
     #[cfg_attr(
         feature = "std",
