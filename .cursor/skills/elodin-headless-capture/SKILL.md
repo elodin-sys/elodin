@@ -65,8 +65,10 @@ simulation database server and then allows a two-second warmup. Use
 `--encoder x264` to force the portable fallback, or `--encoder vaapi` /
 `--encoder nvenc` when testing a specific hardware path. Set
 `ELODIN_GPU=mesa` or `ELODIN_GPU=nvidia` before entering the development shell
-to override automatic GPU selection. An explicitly set `GBM_BACKENDS_PATH` is
-always preserved.
+to override automatic GPU selection; `ELODIN_GPU=nvk` instead drives an NVIDIA
+GPU through Mesa's NVK driver and needs no proprietary driver, which is the
+working path on a hybrid Intel + NVIDIA host. An explicitly set
+`GBM_BACKENDS_PATH` is always preserved.
 
 The manual workflow below remains useful for debugging capture infrastructure.
 
@@ -207,3 +209,7 @@ buffers.
   a lighter example and lower resolution.
 - **Stale editor process or DB/assets port conflict:** stop the previous
   Gamescope child or choose another free DB/assets pair with `--port`.
+- **Gamescope dies as soon as recording starts, and the script then reports
+  that no encoder works:** on an Intel iGPU, Gamescope can segfault inside
+  Mesa's ANV driver while allocating the PipeWire capture buffers. Confirm it
+  with `gdb`, then capture through the discrete GPU using `ELODIN_GPU=nvk`.
