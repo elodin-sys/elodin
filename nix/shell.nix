@@ -18,6 +18,11 @@ with pkgs; let
       matplotlib
       polars
       numpy
+      grpcio
+      grpcio-tools
+      grpcio-health-checking
+      grpcio-reflection
+      pyarrow
     ]);
   shellAttrs = {
     name = "elo-unified-shell";

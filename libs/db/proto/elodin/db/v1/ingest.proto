@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package elodin.db.v1;
 
+import "elodin/db/v1/common.proto";
+
 service IngestService {
   // First request must be SessionOpen; replies SessionAccept or SessionReject.
   rpc Ingest(stream IngestRequest) returns (stream IngestResponse);
@@ -58,21 +60,6 @@ enum RowEncoding {
   ROW_ENCODING_TYPED = 2;
 }
 
-enum PrimType {
-  PRIM_TYPE_UNSPECIFIED = 0;
-  PRIM_TYPE_U8 = 1;
-  PRIM_TYPE_U16 = 2;
-  PRIM_TYPE_U32 = 3;
-  PRIM_TYPE_U64 = 4;
-  PRIM_TYPE_I8 = 5;
-  PRIM_TYPE_I16 = 6;
-  PRIM_TYPE_I32 = 7;
-  PRIM_TYPE_I64 = 8;
-  PRIM_TYPE_BOOL = 9;
-  PRIM_TYPE_F32 = 10;
-  PRIM_TYPE_F64 = 11;
-}
-
 message SessionAccept {
   map<string, uint32> message_handles = 1; // session-scoped
   uint64 resume_from_seq = 2; // last durably applied client sequence
@@ -89,11 +76,6 @@ message ComponentSchemaConflict {
   repeated uint64 expected_dims = 3;
   PrimType actual_prim_type = 4;
   repeated uint64 actual_dims = 5;
-}
-
-message AckPolicy {
-  uint32 max_unacked_rows = 1; // 0 → 256
-  uint32 max_ack_delay_ms = 2; // 0 → 100
 }
 
 message TelemetryBatch {
@@ -114,48 +96,6 @@ message Row {
 
 message TypedValues {
   repeated ComponentValue values = 1;
-}
-
-message ComponentValue {
-  uint32 component_index = 1; // index into MessageSchema.components
-
-  oneof value {
-    double f64 = 2;
-    float f32 = 3;
-    sint64 i64 = 4;
-    uint64 u64 = 5;
-    bool b = 6;
-    DoubleArray f64s = 7;
-    FloatArray f32s = 8;
-    Sint64Array i64s = 9;
-    Uint64Array u64s = 10;
-    BoolArray bools = 11;
-  }
-}
-
-message DoubleArray {
-  repeated double v = 1;
-}
-
-message FloatArray {
-  repeated float v = 1;
-}
-
-message Sint64Array {
-  repeated sint64 v = 1;
-}
-
-message Uint64Array {
-  repeated uint64 v = 1;
-}
-
-message BoolArray {
-  repeated bool v = 1;
-}
-
-message WriteAck {
-  // Highest contiguous sequence processed; rejected rows get a prior RowError.
-  uint64 through_seq = 1;
 }
 
 message RowError {

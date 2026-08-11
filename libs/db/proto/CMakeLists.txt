@@ -16,7 +16,12 @@ include(GNUInstallDirs)
 
 set(TARGET_NAME elodin-db-protos)
 set(PROTO_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/ingest.proto")
+    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/common.proto"
+    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/ingest.proto"
+    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/query.proto"
+    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/stream.proto"
+    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/msg.proto"
+    "${CMAKE_CURRENT_SOURCE_DIR}/elodin/db/v1/admin.proto")
 
 add_library(${TARGET_NAME} SHARED ${PROTO_FILES})
 

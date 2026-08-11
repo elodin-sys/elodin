@@ -13,6 +13,7 @@ The RC controller starts automatically with the simulation.
 WASD / Arrow keys for keyboard control.
 """
 
+import os
 from dataclasses import field
 from pathlib import Path
 
@@ -231,7 +232,14 @@ print()
 
 # Register the RC controller to run alongside the simulation
 controller_path = Path(__file__).parent / "controller"
-controller = el.s10.PyRecipe.cargo(name="controller", path=str(controller_path))
+controller_host = os.environ.get("ELODIN_RC_JET_CONTROLLER_HOST")
+controller = el.s10.PyRecipe.cargo(
+    name="controller",
+    path=str(controller_path),
+    args=["--host", controller_host] if controller_host else None,
+    ready=el.s10.Ready.delay(100),
+    ready_timeout="120s",
+)
 world.recipe(controller)
 
 # Run simulation in real-time mode for responsive RC control
@@ -239,5 +247,7 @@ world.run(
     sim_system,
     simulation_rate=1.0 / config.dt,
     generate_real_time=True,
-    max_ticks=config.total_ticks,
+    max_ticks=int(os.environ.get("ELODIN_MAX_TICKS", config.total_ticks)),
+    db_path=os.environ.get("ELODIN_DB_PATH"),
+    interactive=os.environ.get("ELODIN_NON_INTERACTIVE") != "1",
 )

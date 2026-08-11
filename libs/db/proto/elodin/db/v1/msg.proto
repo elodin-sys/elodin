@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+import "elodin/db/v1/common.proto";
+
+service MessageService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Publish(stream PublishRequest) returns (stream PublishResponse);
+  rpc GetMessages(GetMessagesRequest) returns (stream GetMessagesResponse);
+}
+
+message OpaqueKind {}
+
+message LogKind {}
+
+message RegisterRequest {
+  string name = 1;
+
+  oneof kind {
+    OpaqueKind opaque = 2;
+    LogKind log = 3;
+    bytes postcard_schema = 4;
+  }
+
+  map<string, string> metadata = 5;
+}
+
+message RegisterResponse {
+  uint32 message_handle = 1;
+}
+
+message PublishOpen {
+  string client_name = 1;
+  bytes client_instance_id = 2;
+  AckPolicy ack_policy = 3;
+}
+
+message LogPayload {
+  uint32 level = 1;
+  string message = 2;
+}
+
+message OutgoingMessage {
+  uint32 message_handle = 1;
+  sfixed64 timestamp_ns = 2;
+
+  oneof payload {
+    bytes raw = 3;
+    LogPayload log = 4;
+  }
+}
+
+message PublishBatch {
+  uint64 first_seq = 1;
+  repeated OutgoingMessage messages = 2;
+}
+
+message PublishRequest {
+  oneof request {
+    PublishOpen open = 1;
+    PublishBatch batch = 2;
+  }
+}
+
+message PublishAccept {
+  uint64 resume_from_seq = 1;
+}
+
+message MessageError {
+  uint64 seq = 1;
+  string message = 2;
+  string detail = 3;
+}
+
+message PublishResponse {
+  oneof response {
+    PublishAccept accept = 1;
+    WriteAck ack = 2;
+    MessageError error = 3;
+  }
+}
+
+message GetMessagesRequest {
+  string name = 1;
+  sfixed64 start_ns = 2;
+  sfixed64 end_ns = 3; // 0 = open-ended
+  uint64 limit = 4; // 0 = unlimited
+}
+
+message GetMessagesResponse {
+  sfixed64 timestamp_ns = 1;
+
+  oneof payload {
+    bytes raw = 2;
+    LogPayload log = 3;
+  }
+}

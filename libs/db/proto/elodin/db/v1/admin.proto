@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+import "elodin/db/v1/common.proto";
+
+service AdminService {
+  rpc GetDbConfig(GetDbConfigRequest) returns (GetDbConfigResponse);
+  rpc SetDbConfig(SetDbConfigRequest) returns (SetDbConfigResponse);
+  rpc SetComponentMetadata(SetComponentMetadataRequest) returns (SetComponentMetadataResponse);
+  rpc PutAsset(stream PutAssetRequest) returns (PutAssetResponse);
+  rpc GetAsset(GetAssetRequest) returns (stream GetAssetResponse);
+  rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
+}
+
+message GetDbConfigRequest {}
+
+message GetDbConfigResponse {
+  DbConfig config = 1;
+}
+
+message SetDbConfigRequest {
+  optional bool recording = 1;
+  map<string, string> metadata = 2;
+}
+
+message SetDbConfigResponse {
+  DbConfig config = 1;
+}
+
+message SetComponentMetadataRequest {
+  ComponentMetadata metadata = 1;
+}
+
+message SetComponentMetadataResponse {
+  ComponentMetadata metadata = 1;
+}
+
+message PutAssetHeader {
+  string key = 1;
+}
+
+message PutAssetRequest {
+  oneof chunk {
+    PutAssetHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message PutAssetResponse {
+  uint64 size = 1;
+  uint64 assets_revision = 2;
+}
+
+message GetAssetRequest {
+  string key = 1;
+}
+
+message GetAssetResponse {
+  bytes data = 1;
+}
+
+message ListAssetsRequest {
+  string prefix = 1;
+}
+
+message AssetInfo {
+  string key = 1;
+  uint64 size = 2;
+}
+
+message ListAssetsResponse {
+  repeated AssetInfo assets = 1;
+}

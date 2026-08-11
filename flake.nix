@@ -97,7 +97,7 @@
           (with shells; {
             inherit elodin;
             default = shells.elodin;
-            run = pkgs.callPackage ./nix/run.nix {};
+            run = pkgs.callPackage ./nix/run.nix {inherit rustToolchain;};
           })
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             tracy = pkgs.callPackage ./nix/tracy.nix {};

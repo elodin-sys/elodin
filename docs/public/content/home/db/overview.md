@@ -19,8 +19,8 @@ Elodin DB is based on the same ECS system as Elodin Sim (and the rest of the Elo
 
 Elodin DB chiefly communicates over `impeller` -- Elodin's lightweight native
 protocol used by the editor, simulation, and followers. It also offers an
-optional protobuf/gRPC ingest service for foreign clients and can be queried
-through SQL with Arrow IPC results.
+optional protobuf/gRPC API for foreign clients: ingest, historical and SQL
+queries, live playback, message logs, metadata, config, and assets.
 
 ## Quick Start
 
@@ -32,14 +32,16 @@ To start a new instance of Elodin DB, use the following command:
 elodin-db run
 ```
 
-Acknowledged protobuf ingest (optional):
+Enable the optional gRPC API:
 
 ```sh
 elodin-db run [::]:2240 ./db --grpc-addr [::]:50051
 ```
 
-See `libs/db/proto/elodin/db/v1/ingest.proto`, the `elodin-db-protos` CMake
-package, and `libs/db/examples/grpc-client-batched.cpp` (16 MiB max message).
+See `libs/db/proto/elodin/db/v1`, the `elodin-db-protos` CMake package, and
+`libs/db/examples/grpc-client-batched.cpp` (16 MiB max message). Health and
+reflection are enabled. Use `--grpc-auth-token TOKEN` to require bearer-token
+metadata; without it the API is unauthenticated.
 
 ### Lua REPL
 

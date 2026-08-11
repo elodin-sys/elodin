@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
     sync::{Arc, Mutex, atomic::Ordering},
     time::Duration,
 };
@@ -15,11 +14,8 @@ use tonic::{Request, Response, Status};
 
 use super::v1::{
     self, ComponentSchemaConflict, IngestRequest, IngestResponse, SessionAccept, SessionOpen,
-    SessionReject, TelemetryBatch, WriteAck,
-    component_value::Value,
-    ingest_request, ingest_response,
-    ingest_service_server::{IngestService, IngestServiceServer},
-    row,
+    SessionReject, TelemetryBatch, WriteAck, component_value::Value, ingest_request,
+    ingest_response, ingest_service_server::IngestService, row,
 };
 use crate::{ComponentRowApplyError, ComponentSchema as DbComponentSchema, DB, Error as DbError};
 
@@ -32,10 +28,10 @@ const DEFAULT_MAX_UNACKED_ROWS: u32 = 256;
 const DEFAULT_MAX_ACK_DELAY_MS: u32 = 100;
 const MAX_UNACKED_ROWS: u32 = 1_000_000;
 const MAX_ACK_DELAY_MS: u32 = 10_000;
-const MAX_GRPC_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+pub(super) const MAX_GRPC_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
-struct IngestServiceImpl {
+pub(super) struct IngestServiceImpl {
     db: Arc<DB>,
     resume: Arc<Mutex<HashMap<SessionKey, u64>>>,
 }
@@ -102,7 +98,7 @@ enum ApplyRowFailure {
 }
 
 impl IngestServiceImpl {
-    fn new(db: Arc<DB>) -> Self {
+    pub(super) fn new(db: Arc<DB>) -> Self {
         Self {
             db,
             resume: Arc::new(Mutex::new(HashMap::new())),
@@ -557,16 +553,6 @@ impl IngestService for IngestServiceImpl {
         }
         Ok(Response::new(ReceiverStream::new(rx)))
     }
-}
-
-pub async fn serve(addr: SocketAddr, db: Arc<DB>) -> Result<(), tonic::transport::Error> {
-    tonic::transport::Server::builder()
-        .add_service(
-            IngestServiceServer::new(IngestServiceImpl::new(db))
-                .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE),
-        )
-        .serve(addr)
-        .await
 }
 
 fn validate_schema(schema: &v1::SchemaSet) -> Result<Vec<ValidatedMessage>, Status> {
@@ -1150,7 +1136,7 @@ fn internal_status(error: DbError) -> Status {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{fs, net::SocketAddr, path::Path};
 
     use tempfile::TempDir;
 
@@ -1158,7 +1144,18 @@ mod tests {
     use v1::{
         BoolArray, ComponentSchema, ComponentValue, DoubleArray, FloatArray, MessageSchema,
         PrimType, Row, RowEncoding, SchemaSet, Sint64Array, TypedValues, Uint64Array,
+        ingest_service_server::IngestServiceServer,
     };
+
+    async fn serve(addr: SocketAddr, db: Arc<DB>) -> Result<(), tonic::transport::Error> {
+        tonic::transport::Server::builder()
+            .add_service(
+                IngestServiceServer::new(IngestServiceImpl::new(db))
+                    .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE),
+            )
+            .serve(addr)
+            .await
+    }
 
     fn test_db() -> (TempDir, Arc<DB>) {
         let dir = tempfile::tempdir().unwrap();

@@ -29,13 +29,16 @@ axum = [
     "dep:reqwest",
 ]
 grpc = [
+    "axum",
     "dep:prost",
     "dep:sha2",
     "dep:tokio",
     "dep:tokio-stream",
     "dep:tonic",
+    "dep:tonic-health",
     "dep:tonic-prost",
     "dep:tonic-prost-build",
+    "dep:tonic-reflection",
     "tokio/macros",
     "tokio/sync",
 ]
@@ -157,6 +160,8 @@ scuffle-h264 = { version = "0.2", optional = true }
 # foxglove-compatible mcap export
 mcap = { version = "0.25", optional = true }
 base64 = { version = "0.22", optional = true }
+tonic-health = { version = "=0.14.6", optional = true }
+tonic-reflection = { version = "=0.14.6", optional = true }
 
 [[bin]]
 name = "elodin-db-bench"

@@ -61,7 +61,7 @@ test_steps = [
             nix_step(
                 emoji=":crab:",
                 label="elodin-db grpc",
-                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db parses_grpc_addr_for_run -- --test-threads=1 && cargo test -p nox-py world_run_grpc_addr --lib -- --test-threads=1",
+                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db grpc_ -- --test-threads=1 && cargo test -p nox-py world_run_grpc_addr --lib -- --test-threads=1",
             ),
         ],
     ),
@@ -118,6 +118,11 @@ test_steps = [
                 label=":python: frames",
                 flake=".#run",
                 command="python3 examples/frames/main.py",
+            ),
+            nix_step(
+                label=":python: elodin-db gRPC full API",
+                flake=".#run",
+                command="scripts/ci/db_grpc_full_api_demo.sh",
             ),
             nix_step(
                 label=":python: sensor-camera",

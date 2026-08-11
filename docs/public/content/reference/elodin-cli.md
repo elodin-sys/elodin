@@ -364,11 +364,13 @@ Run the Elodin database server
 
 * `--http-addr <ADDR>` — Address to bind the HTTP server to (enables HTTP API)
 
-* `--grpc-addr <ADDR>` — Bind the protobuf/gRPC ingest service (schema
-  registration, packed/typed rows, cumulative acks, resume, per-row errors).
-  Native listener stays up for editor/sim/followers. See
-  `libs/db/proto/elodin/db/v1/ingest.proto`, `elodin-db-protos`, and
-  `libs/db/examples/grpc-client-batched.cpp` (16 MiB max message).
+* `--grpc-addr <ADDR>` — Bind the protobuf/gRPC API for ingest, query, live
+  playback, message logs, metadata/config, and assets. Health and reflection
+  share the endpoint. Native listener stays up for editor/sim/followers. See
+  `libs/db/proto/elodin/db/v1` and `elodin-db-protos` (16 MiB max message).
+
+* `--grpc-auth-token <TOKEN>` — Require `authorization: Bearer TOKEN` metadata
+  on the gRPC endpoint. Requires `--grpc-addr`; omitted means unauthenticated.
 
 * `--replay` — Replay recorded data as live telemetry. The database advances `last_updated` with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.
 

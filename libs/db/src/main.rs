@@ -95,6 +95,14 @@ struct RunArgs {
     #[cfg(feature = "grpc")]
     #[clap(long, help = "Address to bind the gRPC server to")]
     grpc_addr: Option<SocketAddr>,
+    #[cfg(feature = "grpc")]
+    #[clap(
+        long,
+        requires = "grpc_addr",
+        value_parser = clap::builder::NonEmptyStringValueParser::new(),
+        help = "Bearer token required by the gRPC server"
+    )]
+    grpc_auth_token: Option<String>,
     #[clap(long, hide = true)]
     reset: bool,
     #[clap(
@@ -430,6 +438,8 @@ async fn main() -> miette::Result<()> {
             http_addr,
             #[cfg(feature = "grpc")]
             grpc_addr,
+            #[cfg(feature = "grpc")]
+            grpc_auth_token,
             path,
             config,
             reset,
@@ -555,7 +565,9 @@ async fn main() -> miette::Result<()> {
             #[cfg(feature = "grpc")]
             if let Some(grpc_addr) = grpc_addr {
                 stellarator::struc_con::tokio(move |_| async move {
-                    elodin_db::grpc::serve(grpc_addr, grpc_db).await.unwrap()
+                    elodin_db::grpc::serve_with_auth(grpc_addr, grpc_db, grpc_auth_token)
+                        .await
+                        .unwrap()
                 });
             }
             if let Some(lua_config) = config {
@@ -1073,5 +1085,21 @@ mod tests {
             panic!("expected run command");
         };
         assert_eq!(args.grpc_addr, Some("127.0.0.1:50051".parse().unwrap()));
+        assert!(args.grpc_auth_token.is_none());
+    }
+
+    #[test]
+    fn grpc_auth_token_requires_grpc_addr() {
+        assert!(
+            Cli::try_parse_from([
+                "elodin-db",
+                "run",
+                "127.0.0.1:2240",
+                "/tmp/elodin-db-grpc-cli-test",
+                "--grpc-auth-token",
+                "secret",
+            ])
+            .is_err()
+        );
     }
 }
