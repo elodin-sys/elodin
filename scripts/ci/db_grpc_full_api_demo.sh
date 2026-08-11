@@ -27,20 +27,70 @@ cd "${root}"
 python3 -c 'import elodin, grpc, grpc_tools, pyarrow'
 db_port=$((30000 + $$ % 10000))
 grpc_port=$((db_port + 2))
+live_grpc_port=$((db_port + 4))
+
+generated="${work}/python"
+mkdir -p "${generated}"
+python3 -m grpc_tools.protoc \
+  -I libs/db/proto \
+  --python_out="${generated}" \
+  --grpc_python_out="${generated}" \
+  libs/db/proto/elodin/db/v1/common.proto \
+  libs/db/proto/elodin/db/v1/ingest.proto \
+  libs/db/proto/elodin/db/v1/query.proto \
+  libs/db/proto/elodin/db/v1/stream.proto \
+  libs/db/proto/elodin/db/v1/msg.proto \
+  libs/db/proto/elodin/db/v1/admin.proto
+touch "${generated}/elodin/__init__.py"
+touch "${generated}/elodin/db/__init__.py"
+touch "${generated}/elodin/db/v1/__init__.py"
+
+wait_for_port() {
+  local port="$1"
+  for _ in $(seq 1 100); do
+    if python3 - "${port}" <<'PY'
+import socket
+import sys
+
+with socket.socket() as sock:
+    sock.settimeout(0.1)
+    sys.exit(sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) != 0)
+PY
+    then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
 
 if [[ -n "${ELODIN_GRPC_DEMO_DB:-}" ]]; then
   cp -a "${ELODIN_GRPC_DEMO_DB}" "${work}/db"
 else
   sim_log="${work}/rc-jet.log"
   touch "${sim_log}"
+  controller_bin="${ELODIN_RC_JET_CONTROLLER_BIN:-}"
+  if [[ -z "${controller_bin}" ]] && command -v cargo >/dev/null; then
+    cargo build --release -p rc-jet-controller
+    controller_bin="${root}/target/release/rc-jet-controller"
+  fi
   setsid env \
     ELODIN_DB_PATH="${work}/db" \
     ELODIN_MAX_TICKS="${ELODIN_GRPC_DEMO_TICKS:-3000}" \
     ELODIN_NON_INTERACTIVE=1 \
     ELODIN_RC_JET_CONTROLLER_HOST="127.0.0.1:${db_port}" \
+    ELODIN_RC_JET_CONTROLLER_BIN="${controller_bin}" \
+    ELODIN_GRPC_ADDR="127.0.0.1:${live_grpc_port}" \
     elodin run examples/rc-jet/main.py --addr "127.0.0.1:${db_port}" \
     >"${sim_log}" 2>&1 &
   sim_pid=$!
+  if ! wait_for_port "${live_grpc_port}"; then
+    rg -n '^' "${sim_log}" >&2 || true
+    printf 'embedded RC-jet gRPC server did not become ready\n' >&2
+    exit 1
+  fi
+  PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
+    --live --target "127.0.0.1:${live_grpc_port}"
   complete=0
   for _ in $(seq 1 720); do
     if rg -q 'elodin simulation summary' "${sim_log}"; then
@@ -96,22 +146,6 @@ if ! "${server_bin}" run --help | rg -q -- '--grpc-addr'; then
   exit 1
 fi
 
-generated="${work}/python"
-mkdir -p "${generated}"
-python3 -m grpc_tools.protoc \
-  -I libs/db/proto \
-  --python_out="${generated}" \
-  --grpc_python_out="${generated}" \
-  libs/db/proto/elodin/db/v1/common.proto \
-  libs/db/proto/elodin/db/v1/ingest.proto \
-  libs/db/proto/elodin/db/v1/query.proto \
-  libs/db/proto/elodin/db/v1/stream.proto \
-  libs/db/proto/elodin/db/v1/msg.proto \
-  libs/db/proto/elodin/db/v1/admin.proto
-touch "${generated}/elodin/__init__.py"
-touch "${generated}/elodin/db/__init__.py"
-touch "${generated}/elodin/db/v1/__init__.py"
-
 start_server() {
   local token="${1:-}"
   local auth=()
@@ -124,24 +158,7 @@ start_server() {
       --grpc-addr "127.0.0.1:${grpc_port}" "${auth[@]}"
   ) >"${work}/server.log" 2>&1 &
   server_pid=$!
-
-  for _ in $(seq 1 100); do
-    if python3 - "${grpc_port}" <<'PY'
-import socket
-import sys
-
-with socket.socket() as sock:
-    sock.settimeout(0.1)
-    sys.exit(sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) != 0)
-PY
-    then
-      return
-    fi
-    if ! kill -0 "${server_pid}" 2>/dev/null; then
-      break
-    fi
-    sleep 0.1
-  done
+  wait_for_port "${grpc_port}" && return
   rg -n '^' "${work}/server.log" >&2 || true
   printf 'elodin-db did not become ready\n' >&2
   exit 1
@@ -167,4 +184,17 @@ stop_server
 start_server "demo-token"
 PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
   --target "127.0.0.1:${grpc_port}" --token "demo-token"
+stop_server
+
+gse_state="${work}/gse-state"
+start_server
+PYTHONPATH="${generated}" python3 libs/db/examples/grpc_gse_client.py \
+  --phase write1 --target "127.0.0.1:${grpc_port}" --state-dir "${gse_state}"
+stop_server
+
+start_server
+PYTHONPATH="${generated}" python3 libs/db/examples/grpc_gse_client.py \
+  --phase write2 --target "127.0.0.1:${grpc_port}" --state-dir "${gse_state}"
+PYTHONPATH="${generated}" python3 libs/db/examples/grpc_gse_client.py \
+  --phase verify --target "127.0.0.1:${grpc_port}" --state-dir "${gse_state}"
 stop_server

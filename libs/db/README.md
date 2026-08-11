@@ -42,11 +42,17 @@ require `authorization: Bearer TOKEN` metadata. Transport remains insecure, so
 bind only on a trusted network.
 
 The full Python demo records a 10-second RC jet run with its controller and
-headless renderer, then exercises every service:
+headless renderer, exercises live and recorded streaming, numeric SQL,
+downsampling, multi-chunk assets, and every service, then runs a mixed-schema
+writer through a database restart:
 
 ```sh
 nix develop .#run --command scripts/ci/db_grpc_full_api_demo.sh
 ```
+
+[`grpc_gse_client.py`](examples/grpc_gse_client.py) is the smaller Python
+writer reference for typed telemetry batches, structured logs, and
+resume/replay.
 
 ### Stream data to the database with C
 

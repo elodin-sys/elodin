@@ -39,13 +39,14 @@ def metadata(token):
     return (("authorization", f"Bearer {token}"),) if token else ()
 
 
-def query_component(query, component, call_metadata, max_points=0):
+def query_component(query, component, call_metadata, max_points=0, element_index=0):
     responses = list(
         query.GetTimeSeries(
             query_pb2.GetTimeSeriesRequest(
                 component=component,
                 start_ns=-(2**63),
                 max_points=max_points,
+                element_index=element_index,
             ),
             metadata=call_metadata,
         )
@@ -61,6 +62,32 @@ def query_component(query, component, call_metadata, max_points=0):
         response.data.packed_values for response in responses if response.HasField("data")
     )
     return header, timestamps, values
+
+
+def decode_component_rows(header, values):
+    formats = {
+        common_pb2.PRIM_TYPE_U8: "B",
+        common_pb2.PRIM_TYPE_U16: "H",
+        common_pb2.PRIM_TYPE_U32: "I",
+        common_pb2.PRIM_TYPE_U64: "Q",
+        common_pb2.PRIM_TYPE_I8: "b",
+        common_pb2.PRIM_TYPE_I16: "h",
+        common_pb2.PRIM_TYPE_I32: "i",
+        common_pb2.PRIM_TYPE_I64: "q",
+        common_pb2.PRIM_TYPE_BOOL: "?",
+        common_pb2.PRIM_TYPE_F32: "f",
+        common_pb2.PRIM_TYPE_F64: "d",
+    }
+    code = formats.get(header.prim_type)
+    if code is None:
+        raise RuntimeError(f"unsupported primitive type: {header.prim_type}")
+    elements = 1
+    for dimension in header.dims:
+        elements *= dimension
+    row = struct.Struct("<" + code * elements)
+    if len(values) % row.size:
+        raise RuntimeError("component payload is not row-aligned")
+    return [row.unpack_from(values, offset) for offset in range(0, len(values), row.size)]
 
 
 def exercise_ingest(channel, call_metadata):
@@ -175,6 +202,12 @@ def exercise_messages(channel, call_metadata):
 
 def exercise_admin(channel, call_metadata):
     stub = admin_pb2_grpc.AdminServiceStub(channel)
+    stream_stub = stream_pb2_grpc.StreamServiceStub(channel)
+    events = stream_stub.WatchDb(stream_pb2.WatchDbRequest(), metadata=call_metadata, timeout=10)
+    initial_events = {next(events).WhichOneof("event"), next(events).WhichOneof("event")}
+    if initial_events != {"last_updated_ns", "config"}:
+        raise RuntimeError(f"incomplete initial DB watch: {initial_events}")
+
     config = stub.GetDbConfig(admin_pb2.GetDbConfigRequest(), metadata=call_metadata).config
     config = stub.SetDbConfig(
         admin_pb2.SetDbConfigRequest(metadata={"grpc.demo": "true"}),
@@ -182,22 +215,42 @@ def exercise_admin(channel, call_metadata):
     ).config
     if config.metadata["grpc.demo"] != "true":
         raise RuntimeError("config patch was not applied")
-    asset = b"Elodin gRPC full API demo\n"
+    changed = next(events)
+    if (
+        changed.WhichOneof("event") != "config"
+        or changed.config.metadata.get("grpc.demo") != "true"
+    ):
+        raise RuntimeError("WatchDb did not push the config mutation")
+    events.cancel()
+
+    f22 = stub.ListAssets(
+        admin_pb2.ListAssetsRequest(prefix="f22.glb"), metadata=call_metadata
+    ).assets
+    if len(f22) != 1 or f22[0].key != "f22.glb":
+        raise RuntimeError("recorded f22.glb asset was not listed")
+    f22_chunks = list(
+        stub.GetAsset(admin_pb2.GetAssetRequest(key="f22.glb"), metadata=call_metadata)
+    )
+    if len(f22_chunks) <= 1 or sum(len(chunk.data) for chunk in f22_chunks) != f22[0].size:
+        raise RuntimeError("recorded asset did not exercise chunked reads")
+
+    asset_size = 2 * 1024 * 1024 + 123
+    pattern = bytes(range(256))
+    asset = (pattern * ((asset_size + len(pattern) - 1) // len(pattern)))[:asset_size]
+
+    def put_requests():
+        yield admin_pb2.PutAssetRequest(header=admin_pb2.PutAssetHeader(key="grpc-demo/probe.bin"))
+        for offset in range(0, len(asset), 512 * 1024):
+            yield admin_pb2.PutAssetRequest(data=asset[offset : offset + 512 * 1024])
+
     stored = stub.PutAsset(
-        iter(
-            [
-                admin_pb2.PutAssetRequest(
-                    header=admin_pb2.PutAssetHeader(key="grpc-demo/probe.txt")
-                ),
-                admin_pb2.PutAssetRequest(data=asset),
-            ]
-        ),
+        put_requests(),
         metadata=call_metadata,
     )
     received = b"".join(
         response.data
         for response in stub.GetAsset(
-            admin_pb2.GetAssetRequest(key="grpc-demo/probe.txt"),
+            admin_pb2.GetAssetRequest(key="grpc-demo/probe.bin"),
             metadata=call_metadata,
         )
     )
@@ -206,7 +259,7 @@ def exercise_admin(channel, call_metadata):
     assets = stub.ListAssets(
         admin_pb2.ListAssetsRequest(prefix="grpc-demo/"), metadata=call_metadata
     )
-    if not any(item.key == "grpc-demo/probe.txt" for item in assets.assets):
+    if not any(item.key == "grpc-demo/probe.bin" for item in assets.assets):
         raise RuntimeError("asset was absent from listing")
     stub.SetComponentMetadata(
         admin_pb2.SetComponentMetadataRequest(
@@ -220,7 +273,52 @@ def exercise_admin(channel, call_metadata):
         admin_pb2.SetDbConfigRequest(metadata={"grpc.demo": ""}),
         metadata=call_metadata,
     )
-    return stored.assets_revision
+    return stored.assets_revision, len(f22_chunks), len(asset)
+
+
+def exercise_numeric_sql(query, call_metadata, expected_rows):
+    tables = [
+        pa.ipc.open_stream(pa.py_buffer(response.ipc)).read_all()
+        for response in query.Sql(
+            query_pb2.SqlRequest(
+                sql=(
+                    "SELECT bdx_world_pos.bdx_world_pos[5] AS x, "
+                    "bdx_world_pos.bdx_world_pos[6] AS y FROM bdx_world_pos"
+                )
+            ),
+            metadata=call_metadata,
+        )
+    ]
+    rows = sum(table.num_rows for table in tables)
+    if rows != expected_rows:
+        raise RuntimeError(f"ground-track SQL returned {rows} rows, expected {expected_rows}")
+    if not tables or tables[0].column_names != ["x", "y"]:
+        raise RuntimeError("ground-track SQL returned an unexpected schema")
+    return rows
+
+
+def exercise_vector_downsample(query, call_metadata):
+    header, timestamps, values = query_component(query, "bdx.world_pos", call_metadata)
+    rows = decode_component_rows(header, values)
+    if len(header.dims) != 1 or header.dims[0] < 7:
+        raise RuntimeError(f"unexpected bdx.world_pos shape: {list(header.dims)}")
+    reduced_header, reduced_timestamps, reduced_values = query_component(
+        query,
+        "bdx.world_pos",
+        call_metadata,
+        max_points=32,
+        element_index=6,
+    )
+    reduced_rows = decode_component_rows(reduced_header, reduced_values)
+    if len(reduced_timestamps) != 32:
+        raise RuntimeError("vector-element downsampling did not return 32 points")
+    if reduced_timestamps[0] != timestamps[0] or reduced_timestamps[-1] != timestamps[-1]:
+        raise RuntimeError("vector-element downsampling did not preserve endpoints")
+    altitude = [row[6] for row in rows]
+    reduced_altitude = [row[6] for row in reduced_rows]
+    if min(reduced_altitude) < min(altitude) or max(reduced_altitude) > max(altitude):
+        raise RuntimeError("downsampled altitude escaped the raw value range")
+    return len(timestamps), len(reduced_timestamps)
 
 
 def exercise_streams(channel, call_metadata, component, timestamp):
@@ -285,10 +383,197 @@ def exercise_streams(channel, call_metadata, component, timestamp):
         raise RuntimeError(f"incomplete DB watch: {initial}")
 
 
+def exercise_recorded_playback(channel, call_metadata, camera_messages):
+    stub = stream_pb2_grpc.StreamServiceStub(channel)
+    first_frame_ns = camera_messages[0].timestamp_ns
+    second_frame_ns = camera_messages[1].timestamp_ns
+    component_requests = queue.Queue()
+    component_responses = stub.StreamComponents(
+        requests_from(component_requests), metadata=call_metadata, timeout=15
+    )
+    component_requests.put(
+        stream_pb2.StreamComponentsRequest(
+            open=stream_pb2.StreamOpen(
+                components=["bdx.world_pos"],
+                fixed_rate=stream_pb2.FixedRate(
+                    initial=stream_pb2.INITIAL_TIMESTAMP_MANUAL,
+                    initial_timestamp_ns=first_frame_ns,
+                    timestep_ns=1_000_000,
+                    frequency=100,
+                ),
+            )
+        )
+    )
+    component_requests.put(
+        stream_pb2.StreamComponentsRequest(
+            control=stream_pb2.StreamControl(
+                playing=False,
+                seek_ns=first_frame_ns,
+            )
+        )
+    )
+    stream_id = None
+    latest_update = None
+
+    def wait_for_component_clock(target_ns):
+        nonlocal stream_id, latest_update
+        for _ in range(64):
+            response = next(component_responses)
+            kind = response.WhichOneof("response")
+            if kind == "opened":
+                stream_id = response.opened.stream_id
+            elif kind == "update":
+                latest_update = response.update
+            elif kind == "timestamp" and response.timestamp.timestamp_ns == target_ns:
+                if latest_update is None or stream_id is None:
+                    continue
+                if latest_update.timestamp_ns > target_ns:
+                    raise RuntimeError("component playback advanced past its clock")
+                return
+        raise RuntimeError(f"component playback did not reach {target_ns}")
+
+    wait_for_component_clock(first_frame_ns)
+    message_requests = queue.Queue()
+    message_responses = stub.StreamMessages(
+        requests_from(message_requests), metadata=call_metadata, timeout=15
+    )
+    message_requests.put(
+        stream_pb2.StreamMessagesRequest(
+            open=stream_pb2.MessageStreamOpen(
+                messages=["bdx.fpv_cam"],
+                fixed_rate=stream_pb2.FixedRate(
+                    initial=stream_pb2.INITIAL_TIMESTAMP_MANUAL,
+                    initial_timestamp_ns=first_frame_ns,
+                    timestep_ns=1_000_000,
+                    frequency=100,
+                ),
+                playback_stream_id=stream_id,
+            )
+        )
+    )
+    if next(message_responses).timestamp_ns != first_frame_ns:
+        raise RuntimeError("FPV playback did not start at the component clock")
+    component_requests.put(
+        stream_pb2.StreamComponentsRequest(
+            control=stream_pb2.StreamControl(
+                playing=False,
+                seek_ns=second_frame_ns,
+            )
+        )
+    )
+    wait_for_component_clock(second_frame_ns)
+    if next(message_responses).timestamp_ns != second_frame_ns:
+        raise RuntimeError("FPV playback did not follow the component seek")
+
+    component_responses.cancel()
+    message_responses.cancel()
+    component_requests.put(None)
+    message_requests.put(None)
+    return second_frame_ns - first_frame_ns
+
+
+def collect_live_component(stub, call_metadata, component, immediate):
+    responses = stub.StreamComponents(
+        iter(
+            [
+                stream_pb2.StreamComponentsRequest(
+                    open=stream_pb2.StreamOpen(
+                        components=[component],
+                        real_time=stream_pb2.RealTime(immediate=immediate),
+                    )
+                )
+            ]
+        ),
+        metadata=call_metadata,
+        timeout=8,
+    )
+    timestamps = []
+    for response in responses:
+        if response.WhichOneof("response") != "update":
+            continue
+        timestamp = response.update.timestamp_ns
+        if not timestamps or timestamp > timestamps[-1]:
+            timestamps.append(timestamp)
+        if len(timestamps) == 3:
+            responses.cancel()
+            return timestamps
+    raise RuntimeError(f"live {component} stream ended before three updates")
+
+
+def collect_live_camera(stub, call_metadata):
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline:
+        responses = stub.StreamMessages(
+            iter(
+                [
+                    stream_pb2.StreamMessagesRequest(
+                        open=stream_pb2.MessageStreamOpen(
+                            messages=["bdx.fpv_cam"],
+                            real_time=stream_pb2.RealTime(),
+                        )
+                    )
+                ]
+            ),
+            metadata=call_metadata,
+            timeout=8,
+        )
+        try:
+            timestamps = []
+            for response in responses:
+                if not timestamps or response.timestamp_ns > timestamps[-1]:
+                    timestamps.append(response.timestamp_ns)
+                if len(timestamps) == 2:
+                    responses.cancel()
+                    return timestamps
+        except grpc.RpcError as error:
+            if error.code() != grpc.StatusCode.NOT_FOUND:
+                raise
+        time.sleep(0.05)
+    raise RuntimeError("live FPV stream did not produce two frames")
+
+
+def exercise_live(channel, call_metadata):
+    query = query_pb2_grpc.QueryServiceStub(channel)
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline:
+        schema = query.DumpSchema(query_pb2.DumpSchemaRequest(), metadata=call_metadata)
+        names = {component.name for component in schema.components}
+        if {"bdx.world_pos", "bdx.mach"} <= names:
+            break
+        time.sleep(0.05)
+    else:
+        raise RuntimeError("live RC-jet schema did not become available")
+
+    stream = stream_pb2_grpc.StreamServiceStub(channel)
+    batched = collect_live_component(stream, call_metadata, "bdx.world_pos", False)
+    immediate = collect_live_component(stream, call_metadata, "bdx.mach", True)
+    frames = collect_live_camera(stream, call_metadata)
+    events = stream.WatchDb(stream_pb2.WatchDbRequest(), metadata=call_metadata, timeout=8)
+    last_updated = []
+    for event in events:
+        if event.WhichOneof("event") != "last_updated_ns":
+            continue
+        timestamp = event.last_updated_ns
+        if not last_updated or timestamp > last_updated[-1]:
+            last_updated.append(timestamp)
+        if len(last_updated) == 3:
+            events.cancel()
+            break
+    if len(last_updated) != 3:
+        raise RuntimeError("WatchDb did not advance with the live simulation")
+    return {
+        "live_batched_updates": len(batched),
+        "live_immediate_updates": len(immediate),
+        "live_camera_frames": len(frames),
+        "live_watch_updates": len(last_updated),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", default="127.0.0.1:50051")
     parser.add_argument("--token")
+    parser.add_argument("--live", action="store_true")
     args = parser.parse_args()
     channel = grpc.insecure_channel(args.target)
     grpc.channel_ready_future(channel).result(timeout=10)
@@ -327,6 +612,9 @@ def main():
     }
     if not expected <= set(services):
         raise RuntimeError(f"reflection missing services: {expected - set(services)}")
+    if args.live:
+        print(json.dumps(exercise_live(channel, call_metadata), sort_keys=True))
+        return
 
     query = query_pb2_grpc.QueryServiceStub(channel)
     time_range = query.GetTimeRange(query_pb2.GetTimeRangeRequest(), metadata=call_metadata)
@@ -345,13 +633,16 @@ def main():
             msg_pb2.GetMessagesRequest(
                 name="bdx.fpv_cam",
                 start_ns=-(2**63),
-                limit=1,
+                limit=2,
             ),
             metadata=call_metadata,
         )
     )
-    if not camera_messages:
-        raise RuntimeError("headless renderer did not record an FPV frame")
+    if len(camera_messages) < 2:
+        raise RuntimeError("headless renderer did not record two FPV frames")
+    world_rows, vector_points = exercise_vector_downsample(query, call_metadata)
+    playback_seek_ns = exercise_recorded_playback(channel, call_metadata, camera_messages)
+    ground_track_rows = exercise_numeric_sql(query, call_metadata, world_rows)
 
     selected = None
     for schema in schema_snapshot.components:
@@ -385,7 +676,7 @@ def main():
     ingested_timestamp = exercise_ingest(channel, call_metadata)
     query_component(query, "grpc.demo.ingested", call_metadata)
     message_count = exercise_messages(channel, call_metadata)
-    revision = exercise_admin(channel, call_metadata)
+    revision, asset_chunks, uploaded_asset_bytes = exercise_admin(channel, call_metadata)
     exercise_streams(channel, call_metadata, "grpc.demo.ingested", ingested_timestamp)
 
     print(
@@ -394,6 +685,12 @@ def main():
                 "components": len(metadata_snapshot.components),
                 "control_rows": len(control_timestamps),
                 "camera_messages": len(camera_messages),
+                "playback_seek_ns": playback_seek_ns,
+                "vector_points": vector_points,
+                "world_rows": world_rows,
+                "ground_track_rows": ground_track_rows,
+                "asset_chunks": asset_chunks,
+                "uploaded_asset_bytes": uploaded_asset_bytes,
                 "schemas": len(schema_snapshot.components),
                 "selected": header.component,
                 "selected_rows": len(timestamps),
