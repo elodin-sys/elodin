@@ -26,8 +26,9 @@ Options:
   -h, --help               Show this help
 
 Environment:
-  GPU selection comes from the Nix development shell. Set ELODIN_GPU before
-  entering the shell to override automatic selection. An explicitly set
+  GPU selection comes from the Nix development shell. Set ELODIN_GPU to mesa,
+  nvk, or nvidia to override automatic selection; nvk drives an NVIDIA GPU
+  through Mesa and needs no proprietary driver. An explicitly set
   GBM_BACKENDS_PATH is always preserved.
 EOF
 }
@@ -247,16 +248,25 @@ fi
 case "${ELODIN_GPU:-auto}" in
   auto) ;;
   mesa) selected_gpu=mesa ;;
+  nvk) selected_gpu=nvk ;;
   nvidia)
     [[ "$selected_gpu" == nvidia ]] \
       || fail "NVIDIA is not configured; set ELODIN_GPU=nvidia before entering nix develop"
     ;;
-  *) fail "ELODIN_GPU must be auto, mesa, or nvidia" ;;
+  *) fail "ELODIN_GPU must be auto, mesa, nvk, or nvidia" ;;
 esac
 
-if [[ "$selected_gpu" == mesa ]]; then
+if [[ "$selected_gpu" == mesa || "$selected_gpu" == nvk ]]; then
+  # Intel's ANV driver segfaults gamescope while it allocates PipeWire capture
+  # buffers, so a hybrid Intel+NVIDIA host needs NVK to reach its discrete GPU
+  # without the proprietary driver.
+  if [[ "$selected_gpu" == nvk ]]; then
+    mesa_drivers=(nouveau)
+  else
+    mesa_drivers=(radeon intel)
+  fi
   mesa_manifests=()
-  for manifest in radeon intel; do
+  for manifest in "${mesa_drivers[@]}"; do
     path="$mesa_prefix/share/vulkan/icd.d/${manifest}_icd.$(uname -m).json"
     [[ -e "$path" ]] && mesa_manifests+=("$path")
   done
@@ -270,7 +280,7 @@ if [[ "$selected_gpu" == mesa ]]; then
 fi
 
 if [[ -z "${GBM_BACKENDS_PATH+x}" ]]; then
-  if [[ "$selected_gpu" == mesa ]]; then
+  if [[ "$selected_gpu" == mesa || "$selected_gpu" == nvk ]]; then
     export GBM_BACKENDS_PATH="$mesa_prefix/lib/gbm"
   else
     for candidate in \
