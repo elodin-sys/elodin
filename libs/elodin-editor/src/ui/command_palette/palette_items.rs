@@ -1440,10 +1440,9 @@ pub fn clear_schematic() -> PaletteItem {
          mut skyboxes: MessageWriter<SetActiveSkybox>,
          mut skybox_cache: ResMut<SkyboxCache>,
          mut skybox_mirror: ResMut<crate::skybox_db_assets::DbSkyboxAssetMirror>,
-         mut initial_kdl: ResMut<InitialKdlPath>,
          config: Res<DbConfig>| {
             // Leave the CLI `--kdl` pin so Clear isn't undone by sticky sync.
-            initial_kdl.0 = None;
+            params.clear_initial_kdl_pin();
             params.current_document.clear();
             params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
             // `load_schematic` despawns every schematic entity and zeroes
@@ -2301,6 +2300,15 @@ mod tests {
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {
         Schematic::from_kdl(kdl).expect("saved KDL should parse")
+    }
+
+    /// Initializing an item's system is where Bevy validates its params, so a
+    /// duplicate resource access (e.g. `ResMut<T>` alongside a `SystemParam`
+    /// that already borrows `T`) panics the first time the palette opens.
+    #[test]
+    fn root_palette_items_have_no_conflicting_params() {
+        let mut world = bevy::prelude::World::new();
+        PalettePage::default().initialize(&mut world);
     }
 
     #[test]
