@@ -222,25 +222,25 @@ def pre_step(tick: int, ctx: el.StepContext):
         )
 
 
-def post_step(_tick: int, ctx: el.StepContext) -> None:
-    """Record numerical divergence from the SPICE truth trajectories."""
-    for probe, truth_probe in zip(PROBES, TRUTH_PROBES):
+def post_step(tick: int, ctx: el.StepContext) -> None:
+    """Record numerical divergence from SPICE at the completed tick epoch."""
+    current_time_et = start_time_et + tick * SIM_TIME_STEP
+
+    for probe in PROBES:
         simulated_pos = np.asarray(
             ctx.read_component(f"{probe['entity_name']}.world_pos"),
-            dtype=np.float64,
-        )[4:7]
-        truth_pos = np.asarray(
-            ctx.read_component(f"{truth_probe['entity_name']}.world_pos"),
             dtype=np.float64,
         )[4:7]
         simulated_vel = np.asarray(
             ctx.read_component(f"{probe['entity_name']}.world_vel"),
             dtype=np.float64,
         )[3:6]
-        truth_vel = np.asarray(
-            ctx.read_component(f"{truth_probe['entity_name']}.world_vel"),
-            dtype=np.float64,
-        )[3:6]
+
+        truth_state, _ = spice.spkezr(
+            probe["spice_name"], current_time_et, "ECLIPJ2000", "NONE", "SUN"
+        )
+        truth_pos = np.asarray(truth_state[:3], dtype=np.float64) * 1000.0
+        truth_vel = np.asarray(truth_state[3:], dtype=np.float64) * 1000.0
 
         position_error_km = np.linalg.norm(simulated_pos - truth_pos) / 1000.0
         velocity_error_mps = np.linalg.norm(simulated_vel - truth_vel)
