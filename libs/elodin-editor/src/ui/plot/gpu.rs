@@ -227,6 +227,16 @@ impl LineMut<'_> {
             LineMut::XY(xy_line) => xy_line.y_shard_alloc.as_ref(),
         }
     }
+
+    /// Content generation for index-cache invalidation: bumps whenever the
+    /// tree is cleared/rebuilt (shard offsets move within the same buffers).
+    /// XY lines are append-only, so the point count serves as their gen.
+    pub fn content_gen(&self) -> u64 {
+        match self {
+            LineMut::Timeseries(line) => line.data.content_gen(),
+            LineMut::XY(xy_line) => xy_line.point_count() as u64,
+        }
+    }
 }
 
 impl LineHandle {
@@ -464,6 +474,10 @@ pub struct GpuLine {
     last_index_range: Option<(i64, i64)>,
     /// Cache key part B: `(clip_end, pixel_width)`.
     last_clip_range: Option<(i64, i64)>,
+    /// Cache key part C: LineTree `content_gen` — a clear/rebuild moves shard
+    /// offsets inside the same buffers, so the index strip must be rewritten
+    /// even when the visible range is unchanged (same as `plot_3d`).
+    content_gen: u64,
     /// Identity of the x/y value buffers the bind group references; the bind
     /// group must be rebuilt if the underlying `BufferShardAlloc` changes.
     value_buffer_ids: (BufferId, BufferId),
@@ -675,6 +689,7 @@ fn extract_lines(
                     );
                     (index_buffer, values_bind_group)
                 };
+                let content_gen = line.content_gen();
                 let range_key = (
                     selected_span_micros,
                     clip_range.start.0,
@@ -684,9 +699,16 @@ fn extract_lines(
                 let prev_key = cached.and_then(|g| {
                     let (sa, sb) = g.last_index_range?;
                     let (ca, cb) = g.last_clip_range?;
-                    Some((sa, sb, ca, cb))
+                    Some((sa, sb, ca, cb, g.content_gen))
                 });
-                let count = if prev_key == Some(range_key) {
+                let count = if prev_key
+                    == Some((
+                        range_key.0,
+                        range_key.1,
+                        range_key.2,
+                        range_key.3,
+                        content_gen,
+                    )) {
                     cached.map(|g| g.count).unwrap_or(0)
                 } else {
                     line.write_to_index_buffer_sampled(
@@ -703,6 +725,7 @@ fn extract_lines(
                     count,
                     last_index_range: Some((range_key.0, range_key.1)),
                     last_clip_range: Some((range_key.2, range_key.3)),
+                    content_gen,
                     value_buffer_ids,
                 };
 
