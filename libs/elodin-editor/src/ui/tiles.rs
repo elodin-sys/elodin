@@ -1837,7 +1837,14 @@ impl ViewportPane {
                 projection_color: viewport.projection_color,
                 frustums_thickness: viewport.frustums_thickness,
             },
-            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up, viewport.frame),
+            crate::ui::inspector::viewport::Viewport::new(
+                parent,
+                pos,
+                look_at,
+                up,
+                viewport.frame,
+                viewport.smoothing,
+            ),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));

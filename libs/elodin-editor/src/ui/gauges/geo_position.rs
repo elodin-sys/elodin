@@ -8,7 +8,7 @@ use bevy_geo_frames::{GeoContext, GeoFrame, ecef_to_lla_deg};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
 
-use super::{EqlBinding, GaugePane};
+use super::{EqlBinding, GaugePane, component_value_to_position};
 use crate::ui::{
     SelectedObject,
     tiles::WindowState,
@@ -140,24 +140,6 @@ impl WidgetSystem for GeoPositionGaugeWidget<'_, '_> {
                 crate::ui::monitor::render_value_cards(ui, &cards);
             });
     }
-}
-
-/// Extract a position (metres) from a component value for the position gauge.
-///
-/// Accepts only (in `F32` or `F64`):
-/// - a bare 3-vector (exactly three elements), or
-/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (≥7 elements:
-///   quat `[x, y, z, w]` + position `[x, y, z]`).
-///
-/// Rejects other lengths (e.g. 4-element fin deflections) so the gauge does not
-/// treat arbitrary trailing floats as coordinates and invent NED/LLA values.
-fn component_value_to_position(value: &ComponentValue) -> Option<DVec3> {
-    let data = super::component_buf_f64(value)?;
-    // world_pos-style pose: position is elements 4..7 (after the head quaternion).
-    if data.len() >= 7 {
-        return Some(DVec3::new(data[4], data[5], data[6]));
-    }
-    (data.len() == 3).then(|| DVec3::new(data[0], data[1], data[2]))
 }
 
 /// Convert a position from `source` into the `display` coordinate system.
