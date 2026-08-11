@@ -8,7 +8,7 @@ pub mod geo_position;
 pub mod horizon;
 pub mod orientation;
 
-use bevy::prelude::*;
+use bevy::{math::DVec3, prelude::*};
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Vec2};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
@@ -38,6 +38,27 @@ pub(crate) fn component_buf_f64(value: &ComponentValue) -> Option<Vec<f64>> {
         ComponentValue::F64(array) => Some(array.buf.as_buf().to_vec()),
         _ => None,
     }
+}
+
+/// Extract a position (metres) from a component value.
+///
+/// Accepts only (in `F32` or `F64`):
+/// - a bare 3-vector (exactly three elements), or
+/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (≥7 elements:
+///   quat `[x, y, z, w]` + position `[x, y, z]`).
+///
+/// Rejects other lengths (e.g. 4-element fin deflections) so a consumer does not
+/// treat arbitrary trailing floats as coordinates and invent coordinate values.
+///
+/// Shared with the viewport's `look_at`, which wants the same rule: having two
+/// definitions of what counts as a position is how they drift apart.
+pub(crate) fn component_value_to_position(value: &ComponentValue) -> Option<DVec3> {
+    let data = component_buf_f64(value)?;
+    // world_pos-style pose: position is elements 4..7 (after the head quaternion).
+    if data.len() >= 7 {
+        return Some(DVec3::new(data[4], data[5], data[6]));
+    }
+    (data.len() == 3).then(|| DVec3::new(data[0], data[1], data[2]))
 }
 
 /// Tile pane for either gauge: points at the entity carrying the gauge data

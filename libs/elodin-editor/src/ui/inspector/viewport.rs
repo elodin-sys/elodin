@@ -838,21 +838,25 @@ pub fn set_viewport_pos(
             .compiled_expr
             .as_ref()
             .map(|expr| expr.execute(&entity_map, &values));
+        // Aiming only needs a point, so a bare 3-vector is as good as a pose —
+        // the same rule the position gauge applies, shared rather than restated.
+        // `as_world_pos` would have demanded all 7 elements and silently ignored
+        // the 3-vector form the reference docs show, leaving the camera tracking
+        // its subject without ever turning to face it.
         let target_look_at = look_at_executed
             .as_ref()
             .and_then(|executed| executed.as_ref().ok())
-            .and_then(|val| val.as_world_pos())
-            .map(|world_pos| world_pos.pos());
+            .and_then(crate::ui::gauges::component_value_to_position);
         // A configured look_at whose sample is missing this frame is a gap, not a
         // switch to body-attitude mode: a gap must freeze the last good pose like
         // a pos gap, not flip attitude, drop the smoothed look_at, and re-arm the
         // attitude seek.
         //
-        // Only a failed *execution* counts. A value that resolves but is not a
-        // 7-vector pose — a bare 3-vector, which `as_world_pos` rejects and the
-        // reference docs still show — is not a gap: it has always meant "track
-        // pos, don't aim", and freezing the camera for it would strand the
-        // viewport on its first pose forever, `smoothing=0` included.
+        // Only a failed *execution* counts. A value that resolves to a length the
+        // rule above rejects (4-element fin deflections, say) is not a gap: it has
+        // always meant "track pos, don't aim", and freezing the camera for it
+        // would strand the viewport on its first pose forever, `smoothing=0`
+        // included.
         let look_at_gap = matches!(look_at_executed, Some(Err(_)));
         // Only aim (below) when this frame's pos actually resolves. On a missing
         // sample we hold the last good pose rather than re-aiming a raw, unsmoothed
@@ -1630,11 +1634,10 @@ mod tests {
         }
     }
 
-    /// A `look_at` that resolves to something other than a 7-vector pose — a
-    /// bare 3-vector, which the reference docs still show — must not be mistaken
-    /// for a missing sample. Gap handling freezes the pose, so treating it as one
-    /// would strand the viewport on its first position forever, whatever the
-    /// `smoothing` value.
+    /// A `look_at` of a length that cannot be a position (4 elements here) must
+    /// not be mistaken for a missing sample. Gap handling freezes the pose, so
+    /// treating it as one would strand the viewport on its first position
+    /// forever, whatever the `smoothing` value.
     #[test]
     fn non_pose_look_at_still_tracks_pos() {
         use crate::object_3d::{EditableEQL, compile_eql_expr};
@@ -1681,8 +1684,8 @@ mod tests {
                     super::Viewport::new(
                         parent,
                         editable("(0,0,0,1, 1,2,3)"),
-                        // Three elements: executes fine, but is not a pose.
-                        editable("(0,0,0)"),
+                        // Four elements: executes fine, but cannot be a position.
+                        editable("(0,0,0,1)"),
                         editable("(0,0,1)"),
                         Some(frame),
                         smoothing,
@@ -1702,6 +1705,74 @@ mod tests {
                 "viewport should still exist"
             );
         }
+    }
+
+    /// A bare 3-vector `look_at` — the form the reference docs show — must aim the
+    /// camera, not just be accepted. It used to be dropped for lacking the head
+    /// quaternion, so the camera tracked its subject while facing elsewhere.
+    #[test]
+    fn three_vector_look_at_aims_the_camera() {
+        use crate::object_3d::{EditableEQL, compile_eql_expr};
+        use bevy::math::{DQuat, DVec3};
+        use bevy::prelude::IntoScheduleConfigs;
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+
+        let eql_ctx = eql::Context::default();
+        let editable = |s: &str| EditableEQL {
+            eql: s.to_string(),
+            compiled_expr: Some(
+                compile_eql_expr(
+                    eql_ctx
+                        .parse_str(s)
+                        .unwrap_or_else(|e| panic!("parse {s:?}: {e}")),
+                )
+                .unwrap_or_else(|e| panic!("compile {s:?}: {e}")),
+            ),
+        };
+
+        let mut app = bevy::app::App::new();
+        app.insert_resource(GeoContext::default());
+        app.init_resource::<super::EntityMap>();
+        app.init_resource::<Time>();
+        crate::register_world_pos_components(&mut app);
+        app.add_systems(
+            bevy::app::Update,
+            (super::set_viewport_pos, crate::sync_pos).chain(),
+        );
+
+        let frame = GeoFrame::ENU;
+        let parent = app
+            .world_mut()
+            .spawn((
+                super::WorldPos::default(),
+                GeoPosition(frame, DVec3::ZERO),
+                GeoRotation::relative(frame, DQuat::IDENTITY),
+            ))
+            .id();
+        let viewport_entity = app
+            .world_mut()
+            .spawn((
+                super::Viewport::new(
+                    parent,
+                    editable("(0,0,0,1, 10,0,0)"),
+                    editable("(0,0,0)"),
+                    editable("(0,0,1)"),
+                    Some(frame),
+                    0.0,
+                ),
+                EditorCam::default(),
+            ))
+            .id();
+        app.update();
+
+        // Aiming at the origin from 10 m out sets the orbit anchor to that range;
+        // a dropped look_at leaves the camera's default depth instead.
+        let editor_cam = app.world().get::<EditorCam>(viewport_entity).unwrap();
+        assert!(
+            (editor_cam.last_anchor_depth + 10.0).abs() < 1e-9,
+            "3-vector look_at did not aim: anchor depth {}",
+            editor_cam.last_anchor_depth
+        );
     }
 
     macro_rules! assert_eq_mat {
