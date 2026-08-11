@@ -1,5 +1,8 @@
 import os
+import typing as ty
+
 import elodin as el
+import jax
 from jax import numpy as jnp
 from jax.numpy import linalg as la
 import spiceypy as spice
@@ -133,6 +136,23 @@ TRUTH_PROBES = [
         "mass": 825.0,
     },
 ]
+PositionErrorKm = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "position_error_km",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+        metadata={"external_control": "true"},
+    ),
+]
+VelocityErrorMps = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "velocity_error_mps",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+        metadata={"external_control": "true"},
+    ),
+]
+
 EPHEMERIS_BODIES = PLANETS
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
 SUN_MASS = 1.9885e30
@@ -163,14 +183,23 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
     print(init_pos)
     print(init_vel)
 
+    components = [
+        el.Body(
+            world_pos=el.WorldPos(linear=init_pos),
+            world_vel=el.WorldVel(linear=init_vel),
+            inertia=el.Inertia(body["mass"]),
+        ),
+    ]
+    if body in PROBES:
+        components.extend(
+            [
+                el.C(PositionErrorKm, jnp.array([0.0], dtype=jnp.float64)),
+                el.C(VelocityErrorMps, jnp.array([0.0], dtype=jnp.float64)),
+            ]
+        )
+
     body_entity_ids[body["entity_name"]] = w.spawn(
-        [
-            el.Body(
-                world_pos=el.WorldPos(linear=init_pos),
-                world_vel=el.WorldVel(linear=init_vel),
-                inertia=el.Inertia(body["mass"]),
-            ),
-        ],
+        components,
         name=body["entity_name"],
     )
 
@@ -190,6 +219,39 @@ def pre_step(tick: int, ctx: el.StepContext):
         ctx.write_component(
             f"{body['entity_name']}.world_vel",
             np.array([0.0, 0.0, 0.0, vel_ms[0], vel_ms[1], vel_ms[2]], dtype=np.float64),
+        )
+
+
+def post_step(_tick: int, ctx: el.StepContext) -> None:
+    """Record numerical divergence from the SPICE truth trajectories."""
+    for probe, truth_probe in zip(PROBES, TRUTH_PROBES):
+        simulated_pos = np.asarray(
+            ctx.read_component(f"{probe['entity_name']}.world_pos"),
+            dtype=np.float64,
+        )[4:7]
+        truth_pos = np.asarray(
+            ctx.read_component(f"{truth_probe['entity_name']}.world_pos"),
+            dtype=np.float64,
+        )[4:7]
+        simulated_vel = np.asarray(
+            ctx.read_component(f"{probe['entity_name']}.world_vel"),
+            dtype=np.float64,
+        )[3:6]
+        truth_vel = np.asarray(
+            ctx.read_component(f"{truth_probe['entity_name']}.world_vel"),
+            dtype=np.float64,
+        )[3:6]
+
+        position_error_km = np.linalg.norm(simulated_pos - truth_pos) / 1000.0
+        velocity_error_mps = np.linalg.norm(simulated_vel - truth_vel)
+
+        ctx.write_component(
+            f"{probe['entity_name']}.position_error_km",
+            np.array([position_error_km], dtype=np.float64),
+        )
+        ctx.write_component(
+            f"{probe['entity_name']}.velocity_error_mps",
+            np.array([velocity_error_mps], dtype=np.float64),
         )
 
 
@@ -256,10 +318,13 @@ w.schematic(
             //viewport name=Viewport pos="(0,0,0,0,0,0,100)" look_at="(0,0,0,0,0,0,0)" hdr=#true
             viewport name=Viewport pos="(0,0,0,0, 0,0,2000000000000.0)" look_at="(0,0,0,0, 0,0,0)" fov=45.0 near=1000000.0
 
-            graph "sun.world_pos" name=Graph
+            graph "voyager1.position_error_km" name="Voyager 1 position error (km)"
+            graph "voyager2.position_error_km" name="Voyager 2 position error (km)"
         }}
         tabs share=0.2 {{
             inspector
+            graph "voyager1.velocity_error_mps" name="Voyager 1 velocity error (m/s)"
+            graph "voyager2.velocity_error_mps" name="Voyager 2 velocity error (m/s)"
         }}
     }}
     object_3d sun.world_pos {{
@@ -281,6 +346,7 @@ sim = w.run(
     sys,
     simulation_rate=SIMULATION_RATE_HZ,
     pre_step=pre_step,
+    post_step=post_step,
     max_ticks=max_ticks,
     start_timestamp=start_time_epoch_us,
     db_path=str(db_path),
