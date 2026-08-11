@@ -551,7 +551,7 @@ fn prefetch_visible_window(
         if !schema_reg.0.contains_key(&component_id) {
             continue;
         }
-        if series_store.sample_count_in_range(&component_id, sync_range) > 0 {
+        if series_store.has_samples_in_range(&component_id, sync_range) {
             prefetch
                 .in_flight
                 .remove(&(component_id, range_key.0, range_key.1));
@@ -744,7 +744,7 @@ pub fn sync_plot_lines_from_series_store(
         if !fetch_ids.contains(&component_id) {
             continue;
         }
-        let samples_in_window = series_store.sample_count_in_range(&component_id, sync_range);
+        let has_samples_in_window = series_store.has_samples_in_range(&component_id, sync_range);
         let num_elements = component.element_names.len().max(1);
         for element_index in 0..num_elements {
             let handle = component.lines.entry(element_index).or_insert_with(|| {
@@ -762,7 +762,7 @@ pub fn sync_plot_lines_from_series_store(
             let Some(mut line) = lines.get_mut(handle) else {
                 continue;
             };
-            if samples_in_window == 0 {
+            if !has_samples_in_window {
                 // Don't wipe live tip / prior draw when the store hasn't caught
                 // up to this window yet — unless the camera moved (show empty).
                 if range_changed {
