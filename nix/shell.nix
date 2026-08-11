@@ -52,6 +52,8 @@ with pkgs; let
         buildkite-test-collector-rust
         (rustToolchain pkgs)
         cargo-nextest
+        protobuf
+        grpc
         pythonBase
         clang
         maturin
@@ -82,9 +84,11 @@ with pkgs; let
         git
         git-filter-repo
         git-lfs
+        time
 
         # Documentation and quality tools
         alejandra
+        buf
         typos
         zola
         rav1e
@@ -99,6 +103,8 @@ with pkgs; let
           gamescope
           xwayland
           util-linux # Provides setsid for capture process-group cleanup
+          iproute2
+          tcpdump
           libva-utils
           alsa-oss
           alsa-utils

@@ -51,6 +51,14 @@ auto table = builder::vtable({
 
 The DB engine automatically divides the nanosecond source value by 1000 on ingestion, producing correct microsecond record timestamps. The raw component data is stored unchanged, preserving full nanosecond precision for downstream analysis. Wrapping every field -- including the clock field itself -- in `timestamp_ns()` ensures all components in a message share the same temporally-aligned record timestamp. This works identically for SITL and real hardware -- the conversion is declared in the VTable schema, not in mode-specific code.
 
+## Foreign-client gRPC ingest
+
+`--grpc-addr` enables a protobuf ingest adapter on the same DB core: schema
+handshake, server-assigned handles, packed/typed rows, cumulative acks, and
+non-fatal row errors, with resume on reconnect. Native Impeller/VTable remains
+the editor/sim/follower path. Contract:
+`libs/db/proto/elodin/db/v1/ingest.proto` (16 MiB max message).
+
 ## VTable
 
 Elodin DB uses a dynamic data-extraction system for fast data-ingest. Instead of requiring that data is sent in a fixed format - Elodin DB allows users to generate a vtable that describes the data being ingested. Loosely this can be thought of as a collection of offsets combined with entity and component ids. We borrowed the concept of a vtable from FlatBuffers, which use them in a similar manner.

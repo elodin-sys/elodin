@@ -17,6 +17,27 @@ Install the elodin-db from the [releases](https://github.com/elodin-sys/elodin/r
 elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua --log-level warn
 ```
 
+### gRPC ingest for C++ and other foreign clients
+
+```sh
+elodin-db run [::]:2240 ./db --grpc-addr [::]:50051
+```
+
+Optional acknowledged schema registration and streaming ingest beside the
+native listener (editor/sim/followers). Not a query/admin API. Contract:
+[`proto/elodin/db/v1/ingest.proto`](proto/elodin/db/v1/ingest.proto). CMake:
+`elodin-db-protos` + [`grpc-client-batched.cpp`](examples/grpc-client-batched.cpp).
+
+```cmake
+find_package(elodin-db-protos REQUIRED CONFIG)
+target_link_libraries(my_client PRIVATE elodin-db-protos::elodin-db-protos)
+```
+
+Sessions register a schema, receive handles, then send packed or typed batches.
+With `timestamp_source`, clients may omit `time_monotonic_ns` (server derives
+it). Max message 16 MiB; ack policy 1–1e6 rows / 1–10_000 ms (0 → 256 / 100 ms).
+Insecure channel — bind only on a trusted network.
+
 ### Stream data to the database with C
 
 See [./examples/client.c](./examples/client.c) for an example C client that streams fake sensor data to the database. Build and run the client:

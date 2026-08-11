@@ -92,6 +92,9 @@ struct RunArgs {
     #[cfg(feature = "axum")]
     #[clap(long, help = "Address to bind the HTTP server to")]
     http_addr: Option<SocketAddr>,
+    #[cfg(feature = "grpc")]
+    #[clap(long, help = "Address to bind the gRPC server to")]
+    grpc_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
     #[clap(
@@ -423,7 +426,10 @@ async fn main() -> miette::Result<()> {
     match args.command {
         Commands::Run(RunArgs {
             addr,
+            #[cfg(feature = "axum")]
             http_addr,
+            #[cfg(feature = "grpc")]
+            grpc_addr,
             path,
             config,
             reset,
@@ -529,7 +535,10 @@ async fn main() -> miette::Result<()> {
                     .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
             }
+            #[cfg(feature = "axum")]
             let axum_db = server.db.clone();
+            #[cfg(feature = "grpc")]
+            let grpc_db = server.db.clone();
             if let Some(config) = follow_config {
                 let follow_db = server.db.clone();
                 stellarator::struc_con::stellar(move || {
@@ -537,9 +546,16 @@ async fn main() -> miette::Result<()> {
                 });
             }
             let db = stellarator::spawn(server.run());
+            #[cfg(feature = "axum")]
             if let Some(http_addr) = http_addr {
                 stellarator::struc_con::tokio(move |_| async move {
                     elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
+                });
+            }
+            #[cfg(feature = "grpc")]
+            if let Some(grpc_addr) = grpc_addr {
+                stellarator::struc_con::tokio(move |_| async move {
+                    elodin_db::grpc::serve(grpc_addr, grpc_db).await.unwrap()
                 });
             }
             if let Some(lua_config) = config {
@@ -1036,4 +1052,26 @@ void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, co
         id0 = set_msg_meta_id[0],
         id1 = set_msg_meta_id[1],
     ))
+}
+
+#[cfg(all(test, feature = "grpc"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_grpc_addr_for_run() {
+        let cli = Cli::try_parse_from([
+            "elodin-db",
+            "run",
+            "127.0.0.1:2240",
+            "/tmp/elodin-db-grpc-cli-test",
+            "--grpc-addr",
+            "127.0.0.1:50051",
+        ])
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.grpc_addr, Some("127.0.0.1:50051".parse().unwrap()));
+    }
 }

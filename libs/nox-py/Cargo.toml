@@ -47,6 +47,7 @@ impeller2-wkt.path = "../impeller2/wkt"
 impeller2-wkt.features = ["gui", "std"]
 impeller2-stellar.path = "../impeller2/stellar"
 elodin-db.path = "../db"
+elodin-db.features = ["grpc"]
 futures-lite = "2.5.0"
 
 impeller2-kdl.path = "../impeller2/kdl"

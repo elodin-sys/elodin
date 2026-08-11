@@ -687,6 +687,7 @@ class World(WorldBuilder):
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
         backend: str = "cranelift",
+        grpc_addr: Optional[str] = None,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -715,6 +716,7 @@ class World(WorldBuilder):
             log_level,
             backend,
             simulation_source_entrypoint,
+            grpc_addr,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

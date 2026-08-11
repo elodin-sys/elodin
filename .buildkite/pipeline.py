@@ -26,6 +26,11 @@ test_steps = [
             ),
             nix_step(
                 emoji=":c:",
+                label="db-cpp-grpc-batched",
+                command="scripts/ci/db_grpc_cpp_smoke.sh",
+            ),
+            nix_step(
+                emoji=":c:",
                 label="db-cpp-per-component",
                 command="cd libs/db; clang++ -std=c++23 examples/client-per-component.cpp",
             ),
@@ -53,6 +58,11 @@ test_steps = [
                 label="cargo fmt",
                 command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
+            nix_step(
+                emoji=":crab:",
+                label="elodin-db grpc",
+                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db parses_grpc_addr_for_run -- --test-threads=1 && cargo test -p nox-py world_run_grpc_addr --lib -- --test-threads=1",
+            ),
         ],
     ),
     group(
@@ -65,6 +75,10 @@ test_steps = [
             nix_step(
                 label="typos",
                 command="typos -c typos.toml",
+            ),
+            nix_step(
+                label="buf lint",
+                command="buf lint",
             ),
         ],
     ),
@@ -135,7 +149,7 @@ test_steps = [
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",
-                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features tracy'",
+                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy'",
                 flake=".#tracy",
                 command="bash ./scripts/ci/db_perf.sh",
             ),
@@ -146,6 +160,10 @@ test_steps = [
         label=":nix: elodin-cli",
         key="elodin-cli",
         command="nix build .#elodin-cli",
+    ),
+    step(
+        label=":nix: elodin-db-protos",
+        command="nix build .#elodin-db-protos",
     ),
     group(
         name=":nix: aleph-os",

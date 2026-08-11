@@ -8,6 +8,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "grpc")]
+use std::collections::VecDeque;
+
 use clap::{Parser, ValueEnum};
 use elodin_db::Server;
 use impeller2::{
@@ -18,11 +21,39 @@ use impeller2_stellar::Client;
 use impeller2_wkt::{SubscribeLastUpdated, VTableMsg};
 use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar};
 
+#[cfg(feature = "grpc")]
+use {
+    elodin_db::grpc::v1::{
+        AckPolicy, ComponentSchema, ComponentValue, IngestRequest, MessageSchema, Row, RowEncoding,
+        SchemaSet, SessionOpen, TelemetryBatch, TypedValues, component_value, ingest_request,
+        ingest_response, ingest_service_client::IngestServiceClient, row,
+    },
+    prost::Message,
+    sha2::{Digest, Sha256},
+    stellarator::struc_con::{Joinable, tokio as tokio_thread},
+    tokio::sync::mpsc,
+    tokio_stream::wrappers::ReceiverStream,
+};
+
 #[derive(ValueEnum, Clone, Copy, Default)]
 enum SendMode {
     #[default]
     Batch,
     PerComponent,
+    #[cfg(feature = "grpc")]
+    GrpcPacked,
+    #[cfg(feature = "grpc")]
+    GrpcTyped,
+}
+
+impl SendMode {
+    fn is_grpc(self) -> bool {
+        match self {
+            Self::Batch | Self::PerComponent => false,
+            #[cfg(feature = "grpc")]
+            Self::GrpcPacked | Self::GrpcTyped => true,
+        }
+    }
 }
 
 impl fmt::Display for SendMode {
@@ -30,6 +61,10 @@ impl fmt::Display for SendMode {
         match self {
             SendMode::Batch => write!(f, "batch"),
             SendMode::PerComponent => write!(f, "per-component"),
+            #[cfg(feature = "grpc")]
+            SendMode::GrpcPacked => write!(f, "grpc-packed"),
+            #[cfg(feature = "grpc")]
+            SendMode::GrpcTyped => write!(f, "grpc-typed"),
         }
     }
 }
@@ -53,6 +88,14 @@ struct Args {
     scenario: Option<Scenario>,
     #[arg(long, value_enum)]
     mode: Option<SendMode>,
+    #[arg(
+        long,
+        help = "Use an existing Impeller server instead of an embedded DB"
+    )]
+    db_addr: Option<SocketAddr>,
+    #[cfg(feature = "grpc")]
+    #[arg(long, help = "Use an existing gRPC server; requires --db-addr")]
+    grpc_addr: Option<SocketAddr>,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -61,6 +104,24 @@ enum Scenario {
     HighFreq,
     HighFanout,
     Stress,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Endpoints {
+    db: Option<SocketAddr>,
+    #[cfg(feature = "grpc")]
+    grpc: Option<SocketAddr>,
+}
+
+struct BenchmarkConfig<'a> {
+    components: usize,
+    frequency: u32,
+    duration_secs: u64,
+    clients: usize,
+    with_reader: bool,
+    mode: SendMode,
+    scenario_name: &'a str,
+    endpoints: Endpoints,
 }
 
 struct BenchResult {
@@ -83,6 +144,10 @@ struct BenchResult {
     send_latency_p95_us: u64,
     send_latency_p99_us: u64,
     send_latency_max_us: u64,
+    ack_latency_p50_us: Option<u64>,
+    ack_latency_p95_us: Option<u64>,
+    ack_latency_p99_us: Option<u64>,
+    ack_latency_max_us: Option<u64>,
 }
 
 impl BenchResult {
@@ -123,6 +188,23 @@ impl BenchResult {
         eprintln!("║ send latency p95:  {:<23} µs ║", self.send_latency_p95_us);
         eprintln!("║ send latency p99:  {:<23} µs ║", self.send_latency_p99_us);
         eprintln!("║ send latency max:  {:<23} µs ║", self.send_latency_max_us);
+        if let Some(p50) = self.ack_latency_p50_us {
+            eprintln!("║ ack latency p50:   {:<23} µs ║", p50);
+            eprintln!(
+                "║ ack latency p95:   {:<23} µs ║",
+                self.ack_latency_p95_us.unwrap()
+            );
+            eprintln!(
+                "║ ack latency p99:   {:<23} µs ║",
+                self.ack_latency_p99_us.unwrap()
+            );
+            eprintln!(
+                "║ ack latency max:   {:<23} µs ║",
+                self.ack_latency_max_us.unwrap()
+            );
+        } else {
+            eprintln!("║ ack latency:       {:<23}    ║", "n/a");
+        }
         eprintln!("╠══════════════════════════════════════════════╣");
         eprintln!("║ per-second throughput (writes/s):            ║");
         for (i, &t) in self.per_second_throughput.iter().enumerate() {
@@ -137,6 +219,11 @@ impl BenchResult {
             .iter()
             .map(|v| v.to_string())
             .collect();
+        let json_number = |value: Option<u64>| {
+            value
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "null".to_string())
+        };
         println!(
             concat!(
                 "{{",
@@ -158,6 +245,10 @@ impl BenchResult {
                 "\"send_latency_p95_us\":{},",
                 "\"send_latency_p99_us\":{},",
                 "\"send_latency_max_us\":{},",
+                "\"ack_latency_p50_us\":{},",
+                "\"ack_latency_p95_us\":{},",
+                "\"ack_latency_p99_us\":{},",
+                "\"ack_latency_max_us\":{},",
                 "\"per_second_throughput\":[{}]",
                 "}}"
             ),
@@ -179,6 +270,10 @@ impl BenchResult {
             self.send_latency_p95_us,
             self.send_latency_p99_us,
             self.send_latency_max_us,
+            json_number(self.ack_latency_p50_us),
+            json_number(self.ack_latency_p95_us),
+            json_number(self.ack_latency_p99_us),
+            json_number(self.ack_latency_max_us),
             per_sec.join(","),
         );
     }
@@ -261,16 +356,38 @@ async fn main() {
         })
         .unwrap_or("custom")
         .to_string();
+    let mode = args.mode.unwrap_or_default();
+    if args.clients == 0 || args.components == 0 || args.frequency == 0 || args.duration == 0 {
+        eprintln!("components, frequency, duration, and clients must be positive");
+        std::process::exit(2);
+    }
+    if mode.is_grpc() && args.clients != 1 {
+        eprintln!("gRPC modes use one bidi stream; overriding --clients to 1");
+        args.clients = 1;
+    }
+    #[cfg(feature = "grpc")]
+    if mode.is_grpc() && args.db_addr.is_some() != args.grpc_addr.is_some() {
+        eprintln!("external gRPC mode requires both --db-addr and --grpc-addr");
+        std::process::exit(2);
+    }
+    #[cfg(feature = "grpc")]
+    let endpoints = Endpoints {
+        db: args.db_addr,
+        grpc: args.grpc_addr,
+    };
+    #[cfg(not(feature = "grpc"))]
+    let endpoints = Endpoints { db: args.db_addr };
 
-    let result = run_benchmark(
-        args.components,
-        args.frequency,
-        args.duration,
-        args.clients,
-        args.with_reader,
-        args.mode.unwrap_or_default(),
-        &scenario_name,
-    )
+    let result = run_benchmark(BenchmarkConfig {
+        components: args.components,
+        frequency: args.frequency,
+        duration_secs: args.duration,
+        clients: args.clients,
+        with_reader: args.with_reader,
+        mode,
+        scenario_name: &scenario_name,
+        endpoints,
+    })
     .await;
 
     if args.json {
@@ -280,25 +397,50 @@ async fn main() {
     }
 }
 
-async fn run_benchmark(
-    num_components: usize,
-    frequency: u32,
-    duration_secs: u64,
-    num_clients: usize,
-    with_reader: bool,
-    mode: SendMode,
-    scenario_name: &str,
-) -> BenchResult {
+async fn run_benchmark(config: BenchmarkConfig<'_>) -> BenchResult {
+    let BenchmarkConfig {
+        components: num_components,
+        frequency,
+        duration_secs,
+        clients: num_clients,
+        with_reader,
+        mode,
+        scenario_name,
+        endpoints,
+    } = config;
     let temp_dir = std::env::temp_dir().join(format!("elodin_db_bench_{}", std::process::id()));
-    if temp_dir.exists() {
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
+    let embedded = endpoints.db.is_none();
+    let (addr, _embedded_db) = if let Some(addr) = endpoints.db {
+        (addr, None)
+    } else {
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = Server::from_listener(listener, &temp_dir).unwrap();
+        let db = server.db.clone();
+        stellar(move || async move { server.run().await });
+        (addr, Some(db))
+    };
 
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = Server::from_listener(listener, &temp_dir).unwrap();
-
-    stellar(move || async move { server.run().await });
+    #[cfg(feature = "grpc")]
+    let grpc_addr = if mode.is_grpc() {
+        if let Some(addr) = endpoints.grpc {
+            Some(addr)
+        } else {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            drop(listener);
+            let db = _embedded_db
+                .clone()
+                .expect("embedded gRPC benchmark requires an embedded DB");
+            tokio_thread(move |_| async move { elodin_db::grpc::serve(addr, db).await.unwrap() });
+            Some(addr)
+        }
+    } else {
+        None
+    };
 
     sleep(Duration::from_millis(100)).await;
 
@@ -328,6 +470,8 @@ async fn run_benchmark(
     });
 
     let mut handles = Vec::new();
+    #[cfg(feature = "grpc")]
+    let mut grpc_result = None;
 
     match mode {
         SendMode::Batch => {
@@ -368,6 +512,27 @@ async fn run_benchmark(
                 )));
             }
         }
+        #[cfg(feature = "grpc")]
+        SendMode::GrpcPacked | SendMode::GrpcTyped => {
+            let encoding = match mode {
+                SendMode::GrpcPacked => RowEncoding::Packed,
+                SendMode::GrpcTyped => RowEncoding::Typed,
+                _ => unreachable!(),
+            };
+            let counter = write_counter.clone();
+            let writer = tokio_thread(move |_| {
+                run_writer_grpc(
+                    grpc_addr.unwrap(),
+                    num_components,
+                    frequency,
+                    interval,
+                    target_duration,
+                    encoding,
+                    counter,
+                )
+            });
+            grpc_result = Some(writer.join().await.unwrap().unwrap());
+        }
     }
 
     for handle in handles {
@@ -378,26 +543,25 @@ async fn run_benchmark(
     let per_second_throughput = sampler.await.unwrap_or_default();
     let total_writes = count_total_samples(addr, num_components, mode, num_clients).await;
 
-    let mut lat_samples = latencies.lock().unwrap().clone();
-    lat_samples.sort_unstable();
-    let (p50, p95, p99, max) = if lat_samples.is_empty() {
-        (0, 0, 0, 0)
-    } else {
-        let len = lat_samples.len();
-        (
-            lat_samples[len * 50 / 100],
-            lat_samples[len * 95 / 100],
-            lat_samples[len.saturating_sub(1).min(len * 99 / 100)],
-            lat_samples[len - 1],
-        )
+    let impeller_send_samples = latencies.lock().unwrap().clone();
+    #[cfg(feature = "grpc")]
+    let (send_samples, ack_samples) = match grpc_result {
+        Some(result) => (result.send_latencies, Some(result.ack_latencies)),
+        None => (impeller_send_samples, None),
     };
+    #[cfg(not(feature = "grpc"))]
+    let (send_samples, ack_samples): (Vec<u64>, Option<Vec<u64>>) = (impeller_send_samples, None);
+    let send_latency = latency_summary(send_samples);
+    let ack_latency = ack_samples.map(latency_summary);
 
     let target_writes_per_sec = num_components as f64 * frequency as f64;
     let throughput = total_writes as f64 / elapsed.as_secs_f64();
     let data_bytes = total_writes * 8;
     let data_volume_mb = data_bytes as f64 / (1024.0 * 1024.0);
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    if embedded {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     BenchResult {
         scenario: scenario_name.to_string(),
@@ -415,10 +579,270 @@ async fn run_benchmark(
         with_reader,
         clients: num_clients,
         per_second_throughput,
-        send_latency_p50_us: p50,
-        send_latency_p95_us: p95,
-        send_latency_p99_us: p99,
-        send_latency_max_us: max,
+        send_latency_p50_us: send_latency.p50,
+        send_latency_p95_us: send_latency.p95,
+        send_latency_p99_us: send_latency.p99,
+        send_latency_max_us: send_latency.max,
+        ack_latency_p50_us: ack_latency.map(|latency| latency.p50),
+        ack_latency_p95_us: ack_latency.map(|latency| latency.p95),
+        ack_latency_p99_us: ack_latency.map(|latency| latency.p99),
+        ack_latency_max_us: ack_latency.map(|latency| latency.max),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LatencySummary {
+    p50: u64,
+    p95: u64,
+    p99: u64,
+    max: u64,
+}
+
+fn latency_summary(mut samples: Vec<u64>) -> LatencySummary {
+    if samples.is_empty() {
+        return LatencySummary {
+            p50: 0,
+            p95: 0,
+            p99: 0,
+            max: 0,
+        };
+    }
+    samples.sort_unstable();
+    let len = samples.len();
+    LatencySummary {
+        p50: samples[len * 50 / 100],
+        p95: samples[len * 95 / 100],
+        p99: samples[len.saturating_sub(1).min(len * 99 / 100)],
+        max: samples[len - 1],
+    }
+}
+
+#[cfg(feature = "grpc")]
+struct GrpcWriterResult {
+    send_latencies: Vec<u64>,
+    ack_latencies: Vec<u64>,
+}
+
+#[cfg(feature = "grpc")]
+async fn run_writer_grpc(
+    addr: SocketAddr,
+    num_components: usize,
+    frequency: u32,
+    interval: Duration,
+    target_duration: Duration,
+    encoding: RowEncoding,
+    write_counter: Arc<AtomicU64>,
+) -> Result<GrpcWriterResult, String> {
+    let schema = grpc_schema(num_components, encoding);
+    let schema_fingerprint = Sha256::digest(schema.encode_to_vec()).to_vec();
+    let open = IngestRequest {
+        req: Some(ingest_request::Req::Open(SessionOpen {
+            client_name: format!("elodin-db-bench-{encoding:?}"),
+            schema_fingerprint,
+            schema: Some(schema),
+            ack_policy: Some(AckPolicy {
+                max_unacked_rows: 256,
+                max_ack_delay_ms: 20,
+            }),
+            client_instance_id: format!(
+                "{}-{encoding:?}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|error| error.to_string())?
+                    .as_nanos()
+            )
+            .into_bytes(),
+        })),
+    };
+
+    let mut client = IngestServiceClient::connect(format!("http://{addr}"))
+        .await
+        .map_err(|error| error.to_string())?;
+    let (tx, rx) = mpsc::channel(64);
+    tx.send(open).await.map_err(|error| error.to_string())?;
+    let mut responses = client
+        .ingest(ReceiverStream::new(rx))
+        .await
+        .map_err(|error| error.to_string())?
+        .into_inner();
+    let first = responses
+        .message()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "gRPC stream closed before SessionAccept".to_string())?;
+    let accept = match first.resp {
+        Some(ingest_response::Resp::Accept(accept)) => accept,
+        Some(ingest_response::Resp::Reject(reject)) => {
+            return Err(format!("session rejected: {}", reject.detail));
+        }
+        _ => return Err("expected SessionAccept".to_string()),
+    };
+    let message_handle = *accept
+        .message_handles
+        .get("BenchMessage")
+        .ok_or_else(|| "SessionAccept omitted BenchMessage".to_string())?;
+
+    let pending = Arc::new(std::sync::Mutex::new(VecDeque::<(u64, Instant)>::new()));
+    let ack_latencies = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let row_errors = Arc::new(AtomicU64::new(0));
+    let through_seq = Arc::new(AtomicU64::new(accept.resume_from_seq));
+    let reader_pending = pending.clone();
+    let reader_latencies = ack_latencies.clone();
+    let reader_errors = row_errors.clone();
+    let reader_through = through_seq.clone();
+    let reader = tokio::spawn(async move {
+        while let Some(response) = responses
+            .message()
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            match response.resp {
+                Some(ingest_response::Resp::Ack(ack)) => {
+                    reader_through.store(ack.through_seq, Ordering::Relaxed);
+                    let now = Instant::now();
+                    let mut pending = reader_pending.lock().unwrap();
+                    let mut latencies = reader_latencies.lock().unwrap();
+                    while pending
+                        .front()
+                        .is_some_and(|(seq, _)| *seq <= ack.through_seq)
+                    {
+                        let (_, sent_at) = pending.pop_front().unwrap();
+                        latencies.push(now.duration_since(sent_at).as_micros() as u64);
+                    }
+                }
+                Some(ingest_response::Resp::Error(error)) => {
+                    reader_errors.fetch_add(1, Ordering::Relaxed);
+                    eprintln!(
+                        "gRPC RowError seq={} component={} detail={}",
+                        error.seq, error.component, error.detail
+                    );
+                }
+                Some(ingest_response::Resp::Reject(reject)) => {
+                    return Err(format!("session rejected after accept: {}", reject.detail));
+                }
+                Some(ingest_response::Resp::Accept(_)) | None => {
+                    return Err("unexpected gRPC ingest response".to_string());
+                }
+            }
+        }
+        Ok::<_, String>(())
+    });
+
+    let start = Instant::now();
+    let mut deadline = Instant::now();
+    let mut seq = accept.resume_from_seq.saturating_add(1);
+    let mut tick = 0u64;
+    let mut send_latencies = Vec::new();
+    while start.elapsed() < target_duration {
+        let tick_started = Instant::now();
+        let payload = match encoding {
+            RowEncoding::Packed => row::Payload::Packed(grpc_packed_values(tick, num_components)),
+            RowEncoding::Typed => row::Payload::Typed(grpc_typed_values(tick, num_components)),
+            RowEncoding::Unspecified => return Err("unspecified gRPC encoding".to_string()),
+        };
+        let request = IngestRequest {
+            req: Some(ingest_request::Req::Batch(TelemetryBatch {
+                first_seq: seq,
+                rows: vec![Row {
+                    message_handle,
+                    time_monotonic_ns: 1_000_000_000
+                        + (tick as i64 * 1_000_000_000 / i64::from(frequency)),
+                    payload: Some(payload),
+                }],
+            })),
+        };
+        let ack_started = Instant::now();
+        pending.lock().unwrap().push_back((seq, ack_started));
+        tx.send(request).await.map_err(|error| error.to_string())?;
+        if tick.is_multiple_of(10) {
+            send_latencies.push(tick_started.elapsed().as_micros() as u64);
+        }
+        write_counter.fetch_add(num_components as u64, Ordering::Relaxed);
+        seq += 1;
+        tick += 1;
+        deadline += interval;
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+
+    drop(tx);
+    reader
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    if row_errors.load(Ordering::Relaxed) != 0 {
+        return Err(format!(
+            "{} gRPC rows were rejected",
+            row_errors.load(Ordering::Relaxed)
+        ));
+    }
+    let expected_through = seq.saturating_sub(1);
+    if through_seq.load(Ordering::Relaxed) < expected_through || !pending.lock().unwrap().is_empty()
+    {
+        return Err(format!(
+            "gRPC stream closed before acking sequence {expected_through}"
+        ));
+    }
+
+    let ack_latencies = ack_latencies.lock().unwrap().clone();
+    Ok(GrpcWriterResult {
+        send_latencies,
+        ack_latencies,
+    })
+}
+
+#[cfg(feature = "grpc")]
+fn grpc_schema(num_components: usize, encoding: RowEncoding) -> SchemaSet {
+    let components = (0..num_components)
+        .map(|index| ComponentSchema {
+            name: format!("bench_comp_{}", index + 1),
+            prim_type: elodin_db::grpc::v1::PrimType::F64 as i32,
+            dims: Vec::new(),
+            element_names: Vec::new(),
+            packed_offset: if encoding == RowEncoding::Packed {
+                (index * std::mem::size_of::<f64>()) as u32
+            } else {
+                0
+            },
+            timestamp_source: false,
+        })
+        .collect();
+    SchemaSet {
+        messages: vec![MessageSchema {
+            name: "BenchMessage".to_string(),
+            encoding: encoding as i32,
+            packed_size: if encoding == RowEncoding::Packed {
+                (num_components * std::mem::size_of::<f64>()) as u32
+            } else {
+                0
+            },
+            components,
+        }],
+    }
+}
+
+#[cfg(feature = "grpc")]
+fn grpc_packed_values(tick: u64, num_components: usize) -> Vec<u8> {
+    let mut values = Vec::with_capacity(num_components * std::mem::size_of::<f64>());
+    for index in 0..num_components {
+        values.extend_from_slice(
+            &((tick * num_components as u64 + index as u64) as f64).to_le_bytes(),
+        );
+    }
+    values
+}
+
+#[cfg(feature = "grpc")]
+fn grpc_typed_values(tick: u64, num_components: usize) -> TypedValues {
+    TypedValues {
+        values: (0..num_components)
+            .map(|index| ComponentValue {
+                component_index: index as u32,
+                value: Some(component_value::Value::F64(
+                    (tick * num_components as u64 + index as u64) as f64,
+                )),
+            })
+            .collect(),
     }
 }
 
@@ -608,6 +1032,15 @@ async fn count_total_samples(
             }
             out
         }
+        #[cfg(feature = "grpc")]
+        SendMode::GrpcPacked | SendMode::GrpcTyped => (0..num_components)
+            .map(|index| {
+                (
+                    ((index + 1) as u16).to_le_bytes(),
+                    format!("bench_comp_{}", index + 1),
+                )
+            })
+            .collect(),
     };
 
     for (vtable_id, comp_name) in &pairs {

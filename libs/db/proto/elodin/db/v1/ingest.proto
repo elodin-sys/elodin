@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+service IngestService {
+  // First request must be SessionOpen; replies SessionAccept or SessionReject.
+  rpc Ingest(stream IngestRequest) returns (stream IngestResponse);
+}
+
+message IngestRequest {
+  oneof req {
+    SessionOpen open = 1;
+    TelemetryBatch batch = 2;
+  }
+}
+
+message IngestResponse {
+  oneof resp {
+    SessionAccept accept = 1;
+    WriteAck ack = 2;
+    RowError error = 3;
+    SessionReject reject = 4;
+  }
+}
+
+message SessionOpen {
+  string client_name = 1;
+  bytes schema_fingerprint = 2; // SHA-256 of the canonical SchemaSet
+  SchemaSet schema = 3;
+  AckPolicy ack_policy = 4;
+  // Stable across reconnects within one process; changes after a restart.
+  bytes client_instance_id = 5;
+}
+
+message SchemaSet {
+  repeated MessageSchema messages = 1;
+}
+
+message MessageSchema {
+  string name = 1;
+  RowEncoding encoding = 2;
+  uint32 packed_size = 3; // required for packed encoding
+  repeated ComponentSchema components = 4;
+}
+
+message ComponentSchema {
+  string name = 1;
+  PrimType prim_type = 2;
+  repeated uint64 dims = 3; // empty = scalar
+  repeated string element_names = 4;
+  uint32 packed_offset = 5;
+  bool timestamp_source = 6;
+}
+
+enum RowEncoding {
+  ROW_ENCODING_UNSPECIFIED = 0;
+  ROW_ENCODING_PACKED = 1;
+  ROW_ENCODING_TYPED = 2;
+}
+
+enum PrimType {
+  PRIM_TYPE_UNSPECIFIED = 0;
+  PRIM_TYPE_U8 = 1;
+  PRIM_TYPE_U16 = 2;
+  PRIM_TYPE_U32 = 3;
+  PRIM_TYPE_U64 = 4;
+  PRIM_TYPE_I8 = 5;
+  PRIM_TYPE_I16 = 6;
+  PRIM_TYPE_I32 = 7;
+  PRIM_TYPE_I64 = 8;
+  PRIM_TYPE_BOOL = 9;
+  PRIM_TYPE_F32 = 10;
+  PRIM_TYPE_F64 = 11;
+}
+
+message SessionAccept {
+  map<string, uint32> message_handles = 1; // session-scoped
+  uint64 resume_from_seq = 2; // last durably applied client sequence
+}
+
+message SessionReject {
+  string detail = 1;
+  repeated ComponentSchemaConflict conflicts = 2;
+}
+
+message ComponentSchemaConflict {
+  string component = 1;
+  PrimType expected_prim_type = 2;
+  repeated uint64 expected_dims = 3;
+  PrimType actual_prim_type = 4;
+  repeated uint64 actual_dims = 5;
+}
+
+message AckPolicy {
+  uint32 max_unacked_rows = 1; // 0 → 256
+  uint32 max_ack_delay_ms = 2; // 0 → 100
+}
+
+message TelemetryBatch {
+  uint64 first_seq = 1; // row i has sequence first_seq + i
+  repeated Row rows = 2;
+}
+
+message Row {
+  uint32 message_handle = 1;
+  // Optional when a component is timestamp_source; else stored as ns / 1000.
+  sfixed64 time_monotonic_ns = 2;
+
+  oneof payload {
+    bytes packed = 3; // length must equal MessageSchema.packed_size
+    TypedValues typed = 4;
+  }
+}
+
+message TypedValues {
+  repeated ComponentValue values = 1;
+}
+
+message ComponentValue {
+  uint32 component_index = 1; // index into MessageSchema.components
+
+  oneof value {
+    double f64 = 2;
+    float f32 = 3;
+    sint64 i64 = 4;
+    uint64 u64 = 5;
+    bool b = 6;
+    DoubleArray f64s = 7;
+    FloatArray f32s = 8;
+    Sint64Array i64s = 9;
+    Uint64Array u64s = 10;
+    BoolArray bools = 11;
+  }
+}
+
+message DoubleArray {
+  repeated double v = 1;
+}
+
+message FloatArray {
+  repeated float v = 1;
+}
+
+message Sint64Array {
+  repeated sint64 v = 1;
+}
+
+message Uint64Array {
+  repeated uint64 v = 1;
+}
+
+message BoolArray {
+  repeated bool v = 1;
+}
+
+message WriteAck {
+  // Highest contiguous sequence processed; rejected rows get a prior RowError.
+  uint64 through_seq = 1;
+}
+
+message RowError {
+  uint64 seq = 1;
+  string component = 2;
+  string detail = 3; // non-fatal; stream continues
+}

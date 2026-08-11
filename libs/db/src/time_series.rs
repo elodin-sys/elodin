@@ -87,6 +87,12 @@ impl TimeSeries {
         self.data.get(i..i + element_size)
     }
 
+    #[cfg(feature = "grpc")]
+    pub(crate) fn get_all(&self, timestamp: Timestamp) -> Option<&[u8]> {
+        self.get_range(&(timestamp..timestamp))
+            .map(|(_, data)| data)
+    }
+
     pub fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, &[u8])> {
         let timestamps = self.timestamps();
         let index = match timestamps.binary_search(&timestamp) {

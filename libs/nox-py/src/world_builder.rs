@@ -46,6 +46,17 @@ fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
     }
 }
 
+fn parse_grpc_addr(addr: Option<String>) -> Result<Option<SocketAddr>, Error> {
+    addr.map(|addr| {
+        addr.parse().map_err(|err| {
+            Error::PyO3(PyValueError::new_err(format!(
+                "invalid grpc_addr {addr:?}: {err}"
+            )))
+        })
+    })
+    .transpose()
+}
+
 fn unix_now_ns() -> u64 {
     time::SystemTime::now()
         .duration_since(time::UNIX_EPOCH)
@@ -539,6 +550,7 @@ impl WorldBuilder {
         log_level = None,
         backend = "cranelift",
         simulation_source_entrypoint = None,
+        grpc_addr = None,
     ))]
     pub fn run(
         &mut self,
@@ -559,7 +571,9 @@ impl WorldBuilder {
         log_level: Option<String>,
         backend: &str,
         simulation_source_entrypoint: Option<String>,
+        grpc_addr: Option<String>,
     ) -> Result<Option<String>, Error> {
+        let grpc_addr = parse_grpc_addr(grpc_addr)?;
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
             tracing_subscriber::EnvFilter::builder().from_env_lossy()
@@ -666,6 +680,12 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                if let Some(grpc_addr) = grpc_addr {
+                    let grpc_db = db_server.db.clone();
+                    stellarator::struc_con::tokio(move |_| async move {
+                        elodin_db::grpc::serve(grpc_addr, grpc_db).await.unwrap()
+                    });
+                }
                 crate::impeller2_server::prime_schematic_assets(
                     &db_server.db,
                     exec.world_mut(),
@@ -1949,6 +1969,18 @@ impl WorldBuilder {
 mod test {
     use super::*;
     use convert_case::Casing;
+
+    #[test]
+    fn world_run_grpc_addr_defaults_disabled() {
+        assert!(parse_grpc_addr(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn world_run_grpc_addr_rejects_invalid_values() {
+        pyo3::prepare_freethreaded_python();
+        let error = parse_grpc_addr(Some("not-an-address".to_string())).unwrap_err();
+        assert!(error.to_string().contains("invalid grpc_addr"));
+    }
 
     #[test]
     fn test_snake_case() {
