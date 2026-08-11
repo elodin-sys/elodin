@@ -224,7 +224,7 @@ def pre_step(tick: int, ctx: el.StepContext):
 
 def post_step(tick: int, ctx: el.StepContext) -> None:
     """Record numerical divergence from SPICE at the completed tick epoch."""
-    current_time_et = start_time_et + tick * SIM_TIME_STEP
+    current_time_et = start_time_et + (tick + 1) * SIM_TIME_STEP
 
     for probe in PROBES:
         simulated_pos = np.asarray(
