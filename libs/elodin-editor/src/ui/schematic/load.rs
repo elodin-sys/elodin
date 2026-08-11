@@ -274,7 +274,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub eql: Res<'w, EqlContext>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     /// Optional: absent in minimal test apps (no kdl_document plugin).
-    initial_kdl: Option<Res<'w, crate::plugins::kdl_document::InitialKdlPath>>,
+    initial_kdl: Option<ResMut<'w, crate::plugins::kdl_document::InitialKdlPath>>,
     pub geo_context: ResMut<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
@@ -422,6 +422,14 @@ pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
 }
 
 impl LoadSchematicParams<'_, '_> {
+    /// Drops the CLI `--kdl` pin so a local clear/open is not re-forced by
+    /// sticky config sync.
+    pub fn clear_initial_kdl_pin(&mut self) {
+        if let Some(pin) = self.initial_kdl.as_deref_mut() {
+            pin.0 = None;
+        }
+    }
+
     pub fn load_schematic(
         &mut self,
         schematic: &Schematic,
@@ -1992,6 +2000,33 @@ mod tests {
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    /// "Clear Schematic" drops the CLI `--kdl` pin through these params: a
+    /// second `ResMut<InitialKdlPath>` in the same system is a conflicting
+    /// param and panics when the palette item is initialized.
+    #[test]
+    fn clear_initial_kdl_pin_drops_the_cli_path() {
+        use crate::plugins::kdl_document::InitialKdlPath;
+
+        let mut app = test_app();
+        // Absent in minimal apps (no kdl_document plugin): a no-op, not a panic.
+        clear_pin(&mut app);
+        assert!(app.world().get_resource::<InitialKdlPath>().is_none());
+
+        app.insert_resource(InitialKdlPath(Some(std::path::PathBuf::from(
+            "/tmp/sim.kdl",
+        ))));
+        clear_pin(&mut app);
+        assert!(app.world().resource::<InitialKdlPath>().0.is_none());
+    }
+
+    fn clear_pin(app: &mut App) {
+        let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
+        system_state
+            .params_mut(app.world_mut())
+            .clear_initial_kdl_pin();
+        system_state.apply(app.world_mut());
     }
 
     #[test]
