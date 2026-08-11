@@ -17,6 +17,19 @@ This example is a work in progress. Right now the simulated probes do
 not make it to Saturn. Future work is needed to isolate the error
 sources and improve the simulation.
 
+The editor exposes that divergence numerically as two telemetry signals
+for each simulated probe:
+
+- `position_error_km`: Euclidean distance from the matching SPICE truth
+  position, in kilometers.
+- `velocity_error_mps`: Euclidean difference from the matching SPICE truth
+  velocity, in meters per second.
+
+The default schematic graphs both signals for Voyager 1 and Voyager 2.
+These diagnostics make it possible to see when the trajectory starts
+diverging instead of relying only on the red simulated and green truth
+paths in the 3D viewport.
+
 
 ## Setup
 
@@ -42,8 +55,7 @@ cd examples/voyager
 ```
 
 This writes the kernels into `examples/voyager/nasa_spice_data/`,
-which [main.py](/mnt/share/elodin/code/elodin-agent1/examples/voyager/main.py)
-loads at startup.
+which `main.py` loads at startup.
 
 
 ## Run
