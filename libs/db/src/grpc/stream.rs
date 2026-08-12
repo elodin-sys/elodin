@@ -1237,6 +1237,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_follower_emits_once_seek_reaches_message() {
+        let directory = TempDir::new().unwrap();
+        let log = MsgLog::create(directory.path()).unwrap();
+        log.push(Timestamp(200), b"later").unwrap();
+        let initial = Playback {
+            playing: false,
+            timestamp: Timestamp(100),
+            seek_generation: 0,
+            timestep: Duration::from_micros(1),
+            frequency: 100,
+        };
+        let (control_tx, control_rx) = watch::channel(initial);
+        let (tx, mut rx) = mpsc::channel(4);
+        let task = tokio::spawn(follow_shared_messages(
+            vec![("demo.log".into(), log)],
+            tx,
+            control_rx,
+        ));
+        // No message exists at or before the cursor, so nothing is emitted.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), rx.recv())
+                .await
+                .is_err()
+        );
+        let mut seek = initial;
+        seek.timestamp = Timestamp(200);
+        seek.seek_generation = 1;
+        control_tx.send(seek).unwrap();
+        assert_eq!(rx.recv().await.unwrap().unwrap().timestamp_ns, 200_000);
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn transport_invalid_control_terminates_stream() {
         let (_directory, _service, mut client, server) = transport_service().await;
         let (tx, rx) = mpsc::channel(4);

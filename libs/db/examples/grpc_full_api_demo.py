@@ -316,25 +316,28 @@ def exercise_vector_downsample(query, call_metadata):
 
 def exercise_streams(channel, call_metadata, component, timestamp):
     stub = stream_pb2_grpc.StreamServiceStub(channel)
-    requests = iter(
-        [
-            stream_pb2.StreamComponentsRequest(
-                open=stream_pb2.StreamOpen(
-                    components=[component],
-                    fixed_rate=stream_pb2.FixedRate(
-                        initial=stream_pb2.INITIAL_TIMESTAMP_MANUAL,
-                        initial_timestamp_ns=timestamp,
-                        timestep_ns=1_000_000,
-                        frequency=100,
-                    ),
-                )
-            ),
-            stream_pb2.StreamComponentsRequest(
-                control=stream_pb2.StreamControl(playing=False, seek_ns=timestamp)
-            ),
-        ]
+    component_requests = queue.Queue()
+    responses = stub.StreamComponents(
+        requests_from(component_requests), metadata=call_metadata, timeout=15
     )
-    responses = stub.StreamComponents(requests, metadata=call_metadata)
+    component_requests.put(
+        stream_pb2.StreamComponentsRequest(
+            open=stream_pb2.StreamOpen(
+                components=[component],
+                fixed_rate=stream_pb2.FixedRate(
+                    initial=stream_pb2.INITIAL_TIMESTAMP_MANUAL,
+                    initial_timestamp_ns=timestamp,
+                    timestep_ns=1_000_000,
+                    frequency=100,
+                ),
+            )
+        )
+    )
+    component_requests.put(
+        stream_pb2.StreamComponentsRequest(
+            control=stream_pb2.StreamControl(playing=False, seek_ns=timestamp)
+        )
+    )
     seen = set()
     stream_id = None
     for response in responses:
@@ -364,12 +367,22 @@ def exercise_streams(channel, call_metadata, component, timestamp):
             ]
         ),
         metadata=call_metadata,
+        timeout=15,
+    )
+    # The demo log was published after `timestamp`, so the paused shared clock
+    # has no message at or before its cursor yet; seek the owning component
+    # stream forward and the follower emits the log.
+    component_requests.put(
+        stream_pb2.StreamComponentsRequest(
+            control=stream_pb2.StreamControl(seek_ns=time.monotonic_ns())
+        )
     )
     if next(message_stream).name != "grpc.demo.log":
         raise RuntimeError("message stream did not bind to component playback")
     message_stream.cancel()
     responses.cancel()
-    events = stub.WatchDb(stream_pb2.WatchDbRequest(), metadata=call_metadata)
+    component_requests.put(None)
+    events = stub.WatchDb(stream_pb2.WatchDbRequest(), metadata=call_metadata, timeout=15)
     initial = {next(events).WhichOneof("event"), next(events).WhichOneof("event")}
     events.cancel()
     if initial != {"last_updated_ns", "config"}:
