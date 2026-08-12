@@ -260,6 +260,7 @@ impl Plugin for EditorPlugin {
                     .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
                     .build(),
             )
+            .add_plugins(plugins::gpu_info::GpuInfoPlugin)
             .add_plugins(plugins::kdl_document::plugin)
             .add_plugins(skybox_asset_plugin())
             .add_plugins(skybox_generation_plugin())
