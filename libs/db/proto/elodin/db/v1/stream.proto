@@ -6,7 +6,13 @@ import "elodin/db/v1/common.proto";
 import "elodin/db/v1/query.proto";
 
 service StreamService {
+  // Coalescing latest-value stream: each update carries the newest row for a
+  // component at send time, so intermediate rows may be skipped under load.
+  // Use QueryService.GetTimeSeries for lossless historical reads.
   rpc StreamComponents(stream StreamComponentsRequest) returns (stream StreamComponentsResponse);
+  // Live mode delivers every message appended while the stream is connected;
+  // there is no resume across reconnects. Fixed-rate mode samples the message
+  // at or before the playback cursor (coalescing).
   rpc StreamMessages(stream StreamMessagesRequest) returns (stream StreamMessagesResponse);
   rpc WatchDb(WatchDbRequest) returns (stream WatchDbResponse);
 }
@@ -25,8 +31,8 @@ enum InitialTimestamp {
 message FixedRate {
   InitialTimestamp initial = 1;
   sfixed64 initial_timestamp_ns = 2;
-  uint64 timestep_ns = 3;
-  uint64 frequency = 4;
+  uint64 timestep_ns = 3; // >= 1000: the database records at 1 µs resolution
+  uint64 frequency = 4; // frames per second, non-zero
 }
 
 message StreamOpen {
@@ -38,11 +44,13 @@ message StreamOpen {
   }
 }
 
+// Only valid on streams that own a fixed-rate clock. An invalid control
+// terminates the stream with INVALID_ARGUMENT.
 message StreamControl {
   optional bool playing = 1;
   optional sfixed64 seek_ns = 2;
-  optional uint64 timestep_ns = 3;
-  optional uint64 frequency = 4;
+  optional uint64 timestep_ns = 3; // >= 1000
+  optional uint64 frequency = 4; // non-zero
 }
 
 message StreamComponentsRequest {
@@ -83,8 +91,11 @@ message MessageStreamOpen {
     FixedRate fixed_rate = 3;
   }
 
-  // 0 = independent clock; shared-clock controls go to StreamComponents.
-  uint64 playback_stream_id = 4;
+  // Attach to the fixed-rate clock owned by a component stream: this stream
+  // mirrors the owner's playback position (including pauses and seeks) and
+  // ends when the owning stream ends. Controls go to the owning stream.
+  // Omitted = independent clock from `fixed_rate`.
+  optional uint64 playback_stream_id = 4;
 }
 
 message StreamMessagesRequest {

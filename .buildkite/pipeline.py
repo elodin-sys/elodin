@@ -80,6 +80,11 @@ test_steps = [
                 label="buf lint",
                 command="buf lint",
             ),
+            nix_step(
+                label="buf breaking",
+                # Scoped to the db module; skips until the baseline branch has it.
+                command="git fetch --force origin main:buf-breaking-baseline && if git cat-file -e buf-breaking-baseline:libs/db/proto 2>/dev/null; then buf breaking --against '.git#branch=buf-breaking-baseline,subdir=libs/db/proto'; else echo 'no protos in baseline; skipping'; fi",
+            ),
         ],
     ),
     nix_step(

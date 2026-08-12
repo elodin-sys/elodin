@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{Arc, atomic::Ordering},
     time::Duration,
 };
 
@@ -12,10 +12,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use super::v1::{
-    self, ComponentSchemaConflict, IngestRequest, IngestResponse, SessionAccept, SessionOpen,
-    SessionReject, TelemetryBatch, WriteAck, component_value::Value, ingest_request,
-    ingest_response, ingest_service_server::IngestService, row,
+use super::{
+    common::{self, SessionKey, SessionResume},
+    v1::{
+        self, ComponentSchemaConflict, IngestRequest, IngestResponse, SessionAccept, SessionOpen,
+        SessionReject, TelemetryBatch, WriteAck, component_value::Value, ingest_request,
+        ingest_response, ingest_service_server::IngestService, row,
+    },
 };
 use crate::{ComponentRowApplyError, ComponentSchema as DbComponentSchema, DB, Error as DbError};
 
@@ -33,13 +36,7 @@ pub(super) const MAX_GRPC_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 #[derive(Clone)]
 pub(super) struct IngestServiceImpl {
     db: Arc<DB>,
-    resume: Arc<Mutex<HashMap<SessionKey, u64>>>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct SessionKey {
-    client_name: String,
-    client_instance_id: Vec<u8>,
+    resume: Arc<SessionResume>,
 }
 
 #[derive(Clone)]
@@ -73,6 +70,9 @@ struct Session {
     messages: HashMap<u32, ValidatedMessage>,
     current_seq: u64,
     ack_policy: NormalizedAckPolicy,
+    // Rows at or below this open-time watermark may be crash-window replays
+    // and are content-deduplicated; later rows always append.
+    dedup_below: Timestamp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,10 +99,8 @@ enum ApplyRowFailure {
 
 impl IngestServiceImpl {
     pub(super) fn new(db: Arc<DB>) -> Self {
-        Self {
-            db,
-            resume: Arc::new(Mutex::new(HashMap::new())),
-        }
+        let resume = Arc::new(SessionResume::new(db.path.clone(), ".grpc-ingest-session-"));
+        Self { db, resume }
     }
 
     fn open_session(&self, open: SessionOpen) -> Result<OpenOutcome, Status> {
@@ -224,12 +222,7 @@ impl IngestServiceImpl {
             client_name: open.client_name,
             client_instance_id: open.client_instance_id,
         };
-        let current_seq = *self
-            .resume
-            .lock()
-            .map_err(|_| Status::internal("gRPC resume state lock poisoned"))?
-            .get(&key)
-            .unwrap_or(&0);
+        let current_seq = self.resume.get(&key);
 
         let mut order = (0..messages.len()).collect::<Vec<_>>();
         order.sort_unstable_by(|left, right| messages[*left].name.cmp(&messages[*right].name));
@@ -253,6 +246,7 @@ impl IngestServiceImpl {
                 messages: registered,
                 current_seq,
                 ack_policy,
+                dedup_below: self.db.last_updated.latest(),
             },
         ))
     }
@@ -286,6 +280,9 @@ impl IngestServiceImpl {
         let mut responses = Vec::new();
         for (index, row) in batch.rows.iter().enumerate() {
             let seq = batch.first_seq + index as u64;
+            if seq <= session.current_seq {
+                continue;
+            }
             match self.apply_row(session, row) {
                 Ok(()) => {}
                 Err(ApplyRowFailure::Row(error)) => {
@@ -297,23 +294,29 @@ impl IngestServiceImpl {
                 }
                 Err(ApplyRowFailure::Fatal(status)) => return Err(status),
             }
-            if seq == session.current_seq.saturating_add(1) {
-                session.current_seq = seq;
-            }
+            session.current_seq = seq;
         }
 
-        {
-            let mut resume = self
-                .resume
-                .lock()
-                .map_err(|_| Status::internal("gRPC resume state lock poisoned"))?;
-            let stored = resume.entry(session.key.clone()).or_default();
-            *stored = (*stored).max(session.current_seq);
-        }
+        self.resume.remember(&session.key, session.current_seq);
         responses.push(response(ingest_response::Resp::Ack(WriteAck {
             through_seq: session.current_seq,
         })));
         Ok(responses)
+    }
+
+    // Persist the resume position, then send the ack. Persistence failures
+    // are non-fatal: the client replays from an older point and replays
+    // deduplicate.
+    async fn flush_ack(
+        &self,
+        key: &SessionKey,
+        tx: &mpsc::Sender<Result<IngestResponse, Status>>,
+        ack: WriteAck,
+    ) -> bool {
+        if let Err(error) = self.resume.persist(key, ack.through_seq) {
+            tracing::warn!(?error, "failed to persist gRPC ingest resume state");
+        }
+        queue_ack(tx, ack).await
     }
 
     async fn run_session(
@@ -336,7 +339,7 @@ impl IngestServiceImpl {
                     let ack = pending_ack.take().expect("pending ack must have a deadline");
                     last_sent_ack = ack.through_seq;
                     ack_deadline = None;
-                    if !queue_ack(&tx, ack).await {
+                    if !self.flush_ack(&session.key, &tx, ack).await {
                         return;
                     }
                 }
@@ -345,7 +348,7 @@ impl IngestServiceImpl {
                         Ok(Some(request)) => request,
                         Ok(None) => {
                             if let Some(ack) = pending_ack.take() {
-                                let _ = queue_ack(&tx, ack).await;
+                                let _ = self.flush_ack(&session.key, &tx, ack).await;
                             }
                             return;
                         }
@@ -413,7 +416,7 @@ impl IngestServiceImpl {
                         let ack = pending_ack.take().expect("pending ack was just set");
                         last_sent_ack = ack.through_seq;
                         ack_deadline = None;
-                        if !queue_ack(&tx, ack).await {
+                        if !self.flush_ack(&session.key, &tx, ack).await {
                             return;
                         }
                     }
@@ -487,19 +490,27 @@ impl IngestServiceImpl {
             }
         }
 
-        let timestamp_ns = embedded_timestamp_ns.unwrap_or(row.time_monotonic_ns);
-        if embedded_timestamp_ns.is_some()
-            && row.time_monotonic_ns != 0
-            && row.time_monotonic_ns != timestamp_ns
-        {
-            return Err(ApplyRowFailure::Row(RowFailure {
-                component: embedded_timestamp_component.unwrap_or_default().to_string(),
-                detail: "time_monotonic_ns does not match the packed timestamp source".to_string(),
-            }));
-        }
-        let timestamp = Timestamp(timestamp_ns / 1000);
+        let timestamp_ns = match (embedded_timestamp_ns, row.time_monotonic_ns) {
+            (Some(embedded), Some(explicit)) if embedded != explicit => {
+                return Err(ApplyRowFailure::Row(RowFailure {
+                    component: embedded_timestamp_component.unwrap_or_default().to_string(),
+                    detail: "time_monotonic_ns does not match the packed timestamp source"
+                        .to_string(),
+                }));
+            }
+            (Some(embedded), _) => embedded,
+            (None, Some(explicit)) => explicit,
+            (None, None) => {
+                return Err(ApplyRowFailure::Row(RowFailure {
+                    component: String::new(),
+                    detail: "row requires time_monotonic_ns or a timestamp_source component"
+                        .to_string(),
+                }));
+            }
+        };
+        let timestamp = common::record_timestamp(timestamp_ns);
         self.db
-            .apply_component_row(timestamp, &values)
+            .apply_component_row(timestamp, &values, timestamp <= session.dedup_below)
             .map_err(|error| match error {
                 ComponentRowApplyError::TimeTravel(component_id) => {
                     ApplyRowFailure::Row(RowFailure {
@@ -1355,7 +1366,7 @@ mod tests {
         }
         Row {
             message_handle: handle,
-            time_monotonic_ns: time_ns,
+            time_monotonic_ns: Some(time_ns),
             payload: Some(row::Payload::Packed(packed)),
         }
     }
@@ -1363,7 +1374,7 @@ mod tests {
     fn typed_row(handle: u32, time_ns: i64, flags: [bool; 2]) -> Row {
         Row {
             message_handle: handle,
-            time_monotonic_ns: time_ns,
+            time_monotonic_ns: Some(time_ns),
             payload: Some(row::Payload::Typed(TypedValues {
                 values: vec![
                     ComponentValue {
@@ -1737,7 +1748,7 @@ mod tests {
 
         let packed_time = 1_234_000i64;
         let mut packed = packed_row(packed_handle, packed_time, [1.5, -2.0]);
-        packed.time_monotonic_ns = 0;
+        packed.time_monotonic_ns = None;
         let responses = service
             .process_batch(
                 &mut session,
@@ -1859,6 +1870,36 @@ mod tests {
             .unwrap();
         assert_eq!(ack(responses.last().unwrap()), Some(2));
         assert!(!responses.iter().any(is_row_error));
+        assert_eq!(
+            db.with_state(|state| state
+                .get_component(ComponentId::new("PACKED.VEC"))
+                .unwrap()
+                .time_series
+                .sample_count()),
+            2
+        );
+    }
+
+    #[test]
+    fn identical_rows_with_new_sequences_are_preserved() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let (accept, mut session) = accepted(&service, "client", b"instance", packed_schema());
+        let handle = accept.message_handles["PackedMessage"];
+        for seq in 1..=2 {
+            let responses = service
+                .process_batch(
+                    &mut session,
+                    TelemetryBatch {
+                        first_seq: seq,
+                        rows: vec![packed_row(handle, 1_000_000, [1.0, 2.0])],
+                    },
+                )
+                .unwrap();
+            assert!(!responses.iter().any(is_row_error));
+        }
+        // Fresh rows above the open-time watermark always append, even when
+        // their content matches an existing occurrence.
         assert_eq!(
             db.with_state(|state| state
                 .get_component(ComponentId::new("PACKED.VEC"))
@@ -2043,7 +2084,9 @@ mod tests {
     fn replay_fills_components_missing_from_a_partial_row() {
         let (_dir, db) = test_db();
         let service = IngestServiceImpl::new(db.clone());
-        let (accept, mut session) = accepted(&service, "client", b"instance", packed_schema());
+        // Register the schema, then simulate a crash that persisted only one
+        // component of the row before the client reconnects and replays.
+        let (_, _) = accepted(&service, "client", b"instance", packed_schema());
         db.with_state(|state| {
             state
                 .get_component(ComponentId::new("PACKED.TIME"))
@@ -2052,6 +2095,8 @@ mod tests {
                 .push_buf(Timestamp(1000), &1_000_000u64.to_le_bytes())
                 .unwrap();
         });
+        crate::AtomicTimestampExt::update_max(&db.last_updated, Timestamp(1000));
+        let (accept, mut session) = accepted(&service, "client", b"instance", packed_schema());
         service
             .process_batch(
                 &mut session,
@@ -2401,6 +2446,37 @@ mod tests {
             assert!(error.message().contains(field));
             client = harness.connect().await;
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn transport_acked_resume_survives_service_restart() {
+        let (harness, mut client) = TransportHarness::start().await;
+        let (tx, mut responses, accept) = open_transport_session(
+            &mut client,
+            open_with_ack_policy("restart-client", b"instance", 1, 10_000),
+        )
+        .await;
+        assert_eq!(accept.resume_from_seq, 0);
+        let handle = accept.message_handles["PackedMessage"];
+        tx.send(batch_request(
+            1,
+            vec![packed_row(handle, 1_000_000, [1.0, 2.0])],
+        ))
+        .await
+        .unwrap();
+        loop {
+            if ack(&next_response(&mut responses).await) == Some(1) {
+                break;
+            }
+        }
+        drop(tx);
+
+        // A fresh service over the same database simulates a restarted
+        // process: the resume position persisted at ack time is recovered.
+        let restarted = IngestServiceImpl::new(harness._db.clone());
+        let (accept, _session) =
+            accepted(&restarted, "restart-client", b"instance", packed_schema());
+        assert_eq!(accept.resume_from_seq, 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

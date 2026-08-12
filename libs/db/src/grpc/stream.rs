@@ -121,11 +121,12 @@ impl StreamServiceImpl {
             v1::InitialTimestamp::Latest | v1::InitialTimestamp::Unspecified => {
                 self.db.last_updated.latest()
             }
-            v1::InitialTimestamp::Manual => Timestamp(fixed.initial_timestamp_ns / 1000),
+            v1::InitialTimestamp::Manual => common::record_timestamp(fixed.initial_timestamp_ns),
         };
-        if fixed.timestep_ns == 0 || fixed.frequency == 0 {
+        validate_timestep(fixed.timestep_ns)?;
+        if fixed.frequency == 0 {
             return Err(Status::invalid_argument(
-                "fixed-rate timestep_ns and frequency must be non-zero",
+                "fixed-rate frequency must be non-zero",
             ));
         }
         Ok(Playback {
@@ -204,7 +205,7 @@ impl StreamService for StreamServiceImpl {
         match open.behavior {
             Some(v1::stream_open::Behavior::FixedRate(fixed)) => {
                 let playback = self.playback(&fixed)?;
-                let (stream_id, control_tx, control_rx, registration) =
+                let (stream_id, control_tx, _control_rx, registration) =
                     self.register_playback(playback);
                 tx.send(Ok(StreamComponentsResponse {
                     response: Some(stream_components_response::Response::Opened(
@@ -213,11 +214,15 @@ impl StreamService for StreamServiceImpl {
                 }))
                 .await
                 .map_err(|_| Status::cancelled("client closed response stream"))?;
-                tokio::spawn(read_component_controls(incoming, control_tx));
+                tokio::spawn(read_component_controls(
+                    incoming,
+                    control_tx.clone(),
+                    tx.clone(),
+                ));
                 tokio::spawn(run_fixed_components(
                     components,
                     tx,
-                    control_rx,
+                    control_tx,
                     registration,
                 ));
             }
@@ -252,28 +257,36 @@ impl StreamService for StreamServiceImpl {
             ));
         };
         let messages = self.messages(&open.messages)?;
-        let playback_stream_id = open.playback_stream_id;
         let (tx, rx) = mpsc::channel(32);
         match open.behavior {
             Some(v1::message_stream_open::Behavior::FixedRate(fixed)) => {
-                let shared_playback = playback_stream_id != 0;
-                let (control_tx, control_rx) = if playback_stream_id == 0 {
-                    watch::channel(self.playback(&fixed)?)
-                } else {
-                    let control_tx = self
-                        .playback_sender(playback_stream_id)
-                        .ok_or_else(|| Status::not_found("playback_stream_id not found"))?;
-                    let control_rx = control_tx.subscribe();
-                    (control_tx, control_rx)
-                };
-                if shared_playback {
-                    tokio::spawn(reject_message_controls(incoming, tx.clone()));
-                } else {
-                    tokio::spawn(read_message_controls(incoming, control_tx));
+                match open.playback_stream_id {
+                    None => {
+                        let (control_tx, _control_rx) = watch::channel(self.playback(&fixed)?);
+                        tokio::spawn(read_message_controls(
+                            incoming,
+                            control_tx.clone(),
+                            tx.clone(),
+                        ));
+                        tokio::spawn(run_fixed_messages(messages, tx, control_tx));
+                    }
+                    Some(0) => {
+                        return Err(Status::invalid_argument(
+                            "playback_stream_id must be non-zero",
+                        ));
+                    }
+                    Some(id) => {
+                        let control_tx = self
+                            .playback_sender(id)
+                            .ok_or_else(|| Status::not_found("playback_stream_id not found"))?;
+                        let control_rx = control_tx.subscribe();
+                        drop(control_tx);
+                        tokio::spawn(reject_message_controls(incoming, tx.clone()));
+                        tokio::spawn(follow_shared_messages(messages, tx, control_rx));
+                    }
                 }
-                tokio::spawn(run_fixed_messages(messages, tx, control_rx));
             }
-            _ if playback_stream_id != 0 => {
+            _ if open.playback_stream_id.is_some() => {
                 return Err(Status::invalid_argument(
                     "playback_stream_id requires fixed-rate behavior",
                 ));
@@ -415,24 +428,26 @@ async fn run_immediate_component(
     }
 }
 
+// Owns the playback clock: the advancing cursor is published through the
+// watch channel so late-attaching shared message streams start at, and stay
+// on, the current position.
 async fn run_fixed_components(
     components: Vec<(String, Component)>,
     tx: mpsc::Sender<Result<StreamComponentsResponse, Status>>,
-    mut control: watch::Receiver<Playback>,
+    control_tx: watch::Sender<Playback>,
     _registration: PlaybackRegistration,
 ) {
-    let mut cursor = control.borrow().timestamp;
-    let mut seek_generation = control.borrow().seek_generation;
+    let mut control = control_tx.subscribe();
     let mut emitted = None;
     loop {
-        let state = *control.borrow();
+        let state = *control.borrow_and_update();
+        if emitted != Some(state.timestamp)
+            && !send_component_frame(&components, &tx, state.timestamp).await
+        {
+            return;
+        }
+        emitted = Some(state.timestamp);
         if !state.playing {
-            if emitted != Some(cursor) {
-                if !send_component_frame(&components, &tx, cursor).await {
-                    return;
-                }
-                emitted = Some(cursor);
-            }
             tokio::select! {
                 result = control.changed() => {
                     if result.is_err() {
@@ -441,30 +456,29 @@ async fn run_fixed_components(
                 }
                 _ = tx.closed() => return,
             }
-            apply_seek(&control, &mut cursor, &mut seek_generation);
             continue;
         }
-        if !send_component_frame(&components, &tx, cursor).await {
-            return;
-        }
-        emitted = Some(cursor);
         let sleep = tokio::time::sleep(Duration::from_secs_f64(1.0 / state.frequency as f64));
         tokio::pin!(sleep);
         tokio::select! {
             _ = &mut sleep => {
-                cursor = Timestamp(
-                    cursor.0.saturating_add((state.timestep.as_nanos() / 1000) as i64)
-                );
+                advance_cursor(&control_tx, &state);
             }
             result = control.changed() => {
                 if result.is_err() {
                     return;
                 }
-                apply_seek(&control, &mut cursor, &mut seek_generation);
             }
             _ = tx.closed() => return,
         }
     }
+}
+
+fn advance_cursor(control_tx: &watch::Sender<Playback>, state: &Playback) {
+    let step = (state.timestep.as_nanos() / 1000) as i64;
+    control_tx.send_modify(|playback| {
+        playback.timestamp = Timestamp(playback.timestamp.0.saturating_add(step));
+    });
 }
 
 async fn send_component_frame(
@@ -490,16 +504,26 @@ async fn send_component_frame(
     .is_ok()
 }
 
+fn validate_timestep(timestep_ns: u64) -> Result<(), Status> {
+    if timestep_ns < 1_000 {
+        return Err(Status::invalid_argument(
+            "timestep_ns must be at least 1000: the database records at 1 µs resolution",
+        ));
+    }
+    Ok(())
+}
+
 fn apply_control(state: &mut Playback, control: StreamControl) -> Result<(), Status> {
     if let Some(playing) = control.playing {
         state.playing = playing;
     }
     if let Some(timestamp) = control.seek_ns {
-        state.timestamp = Timestamp(timestamp / 1000);
+        state.timestamp = common::record_timestamp(timestamp);
         state.seek_generation = state.seek_generation.wrapping_add(1);
     }
     if let Some(timestep) = control.timestep_ns {
-        state.timestep = common::duration(timestep)?;
+        validate_timestep(timestep)?;
+        state.timestep = Duration::from_nanos(timestep);
     }
     if let Some(frequency) = control.frequency {
         if frequency == 0 {
@@ -510,33 +534,55 @@ fn apply_control(state: &mut Playback, control: StreamControl) -> Result<(), Sta
     Ok(())
 }
 
+// send_if_modified applies the control atomically against concurrent cursor
+// advances; an invalid control terminates the stream instead of being
+// silently dropped.
+fn try_control(control: &watch::Sender<Playback>, update: StreamControl) -> Result<(), Status> {
+    let mut result = Ok(());
+    control.send_if_modified(|state| {
+        result = apply_control(state, update);
+        result.is_ok()
+    });
+    result
+}
+
 async fn read_component_controls(
     mut incoming: tonic::Streaming<StreamComponentsRequest>,
     control: watch::Sender<Playback>,
+    tx: mpsc::Sender<Result<StreamComponentsResponse, Status>>,
 ) {
     while let Ok(Some(request)) = incoming.message().await {
-        let Some(stream_components_request::Request::Control(update)) = request.request else {
-            continue;
+        let status = match request.request {
+            Some(stream_components_request::Request::Control(update)) => {
+                match try_control(&control, update) {
+                    Ok(()) => continue,
+                    Err(status) => status,
+                }
+            }
+            _ => Status::invalid_argument("only StreamControl may follow StreamOpen"),
         };
-        let mut next = *control.borrow();
-        if apply_control(&mut next, update).is_err() || control.send(next).is_err() {
-            return;
-        }
+        let _ = tx.send(Err(status)).await;
+        return;
     }
 }
 
 async fn read_message_controls(
     mut incoming: tonic::Streaming<StreamMessagesRequest>,
     control: watch::Sender<Playback>,
+    tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
 ) {
     while let Ok(Some(request)) = incoming.message().await {
-        let Some(stream_messages_request::Request::Control(update)) = request.request else {
-            continue;
+        let status = match request.request {
+            Some(stream_messages_request::Request::Control(update)) => {
+                match try_control(&control, update) {
+                    Ok(()) => continue,
+                    Err(status) => status,
+                }
+            }
+            _ => Status::invalid_argument("only StreamControl may follow MessageStreamOpen"),
         };
-        let mut next = *control.borrow();
-        if apply_control(&mut next, update).is_err() || control.send(next).is_err() {
-            return;
-        }
+        let _ = tx.send(Err(status)).await;
+        return;
     }
 }
 
@@ -566,28 +612,27 @@ async fn reject_message_controls(
     }
 }
 
+// Delivers the latest existing message on subscribe, then drains every
+// subsequent append by index so bursts and equal timestamps are not skipped.
 async fn run_live_message(
     (name, log): (String, MsgLog),
     tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
 ) {
     let waiter = log.waiter();
-    let mut sent = None;
+    let mut next = log.timestamps().len().saturating_sub(1);
     loop {
-        if let Some((timestamp, payload)) = log.latest()
-            && sent != Some(timestamp)
-        {
-            if tx
-                .send(Ok(StreamMessagesResponse {
-                    name: name.clone(),
-                    timestamp_ns: timestamp.0.saturating_mul(1000),
-                    payload: payload.to_vec(),
-                }))
-                .await
-                .is_err()
-            {
+        // A truncated log restarts indexing from its new tail.
+        next = next.min(log.timestamps().len());
+        while let Some((timestamp, payload)) = log.get_index(next) {
+            let response = StreamMessagesResponse {
+                name: name.clone(),
+                timestamp_ns: timestamp.0.saturating_mul(1000),
+                payload: payload.to_vec(),
+            };
+            if tx.send(Ok(response)).await.is_err() {
                 return;
             }
-            sent = Some(timestamp);
+            next += 1;
         }
         tokio::select! {
             _ = waiter.wait() => {}
@@ -596,20 +641,26 @@ async fn run_live_message(
     }
 }
 
+// Owns an independent message playback clock; the same publish-through-watch
+// structure as run_fixed_components.
 async fn run_fixed_messages(
     messages: Vec<(String, MsgLog)>,
     tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
-    mut control: watch::Receiver<Playback>,
+    control_tx: watch::Sender<Playback>,
 ) {
+    let mut control = control_tx.subscribe();
     let mut sent = HashMap::<String, Timestamp>::new();
-    let mut cursor = control.borrow().timestamp;
     let mut seek_generation = control.borrow().seek_generation;
     loop {
-        let state = *control.borrow();
+        let state = *control.borrow_and_update();
+        if state.seek_generation != seek_generation {
+            seek_generation = state.seek_generation;
+            sent.clear();
+        }
+        if !send_message_frame(&messages, &tx, state.timestamp, &mut sent).await {
+            return;
+        }
         if !state.playing {
-            if !send_message_frame(&messages, &tx, cursor, &mut sent).await {
-                return;
-            }
             tokio::select! {
                 result = control.changed() => {
                     if result.is_err() {
@@ -618,28 +669,17 @@ async fn run_fixed_messages(
                 }
                 _ = tx.closed() => return,
             }
-            if apply_seek(&control, &mut cursor, &mut seek_generation) {
-                sent.clear();
-            }
             continue;
-        }
-        if !send_message_frame(&messages, &tx, cursor, &mut sent).await {
-            return;
         }
         let sleep = tokio::time::sleep(Duration::from_secs_f64(1.0 / state.frequency as f64));
         tokio::pin!(sleep);
         tokio::select! {
             _ = &mut sleep => {
-                cursor = Timestamp(
-                    cursor.0.saturating_add((state.timestep.as_nanos() / 1000) as i64)
-                );
+                advance_cursor(&control_tx, &state);
             }
             result = control.changed() => {
                 if result.is_err() {
                     return;
-                }
-                if apply_seek(&control, &mut cursor, &mut seek_generation) {
-                    sent.clear();
                 }
             }
             _ = tx.closed() => return,
@@ -647,18 +687,33 @@ async fn run_fixed_messages(
     }
 }
 
-fn apply_seek(
-    control: &watch::Receiver<Playback>,
-    cursor: &mut Timestamp,
-    generation: &mut u64,
-) -> bool {
-    let state = *control.borrow();
-    if state.seek_generation == *generation {
-        return false;
+// Mirrors a clock owned by a component stream: emits whenever the owner
+// publishes a new position and ends when the owning stream ends.
+async fn follow_shared_messages(
+    messages: Vec<(String, MsgLog)>,
+    tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
+    mut control: watch::Receiver<Playback>,
+) {
+    let mut sent = HashMap::<String, Timestamp>::new();
+    let mut seek_generation = control.borrow().seek_generation;
+    loop {
+        let state = *control.borrow_and_update();
+        if state.seek_generation != seek_generation {
+            seek_generation = state.seek_generation;
+            sent.clear();
+        }
+        if !send_message_frame(&messages, &tx, state.timestamp, &mut sent).await {
+            return;
+        }
+        tokio::select! {
+            result = control.changed() => {
+                if result.is_err() {
+                    return;
+                }
+            }
+            _ = tx.closed() => return,
+        }
     }
-    *cursor = state.timestamp;
-    *generation = state.seek_generation;
-    true
 }
 
 async fn send_message_frame(
@@ -751,8 +806,12 @@ mod tests {
                 )
                 .unwrap();
         });
-        db.apply_component_row(Timestamp(100), &[(id, 1.0f64.to_le_bytes().to_vec())])
-            .unwrap();
+        db.apply_component_row(
+            Timestamp(100),
+            &[(id, 1.0f64.to_le_bytes().to_vec())],
+            false,
+        )
+        .unwrap();
         let service = StreamServiceImpl::new(db);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -804,12 +863,12 @@ mod tests {
             timestep: Duration::from_micros(1),
             frequency: 100,
         };
-        let (control_tx, control_rx) = watch::channel(initial);
+        let (control_tx, _control_rx) = watch::channel(initial);
         let playbacks = Arc::new(Mutex::new(HashMap::from([(1, control_tx.clone())])));
         let task = tokio::spawn(run_fixed_components(
             vec![("demo.signal".into(), component)],
             tx,
-            control_rx,
+            control_tx.clone(),
             PlaybackRegistration { id: 1, playbacks },
         ));
 
@@ -873,6 +932,18 @@ mod tests {
         assert_eq!(state.seek_generation, 1);
         assert_eq!(state.timestep, Duration::from_nanos(2_000));
         assert_eq!(state.frequency, 120);
+
+        // Sub-microsecond timesteps would freeze the cursor at the database's
+        // 1 µs resolution.
+        let error = apply_control(
+            &mut state,
+            StreamControl {
+                timestep_ns: Some(999),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
     }
 
     #[tokio::test]
@@ -908,6 +979,67 @@ mod tests {
         log.push(Timestamp(11), b"second").unwrap();
         assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"second");
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn live_message_stream_drains_bursts_and_equal_timestamps() {
+        let directory = TempDir::new().unwrap();
+        let log = MsgLog::create(directory.path()).unwrap();
+        log.push(Timestamp(10), b"first").unwrap();
+        let (tx, mut rx) = mpsc::channel(8);
+        let task = tokio::spawn(run_live_message(("demo.log".into(), log.clone()), tx));
+        assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"first");
+        // Burst appended before the task wakes, including a duplicate timestamp.
+        log.push(Timestamp(11), b"second").unwrap();
+        log.push(Timestamp(11), b"third").unwrap();
+        log.push(Timestamp(12), b"fourth").unwrap();
+        for expected in [b"second".as_slice(), b"third", b"fourth"] {
+            assert_eq!(rx.recv().await.unwrap().unwrap().payload, expected);
+        }
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn shared_playback_attaches_at_current_cursor() {
+        let directory = TempDir::new().unwrap();
+        let component = component(&directory);
+        let (frame_tx, frame_rx) = mpsc::channel(64);
+        let initial = Playback {
+            playing: true,
+            timestamp: Timestamp(100),
+            seek_generation: 0,
+            timestep: Duration::from_micros(1),
+            frequency: 500,
+        };
+        let (control_tx, mut watcher) = watch::channel(initial);
+        let playbacks = Arc::new(Mutex::new(HashMap::from([(1, control_tx.clone())])));
+        let owner = tokio::spawn(run_fixed_components(
+            vec![("demo.signal".into(), component)],
+            frame_tx,
+            control_tx.clone(),
+            PlaybackRegistration { id: 1, playbacks },
+        ));
+        // The owner publishes its advancing cursor into the shared clock.
+        watcher
+            .wait_for(|state| state.timestamp > Timestamp(100))
+            .await
+            .unwrap();
+
+        let log = MsgLog::create(directory.path().join("log")).unwrap();
+        log.push(Timestamp(101), b"attached").unwrap();
+        let (message_tx, mut message_rx) = mpsc::channel(8);
+        let follower = tokio::spawn(follow_shared_messages(
+            vec![("demo.log".into(), log)],
+            message_tx,
+            control_tx.subscribe(),
+        ));
+        let first = message_rx.recv().await.unwrap().unwrap();
+        // A late attacher starts at the owner's current position, not the
+        // original open timestamp.
+        assert!(first.timestamp_ns >= 101_000);
+        drop(frame_rx);
+        owner.await.unwrap();
+        follower.abort();
     }
 
     #[tokio::test]
@@ -1005,6 +1137,49 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_invalid_control_terminates_stream() {
+        let (_directory, _service, mut client, server) = transport_service().await;
+        let (tx, rx) = mpsc::channel(4);
+        tx.send(StreamComponentsRequest {
+            request: Some(stream_components_request::Request::Open(v1::StreamOpen {
+                components: vec!["demo.signal".into()],
+                behavior: Some(v1::stream_open::Behavior::FixedRate(v1::FixedRate {
+                    initial: v1::InitialTimestamp::Manual as i32,
+                    initial_timestamp_ns: 100_000,
+                    timestep_ns: 1_000_000,
+                    frequency: 100,
+                })),
+            })),
+        })
+        .await
+        .unwrap();
+        let mut responses = client
+            .stream_components(ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        tx.send(StreamComponentsRequest {
+            request: Some(stream_components_request::Request::Control(StreamControl {
+                frequency: Some(0),
+                ..Default::default()
+            })),
+        })
+        .await
+        .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Err(error) = responses.message().await {
+                    break error;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
         server.abort();
     }
 

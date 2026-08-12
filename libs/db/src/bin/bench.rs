@@ -746,8 +746,9 @@ async fn run_writer_grpc(
                 first_seq: seq,
                 rows: vec![Row {
                     message_handle,
-                    time_monotonic_ns: 1_000_000_000
-                        + (tick as i64 * 1_000_000_000 / i64::from(frequency)),
+                    time_monotonic_ns: Some(
+                        1_000_000_000 + (tick as i64 * 1_000_000_000 / i64::from(frequency)),
+                    ),
                     payload: Some(payload),
                 }],
             })),

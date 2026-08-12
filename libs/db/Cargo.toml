@@ -39,6 +39,7 @@ grpc = [
     "dep:tonic-prost",
     "dep:tonic-prost-build",
     "dep:tonic-reflection",
+    "dep:tonic-types",
     "tokio/macros",
     "tokio/sync",
 ]
@@ -162,6 +163,7 @@ mcap = { version = "0.25", optional = true }
 base64 = { version = "0.22", optional = true }
 tonic-health = { version = "=0.14.6", optional = true }
 tonic-reflection = { version = "=0.14.6", optional = true }
+tonic-types = { version = "=0.14.6", optional = true }
 
 [[bin]]
 name = "elodin-db-bench"

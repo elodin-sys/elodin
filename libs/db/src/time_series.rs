@@ -111,6 +111,7 @@ impl TimeSeries {
         self.get_indices(indices)
     }
 
+    #[cfg(feature = "grpc")]
     pub(crate) fn get_range_chunk(
         &self,
         range: &Range<Timestamp>,

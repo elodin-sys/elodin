@@ -101,6 +101,12 @@ impl MsgLog {
         Some((*timestamp, buf))
     }
 
+    pub fn get_index(&self, index: usize) -> Option<(Timestamp, &[u8])> {
+        let timestamp = self.timestamps().get(index)?;
+        let buf = self.bufs.get_msg(index)?;
+        Some((*timestamp, buf))
+    }
+
     pub fn get_range(
         &self,
         range: &std::ops::Range<Timestamp>,

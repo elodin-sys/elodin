@@ -5,14 +5,15 @@ use futures_lite::StreamExt;
 use impeller2::types::{ComponentId, PrimType as DbPrimType, Timestamp};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 use super::{
-    common,
+    common, ingest,
     v1::{
         self, DumpMetadataRequest, DumpMetadataResponse, DumpSchemaRequest, DumpSchemaResponse,
-        GetTimeRangeRequest, GetTimeRangeResponse, GetTimeSeriesRequest, GetTimeSeriesResponse,
-        SqlRequest, SqlResponse, get_time_series_response, query_service_server::QueryService,
+        GetServerInfoRequest, GetServerInfoResponse, GetTimeRangeRequest, GetTimeRangeResponse,
+        GetTimeSeriesRequest, GetTimeSeriesResponse, SqlRequest, SqlResponse,
+        get_time_series_response, query_service_server::QueryService,
     },
 };
 use crate::{
@@ -38,6 +39,19 @@ impl QueryServiceImpl {
 impl QueryService for QueryServiceImpl {
     type GetTimeSeriesStream = ReceiverStream<Result<GetTimeSeriesResponse, Status>>;
     type SqlStream = ReceiverStream<Result<SqlResponse, Status>>;
+
+    async fn get_server_info(
+        &self,
+        _request: Request<GetServerInfoRequest>,
+    ) -> Result<Response<GetServerInfoResponse>, Status> {
+        Ok(Response::new(GetServerInfoResponse {
+            build_version: env!("CARGO_PKG_VERSION").to_string(),
+            max_message_size_bytes: ingest::MAX_GRPC_MESSAGE_SIZE as u32,
+            features: ["sql-arrow-ipc", "lttb-downsample", "message-resume"]
+                .map(str::to_string)
+                .to_vec(),
+        }))
+    }
 
     async fn get_time_range(
         &self,
@@ -130,28 +144,41 @@ impl QueryService for QueryServiceImpl {
                 Some((component, element_names))
             })
             .ok_or_else(|| {
-                Status::not_found(format!("component {} not found", request.component))
+                common::status_with_reason(
+                    Code::NotFound,
+                    format!("component {} not found", request.component),
+                    "COMPONENT_NOT_FOUND",
+                )
             })?;
 
-        let end = if request.end_ns == 0 {
-            Timestamp(i64::MAX)
-        } else {
-            Timestamp(request.end_ns / 1000)
-        };
+        // TimeSeries::get_range treats the end as inclusive; subtracting one
+        // microsecond turns the public half-open [start_ns, end_ns) contract
+        // into the accessor's closed range.
         let range = Range {
-            start: Timestamp(request.start_ns / 1000),
-            end,
+            start: common::range_start(request.start_ns),
+            end: Timestamp(
+                common::range_end_exclusive(request.end_ns)
+                    .0
+                    .saturating_sub(1),
+            ),
         };
         let Some((timestamps, _)) = component.time_series.get_range(&range) else {
-            return Err(Status::out_of_range("requested time range has no samples"));
+            return Err(common::status_with_reason(
+                Code::OutOfRange,
+                "requested time range has no samples".to_string(),
+                "TIME_RANGE_EMPTY",
+            ));
         };
         let row_size = component.schema.size();
-        let limit = if request.limit == 0 {
-            timestamps.len()
-        } else {
-            usize::try_from(request.limit)
-                .unwrap_or(usize::MAX)
-                .min(timestamps.len())
+        let limit = common::row_limit(request.limit)?.min(timestamps.len());
+        let max_points = match request.max_points {
+            None => None,
+            Some(points) if points < 3 => {
+                return Err(Status::invalid_argument(
+                    "max_points must be at least 3; omit it for raw rows",
+                ));
+            }
+            Some(points) => Some(points as usize),
         };
         let (tx, rx) = mpsc::channel(16);
         let header = v1::TimeSeriesHeader {
@@ -166,8 +193,7 @@ impl QueryService for QueryServiceImpl {
         .await
         .map_err(|_| Status::cancelled("client closed response stream"))?;
 
-        let max_points = request.max_points as usize;
-        if max_points == 0 || max_points < 3 || limit <= max_points {
+        if max_points.is_none_or(|points| limit <= points) {
             let rows_per_chunk = (CHUNK_BYTES / row_size.max(1)).max(1);
             tokio::spawn(async move {
                 let mut offset = 0;
@@ -188,6 +214,7 @@ impl QueryService for QueryServiceImpl {
                 }
             });
         } else {
+            let max_points = max_points.expect("checked above");
             let (timestamps, data) = component.time_series.get_range(&range).unwrap();
             let (timestamps, data) = downsample(
                 &timestamps[..limit],
@@ -253,7 +280,7 @@ fn downsample<'a>(
     element_index: usize,
     max_points: usize,
 ) -> Result<Downsampled<'a>, Status> {
-    if max_points == 0 || timestamps.len() <= max_points || max_points < 3 {
+    if timestamps.len() <= max_points {
         return Ok((Cow::Borrowed(timestamps), Cow::Borrowed(data)));
     }
     if element_index >= elements {
@@ -365,6 +392,7 @@ mod tests {
             db.apply_component_row(
                 Timestamp(100 + index),
                 &[(id, (index as f64).to_le_bytes().to_vec())],
+                false,
             )
             .unwrap();
         }
@@ -412,10 +440,10 @@ mod tests {
         let mut stream = service
             .get_time_series(Request::new(GetTimeSeriesRequest {
                 component: "demo.signal".into(),
-                start_ns: 100_000,
-                end_ns: 107_000,
-                limit: 0,
-                max_points: 4,
+                start_ns: Some(100_000),
+                end_ns: Some(108_000),
+                limit: None,
+                max_points: Some(4),
                 element_index: 0,
             }))
             .await
@@ -438,6 +466,66 @@ mod tests {
         };
         assert_eq!(data.timestamps_ns.len(), 4);
         assert_eq!(data.packed_values.len(), 4 * size_of::<f64>());
+    }
+
+    #[tokio::test]
+    async fn server_info_reports_capabilities() {
+        let (_directory, db) = test_db();
+        let info = QueryServiceImpl::new(db)
+            .get_server_info(Request::new(GetServerInfoRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(info.build_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.max_message_size_bytes, 16 * 1024 * 1024);
+        assert!(info.features.iter().any(|f| f == "sql-arrow-ipc"));
+    }
+
+    #[tokio::test]
+    async fn time_series_range_is_half_open() {
+        let (_directory, db) = test_db();
+        let service = QueryServiceImpl::new(db);
+        let collect = |start_ns: Option<i64>, end_ns: Option<i64>| {
+            let service = service.clone();
+            async move {
+                let mut stream = service
+                    .get_time_series(Request::new(GetTimeSeriesRequest {
+                        component: "demo.signal".into(),
+                        start_ns,
+                        end_ns,
+                        limit: None,
+                        max_points: None,
+                        element_index: 0,
+                    }))
+                    .await
+                    .unwrap()
+                    .into_inner();
+                let mut timestamps = Vec::new();
+                while let Some(response) = futures_lite::StreamExt::next(&mut stream).await {
+                    if let Some(get_time_series_response::Chunk::Data(data)) =
+                        response.unwrap().chunk
+                    {
+                        timestamps.extend(data.timestamps_ns);
+                    }
+                }
+                timestamps
+            }
+        };
+        // Rows exist at 100..=107 µs; a row exactly at end_ns is excluded.
+        assert_eq!(
+            collect(Some(100_000), Some(102_000)).await,
+            vec![100_000, 101_000]
+        );
+        // Adjacent pages compose without duplicating the boundary row.
+        assert_eq!(
+            collect(Some(102_000), Some(104_000)).await,
+            vec![102_000, 103_000]
+        );
+        // Sub-microsecond bounds select whole buckets inside the range.
+        assert_eq!(
+            collect(Some(100_500), Some(102_500)).await,
+            vec![101_000, 102_000]
+        );
     }
 
     #[tokio::test]
@@ -484,16 +572,20 @@ mod tests {
                 .unwrap();
         });
         for sequence in 1..=5 {
-            db.apply_component_row(Timestamp(sequence), &[(id, vec![sequence as u8; row_size])])
-                .unwrap();
+            db.apply_component_row(
+                Timestamp(sequence),
+                &[(id, vec![sequence as u8; row_size])],
+                false,
+            )
+            .unwrap();
         }
         let mut stream = QueryServiceImpl::new(db)
             .get_time_series(Request::new(GetTimeSeriesRequest {
                 component: "demo.large".into(),
-                start_ns: 0,
-                end_ns: 0,
-                limit: 0,
-                max_points: 0,
+                start_ns: None,
+                end_ns: None,
+                limit: None,
+                max_points: None,
                 element_index: 0,
             }))
             .await

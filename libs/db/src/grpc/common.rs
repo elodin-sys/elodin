@@ -1,14 +1,117 @@
-use std::time::Duration;
+use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 
-use impeller2::types::PrimType as DbPrimType;
+use impeller2::types::{PrimType as DbPrimType, Timestamp};
 use impeller2_wkt::{
     ComponentMetadata as DbComponentMetadata, DbConfig as DbDbConfig,
     MsgMetadata as DbMessageMetadata,
 };
-use tonic::Status;
+use sha2::{Digest, Sha256};
+use tonic::{Code, Status};
+use tonic_types::{ErrorDetails, StatusExt};
 
 use super::v1;
 use crate::Error;
+
+pub(super) const ERROR_DOMAIN: &str = "db.elodin.systems";
+
+pub(super) fn status_with_reason(code: Code, message: String, reason: &str) -> Status {
+    Status::with_error_details(
+        code,
+        message,
+        ErrorDetails::with_error_info(reason, ERROR_DOMAIN, HashMap::<String, String>::new()),
+    )
+}
+
+// Record time lives on a microsecond grid: writes floor into their bucket,
+// half-open [start_ns, end_ns) reads select buckets whose full span is inside.
+pub(super) fn record_timestamp(ns: i64) -> Timestamp {
+    Timestamp(ns.div_euclid(1000))
+}
+
+// Signed div_ceil is unstable (int_roundings); this form cannot overflow.
+fn ceil_us(ns: i64) -> i64 {
+    ns.div_euclid(1000) + i64::from(ns.rem_euclid(1000) != 0)
+}
+
+pub(super) fn range_start(start_ns: Option<i64>) -> Timestamp {
+    Timestamp(start_ns.map_or(i64::MIN, ceil_us))
+}
+
+pub(super) fn range_end_exclusive(end_ns: Option<i64>) -> Timestamp {
+    Timestamp(end_ns.map_or(i64::MAX, ceil_us))
+}
+
+pub(super) fn row_limit(limit: Option<u64>) -> Result<usize, Status> {
+    match limit {
+        None => Ok(usize::MAX),
+        Some(0) => Err(Status::invalid_argument(
+            "limit must be >= 1; omit it for unlimited",
+        )),
+        Some(value) => Ok(usize::try_from(value).unwrap_or(usize::MAX)),
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) struct SessionKey {
+    pub(super) client_name: String,
+    pub(super) client_instance_id: Vec<u8>,
+}
+
+// Per-session resume sequences, cached in memory and persisted as dotfiles
+// beside the database so resume positions survive server restarts.
+pub(super) struct SessionResume {
+    db_path: PathBuf,
+    prefix: &'static str,
+    cache: Mutex<HashMap<SessionKey, u64>>,
+}
+
+impl SessionResume {
+    pub(super) fn new(db_path: PathBuf, prefix: &'static str) -> Self {
+        Self {
+            db_path,
+            prefix,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub(super) fn get(&self, key: &SessionKey) -> u64 {
+        if let Some(sequence) = self.cache.lock().unwrap().get(key).copied() {
+            return sequence;
+        }
+        let sequence = std::fs::read_to_string(self.path(key))
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        self.cache.lock().unwrap().insert(key.clone(), sequence);
+        sequence
+    }
+
+    pub(super) fn remember(&self, key: &SessionKey, sequence: u64) {
+        let mut cache = self.cache.lock().unwrap();
+        let stored = cache.entry(key.clone()).or_default();
+        *stored = (*stored).max(sequence);
+    }
+
+    pub(super) fn persist(&self, key: &SessionKey, sequence: u64) -> std::io::Result<()> {
+        let path = self.path(key);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, sequence.to_string())?;
+        std::fs::rename(temporary, path)?;
+        self.remember(key, sequence);
+        Ok(())
+    }
+
+    fn path(&self, key: &SessionKey) -> PathBuf {
+        let mut hash = Sha256::new();
+        hash.update(key.client_name.len().to_le_bytes());
+        hash.update(key.client_name.as_bytes());
+        hash.update(key.client_instance_id.len().to_le_bytes());
+        hash.update(&key.client_instance_id);
+        self.db_path
+            .join(format!("{}{:x}", self.prefix, hash.finalize()))
+    }
+}
 
 pub(super) fn prim_type(value: DbPrimType) -> v1::PrimType {
     match value {
@@ -58,20 +161,18 @@ pub(super) fn message_metadata(value: &DbMessageMetadata) -> Result<v1::MessageM
     })
 }
 
-pub(super) fn duration(value: u64) -> Result<Duration, Status> {
-    if value == 0 {
-        return Err(Status::invalid_argument("duration must be non-zero"));
-    }
-    Ok(Duration::from_nanos(value))
-}
-
 pub(super) fn internal(error: impl std::fmt::Display) -> Status {
     Status::internal(error.to_string())
 }
 
 pub(super) fn db_error(error: Error) -> Status {
     match error {
-        Error::ComponentNotFound(_) | Error::MsgNotFound(_) => Status::not_found(error.to_string()),
+        Error::ComponentNotFound(_) => {
+            status_with_reason(Code::NotFound, error.to_string(), "COMPONENT_NOT_FOUND")
+        }
+        Error::MsgNotFound(_) => {
+            status_with_reason(Code::NotFound, error.to_string(), "MESSAGE_NOT_FOUND")
+        }
         Error::Io(ref io) if io.kind() == std::io::ErrorKind::PermissionDenied => {
             Status::permission_denied(error.to_string())
         }

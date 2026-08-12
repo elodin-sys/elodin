@@ -994,11 +994,16 @@ impl DB {
         Ok(())
     }
 
+    // `dedup` enables content-based replay absorption: rows whose payload
+    // matches an occurrence already stored at `timestamp` are skipped (or
+    // partially filled in). Callers enable it only for rows that can be
+    // crash-window replays; fresh rows always append.
     #[cfg(feature = "grpc")]
     pub(crate) fn apply_component_row(
         &self,
         timestamp: Timestamp,
         values: &[(ComponentId, Vec<u8>)],
+        dedup: bool,
     ) -> Result<(), ComponentRowApplyError> {
         self.with_state_mut(|state| {
             let mut seen = HashSet::with_capacity(values.len());
@@ -1027,6 +1032,9 @@ impl DB {
             }
 
             let mut pending = vec![true; values.len()];
+            if !dedup {
+                max_occurrences = 0;
+            }
             for occurrence in 0..max_occurrences {
                 let mut candidate = Vec::with_capacity(values.len());
                 let mut matched = false;

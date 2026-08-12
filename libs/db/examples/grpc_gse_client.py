@@ -216,7 +216,7 @@ def component_count(query, call_metadata, name):
     return sum(
         len(response.data.timestamps_ns)
         for response in query.GetTimeSeries(
-            query_pb2.GetTimeSeriesRequest(component=name, start_ns=-(2**63)),
+            query_pb2.GetTimeSeriesRequest(component=name),
             metadata=call_metadata,
         )
         if response.HasField("data")
@@ -238,7 +238,7 @@ def verify(channel, call_metadata):
         raise RuntimeError(f"unexpected GSE component counts: {counts}")
     logs = list(
         msg_pb2_grpc.MessageServiceStub(channel).GetMessages(
-            msg_pb2.GetMessagesRequest(name="grpc.gse.log", start_ns=-(2**63)),
+            msg_pb2.GetMessagesRequest(name="grpc.gse.log"),
             metadata=call_metadata,
         )
     )

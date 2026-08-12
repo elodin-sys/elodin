@@ -1,19 +1,14 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
-use impeller2::types::{PacketId, Timestamp, msg_id};
+use impeller2::types::{PacketId, msg_id};
 use impeller2_wkt::{LogEntry, MsgMetadata, log_entry_msg_schema, opaque_bytes_msg_schema};
 use postcard_schema::schema::owned::OwnedNamedType;
-use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 use super::{
-    common,
+    common::{self, SessionKey, SessionResume},
     v1::{
         self, GetMessagesRequest, GetMessagesResponse, PublishAccept, PublishRequest,
         PublishResponse, RegisterRequest, RegisterResponse, WriteAck, get_messages_response,
@@ -26,13 +21,7 @@ use crate::DB;
 #[derive(Clone)]
 pub(super) struct MessageServiceImpl {
     db: Arc<DB>,
-    resume: Arc<Mutex<HashMap<SessionKey, u64>>>,
-}
-
-#[derive(Clone, Eq, Hash, PartialEq)]
-struct SessionKey {
-    client_name: String,
-    client_instance_id: Vec<u8>,
+    resume: Arc<SessionResume>,
 }
 
 #[derive(Clone, Copy)]
@@ -43,10 +32,11 @@ struct PublishAckPolicy {
 
 impl MessageServiceImpl {
     pub(super) fn new(db: Arc<DB>) -> Self {
-        Self {
-            db,
-            resume: Arc::new(Mutex::new(HashMap::new())),
-        }
+        let resume = Arc::new(SessionResume::new(
+            db.path.clone(),
+            ".grpc-message-session-",
+        ));
+        Self { db, resume }
     }
 
     fn metadata(&self, handle: u32) -> Result<(PacketId, MsgMetadata), Status> {
@@ -61,40 +51,6 @@ impl MessageServiceImpl {
             })
             .map(|metadata| (id, metadata))
             .ok_or_else(|| Status::not_found(format!("message handle {handle} is not registered")))
-    }
-
-    fn resume_from(&self, key: &SessionKey) -> u64 {
-        if let Some(sequence) = self.resume.lock().unwrap().get(key).copied() {
-            return sequence;
-        }
-        let sequence = std::fs::read_to_string(self.session_path(key))
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
-        self.resume.lock().unwrap().insert(key.clone(), sequence);
-        sequence
-    }
-
-    fn store_resume(&self, key: &SessionKey, sequence: u64) -> Result<(), std::io::Error> {
-        let path = self.session_path(key);
-        let directory = path.parent().unwrap();
-        std::fs::create_dir_all(directory)?;
-        let temporary = path.with_extension("tmp");
-        std::fs::write(&temporary, sequence.to_string())?;
-        std::fs::rename(temporary, path)?;
-        self.resume.lock().unwrap().insert(key.clone(), sequence);
-        Ok(())
-    }
-
-    fn session_path(&self, key: &SessionKey) -> std::path::PathBuf {
-        let mut hash = Sha256::new();
-        hash.update(key.client_name.len().to_le_bytes());
-        hash.update(key.client_name.as_bytes());
-        hash.update(key.client_instance_id.len().to_le_bytes());
-        hash.update(&key.client_instance_id);
-        self.db
-            .path
-            .join(format!(".grpc-message-session-{:x}", hash.finalize()))
     }
 
     fn encode(
@@ -142,34 +98,53 @@ impl MessageServiceImpl {
             if seq <= current_seq {
                 continue;
             }
-            let result = self
-                .metadata(message.message_handle)
-                .and_then(|(id, metadata)| {
-                    let payload = self.encode(&metadata, message.payload)?;
-                    let timestamp = if message.timestamp_ns == 0 {
-                        self.db.apply_implicit_timestamp()
-                    } else {
-                        Timestamp(message.timestamp_ns / 1000)
-                    };
-                    self.db
-                        .push_msg(timestamp, id, &payload)
-                        .map_err(common::db_error)
-                });
-            if let Err(error) = result {
-                let name = self
-                    .metadata(message.message_handle)
-                    .map_or_else(|_| String::new(), |(_, metadata)| metadata.name);
-                errors.push(v1::MessageError {
+            // Validation failures advance the sequence (a retry cannot fix
+            // them); storage failures terminate without advancing so the
+            // message is retried on resume.
+            match self.validate(message) {
+                Ok((id, timestamp, payload)) => {
+                    if let Err(error) = self.db.push_msg(timestamp, id, &payload) {
+                        self.persist_resume(key, current_seq)?;
+                        return Err(common::db_error(error));
+                    }
+                }
+                Err((name, detail)) => errors.push(v1::MessageError {
                     seq,
                     message: name,
-                    detail: error.message().to_string(),
-                });
+                    detail,
+                }),
             }
             current_seq = seq;
         }
-        self.store_resume(key, current_seq)
-            .map_err(common::internal)?;
+        self.persist_resume(key, current_seq)?;
         Ok((current_seq, errors))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn validate(
+        &self,
+        message: v1::OutgoingMessage,
+    ) -> Result<(PacketId, impeller2::types::Timestamp, Vec<u8>), (String, String)> {
+        let describe = |handle| {
+            self.metadata(handle)
+                .map_or_else(|_| String::new(), |(_, metadata)| metadata.name)
+        };
+        let handle = message.message_handle;
+        let (id, metadata) = self
+            .metadata(handle)
+            .map_err(|error| (describe(handle), error.message().to_string()))?;
+        let payload = self
+            .encode(&metadata, message.payload)
+            .map_err(|error| (metadata.name.clone(), error.message().to_string()))?;
+        let timestamp = match message.timestamp_ns {
+            None => self.db.apply_implicit_timestamp(),
+            Some(ns) => common::record_timestamp(ns),
+        };
+        Ok((id, timestamp, payload))
+    }
+
+    fn persist_resume(&self, key: &SessionKey, sequence: u64) -> Result<(), Status> {
+        self.resume.persist(key, sequence).map_err(common::internal)
     }
 
     async fn run_publish(
@@ -314,8 +289,10 @@ impl MessageService for MessageServiceImpl {
                 .and_then(|log| log.metadata().cloned())
         }) && (existing.name != request.name || existing.schema != schema)
         {
-            return Err(Status::already_exists(
-                "message name conflicts with an existing registration",
+            return Err(common::status_with_reason(
+                Code::AlreadyExists,
+                "message name conflicts with an existing registration".to_string(),
+                "MESSAGE_SCHEMA_CONFLICT",
             ));
         }
         let metadata = MsgMetadata {
@@ -355,7 +332,7 @@ impl MessageService for MessageServiceImpl {
             client_name: open.client_name,
             client_instance_id: open.client_instance_id,
         };
-        let resume_from_seq = self.resume_from(&key);
+        let resume_from_seq = self.resume.get(&key);
         let (tx, rx) = mpsc::channel(32);
         tx.send(Ok(PublishResponse {
             response: Some(publish_response::Response::Accept(PublishAccept {
@@ -380,29 +357,31 @@ impl MessageService for MessageServiceImpl {
             return Err(Status::invalid_argument("message name must be non-empty"));
         }
         let id = msg_id(&request.name);
-        let end = if request.end_ns == 0 {
-            Timestamp(i64::MAX)
-        } else {
-            Timestamp(request.end_ns / 1000)
-        };
+        let start = common::range_start(request.start_ns);
+        let end = common::range_end_exclusive(request.end_ns);
+        let limit = common::row_limit(request.limit)?;
         let (metadata, messages) = self
             .db
             .with_state(|state| {
                 let log = state.get_msg_log(id)?;
                 let metadata = log.metadata().cloned();
-                let limit = if request.limit == 0 {
-                    usize::MAX
-                } else {
-                    usize::try_from(request.limit).unwrap_or(usize::MAX)
-                };
+                // The native accessor snaps outward on a miss; the filter
+                // enforces the half-open [start_ns, end_ns) contract.
                 let messages = log
-                    .get_range(&(Timestamp(request.start_ns / 1000)..end))
+                    .get_range(&(start..end))
+                    .filter(|(timestamp, _)| *timestamp >= start && *timestamp < end)
                     .take(limit)
                     .map(|(timestamp, payload)| (timestamp, payload.to_vec()))
                     .collect::<Vec<_>>();
                 Some((metadata, messages))
             })
-            .ok_or_else(|| Status::not_found(format!("message {} not found", request.name)))?;
+            .ok_or_else(|| {
+                common::status_with_reason(
+                    Code::NotFound,
+                    format!("message {} not found", request.name),
+                    "MESSAGE_NOT_FOUND",
+                )
+            })?;
         let is_log = metadata.is_some_and(|metadata| metadata.schema == log_entry_msg_schema());
         let (tx, rx) = mpsc::channel(32);
         tokio::spawn(async move {
@@ -439,6 +418,7 @@ impl MessageService for MessageServiceImpl {
 
 #[cfg(test)]
 mod tests {
+    use impeller2::types::Timestamp;
     use tempfile::TempDir;
     use v1::message_service_server::MessageServiceServer;
 
@@ -511,7 +491,7 @@ mod tests {
             messages: vec![
                 v1::OutgoingMessage {
                     message_handle: handle,
-                    timestamp_ns: 100_000,
+                    timestamp_ns: Some(100_000),
                     payload: Some(outgoing_message::Payload::Log(v1::LogPayload {
                         level: 2,
                         message: "first".into(),
@@ -519,7 +499,7 @@ mod tests {
                 },
                 v1::OutgoingMessage {
                     message_handle: handle,
-                    timestamp_ns: 101_000,
+                    timestamp_ns: Some(101_000),
                     payload: Some(outgoing_message::Payload::Log(v1::LogPayload {
                         level: 3,
                         message: "second".into(),
@@ -534,7 +514,7 @@ mod tests {
         assert_eq!(current, 2);
         assert!(errors.is_empty());
         let restarted = MessageServiceImpl::new(db.clone());
-        assert_eq!(restarted.resume_from(&key), 2);
+        assert_eq!(restarted.resume.get(&key), 2);
         let (current, errors) = restarted.process_batch(batch, &key, 2).unwrap();
         assert_eq!(current, 2);
         assert!(errors.is_empty());
@@ -550,9 +530,9 @@ mod tests {
         let mut messages = service
             .get_messages(Request::new(GetMessagesRequest {
                 name: "demo.log".into(),
-                start_ns: 0,
-                end_ns: 0,
-                limit: 0,
+                start_ns: None,
+                end_ns: None,
+                limit: None,
             }))
             .await
             .unwrap()
@@ -585,9 +565,9 @@ mod tests {
         let mut messages = service
             .get_messages(Request::new(GetMessagesRequest {
                 name: "demo.raw".into(),
-                start_ns: 0,
-                end_ns: 0,
-                limit: 0,
+                start_ns: None,
+                end_ns: None,
+                limit: None,
             }))
             .await
             .unwrap()
@@ -600,6 +580,47 @@ mod tests {
             message.payload,
             Some(get_messages_response::Payload::Raw(b"native".to_vec()))
         );
+    }
+
+    #[tokio::test]
+    async fn get_messages_range_is_half_open() {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let service = MessageServiceImpl::new(db.clone());
+        let id = msg_id("demo.range");
+        for timestamp_us in [10, 20, 30] {
+            db.push_msg(Timestamp(timestamp_us), id, &[timestamp_us as u8])
+                .unwrap();
+        }
+        let collect = |start_ns: Option<i64>, end_ns: Option<i64>| {
+            let service = service.clone();
+            async move {
+                let mut stream = service
+                    .get_messages(Request::new(GetMessagesRequest {
+                        name: "demo.range".into(),
+                        start_ns,
+                        end_ns,
+                        limit: None,
+                    }))
+                    .await
+                    .unwrap()
+                    .into_inner();
+                let mut timestamps = Vec::new();
+                while let Some(message) = futures_lite::StreamExt::next(&mut stream).await {
+                    timestamps.push(message.unwrap().timestamp_ns);
+                }
+                timestamps
+            }
+        };
+        // A start between records must not surface the earlier record.
+        assert_eq!(collect(Some(15_000), None).await, vec![20_000, 30_000]);
+        // end_ns is exclusive.
+        assert_eq!(
+            collect(Some(10_000), Some(30_000)).await,
+            vec![10_000, 20_000]
+        );
+        // A range entirely before the first record returns nothing.
+        assert_eq!(collect(Some(1_000), Some(5_000)).await, Vec::<i64>::new());
     }
 
     #[tokio::test]
@@ -635,7 +656,7 @@ mod tests {
                 first_seq: 1,
                 messages: vec![v1::OutgoingMessage {
                     message_handle: handle,
-                    timestamp_ns: 1_000,
+                    timestamp_ns: Some(1_000),
                     payload: Some(outgoing_message::Payload::Raw(vec![1])),
                 }],
             })),
@@ -674,7 +695,7 @@ mod tests {
                 first_seq: 1,
                 messages: vec![v1::OutgoingMessage {
                     message_handle: handle,
-                    timestamp_ns: 1_000,
+                    timestamp_ns: Some(1_000),
                     payload: Some(outgoing_message::Payload::Raw(vec![1])),
                 }],
             })),
@@ -713,10 +734,10 @@ mod tests {
             client_name: "test".into(),
             client_instance_id: vec![1],
         };
-        service.store_resume(&key, 7).unwrap();
+        service.resume.persist(&key, 7).unwrap();
         drop(service);
         drop(db);
         let reopened = Arc::new(DB::open(path).unwrap());
-        assert_eq!(MessageServiceImpl::new(reopened).resume_from(&key), 7);
+        assert_eq!(MessageServiceImpl::new(reopened).resume.get(&key), 7);
     }
 }

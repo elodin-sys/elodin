@@ -6,6 +6,9 @@ import "elodin/db/v1/common.proto";
 
 service IngestService {
   // First request must be SessionOpen; replies SessionAccept or SessionReject.
+  // Delivery is at-least-once: resend rows above SessionAccept.resume_from_seq
+  // after a reconnect; replayed rows are deduplicated by sequence and, across
+  // a server crash, by row content.
   rpc Ingest(stream IngestRequest) returns (stream IngestResponse);
 }
 
@@ -62,7 +65,10 @@ enum RowEncoding {
 
 message SessionAccept {
   map<string, uint32> message_handles = 1; // session-scoped
-  uint64 resume_from_seq = 2; // last durably applied client sequence
+  // Last applied client sequence for this (client_name, client_instance_id).
+  // Persisted at ack cadence, so after a crash it may trail the last WriteAck;
+  // resend rows above it.
+  uint64 resume_from_seq = 2;
 }
 
 message SessionReject {
@@ -85,8 +91,9 @@ message TelemetryBatch {
 
 message Row {
   uint32 message_handle = 1;
-  // Optional when a component is timestamp_source; else stored as ns / 1000.
-  sfixed64 time_monotonic_ns = 2;
+  // Record time, floored to the containing microsecond. May be omitted only
+  // when a component is timestamp_source; if both are present they must match.
+  optional sfixed64 time_monotonic_ns = 2;
 
   oneof payload {
     bytes packed = 3; // length must equal MessageSchema.packed_size

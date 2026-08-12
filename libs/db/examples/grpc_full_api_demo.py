@@ -39,18 +39,11 @@ def metadata(token):
     return (("authorization", f"Bearer {token}"),) if token else ()
 
 
-def query_component(query, component, call_metadata, max_points=0, element_index=0):
-    responses = list(
-        query.GetTimeSeries(
-            query_pb2.GetTimeSeriesRequest(
-                component=component,
-                start_ns=-(2**63),
-                max_points=max_points,
-                element_index=element_index,
-            ),
-            metadata=call_metadata,
-        )
-    )
+def query_component(query, component, call_metadata, max_points=None, element_index=0):
+    request = query_pb2.GetTimeSeriesRequest(component=component, element_index=element_index)
+    if max_points is not None:
+        request.max_points = max_points
+    responses = list(query.GetTimeSeries(request, metadata=call_metadata))
     header = next(response.header for response in responses if response.HasField("header"))
     timestamps = [
         timestamp
@@ -189,7 +182,7 @@ def exercise_messages(channel, call_metadata):
         raise RuntimeError("message was not acknowledged")
     stored = list(
         stub.GetMessages(
-            msg_pb2.GetMessagesRequest(name="grpc.demo.log", start_ns=-(2**63)),
+            msg_pb2.GetMessagesRequest(name="grpc.demo.log"),
             metadata=call_metadata,
         )
     )
@@ -630,11 +623,7 @@ def main():
     message_query = msg_pb2_grpc.MessageServiceStub(channel)
     camera_messages = list(
         message_query.GetMessages(
-            msg_pb2.GetMessagesRequest(
-                name="bdx.fpv_cam",
-                start_ns=-(2**63),
-                limit=2,
-            ),
+            msg_pb2.GetMessagesRequest(name="bdx.fpv_cam", limit=2),
             metadata=call_metadata,
         )
     )

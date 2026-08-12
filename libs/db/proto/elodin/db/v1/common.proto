@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package elodin.db.v1;
 
+// All `*_ns` fields are nanoseconds. Record time is stored at microsecond
+// resolution: write timestamps are floored to the containing microsecond and
+// query ranges are evaluated half-open on that microsecond grid.
+
 enum PrimType {
   PRIM_TYPE_UNSPECIFIED = 0;
   PRIM_TYPE_U8 = 1;
@@ -59,6 +63,11 @@ message AckPolicy {
   uint32 max_ack_delay_ms = 2; // 0 → 100
 }
 
+// Cumulative acknowledgement: every row with sequence <= through_seq has been
+// applied to the database and is visible to readers. Durability follows the
+// server's storage flush policy. The resume position is persisted at ack
+// cadence, so after a server crash the stream resumes at the last
+// acknowledged sequence and replays unacknowledged rows (at-least-once).
 message WriteAck {
   uint64 through_seq = 1;
 }

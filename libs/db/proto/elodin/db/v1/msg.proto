@@ -6,6 +6,10 @@ import "elodin/db/v1/common.proto";
 
 service MessageService {
   rpc Register(RegisterRequest) returns (RegisterResponse);
+  // At-least-once delivery: resend messages above PublishAccept.resume_from_seq
+  // after a reconnect. Validation failures are reported per message via
+  // MessageError and the sequence still advances; storage failures terminate
+  // the stream without advancing, so the failed message is retried on resume.
   rpc Publish(stream PublishRequest) returns (stream PublishResponse);
   rpc GetMessages(GetMessagesRequest) returns (stream GetMessagesResponse);
 }
@@ -27,6 +31,7 @@ message RegisterRequest {
 }
 
 message RegisterResponse {
+  // Stable handle derived from the message name; valid across sessions.
   uint32 message_handle = 1;
 }
 
@@ -43,7 +48,9 @@ message LogPayload {
 
 message OutgoingMessage {
   uint32 message_handle = 1;
-  sfixed64 timestamp_ns = 2;
+  // Record time, floored to the containing microsecond.
+  // Omitted = server-assigned time.
+  optional sfixed64 timestamp_ns = 2;
 
   oneof payload {
     bytes raw = 3;
@@ -64,13 +71,13 @@ message PublishRequest {
 }
 
 message PublishAccept {
-  uint64 resume_from_seq = 1;
+  uint64 resume_from_seq = 1; // persisted; survives server restarts
 }
 
 message MessageError {
   uint64 seq = 1;
   string message = 2;
-  string detail = 3;
+  string detail = 3; // non-fatal validation failure; stream continues
 }
 
 message PublishResponse {
@@ -81,11 +88,14 @@ message PublishResponse {
   }
 }
 
+// Reads messages in the half-open range [start_ns, end_ns), ordered by
+// timestamp. Messages at exactly end_ns are excluded, so adjacent pages
+// compose without duplicates.
 message GetMessagesRequest {
   string name = 1;
-  sfixed64 start_ns = 2;
-  sfixed64 end_ns = 3; // 0 = open-ended
-  uint64 limit = 4; // 0 = unlimited
+  optional sfixed64 start_ns = 2; // omitted = earliest
+  optional sfixed64 end_ns = 3; // omitted = open-ended
+  optional uint64 limit = 4; // max messages, >= 1; omitted = unlimited
 }
 
 message GetMessagesResponse {
