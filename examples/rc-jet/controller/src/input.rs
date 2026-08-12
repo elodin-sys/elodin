@@ -163,9 +163,12 @@ impl InputReader {
             }
         };
 
-        let device_state = std::env::var_os("DISPLAY").map(|_| DeviceState::new());
+        // Only device_query's Linux backend needs an X display; macOS and
+        // Windows read the keyboard without one.
+        let has_display = !cfg!(target_os = "linux") || std::env::var_os("DISPLAY").is_some();
+        let device_state = has_display.then(DeviceState::new);
         if device_state.is_none() {
-            tracing::info!("No display found; keyboard input disabled, idle pilot flies");
+            tracing::info!("No X display; keyboard input disabled, idle pilot flies");
         }
 
         Self {
