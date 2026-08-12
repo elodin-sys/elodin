@@ -572,12 +572,22 @@ fn try_control(control: &watch::Sender<Playback>, update: StreamControl) -> Resu
     result
 }
 
+// Both control readers exit when the owning response stream closes so their
+// watch::Sender clones drop with the stream: otherwise a lingering request
+// side could keep shared followers alive and steerable after the owner ended.
 async fn read_component_controls(
     mut incoming: tonic::Streaming<StreamComponentsRequest>,
     control: watch::Sender<Playback>,
     tx: mpsc::Sender<Result<StreamComponentsResponse, Status>>,
 ) {
-    while let Ok(Some(request)) = incoming.message().await {
+    loop {
+        let request = tokio::select! {
+            request = incoming.message() => request,
+            _ = tx.closed() => return,
+        };
+        let Ok(Some(request)) = request else {
+            return;
+        };
         let status = match request.request {
             Some(stream_components_request::Request::Control(update)) => {
                 match try_control(&control, update) {
@@ -597,7 +607,14 @@ async fn read_message_controls(
     control: watch::Sender<Playback>,
     tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
 ) {
-    while let Ok(Some(request)) = incoming.message().await {
+    loop {
+        let request = tokio::select! {
+            request = incoming.message() => request,
+            _ = tx.closed() => return,
+        };
+        let Ok(Some(request)) = request else {
+            return;
+        };
         let status = match request.request {
             Some(stream_messages_request::Request::Control(update)) => {
                 match try_control(&control, update) {
