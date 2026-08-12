@@ -49,32 +49,14 @@
       [ -e /proc/driver/nvidia/version ] && [ -n "$nvidia_icd" ]
     }
 
-    # A Mesa-capable GPU (Intel 0x8086 / AMD 0x1002) means the editor has a
-    # working non-NVIDIA path, so do not force the host NVIDIA driver. Match
-    # those vendors explicitly: BMC/IPMI framebuffers (e.g. ASPEED 0x1a03,
-    # Matrox 0x102b) also expose render nodes but are not performance GPUs, so a
-    # "not 0x10de" test would wrongly skip the hook on a Quadro-only server.
-    has_mesa_gpu() {
-      for vendor in /sys/class/drm/renderD*/device/vendor; do
-        case "$(cat "$vendor" 2>/dev/null)" in
-          0x8086 | 0x1002) return 0 ;;
-        esac
-      done
-      return 1
-    }
-
+    # Prefer the discrete NVIDIA GPU whenever its driver is usable, including on
+    # hybrid hosts where an Intel or AMD GPU drives the display. Every other
+    # mode stays on Mesa: `mesa` opts out, and `nvk` reaches the same NVIDIA GPU
+    # through Mesa's own driver, so engaging the proprietary one would break it.
     use_nvidia=0
     case "$mode" in
-      nvidia)
+      nvidia | auto)
         if nvidia_present; then
-          use_nvidia=1
-        fi
-        ;;
-      mesa)
-        use_nvidia=0
-        ;;
-      *)
-        if nvidia_present && ! has_mesa_gpu; then
           use_nvidia=1
         fi
         ;;

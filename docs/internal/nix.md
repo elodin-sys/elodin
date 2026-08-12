@@ -11,6 +11,7 @@ Elodin provides a unified development shell that includes all necessary tools fo
 - This single shell includes tools for Rust, Python, C/C++, cloud operations, documentation, and git-lfs
 - No need to switch between different shells for different tasks
 - git-lfs is included to handle large files in the repository
+- On Linux the shell and the packaged binaries render on the discrete NVIDIA GPU whenever its driver is usable; set `ELODIN_GPU=mesa` to stay on Mesa, or `ELODIN_GPU=nvk` to reach an NVIDIA GPU through Mesa's own driver
 
 ## Linux headless capture
 
