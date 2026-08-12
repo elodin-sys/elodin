@@ -347,11 +347,7 @@ impl MessageService for MessageServiceImpl {
                 "first publish request must be PublishOpen",
             ));
         };
-        if open.client_name.is_empty() || open.client_instance_id.is_empty() {
-            return Err(Status::invalid_argument(
-                "client_name and client_instance_id must be non-empty",
-            ));
-        }
+        common::validate_session_identity(&open.client_name, &open.client_instance_id)?;
         let policy = normalize_ack_policy(open.ack_policy.as_ref())?;
         let key = SessionKey {
             client_name: open.client_name,
@@ -643,6 +639,24 @@ mod tests {
             metadata.metadata.get("source").map(String::as_str),
             Some("camera")
         );
+    }
+
+    #[tokio::test]
+    async fn publish_rejects_oversized_identity() {
+        let (_directory, mut client, server) = transport_client().await;
+        let (tx, rx) = mpsc::channel(2);
+        tx.send(PublishRequest {
+            request: Some(publish_request::Request::Open(v1::PublishOpen {
+                client_name: "x".repeat(200),
+                client_instance_id: vec![1],
+                ack_policy: None,
+            })),
+        })
+        .await
+        .unwrap();
+        let error = client.publish(ReceiverStream::new(rx)).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        server.abort();
     }
 
     #[tokio::test]

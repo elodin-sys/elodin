@@ -22,8 +22,6 @@ use super::{
 };
 use crate::{ComponentRowApplyError, ComponentSchema as DbComponentSchema, DB, Error as DbError};
 
-const MAX_CLIENT_NAME_LEN: usize = 128;
-const MAX_CLIENT_INSTANCE_ID_LEN: usize = 128;
 const MAX_SCHEMA_NAME_LEN: usize = 256;
 const MAX_COMPONENT_ELEMENTS: usize = 1 << 24;
 // Half the gRPC message cap so even a single-row batch always fits; larger
@@ -109,14 +107,7 @@ impl IngestServiceImpl {
     }
 
     fn open_session(&self, open: SessionOpen) -> Result<OpenOutcome, Status> {
-        validate_bounded_name("client_name", &open.client_name, MAX_CLIENT_NAME_LEN)?;
-        if open.client_instance_id.is_empty()
-            || open.client_instance_id.len() > MAX_CLIENT_INSTANCE_ID_LEN
-        {
-            return Err(Status::invalid_argument(format!(
-                "client_instance_id must contain 1..={MAX_CLIENT_INSTANCE_ID_LEN} bytes"
-            )));
-        }
+        common::validate_session_identity(&open.client_name, &open.client_instance_id)?;
         let ack_policy = normalize_ack_policy(open.ack_policy.as_ref())?;
         if open.schema_fingerprint.len() != 32 {
             return Err(Status::invalid_argument(

@@ -36,8 +36,8 @@ message RegisterResponse {
 }
 
 message PublishOpen {
-  string client_name = 1;
-  bytes client_instance_id = 2;
+  string client_name = 1; // 1..=128 non-control UTF-8 bytes
+  bytes client_instance_id = 2; // 1..=128 bytes
   AckPolicy ack_policy = 3;
 }
 

@@ -14,6 +14,31 @@ use crate::Error;
 
 pub(super) const ERROR_DOMAIN: &str = "db.elodin.systems";
 
+pub(super) const MAX_CLIENT_NAME_LEN: usize = 128;
+pub(super) const MAX_CLIENT_INSTANCE_ID_LEN: usize = 128;
+
+// Session identities key the never-evicted resume cache; both writer
+// services bound them identically.
+pub(super) fn validate_session_identity(
+    client_name: &str,
+    client_instance_id: &[u8],
+) -> Result<(), Status> {
+    if client_name.trim().is_empty()
+        || client_name.len() > MAX_CLIENT_NAME_LEN
+        || client_name.chars().any(char::is_control)
+    {
+        return Err(Status::invalid_argument(format!(
+            "client_name must contain 1..={MAX_CLIENT_NAME_LEN} non-control UTF-8 bytes"
+        )));
+    }
+    if client_instance_id.is_empty() || client_instance_id.len() > MAX_CLIENT_INSTANCE_ID_LEN {
+        return Err(Status::invalid_argument(format!(
+            "client_instance_id must contain 1..={MAX_CLIENT_INSTANCE_ID_LEN} bytes"
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn status_with_reason(code: Code, message: String, reason: &str) -> Status {
     Status::with_error_details(
         code,
