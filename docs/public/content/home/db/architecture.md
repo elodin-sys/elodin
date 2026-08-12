@@ -56,8 +56,10 @@ The DB engine automatically divides the nanosecond source value by 1000 on inges
 `--grpc-addr` adds versioned protobuf services on the same DB core:
 acknowledged ingest, bounded and SQL queries, real-time/fixed-rate streams,
 message logs, metadata/config, and chunked assets. Health and reflection share
-the endpoint. Native Impeller/VTable remains the editor/sim/follower path.
-Contracts: `libs/db/proto/elodin/db/v1` (16 MiB max message).
+the endpoint. See the [gRPC Client guide](/home/db/grpc-client) for setup,
+generated C++/Python clients, write-resume semantics, queries, and playback.
+Native Impeller/VTable remains the editor/sim/follower path. Contracts:
+`libs/db/proto/elodin/db/v1` (16 MiB max message).
 
 ## VTable
 
