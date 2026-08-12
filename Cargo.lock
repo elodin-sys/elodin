@@ -2054,8 +2054,8 @@ dependencies = [
 
 [[package]]
 name = "bevy_hanabi"
-version = "0.19.1-dev"
-source = "git+https://github.com/elodin-sys/bevy_hanabi?rev=e721a3c5f8c730baa6bb9885f08d55237404640b#e721a3c5f8c730baa6bb9885f08d55237404640b"
+version = "0.20.0-dev"
+source = "git+https://github.com/elodin-sys/bevy_hanabi?rev=91176ce93c2b6226f320c3f2ae11b10170dd6317#91176ce93c2b6226f320c3f2ae11b10170dd6317"
 dependencies = [
  "anyhow",
  "bevy",
