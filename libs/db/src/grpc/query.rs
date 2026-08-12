@@ -115,7 +115,11 @@ impl QueryService for QueryServiceImpl {
                         name,
                         prim_type: common::prim_type(component.schema.prim_type) as i32,
                         dims: component.schema.shape().into_vec(),
-                        start_time_ns: component.time_series.index_extra().0.saturating_mul(1000),
+                        start_time_ns: component
+                            .time_series
+                            .start_timestamp()
+                            .0
+                            .saturating_mul(1000),
                     }
                 })
                 .collect::<Vec<_>>()
@@ -430,12 +434,12 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        assert!(
-            schema
-                .components
-                .iter()
-                .any(|item| item.name == "demo.signal")
-        );
+        let snapshot = schema
+            .components
+            .iter()
+            .find(|item| item.name == "demo.signal")
+            .expect("demo.signal schema snapshot");
+        assert_eq!(snapshot.start_time_ns, 100_000);
 
         let mut stream = service
             .get_time_series(Request::new(GetTimeSeriesRequest {
