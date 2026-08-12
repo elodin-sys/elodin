@@ -350,7 +350,6 @@ def exercise_streams(channel, call_metadata, component, timestamp):
         if kind == "opened":
             stream_id = response.opened.stream_id
         if {"header", "update", "timestamp", "opened"} <= seen:
-            responses.cancel()
             break
     if not {"header", "update", "timestamp", "opened"} <= seen:
         raise RuntimeError(f"incomplete component stream: {seen}")
@@ -376,6 +375,7 @@ def exercise_streams(channel, call_metadata, component, timestamp):
     if next(message_stream).name != "grpc.demo.log":
         raise RuntimeError("message stream did not bind to component playback")
     message_stream.cancel()
+    responses.cancel()
     events = stub.WatchDb(stream_pb2.WatchDbRequest(), metadata=call_metadata)
     initial = {next(events).WhichOneof("event"), next(events).WhichOneof("event")}
     events.cancel()

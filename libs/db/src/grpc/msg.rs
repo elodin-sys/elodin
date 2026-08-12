@@ -241,6 +241,9 @@ impl MessageServiceImpl {
                     return;
                 }
             }
+            if pending == 0 {
+                deadline = tokio::time::Instant::now() + policy.max_delay;
+            }
             pending += row_count;
             if pending >= policy.max_unacked {
                 if send_ack(&tx, current_seq).await.is_err() {
@@ -437,8 +440,52 @@ impl MessageService for MessageServiceImpl {
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
+    use v1::message_service_server::MessageServiceServer;
 
     use super::*;
+
+    async fn transport_client() -> (
+        TempDir,
+        v1::message_service_client::MessageServiceClient<tonic::transport::Channel>,
+        tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
+    ) {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let service = MessageServiceImpl::new(db);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(MessageServiceServer::new(service))
+                .serve(addr)
+                .await
+        });
+        let endpoint = format!("http://{addr}");
+        let client = loop {
+            match v1::message_service_client::MessageServiceClient::connect(endpoint.clone()).await
+            {
+                Ok(client) => break client,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        };
+        (directory, client, server)
+    }
+
+    async fn register_raw(
+        client: &mut v1::message_service_client::MessageServiceClient<tonic::transport::Channel>,
+    ) -> u32 {
+        client
+            .register(RegisterRequest {
+                name: "transport.raw".into(),
+                kind: Some(register_request::Kind::Opaque(v1::OpaqueKind {})),
+                metadata: Default::default(),
+            })
+            .await
+            .unwrap()
+            .into_inner()
+            .message_handle
+    }
 
     #[tokio::test]
     async fn register_publish_read_and_replay_deduplicate() {
@@ -553,6 +600,107 @@ mod tests {
             message.payload,
             Some(get_messages_response::Payload::Raw(b"native".to_vec()))
         );
+    }
+
+    #[tokio::test]
+    async fn transport_starts_ack_delay_with_first_pending_batch() {
+        let (_directory, mut client, server) = transport_client().await;
+        let handle = register_raw(&mut client).await;
+        let (tx, rx) = mpsc::channel(4);
+        tx.send(PublishRequest {
+            request: Some(publish_request::Request::Open(v1::PublishOpen {
+                client_name: "transport".into(),
+                client_instance_id: vec![1],
+                ack_policy: Some(v1::AckPolicy {
+                    max_unacked_rows: 100,
+                    max_ack_delay_ms: 200,
+                }),
+            })),
+        })
+        .await
+        .unwrap();
+        let mut responses = client
+            .publish(ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            responses.message().await.unwrap().unwrap().response,
+            Some(publish_response::Response::Accept(_))
+        ));
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let started = tokio::time::Instant::now();
+        tx.send(PublishRequest {
+            request: Some(publish_request::Request::Batch(v1::PublishBatch {
+                first_seq: 1,
+                messages: vec![v1::OutgoingMessage {
+                    message_handle: handle,
+                    timestamp_ns: 1_000,
+                    payload: Some(outgoing_message::Payload::Raw(vec![1])),
+                }],
+            })),
+        })
+        .await
+        .unwrap();
+        let response = responses.message().await.unwrap().unwrap();
+        assert!(matches!(
+            response.response,
+            Some(publish_response::Response::Ack(_))
+        ));
+        assert!(started.elapsed() >= Duration::from_millis(150));
+        drop(tx);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_flushes_pending_ack_on_half_close() {
+        let (_directory, mut client, server) = transport_client().await;
+        let handle = register_raw(&mut client).await;
+        let (tx, rx) = mpsc::channel(4);
+        tx.send(PublishRequest {
+            request: Some(publish_request::Request::Open(v1::PublishOpen {
+                client_name: "transport-close".into(),
+                client_instance_id: vec![2],
+                ack_policy: Some(v1::AckPolicy {
+                    max_unacked_rows: 100,
+                    max_ack_delay_ms: 10_000,
+                }),
+            })),
+        })
+        .await
+        .unwrap();
+        tx.send(PublishRequest {
+            request: Some(publish_request::Request::Batch(v1::PublishBatch {
+                first_seq: 1,
+                messages: vec![v1::OutgoingMessage {
+                    message_handle: handle,
+                    timestamp_ns: 1_000,
+                    payload: Some(outgoing_message::Payload::Raw(vec![1])),
+                }],
+            })),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+        let mut responses = client
+            .publish(ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            responses.message().await.unwrap().unwrap().response,
+            Some(publish_response::Response::Accept(_))
+        ));
+        let response = tokio::time::timeout(Duration::from_secs(1), responses.message())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let Some(publish_response::Response::Ack(ack)) = response.response else {
+            panic!("expected ack");
+        };
+        assert_eq!(ack.through_seq, 1);
+        server.abort();
     }
 
     #[test]

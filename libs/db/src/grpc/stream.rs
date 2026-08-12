@@ -35,6 +35,17 @@ struct Playback {
     frequency: u64,
 }
 
+struct PlaybackRegistration {
+    id: u64,
+    playbacks: Arc<Mutex<HashMap<u64, watch::Sender<Playback>>>>,
+}
+
+impl Drop for PlaybackRegistration {
+    fn drop(&mut self) {
+        self.playbacks.lock().unwrap().remove(&self.id);
+    }
+}
+
 impl StreamServiceImpl {
     pub(super) fn new(db: Arc<DB>) -> Self {
         Self {
@@ -129,7 +140,12 @@ impl StreamServiceImpl {
     fn register_playback(
         &self,
         playback: Playback,
-    ) -> (u64, watch::Sender<Playback>, watch::Receiver<Playback>) {
+    ) -> (
+        u64,
+        watch::Sender<Playback>,
+        watch::Receiver<Playback>,
+        PlaybackRegistration,
+    ) {
         loop {
             let id = fastrand::u64(1..);
             let mut playbacks = self.playbacks.lock().unwrap();
@@ -138,7 +154,11 @@ impl StreamServiceImpl {
             }
             let (tx, rx) = watch::channel(playback);
             playbacks.insert(id, tx.clone());
-            return (id, tx, rx);
+            let registration = PlaybackRegistration {
+                id,
+                playbacks: self.playbacks.clone(),
+            };
+            return (id, tx, rx, registration);
         }
     }
 
@@ -184,7 +204,8 @@ impl StreamService for StreamServiceImpl {
         match open.behavior {
             Some(v1::stream_open::Behavior::FixedRate(fixed)) => {
                 let playback = self.playback(&fixed)?;
-                let (stream_id, control_tx, control_rx) = self.register_playback(playback);
+                let (stream_id, control_tx, control_rx, registration) =
+                    self.register_playback(playback);
                 tx.send(Ok(StreamComponentsResponse {
                     response: Some(stream_components_response::Response::Opened(
                         v1::StreamOpened { stream_id },
@@ -193,17 +214,22 @@ impl StreamService for StreamServiceImpl {
                 .await
                 .map_err(|_| Status::cancelled("client closed response stream"))?;
                 tokio::spawn(read_component_controls(incoming, control_tx));
-                tokio::spawn(run_fixed_components(components, tx, control_rx));
+                tokio::spawn(run_fixed_components(
+                    components,
+                    tx,
+                    control_rx,
+                    registration,
+                ));
             }
             Some(v1::stream_open::Behavior::RealTime(real_time)) if real_time.immediate => {
-                tokio::spawn(reject_component_controls(incoming));
+                tokio::spawn(reject_component_controls(incoming, tx.clone()));
                 for component in components {
                     tokio::spawn(run_immediate_component(component, tx.clone()));
                 }
                 drop(tx);
             }
             _ => {
-                tokio::spawn(reject_component_controls(incoming));
+                tokio::spawn(reject_component_controls(incoming, tx.clone()));
                 let db = self.db.clone();
                 tokio::spawn(run_batched_components(db, components, tx));
             }
@@ -230,6 +256,7 @@ impl StreamService for StreamServiceImpl {
         let (tx, rx) = mpsc::channel(32);
         match open.behavior {
             Some(v1::message_stream_open::Behavior::FixedRate(fixed)) => {
+                let shared_playback = playback_stream_id != 0;
                 let (control_tx, control_rx) = if playback_stream_id == 0 {
                     watch::channel(self.playback(&fixed)?)
                 } else {
@@ -239,7 +266,11 @@ impl StreamService for StreamServiceImpl {
                     let control_rx = control_tx.subscribe();
                     (control_tx, control_rx)
                 };
-                tokio::spawn(read_message_controls(incoming, control_tx));
+                if shared_playback {
+                    tokio::spawn(reject_message_controls(incoming, tx.clone()));
+                } else {
+                    tokio::spawn(read_message_controls(incoming, control_tx));
+                }
                 tokio::spawn(run_fixed_messages(messages, tx, control_rx));
             }
             _ if playback_stream_id != 0 => {
@@ -248,7 +279,7 @@ impl StreamService for StreamServiceImpl {
                 ));
             }
             _ => {
-                tokio::spawn(reject_message_controls(incoming));
+                tokio::spawn(reject_message_controls(incoming, tx.clone()));
                 for message in messages {
                     tokio::spawn(run_live_message(message, tx.clone()));
                 }
@@ -273,13 +304,13 @@ impl StreamService for StreamServiceImpl {
             loop {
                 let seen_timestamp = last_timestamp;
                 let seen_generation = config_generation;
-                futures_lite::future::race(
-                    db.last_updated
-                        .wait_for(move |value| value != seen_timestamp),
-                    db.db_config_gen
-                        .wait_for(move |value| value != seen_generation),
-                )
-                .await;
+                tokio::select! {
+                    _ = futures_lite::future::race(
+                        db.last_updated.wait_for(move |value| value != seen_timestamp),
+                        db.db_config_gen.wait_for(move |value| value != seen_generation),
+                    ) => {}
+                    _ = tx.closed() => return,
+                }
                 let timestamp = db.last_updated.latest();
                 let generation = db.db_config_gen.latest();
                 if timestamp != last_timestamp
@@ -354,7 +385,10 @@ async fn run_batched_components(
             }
             sent.insert(component.component_id, current);
         }
-        db.last_updated.wait().await;
+        tokio::select! {
+            _ = db.last_updated.wait() => {}
+            _ = tx.closed() => return,
+        }
     }
 }
 
@@ -374,7 +408,10 @@ async fn run_immediate_component(
                 sent = Some(current);
             }
         }
-        let _ = waiter.wait().await;
+        tokio::select! {
+            _ = waiter.wait() => {}
+            _ = tx.closed() => return,
+        }
     }
 }
 
@@ -382,6 +419,7 @@ async fn run_fixed_components(
     components: Vec<(String, Component)>,
     tx: mpsc::Sender<Result<StreamComponentsResponse, Status>>,
     mut control: watch::Receiver<Playback>,
+    _registration: PlaybackRegistration,
 ) {
     let mut cursor = control.borrow().timestamp;
     let mut seek_generation = control.borrow().seek_generation;
@@ -395,8 +433,13 @@ async fn run_fixed_components(
                 }
                 emitted = Some(cursor);
             }
-            if control.changed().await.is_err() {
-                return;
+            tokio::select! {
+                result = control.changed() => {
+                    if result.is_err() {
+                        return;
+                    }
+                }
+                _ = tx.closed() => return,
             }
             apply_seek(&control, &mut cursor, &mut seek_generation);
             continue;
@@ -419,6 +462,7 @@ async fn run_fixed_components(
                 }
                 apply_seek(&control, &mut cursor, &mut seek_generation);
             }
+            _ = tx.closed() => return,
         }
     }
 }
@@ -496,12 +540,30 @@ async fn read_message_controls(
     }
 }
 
-async fn reject_component_controls(mut incoming: tonic::Streaming<StreamComponentsRequest>) {
-    while let Ok(Some(_)) = incoming.message().await {}
+async fn reject_component_controls(
+    mut incoming: tonic::Streaming<StreamComponentsRequest>,
+    tx: mpsc::Sender<Result<StreamComponentsResponse, Status>>,
+) {
+    if let Ok(Some(_)) = incoming.message().await {
+        let _ = tx
+            .send(Err(Status::failed_precondition(
+                "stream controls require fixed-rate behavior",
+            )))
+            .await;
+    }
 }
 
-async fn reject_message_controls(mut incoming: tonic::Streaming<StreamMessagesRequest>) {
-    while let Ok(Some(_)) = incoming.message().await {}
+async fn reject_message_controls(
+    mut incoming: tonic::Streaming<StreamMessagesRequest>,
+    tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
+) {
+    if let Ok(Some(_)) = incoming.message().await {
+        let _ = tx
+            .send(Err(Status::failed_precondition(
+                "stream controls require an independent fixed-rate clock",
+            )))
+            .await;
+    }
 }
 
 async fn run_live_message(
@@ -527,7 +589,10 @@ async fn run_live_message(
             }
             sent = Some(timestamp);
         }
-        let _ = waiter.wait().await;
+        tokio::select! {
+            _ = waiter.wait() => {}
+            _ = tx.closed() => return,
+        }
     }
 }
 
@@ -545,8 +610,13 @@ async fn run_fixed_messages(
             if !send_message_frame(&messages, &tx, cursor, &mut sent).await {
                 return;
             }
-            if control.changed().await.is_err() {
-                return;
+            tokio::select! {
+                result = control.changed() => {
+                    if result.is_err() {
+                        return;
+                    }
+                }
+                _ = tx.closed() => return,
             }
             if apply_seek(&control, &mut cursor, &mut seek_generation) {
                 sent.clear();
@@ -572,6 +642,7 @@ async fn run_fixed_messages(
                     sent.clear();
                 }
             }
+            _ = tx.closed() => return,
         }
     }
 }
@@ -649,11 +720,59 @@ async fn send_db_config(
 #[cfg(test)]
 mod tests {
     use impeller2::types::PrimType;
-    use impeller2_wkt::SetDbConfig;
+    use impeller2_wkt::{ComponentMetadata, SetDbConfig};
     use tempfile::TempDir;
+    use v1::stream_service_server::StreamServiceServer;
 
     use super::*;
     use crate::ComponentSchema;
+
+    async fn transport_service() -> (
+        TempDir,
+        StreamServiceImpl,
+        v1::stream_service_client::StreamServiceClient<tonic::transport::Channel>,
+        tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
+    ) {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = ComponentId::new("demo.signal");
+        db.with_state_mut(|state| {
+            state
+                .insert_component(id, ComponentSchema::new(PrimType::F64, &[]), &db.path)
+                .unwrap();
+            state
+                .set_component_metadata(
+                    ComponentMetadata {
+                        component_id: id,
+                        name: "demo.signal".into(),
+                        metadata: Default::default(),
+                    },
+                    &db.path,
+                )
+                .unwrap();
+        });
+        db.apply_component_row(Timestamp(100), &[(id, 1.0f64.to_le_bytes().to_vec())])
+            .unwrap();
+        let service = StreamServiceImpl::new(db);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let server_service = service.clone();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(StreamServiceServer::new(server_service))
+                .serve(addr)
+                .await
+        });
+        let endpoint = format!("http://{addr}");
+        let client = loop {
+            match v1::stream_service_client::StreamServiceClient::connect(endpoint.clone()).await {
+                Ok(client) => break client,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        };
+        (directory, service, client, server)
+    }
 
     fn component(directory: &TempDir) -> Component {
         let component = Component::create(
@@ -686,10 +805,12 @@ mod tests {
             frequency: 100,
         };
         let (control_tx, control_rx) = watch::channel(initial);
+        let playbacks = Arc::new(Mutex::new(HashMap::from([(1, control_tx.clone())])));
         let task = tokio::spawn(run_fixed_components(
             vec![("demo.signal".into(), component)],
             tx,
             control_rx,
+            PlaybackRegistration { id: 1, playbacks },
         ));
 
         let first = rx.recv().await.unwrap().unwrap();
@@ -766,7 +887,8 @@ mod tests {
             timestep: Duration::from_millis(1),
             frequency: 60,
         };
-        let (stream_id, _, mut component_clock) = service.register_playback(playback);
+        let (stream_id, _, mut component_clock, _registration) =
+            service.register_playback(playback);
         let message_clock = service.playback_sender(stream_id).unwrap();
         let mut updated = playback;
         updated.playing = false;
@@ -786,6 +908,104 @@ mod tests {
         log.push(Timestamp(11), b"second").unwrap();
         assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"second");
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_releases_fixed_playback_on_disconnect() {
+        let (_directory, service, mut client, server) = transport_service().await;
+        for _ in 0..4 {
+            let mut responses = client
+                .stream_components(tokio_stream::iter([StreamComponentsRequest {
+                    request: Some(stream_components_request::Request::Open(v1::StreamOpen {
+                        components: vec!["demo.signal".into()],
+                        behavior: Some(v1::stream_open::Behavior::FixedRate(v1::FixedRate {
+                            initial: v1::InitialTimestamp::Manual as i32,
+                            initial_timestamp_ns: 100_000,
+                            timestep_ns: 1_000_000,
+                            frequency: 100,
+                        })),
+                    })),
+                }]))
+                .await
+                .unwrap()
+                .into_inner();
+            while !matches!(
+                futures_lite::StreamExt::next(&mut responses)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .response,
+                Some(stream_components_response::Response::Opened(_))
+            ) {}
+            drop(responses);
+            tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    if service.playbacks.lock().unwrap().is_empty() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_requires_stream_open_first() {
+        let (_directory, _service, mut client, server) = transport_service().await;
+        let error = client
+            .stream_components(tokio_stream::iter([StreamComponentsRequest {
+                request: Some(stream_components_request::Request::Control(StreamControl {
+                    playing: Some(false),
+                    ..Default::default()
+                })),
+            }]))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_rejects_controls_on_realtime_stream() {
+        let (_directory, _service, mut client, server) = transport_service().await;
+        let (tx, rx) = mpsc::channel(4);
+        tx.send(StreamComponentsRequest {
+            request: Some(stream_components_request::Request::Open(v1::StreamOpen {
+                components: vec!["demo.signal".into()],
+                behavior: Some(v1::stream_open::Behavior::RealTime(v1::RealTime {
+                    immediate: false,
+                })),
+            })),
+        })
+        .await
+        .unwrap();
+        let mut responses = client
+            .stream_components(ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        tx.send(StreamComponentsRequest {
+            request: Some(stream_components_request::Request::Control(StreamControl {
+                playing: Some(false),
+                ..Default::default()
+            })),
+        })
+        .await
+        .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Err(error) = responses.message().await {
+                    break error;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+        server.abort();
     }
 
     #[tokio::test]

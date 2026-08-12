@@ -107,22 +107,41 @@ impl TimeSeries {
     }
 
     pub fn get_range(&self, range: &Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
-        let timestamps = self.timestamps();
+        let indices = self.range_indices(range)?;
+        self.get_indices(indices)
+    }
 
-        let start = range.start;
-        let end = range.end;
-        let start_index = timestamps.partition_point(|&t| t < start);
-        let end_index = timestamps.partition_point(|&t| t <= end);
+    pub(crate) fn get_range_chunk(
+        &self,
+        range: &Range<Timestamp>,
+        offset: usize,
+        limit: usize,
+    ) -> Option<(&[Timestamp], &[u8])> {
+        let indices = self.range_indices(range)?;
+        let start = indices.start.saturating_add(offset).min(indices.end);
+        let end = start.saturating_add(limit).min(indices.end);
+        if start >= end {
+            return None;
+        }
+        self.get_indices(start..end)
+    }
+
+    fn range_indices(&self, range: &Range<Timestamp>) -> Option<Range<usize>> {
+        let timestamps = self.timestamps();
+        let start_index = timestamps.partition_point(|&t| t < range.start);
+        let end_index = timestamps.partition_point(|&t| t <= range.end);
         if start_index >= end_index {
             return None;
         }
+        Some(start_index..end_index)
+    }
 
-        let timestamps = timestamps.get(start_index..end_index)?;
+    fn get_indices(&self, indices: Range<usize>) -> Option<(&[Timestamp], &[u8])> {
+        let timestamps = self.timestamps().get(indices.clone())?;
         let element_size = self.element_size();
         let data = self
             .data
-            .get(start_index * element_size..end_index * element_size)?;
-
+            .get(indices.start * element_size..indices.end * element_size)?;
         Some((timestamps, data))
     }
 

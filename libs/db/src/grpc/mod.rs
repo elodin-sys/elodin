@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use tonic::{Request, Status, service::InterceptorLayer};
+use tonic::{Request, Status, service::interceptor::InterceptedService};
 
 use crate::DB;
 
@@ -55,39 +55,32 @@ pub async fn serve_with_auth(
         .register_encoded_file_descriptor_set(DESCRIPTOR_SET)
         .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET)
         .build_v1alpha()?;
-    let interceptor = InterceptorLayer::new(move |request: Request<()>| {
-        authorize(request, auth_token.as_deref())
-    });
+    let auth_token = Arc::new(auth_token);
+    let authenticate = move |request: Request<()>| authorize(request, auth_token.as_deref());
+    let ingest = IngestServiceServer::new(ingest::IngestServiceImpl::new(db.clone()))
+        .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
+        .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE);
+    let admin = AdminServiceServer::new(admin::AdminServiceImpl::new(db.clone()))
+        .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
+        .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE);
+    let message = MessageServiceServer::new(msg::MessageServiceImpl::new(db.clone()))
+        .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
+        .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE);
+    let query = QueryServiceServer::new(query::QueryServiceImpl::new(db.clone()))
+        .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
+        .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE);
+    let stream = StreamServiceServer::new(stream::StreamServiceImpl::new(db))
+        .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
+        .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE);
     tonic::transport::Server::builder()
-        .layer(interceptor)
-        .add_service(
-            IngestServiceServer::new(ingest::IngestServiceImpl::new(db.clone()))
-                .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
-                .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE),
-        )
-        .add_service(
-            AdminServiceServer::new(admin::AdminServiceImpl::new(db.clone()))
-                .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
-                .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE),
-        )
-        .add_service(
-            MessageServiceServer::new(msg::MessageServiceImpl::new(db.clone()))
-                .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
-                .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE),
-        )
-        .add_service(
-            QueryServiceServer::new(query::QueryServiceImpl::new(db.clone()))
-                .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
-                .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE),
-        )
-        .add_service(
-            StreamServiceServer::new(stream::StreamServiceImpl::new(db))
-                .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
-                .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE),
-        )
+        .add_service(InterceptedService::new(ingest, authenticate.clone()))
+        .add_service(InterceptedService::new(admin, authenticate.clone()))
+        .add_service(InterceptedService::new(message, authenticate.clone()))
+        .add_service(InterceptedService::new(query, authenticate.clone()))
+        .add_service(InterceptedService::new(stream, authenticate.clone()))
         .add_service(health)
-        .add_service(reflection_v1)
-        .add_service(reflection_v1alpha)
+        .add_service(InterceptedService::new(reflection_v1, authenticate.clone()))
+        .add_service(InterceptedService::new(reflection_v1alpha, authenticate))
         .serve(addr)
         .await?;
     Ok(())
@@ -103,9 +96,20 @@ fn authorize(request: Request<()>, token: Option<&str>) -> Result<Request<()>, S
         .get("authorization")
         .and_then(|value| value.to_str().ok())
     {
-        Some(value) if value == expected => Ok(request),
+        Some(value) if constant_time_eq(value.as_bytes(), expected.as_bytes()) => Ok(request),
         _ => Err(Status::unauthenticated("invalid bearer token")),
     }
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let mut different = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        different |= usize::from(
+            left.get(index).copied().unwrap_or_default()
+                ^ right.get(index).copied().unwrap_or_default(),
+        );
+    }
+    different == 0
 }
 
 #[cfg(test)]
@@ -135,6 +139,13 @@ mod tests {
 
         let decoded = SessionOpen::decode(open.encode_to_vec().as_slice()).unwrap();
         assert_eq!(decoded, open);
+    }
+
+    #[test]
+    fn bearer_comparison_rejects_length_and_value_mismatches() {
+        assert!(constant_time_eq(b"Bearer secret", b"Bearer secret"));
+        assert!(!constant_time_eq(b"Bearer secret", b"Bearer other!"));
+        assert!(!constant_time_eq(b"Bearer secret", b"Bearer secret-long"));
     }
 
     #[tokio::test]
@@ -186,10 +197,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut health = tonic_health::pb::health_client::HealthClient::with_interceptor(
-            channel.clone(),
-            bearer,
-        );
+        let mut health = tonic_health::pb::health_client::HealthClient::new(channel.clone());
         let status = health
             .check(tonic_health::pb::HealthCheckRequest {
                 service: "elodin.db.v1.QueryService".into(),

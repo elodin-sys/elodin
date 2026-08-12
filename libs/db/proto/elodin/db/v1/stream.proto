@@ -83,7 +83,8 @@ message MessageStreamOpen {
     FixedRate fixed_rate = 3;
   }
 
-  uint64 playback_stream_id = 4; // 0 = independent clock
+  // 0 = independent clock; shared-clock controls go to StreamComponents.
+  uint64 playback_stream_id = 4;
 }
 
 message StreamMessagesRequest {

@@ -37,9 +37,15 @@ target_link_libraries(my_client PRIVATE elodin-db-protos::elodin-db-protos)
 Sessions register a schema, receive handles, then send packed or typed batches.
 With `timestamp_source`, clients may omit `time_monotonic_ns` (server derives
 it). Max message 16 MiB; ack policy 1–1e6 rows / 1–10_000 ms (0 → 256 / 100 ms).
+`StreamControl` applies only to fixed-rate sessions; a message stream attached
+to a component playback clock is controlled through the owning component
+stream.
 The server is unauthenticated by default. Add `--grpc-auth-token TOKEN` to
-require `authorization: Bearer TOKEN` metadata. Transport remains insecure, so
-bind only on a trusted network.
+require `authorization: Bearer TOKEN` on application RPCs and reflection; the
+standard health endpoint remains unauthenticated for load balancers. Transport
+remains insecure, so bind only on a trusted network. Message publish resumes
+persist across server restarts; ingest restarts replay from sequence zero and
+deduplicate complete rows already stored.
 
 The full Python demo records a 10-second RC jet run with its controller and
 headless renderer, exercises live and recorded streaming, numeric SQL,

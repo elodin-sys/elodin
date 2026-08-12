@@ -142,7 +142,7 @@ impl QueryService for QueryServiceImpl {
             start: Timestamp(request.start_ns / 1000),
             end,
         };
-        let Some((timestamps, data)) = component.time_series.get_range(&range) else {
+        let Some((timestamps, _)) = component.time_series.get_range(&range) else {
             return Err(Status::out_of_range("requested time range has no samples"));
         };
         let row_size = component.schema.size();
@@ -153,20 +153,6 @@ impl QueryService for QueryServiceImpl {
                 .unwrap_or(usize::MAX)
                 .min(timestamps.len())
         };
-        let timestamps = &timestamps[..limit];
-        let data = &data[..limit * row_size];
-        let (timestamps, data) = downsample(
-            timestamps,
-            data,
-            row_size,
-            component.schema.prim_type,
-            component.schema.dim.iter().product(),
-            request.element_index as usize,
-            request.max_points as usize,
-        )?;
-        let timestamps = timestamps.into_owned();
-        let data = data.into_owned();
-
         let (tx, rx) = mpsc::channel(16);
         let header = v1::TimeSeriesHeader {
             component: request.component,
@@ -179,26 +165,45 @@ impl QueryService for QueryServiceImpl {
         }))
         .await
         .map_err(|_| Status::cancelled("client closed response stream"))?;
-        tokio::spawn(async move {
+
+        let max_points = request.max_points as usize;
+        if max_points == 0 || max_points < 3 || limit <= max_points {
             let rows_per_chunk = (CHUNK_BYTES / row_size.max(1)).max(1);
-            for (time_chunk, data_chunk) in timestamps
-                .chunks(rows_per_chunk)
-                .zip(data.chunks(rows_per_chunk * row_size))
-            {
-                let response = GetTimeSeriesResponse {
-                    chunk: Some(get_time_series_response::Chunk::Data(v1::TimeSeriesData {
-                        timestamps_ns: time_chunk
-                            .iter()
-                            .map(|timestamp| timestamp.0.saturating_mul(1000))
-                            .collect(),
-                        packed_values: data_chunk.to_vec(),
-                    })),
-                };
-                if tx.send(Ok(response)).await.is_err() {
-                    break;
+            tokio::spawn(async move {
+                let mut offset = 0;
+                while offset < limit {
+                    let Some((timestamps, data)) = component.time_series.get_range_chunk(
+                        &range,
+                        offset,
+                        rows_per_chunk.min(limit - offset),
+                    ) else {
+                        break;
+                    };
+                    let count = timestamps.len();
+                    let response = time_series_data(timestamps, data);
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
+                    offset += count;
                 }
-            }
-        });
+            });
+        } else {
+            let (timestamps, data) = component.time_series.get_range(&range).unwrap();
+            let (timestamps, data) = downsample(
+                &timestamps[..limit],
+                &data[..limit * row_size],
+                row_size,
+                component.schema.prim_type,
+                component.schema.dim.iter().product(),
+                request.element_index as usize,
+                max_points,
+            )?;
+            let timestamps = timestamps.into_owned();
+            let data = data.into_owned();
+            tokio::spawn(async move {
+                let _ = tx.send(Ok(time_series_data(&timestamps, &data))).await;
+            });
+        }
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
@@ -314,6 +319,18 @@ fn element_as_f64(prim_type: DbPrimType, bytes: &[u8]) -> Result<f64, Status> {
         DbPrimType::F32 => read!(f32),
         DbPrimType::F64 => read!(f64),
     })
+}
+
+fn time_series_data(timestamps: &[Timestamp], data: &[u8]) -> GetTimeSeriesResponse {
+    GetTimeSeriesResponse {
+        chunk: Some(get_time_series_response::Chunk::Data(v1::TimeSeriesData {
+            timestamps_ns: timestamps
+                .iter()
+                .map(|timestamp| timestamp.0.saturating_mul(1000))
+                .collect(),
+            packed_values: data.to_vec(),
+        })),
+    }
 }
 
 #[cfg(test)]
@@ -439,5 +456,58 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(!response.ipc.is_empty());
+    }
+
+    #[tokio::test]
+    async fn raw_time_series_streams_multiple_chunks() {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = ComponentId::new("demo.large");
+        let row_size = CHUNK_BYTES / 4;
+        db.with_state_mut(|state| {
+            state
+                .insert_component(
+                    id,
+                    ComponentSchema::new(PrimType::U8, &[row_size]),
+                    &db.path,
+                )
+                .unwrap();
+            state
+                .set_component_metadata(
+                    ComponentMetadata {
+                        component_id: id,
+                        name: "demo.large".into(),
+                        metadata: Default::default(),
+                    },
+                    &db.path,
+                )
+                .unwrap();
+        });
+        for sequence in 1..=5 {
+            db.apply_component_row(Timestamp(sequence), &[(id, vec![sequence as u8; row_size])])
+                .unwrap();
+        }
+        let mut stream = QueryServiceImpl::new(db)
+            .get_time_series(Request::new(GetTimeSeriesRequest {
+                component: "demo.large".into(),
+                start_ns: 0,
+                end_ns: 0,
+                limit: 0,
+                max_points: 0,
+                element_index: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let mut chunks = 0;
+        let mut bytes = 0;
+        while let Some(response) = futures_lite::StreamExt::next(&mut stream).await {
+            if let Some(get_time_series_response::Chunk::Data(data)) = response.unwrap().chunk {
+                chunks += 1;
+                bytes += data.packed_values.len();
+            }
+        }
+        assert_eq!(chunks, 2);
+        assert_eq!(bytes, row_size * 5);
     }
 }
