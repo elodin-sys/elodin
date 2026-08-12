@@ -689,8 +689,19 @@ impl WorldBuilder {
                     })?;
                 if let Some(grpc_addr) = grpc_addr {
                     let grpc_db = db_server.db.clone();
+                    // Bind synchronously so a bad or busy address fails
+                    // world.run instead of a background task.
+                    let listener = std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                        crate::Error::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("failed to bind grpc_addr {grpc_addr}: {e}"),
+                        ))
+                    })?;
                     stellarator::struc_con::tokio(move |_| async move {
-                        elodin_db::grpc::serve(grpc_addr, grpc_db).await.unwrap()
+                        if let Err(error) = elodin_db::grpc::serve_listener(listener, grpc_db).await
+                        {
+                            tracing::error!(?error, "gRPC server exited");
+                        }
                     });
                 }
                 crate::impeller2_server::prime_schematic_assets(

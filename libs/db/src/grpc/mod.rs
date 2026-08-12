@@ -29,6 +29,30 @@ pub async fn serve_with_auth(
     db: Arc<DB>,
     auth_token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    router(db, auth_token).await?.serve(addr).await?;
+    Ok(())
+}
+
+// Serves on a listener the caller bound, letting embedders surface bind
+// failures synchronously instead of from a background task.
+pub async fn serve_listener(
+    listener: std::net::TcpListener,
+    db: Arc<DB>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    listener.set_nonblocking(true)?;
+    let listener = tokio::net::TcpListener::from_std(listener)?;
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    router(db, None)
+        .await?
+        .serve_with_incoming(incoming)
+        .await?;
+    Ok(())
+}
+
+async fn router(
+    db: Arc<DB>,
+    auth_token: Option<String>,
+) -> Result<tonic::transport::server::Router, Box<dyn std::error::Error + Send + Sync>> {
     use v1::{
         admin_service_server::AdminServiceServer, ingest_service_server::IngestServiceServer,
         message_service_server::MessageServiceServer, query_service_server::QueryServiceServer,
@@ -72,7 +96,7 @@ pub async fn serve_with_auth(
     let stream = StreamServiceServer::new(stream::StreamServiceImpl::new(db))
         .max_decoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE)
         .max_encoding_message_size(ingest::MAX_GRPC_MESSAGE_SIZE);
-    tonic::transport::Server::builder()
+    Ok(tonic::transport::Server::builder()
         .add_service(InterceptedService::new(ingest, authenticate.clone()))
         .add_service(InterceptedService::new(admin, authenticate.clone()))
         .add_service(InterceptedService::new(message, authenticate.clone()))
@@ -80,10 +104,7 @@ pub async fn serve_with_auth(
         .add_service(InterceptedService::new(stream, authenticate.clone()))
         .add_service(health)
         .add_service(InterceptedService::new(reflection_v1, authenticate.clone()))
-        .add_service(InterceptedService::new(reflection_v1alpha, authenticate))
-        .serve(addr)
-        .await?;
-    Ok(())
+        .add_service(InterceptedService::new(reflection_v1alpha, authenticate)))
 }
 
 fn authorize(request: Request<()>, token: Option<&str>) -> Result<Request<()>, Status> {
@@ -146,6 +167,27 @@ mod tests {
         assert!(constant_time_eq(b"Bearer secret", b"Bearer secret"));
         assert!(!constant_time_eq(b"Bearer secret", b"Bearer other!"));
         assert!(!constant_time_eq(b"Bearer secret", b"Bearer secret-long"));
+    }
+
+    #[tokio::test]
+    async fn serve_listener_accepts_prebound_socket() {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { serve_listener(listener, db).await.unwrap() });
+        let endpoint = format!("http://{addr}");
+        let mut query = loop {
+            match v1::query_service_client::QueryServiceClient::connect(endpoint.clone()).await {
+                Ok(client) => break client,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        };
+        query
+            .get_time_range(v1::GetTimeRangeRequest {})
+            .await
+            .unwrap();
+        server.abort();
     }
 
     #[tokio::test]
