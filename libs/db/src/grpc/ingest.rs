@@ -26,7 +26,9 @@ const MAX_CLIENT_NAME_LEN: usize = 128;
 const MAX_CLIENT_INSTANCE_ID_LEN: usize = 128;
 const MAX_SCHEMA_NAME_LEN: usize = 256;
 const MAX_COMPONENT_ELEMENTS: usize = 1 << 24;
-const MAX_PACKED_SIZE: usize = 256 * 1024 * 1024;
+// Half the gRPC message cap so even a single-row batch always fits; larger
+// schemas would pass SessionOpen yet be undeliverable.
+const MAX_PACKED_SIZE: usize = MAX_GRPC_MESSAGE_SIZE / 2;
 const DEFAULT_MAX_UNACKED_ROWS: u32 = 256;
 const DEFAULT_MAX_ACK_DELAY_MS: u32 = 100;
 const MAX_UNACKED_ROWS: u32 = 1_000_000;
