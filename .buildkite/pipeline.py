@@ -61,7 +61,7 @@ test_steps = [
             nix_step(
                 emoji=":crab:",
                 label="elodin-db grpc",
-                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db grpc_ -- --test-threads=1 && cargo test -p nox-py world_run_grpc_addr --lib -- --test-threads=1",
+                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db grpc_ -- --test-threads=1 && cargo test -p elodin-db --features grpc grpc_address_follows_main_port -- --test-threads=1",
             ),
         ],
     ),

@@ -55,3 +55,7 @@ pub mod nox_impls;
 /// Port offset K for the embedded static-assets HTTP server: assets listen on
 /// `{impeller_tcp_port} + ASSETS_HTTP_PORT_OFFSET` (default Impeller 2240 → assets 2241).
 pub const ASSETS_HTTP_PORT_OFFSET: u16 = 1;
+
+/// Port offset for the always-on gRPC server: gRPC listens on
+/// `{impeller_tcp_port} + GRPC_PORT_OFFSET` (default Impeller 2240 → gRPC 2242).
+pub const GRPC_PORT_OFFSET: u16 = 2;

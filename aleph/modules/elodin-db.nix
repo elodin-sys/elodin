@@ -51,13 +51,6 @@ in {
         Whether to automatically open the specified ports in the firewall.
       '';
     };
-    grpcAddress = lib.mkOption {
-      type = lib.types.str;
-      default = "[::]:50051";
-      description = ''
-        Address for the elodin-db gRPC ingest server.
-      '';
-    };
     dbFolderName = lib.mkOption {
       type = lib.types.str;
       default = "/db";
@@ -91,7 +84,7 @@ in {
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 --grpc-addr ${cfg.grpcAddress}${assetsFlag} ${cfg.dbFolderName}/%i";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248${assetsFlag} ${cfg.dbFolderName}/%i";
         KillSignal = "SIGINT";
         Environment = "RUST_LOG=info";
       };
@@ -104,7 +97,7 @@ in {
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 --grpc-addr ${cfg.grpcAddress}${assetsFlag} ${cfg.dbFolderName}/default";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248${assetsFlag} ${cfg.dbFolderName}/default";
         KillSignal = "SIGINT";
         Restart = "on-failure";
         RestartSec = "5s";

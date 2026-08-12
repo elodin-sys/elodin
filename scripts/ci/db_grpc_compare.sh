@@ -107,7 +107,7 @@ run_mode() {
     -o "${server_time}" bash -c \
     'pid_file=$1; shift; printf "%s\n" "$$" >"${pid_file}"; exec "$@"' server-child \
     "${work}/server.pid" nice -n "${db_nice}" "${server_bin}" run "${db_addr}" "${work}/db" \
-    --grpc-addr "${grpc_addr}" >"${output}/${mode}.server.log" 2>&1 &
+    >"${output}/${mode}.server.log" 2>&1 &
   server_pgid=$!
   if ! wait_for_port "${base}" || ! wait_for_port "$((base + 2))"; then
     printf 'server failed to start for %s\n' "${mode}" >&2

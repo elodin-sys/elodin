@@ -66,15 +66,18 @@ pub fn slot_template(worker_id: usize, resources: &ResourceConfig) -> Result<Slo
         };
         ports.insert(name.clone(), port);
     }
-    // elodin-db always serves editor/render-server assets on `db_port + 1`
-    // (the headless sensor-camera renderer fetches scene assets from it), so
-    // the assets port is part of every slot: validated, preflight-probed, and
-    // exported as ELODIN_MC_PORT_DB_ASSETS.
+    // elodin-db always serves assets on `db_port + 1` and gRPC on
+    // `db_port + 2`, so both derived ports are validated, preflight-probed,
+    // and exported with every slot.
     if let Some(db) = db_port {
         let assets = db
             .checked_add(1)
             .ok_or_else(|| miette!("worker {worker_id}: assets port (db_port + 1) overflows"))?;
+        let grpc = db
+            .checked_add(2)
+            .ok_or_else(|| miette!("worker {worker_id}: gRPC port (db_port + 2) overflows"))?;
         ports.insert("db_assets".to_string(), Some(assets));
+        ports.insert("db_grpc".to_string(), Some(grpc));
     }
     let mut seen: HashMap<u16, String> = HashMap::new();
     if let Some(db) = db_port {
@@ -202,11 +205,9 @@ pub fn allocate_port(bind_ip: IpAddr) -> Result<PortGuard> {
     ))
 }
 
-/// Allocate a consecutive port pair `(P, P + 1)`, both free for TCP and UDP.
-/// Used for `db_port = "auto"`: elodin-db implicitly serves assets on
-/// `db_port + 1`, so a dynamically allocated DB port must bring its assets
-/// port with it.
-pub fn allocate_port_pair(bind_ip: IpAddr) -> Result<(PortGuard, PortGuard)> {
+/// Allocate consecutive DB, asset, and gRPC ports `(P, P + 1, P + 2)`, all
+/// free for TCP and UDP.
+pub fn allocate_db_ports(bind_ip: IpAddr) -> Result<(PortGuard, PortGuard, PortGuard)> {
     for _ in 0..64 {
         let Ok(udp) = UdpSocket::bind((bind_ip, 0)) else {
             break;
@@ -217,6 +218,9 @@ pub fn allocate_port_pair(bind_ip: IpAddr) -> Result<(PortGuard, PortGuard)> {
         let Some(assets_port) = port.checked_add(1) else {
             continue;
         };
+        let Some(grpc_port) = port.checked_add(2) else {
+            continue;
+        };
         let Ok(tcp) = TcpListener::bind((bind_ip, port)) else {
             continue;
         };
@@ -224,6 +228,12 @@ pub fn allocate_port_pair(bind_ip: IpAddr) -> Result<(PortGuard, PortGuard)> {
             continue;
         };
         let Ok(assets_tcp) = TcpListener::bind((bind_ip, assets_port)) else {
+            continue;
+        };
+        let Ok(grpc_udp) = UdpSocket::bind((bind_ip, grpc_port)) else {
+            continue;
+        };
+        let Ok(grpc_tcp) = TcpListener::bind((bind_ip, grpc_port)) else {
             continue;
         };
         return Ok((
@@ -237,10 +247,15 @@ pub fn allocate_port_pair(bind_ip: IpAddr) -> Result<(PortGuard, PortGuard)> {
                 _tcp: assets_tcp,
                 _udp: assets_udp,
             },
+            PortGuard {
+                port: grpc_port,
+                _tcp: grpc_tcp,
+                _udp: grpc_udp,
+            },
         ));
     }
     Err(miette!(
-        "failed to allocate a dynamic db/assets port pair on {bind_ip} (64 attempts)"
+        "failed to allocate dynamic db/assets/gRPC ports on {bind_ip} (64 attempts)"
     ))
 }
 
@@ -546,18 +561,17 @@ mod tests {
         assert!(message.contains("20032"), "got: {message}");
     }
 
-    /// elodin-db always serves assets on `db_port + 1`, so a named port
-    /// placed there — the customer's original silent-corruption failure — is
-    /// rejected up front.
+    /// elodin-db always serves assets and gRPC beside the native port, so
+    /// named ports placed there are rejected up front.
     #[test]
-    fn assets_port_is_always_reserved() {
-        let colliding = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20001))]);
-        let err = validate_port_plan(&colliding, 4).unwrap_err();
-        assert!(err.to_string().contains("collision"), "got: {err}");
+    fn derived_db_ports_are_always_reserved() {
+        for port in [20001, 20002] {
+            let colliding = resources(32, 20000, &[("sitl_socket", PortSpec::Static(port))]);
+            let err = validate_port_plan(&colliding, 4).unwrap_err();
+            assert!(err.to_string().contains("collision"), "got: {err}");
+        }
 
-        // The customer's real plan leaves db_port + 1 free: valid, and the
-        // assets port shows up as a planned (probed/reaped) port per worker.
-        let valid = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20002))]);
+        let valid = resources(32, 20000, &[("sitl_socket", PortSpec::Static(20018))]);
         let planned = validate_port_plan(&valid, 2).unwrap();
         assert!(
             planned
@@ -569,6 +583,16 @@ mod tests {
                 .iter()
                 .any(|planned| planned.name == "db_assets" && planned.port == 20033)
         );
+        assert!(
+            planned
+                .iter()
+                .any(|planned| planned.name == "db_grpc" && planned.port == 20002)
+        );
+        assert!(
+            planned
+                .iter()
+                .any(|planned| planned.name == "db_grpc" && planned.port == 20034)
+        );
     }
 
     #[test]
@@ -579,11 +603,9 @@ mod tests {
             &[("ardupilot", PortSpec::Auto(crate::AutoTag::Auto))],
         );
         let planned = validate_port_plan(&resources, 96).unwrap();
-        assert!(
-            planned
-                .iter()
-                .all(|planned| planned.name == "db_port" || planned.name == "db_assets")
-        );
+        assert!(planned.iter().all(|planned| {
+            planned.name == "db_port" || planned.name == "db_assets" || planned.name == "db_grpc"
+        }));
     }
 
     #[test]
@@ -595,16 +617,18 @@ mod tests {
     }
 
     #[test]
-    fn allocate_port_pair_is_consecutive_and_guarded() {
+    fn allocate_db_ports_are_consecutive_and_guarded() {
         let ip = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
-        let (db, assets) = allocate_port_pair(ip).unwrap();
+        let (db, assets, grpc) = allocate_db_ports(ip).unwrap();
         assert_eq!(assets.port, db.port + 1);
-        // Both ports are held on both protocols while the guards live.
+        assert_eq!(grpc.port, db.port + 2);
         assert!(UdpSocket::bind((ip, db.port)).is_err());
         assert!(TcpListener::bind((ip, db.port)).is_err());
         assert!(UdpSocket::bind((ip, assets.port)).is_err());
         assert!(TcpListener::bind((ip, assets.port)).is_err());
-        drop((db, assets));
+        assert!(UdpSocket::bind((ip, grpc.port)).is_err());
+        assert!(TcpListener::bind((ip, grpc.port)).is_err());
+        drop((db, assets, grpc));
     }
 
     #[cfg(target_os = "linux")]

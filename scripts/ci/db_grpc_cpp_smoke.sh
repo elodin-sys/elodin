@@ -37,8 +37,7 @@ grpc_port=$((db_port + 2))
 db_dir="${work}/db"
 (
   trap - INT
-  exec env RUST_LOG=warn "${server_bin}" run "127.0.0.1:${db_port}" "${db_dir}" \
-    --grpc-addr "127.0.0.1:${grpc_port}"
+  exec env RUST_LOG=warn "${server_bin}" run "127.0.0.1:${db_port}" "${db_dir}"
 ) >"${work}/server.log" 2>&1 &
 server_pid=$!
 

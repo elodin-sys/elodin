@@ -53,12 +53,13 @@ The DB engine automatically divides the nanosecond source value by 1000 on inges
 
 ## Foreign-client gRPC API
 
-`--grpc-addr` adds versioned protobuf services on the same DB core:
-acknowledged ingest, bounded and SQL queries, real-time/fixed-rate streams,
-message logs, metadata/config, and chunked assets. Health and reflection share
-the endpoint. See the [gRPC Client guide](/home/db/grpc-client) for setup,
-generated C++/Python clients, write-resume semantics, queries, and playback.
-Native Impeller/VTable remains the editor/sim/follower path. Contracts:
+Every DB starts versioned protobuf services on the same core at native port
+`P + 2`, next to asset HTTP at `P + 1`. The API covers acknowledged ingest,
+bounded and SQL queries, real-time/fixed-rate streams, message logs,
+metadata/config, and chunked assets. Health and reflection share the endpoint.
+See the [gRPC Client guide](/home/db/grpc-client) for setup, generated
+C++/Python clients, write-resume semantics, queries, and playback. Native
+Impeller/VTable remains the editor/sim/follower path. Contracts:
 `libs/db/proto/elodin/db/v1` (16 MiB max message).
 
 ## VTable

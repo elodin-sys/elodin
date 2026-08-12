@@ -20,12 +20,13 @@ elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config
 ### gRPC API for foreign clients
 
 ```sh
-elodin-db run [::]:2240 ./db --grpc-addr [::]:50051
+elodin-db run [::]:2240 ./db
 ```
 
-The optional API includes acknowledged telemetry ingest, historical and SQL
-queries, live/fixed-rate streams, message logs, config, metadata, and assets.
-Health checking and server reflection are enabled. Contracts live under
+The always-on gRPC API listens two ports above the native endpoint (`2242` for
+the default `2240`). It includes acknowledged telemetry ingest, historical and
+SQL queries, live/fixed-rate streams, message logs, config, metadata, and
+assets. Health checking and server reflection are enabled. Contracts live under
 [`proto/elodin/db/v1`](proto/elodin/db/v1). CMake clients use
 `elodin-db-protos`; see [`grpc-client-batched.cpp`](examples/grpc-client-batched.cpp).
 

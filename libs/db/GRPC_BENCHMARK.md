@@ -52,7 +52,7 @@ times. Set `DB_BENCH_CAPTURE=1` for a loopback pcap, then inspect with:
 
 ```bash
 python3 scripts/ci/db_grpc_packet_shape.py capture.pcap \
-  --port 50051 --mss 1460
+  --port 2242 --mss 1460
 ```
 
 This host lacked `CAP_NET_RAW`/`CAP_NET_ADMIN`, so no packet-shape or netem
@@ -86,14 +86,13 @@ netem qdisc it installed.
 Remote DB:
 
 ```bash
-target/release/elodin-db run 0.0.0.0:2240 "$DB_PATH" \
-  --grpc-addr 0.0.0.0:50051
+target/release/elodin-db run 0.0.0.0:2240 "$DB_PATH"
 ```
 
 Capture on the client or server host:
 
 ```bash
-sudo tcpdump -i "$IFACE" -nn -s 0 -w grpc-link.pcap 'tcp port 50051'
+sudo tcpdump -i "$IFACE" -nn -s 0 -w grpc-link.pcap 'tcp port 2242'
 ```
 
 From the client, run each encoding against that endpoint on a fresh DB path:
@@ -102,12 +101,12 @@ From the client, run each encoding against that endpoint on a fresh DB path:
 target/release/elodin-db-bench \
   --components 40 --frequency 250 --duration 60 --clients 1 \
   --mode grpc-packed --db-addr "$DB_HOST:2240" \
-  --grpc-addr "$DB_HOST:50051" --json
+  --grpc-addr "$DB_HOST:2242" --json
 
 target/release/elodin-db-bench \
   --components 40 --frequency 250 --duration 60 --clients 1 \
   --mode grpc-typed --db-addr "$DB_HOST:2240" \
-  --grpc-addr "$DB_HOST:50051" --json
+  --grpc-addr "$DB_HOST:2242" --json
 ```
 
 Require p99 ack below 50 ms at the target load, measure DB and client CPU

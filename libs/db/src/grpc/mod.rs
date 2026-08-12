@@ -17,6 +17,12 @@ mod stream;
 
 const DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("elodin_db_descriptor");
 
+pub use impeller2::GRPC_PORT_OFFSET;
+
+pub fn grpc_addr(tcp: SocketAddr) -> SocketAddr {
+    SocketAddr::new(tcp.ip(), tcp.port().saturating_add(GRPC_PORT_OFFSET))
+}
+
 pub async fn serve(
     addr: SocketAddr,
     db: Arc<DB>,
@@ -152,6 +158,12 @@ mod tests {
     use prost::Message;
     use tempfile::TempDir;
     use tonic::metadata::MetadataValue;
+
+    #[test]
+    fn grpc_address_follows_main_port() {
+        let main: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        assert_eq!(grpc_addr(main), "127.0.0.1:2242".parse().unwrap());
+    }
 
     #[test]
     fn generated_message_round_trip() {

@@ -32,10 +32,11 @@ To start a new instance of Elodin DB, use the following command:
 elodin-db run
 ```
 
-Enable the optional gRPC API:
+The gRPC API starts automatically two ports above the native endpoint:
 
 ```sh
-elodin-db run [::]:2240 ./db --grpc-addr [::]:50051
+elodin-db run [::]:2240 ./db
+# Native: 2240, asset HTTP: 2241, gRPC: 2242
 ```
 
 See `libs/db/proto/elodin/db/v1`, the `elodin-db-protos` CMake package, and

@@ -23,10 +23,11 @@ administrative access. Python-only applications that prefer a higher-level API
 can use the [Python Client](/home/db/python-client). Native Elodin processes
 should continue to use Impeller and VTables.
 
-Start the optional endpoint alongside the normal database listener:
+The endpoint starts automatically two ports above the native listener:
 
 ```sh
-elodin-db run 127.0.0.1:2240 ./db --grpc-addr 127.0.0.1:50051
+elodin-db run 127.0.0.1:2240 ./db
+# Native: 2240, asset HTTP: 2241, gRPC: 2242
 ```
 
 The endpoint serves the application services, standard gRPC health checking,
@@ -81,7 +82,7 @@ import time
 import grpc
 from elodin.db.v1 import common_pb2, ingest_pb2, ingest_pb2_grpc
 
-channel = grpc.insecure_channel("127.0.0.1:50051")
+channel = grpc.insecure_channel("127.0.0.1:2242")
 grpc.channel_ready_future(channel).result(timeout=10)
 
 schema = ingest_pb2.SchemaSet(messages=[
@@ -306,7 +307,6 @@ The server is unauthenticated by default. Add a static bearer token:
 
 ```sh
 elodin-db run 127.0.0.1:2240 ./db \
-  --grpc-addr 127.0.0.1:50051 \
   --grpc-auth-token "$TOKEN"
 ```
 

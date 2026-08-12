@@ -93,12 +93,8 @@ struct RunArgs {
     #[clap(long, help = "Address to bind the HTTP server to")]
     http_addr: Option<SocketAddr>,
     #[cfg(feature = "grpc")]
-    #[clap(long, help = "Address to bind the gRPC server to")]
-    grpc_addr: Option<SocketAddr>,
-    #[cfg(feature = "grpc")]
     #[clap(
         long,
-        requires = "grpc_addr",
         value_parser = clap::builder::NonEmptyStringValueParser::new(),
         help = "Bearer token required by the gRPC server"
     )]
@@ -437,8 +433,6 @@ async fn main() -> miette::Result<()> {
             #[cfg(feature = "axum")]
             http_addr,
             #[cfg(feature = "grpc")]
-            grpc_addr,
-            #[cfg(feature = "grpc")]
             grpc_auth_token,
             path,
             config,
@@ -539,6 +533,13 @@ async fn main() -> miette::Result<()> {
                 Some(server.db.clone()),
             )
             .into_diagnostic()?;
+            #[cfg(feature = "grpc")]
+            let grpc_listener = {
+                let grpc_addr = elodin_db::grpc::grpc_addr(addr);
+                std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                    miette::miette!("failed to bind gRPC server at {grpc_addr}: {e}")
+                })?
+            };
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
@@ -563,23 +564,17 @@ async fn main() -> miette::Result<()> {
                 });
             }
             #[cfg(feature = "grpc")]
-            if let Some(grpc_addr) = grpc_addr {
-                // Bind synchronously so a bad or busy address fails startup
-                // instead of panicking a background task.
-                let listener = std::net::TcpListener::bind(grpc_addr)
-                    .map_err(|e| miette::miette!("failed to bind --grpc-addr {grpc_addr}: {e}"))?;
-                stellarator::struc_con::tokio(move |_| async move {
-                    if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
-                        listener,
-                        grpc_db,
-                        grpc_auth_token,
-                    )
-                    .await
-                    {
-                        tracing::error!(?error, "gRPC server exited");
-                    }
-                });
-            }
+            stellarator::struc_con::tokio(move |_| async move {
+                if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
+                    grpc_listener,
+                    grpc_db,
+                    grpc_auth_token,
+                )
+                .await
+                {
+                    tracing::error!(?error, "gRPC server exited");
+                }
+            });
             if let Some(lua_config) = config {
                 let args = impeller2_cli::Args {
                     config: Some(lua_config),
@@ -1081,35 +1076,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_grpc_addr_for_run() {
-        let cli = Cli::try_parse_from([
-            "elodin-db",
-            "run",
-            "127.0.0.1:2240",
-            "/tmp/elodin-db-grpc-cli-test",
-            "--grpc-addr",
-            "127.0.0.1:50051",
-        ])
-        .unwrap();
-        let Commands::Run(args) = cli.command else {
-            panic!("expected run command");
-        };
-        assert_eq!(args.grpc_addr, Some("127.0.0.1:50051".parse().unwrap()));
-        assert!(args.grpc_auth_token.is_none());
-    }
-
-    #[test]
-    fn grpc_auth_token_requires_grpc_addr() {
+    fn grpc_addr_is_not_a_run_flag() {
         assert!(
             Cli::try_parse_from([
                 "elodin-db",
                 "run",
                 "127.0.0.1:2240",
                 "/tmp/elodin-db-grpc-cli-test",
-                "--grpc-auth-token",
-                "secret",
+                "--grpc-addr",
+                "127.0.0.1:2242",
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn grpc_auth_token_uses_derived_address() {
+        let cli = Cli::try_parse_from([
+            "elodin-db",
+            "run",
+            "127.0.0.1:2240",
+            "/tmp/elodin-db-grpc-cli-test",
+            "--grpc-auth-token",
+            "secret",
+        ])
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.grpc_auth_token.as_deref(), Some("secret"));
     }
 }

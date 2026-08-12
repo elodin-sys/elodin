@@ -19,7 +19,7 @@ license = false
 eula = false
 
 [features]
-default = ["axum", "parquet", "video-export", "mcap-export"]
+default = ["axum", "grpc", "parquet", "video-export", "mcap-export"]
 axum = [
     "dep:axum",
     "dep:axum-streams",

@@ -29,7 +29,7 @@ constexpr std::size_t kComponentCount = 8;
 constexpr std::string_view kMessageName = "GrpcCppReference";
 
 struct Options {
-    std::string address = "127.0.0.1:50051";
+    std::string address = "127.0.0.1:2242";
     std::uint64_t ticks = 100;
     double frequency_hz = 100.0;
 };

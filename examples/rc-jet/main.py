@@ -264,5 +264,4 @@ world.run(
     max_ticks=int(os.environ.get("ELODIN_MAX_TICKS", config.total_ticks)),
     db_path=os.environ.get("ELODIN_DB_PATH"),
     interactive=os.environ.get("ELODIN_NON_INTERACTIVE") != "1",
-    grpc_addr=os.environ.get("ELODIN_GRPC_ADDR"),
 )

@@ -36,7 +36,6 @@ cd "${root}"
 python3 -c 'import elodin, grpc, grpc_tools, pyarrow'
 db_port=$((30000 + $$ % 10000))
 grpc_port=$((db_port + 2))
-live_grpc_port=$((db_port + 4))
 
 generated="${work}/python"
 mkdir -p "${generated}"
@@ -89,17 +88,16 @@ else
     ELODIN_NON_INTERACTIVE=1 \
     ELODIN_RC_JET_CONTROLLER_HOST="127.0.0.1:${db_port}" \
     ELODIN_RC_JET_CONTROLLER_BIN="${controller_bin}" \
-    ELODIN_GRPC_ADDR="127.0.0.1:${live_grpc_port}" \
     elodin run examples/rc-jet/main.py --addr "127.0.0.1:${db_port}" \
     >"${sim_log}" 2>&1 &
   sim_pid=$!
-  if ! wait_for_port "${live_grpc_port}"; then
+  if ! wait_for_port "${grpc_port}"; then
     rg -n '^' "${sim_log}" >&2 || true
     printf 'embedded RC-jet gRPC server did not become ready\n' >&2
     exit 1
   fi
   PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
-    --live --target "127.0.0.1:${live_grpc_port}"
+    --live --target "127.0.0.1:${grpc_port}"
   complete=0
   for _ in $(seq 1 720); do
     if rg -q 'elodin simulation summary' "${sim_log}"; then
@@ -150,7 +148,7 @@ else
   printf 'elodin-db or cargo is required\n' >&2
   exit 1
 fi
-if ! "${server_bin}" run --help | rg -q -- '--grpc-addr'; then
+if ! "${server_bin}" run --help | rg -q -- '--grpc-auth-token'; then
   printf 'elodin-db was built without the grpc feature\n' >&2
   exit 1
 fi
@@ -164,7 +162,7 @@ start_server() {
   (
     trap - INT
     exec env RUST_LOG=warn "${server_bin}" run "127.0.0.1:${db_port}" "${work}/db" \
-      --grpc-addr "127.0.0.1:${grpc_port}" "${auth[@]}"
+      "${auth[@]}"
   ) >"${work}/server.log" 2>&1 &
   server_pid=$!
   wait_for_port "${grpc_port}" && return

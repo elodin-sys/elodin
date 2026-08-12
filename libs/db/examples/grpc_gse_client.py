@@ -250,7 +250,7 @@ def verify(channel, call_metadata):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", choices=["write1", "write2", "verify"], required=True)
-    parser.add_argument("--target", default="127.0.0.1:50051")
+    parser.add_argument("--target", default="127.0.0.1:2242")
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--token")
     args = parser.parse_args()
