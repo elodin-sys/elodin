@@ -85,6 +85,11 @@ impl MessageServiceImpl {
         if batch.messages.is_empty() {
             return Err(Status::invalid_argument("publish batch is empty"));
         }
+        if batch.first_seq == 0 {
+            return Err(Status::failed_precondition(
+                "sequence numbers must start at 1",
+            ));
+        }
         if batch.first_seq > current_seq + 1 {
             return Err(Status::failed_precondition(format!(
                 "sequence gap: expected {}, got {}",
@@ -580,6 +585,42 @@ mod tests {
             message.payload,
             Some(get_messages_response::Payload::Raw(b"native".to_vec()))
         );
+    }
+
+    #[tokio::test]
+    async fn publish_rejects_sequence_zero() {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let service = MessageServiceImpl::new(db);
+        let handle = service
+            .register(Request::new(RegisterRequest {
+                name: "demo.zero".into(),
+                kind: Some(register_request::Kind::Opaque(v1::OpaqueKind {})),
+                metadata: Default::default(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .message_handle;
+        let key = SessionKey {
+            client_name: "test".into(),
+            client_instance_id: vec![1],
+        };
+        let error = service
+            .process_batch(
+                v1::PublishBatch {
+                    first_seq: 0,
+                    messages: vec![v1::OutgoingMessage {
+                        message_handle: handle,
+                        timestamp_ns: Some(1_000),
+                        payload: Some(outgoing_message::Payload::Raw(vec![1])),
+                    }],
+                },
+                &key,
+                0,
+            )
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition);
     }
 
     #[tokio::test]

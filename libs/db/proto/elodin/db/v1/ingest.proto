@@ -85,7 +85,7 @@ message ComponentSchemaConflict {
 }
 
 message TelemetryBatch {
-  uint64 first_seq = 1; // row i has sequence first_seq + i
+  uint64 first_seq = 1; // row i has sequence first_seq + i; starts at 1
   repeated Row rows = 2;
 }
 

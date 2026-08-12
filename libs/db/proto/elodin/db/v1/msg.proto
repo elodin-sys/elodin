@@ -59,7 +59,7 @@ message OutgoingMessage {
 }
 
 message PublishBatch {
-  uint64 first_seq = 1;
+  uint64 first_seq = 1; // message i has sequence first_seq + i; starts at 1
   repeated OutgoingMessage messages = 2;
 }
 
