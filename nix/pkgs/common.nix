@@ -132,8 +132,57 @@
   nvidiaHookScript = pkgs.writeShellScript "elodin-gpu-hook" ''
     eval "$(${gpuDetectScript})"
   '';
+
+  linuxGstreamerPackages = with pkgs; [
+    gst_all_1.gstreamer
+    gst_all_1.gst-plugins-base
+    gst_all_1.gst-plugins-good
+    gst_all_1.gst-plugins-bad
+    gst_all_1.gst-plugins-ugly
+  ];
+
+  makeGstPluginPath = {
+    pkgs,
+    extra ? [],
+  }:
+    lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+      linuxGstreamerPackages
+      ++ lib.optionals pkgs.stdenv.isLinux [pkgs.pipewire]
+      ++ extra
+    );
+
+  # DISPLAY / X11 / NVIDIA selection shared by the default and .#run shells.
+  linuxEditorShellHook = ''
+    if [ -z "$DISPLAY" ]; then
+      export DISPLAY=:0
+    fi
+    export WINIT_UNIX_BACKEND=x11
+    unset WAYLAND_DISPLAY
+    export XDG_SESSION_TYPE=x11
+    export LD_LIBRARY_PATH="${lib.makeLibraryPath (with pkgs; [
+      libx11
+      libxcursor
+      libxrandr
+      libxi
+      libxext
+      libxkbcommon
+      mesa
+      libGL
+    ])}:''${LD_LIBRARY_PATH}"
+    # Route to the host NVIDIA driver when one is usable, including on
+    # hybrid hosts. Set ELODIN_GPU=mesa to stay on Mesa.
+    . ${nvidiaHookScript}
+  '';
 in {
-  inherit alsaPluginDir asoundConf mesaVulkanIcdPath nvidiaHookScript;
+  inherit
+    alsaPluginDir
+    asoundConf
+    mesaVulkanIcdPath
+    nvidiaHookScript
+    linuxGstreamerPackages
+    makeGstPluginPath
+    linuxEditorShellHook
+    ;
 
   src = let
     includeSrc = orig_path: type: let

@@ -9,9 +9,9 @@ This workflow is **Linux-only**. Gamescope's headless compositor, its PipeWire
 video source, and the host GPU-driver integration used here are Linux
 facilities. Keep the related Nix dependencies guarded by `stdenv.isLinux`.
 
-Run commands from the repository root inside `nix develop`. Do not use `sudo`:
-Gamescope and GStreamer must use the same user's PipeWire socket under
-`XDG_RUNTIME_DIR`.
+Run commands from the repository root inside `nix develop` or
+`nix develop .#run`. Do not use `sudo`: Gamescope and GStreamer must use the
+same user's PipeWire socket under `XDG_RUNTIME_DIR`.
 
 ## Prerequisites
 
@@ -59,8 +59,8 @@ available:
 ./scripts/elodin_capture.sh --port 32400 --output /tmp/elodin.mp4 examples/cube-sat/main.py
 ```
 
-Run it inside `nix develop`. The default readiness check waits for the
-simulation database server and then allows a two-second warmup. Use
+Run it inside `nix develop` or `nix develop .#run`. The default readiness check
+waits for the simulation database server and then allows a two-second warmup. Use
 `--ready-regex` or `--warmup` for examples with unusual startup behavior. Use
 `--encoder x264` to force the portable fallback, or `--encoder vaapi` /
 `--encoder nvenc` when testing a specific hardware path. Set
