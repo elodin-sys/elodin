@@ -457,8 +457,17 @@ def exercise_recorded_playback(channel, call_metadata, camera_messages):
             )
         )
     )
-    if next(message_responses).timestamp_ns != first_frame_ns:
-        raise RuntimeError("FPV playback did not start at the component clock")
+
+    # Seeks resample, so a control racing the attach may re-emit the current
+    # frame; drain until the expected frame rather than asserting the very
+    # next message.
+    def wait_for_frame(target_ns, what):
+        for _ in range(16):
+            if next(message_responses).timestamp_ns == target_ns:
+                return
+        raise RuntimeError(f"FPV playback did not {what}")
+
+    wait_for_frame(first_frame_ns, "start at the component clock")
     component_requests.put(
         stream_pb2.StreamComponentsRequest(
             control=stream_pb2.StreamControl(
@@ -468,8 +477,7 @@ def exercise_recorded_playback(channel, call_metadata, camera_messages):
         )
     )
     wait_for_component_clock(second_frame_ns)
-    if next(message_responses).timestamp_ns != second_frame_ns:
-        raise RuntimeError("FPV playback did not follow the component seek")
+    wait_for_frame(second_frame_ns, "follow the component seek")
 
     component_responses.cancel()
     message_responses.cancel()
