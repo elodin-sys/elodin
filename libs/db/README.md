@@ -48,9 +48,9 @@ The server is unauthenticated by default. Add `--grpc-auth-token TOKEN` to
 require `authorization: Bearer TOKEN` on application RPCs and reflection; the
 standard health endpoint remains unauthenticated for load balancers. Transport
 remains insecure, so bind only on a trusted network. Ingest and message publish
-resume positions persist across server restarts (ingest at ack cadence), so
-delivery is at-least-once: replayed rows deduplicate, and rows replayed across
-a crash deduplicate by content.
+resume positions persist across server restarts (ingest periodically at ack
+time), so delivery is at-least-once: replayed rows deduplicate, and rows
+replayed across a crash deduplicate by content.
 
 The full Python demo records a 10-second RC jet run with its controller and
 headless renderer, exercises live and recorded streaming, numeric SQL,

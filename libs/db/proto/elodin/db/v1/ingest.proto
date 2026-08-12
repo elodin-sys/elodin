@@ -66,7 +66,7 @@ enum RowEncoding {
 message SessionAccept {
   map<string, uint32> message_handles = 1; // session-scoped
   // Last applied client sequence for this (client_name, client_instance_id).
-  // Persisted at ack cadence, so after a crash it may trail the last WriteAck;
+  // Persisted periodically, so after a crash it may trail the last WriteAck;
   // resend rows above it.
   uint64 resume_from_seq = 2;
 }

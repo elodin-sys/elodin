@@ -31,6 +31,9 @@ const DEFAULT_MAX_UNACKED_ROWS: u32 = 256;
 const DEFAULT_MAX_ACK_DELAY_MS: u32 = 100;
 const MAX_UNACKED_ROWS: u32 = 1_000_000;
 const MAX_ACK_DELAY_MS: u32 = 10_000;
+// Bounds resume-file writes for aggressive ack policies (e.g. one ack per
+// batch); the widened crash window is absorbed by content deduplication.
+const RESUME_PERSIST_INTERVAL: Duration = Duration::from_millis(250);
 pub(super) const MAX_GRPC_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -184,12 +187,23 @@ impl IngestServiceImpl {
                         component.timestamp_source,
                         &self.db.path,
                     )?;
-                    let mut metadata = HashMap::new();
+                    // Merge into existing metadata so reconnects never wipe
+                    // user-set keys (units, tags, prior element_names).
+                    let existing = state.get_component_metadata(component.id).cloned();
+                    let mut metadata = existing
+                        .as_ref()
+                        .map(|meta| meta.metadata.clone())
+                        .unwrap_or_default();
                     if !component.element_names.is_empty() {
                         metadata.insert(
                             "element_names".to_string(),
                             component.element_names.join(","),
                         );
+                    }
+                    if existing.as_ref().is_some_and(|meta| {
+                        meta.name == component.name && meta.metadata == metadata
+                    }) {
+                        continue;
                     }
                     state.set_component_metadata(
                         ComponentMetadata {
@@ -304,17 +318,25 @@ impl IngestServiceImpl {
         Ok(responses)
     }
 
-    // Persist the resume position, then send the ack. Persistence failures
-    // are non-fatal: the client replays from an older point and replays
-    // deduplicate.
+    // Persistence failures are non-fatal: the client replays from an older
+    // point and replays deduplicate.
+    fn persist_resume(&self, key: &SessionKey, through_seq: u64) {
+        if let Err(error) = self.resume.persist(key, through_seq) {
+            tracing::warn!(?error, "failed to persist gRPC ingest resume state");
+        }
+    }
+
+    // Persist the resume position (throttled), then send the ack.
     async fn flush_ack(
         &self,
         key: &SessionKey,
         tx: &mpsc::Sender<Result<IngestResponse, Status>>,
         ack: WriteAck,
+        last_persist: &mut tokio::time::Instant,
     ) -> bool {
-        if let Err(error) = self.resume.persist(key, ack.through_seq) {
-            tracing::warn!(?error, "failed to persist gRPC ingest resume state");
+        if last_persist.elapsed() >= RESUME_PERSIST_INTERVAL {
+            *last_persist = tokio::time::Instant::now();
+            self.persist_resume(key, ack.through_seq);
         }
         queue_ack(tx, ack).await
     }
@@ -329,6 +351,7 @@ impl IngestServiceImpl {
         let mut last_sent_ack = session.current_seq;
         let mut pending_ack: Option<WriteAck> = None;
         let mut ack_deadline: Option<tokio::time::Instant> = None;
+        let mut last_persist = tokio::time::Instant::now();
 
         loop {
             let has_pending_ack = pending_ack.is_some();
@@ -339,7 +362,7 @@ impl IngestServiceImpl {
                     let ack = pending_ack.take().expect("pending ack must have a deadline");
                     last_sent_ack = ack.through_seq;
                     ack_deadline = None;
-                    if !self.flush_ack(&session.key, &tx, ack).await {
+                    if !self.flush_ack(&session.key, &tx, ack, &mut last_persist).await {
                         return;
                     }
                 }
@@ -347,8 +370,9 @@ impl IngestServiceImpl {
                     let request = match request {
                         Ok(Some(request)) => request,
                         Ok(None) => {
+                            self.persist_resume(&session.key, session.current_seq);
                             if let Some(ack) = pending_ack.take() {
-                                let _ = self.flush_ack(&session.key, &tx, ack).await;
+                                let _ = queue_ack(&tx, ack).await;
                             }
                             return;
                         }
@@ -416,7 +440,7 @@ impl IngestServiceImpl {
                         let ack = pending_ack.take().expect("pending ack was just set");
                         last_sent_ack = ack.through_seq;
                         ack_deadline = None;
-                        if !self.flush_ack(&session.key, &tx, ack).await {
+                        if !self.flush_ack(&session.key, &tx, ack, &mut last_persist).await {
                             return;
                         }
                     }
@@ -1881,6 +1905,31 @@ mod tests {
     }
 
     #[test]
+    fn session_open_preserves_existing_component_metadata() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let (_, _) = accepted(&service, "client", b"instance", packed_schema());
+        let id = ComponentId::new("PACKED.VEC");
+        db.with_state_mut(|state| {
+            let mut metadata = state.get_component_metadata(id).unwrap().clone();
+            metadata
+                .metadata
+                .insert("unit".to_string(), "m/s".to_string());
+            state.set_component_metadata(metadata, &db.path).unwrap();
+        });
+
+        let (_, _) = accepted(&service, "client", b"reconnect", packed_schema());
+        db.with_state(|state| {
+            let metadata = state.get_component_metadata(id).unwrap();
+            assert_eq!(
+                metadata.metadata.get("unit").map(String::as_str),
+                Some("m/s")
+            );
+            assert!(metadata.metadata.contains_key("element_names"));
+        });
+    }
+
+    #[test]
     fn identical_rows_with_new_sequences_are_preserved() {
         let (_dir, db) = test_db();
         let service = IngestServiceImpl::new(db.clone());
@@ -2470,6 +2519,14 @@ mod tests {
             }
         }
         drop(tx);
+        // Drain to stream end so the session task has persisted its final
+        // resume position before the restart below.
+        while tokio::time::timeout(Duration::from_secs(2), responses.message())
+            .await
+            .expect("timed out draining ingest stream")
+            .unwrap()
+            .is_some()
+        {}
 
         // A fresh service over the same database simulates a restarted
         // process: the resume position persisted at ack time is recovered.
