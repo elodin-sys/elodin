@@ -431,11 +431,12 @@ async fn run_benchmark(config: BenchmarkConfig<'_>) -> BenchResult {
         } else {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = listener.local_addr().unwrap();
-            drop(listener);
             let db = _embedded_db
                 .clone()
                 .expect("embedded gRPC benchmark requires an embedded DB");
-            tokio_thread(move |_| async move { elodin_db::grpc::serve(addr, db).await.unwrap() });
+            tokio_thread(move |_| async move {
+                elodin_db::grpc::serve_listener(listener, db).await.unwrap()
+            });
             Some(addr)
         }
     } else {
