@@ -109,7 +109,7 @@ impl MessageServiceImpl {
             match self.validate(message) {
                 Ok((id, timestamp, payload)) => {
                     if let Err(error) = self.db.push_msg(timestamp, id, &payload) {
-                        self.persist_resume(key, current_seq)?;
+                        self.persist_resume(key, current_seq);
                         return Err(common::db_error(error));
                     }
                 }
@@ -121,7 +121,7 @@ impl MessageServiceImpl {
             }
             current_seq = seq;
         }
-        self.persist_resume(key, current_seq)?;
+        self.persist_resume(key, current_seq);
         Ok((current_seq, errors))
     }
 
@@ -148,8 +148,14 @@ impl MessageServiceImpl {
         Ok((id, timestamp, payload))
     }
 
-    fn persist_resume(&self, key: &SessionKey, sequence: u64) -> Result<(), Status> {
-        self.resume.persist(key, sequence).map_err(common::internal)
+    // Rows are already stored when this runs, so a failed disk write must not
+    // fail the stream; the in-memory position still advances and a restart
+    // resumes from the older on-disk point (at-least-once).
+    fn persist_resume(&self, key: &SessionKey, sequence: u64) {
+        self.resume.remember(key, sequence);
+        if let Err(error) = self.resume.persist(key, sequence) {
+            tracing::warn!(?error, "failed to persist gRPC message resume state");
+        }
     }
 
     async fn run_publish(

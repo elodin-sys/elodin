@@ -529,7 +529,15 @@ fn validate_frequency(frequency: u64) -> Result<(), Status> {
     Ok(())
 }
 
+// Validates every field before mutating so a rejected control leaves the
+// shared playback state untouched.
 fn apply_control(state: &mut Playback, control: StreamControl) -> Result<(), Status> {
+    if let Some(timestep) = control.timestep_ns {
+        validate_timestep(timestep)?;
+    }
+    if let Some(frequency) = control.frequency {
+        validate_frequency(frequency)?;
+    }
     if let Some(playing) = control.playing {
         state.playing = playing;
     }
@@ -538,11 +546,9 @@ fn apply_control(state: &mut Playback, control: StreamControl) -> Result<(), Sta
         state.seek_generation = state.seek_generation.wrapping_add(1);
     }
     if let Some(timestep) = control.timestep_ns {
-        validate_timestep(timestep)?;
         state.timestep = Duration::from_nanos(timestep);
     }
     if let Some(frequency) = control.frequency {
-        validate_frequency(frequency)?;
         state.frequency = frequency;
     }
     Ok(())
@@ -1030,16 +1036,25 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
 
-        // Unbounded frequencies would turn the frame sleep into a busy loop.
+        // Unbounded frequencies would turn the frame sleep into a busy loop,
+        // and a rejected control must leave the state untouched even when it
+        // combines valid fields with the invalid one.
+        let snapshot = state;
         let error = apply_control(
             &mut state,
             StreamControl {
+                playing: Some(true),
+                seek_ns: Some(9_000),
                 frequency: Some(MAX_FRAME_FREQUENCY + 1),
                 ..Default::default()
             },
         )
         .unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(state.playing, snapshot.playing);
+        assert_eq!(state.timestamp, snapshot.timestamp);
+        assert_eq!(state.seek_generation, snapshot.seek_generation);
+        assert_eq!(state.frequency, snapshot.frequency);
     }
 
     #[tokio::test]
