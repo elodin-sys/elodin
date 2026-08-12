@@ -10,9 +10,11 @@ service StreamService {
   // component at send time, so intermediate rows may be skipped under load.
   // Use QueryService.GetTimeSeries for lossless historical reads.
   rpc StreamComponents(stream StreamComponentsRequest) returns (stream StreamComponentsResponse);
-  // Live mode delivers every message appended while the stream is connected;
-  // there is no resume across reconnects. Fixed-rate mode samples the message
-  // at or before the playback cursor (coalescing).
+  // Live mode primes each subscribed log with its latest stored message,
+  // then delivers every message appended while connected. There is no resume
+  // across reconnects: reconnecting re-delivers the latest message, so
+  // consumers must tolerate that duplicate. Fixed-rate mode samples the
+  // message at or before the playback cursor (coalescing).
   rpc StreamMessages(stream StreamMessagesRequest) returns (stream StreamMessagesResponse);
   rpc WatchDb(WatchDbRequest) returns (stream WatchDbResponse);
 }
