@@ -1479,8 +1479,10 @@ pub struct LineTree<D: Clone + BoundOrd> {
     last_hc_archive_len: usize,
     /// Wall-clock instant of the last HC pass, for time-based throttling.
     last_hc_instant: Option<std::time::Instant>,
-    /// Bumped on [`Self::clear`] / view rebuild so GPU index caches can invalidate
-    /// when LineTree contents change without a visible-range change.
+    /// Bumped on any view-content mutation ([`Self::insert`] — including live
+    /// appends via [`Self::update_last`] — [`Self::clear`], and view rebuild)
+    /// so GPU index caches invalidate when LineTree contents change without a
+    /// visible-range change.
     content_gen: u64,
 }
 
@@ -1518,6 +1520,10 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn insert(&mut self, chunk: Chunk<D>) {
+        // Covers live appends too (`update_last` re-inserts the tail chunk):
+        // the GPU index strip must be rewritten for the live tip to advance
+        // even when the visible-range cache key is unchanged.
+        self.content_gen = self.content_gen.wrapping_add(1);
         let _ = self.tree.insert_overwrite(
             ii(
                 chunk.summary.start_timestamp.0,
@@ -2503,16 +2509,17 @@ mod tests {
     }
 
     #[test]
-    fn line_tree_content_gen_bumps_on_clear() {
+    fn line_tree_content_gen_bumps_on_insert_and_clear() {
         let mut tree = LineTree::<f32>::default();
         assert_eq!(tree.content_gen(), 0);
         let chunk =
             Chunk::from_iter(&[Timestamp(1)], Timestamp(0), [1.0f32].into_iter()).expect("chunk");
         tree.insert(chunk);
-        tree.clear();
         assert_eq!(tree.content_gen(), 1);
         tree.clear();
         assert_eq!(tree.content_gen(), 2);
+        tree.clear();
+        assert_eq!(tree.content_gen(), 3);
     }
 
     #[test]

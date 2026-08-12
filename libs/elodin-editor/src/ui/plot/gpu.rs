@@ -228,8 +228,9 @@ impl LineMut<'_> {
         }
     }
 
-    /// Content generation for index-cache invalidation: bumps whenever the
-    /// tree is cleared/rebuilt (shard offsets move within the same buffers).
+    /// Content generation for index-cache invalidation: bumps on any tree
+    /// content change — live appends, clear, rebuild (shard offsets can move
+    /// within the same buffers, and the live tip must keep advancing).
     /// XY lines are append-only, so the point count serves as their gen.
     pub fn content_gen(&self) -> u64 {
         match self {
