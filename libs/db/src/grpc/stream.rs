@@ -223,14 +223,14 @@ impl StreamService for StreamServiceImpl {
                 ));
             }
             Some(v1::stream_open::Behavior::RealTime(real_time)) if real_time.immediate => {
-                tokio::spawn(reject_component_controls(incoming, tx.clone()));
+                tokio::spawn(reject_component_controls(incoming, tx.downgrade()));
                 for component in components {
                     tokio::spawn(run_immediate_component(component, tx.clone()));
                 }
                 drop(tx);
             }
             _ => {
-                tokio::spawn(reject_component_controls(incoming, tx.clone()));
+                tokio::spawn(reject_component_controls(incoming, tx.downgrade()));
                 let db = self.db.clone();
                 tokio::spawn(run_batched_components(db, components, tx));
             }
@@ -277,7 +277,7 @@ impl StreamService for StreamServiceImpl {
                             .ok_or_else(|| Status::not_found("playback_stream_id not found"))?;
                         let control_rx = control_tx.subscribe();
                         drop(control_tx);
-                        tokio::spawn(reject_message_controls(incoming, tx.clone()));
+                        tokio::spawn(reject_message_controls(incoming, tx.downgrade()));
                         tokio::spawn(follow_shared_messages(messages, tx, control_rx));
                     }
                 }
@@ -288,7 +288,7 @@ impl StreamService for StreamServiceImpl {
                 ));
             }
             _ => {
-                tokio::spawn(reject_message_controls(incoming, tx.clone()));
+                tokio::spawn(reject_message_controls(incoming, tx.downgrade()));
                 for message in messages {
                     tokio::spawn(run_live_message(message, tx.clone()));
                 }
@@ -629,11 +629,16 @@ async fn read_message_controls(
     }
 }
 
+// The reject handlers hold only weak senders so the response stream closes
+// as soon as its producers finish (e.g. a shared follower whose owner ended)
+// instead of staying open for a client that never sends another frame.
 async fn reject_component_controls(
     mut incoming: tonic::Streaming<StreamComponentsRequest>,
-    tx: mpsc::Sender<Result<StreamComponentsResponse, Status>>,
+    tx: mpsc::WeakSender<Result<StreamComponentsResponse, Status>>,
 ) {
-    if let Ok(Some(_)) = incoming.message().await {
+    if let Ok(Some(_)) = incoming.message().await
+        && let Some(tx) = tx.upgrade()
+    {
         let _ = tx
             .send(Err(Status::failed_precondition(
                 "stream controls require fixed-rate behavior",
@@ -644,9 +649,11 @@ async fn reject_component_controls(
 
 async fn reject_message_controls(
     mut incoming: tonic::Streaming<StreamMessagesRequest>,
-    tx: mpsc::Sender<Result<StreamMessagesResponse, Status>>,
+    tx: mpsc::WeakSender<Result<StreamMessagesResponse, Status>>,
 ) {
-    if let Ok(Some(_)) = incoming.message().await {
+    if let Ok(Some(_)) = incoming.message().await
+        && let Some(tx) = tx.upgrade()
+    {
         let _ = tx
             .send(Err(Status::failed_precondition(
                 "stream controls require an independent fixed-rate clock",
@@ -1368,6 +1375,85 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_shared_follower_ends_with_owner() {
+        let (_directory, _service, mut client, server) = transport_service().await;
+        let (component_tx, component_rx) = mpsc::channel(4);
+        component_tx
+            .send(StreamComponentsRequest {
+                request: Some(stream_components_request::Request::Open(v1::StreamOpen {
+                    components: vec!["demo.signal".into()],
+                    behavior: Some(v1::stream_open::Behavior::FixedRate(v1::FixedRate {
+                        initial: v1::InitialTimestamp::Manual as i32,
+                        initial_timestamp_ns: 100_000,
+                        timestep_ns: 1_000_000,
+                        frequency: 100,
+                    })),
+                })),
+            })
+            .await
+            .unwrap();
+        let mut component_responses = client
+            .stream_components(ReceiverStream::new(component_rx))
+            .await
+            .unwrap()
+            .into_inner();
+        let stream_id = loop {
+            if let Some(stream_components_response::Response::Opened(opened)) = component_responses
+                .message()
+                .await
+                .unwrap()
+                .unwrap()
+                .response
+            {
+                break opened.stream_id;
+            }
+        };
+
+        // The follower's request stream stays open on purpose: it must end
+        // with the owner regardless.
+        let (message_tx, message_rx) = mpsc::channel(4);
+        message_tx
+            .send(StreamMessagesRequest {
+                request: Some(stream_messages_request::Request::Open(
+                    v1::MessageStreamOpen {
+                        messages: Vec::new(),
+                        behavior: Some(v1::message_stream_open::Behavior::FixedRate(
+                            v1::FixedRate {
+                                initial: v1::InitialTimestamp::Manual as i32,
+                                initial_timestamp_ns: 100_000,
+                                timestep_ns: 1_000_000,
+                                frequency: 100,
+                            },
+                        )),
+                        playback_stream_id: Some(stream_id),
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+        let mut message_responses = client
+            .stream_messages(ReceiverStream::new(message_rx))
+            .await
+            .unwrap()
+            .into_inner();
+
+        drop(component_tx);
+        drop(component_responses);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match message_responses.message().await {
+                    Ok(Some(_)) => continue,
+                    Ok(None) | Err(_) => break,
+                }
+            }
+        })
+        .await
+        .expect("shared follower did not end with its owner");
+        drop(message_tx);
         server.abort();
     }
 
