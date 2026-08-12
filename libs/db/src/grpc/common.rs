@@ -82,8 +82,12 @@ impl SessionResume {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(0);
-        self.cache.lock().unwrap().insert(key.clone(), sequence);
-        sequence
+        // Never regress: a concurrent remember/persist may have advanced the
+        // cache while the disk read ran.
+        let mut cache = self.cache.lock().unwrap();
+        let stored = cache.entry(key.clone()).or_default();
+        *stored = (*stored).max(sequence);
+        *stored
     }
 
     pub(super) fn remember(&self, key: &SessionKey, sequence: u64) {

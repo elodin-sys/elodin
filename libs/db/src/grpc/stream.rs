@@ -487,7 +487,10 @@ async fn send_component_frame(
     cursor: Timestamp,
 ) -> bool {
     for (name, component) in components {
+        // get_nearest snaps to the first sample when the cursor precedes all
+        // data; playback must never emit samples ahead of its clock.
         if let Some((timestamp, value)) = component.time_series.get_nearest(cursor)
+            && timestamp <= cursor
             && tx.send(Ok(update(name, timestamp, value))).await.is_err()
         {
             return false;
@@ -726,7 +729,7 @@ async fn send_message_frame(
         let Some((timestamp, payload)) = log.get_nearest(cursor) else {
             continue;
         };
-        if sent.get(name) == Some(&timestamp) {
+        if timestamp > cursor || sent.get(name) == Some(&timestamp) {
             continue;
         }
         if tx
@@ -905,6 +908,51 @@ mod tests {
                 }
             ))
         ));
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn fixed_stream_holds_updates_until_cursor_reaches_data() {
+        let directory = TempDir::new().unwrap();
+        let component = component(&directory);
+        let (tx, mut rx) = mpsc::channel(8);
+        let initial = Playback {
+            playing: false,
+            timestamp: Timestamp(50),
+            seek_generation: 0,
+            timestep: Duration::from_micros(1),
+            frequency: 100,
+        };
+        let (control_tx, _control_rx) = watch::channel(initial);
+        let playbacks = Arc::new(Mutex::new(HashMap::from([(1, control_tx.clone())])));
+        let task = tokio::spawn(run_fixed_components(
+            vec![("demo.signal".into(), component)],
+            tx,
+            control_tx.clone(),
+            PlaybackRegistration { id: 1, playbacks },
+        ));
+
+        // The cursor precedes every sample (data starts at 100 µs), so the
+        // frame carries only the clock, never a future sample.
+        let first = rx.recv().await.unwrap().unwrap();
+        assert!(matches!(
+            first.response,
+            Some(stream_components_response::Response::Timestamp(
+                v1::StreamTimestamp {
+                    timestamp_ns: 50_000
+                }
+            ))
+        ));
+
+        let mut seek = initial;
+        seek.timestamp = Timestamp(100);
+        seek.seek_generation = 1;
+        control_tx.send(seek).unwrap();
+        let update = rx.recv().await.unwrap().unwrap();
+        let Some(stream_components_response::Response::Update(update)) = update.response else {
+            panic!("expected component update");
+        };
+        assert_eq!(update.timestamp_ns, 100_000);
         task.abort();
     }
 
