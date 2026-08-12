@@ -124,11 +124,7 @@ impl StreamServiceImpl {
             v1::InitialTimestamp::Manual => common::record_timestamp(fixed.initial_timestamp_ns),
         };
         validate_timestep(fixed.timestep_ns)?;
-        if fixed.frequency == 0 {
-            return Err(Status::invalid_argument(
-                "fixed-rate frequency must be non-zero",
-            ));
-        }
+        validate_frequency(fixed.frequency)?;
         Ok(Playback {
             playing: true,
             timestamp,
@@ -521,6 +517,18 @@ fn validate_timestep(timestep_ns: u64) -> Result<(), Status> {
     Ok(())
 }
 
+// An unbounded frequency yields a zero-duration frame sleep and a busy loop.
+const MAX_FRAME_FREQUENCY: u64 = 1_000;
+
+fn validate_frequency(frequency: u64) -> Result<(), Status> {
+    if frequency == 0 || frequency > MAX_FRAME_FREQUENCY {
+        return Err(Status::invalid_argument(format!(
+            "frequency must be 1..={MAX_FRAME_FREQUENCY}"
+        )));
+    }
+    Ok(())
+}
+
 fn apply_control(state: &mut Playback, control: StreamControl) -> Result<(), Status> {
     if let Some(playing) = control.playing {
         state.playing = playing;
@@ -534,9 +542,7 @@ fn apply_control(state: &mut Playback, control: StreamControl) -> Result<(), Sta
         state.timestep = Duration::from_nanos(timestep);
     }
     if let Some(frequency) = control.frequency {
-        if frequency == 0 {
-            return Err(Status::invalid_argument("frequency must be non-zero"));
-        }
+        validate_frequency(frequency)?;
         state.frequency = frequency;
     }
     Ok(())
@@ -1018,6 +1024,17 @@ mod tests {
             &mut state,
             StreamControl {
                 timestep_ns: Some(999),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+
+        // Unbounded frequencies would turn the frame sleep into a busy loop.
+        let error = apply_control(
+            &mut state,
+            StreamControl {
+                frequency: Some(MAX_FRAME_FREQUENCY + 1),
                 ..Default::default()
             },
         )

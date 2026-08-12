@@ -32,7 +32,7 @@ message FixedRate {
   InitialTimestamp initial = 1;
   sfixed64 initial_timestamp_ns = 2;
   uint64 timestep_ns = 3; // >= 1000: the database records at 1 µs resolution
-  uint64 frequency = 4; // frames per second, non-zero
+  uint64 frequency = 4; // frames per second, 1..=1000
 }
 
 message StreamOpen {
@@ -50,7 +50,7 @@ message StreamControl {
   optional bool playing = 1;
   optional sfixed64 seek_ns = 2;
   optional uint64 timestep_ns = 3; // >= 1000
-  optional uint64 frequency = 4; // non-zero
+  optional uint64 frequency = 4; // 1..=1000
 }
 
 message StreamComponentsRequest {

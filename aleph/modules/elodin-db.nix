@@ -93,7 +93,7 @@ in {
         User = "root";
         ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 --grpc-addr ${cfg.grpcAddress}${assetsFlag} ${cfg.dbFolderName}/%i";
         KillSignal = "SIGINT";
-        Environment = "RUST_LOG=warn";
+        Environment = "RUST_LOG=info";
       };
     };
 
@@ -108,7 +108,7 @@ in {
         KillSignal = "SIGINT";
         Restart = "on-failure";
         RestartSec = "5s";
-        Environment = "RUST_LOG=warn";
+        Environment = "RUST_LOG=info";
       };
     };
 
