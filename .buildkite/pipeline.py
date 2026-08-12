@@ -129,9 +129,7 @@ test_steps = [
                 flake=".#run",
                 pre_command="nix develop --command bash -c 'cargo build --release -p rc-jet-controller'",
                 command="scripts/ci/db_grpc_full_api_demo.sh",
-                env={
-                    "ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller"
-                },
+                env={"ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller"},
             ),
             nix_step(
                 label=":python: sensor-camera",
