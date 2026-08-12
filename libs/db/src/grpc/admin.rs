@@ -101,11 +101,16 @@ impl AdminService for AdminServiceImpl {
             name: metadata.name,
             metadata: metadata.metadata,
         };
+        let component_id = value.component_id;
         self.db
-            .with_state_mut(|state| state.set_component_metadata(value.clone(), &self.db.path))
+            .with_state_mut(|state| state.set_component_metadata(value, &self.db.path))
             .map_err(common::db_error)?;
+        let metadata = self
+            .db
+            .with_state(|state| state.get_component_metadata(component_id).cloned())
+            .ok_or_else(|| Status::internal("component metadata missing after update"))?;
         Ok(Response::new(SetComponentMetadataResponse {
-            metadata: Some(common::component_metadata(&value)),
+            metadata: Some(common::component_metadata(&metadata)),
         }))
     }
 
@@ -245,6 +250,16 @@ mod tests {
             .unwrap();
         assert!(!config.metadata.contains_key("demo"));
 
+        let component_id = ComponentId::new("demo.signal");
+        db.with_state_mut(|state| {
+            let mut metadata = DbComponentMetadata {
+                component_id,
+                name: "demo.signal".into(),
+                metadata: Default::default(),
+            };
+            metadata.set_timestamp_source(true);
+            state.set_component_metadata(metadata, &db.path).unwrap();
+        });
         let metadata = service
             .set_component_metadata(Request::new(SetComponentMetadataRequest {
                 metadata: Some(v1::ComponentMetadata {
@@ -258,6 +273,7 @@ mod tests {
             .metadata
             .unwrap();
         assert_eq!(metadata.metadata["unit"], "m");
+        assert_eq!(metadata.metadata["_is_timestamp_source"], "true");
 
         let stored = service.store_asset("demo/data.bin", b"contents").unwrap();
         assert_eq!(stored.size, 8);
