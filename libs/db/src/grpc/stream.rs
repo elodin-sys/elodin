@@ -647,8 +647,12 @@ async fn run_live_message(
     let waiter = log.waiter();
     let mut next = log.timestamps().len().saturating_sub(1);
     loop {
-        // A truncated log restarts indexing from its new tail.
-        next = next.min(log.timestamps().len());
+        // A truncated log rewinds the index; re-prime with its latest
+        // surviving message just like the initial subscribe.
+        let len = log.timestamps().len();
+        if next > len {
+            next = len.saturating_sub(1);
+        }
         while let Some((timestamp, payload)) = log.get_index(next) {
             let response = StreamMessagesResponse {
                 name: name.clone(),
@@ -1113,6 +1117,23 @@ mod tests {
         for expected in [b"second".as_slice(), b"third", b"fourth"] {
             assert_eq!(rx.recv().await.unwrap().unwrap().payload, expected);
         }
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn live_message_stream_reprimes_after_truncation() {
+        let directory = TempDir::new().unwrap();
+        let log = MsgLog::create(directory.path()).unwrap();
+        log.push(Timestamp(10), b"first").unwrap();
+        let (tx, mut rx) = mpsc::channel(8);
+        let task = tokio::spawn(run_live_message(("demo.log".into(), log.clone()), tx));
+        assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"first");
+        log.push(Timestamp(11), b"second").unwrap();
+        assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"second");
+        // A rollover truncation rewinds the log; the next append re-primes.
+        log.truncate();
+        log.push(Timestamp(12), b"fresh").unwrap();
+        assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"fresh");
         task.abort();
     }
 
