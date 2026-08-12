@@ -435,8 +435,14 @@ async fn run_fixed_components(
 ) {
     let mut control = control_tx.subscribe();
     let mut emitted = None;
+    let mut seek_generation = control.borrow().seek_generation;
     loop {
         let state = *control.borrow_and_update();
+        // A seek always resamples, even to the current position.
+        if state.seek_generation != seek_generation {
+            seek_generation = state.seek_generation;
+            emitted = None;
+        }
         if emitted != Some(state.timestamp)
             && !send_component_frame(&components, &tx, state.timestamp).await
         {

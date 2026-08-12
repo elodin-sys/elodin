@@ -385,21 +385,9 @@ impl MessageService for MessageServiceImpl {
         let start = common::range_start(request.start_ns);
         let end = common::range_end_exclusive(request.end_ns);
         let limit = common::row_limit(request.limit)?;
-        let (metadata, messages) = self
+        let log = self
             .db
-            .with_state(|state| {
-                let log = state.get_msg_log(id)?;
-                let metadata = log.metadata().cloned();
-                // The native accessor snaps outward on a miss; the filter
-                // enforces the half-open [start_ns, end_ns) contract.
-                let messages = log
-                    .get_range(&(start..end))
-                    .filter(|(timestamp, _)| *timestamp >= start && *timestamp < end)
-                    .take(limit)
-                    .map(|(timestamp, payload)| (timestamp, payload.to_vec()))
-                    .collect::<Vec<_>>();
-                Some((metadata, messages))
-            })
+            .with_state(|state| state.get_msg_log(id).cloned())
             .ok_or_else(|| {
                 common::status_with_reason(
                     Code::NotFound,
@@ -407,12 +395,25 @@ impl MessageService for MessageServiceImpl {
                     "MESSAGE_NOT_FOUND",
                 )
             })?;
-        let is_log = metadata.is_some_and(|metadata| metadata.schema == log_entry_msg_schema());
+        let is_log = log
+            .metadata()
+            .is_some_and(|metadata| metadata.schema == log_entry_msg_schema());
         let (tx, rx) = mpsc::channel(32);
+        // Walk the log by index outside the state lock so large logs stream
+        // one message at a time instead of buffering the whole range.
         tokio::spawn(async move {
-            for (timestamp, payload) in messages {
+            let mut index = log.timestamps().partition_point(|t| *t < start);
+            let mut sent = 0;
+            while sent < limit {
+                let Some((timestamp, payload)) = log.get_index(index) else {
+                    return;
+                };
+                if timestamp >= end {
+                    return;
+                }
+                index += 1;
                 let payload = if is_log {
-                    match postcard::from_bytes::<LogEntry>(&payload) {
+                    match postcard::from_bytes::<LogEntry>(payload) {
                         Ok(log) => get_messages_response::Payload::Log(v1::LogPayload {
                             level: log.level as u32,
                             message: log.message,
@@ -423,18 +424,16 @@ impl MessageService for MessageServiceImpl {
                         }
                     }
                 } else {
-                    get_messages_response::Payload::Raw(payload)
+                    get_messages_response::Payload::Raw(payload.to_vec())
                 };
-                if tx
-                    .send(Ok(GetMessagesResponse {
-                        timestamp_ns: timestamp.0.saturating_mul(1000),
-                        payload: Some(payload),
-                    }))
-                    .await
-                    .is_err()
-                {
+                let response = GetMessagesResponse {
+                    timestamp_ns: timestamp.0.saturating_mul(1000),
+                    payload: Some(payload),
+                };
+                if tx.send(Ok(response)).await.is_err() {
                     return;
                 }
+                sent += 1;
             }
         });
         Ok(Response::new(ReceiverStream::new(rx)))
