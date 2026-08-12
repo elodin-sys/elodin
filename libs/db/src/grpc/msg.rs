@@ -294,11 +294,13 @@ impl MessageService for MessageServiceImpl {
             None => return Err(Status::invalid_argument("message kind is required")),
         };
         let id = msg_id(&request.name);
-        if let Some(existing) = self.db.with_state(|state| {
+        let existing = self.db.with_state(|state| {
             state
                 .get_msg_log(id)
                 .and_then(|log| log.metadata().cloned())
-        }) && (existing.name != request.name || existing.schema != schema)
+        });
+        if let Some(existing) = &existing
+            && (existing.name != request.name || existing.schema != schema)
         {
             return Err(common::status_with_reason(
                 Code::AlreadyExists,
@@ -306,14 +308,26 @@ impl MessageService for MessageServiceImpl {
                 "MESSAGE_SCHEMA_CONFLICT",
             ));
         }
-        let metadata = MsgMetadata {
-            name: request.name,
-            schema,
-            metadata: request.metadata,
-        };
-        self.db
-            .with_state_mut(|state| state.set_msg_metadata(id, metadata, &self.db.path))
-            .map_err(common::db_error)?;
+        // Merge into existing metadata so re-registration stays idempotent
+        // and never clears keys set earlier.
+        let mut metadata = existing
+            .as_ref()
+            .map(|existing| existing.metadata.clone())
+            .unwrap_or_default();
+        metadata.extend(request.metadata);
+        if !existing
+            .as_ref()
+            .is_some_and(|existing| existing.metadata == metadata)
+        {
+            let metadata = MsgMetadata {
+                name: request.name,
+                schema,
+                metadata,
+            };
+            self.db
+                .with_state_mut(|state| state.set_msg_metadata(id, metadata, &self.db.path))
+                .map_err(common::db_error)?;
+        }
         Ok(Response::new(RegisterResponse {
             message_handle: u16::from_le_bytes(id) as u32,
         }))
@@ -590,6 +604,45 @@ mod tests {
         assert_eq!(
             message.payload,
             Some(get_messages_response::Payload::Raw(b"native".to_vec()))
+        );
+    }
+
+    #[tokio::test]
+    async fn register_preserves_existing_metadata() {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let service = MessageServiceImpl::new(db.clone());
+        let register = |metadata: std::collections::HashMap<String, String>| {
+            let service = service.clone();
+            async move {
+                service
+                    .register(Request::new(RegisterRequest {
+                        name: "demo.meta".into(),
+                        kind: Some(register_request::Kind::Opaque(v1::OpaqueKind {})),
+                        metadata,
+                    }))
+                    .await
+                    .unwrap()
+            }
+        };
+        register([("unit".to_string(), "frames".to_string())].into()).await;
+        // A reconnect that omits metadata must not clear earlier keys.
+        register(Default::default()).await;
+        register([("source".to_string(), "camera".to_string())].into()).await;
+        let metadata = db
+            .with_state(|state| {
+                state
+                    .get_msg_log(msg_id("demo.meta"))
+                    .and_then(|log| log.metadata().cloned())
+            })
+            .unwrap();
+        assert_eq!(
+            metadata.metadata.get("unit").map(String::as_str),
+            Some("frames")
+        );
+        assert_eq!(
+            metadata.metadata.get("source").map(String::as_str),
+            Some("camera")
         );
     }
 

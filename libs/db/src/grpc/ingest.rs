@@ -222,15 +222,21 @@ impl IngestServiceImpl {
         }
         self.db.vtable_gen.fetch_add(1, Ordering::SeqCst);
 
+        // Skip the config write on reconnects with an unchanged fingerprint
+        // so WatchDb subscribers do not see handshake noise.
         let fingerprint_key = fingerprint_metadata_key(&open.client_name);
-        self.db
-            .apply_set_db_config(SetDbConfig {
-                recording: None,
-                metadata: [(fingerprint_key, hex(&open.schema_fingerprint))]
-                    .into_iter()
-                    .collect(),
-            })
-            .map_err(internal_status)?;
+        let fingerprint_hex = hex(&open.schema_fingerprint);
+        let fingerprint_stored = self.db.with_state(|state| {
+            state.db_config.metadata.get(&fingerprint_key) == Some(&fingerprint_hex)
+        });
+        if !fingerprint_stored {
+            self.db
+                .apply_set_db_config(SetDbConfig {
+                    recording: None,
+                    metadata: [(fingerprint_key, fingerprint_hex)].into_iter().collect(),
+                })
+                .map_err(internal_status)?;
+        }
 
         let key = SessionKey {
             client_name: open.client_name,
@@ -1902,6 +1908,16 @@ mod tests {
                 .sample_count()),
             2
         );
+    }
+
+    #[test]
+    fn reconnect_with_same_schema_skips_config_write() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let (_, _) = accepted(&service, "client", b"instance", packed_schema());
+        let generation = db.db_config_gen.latest();
+        let (_, _) = accepted(&service, "client", b"reconnect", packed_schema());
+        assert_eq!(db.db_config_gen.latest(), generation);
     }
 
     #[test]
