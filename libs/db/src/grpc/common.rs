@@ -63,6 +63,9 @@ pub(super) struct SessionResume {
     db_path: PathBuf,
     prefix: &'static str,
     cache: Mutex<HashMap<SessionKey, u64>>,
+    // Serializes file writes so overlapping sessions on one key cannot land
+    // a stale sequence after a newer one.
+    persist_lock: Mutex<()>,
 }
 
 impl SessionResume {
@@ -71,6 +74,7 @@ impl SessionResume {
             db_path,
             prefix,
             cache: Mutex::new(HashMap::new()),
+            persist_lock: Mutex::new(()),
         }
     }
 
@@ -97,12 +101,17 @@ impl SessionResume {
     }
 
     pub(super) fn persist(&self, key: &SessionKey, sequence: u64) -> std::io::Result<()> {
+        let guard = self.persist_lock.lock().unwrap();
+        self.remember(key, sequence);
+        // Write the merged maximum so a stale concurrent session never
+        // regresses the on-disk resume position.
+        let sequence = self.get(key);
         let path = self.path(key);
         std::fs::create_dir_all(path.parent().unwrap())?;
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, sequence.to_string())?;
         std::fs::rename(temporary, path)?;
-        self.remember(key, sequence);
+        drop(guard);
         Ok(())
     }
 
@@ -167,6 +176,27 @@ pub(super) fn message_metadata(value: &DbMessageMetadata) -> Result<v1::MessageM
 
 pub(super) fn internal(error: impl std::fmt::Display) -> Status {
     Status::internal(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persist_never_regresses_the_stored_sequence() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let store = SessionResume::new(directory.path().to_path_buf(), ".test-session-");
+        let key = SessionKey {
+            client_name: "client".into(),
+            client_instance_id: vec![1],
+        };
+        store.persist(&key, 10).unwrap();
+        // A stale overlapping session persisting an older sequence must not
+        // rewind the on-disk resume position.
+        store.persist(&key, 5).unwrap();
+        let fresh = SessionResume::new(directory.path().to_path_buf(), ".test-session-");
+        assert_eq!(fresh.get(&key), 10);
+    }
 }
 
 pub(super) fn db_error(error: Error) -> Status {
