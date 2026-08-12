@@ -1266,12 +1266,13 @@ impl State {
                       "schema mismatch");
                 return Err(Error::SchemaMismatch);
             }
-            // If this component is a timestamp source, update the metadata
-            if is_timestamp_source
-                && let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
-                && !existing_meta.is_timestamp_source()
+            // Sync the flag with the current declaration in both directions:
+            // a stale sticky flag would keep the sink from advancing
+            // last_updated for a component that is no longer a clock.
+            if let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
+                && existing_meta.is_timestamp_source() != is_timestamp_source
             {
-                existing_meta.set_timestamp_source(true);
+                existing_meta.set_timestamp_source(is_timestamp_source);
                 // Re-save the metadata - ensure directory exists first
                 let component_metadata_dir = db_path.join(component_id.to_string());
                 if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {

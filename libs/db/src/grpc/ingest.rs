@@ -1917,6 +1917,35 @@ mod tests {
     }
 
     #[test]
+    fn session_open_syncs_timestamp_source_flag() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let id = ComponentId::new("PACKED.TIME");
+        let (_, _) = accepted(&service, "client", b"one", packed_schema());
+        db.with_state(|state| {
+            assert!(
+                state
+                    .get_component_metadata(id)
+                    .unwrap()
+                    .is_timestamp_source()
+            )
+        });
+
+        // A later declaration without the flag clears it.
+        let mut schema = packed_schema();
+        schema.messages[0].components[0].timestamp_source = false;
+        let (_, _) = accepted(&service, "client", b"two", schema);
+        db.with_state(|state| {
+            assert!(
+                !state
+                    .get_component_metadata(id)
+                    .unwrap()
+                    .is_timestamp_source()
+            )
+        });
+    }
+
+    #[test]
     fn reconnect_with_same_schema_skips_config_write() {
         let (_dir, db) = test_db();
         let service = IngestServiceImpl::new(db.clone());
