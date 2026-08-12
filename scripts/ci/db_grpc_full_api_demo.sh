@@ -7,6 +7,7 @@ server_pid=""
 sim_pid=""
 
 cleanup() {
+  local status=$?
   if [[ -n "${sim_pid}" ]] && kill -0 "${sim_pid}" 2>/dev/null; then
     kill -TERM -- "-${sim_pid}" 2>/dev/null || true
     wait "${sim_pid}" 2>/dev/null || true
@@ -14,6 +15,14 @@ cleanup() {
   if [[ -n "${server_pid}" ]] && kill -0 "${server_pid}" 2>/dev/null; then
     kill -INT "${server_pid}" 2>/dev/null || true
     wait "${server_pid}" 2>/dev/null || true
+  fi
+  if [[ "${status}" -ne 0 ]]; then
+    for log in "${work}/rc-jet.log" "${work}/server.log"; do
+      if [[ -s "${log}" ]]; then
+        printf '==== %s (tail) ====\n' "${log}" >&2
+        tail -n 120 "${log}" >&2 || true
+      fi
+    done
   fi
   if [[ "${ELODIN_GRPC_DEMO_KEEP:-0}" != "1" ]]; then
     rm -rf "${work}"
