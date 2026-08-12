@@ -560,12 +560,13 @@
 </span></code></pre>
 <p>The DB engine automatically divides the nanosecond source value by 1000 on ingestion, producing correct microsecond record timestamps. The raw component data is stored unchanged, preserving full nanosecond precision for downstream analysis. Wrapping every field -- including the clock field itself -- in <code>timestamp_ns()</code> ensures all components in a message share the same temporally-aligned record timestamp. This works identically for SITL and real hardware -- the conversion is declared in the VTable schema, not in mode-specific code.</p>
 <h2 id="foreign-client-grpc-api">Foreign-client gRPC API</h2>
-<p><code>--grpc-addr</code> adds versioned protobuf services on the same DB core:
-acknowledged ingest, bounded and SQL queries, real-time/fixed-rate streams,
-message logs, metadata/config, and chunked assets. Health and reflection share
-the endpoint. See the <a href="/home/db/grpc-client">gRPC Client guide</a> for setup,
-generated C++/Python clients, write-resume semantics, queries, and playback.
-Native Impeller/VTable remains the editor/sim/follower path. Contracts:
+<p>Every DB starts versioned protobuf services on the same core at native port
+<code>P + 2</code>, next to asset HTTP at <code>P + 1</code>. The API covers acknowledged ingest,
+bounded and SQL queries, real-time/fixed-rate streams, message logs,
+metadata/config, and chunked assets. Health and reflection share the endpoint.
+See the <a href="/home/db/grpc-client">gRPC Client guide</a> for setup, generated
+C++/Python clients, write-resume semantics, queries, and playback. Native
+Impeller/VTable remains the editor/sim/follower path. Contracts:
 <code>libs/db/proto/elodin/db/v1</code> (16 MiB max message).</p>
 <h2 id="vtable">VTable</h2>
 <p>Elodin DB uses a dynamic data-extraction system for fast data-ingest. Instead of requiring that data is sent in a fixed format - Elodin DB allows users to generate a vtable that describes the data being ingested. Loosely this can be thought of as a collection of offsets combined with entity and component ids. We borrowed the concept of a vtable from FlatBuffers, which use them in a similar manner.</p>

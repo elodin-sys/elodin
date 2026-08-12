@@ -534,9 +534,10 @@ queries, live playback, message logs, metadata, config, and assets.</p>
 <p>To start a new instance of Elodin DB, use the following command:</p>
 <pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run</span>
 </span></code></pre>
-<p>Enable the optional gRPC API:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run <span class="z-keyword z-control z-regexp z-set z-begin z-shell">[</span>::<span class="z-keyword z-control z-regexp z-set z-end z-shell">]</span>:2240 ./db<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>grpc-addr</span> <span class="z-keyword z-control z-regexp z-set z-begin z-shell">[</span>::<span class="z-keyword z-control z-regexp z-set z-end z-shell">]</span>:50051</span>
-</span></code></pre>
+<p>The gRPC API starts automatically two ports above the native endpoint:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run <span class="z-keyword z-control z-regexp z-set z-begin z-shell">[</span>::<span class="z-keyword z-control z-regexp z-set z-end z-shell">]</span>:2240 ./db</span>
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Native: 2240, asset HTTP: 2241, gRPC: 2242</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span></code></pre>
 <p>See <code>libs/db/proto/elodin/db/v1</code>, the <code>elodin-db-protos</code> CMake package, and
 <code>libs/db/examples/grpc-client-batched.cpp</code> (16 MiB max message). Health and
 reflection are enabled. Use <code>--grpc-auth-token TOKEN</code> to require bearer-token

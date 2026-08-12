@@ -1187,15 +1187,16 @@ and <code>drift_resets</code>, with worst-run callouts in the campaign summary.<
 <li>
 <p><code>--http-addr &lt;ADDR&gt;</code> — Address to bind the HTTP server to (enables HTTP API)</p>
 </li>
-<li>
-<p><code>--grpc-addr &lt;ADDR&gt;</code> — Bind the protobuf/gRPC API for ingest, query, live
-playback, message logs, metadata/config, and assets. Health and reflection
-share the endpoint. Native listener stays up for editor/sim/followers. See
-<code>libs/db/proto/elodin/db/v1</code> and <code>elodin-db-protos</code> (16 MiB max message).</p>
-</li>
+</ul>
+<p>The protobuf/gRPC API starts automatically at <code>&lt;ADDR&gt; + 2</code> (<code>2242</code> for the
+default native listener), alongside asset HTTP at <code>&lt;ADDR&gt; + 1</code>. It covers
+ingest, query, live playback, message logs, metadata/config, and assets. Health
+and reflection share the endpoint. See <code>libs/db/proto/elodin/db/v1</code> and
+<code>elodin-db-protos</code> (16 MiB max message).</p>
+<ul>
 <li>
 <p><code>--grpc-auth-token &lt;TOKEN&gt;</code> — Require <code>authorization: Bearer TOKEN</code> metadata
-on the gRPC endpoint. Requires <code>--grpc-addr</code>; omitted means unauthenticated.</p>
+on the gRPC endpoint; omitted means unauthenticated.</p>
 </li>
 <li>
 <p><code>--replay</code> — Replay recorded data as live telemetry. The database advances <code>last_updated</code> with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.</p>
