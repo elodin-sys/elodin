@@ -1667,15 +1667,21 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             return None;
         }
 
-        // Sort for percentile calculation
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
+        // Two quickselect passes (O(n) each) instead of a full O(n log n) sort.
+        // On long historical windows this is the dominant frame cost: sorting
+        // hundreds of thousands of samples per graph per refresh.
         let len = values.len();
         let low_idx = ((p_low / 100.0) * len as f32) as usize;
         let high_idx = ((p_high / 100.0) * len as f32) as usize;
         let high_idx = high_idx.min(len - 1);
 
-        Some((values[low_idx], values[high_idx]))
+        let cmp = |a: &D, b: &D| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+        // Select the high percentile first, then the low within the partition
+        // below it (low_idx <= high_idx always, since p_low < p_high).
+        let (_, &mut high, _) = values.select_nth_unstable_by(high_idx, cmp);
+        let (_, &mut low, _) = values[..=high_idx].select_nth_unstable_by(low_idx, cmp);
+
+        Some((low, high))
     }
 
     pub fn last(&self) -> Option<&Chunk<D>> {
