@@ -39,10 +39,18 @@ pub async fn serve_listener(
     listener: std::net::TcpListener,
     db: Arc<DB>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    serve_listener_with_auth(listener, db, None).await
+}
+
+pub async fn serve_listener_with_auth(
+    listener: std::net::TcpListener,
+    db: Arc<DB>,
+    auth_token: Option<String>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     listener.set_nonblocking(true)?;
     let listener = tokio::net::TcpListener::from_std(listener)?;
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-    router(db, None)
+    router(db, auth_token)
         .await?
         .serve_with_incoming(incoming)
         .await?;

@@ -564,10 +564,20 @@ async fn main() -> miette::Result<()> {
             }
             #[cfg(feature = "grpc")]
             if let Some(grpc_addr) = grpc_addr {
+                // Bind synchronously so a bad or busy address fails startup
+                // instead of panicking a background task.
+                let listener = std::net::TcpListener::bind(grpc_addr)
+                    .map_err(|e| miette::miette!("failed to bind --grpc-addr {grpc_addr}: {e}"))?;
                 stellarator::struc_con::tokio(move |_| async move {
-                    elodin_db::grpc::serve_with_auth(grpc_addr, grpc_db, grpc_auth_token)
-                        .await
-                        .unwrap()
+                    if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
+                        listener,
+                        grpc_db,
+                        grpc_auth_token,
+                    )
+                    .await
+                    {
+                        tracing::error!(?error, "gRPC server exited");
+                    }
                 });
             }
             if let Some(lua_config) = config {

@@ -236,6 +236,19 @@ impl IngestServiceImpl {
             client_instance_id: open.client_instance_id,
         };
         let current_seq = self.resume.get(&key);
+        // Timestamp-source components do not advance last_updated, so the
+        // replay watermark also covers each session component's own latest.
+        let mut dedup_below = self.db.last_updated.latest();
+        self.db.with_state(|state| {
+            for component in messages.iter().flat_map(|message| &message.components) {
+                if let Some((timestamp, _)) = state
+                    .get_component(component.id)
+                    .and_then(|component| component.time_series.latest())
+                {
+                    dedup_below = dedup_below.max(*timestamp);
+                }
+            }
+        });
 
         let mut order = (0..messages.len()).collect::<Vec<_>>();
         order.sort_unstable_by(|left, right| messages[*left].name.cmp(&messages[*right].name));
@@ -259,7 +272,7 @@ impl IngestServiceImpl {
                 messages: registered,
                 current_seq,
                 ack_policy,
-                dedup_below: self.db.last_updated.latest(),
+                dedup_below,
             },
         ))
     }
@@ -2018,6 +2031,63 @@ mod tests {
                 .time_series
                 .sample_count()),
             2
+        );
+    }
+
+    #[test]
+    fn restart_replay_deduplicates_timestamp_source_only_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        // Timestamp-source writes do not advance last_updated, so the replay
+        // watermark must come from the component's own data.
+        let schema = SchemaSet {
+            messages: vec![MessageSchema {
+                name: "ClockMessage".to_string(),
+                encoding: RowEncoding::Packed as i32,
+                packed_size: 8,
+                components: vec![component("CLOCK.TIME", PrimType::I64, &[], 0, true)],
+            }],
+        };
+        let row = |time_ns: i64| Row {
+            message_handle: 1,
+            time_monotonic_ns: None,
+            payload: Some(row::Payload::Packed(time_ns.to_le_bytes().to_vec())),
+        };
+        {
+            let db = Arc::new(DB::create(path.clone()).unwrap());
+            let service = IngestServiceImpl::new(db);
+            let (accept, mut session) = accepted(&service, "client", b"instance", schema.clone());
+            assert_eq!(accept.message_handles["ClockMessage"], 1);
+            service
+                .process_batch(
+                    &mut session,
+                    TelemetryBatch {
+                        first_seq: 1,
+                        rows: vec![row(1_000_000)],
+                    },
+                )
+                .unwrap();
+        }
+
+        let db = Arc::new(DB::open(path).unwrap());
+        let service = IngestServiceImpl::new(db.clone());
+        let (_, mut session) = accepted(&service, "client", b"instance", schema);
+        service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: 1,
+                    rows: vec![row(1_000_000)],
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            db.with_state(|state| state
+                .get_component(ComponentId::new("CLOCK.TIME"))
+                .unwrap()
+                .time_series
+                .sample_count()),
+            1
         );
     }
 
