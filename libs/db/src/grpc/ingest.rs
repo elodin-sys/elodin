@@ -318,7 +318,10 @@ impl IngestServiceImpl {
                         detail: error.detail,
                     })));
                 }
-                Err(ApplyRowFailure::Fatal(status)) => return Err(status),
+                Err(ApplyRowFailure::Fatal(status)) => {
+                    self.resume.remember(&session.key, session.current_seq);
+                    return Err(status);
+                }
             }
             session.current_seq = seq;
         }
@@ -415,6 +418,7 @@ impl IngestServiceImpl {
                     let mut responses = match self.process_batch(&mut session, batch) {
                         Ok(responses) => responses,
                         Err(status) => {
+                            self.persist_resume(&session.key, session.current_seq);
                             let _ = tx.send(Err(status)).await;
                             return;
                         }
@@ -2011,6 +2015,44 @@ mod tests {
     }
 
     #[test]
+    fn fatal_batch_remembers_applied_prefix() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let mut schema = packed_schema();
+        schema.messages.extend(typed_schema().messages);
+        let (accept, mut session) = accepted(&service, "client", b"instance", schema);
+        let packed_handle = accept.message_handles["PackedMessage"];
+        let typed_handle = accept.message_handles["TypedMessage"];
+
+        // Simulate an internal failure in the second message after the first
+        // row has already been applied.
+        session.messages.get_mut(&typed_handle).unwrap().encoding = RowEncoding::Unspecified;
+        let error = service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: 1,
+                    rows: vec![
+                        packed_row(packed_handle, 1_000_000, [1.0, 2.0]),
+                        typed_row(typed_handle, 2_000_000, [true, false]),
+                    ],
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(session.current_seq, 1);
+        assert_eq!(service.resume.get(&session.key), 1);
+        assert_eq!(
+            db.with_state(|state| state
+                .get_component(ComponentId::new("PACKED.VEC"))
+                .unwrap()
+                .time_series
+                .sample_count()),
+            1
+        );
+    }
+
+    #[test]
     fn restart_replay_deduplicates_each_distinct_row_occurrence() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
@@ -2553,7 +2595,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn transport_preserves_fatal_status_without_covering_ack() {
-        let (_harness, mut client) = TransportHarness::start().await;
+        let (harness, mut client) = TransportHarness::start().await;
         let (tx, mut responses, accept) = open_transport_session(
             &mut client,
             open_with_ack_policy("fatal-client", b"instance", 1_000, 10_000),
@@ -2578,6 +2620,12 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+
+        // No ack covered sequence 1, but its applied progress was persisted
+        // before the terminal status so a restarted service will not replay it.
+        let restarted = IngestServiceImpl::new(harness._db.clone());
+        let (accept, _) = accepted(&restarted, "fatal-client", b"instance", packed_schema());
+        assert_eq!(accept.resume_from_seq, 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
