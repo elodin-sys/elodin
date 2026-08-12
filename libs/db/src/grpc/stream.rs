@@ -474,10 +474,15 @@ async fn run_fixed_components(
     }
 }
 
+// `state` is the playback snapshot the elapsed frame was emitted with; a seek
+// that landed since then wins the race and the advance is skipped so the seek
+// target is always emitted.
 fn advance_cursor(control_tx: &watch::Sender<Playback>, state: &Playback) {
     let step = (state.timestep.as_nanos() / 1000) as i64;
     control_tx.send_modify(|playback| {
-        playback.timestamp = Timestamp(playback.timestamp.0.saturating_add(step));
+        if playback.seek_generation == state.seek_generation {
+            playback.timestamp = Timestamp(playback.timestamp.0.saturating_add(step));
+        }
     });
 }
 
@@ -954,6 +959,32 @@ mod tests {
         };
         assert_eq!(update.timestamp_ns, 100_000);
         task.abort();
+    }
+
+    #[test]
+    fn advance_yields_to_intervening_seek() {
+        let initial = Playback {
+            playing: true,
+            timestamp: Timestamp(100),
+            seek_generation: 0,
+            timestep: Duration::from_micros(1),
+            frequency: 100,
+        };
+        let (control_tx, _control_rx) = watch::channel(initial);
+
+        // A seek that lands between frame emission and the elapsed sleep must
+        // not be stepped over.
+        let mut seek = initial;
+        seek.timestamp = Timestamp(500);
+        seek.seek_generation = 1;
+        control_tx.send(seek).unwrap();
+        advance_cursor(&control_tx, &initial);
+        assert_eq!(control_tx.borrow().timestamp, Timestamp(500));
+
+        // Without an intervening seek the cursor advances by one timestep.
+        let current = *control_tx.borrow();
+        advance_cursor(&control_tx, &current);
+        assert_eq!(control_tx.borrow().timestamp, Timestamp(501));
     }
 
     #[test]
