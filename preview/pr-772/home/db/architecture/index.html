@@ -416,6 +416,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
         </ul>
          
          
@@ -555,8 +563,10 @@
 <p><code>--grpc-addr</code> adds versioned protobuf services on the same DB core:
 acknowledged ingest, bounded and SQL queries, real-time/fixed-rate streams,
 message logs, metadata/config, and chunked assets. Health and reflection share
-the endpoint. Native Impeller/VTable remains the editor/sim/follower path.
-Contracts: <code>libs/db/proto/elodin/db/v1</code> (16 MiB max message).</p>
+the endpoint. See the <a href="/home/db/grpc-client">gRPC Client guide</a> for setup,
+generated C++/Python clients, write-resume semantics, queries, and playback.
+Native Impeller/VTable remains the editor/sim/follower path. Contracts:
+<code>libs/db/proto/elodin/db/v1</code> (16 MiB max message).</p>
 <h2 id="vtable">VTable</h2>
 <p>Elodin DB uses a dynamic data-extraction system for fast data-ingest. Instead of requiring that data is sent in a fixed format - Elodin DB allows users to generate a vtable that describes the data being ingested. Loosely this can be thought of as a collection of offsets combined with entity and component ids. We borrowed the concept of a vtable from FlatBuffers, which use them in a similar manner.</p>
 <p>One of the powers of VTables is that it lets us send raw structs over the wire, without serializing them. For instance take this struct:</p>
@@ -635,7 +645,7 @@ Contracts: <code>libs/db/proto/elodin/db/v1</code> (16 MiB max message).</p>
                
     <!-- this is a spacing hack for expediency -->
     <div class="footer-separator"></div>
-                                
+                                   
 </div>
 
               </main>

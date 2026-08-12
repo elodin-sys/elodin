@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-772/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-772/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-772/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-772/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-772/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-772/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>gRPC Client | Elodin</title>
+<meta name="description" content="Use Elodin DB from C++, Python, and other gRPC clients">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-772/logo.png">
+  
+  <meta name="twitter:title" content="gRPC Client">
+  <meta name="twitter:description" content="Use Elodin DB from C++, Python, and other gRPC clients">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="gRPC Client">
+  <meta property="og:description" content="Use Elodin DB from C++, Python, and other gRPC clients">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-772/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="gRPC Client">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-772/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-772/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Db",
+            "item": "https://docs.elodin.systems/preview/pr-772/home/db/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Grpc Client",
+            "item": "https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.18.0" selected>
+                        v0.18.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-772/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-772/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-772/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-772/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-772/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-772/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-772/home/apollo-lander/"
+                    >Apollo Lander</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/db/python-client/"
+                    >Python Client</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-772/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#generate-a-client">Generate a client</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#python">Python</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#c">C++</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#quick-start-acknowledged-telemetry">Quick start: acknowledged telemetry</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#ingest-contracts">Ingest contracts</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#schemas-and-row-encodings">Schemas and row encodings</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#resume-and-acknowledgements">Resume and acknowledgements</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#discovery-and-historical-reads">Discovery and historical reads</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#live-streams-and-playback">Live streams and playback</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#message-logs">Message logs</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#configuration-metadata-and-assets">Configuration, metadata, and assets</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#authentication-errors-and-limits">Authentication, errors, and limits</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-772/home/db/grpc-client/#runnable-references">Runnable references</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>gRPC Client</h1>
+                  
+                  <p class="lead">Use the versioned protobuf API to ingest, query, and stream Elodin DB data from any gRPC-supported language.</p>
+                   <p>Elodin DB exposes a first-class gRPC API for applications that cannot use its
+native Rust and Impeller interfaces. The same <code>elodin.db.v1</code> contract generates
+typed clients for C++, Python, and every other language supported by gRPC.</p>
+<p>Use gRPC when you need a stable cross-language contract, acknowledged and
+resumable writes, historical queries, playback streams, message logs, or
+administrative access. Python-only applications that prefer a higher-level API
+can use the <a href="/home/db/python-client">Python Client</a>. Native Elodin processes
+should continue to use Impeller and VTables.</p>
+<p>Start the optional endpoint alongside the normal database listener:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run 127.0.0.1:2240 ./db<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>grpc-addr</span> 127.0.0.1:50051</span>
+</span></code></pre>
+<p>The endpoint serves the application services, standard gRPC health checking,
+and server reflection. The source contracts live in
+<code>libs/db/proto/elodin/db/v1</code>.</p>
+<h2 id="generate-a-client">Generate a client</h2>
+<h3 id="python">Python</h3>
+<p>Install the gRPC runtime and compiler, then generate modules from the checked-in
+contracts:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>m</span> pip install grpcio grpcio-tools</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">mkdir</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>p</span> generated</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>m</span> grpc_tools.protoc <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  -</span>I</span> libs/db/proto <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>python_out</span><span class="z-keyword z-operator z-assignment z-option z-shell">=</span>generated <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>grpc_python_out</span><span class="z-keyword z-operator z-assignment z-option z-shell">=</span>generated <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell">  libs/db/proto/elodin/db/v1/<span class="z-keyword z-operator z-regexp z-quantifier z-shell">*</span>.proto</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-storage z-modifier z-shell">export</span> <span class="z-variable z-other z-readwrite z-assignment z-shell">PYTHONPATH</span><span class="z-keyword z-operator z-assignment z-shell">=</span><span class="z-string z-unquoted z-shell"><span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">PWD</span></span>/generated<span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-punctuation z-section z-expansion z-parameter z-begin z-shell">{</span></span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-variable z-other z-readwrite z-shell">PYTHONPATH</span></span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-keyword z-operator z-assignment z-shell">:+</span></span><span class="z-meta z-group z-expansion z-parameter z-shell">:<span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">PYTHONPATH</span></span></span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-section z-expansion z-parameter z-end z-shell">}</span></span><span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span></span>
+</span></code></pre>
+<p>Install <code>pyarrow</code> as well when decoding SQL results.</p>
+<h3 id="c">C++</h3>
+<p>Elodin packages the generated protobuf and gRPC sources as
+<code>elodin-db-protos</code>:</p>
+<pre data-lang="cmake" class="language-cmake z-code"><code class="language-cmake" data-lang="cmake"><span class="z-source z-cmake"><span class="z-meta z-function-call z-cmake"><span class="z-support z-function z-find_package z-cmake">find_package</span></span><span class="z-meta z-function-call z-arguments z-cmake"><span class="z-punctuation z-section z-parens z-begin z-cmake">(</span><span class="z-meta z-string z-unquoted z-cmake">elodin-db-protos</span> <span class="z-variable z-parameter z-REQUIRED z-cmake">REQUIRED</span> <span class="z-variable z-parameter z-CONFIG z-cmake">CONFIG</span><span class="z-punctuation z-section z-parens z-end z-cmake">)</span></span>
+</span><span class="z-source z-cmake"><span class="z-meta z-function-call z-cmake"><span class="z-support z-function z-target_link_libraries z-cmake">target_link_libraries</span></span><span class="z-meta z-function-call z-arguments z-cmake"><span class="z-punctuation z-section z-parens z-begin z-cmake">(</span><span class="z-meta z-string z-unquoted z-cmake">my_client</span> <span class="z-variable z-parameter z-PRIVATE z-cmake">PRIVATE</span> <span class="z-meta z-string z-unquoted z-cmake">elodin-db-protos::elodin-db-protos</span><span class="z-punctuation z-section z-parens z-end z-cmake">)</span></span>
+</span></code></pre>
+<p>Headers use paths such as <code>elodin/db/v1/ingest.grpc.pb.h</code>. The complete
+reference client is <code>libs/db/examples/grpc-client-batched.cpp</code>.</p>
+<h2 id="quick-start-acknowledged-telemetry">Quick start: acknowledged telemetry</h2>
+<p>An ingest stream starts with exactly one <code>SessionOpen</code>. The server validates
+the schema and returns session-scoped handles before accepting rows:</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">hashlib</span></span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">os</span></span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">queue</span></span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">struct</span></span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">time</span></span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">grpc</span></span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-from z-python">from</span></span><span class="z-meta z-statement z-import z-python"><span class="z-meta z-import-source z-python"> <span class="z-meta z-import-path z-python"><span class="z-meta z-import-name z-python">elodin</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-import-name z-python">db</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-import-name z-python">v1</span></span> <span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span></span></span></span><span class="z-meta z-statement z-import z-python"></span><span class="z-meta z-statement z-import z-python"> <span class="z-meta z-generic-name z-python">common_pb2</span><span class="z-punctuation z-separator z-import-list z-python">,</span> <span class="z-meta z-generic-name z-python">ingest_pb2</span><span class="z-punctuation z-separator z-import-list z-python">,</span> <span class="z-meta z-generic-name z-python">ingest_pb2_grpc</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">channel</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">grpc</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">insecure_channel</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">127.0.0.1:50051<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">grpc</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">channel_ready_future</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">channel</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">result</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">timeout</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">10</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">schema</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">SchemaSet</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">messages</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-sequence z-list z-python"><span class="z-punctuation z-section z-sequence z-begin z-python">[</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python">    <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">MessageSchema</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">name</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">sensor.row<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">encoding</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-variable z-other z-constant z-python">ROW_ENCODING_PACKED</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">packed_size</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">8</span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">components</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-sequence z-list z-python"><span class="z-punctuation z-section z-sequence z-begin z-python">[</span>
+</span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python">            <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">ComponentSchema</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">                <span class="z-variable z-parameter z-python">name</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">sensor.pressure<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">                <span class="z-variable z-parameter z-python">prim_type</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">common_pb2</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-variable z-other z-constant z-python">PRIM_TYPE_F64</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">                <span class="z-variable z-parameter z-python">packed_offset</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">0</span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">            <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python">        <span class="z-punctuation z-section z-sequence z-end z-python">]</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-punctuation z-section z-sequence z-end z-python">]</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">outgoing</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">queue</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Queue</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-function z-python"><span class="z-storage z-type z-function z-python"><span class="z-keyword z-declaration z-function z-python">def</span></span> <span class="z-entity z-name z-function z-python"><span class="z-meta z-generic-name z-python">requests</span></span></span><span class="z-meta z-function z-parameters z-python"><span class="z-punctuation z-section z-parameters z-begin z-python">(</span></span><span class="z-meta z-function z-parameters z-python"><span class="z-punctuation z-section z-parameters z-end z-python">)</span></span><span class="z-meta z-function z-python"><span class="z-punctuation z-section z-function z-begin z-python">:</span></span>
+</span><span class="z-source z-python">    <span class="z-meta z-statement z-loop z-while z-python"><span class="z-keyword z-control z-loop z-while z-python">while</span> <span class="z-meta z-group z-python"><span class="z-punctuation z-section z-group z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">request</span></span> <span class="z-keyword z-operator z-assignment z-inline z-python">:=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">outgoing</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">get</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-group z-end z-python">)</span></span> <span class="z-keyword z-operator z-logical z-python">is</span> <span class="z-keyword z-operator z-logical z-python">not</span> <span class="z-constant z-language z-python">None</span><span class="z-punctuation z-section z-block z-loop z-while z-python">:</span></span>
+</span><span class="z-source z-python">        <span class="z-keyword z-control z-flow z-yield z-python">yield</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">request</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">responses</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2_grpc</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">IngestServiceStub</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">channel</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Ingest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">requests</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">outgoing</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">put</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">IngestRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">open</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">SessionOpen</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">client_name</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">sensor-bridge<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">client_instance_id</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">os</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">urandom</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-constant z-numeric z-integer z-decimal z-python">16</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">schema</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">schema</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">schema_fingerprint</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">hashlib</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">sha256</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">schema</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">SerializeToString</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">deterministic</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-language z-python">True</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">digest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">ack_policy</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">common_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">AckPolicy</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">max_unacked_rows</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">32</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">max_ack_delay_ms</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">20</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">accepted</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-support z-function z-builtin z-python">next</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">responses</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">accept</span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">handle</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-item-access z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">accepted</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">message_handles</span></span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-begin z-python">[</span></span><span class="z-meta z-item-access z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">sensor.row<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span></span><span class="z-meta z-item-access z-python"><span class="z-punctuation z-section z-brackets z-end z-python">]</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sequence</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">accepted</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">resume_from_seq</span></span> <span class="z-keyword z-operator z-arithmetic z-python">+</span> <span class="z-constant z-numeric z-integer z-decimal z-python">1</span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">outgoing</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">put</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">IngestRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">batch</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">TelemetryBatch</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">first_seq</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sequence</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">rows</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-sequence z-list z-python"><span class="z-punctuation z-section z-sequence z-begin z-python">[</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">ingest_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Row</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">message_handle</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">handle</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">time_monotonic_ns</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">time</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">monotonic_ns</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">packed</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">struct</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">pack</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">&lt;d<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-constant z-numeric z-float z-decimal z-python">101_325<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-sequence z-list z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-sequence z-end z-python">]</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">outgoing</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">put</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-constant z-language z-python">None</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-statement z-loop z-for z-python"><span class="z-keyword z-control z-loop z-for z-python">for</span> <span class="z-meta z-generic-name z-python">response</span> <span class="z-keyword z-control z-loop z-for z-in z-python">in</span></span><span class="z-meta z-statement z-loop z-for z-python"> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">responses</span></span></span><span class="z-meta z-statement z-loop z-for z-python"><span class="z-punctuation z-section z-block z-loop z-for z-python">:</span></span>
+</span><span class="z-source z-python">    <span class="z-meta z-statement z-conditional z-if z-python"><span class="z-keyword z-control z-conditional z-if z-python">if</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">HasField</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">error<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-block z-conditional z-if z-python">:</span></span>
+</span><span class="z-source z-python">        <span class="z-meta z-statement z-raise z-python"><span class="z-keyword z-control z-flow z-raise z-python">raise</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-support z-type z-exception z-python">RuntimeError</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-storage z-type z-string z-python">f</span><span class="z-meta z-string z-interpolated z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-interpolated z-python"><span class="z-string z-quoted z-double z-python">row </span><span class="z-meta z-interpolation z-python"><span class="z-punctuation z-section z-interpolation z-begin z-python">{</span><span class="z-source z-python z-embedded"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">error</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">seq</span></span></span></span><span class="z-meta z-interpolation z-python"><span class="z-punctuation z-section z-interpolation z-end z-python">}</span></span><span class="z-string z-quoted z-double z-python">: </span><span class="z-meta z-interpolation z-python"><span class="z-punctuation z-section z-interpolation z-begin z-python">{</span><span class="z-source z-python z-embedded"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">error</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">detail</span></span></span></span><span class="z-meta z-interpolation z-python"><span class="z-punctuation z-section z-interpolation z-end z-python">}</span></span><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span></span>
+</span><span class="z-source z-python">    <span class="z-meta z-statement z-conditional z-if z-python"><span class="z-keyword z-control z-conditional z-if z-python">if</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">HasField</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">ack<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span> <span class="z-keyword z-operator z-logical z-python">and</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">ack</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">through_seq</span></span> <span class="z-keyword z-operator z-comparison z-python">&gt;=</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sequence</span></span><span class="z-punctuation z-section z-block z-conditional z-if z-python">:</span></span>
+</span><span class="z-source z-python">        <span class="z-keyword z-control z-flow z-break z-python">break</span>
+</span></code></pre>
+<p>Reuse one channel and stream for sustained writers. The C++ reference uses one
+reader thread and one writer thread so batches can remain in flight while
+cumulative acknowledgements arrive.</p>
+<h2 id="ingest-contracts">Ingest contracts</h2>
+<h3 id="schemas-and-row-encodings">Schemas and row encodings</h3>
+<p>A <code>SchemaSet</code> groups messages by rate and layout. Each <code>MessageSchema</code> contains
+one or more fixed-shape components:</p>
+<ul>
+<li><code>prim_type</code> supports all integer widths, <code>f32</code>, <code>f64</code>, and <code>bool</code>;</li>
+<li>an empty <code>dims</code> list is a scalar; non-empty dimensions describe a dense
+tensor;</li>
+<li><code>element_names</code> label tensor elements for plotting;</li>
+<li><code>timestamp_source</code> marks an <code>i64</code> or <code>u64</code> component whose nanosecond value
+supplies record time.</li>
+</ul>
+<p><code>ROW_ENCODING_PACKED</code> is the efficient path for fixed-layout producers. Every
+component declares a byte offset, and each row carries one little-endian byte
+buffer of exactly <code>packed_size</code>. <code>ROW_ENCODING_TYPED</code> carries a
+<code>ComponentValue</code> per component and is convenient for dynamic clients.</p>
+<p>All <code>*_ns</code> fields are nanoseconds on the wire. Elodin DB floors record time to
+its microsecond storage grid while preserving a timestamp-source component's
+original nanosecond value as data.</p>
+<h3 id="resume-and-acknowledgements">Resume and acknowledgements</h3>
+<p>Rows are numbered from 1. Keep <code>client_name</code> and <code>client_instance_id</code> stable
+while reconnecting the same logical writer. After <code>SessionAccept</code>, resend every
+row above <code>resume_from_seq</code>.</p>
+<p>Delivery is at least once. <code>WriteAck.through_seq</code> means every covered row was
+processed: it is visible to readers, or a preceding <code>RowError</code> reported its
+rejection. Resume positions persist periodically, so a server crash may resume
+slightly before the last ack; replayed ingest rows are deduplicated by sequence
+and, across that crash window, by complete row content.</p>
+<p><code>RowError</code> is non-terminal and always arrives before the ack that covers its
+sequence. Schema conflicts reject the session before any row is applied.</p>
+<h2 id="discovery-and-historical-reads">Discovery and historical reads</h2>
+<p><code>QueryService</code> provides typed operations for common reads:</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-from z-python">from</span></span><span class="z-meta z-statement z-import z-python"><span class="z-meta z-import-source z-python"> <span class="z-meta z-import-path z-python"><span class="z-meta z-import-name z-python">elodin</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-import-name z-python">db</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-import-name z-python">v1</span></span> <span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span></span></span></span><span class="z-meta z-statement z-import z-python"></span><span class="z-meta z-statement z-import z-python"> <span class="z-meta z-generic-name z-python">query_pb2</span><span class="z-punctuation z-separator z-import-list z-python">,</span> <span class="z-meta z-generic-name z-python">query_pb2_grpc</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query_pb2_grpc</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">QueryServiceStub</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">channel</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">info</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">GetServerInfo</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">GetServerInfoRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-support z-function z-builtin z-python">print</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">info</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">build_version</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">info</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">max_message_size_bytes</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">info</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">features</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">metadata</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">DumpMetadata</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">DumpMetadataRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">schemas</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">DumpSchema</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">DumpSchemaRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">responses</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">GetTimeSeries</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">GetTimeSeriesRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">component</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">sensor.pressure<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">start_ns</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">1_000_000</span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">end_ns</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">2_000_000</span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-loop z-for z-python"><span class="z-keyword z-control z-loop z-for z-python">for</span> <span class="z-meta z-generic-name z-python">response</span> <span class="z-keyword z-control z-loop z-for z-in z-python">in</span></span><span class="z-meta z-statement z-loop z-for z-python"> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">responses</span></span></span><span class="z-meta z-statement z-loop z-for z-python"><span class="z-punctuation z-section z-block z-loop z-for z-python">:</span></span>
+</span><span class="z-source z-python">    <span class="z-meta z-statement z-conditional z-if z-python"><span class="z-keyword z-control z-conditional z-if z-python">if</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">HasField</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">header<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-block z-conditional z-if z-python">:</span></span>
+</span><span class="z-source z-python">        <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-support z-function z-builtin z-python">print</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">header</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">prim_type</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">header</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">dims</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python">    <span class="z-meta z-statement z-conditional z-else z-python"><span class="z-keyword z-control z-conditional z-else z-python">else</span><span class="z-punctuation z-section z-block z-conditional z-else z-python">:</span></span>
+</span><span class="z-source z-python">        <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-support z-function z-builtin z-python">print</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">data</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">timestamps_ns</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">data</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">packed_values</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></code></pre>
+<p>Time ranges are half-open <code>[start_ns, end_ns)</code> and are evaluated on the
+microsecond storage grid. Omit either bound for earliest or open-ended reads.
+Omit <code>limit</code> for all matching rows. <code>GetTimeSeries</code> sends one header followed
+by bounded data chunks; chunk boundaries are not part of the contract.</p>
+<p>Set <code>max_points &gt;= 3</code> to apply LTTB downsampling. For tensors,
+<code>element_index</code> selects the element used as the downsampling signal while each
+selected row still contains the complete tensor.</p>
+<p><code>Sql</code> streams one self-contained Arrow IPC stream (schema plus one record
+batch) in each response:</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">pyarrow</span></span> <span class="z-keyword z-control z-import z-as z-python">as</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">pa</span></span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">batches</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-sequence z-list z-empty z-python"><span class="z-punctuation z-section z-sequence z-begin z-python">[</span><span class="z-punctuation z-section z-sequence z-end z-python">]</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-statement z-loop z-for z-python"><span class="z-keyword z-control z-loop z-for z-python">for</span> <span class="z-meta z-generic-name z-python">response</span> <span class="z-keyword z-control z-loop z-for z-in z-python">in</span></span><span class="z-meta z-statement z-loop z-for z-python"> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Sql</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">query_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">SqlRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-statement z-loop z-for z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">sql</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-source z-sql"><span class="z-keyword z-other z-DML z-sql">SELECT</span> <span class="z-variable z-language z-star z-sql">*</span> <span class="z-keyword z-other z-DML z-sql">FROM</span> sensor_pressure</span><span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-statement z-loop z-for z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span></span><span class="z-meta z-statement z-loop z-for z-python"><span class="z-punctuation z-section z-block z-loop z-for z-python">:</span></span>
+</span><span class="z-source z-python">    <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">batches</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">extend</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">pa</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">ipc</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">open_stream</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">response</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">ipc</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">table</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">pa</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">Table</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">from_batches</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">batches</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></code></pre>
+<h2 id="live-streams-and-playback">Live streams and playback</h2>
+<p><code>StreamService.StreamComponents</code> is a latest-value stream, not a lossless
+recording feed. Real-time mode may coalesce intermediate rows under load;
+<code>immediate=true</code> reduces batching but retains the same latest-value contract.
+Use <code>GetTimeSeries</code> when every historical row matters.</p>
+<p>Fixed-rate mode samples each component at or before a shared playback cursor.
+The server returns a <code>stream_id</code> and emits <code>StreamTimestamp</code> frames with the
+sampled component updates. Subsequent request frames may pause, resume, seek,
+or change the timestep and frequency:</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-from z-python">from</span></span><span class="z-meta z-statement z-import z-python"><span class="z-meta z-import-source z-python"> <span class="z-meta z-import-path z-python"><span class="z-meta z-import-name z-python">elodin</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-import-name z-python">db</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-import-name z-python">v1</span></span> <span class="z-meta z-statement z-import z-python"><span class="z-keyword z-control z-import z-python">import</span></span></span></span><span class="z-meta z-statement z-import z-python"></span><span class="z-meta z-statement z-import z-python"> <span class="z-meta z-generic-name z-python">stream_pb2</span></span>
+</span><span class="z-source z-python">
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">open_request</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">StreamComponentsRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">open</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">StreamOpen</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">components</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-sequence z-list z-python"><span class="z-punctuation z-section z-sequence z-begin z-python">[</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">sensor.pressure<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-sequence z-end z-python">]</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-variable z-parameter z-python">fixed_rate</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">FixedRate</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">            <span class="z-variable z-parameter z-python">initial</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream_pb2</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-variable z-other z-constant z-python">INITIAL_TIMESTAMP_EARLIEST</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">            <span class="z-variable z-parameter z-python">timestep_ns</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">20_000_000</span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">            <span class="z-variable z-parameter z-python">frequency</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-integer z-decimal z-python">50</span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">        <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span>
+</span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">pause</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">StreamComponentsRequest</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python">    <span class="z-variable z-parameter z-python">control</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">stream_pb2</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">StreamControl</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">playing</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-language z-python">False</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span></code></pre>
+<p>The first request must be <code>StreamOpen</code>; controls are valid only for a stream
+that owns a fixed-rate clock. Timestep must be at least 1,000 ns and frequency
+must be 1–1,000 Hz. An invalid control terminates the stream with
+<code>INVALID_ARGUMENT</code>.</p>
+<p><code>StreamMessages</code> can own an independent playback clock or attach to a component
+stream via <code>playback_stream_id</code>. An attached stream mirrors pauses, seeks, and
+rate changes, ends with the owner, and is controlled through the component
+stream. <code>WatchDb</code> emits the current timestamp/config followed by changes.</p>
+<h2 id="message-logs">Message logs</h2>
+<p>Variable-length events, logs, and media use <code>MessageService</code>:</p>
+<ol>
+<li><code>Register</code> a name as opaque bytes, structured log, or postcard schema;</li>
+<li>open <code>Publish</code> with a stable client identity;</li>
+<li>send sequenced <code>PublishBatch</code> frames and process <code>MessageError</code>/<code>WriteAck</code>;</li>
+<li>read a lossless historical range with <code>GetMessages</code>.</li>
+</ol>
+<p>Message publish resumes across server restarts. As with telemetry, clients must
+replay above <code>PublishAccept.resume_from_seq</code> and tolerate duplicates from an
+ambiguous failure. <code>GetMessages</code> uses half-open nanosecond ranges and streams
+payloads without buffering the full log.</p>
+<p>Live message delivery is exposed through <code>StreamService.StreamMessages</code>.
+Real-time mode first primes each selected log with its latest stored message,
+then delivers every append while connected. Reconnecting primes again, so
+consumers must tolerate that duplicate.</p>
+<h2 id="configuration-metadata-and-assets">Configuration, metadata, and assets</h2>
+<p><code>AdminService</code> exposes online-safe administration:</p>
+<ul>
+<li><code>GetDbConfig</code> and <code>SetDbConfig</code> read or change recording and metadata;</li>
+<li><code>SetComponentMetadata</code> updates component metadata;</li>
+<li><code>PutAsset</code> accepts a header frame followed by byte chunks;</li>
+<li><code>GetAsset</code> streams chunks back;</li>
+<li><code>ListAssets</code> lists keys by prefix.</li>
+</ul>
+<p>Send the <code>PutAssetHeader</code> first. Asset chunk boundaries are transport details,
+not file boundaries.</p>
+<h2 id="authentication-errors-and-limits">Authentication, errors, and limits</h2>
+<p>The server is unauthenticated by default. Add a static bearer token:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run 127.0.0.1:2240 ./db <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>grpc-addr</span> 127.0.0.1:50051 <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell">  --</span>grpc-auth-token</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">TOKEN</span></span><span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
+</span></code></pre>
+<p>Pass <code>authorization: Bearer TOKEN</code> in call metadata. Authentication covers
+application RPCs and reflection; standard health checks stay unauthenticated
+for load balancers.</p>
+<p>The current transport is plaintext. Bind only to loopback or a trusted network,
+or terminate TLS in deployment infrastructure. The server limits encoded and
+decoded messages to 16 MiB; <code>GetServerInfo.max_message_size_bytes</code> reports the
+active contract.</p>
+<p>Terminal failures use canonical gRPC status codes. Common failures also carry
+<code>google.rpc.ErrorInfo</code> details under domain <code>db.elodin.systems</code>, with stable
+reasons such as <code>COMPONENT_NOT_FOUND</code>, <code>MESSAGE_NOT_FOUND</code>, and
+<code>TIME_RANGE_EMPTY</code>. Branch on status and structured reasons, not human-readable
+error text.</p>
+<h2 id="runnable-references">Runnable references</h2>
+<ul>
+<li><code>libs/db/examples/grpc-client-batched.cpp</code>: packed C++ ingest with concurrent
+writes and acknowledgements;</li>
+<li><code>libs/db/examples/grpc_gse_client.py</code>: typed ingest, structured logs, and
+restart/resume;</li>
+<li><code>libs/db/examples/grpc_full_api_demo.py</code>: all services, health, reflection,
+auth, playback synchronization, SQL, downsampling, and chunked assets.</li>
+</ul>
+<p>Run the complete integration demo from the repository root:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">nix</span></span><span class="z-meta z-function-call z-arguments z-shell"> develop .#run<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>command</span> scripts/ci/db_grpc_full_api_demo.sh</span>
+</span></code></pre>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                    
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-772&#x2F;home&#x2F;aleph&#x2F;betaflight&#x2F;">
+        <div>
+            <div class="footer-card">&larr; Betaflight Install</div>
+        </div>
+    </a>
+                     
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+                             
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-772/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-772/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-772/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-772/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-772/js/search.js"></script>
+
+
+</body>
+
+</html>
