@@ -542,10 +542,9 @@
 </ul>
 <h3 id="flash-usb-drive">Flash USB Drive</h3>
 <p>Compile the SD Image from source using Nix:</p>
-<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">git</span></span><span class="z-meta z-function-call z-arguments z-shell"> clone git@github.com:elodin-sys/elodin.git</span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-support z-function z-cd z-shell">cd</span></span><span class="z-meta z-function-call z-arguments z-shell"> elodin/aleph</span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">nix</span></span><span class="z-meta z-function-call z-arguments z-shell"> build<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>accept-flake-config</span> .#packages.aarch64-linux.sdimage</span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> clone</span><span style="color: light-dark(#2AA198, #2AA198);"> git@github.com:elodin-sys/elodin.git</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">cd</span><span style="color: light-dark(#2AA198, #2AA198);"> elodin/aleph</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">nix</span><span style="color: light-dark(#2AA198, #2AA198);"> build</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-accept-flake-config</span><span style="color: light-dark(#2AA198, #2AA198);"> .#packages.aarch64-linux.sdimage</span></span></code></pre>
 <p>Then you will need to write this image onto your flash drive. There are a number of methods to do this. The two easiest (in ascending order of difficulty) are:</p>
 <ol>
 <li>Using balenaEtcher - https://etcher.balena.io - This is the recommended way if it works on your machine</li>
@@ -565,12 +564,11 @@
     </div>
 </div>
 <p>While connected to the serial port, hit the reset button on Aleph. After some time, you will see a prompt with the below text:</p>
-<pre class="z-code"><code><span class="z-text z-plain">Jetson UEFI firmware (version v35.3.1 built on 2023-01-24T13:18:32+00:00)
-</span><span class="z-text z-plain">ESC   to enter Setup.
-</span><span class="z-text z-plain">F11   to enter Boot Manager Menu.
-</span><span class="z-text z-plain">Enter to continue boot.
-</span><span class="z-text z-plain">**  WARNING: Test Key is used.  **
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>Jetson UEFI firmware (version v35.3.1 built on 2023-01-24T13:18:32+00:00)</span></span>
+<span class="giallo-l"><span>ESC   to enter Setup.</span></span>
+<span class="giallo-l"><span>F11   to enter Boot Manager Menu.</span></span>
+<span class="giallo-l"><span>Enter to continue boot.</span></span>
+<span class="giallo-l"><span>**  WARNING: Test Key is used.  **</span></span></code></pre>
 <p>You want to enter the Boot manager by hitting F11. From there if the USB drive is plugged in correctly you should be able to select it.</p>
 <h3 id="os-install">OS Install</h3>
 <p>Aleph should put into a NixOS install. Once it is booted login with <code>root:root</code>.</p>
@@ -578,7 +576,7 @@
 <h2 id="expansion-board-rp2040-debugger">Expansion Board RP2040 Debugger</h2>
 <p>This is easiest to perform when separated from the stack to provide access to the bootloader button.</p>
 <ol>
-<li>Build the debugprobe.uf2 from source <a href="https://github.com/elodin-sys/debugprobe">here</a>, binary will be "debugprobe.uf2"</li>
+<li>Build the debugprobe.uf2 from source <a rel="external" href="https://github.com/elodin-sys/debugprobe">here</a>, binary will be "debugprobe.uf2"</li>
 <li>While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.</li>
 <li>Your computer should recognize a new drive labeled "RPI-RP2".</li>
 <li>Drag and drop the UF2 firmware file onto the "RPI-RP2" drive. This flashes the necessary firmware onto the built-in debugger, and resets the board.
