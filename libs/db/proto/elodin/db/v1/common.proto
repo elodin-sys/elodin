@@ -64,11 +64,12 @@ message AckPolicy {
 }
 
 // Cumulative acknowledgement: every row with sequence <= through_seq has been
-// applied to the database and is visible to readers. Durability follows the
-// server's storage flush policy. The resume position is persisted
-// periodically as acks are sent (and on clean stream end), so after a server
-// crash the stream resumes at or slightly before the last acknowledged
-// sequence and recent rows replay (at-least-once).
+// processed — applied and visible to readers, or rejected with a per-row
+// error delivered before this ack. Durability follows the server's storage
+// flush policy. The resume position is persisted periodically as acks are
+// sent (and on clean stream end), so after a server crash the stream resumes
+// at or slightly before the last acknowledged sequence and recent rows
+// replay (at-least-once).
 message WriteAck {
   uint64 through_seq = 1;
 }
