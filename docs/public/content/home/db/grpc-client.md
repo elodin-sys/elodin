@@ -15,7 +15,8 @@ icon = ""
 
 Elodin DB exposes a first-class gRPC API for applications that cannot use its
 native Rust and Impeller interfaces. The same `elodin.db.v1` contract generates
-typed clients for C++, Python, and every other language supported by gRPC.
+typed clients for C++, Python, and every other language supported by gRPC. See
+the [gRPC API reference](/reference/grpc-client) for every RPC and message.
 
 Use gRPC when you need a stable cross-language contract, acknowledged and
 resumable writes, historical queries, playback streams, message logs, or
