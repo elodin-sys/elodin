@@ -114,6 +114,33 @@
     # defaults when the host driver libraries are not present.
     [ "$have_glx" = 1 ] || exit 0
 
+    # The driver links against the host libX11/libxcb, and having two Xlib
+    # copies in one process (Nix's and the host's) crashes inside the driver, so
+    # route the whole process at the host X libraries. glibc is deliberately
+    # left alone: the host libc is older than Nix's and loading it breaks
+    # symbol resolution for everything else.
+    for lib_dir in \
+      /run/opengl-driver/lib \
+      /usr/lib/x86_64-linux-gnu \
+      /usr/lib/aarch64-linux-gnu \
+      /usr/lib64; do
+      for lib in \
+        "$lib_dir"/libX11.so.6 \
+        "$lib_dir"/libXext.so.6 \
+        "$lib_dir"/libXau.so.6 \
+        "$lib_dir"/libXdmcp.so.6 \
+        "$lib_dir"/libbsd.so.0 \
+        "$lib_dir"/libmd.so.0 \
+        "$lib_dir"/libxcb.so.1 \
+        "$lib_dir"/libxcb-*.so.*; do
+        [ -e "$lib" ] || continue
+        lib_name="$(basename "$lib")"
+        [ -z "''${linked_libs[$lib_name]+x}" ] || continue
+        ln -sf "$lib" "$nvidia_lib_dir/$lib_name"
+        linked_libs["$lib_name"]=1
+      done
+    done
+
     printf 'export VK_ICD_FILENAMES=%s\n' "$nvidia_icd"
     printf 'export VK_DRIVER_FILES=%s\n' "$nvidia_icd"
     printf 'export __GLX_VENDOR_LIBRARY_NAME=nvidia\n'
