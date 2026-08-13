@@ -218,6 +218,7 @@ impl Plugin for EditorPlugin {
         } else {
             WinitSettings::game()
         };
+        plugins::gpu_info::install_gpu_panic_handler();
         app
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
