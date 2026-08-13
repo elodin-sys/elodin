@@ -1036,6 +1036,7 @@ impl DB {
 
             let mut pending = vec![true; values.len()];
             if repair_partial {
+                let mut complete_historical_match = false;
                 for occurrence in 0..max_occurrences {
                     let mut candidate = Vec::with_capacity(values.len());
                     let mut matched = false;
@@ -1059,14 +1060,15 @@ impl DB {
                         }
                     }
                     if valid && matched {
-                        if candidate.iter().all(|write| !write) && would_time_travel {
-                            return Ok(());
-                        }
                         if candidate.iter().any(|write| *write) {
                             pending = candidate;
                             break;
                         }
+                        complete_historical_match |= would_time_travel;
                     }
+                }
+                if complete_historical_match && pending.iter().all(|write| *write) {
+                    return Ok(());
                 }
             }
 

@@ -2402,6 +2402,70 @@ mod tests {
         });
     }
 
+    #[test]
+    fn replay_repairs_partial_occurrence_after_complete_match() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let (_, _) = accepted(&service, "client", b"instance", packed_schema());
+        let vector = [1.0f32, 2.0]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        db.with_state(|state| {
+            let time = state
+                .get_component(ComponentId::new("PACKED.TIME"))
+                .unwrap();
+            let values = state.get_component(ComponentId::new("PACKED.VEC")).unwrap();
+            time.time_series
+                .push_buf(Timestamp(1000), &1_000_000u64.to_le_bytes())
+                .unwrap();
+            values
+                .time_series
+                .push_buf(Timestamp(1000), &vector)
+                .unwrap();
+            time.time_series
+                .push_buf(Timestamp(1000), &1_000_000u64.to_le_bytes())
+                .unwrap();
+            time.time_series
+                .push_buf(Timestamp(2000), &2_000_000u64.to_le_bytes())
+                .unwrap();
+        });
+
+        let (accept, mut session) = accepted(&service, "client", b"reconnect", packed_schema());
+        let responses = service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: 1,
+                    rows: vec![packed_row(
+                        accept.message_handles["PackedMessage"],
+                        1_000_000,
+                        [1.0, 2.0],
+                    )],
+                },
+            )
+            .unwrap();
+        assert!(!responses.iter().any(is_row_error));
+        db.with_state(|state| {
+            assert_eq!(
+                state
+                    .get_component(ComponentId::new("PACKED.TIME"))
+                    .unwrap()
+                    .time_series
+                    .sample_count(),
+                3
+            );
+            assert_eq!(
+                state
+                    .get_component(ComponentId::new("PACKED.VEC"))
+                    .unwrap()
+                    .time_series
+                    .sample_count(),
+                2
+            );
+        });
+    }
+
     fn read_append_log_committed(path: &Path) -> Vec<u8> {
         let data = fs::read(path).unwrap();
         let committed_len = u64::from_ne_bytes(data[0..8].try_into().unwrap()) as usize;
