@@ -48,6 +48,10 @@ use super::PlotBounds;
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
 pub const OVERVIEW_MAX_POINTS: usize = CHUNK_LEN;
 
+/// Cap for [`LineTree::percentile_bounds`]. Uniform stride keeps P1/P99
+/// stable while avoiding a full-window `Vec` (the remaining FULL RANGE cost).
+pub const MAX_PERCENTILE_SAMPLES: usize = 8192;
+
 /// Tuning for **Hamann–Chen** downsampling of live [`LineTree`] telemetry.
 ///
 /// The simplifier lives in the `hamann-chen-line` workspace crate; its steps follow Shane Celis’s
@@ -1636,6 +1640,10 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     /// Compute robust percentile-based bounds that filter out extreme outliers.
     /// Returns (p1, p99) percentile values from the data, which excludes the most extreme 1% on each end.
+    ///
+    /// Values are taken at a uniform stride so the working set stays at
+    /// [`MAX_PERCENTILE_SAMPLES`]. Full-window collect + quickselect was the
+    /// remaining ~12 FPS cost on graph-heavy FULL RANGE views.
     pub fn percentile_bounds(
         &self,
         range: Range<Timestamp>,
@@ -1645,39 +1653,47 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     where
         D: PartialOrd + Copy,
     {
-        // Collect all values from chunks in range
-        let mut values: Vec<D> = self
-            .range_iter(range)
-            .flat_map(|chunk| chunk.data.cpu().iter().copied())
-            .filter(|v| {
-                // Filter out non-finite f32 values if D is f32
-                // This is a bit of a hack but works for our use case
-                let bytes = std::mem::size_of::<D>();
-                if bytes == 4 {
-                    // Likely f32
-                    let v_f32: f32 = unsafe { std::mem::transmute_copy(v) };
-                    v_f32.is_finite()
-                } else {
-                    true
+        let mut slices: Vec<&[D]> = Vec::new();
+        let mut total = 0usize;
+        for chunk in self.range_iter(range.clone()) {
+            let Some((start, end)) = chunk_visible_offsets(&chunk.timestamps, &range) else {
+                continue;
+            };
+            let data = chunk.data.cpu();
+            let end = end.min(data.len());
+            if start >= end {
+                continue;
+            }
+            let slice = &data[start..end];
+            total += slice.len();
+            slices.push(slice);
+        }
+        if total == 0 {
+            return None;
+        }
+
+        let step = total.div_ceil(MAX_PERCENTILE_SAMPLES).max(1);
+        let mut values: Vec<D> = Vec::with_capacity(total.div_ceil(step));
+        let mut i = 0usize;
+        for slice in slices {
+            for &v in slice {
+                if i.is_multiple_of(step) && value_is_finite(&v) {
+                    values.push(v);
                 }
-            })
-            .collect();
+                i += 1;
+            }
+        }
 
         if values.is_empty() {
             return None;
         }
 
-        // Two quickselect passes (O(n) each) instead of a full O(n log n) sort.
-        // On long historical windows this is the dominant frame cost: sorting
-        // hundreds of thousands of samples per graph per refresh.
         let len = values.len();
         let low_idx = ((p_low / 100.0) * len as f32) as usize;
         let high_idx = ((p_high / 100.0) * len as f32) as usize;
         let high_idx = high_idx.min(len - 1);
 
         let cmp = |a: &D, b: &D| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
-        // Select the high percentile first, then the low within the partition
-        // below it (low_idx <= high_idx always, since p_low < p_high).
         let (_, &mut high, _) = values.select_nth_unstable_by(high_idx, cmp);
         let (_, &mut low, _) = values[..=high_idx].select_nth_unstable_by(low_idx, cmp);
 
@@ -2256,6 +2272,15 @@ pub(crate) fn chunk_visible_offsets(
     (end_offset > start_offset).then_some((start_offset, end_offset))
 }
 
+fn value_is_finite<D: Copy>(v: &D) -> bool {
+    if std::mem::size_of::<D>() == 4 {
+        let v_f32: f32 = unsafe { std::mem::transmute_copy(v) };
+        v_f32.is_finite()
+    } else {
+        true
+    }
+}
+
 pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: usize) -> usize {
     let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
     // Per-chunk index overhead: leading sentinel, first point, strided interior, last point,
@@ -2526,6 +2551,25 @@ mod tests {
         assert_eq!(tree.content_gen(), 2);
         tree.clear();
         assert_eq!(tree.content_gen(), 3);
+    }
+
+    #[test]
+    fn percentile_bounds_filters_sparse_outliers_on_large_series() {
+        let mut tree = LineTree::<f32>::default();
+        let n = MAX_PERCENTILE_SAMPLES * 4;
+        let timestamps: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64)).collect();
+        let mut values = vec![1.0f32; n];
+        let outlier_count = n / 200;
+        for v in values.iter_mut().rev().take(outlier_count) {
+            *v = 1.0e9;
+        }
+        let chunk = Chunk::from_iter(&timestamps, Timestamp(0), values.into_iter()).expect("chunk");
+        tree.insert(chunk);
+        let (low, high) = tree
+            .percentile_bounds(Timestamp(0)..Timestamp(n as i64), 1.0, 99.0)
+            .expect("bounds");
+        assert!((low - 1.0).abs() < 1e-3, "low={low}");
+        assert!((high - 1.0).abs() < 1e-3, "high={high}");
     }
 
     #[test]
