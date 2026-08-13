@@ -1080,7 +1080,8 @@ after reconnecting, replay every item above the server's <code>resume_from_seq</
 <p>A clean stream end persists the latest ingest position. Resume state is also
 persisted while streams run. A server crash can therefore return a resume point
 slightly behind the last acknowledgement, and clients must retain enough recent
-items to replay that window.</p>
+items to replay that window. Complete rows in the ambiguous window may appear
+twice.</p>
 <h3 id="authentication-and-transport">Authentication and transport</h3>
 <p>The endpoint is unauthenticated by default. When the server starts with
 <code>--grpc-auth-token TOKEN</code>, application RPCs and reflection require this metadata:</p>
@@ -1227,8 +1228,9 @@ above <code>resume_from_seq</code>.</li>
 <li>Half-close the request stream after all rows are sent, then drain responses.</li>
 </ol>
 <p>The server skips sequences already covered by the session resume position.
-Sequence gaps terminate the stream. Replayed rows in the crash ambiguity window
-are content-deduplicated; new identical rows at later sequences remain distinct.</p>
+Sequence gaps terminate the stream. A historical replay can repair components
+left missing by a mid-row crash, but complete replayed rows may duplicate. New
+identical rows at later sequences always remain distinct.</p>
 <p>Specific failures:</p>
 <ul>
 <li><code>INVALID_ARGUMENT</code> — missing or malformed open frame, identity, fingerprint,
