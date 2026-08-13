@@ -205,8 +205,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.17.3" selected>
-                        v0.17.3
+                    <option value="v0.18.0" selected>
+                        v0.18.0
                     </option>
                 </select>
             </span>
@@ -341,6 +341,14 @@
                     class="docs-link "
                     href="/reference/elodin-cli/"
                     >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="/reference/grpc-client/"
+                    >gRPC API</a
                 >
             </li>
             
@@ -543,29 +551,27 @@
                    <p>Record a simulation once, then replay or share the database directory without shipping a separate <code>assets/</code> tree. Meshes, custom <code>.png</code> icons, and skyboxes referenced by the schematic are copied into the DB, rewritten in stored KDL as <code>db:…</code> paths, and served over HTTP while the database runs.</p>
 <p>This complements <a href="/reference/replays">Replays</a> and <a href="/reference/schematic">Schematic KDL</a>: telemetry lives in the DB layout you already use; this page covers <strong>files</strong> the schematic needs at visualization time.</p>
 <h2 id="architecture">Architecture</h2>
-<pre data-lang="mermaid" class="language-mermaid z-code"><code class="language-mermaid" data-lang="mermaid"><span class="z-text z-plain">flowchart LR
-</span><span class="z-text z-plain">  subgraph record_phase [&quot;Record&quot;]
-</span><span class="z-text z-plain">    Sim[&quot;Simulation&quot;]
-</span><span class="z-text z-plain">    Parse[&quot;Parse schematic KDL&quot;]
-</span><span class="z-text z-plain">    Copy[&quot;Copy bytes to db/assets&quot;]
-</span><span class="z-text z-plain">    Rewrite[&quot;Rewrite paths to db scheme&quot;]
-</span><span class="z-text z-plain">    Meta[&quot;Set schematic.active&quot;]
-</span><span class="z-text z-plain">  end
-</span><span class="z-text z-plain">  subgraph serve_phase [&quot;Serve&quot;]
-</span><span class="z-text z-plain">    TCP[&quot;Impeller TCP port N&quot;]
-</span><span class="z-text z-plain">    HTTP[&quot;DB Asset Server port N+1&quot;]
-</span><span class="z-text z-plain">  end
-</span><span class="z-text z-plain">  subgraph consume_phase [&quot;Consume&quot;]
-</span><span class="z-text z-plain">    Editor[&quot;Elodin Editor&quot;]
-</span><span class="z-text z-plain">    Follow[&quot;Follower asset sync&quot;]
-</span><span class="z-text z-plain">  end
-</span><span class="z-text z-plain">  Sim --&gt; Parse --&gt; Copy --&gt; Rewrite --&gt; Meta
-</span><span class="z-text z-plain">  Meta --&gt; TCP
-</span><span class="z-text z-plain">  Copy --&gt; HTTP
-</span><span class="z-text z-plain">  HTTP --&gt; Editor
-</span><span class="z-text z-plain">  HTTP --&gt; Follow
-</span></code></pre>
-<h3 id="layers">Layers</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="mermaid"><span class="giallo-l"><span>flowchart LR</span></span>
+<span class="giallo-l"><span>  subgraph record_phase [&quot;Record&quot;]</span></span>
+<span class="giallo-l"><span>    Sim[&quot;Simulation&quot;]</span></span>
+<span class="giallo-l"><span>    Parse[&quot;Parse schematic KDL&quot;]</span></span>
+<span class="giallo-l"><span>    Copy[&quot;Copy bytes to db/assets&quot;]</span></span>
+<span class="giallo-l"><span>    Rewrite[&quot;Rewrite paths to db scheme&quot;]</span></span>
+<span class="giallo-l"><span>    Meta[&quot;Set schematic.active&quot;]</span></span>
+<span class="giallo-l"><span>  end</span></span>
+<span class="giallo-l"><span>  subgraph serve_phase [&quot;Serve&quot;]</span></span>
+<span class="giallo-l"><span>    TCP[&quot;Impeller TCP port N&quot;]</span></span>
+<span class="giallo-l"><span>    HTTP[&quot;DB Asset Server port N+1&quot;]</span></span>
+<span class="giallo-l"><span>  end</span></span>
+<span class="giallo-l"><span>  subgraph consume_phase [&quot;Consume&quot;]</span></span>
+<span class="giallo-l"><span>    Editor[&quot;Elodin Editor&quot;]</span></span>
+<span class="giallo-l"><span>    Follow[&quot;Follower asset sync&quot;]</span></span>
+<span class="giallo-l"><span>  end</span></span>
+<span class="giallo-l"><span>  Sim --&gt; Parse --&gt; Copy --&gt; Rewrite --&gt; Meta</span></span>
+<span class="giallo-l"><span>  Meta --&gt; TCP</span></span>
+<span class="giallo-l"><span>  Copy --&gt; HTTP</span></span>
+<span class="giallo-l"><span>  HTTP --&gt; Editor</span></span>
+<span class="giallo-l"><span>  HTTP --&gt; Follow</span></span></code></pre><h3 id="layers">Layers</h3>
 <table><thead><tr><th>Layer</th><th>Role</th></tr></thead><tbody>
 <tr><td><strong>Blob store</strong></td><td><code>{db_path}/assets/{relative_key}</code> — opaque bytes, any file type</td></tr>
 <tr><td><strong>DB Asset Server</strong></td><td><code>GET http://host:(tcp_port+1)/{relative_key}</code> while <code>elodin-db run</code> is active</td></tr>
@@ -596,9 +602,8 @@
 <p>The active schematic is stored as an asset (default <code>schematics/main.kdl</code>) and pointed to by <code>schematic.active</code> metadata. Consumers fetch it over the DB Asset Server; there is no inline KDL mirror in DB metadata.</p>
 <h2 id="simulation-source-snapshot">Simulation source snapshot</h2>
 <p>When a Python simulation records to an explicit database path, Elodin also writes a source snapshot to <code>{db}/simulation_source/</code>:</p>
-<pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">{db}/simulation_source/manifest.json
-</span><span class="z-text z-plain">{db}/simulation_source/files/...
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>{db}/simulation_source/manifest.json</span></span>
+<span class="giallo-l"><span>{db}/simulation_source/files/...</span></span></code></pre>
 <p>This snapshot is for analysis and provenance. It contains the resolved project-local <code>.py</code> files that were imported after the simulation starts; it is not a compiled simulation, Python environment, dependency lockfile, or asset bundle.</p>
 <p>The first-pass selection rule is:</p>
 <ul>
@@ -607,14 +612,13 @@
 <li>exclude virtualenvs, <code>site-packages</code> / <code>dist-packages</code>, stdlib paths, <code>__pycache__</code>, cache/generated files, and non-Python assets</li>
 </ul>
 <p>For example, the <code>examples/rc-jet</code> snapshot would typically include:</p>
-<pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">examples/rc-jet/main.py
-</span><span class="z-text z-plain">examples/rc-jet/config.py
-</span><span class="z-text z-plain">examples/rc-jet/sim.py
-</span><span class="z-text z-plain">examples/rc-jet/aero.py
-</span><span class="z-text z-plain">examples/rc-jet/propulsion.py
-</span><span class="z-text z-plain">examples/rc-jet/actuators.py
-</span><span class="z-text z-plain">examples/rc-jet/ground.py
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>examples/rc-jet/main.py</span></span>
+<span class="giallo-l"><span>examples/rc-jet/config.py</span></span>
+<span class="giallo-l"><span>examples/rc-jet/sim.py</span></span>
+<span class="giallo-l"><span>examples/rc-jet/aero.py</span></span>
+<span class="giallo-l"><span>examples/rc-jet/propulsion.py</span></span>
+<span class="giallo-l"><span>examples/rc-jet/actuators.py</span></span>
+<span class="giallo-l"><span>examples/rc-jet/ground.py</span></span></code></pre>
 <p>Visual assets remain separate under <code>{db}/assets/</code>.</p>
 <h2 id="consumption-workflows">Consumption workflows</h2>
 <table><thead><tr><th>Mode</th><th>Typical commands</th><th>Assets</th></tr></thead><tbody>
@@ -640,15 +644,14 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <li>Serves the mirrored tree from its own DB Asset Server on <code>(follower_port + 1)</code></li>
 </ol>
 <p>The follower can then serve those files from its own DB Asset Server on <code>(follower_port + 1)</code> to local editors, without copying the full source database directory.</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Source (sim or recorded DB)</span><span class="z-comment z-line z-number-sign z-shell">
-</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run 127.0.0.1:2240 ./source-db</span>
-</span><span class="z-source z-shell z-bash">
-</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Follower — Impeller on 2242, DB Asset Server on 2243</span><span class="z-comment z-line z-number-sign z-shell">
-</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run 127.0.0.1:2242 ./follower-db<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>follows</span> 127.0.0.1:2240</span>
-</span><span class="z-source z-shell z-bash">
-</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Editor attaches to the follower</span><span class="z-comment z-line z-number-sign z-shell">
-</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> editor 127.0.0.1:2242</span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Source (sim or recorded DB)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2240</span><span style="color: light-dark(#2AA198, #2AA198);"> ./source-db</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Follower — Impeller on 2242, DB Asset Server on 2243</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2242</span><span style="color: light-dark(#2AA198, #2AA198);"> ./follower-db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-follows</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2240</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Editor attaches to the follower</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2242</span></span></code></pre>
 <p>Point <code>--follows</code> at the source <strong>Impeller</strong> port (<code>N</code>), not the asset port (<code>N+1</code>).</p>
 <h2 id="supported-asset-types">Supported asset types</h2>
 <h3 id="glb-meshes-object-3d-glb-path">GLB meshes (<code>object_3d</code> → <code>glb path=…</code>)</h3>
@@ -692,10 +695,9 @@ and the editor loads schematic and meshes from the DB itself.</p>
 </tbody></table>
 <h2 id="verification">Verification</h2>
 <p>With <code>elodin-db run</code> listening on <code>2240</code>:</p>
-<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-storage z-modifier z-shell">export</span> <span class="z-variable z-other z-readwrite z-assignment z-shell">DB_PATH</span><span class="z-keyword z-operator z-assignment z-shell">=</span><span class="z-string z-unquoted z-shell">./my-db</span></span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">curl</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>sf</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> /dev/null<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>w</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>%{http_code}\n<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span> http://127.0.0.1:2241/f22.glb</span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ls</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>lh</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">DB_PATH</span></span>/assets/<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> DB_PATH</span><span style="color: light-dark(#859900, #859900);">=</span><span>./</span><span style="color: light-dark(#268BD2, #268BD2);">my-db</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">curl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">sf</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">o</span><span style="color: light-dark(#2AA198, #2AA198);"> /dev/null</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">w</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">%{http_code}\n</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);"> http://127.0.0.1:2241/f22.glb</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ls</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">lh</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">DB_PATH</span><span style="color: light-dark(#2AA198, #2AA198);">/assets/</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre>
 <p>Expect HTTP <code>200</code> and non-empty files under <code>assets/</code> after a sim that references those assets.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table><thead><tr><th>Symptom</th><th>Check</th></tr></thead><tbody>

@@ -40,6 +40,9 @@
         <loc>/home/db/architecture/</loc>
     </url>
     <url>
+        <loc>/home/db/grpc-client/</loc>
+    </url>
+    <url>
         <loc>/home/db/overview/</loc>
     </url>
     <url>
@@ -83,6 +86,9 @@
     </url>
     <url>
         <loc>/reference/elodin-cli/</loc>
+    </url>
+    <url>
+        <loc>/reference/grpc-client/</loc>
     </url>
     <url>
         <loc>/reference/migration/</loc>

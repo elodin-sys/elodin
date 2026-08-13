@@ -398,6 +398,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
         </ul>
          
          
@@ -527,40 +535,30 @@
         <div class="col-1" style="padding: 4px">
             <i class="bx bx-error" style="font-size: 1.5rem"></i>
         </div>
-        <div class="col-15"><p>The Elodin SDK and CLI are supported on macOS and Linux distributions with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 35+, NixOS 21.11+). Windows users run the simulation in Windows Subsystem for Linux (<a href="https://docs.microsoft.com/en-us/windows/wsl/install">install WSL</a>) and the Editor natively on Windows.</p>
+        <div class="col-15"><p>The Elodin SDK and CLI are supported on macOS and Linux distributions with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 35+, NixOS 21.11+). Windows users run the simulation in Windows Subsystem for Linux (<a rel="external" href="https://docs.microsoft.com/en-us/windows/wsl/install">install WSL</a>) and the Editor natively on Windows.</p>
 </div>
     </div>
 </div>
 <p>The Elodin toolkit has two parts: the <strong>Elodin CLI</strong> (which bundles the editor, headless runner, and <code>elodin-db</code>) and the <strong>Python SDK</strong> (used to author simulations).</p>
 <h3 id="install-the-elodin-cli">Install the Elodin CLI</h3>
 <p>On macOS, Linux, or WSL:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">curl</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>proto</span> <span class="z-string z-quoted z-single z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&#39;</span>=https<span class="z-punctuation z-definition z-string z-end z-shell">&#39;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>tlsv1</span>.2<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>LsSf</span> https://github.com/elodin-sys/elodin/releases/latest/download/elodin-installer.sh</span> <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sh</span></span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">curl</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>proto</span> <span class="z-string z-quoted z-single z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&#39;</span>=https<span class="z-punctuation z-definition z-string z-end z-shell">&#39;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>tlsv1</span>.2<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>LsSf</span> https://github.com/elodin-sys/elodin/releases/latest/download/elodin-db-installer.sh</span> <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sh</span></span>
-</span></code></pre>
-<p>On Windows, download and run the latest <code>elodin-x86_64-pc-windows-msvc.msi</code> from the <a href="https://github.com/elodin-sys/elodin/releases/latest">releases page</a>.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">curl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-proto</span><span style="color: light-dark(#2AA198, #2AA198);"> &#39;</span><span style="color: light-dark(#2AA198, #2AA198);">=https</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-tlsv1.2</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">LsSf</span><span style="color: light-dark(#2AA198, #2AA198);"> https://github.com/elodin-sys/elodin/releases/latest/download/elodin-installer.sh</span><span style="color: light-dark(#859900, #859900);"> |</span><span style="color: light-dark(#268BD2, #268BD2);"> sh</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">curl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-proto</span><span style="color: light-dark(#2AA198, #2AA198);"> &#39;</span><span style="color: light-dark(#2AA198, #2AA198);">=https</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-tlsv1.2</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">LsSf</span><span style="color: light-dark(#2AA198, #2AA198);"> https://github.com/elodin-sys/elodin/releases/latest/download/elodin-db-installer.sh</span><span style="color: light-dark(#859900, #859900);"> |</span><span style="color: light-dark(#268BD2, #268BD2);"> sh</span></span></code></pre>
+<p>On Windows, download and run the latest <code>elodin-x86_64-pc-windows-msvc.msi</code> from the <a rel="external" href="https://github.com/elodin-sys/elodin/releases/latest">releases page</a>.</p>
 <p>Verify the install:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>version</span></span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>version</span></span>
-</span></code></pre>
-<h3 id="install-the-elodin-python-sdk">Install the Elodin Python SDK</h3>
-<p>Install <a href="https://docs.astral.sh/uv/"><code>uv</code></a> if you don't already have it:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">curl</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>LsSf</span> https://astral.sh/uv/install.sh</span> <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sh</span></span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-version</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-version</span></span></code></pre><h3 id="install-the-elodin-python-sdk">Install the Elodin Python SDK</h3>
+<p>Install <a rel="external" href="https://docs.astral.sh/uv/"><code>uv</code></a> if you don't already have it:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">curl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">LsSf</span><span style="color: light-dark(#2AA198, #2AA198);"> https://astral.sh/uv/install.sh</span><span style="color: light-dark(#859900, #859900);"> |</span><span style="color: light-dark(#268BD2, #268BD2);"> sh</span></span></code></pre>
 <p>Then create a virtual environment and install the SDK:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">uv</span></span><span class="z-meta z-function-call z-arguments z-shell"> venv</span> <span class="z-keyword z-operator z-logical z-and z-shell">&amp;&amp;</span> <span class="z-meta z-function-call z-shell"><span class="z-support z-function z-source z-shell">source</span></span><span class="z-meta z-function-call z-arguments z-shell"> .venv/bin/activate</span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">uv</span></span><span class="z-meta z-function-call z-arguments z-shell"> pip install<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>U</span> elodin</span>
-</span></code></pre>
-<h3 id="upgrading">Upgrading?</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">uv</span><span style="color: light-dark(#2AA198, #2AA198);"> venv</span><span> &amp;&amp;</span><span style="color: light-dark(#268BD2, #268BD2);"> source</span><span style="color: light-dark(#2AA198, #2AA198);"> .venv/bin/activate</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">uv</span><span style="color: light-dark(#2AA198, #2AA198);"> pip</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">U</span><span style="color: light-dark(#2AA198, #2AA198);"> elodin</span></span></code></pre><h3 id="upgrading">Upgrading?</h3>
 <p>If upgrading from an older Elodin version, consult the <a href="/reference/migration/">migration guides</a>.</p>
 <h2 id="start-simulating">Start Simulating</h2>
-<p>The examples below use <a href="https://github.com/elodin-sys/elodin/blob/main/examples/three-body/main.py"><code>examples/three-body/main.py</code></a>. Clone the elodin repo to follow along:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">git</span></span><span class="z-meta z-function-call z-arguments z-shell"> clone https://github.com/elodin-sys/elodin.git</span> <span class="z-keyword z-operator z-logical z-and z-shell">&amp;&amp;</span> <span class="z-meta z-function-call z-shell"><span class="z-support z-function z-cd z-shell">cd</span></span><span class="z-meta z-function-call z-arguments z-shell"> elodin</span>
-</span></code></pre>
-<h3 id="macos-linux">macOS / Linux</h3>
+<p>The examples below use <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/examples/three-body/main.py"><code>examples/three-body/main.py</code></a>. Clone the elodin repo to follow along:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> clone</span><span style="color: light-dark(#2AA198, #2AA198);"> https://github.com/elodin-sys/elodin.git</span><span> &amp;&amp;</span><span style="color: light-dark(#268BD2, #268BD2);"> cd</span><span style="color: light-dark(#2AA198, #2AA198);"> elodin</span></span></code></pre><h3 id="macos-linux">macOS / Linux</h3>
 <p>Run the simulation and open the Editor in one command:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> editor examples/three-body/main.py</span>
-</span></code></pre>
-<h3 id="windows-wsl">Windows (WSL)</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/three-body/main.py</span></span></code></pre><h3 id="windows-wsl">Windows (WSL)</h3>
 <p>Windows users run the simulation in WSL and connect the natively-installed Editor over <code>localhost</code>.</p>
 <div class="el-info warning container-fluid">
     <div class="row g-0 align-items-center">
@@ -571,27 +569,21 @@
 </div>
     </div>
 </div>
-<pre data-lang="ini" class="language-ini z-code"><code class="language-ini" data-lang="ini"><span class="z-source z-genconfig"><span class="z-storage z-type z-genconfig">[wsl2]
-</span></span><span class="z-source z-genconfig"><span class="z-meta z-param z-genconfig"><span class="z-variable z-parameter z-genconfig">networkingMode</span><span class="z-keyword z-operator z-genconfig">=</span></span>mirrored
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="ini"><span class="giallo-l"><span>[</span><span>wsl2</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">networkingMode</span><span>=</span><span>mirrored</span></span></code></pre>
 <p>In a WSL terminal, start the simulation:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> run examples/three-body/main.py</span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/three-body/main.py</span></span></code></pre>
 <p>In a Windows PowerShell terminal, launch the Editor and connect:</p>
-<pre data-lang="powershell" class="language-powershell z-code"><code class="language-powershell" data-lang="powershell"><span class="z-source z-powershell"><span class="z-support z-function z-powershell">elodin.exe</span> editor <span class="z-constant z-numeric z-integer z-powershell">127.0</span>.<span class="z-constant z-numeric z-integer z-powershell">0.1</span>:<span class="z-constant z-numeric z-integer z-powershell">2240</span>
-</span></code></pre>
-<h2 id="perform-analysis">Perform Analysis</h2>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="powershell"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin.exe</span><span> editor </span><span style="color: light-dark(#D33682, #D33682);">127.0</span><span>.</span><span style="color: light-dark(#D33682, #D33682);">0.1</span><span>:</span><span style="color: light-dark(#D33682, #D33682);">2240</span></span></code></pre><h2 id="perform-analysis">Perform Analysis</h2>
 <p>To analyze simulation data, use the <code>Exec</code> API to run the simulation for some number of ticks and collect the historical component data as a [Polars DataFrame].
 The DataFrame can then be used to generate plots or perform other methods of data analysis.</p>
 <p>Run the bouncing ball example code to see this in action:</p>
 <p>The <code>ball/plot.py</code> example depends on <code>matplotlib</code>. Install it with <code>uv</code>:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">uv</span></span><span class="z-meta z-function-call z-arguments z-shell"> pip install<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>U</span> matplotlib</span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">uv</span><span style="color: light-dark(#2AA198, #2AA198);"> pip</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">U</span><span style="color: light-dark(#2AA198, #2AA198);"> matplotlib</span></span></code></pre>
 <p>Then run the ball plot example (inside the same activated <code>.venv</code>):</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"> examples/ball/plot.py</span>
-</span></code></pre>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">python</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/ball/plot.py</span></span></code></pre>
 <p>For more information on data frames check out
-<a href="https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe">Polars DataFrame</a></p>
+<a rel="external" href="https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe">Polars DataFrame</a></p>
 <h2 id="next-steps">Next Steps</h2>
 <p>Try out the following tutorials to learn how to build simulations using Elodin:</p>
 <!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
@@ -620,7 +612,7 @@ The DataFrame can then be used to generate plots or perform other methods of dat
 <div class="footer-line-padding"></div>
 <div class="footer-line"></div>
 <div class="docs-navigation d-flex justify-content-between">
-                                                           
+                                                              
 </div>
 
               </main>
