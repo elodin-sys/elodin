@@ -175,8 +175,8 @@ row above `resume_from_seq`.
 Delivery is at least once. `WriteAck.through_seq` means every covered row was
 processed: it is visible to readers, or a preceding `RowError` reported its
 rejection. Resume positions persist periodically, so a server crash may resume
-slightly before the last ack; replayed ingest rows are deduplicated by sequence
-and, across that crash window, by complete row content.
+slightly before the last ack. Rows covered by the persisted sequence are
+skipped, but recent complete rows above it may appear twice after a crash.
 
 `RowError` is non-terminal and always arrives before the ack that covers its
 sequence. Schema conflicts reject the session before any row is applied.

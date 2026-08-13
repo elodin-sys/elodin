@@ -994,16 +994,14 @@ impl DB {
         Ok(())
     }
 
-    // `dedup` enables content-based replay absorption: rows whose payload
-    // matches an occurrence already stored at `timestamp` are skipped (or
-    // partially filled in). Callers enable it only for rows that can be
-    // crash-window replays; fresh rows always append.
+    // Repairs components missing from a partially persisted historical row.
+    // Complete rows always append, even when their content matches.
     #[cfg(feature = "grpc")]
     pub(crate) fn apply_component_row(
         &self,
         timestamp: Timestamp,
         values: &[(ComponentId, Vec<u8>)],
-        dedup: bool,
+        repair_partial: bool,
     ) -> Result<(), ComponentRowApplyError> {
         self.with_state_mut(|state| {
             let mut seen = HashSet::with_capacity(values.len());
@@ -1032,37 +1030,33 @@ impl DB {
             }
 
             let mut pending = vec![true; values.len()];
-            if !dedup {
-                max_occurrences = 0;
-            }
-            for occurrence in 0..max_occurrences {
-                let mut candidate = Vec::with_capacity(values.len());
-                let mut matched = false;
-                let mut valid = true;
-                for ((component_id, value), count) in values.iter().zip(&occurrences) {
-                    if occurrence < *count {
-                        let component = state.components.get(component_id).unwrap();
-                        let data = component.time_series.get_all(timestamp).unwrap();
-                        let start = occurrence * value.len();
-                        if data.get(start..start + value.len()) != Some(value.as_slice()) {
+            if repair_partial {
+                for occurrence in 0..max_occurrences {
+                    let mut candidate = Vec::with_capacity(values.len());
+                    let mut matched = false;
+                    let mut valid = true;
+                    for ((component_id, value), count) in values.iter().zip(&occurrences) {
+                        if occurrence < *count {
+                            let component = state.components.get(component_id).unwrap();
+                            let data = component.time_series.get_all(timestamp).unwrap();
+                            let start = occurrence * value.len();
+                            if data.get(start..start + value.len()) != Some(value.as_slice()) {
+                                valid = false;
+                                break;
+                            }
+                            matched = true;
+                            candidate.push(false);
+                        } else if occurrence == *count {
+                            candidate.push(true);
+                        } else {
                             valid = false;
                             break;
                         }
-                        matched = true;
-                        candidate.push(false);
-                    } else if occurrence == *count {
-                        candidate.push(true);
-                    } else {
-                        valid = false;
+                    }
+                    if valid && matched && candidate.iter().any(|write| *write) {
+                        pending = candidate;
                         break;
                     }
-                }
-                if valid && matched {
-                    if candidate.iter().all(|write| !write) {
-                        return Ok(());
-                    }
-                    pending = candidate;
-                    break;
                 }
             }
 

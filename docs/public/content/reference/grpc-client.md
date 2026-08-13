@@ -76,7 +76,8 @@ after reconnecting, replay every item above the server's `resume_from_seq`.
 A clean stream end persists the latest ingest position. Resume state is also
 persisted while streams run. A server crash can therefore return a resume point
 slightly behind the last acknowledgement, and clients must retain enough recent
-items to replay that window.
+items to replay that window. Complete rows in the ambiguous window may appear
+twice.
 
 ### Authentication and transport
 
@@ -246,8 +247,9 @@ Workflow:
 6. Half-close the request stream after all rows are sent, then drain responses.
 
 The server skips sequences already covered by the session resume position.
-Sequence gaps terminate the stream. Replayed rows in the crash ambiguity window
-are content-deduplicated; new identical rows at later sequences remain distinct.
+Sequence gaps terminate the stream. A historical replay can repair components
+left missing by a mid-row crash, but complete replayed rows may duplicate. New
+identical rows at later sequences always remain distinct.
 
 Specific failures:
 

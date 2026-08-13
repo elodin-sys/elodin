@@ -31,8 +31,8 @@ const DEFAULT_MAX_UNACKED_ROWS: u32 = 256;
 const DEFAULT_MAX_ACK_DELAY_MS: u32 = 100;
 const MAX_UNACKED_ROWS: u32 = 1_000_000;
 const MAX_ACK_DELAY_MS: u32 = 10_000;
-// Bounds resume-file writes for aggressive ack policies (e.g. one ack per
-// batch); the widened crash window is absorbed by content deduplication.
+// Bounds resume-file writes for aggressive ack policies; clients may replay
+// recent rows after a crash.
 const RESUME_PERSIST_INTERVAL: Duration = Duration::from_millis(250);
 pub(super) const MAX_GRPC_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 
@@ -73,9 +73,8 @@ struct Session {
     messages: HashMap<u32, ValidatedMessage>,
     current_seq: u64,
     ack_policy: NormalizedAckPolicy,
-    // Rows at or below this open-time watermark may be crash-window replays
-    // and are content-deduplicated; later rows always append.
-    dedup_below: Timestamp,
+    // Historical rows may repair components left missing by a mid-row crash.
+    repair_below: Timestamp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -237,15 +236,15 @@ impl IngestServiceImpl {
         };
         let current_seq = self.resume.get(&key);
         // Timestamp-source components do not advance last_updated, so the
-        // replay watermark also covers each session component's own latest.
-        let mut dedup_below = self.db.last_updated.latest();
+        // repair watermark also covers each session component's own latest.
+        let mut repair_below = self.db.last_updated.latest();
         self.db.with_state(|state| {
             for component in messages.iter().flat_map(|message| &message.components) {
                 if let Some((timestamp, _)) = state
                     .get_component(component.id)
                     .and_then(|component| component.time_series.latest())
                 {
-                    dedup_below = dedup_below.max(*timestamp);
+                    repair_below = repair_below.max(*timestamp);
                 }
             }
         });
@@ -272,7 +271,7 @@ impl IngestServiceImpl {
                 messages: registered,
                 current_seq,
                 ack_policy,
-                dedup_below,
+                repair_below,
             },
         ))
     }
@@ -287,7 +286,7 @@ impl IngestServiceImpl {
                 "sequence numbers must start at 1",
             ));
         }
-        if batch.first_seq > session.current_seq.saturating_add(1) {
+        if !batch.rows.is_empty() && batch.first_seq > session.current_seq.saturating_add(1) {
             return Err(Status::failed_precondition(format!(
                 "sequence gap: expected at most {}, received {}",
                 session.current_seq.saturating_add(1),
@@ -334,7 +333,7 @@ impl IngestServiceImpl {
     }
 
     // Persistence failures are non-fatal: the client replays from an older
-    // point and replays deduplicate.
+    // point and readers may observe duplicate rows.
     fn persist_resume(&self, key: &SessionKey, through_seq: u64) {
         if let Err(error) = self.resume.persist(key, through_seq) {
             tracing::warn!(?error, "failed to persist gRPC ingest resume state");
@@ -550,7 +549,7 @@ impl IngestServiceImpl {
         };
         let timestamp = common::record_timestamp(timestamp_ns);
         self.db
-            .apply_component_row(timestamp, &values, timestamp <= session.dedup_below)
+            .apply_component_row(timestamp, &values, timestamp <= session.repair_below)
             .map_err(|error| match error {
                 ComponentRowApplyError::TimeTravel(component_id) => {
                     ApplyRowFailure::Row(RowFailure {
@@ -1837,7 +1836,7 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_resumes_and_replay_deduplicates() {
+    fn reconnect_resumes_and_skips_acknowledged_sequences() {
         let (_dir, db) = test_db();
         let service = IngestServiceImpl::new(db.clone());
         let schema = packed_schema();
@@ -1988,22 +1987,35 @@ mod tests {
     fn identical_rows_with_new_sequences_are_preserved() {
         let (_dir, db) = test_db();
         let service = IngestServiceImpl::new(db.clone());
-        let (accept, mut session) = accepted(&service, "client", b"instance", packed_schema());
+        let schema = packed_schema();
+        let (accept, mut session) = accepted(&service, "client", b"instance", schema.clone());
         let handle = accept.message_handles["PackedMessage"];
-        for seq in 1..=2 {
-            let responses = service
-                .process_batch(
-                    &mut session,
-                    TelemetryBatch {
-                        first_seq: seq,
-                        rows: vec![packed_row(handle, 1_000_000, [1.0, 2.0])],
-                    },
-                )
-                .unwrap();
-            assert!(!responses.iter().any(is_row_error));
-        }
-        // Fresh rows above the open-time watermark always append, even when
-        // their content matches an existing occurrence.
+        service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: 1,
+                    rows: vec![packed_row(handle, 1_000_000, [1.0, 2.0])],
+                },
+            )
+            .unwrap();
+
+        let (accept, mut reconnect) = accepted(&service, "client", b"instance", schema);
+        assert_eq!(accept.resume_from_seq, 1);
+        let responses = service
+            .process_batch(
+                &mut reconnect,
+                TelemetryBatch {
+                    first_seq: 2,
+                    rows: vec![packed_row(
+                        accept.message_handles["PackedMessage"],
+                        1_000_000,
+                        [1.0, 2.0],
+                    )],
+                },
+            )
+            .unwrap();
+        assert!(!responses.iter().any(is_row_error));
         assert_eq!(
             db.with_state(|state| state
                 .get_component(ComponentId::new("PACKED.VEC"))
@@ -2053,7 +2065,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_replay_deduplicates_each_distinct_row_occurrence() {
+    fn restart_replay_preserves_complete_row_occurrences() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
         let schema = packed_schema();
@@ -2101,15 +2113,15 @@ mod tests {
                 .unwrap()
                 .time_series
                 .sample_count()),
-            2
+            4
         );
     }
 
     #[test]
-    fn restart_replay_deduplicates_timestamp_source_only_messages() {
+    fn restart_replay_preserves_complete_timestamp_source_rows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
-        // Timestamp-source writes do not advance last_updated, so the replay
+        // Timestamp-source writes do not advance last_updated, so the repair
         // watermark must come from the component's own data.
         let schema = SchemaSet {
             messages: vec![MessageSchema {
@@ -2158,7 +2170,7 @@ mod tests {
                 .unwrap()
                 .time_series
                 .sample_count()),
-            1
+            2
         );
     }
 
@@ -2229,7 +2241,25 @@ mod tests {
     }
 
     #[test]
-    fn db_restart_replays_and_self_heals_without_duplicates() {
+    fn empty_batch_ignores_sequence_gap() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db);
+        let (_, mut session) = accepted(&service, "client", b"instance", packed_schema());
+        let responses = service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: u64::MAX,
+                    rows: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(ack(responses.last().unwrap()), Some(0));
+        assert_eq!(session.current_seq, 0);
+    }
+
+    #[test]
+    fn db_restart_replay_may_duplicate_complete_rows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
         let schema = packed_schema();
@@ -2275,7 +2305,7 @@ mod tests {
                 .unwrap()
                 .time_series
                 .sample_count()),
-            1
+            2
         );
     }
 

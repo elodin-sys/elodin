@@ -50,8 +50,8 @@ require `authorization: Bearer TOKEN` on application RPCs and reflection; the
 standard health endpoint remains unauthenticated for load balancers. Transport
 remains insecure, so bind only on a trusted network. Ingest and message publish
 resume positions persist across server restarts (ingest periodically at ack
-time), so delivery is at-least-once: replayed rows deduplicate, and rows
-replayed across a crash deduplicate by content.
+time), so delivery is at-least-once: acknowledged sequences are skipped during
+normal reconnects, while a crash may cause recent complete rows to appear twice.
 
 The full Python demo records a 10-second RC jet run with its controller and
 headless renderer, exercises live and recorded streaming, numeric SQL,
