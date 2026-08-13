@@ -2310,6 +2310,55 @@ mod tests {
     }
 
     #[test]
+    fn db_restart_replay_accepts_complete_rows_behind_the_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let schema = packed_schema();
+        let rows = |handle| {
+            vec![
+                packed_row(handle, 1_000_000, [1.0, 2.0]),
+                packed_row(handle, 2_000_000, [3.0, 4.0]),
+            ]
+        };
+        {
+            let db = Arc::new(DB::create(path.clone()).unwrap());
+            let service = IngestServiceImpl::new(db);
+            let (accept, mut session) = accepted(&service, "client", b"instance", schema.clone());
+            service
+                .process_batch(
+                    &mut session,
+                    TelemetryBatch {
+                        first_seq: 1,
+                        rows: rows(accept.message_handles["PackedMessage"]),
+                    },
+                )
+                .unwrap();
+        }
+
+        let db = Arc::new(DB::open(path).unwrap());
+        let service = IngestServiceImpl::new(db.clone());
+        let (accept, mut session) = accepted(&service, "client", b"instance", schema);
+        let responses = service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: 1,
+                    rows: rows(accept.message_handles["PackedMessage"]),
+                },
+            )
+            .unwrap();
+        assert!(!responses.iter().any(is_row_error));
+        assert_eq!(
+            db.with_state(|state| state
+                .get_component(ComponentId::new("PACKED.VEC"))
+                .unwrap()
+                .time_series
+                .sample_count()),
+            3
+        );
+    }
+
+    #[test]
     fn replay_fills_components_missing_from_a_partial_row() {
         let (_dir, db) = test_db();
         let service = IngestServiceImpl::new(db.clone());
@@ -2350,6 +2399,70 @@ mod tests {
                     1
                 );
             }
+        });
+    }
+
+    #[test]
+    fn replay_repairs_partial_occurrence_after_complete_match() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db.clone());
+        let (_, _) = accepted(&service, "client", b"instance", packed_schema());
+        let vector = [1.0f32, 2.0]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        db.with_state(|state| {
+            let time = state
+                .get_component(ComponentId::new("PACKED.TIME"))
+                .unwrap();
+            let values = state.get_component(ComponentId::new("PACKED.VEC")).unwrap();
+            time.time_series
+                .push_buf(Timestamp(1000), &1_000_000u64.to_le_bytes())
+                .unwrap();
+            values
+                .time_series
+                .push_buf(Timestamp(1000), &vector)
+                .unwrap();
+            time.time_series
+                .push_buf(Timestamp(1000), &1_000_000u64.to_le_bytes())
+                .unwrap();
+            time.time_series
+                .push_buf(Timestamp(2000), &2_000_000u64.to_le_bytes())
+                .unwrap();
+        });
+
+        let (accept, mut session) = accepted(&service, "client", b"reconnect", packed_schema());
+        let responses = service
+            .process_batch(
+                &mut session,
+                TelemetryBatch {
+                    first_seq: 1,
+                    rows: vec![packed_row(
+                        accept.message_handles["PackedMessage"],
+                        1_000_000,
+                        [1.0, 2.0],
+                    )],
+                },
+            )
+            .unwrap();
+        assert!(!responses.iter().any(is_row_error));
+        db.with_state(|state| {
+            assert_eq!(
+                state
+                    .get_component(ComponentId::new("PACKED.TIME"))
+                    .unwrap()
+                    .time_series
+                    .sample_count(),
+                3
+            );
+            assert_eq!(
+                state
+                    .get_component(ComponentId::new("PACKED.VEC"))
+                    .unwrap()
+                    .time_series
+                    .sample_count(),
+                2
+            );
         });
     }
 

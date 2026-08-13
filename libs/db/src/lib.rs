@@ -1007,6 +1007,7 @@ impl DB {
             let mut seen = HashSet::with_capacity(values.len());
             let mut occurrences = Vec::with_capacity(values.len());
             let mut max_occurrences = 0;
+            let mut would_time_travel = false;
             for (component_id, value) in values {
                 if !seen.insert(*component_id) {
                     return Err(ComponentRowApplyError::Internal(Error::BadMessage));
@@ -1025,12 +1026,17 @@ impl DB {
                     .time_series
                     .get_all(timestamp)
                     .map_or(0, |data| data.len() / value.len());
+                would_time_travel |= component
+                    .time_series
+                    .latest()
+                    .is_some_and(|(latest, _)| *latest > timestamp);
                 max_occurrences = max_occurrences.max(count);
                 occurrences.push(count);
             }
 
             let mut pending = vec![true; values.len()];
             if repair_partial {
+                let mut complete_historical_match = false;
                 for occurrence in 0..max_occurrences {
                     let mut candidate = Vec::with_capacity(values.len());
                     let mut matched = false;
@@ -1053,10 +1059,16 @@ impl DB {
                             break;
                         }
                     }
-                    if valid && matched && candidate.iter().any(|write| *write) {
-                        pending = candidate;
-                        break;
+                    if valid && matched {
+                        if candidate.iter().any(|write| *write) {
+                            pending = candidate;
+                            break;
+                        }
+                        complete_historical_match |= would_time_travel;
                     }
+                }
+                if complete_historical_match && pending.iter().all(|write| *write) {
+                    return Ok(());
                 }
             }
 
