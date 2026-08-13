@@ -26,6 +26,11 @@ test_steps = [
             ),
             nix_step(
                 emoji=":c:",
+                label="db-cpp-grpc-batched",
+                command="scripts/ci/db_grpc_cpp_smoke.sh",
+            ),
+            nix_step(
+                emoji=":c:",
                 label="db-cpp-per-component",
                 command="cd libs/db; clang++ -std=c++23 examples/client-per-component.cpp",
             ),
@@ -53,6 +58,11 @@ test_steps = [
                 label="cargo fmt",
                 command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
+            nix_step(
+                emoji=":crab:",
+                label="elodin-db grpc",
+                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db grpc_ -- --test-threads=1 && cargo test -p elodin-db --features grpc grpc_address_follows_main_port -- --test-threads=1",
+            ),
         ],
     ),
     group(
@@ -65,6 +75,15 @@ test_steps = [
             nix_step(
                 label="typos",
                 command="typos -c typos.toml",
+            ),
+            nix_step(
+                label="buf lint",
+                command="buf lint",
+            ),
+            nix_step(
+                label="buf breaking",
+                # Scoped to the db module; skips until the baseline branch has it.
+                command="git fetch --force origin main:buf-breaking-baseline && if git cat-file -e buf-breaking-baseline:libs/db/proto 2>/dev/null; then buf breaking --against '.git#branch=buf-breaking-baseline,subdir=libs/db/proto'; else echo 'no protos in baseline; skipping'; fi",
             ),
         ],
     ),
@@ -106,6 +125,13 @@ test_steps = [
                 command="python3 examples/frames/main.py",
             ),
             nix_step(
+                label=":python: elodin-db gRPC full API",
+                flake=".#run",
+                pre_command="nix develop --command bash -c 'cargo build --release -p rc-jet-controller'",
+                command="scripts/ci/db_grpc_full_api_demo.sh",
+                env={"ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller"},
+            ),
+            nix_step(
                 label=":python: sensor-camera",
                 flake=".#tracy",
                 command="./scripts/ci/sensor_camera_perf.sh",
@@ -135,7 +161,7 @@ test_steps = [
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",
-                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features tracy'",
+                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy'",
                 flake=".#tracy",
                 command="bash ./scripts/ci/db_perf.sh",
             ),
@@ -146,6 +172,10 @@ test_steps = [
         label=":nix: elodin-cli",
         key="elodin-cli",
         command="nix build .#elodin-cli",
+    ),
+    step(
+        label=":nix: elodin-db-protos",
+        command="nix build .#elodin-db-protos",
     ),
     group(
         name=":nix: aleph-os",

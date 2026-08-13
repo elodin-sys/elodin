@@ -25,7 +25,10 @@
 
     nativeBuildInputs = [
       (rustToolchain pkgs)
+      pkgs.protobuf
     ];
+
+    buildFeatures = ["grpc"];
 
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";

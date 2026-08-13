@@ -114,7 +114,8 @@ fn dominant(gamepad: f64, keyboard: f64) -> f64 {
 /// Input reader combining gamepad and keyboard
 pub struct InputReader {
     gilrs: Option<Gilrs>,
-    device_state: DeviceState,
+    /// Absent on headless hosts: device_query aborts without an X display.
+    device_state: Option<DeviceState>,
     stick_mode: StickMode,
     /// Current throttle state (keyboard is incremental)
     keyboard_throttle: f64,
@@ -162,9 +163,17 @@ impl InputReader {
             }
         };
 
+        // Only device_query's Linux backend needs an X display; macOS and
+        // Windows read the keyboard without one.
+        let has_display = !cfg!(target_os = "linux") || std::env::var_os("DISPLAY").is_some();
+        let device_state = has_display.then(DeviceState::new);
+        if device_state.is_none() {
+            tracing::info!("No X display; keyboard input disabled, idle pilot flies");
+        }
+
         Self {
             gilrs,
-            device_state: DeviceState::new(),
+            device_state,
             stick_mode,
             keyboard_throttle: IDLE_THROTTLE,
             last_input: ControlInput {
@@ -269,7 +278,13 @@ impl InputReader {
 
     /// Read keyboard input
     fn read_keyboard(&mut self) -> ControlInput {
-        let keys = self.device_state.get_keys();
+        let Some(device_state) = &self.device_state else {
+            return ControlInput {
+                throttle: self.keyboard_throttle,
+                ..Default::default()
+            };
+        };
+        let keys = device_state.get_keys();
 
         // Throttle (W/S) - incremental
         if keys.contains(&Keycode::W) {

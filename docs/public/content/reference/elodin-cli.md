@@ -364,6 +364,15 @@ Run the Elodin database server
 
 * `--http-addr <ADDR>` — Address to bind the HTTP server to (enables HTTP API)
 
+The protobuf/gRPC API starts automatically at `<ADDR> + 2` (`2242` for the
+default native listener), alongside asset HTTP at `<ADDR> + 1`. It covers
+ingest, query, live playback, message logs, metadata/config, and assets. Health
+and reflection share the endpoint. See `libs/db/proto/elodin/db/v1` and
+`elodin-db-protos` (16 MiB max message).
+
+* `--grpc-auth-token <TOKEN>` — Require `authorization: Bearer TOKEN` metadata
+  on the gRPC endpoint; omitted means unauthenticated.
+
 * `--replay` — Replay recorded data as live telemetry. The database advances `last_updated` with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.
 
 * `--follows <ADDR>` — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.

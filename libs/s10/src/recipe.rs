@@ -60,6 +60,10 @@ enum RecipeRole {
 }
 
 impl Recipe {
+    pub fn has_ready_probe(&self) -> bool {
+        self.ready_probe().is_some()
+    }
+
     fn role(&self) -> RecipeRole {
         match self {
             #[cfg(not(target_os = "windows"))]
@@ -347,7 +351,7 @@ async fn prebuild(
 
 async fn watch_with_readiness(
     name: String,
-    recipe: Recipe,
+    mut recipe: Recipe,
     release: bool,
     cancel_token: CancelToken,
     cgroup: Option<Arc<CgroupScope>>,
@@ -361,6 +365,12 @@ async fn watch_with_readiness(
         let log_path = recipe.log_path().map(PathBuf::from);
         wait_for_dependencies(&name, dependencies).await?;
 
+        // Warm the initial Cargo build before readiness; watch still rebuilds on changes.
+        if probe.is_some()
+            && let Recipe::Cargo(cargo) = &mut recipe
+        {
+            cargo.build(release, cancel_token.clone()).await?;
+        }
         let mut run_fut = recipe.watch(name, release, cancel_token, cgroup);
         mark_ready_or_wait(probe, ready_timeout, log_path, ready_tx, &mut run_fut).await
     }

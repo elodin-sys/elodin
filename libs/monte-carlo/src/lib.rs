@@ -1960,8 +1960,8 @@ struct RunContext<'a> {
 
 /// Resolve a worker's slot for one run: static ports come from the template,
 /// `"auto"` ports are freshly allocated and guarded until the recipe spawns.
-/// An auto DB port is allocated as a consecutive pair with its `db_port + 1`
-/// assets port (a static DB port already carries `db_assets` in the template).
+/// An auto DB port is allocated with its consecutive asset and gRPC ports
+/// (a static DB port already carries both derived ports in the template).
 fn resolve_run_slot(
     template: &ports::SlotTemplate,
     run_id: &str,
@@ -1971,12 +1971,16 @@ fn resolve_run_slot(
     let db_port = match template.db_port {
         Some(port) => port,
         None => {
-            let (db_guard, assets_guard) = ports::allocate_port_pair(template.bind_ip)
-                .with_context(|| format!("allocate dynamic db/assets ports for {run_id}"))?;
+            let (db_guard, assets_guard, grpc_guard) = ports::allocate_db_ports(template.bind_ip)
+                .with_context(|| {
+                format!("allocate dynamic db/assets/gRPC ports for {run_id}")
+            })?;
             let port = db_guard.port;
             ports.insert("db_assets".to_string(), assets_guard.port);
+            ports.insert("db_grpc".to_string(), grpc_guard.port);
             guards.push(db_guard);
             guards.push(assets_guard);
+            guards.push(grpc_guard);
             port
         }
     };
@@ -4632,7 +4636,7 @@ mod tests {
             db_port = 20000
             port_stride = 32
             [resources.ports]
-            sitl_socket = 20002
+            sitl_socket = 20018
             weaver = "auto"
 
             [retention]
@@ -4650,7 +4654,7 @@ mod tests {
         assert_eq!(config.resources.db_port, PortSpec::Static(20000));
         assert_eq!(
             config.resources.ports.get("sitl_socket"),
-            Some(&PortSpec::Static(20002))
+            Some(&PortSpec::Static(20018))
         );
         assert_eq!(
             config.resources.ports.get("weaver"),

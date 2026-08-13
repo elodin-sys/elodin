@@ -60,6 +60,7 @@
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {
           inherit rustToolchain gitRev;
         };
+        elodin-db-protos = final.callPackage ./nix/pkgs/elodin-db-protos.nix {};
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
         rtsp-streamer = final.callPackage ./nix/pkgs/rtsp-streamer.nix {inherit rustToolchain;};
       };
@@ -88,7 +89,7 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db elodinsink rtsp-streamer;
+          inherit elodin-cli elodin-db elodin-db-protos elodinsink rtsp-streamer;
           elodin-py = elodin-py.py;
         };
 
@@ -96,7 +97,7 @@
           (with shells; {
             inherit elodin;
             default = shells.elodin;
-            run = pkgs.callPackage ./nix/run.nix {};
+            run = pkgs.callPackage ./nix/run.nix {inherit rustToolchain;};
           })
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             tracy = pkgs.callPackage ./nix/tracy.nix {};

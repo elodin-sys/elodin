@@ -78,6 +78,8 @@ pub mod export_videos;
 pub mod fix_timestamps;
 pub mod follow;
 mod follow_stream;
+#[cfg(feature = "grpc")]
+pub mod grpc;
 pub mod list_components;
 pub mod merge;
 pub mod msg_log;
@@ -992,6 +994,120 @@ impl DB {
         Ok(())
     }
 
+    // Repairs components missing from a partially persisted historical row.
+    // Complete rows always append, even when their content matches.
+    #[cfg(feature = "grpc")]
+    pub(crate) fn apply_component_row(
+        &self,
+        timestamp: Timestamp,
+        values: &[(ComponentId, Vec<u8>)],
+        repair_partial: bool,
+    ) -> Result<(), ComponentRowApplyError> {
+        self.with_state_mut(|state| {
+            let mut seen = HashSet::with_capacity(values.len());
+            let mut occurrences = Vec::with_capacity(values.len());
+            let mut max_occurrences = 0;
+            for (component_id, value) in values {
+                if !seen.insert(*component_id) {
+                    return Err(ComponentRowApplyError::Internal(Error::BadMessage));
+                }
+                let component =
+                    state
+                        .components
+                        .get(component_id)
+                        .ok_or(ComponentRowApplyError::Internal(Error::ComponentNotFound(
+                            *component_id,
+                        )))?;
+                if value.len() != component.schema.size() {
+                    return Err(ComponentRowApplyError::Internal(Error::BadMessage));
+                }
+                let count = component
+                    .time_series
+                    .get_all(timestamp)
+                    .map_or(0, |data| data.len() / value.len());
+                max_occurrences = max_occurrences.max(count);
+                occurrences.push(count);
+            }
+
+            let mut pending = vec![true; values.len()];
+            if repair_partial {
+                for occurrence in 0..max_occurrences {
+                    let mut candidate = Vec::with_capacity(values.len());
+                    let mut matched = false;
+                    let mut valid = true;
+                    for ((component_id, value), count) in values.iter().zip(&occurrences) {
+                        if occurrence < *count {
+                            let component = state.components.get(component_id).unwrap();
+                            let data = component.time_series.get_all(timestamp).unwrap();
+                            let start = occurrence * value.len();
+                            if data.get(start..start + value.len()) != Some(value.as_slice()) {
+                                valid = false;
+                                break;
+                            }
+                            matched = true;
+                            candidate.push(false);
+                        } else if occurrence == *count {
+                            candidate.push(true);
+                        } else {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if valid && matched && candidate.iter().any(|write| *write) {
+                        pending = candidate;
+                        break;
+                    }
+                }
+            }
+
+            for ((component_id, _), should_write) in values.iter().zip(&pending) {
+                if *should_write
+                    && state
+                        .components
+                        .get(component_id)
+                        .unwrap()
+                        .time_series
+                        .latest()
+                        .is_some_and(|(latest, _)| *latest > timestamp)
+                {
+                    return Err(ComponentRowApplyError::TimeTravel(*component_id));
+                }
+            }
+
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &self.last_updated,
+                earliest_timestamp: &self.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: timestamp,
+                followed_components: &self.followed_components,
+                has_followed_components: self
+                    .has_followed_components
+                    .load(atomic::Ordering::Acquire),
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            for ((component_id, value), should_write) in values.iter().zip(pending) {
+                if !should_write {
+                    continue;
+                }
+                sink.apply_buf(*component_id, value, Some(timestamp))
+                    .map_err(|err| match err {
+                        Error::TimeTravel => ComponentRowApplyError::TimeTravel(*component_id),
+                        other => ComponentRowApplyError::Internal(other),
+                    })?;
+            }
+            sink.flush_timestamps();
+            if sink.sunk_new_time_series {
+                self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+            }
+            Ok(())
+        })
+    }
+
     /// Truncate a specific message log (clears all messages, preserves metadata).
     /// Used when the log hits MapOverflow so sensor camera frames can continue.
     pub fn truncate_msg_log(&self, id: PacketId) {
@@ -1144,12 +1260,13 @@ impl State {
                       "schema mismatch");
                 return Err(Error::SchemaMismatch);
             }
-            // If this component is a timestamp source, update the metadata
-            if is_timestamp_source
-                && let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
-                && !existing_meta.is_timestamp_source()
+            // Sync the flag with the current declaration in both directions:
+            // a stale sticky flag would keep the sink from advancing
+            // last_updated for a component that is no longer a clock.
+            if let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
+                && existing_meta.is_timestamp_source() != is_timestamp_source
             {
-                existing_meta.set_timestamp_source(true);
+                existing_meta.set_timestamp_source(is_timestamp_source);
                 // Re-save the metadata - ensure directory exists first
                 let component_metadata_dir = db_path.join(component_id.to_string());
                 if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {
@@ -1516,6 +1633,13 @@ impl Component {
     }
 }
 
+#[cfg(feature = "grpc")]
+#[derive(Debug)]
+pub(crate) enum ComponentRowApplyError {
+    TimeTravel(ComponentId),
+    Internal(Error),
+}
+
 pub(crate) struct DBSink<'a> {
     pub(crate) components: &'a HashMap<ComponentId, Component>,
     pub(crate) component_metadata: &'a HashMap<ComponentId, ComponentMetadata>,
@@ -1551,20 +1675,14 @@ impl DBSink<'_> {
             }
         }
     }
-}
 
-impl Decomponentize for DBSink<'_> {
-    type Error = Error;
-    fn apply_value(
+    fn apply_buf(
         &mut self,
         component_id: ComponentId,
-        value: impeller2::types::ComponentView<'_>,
+        value_buf: &[u8],
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
         let _span = tracing::trace_span!("apply_value", %component_id).entered();
-        // Warn if a non-follower connection writes to a component being
-        // replicated from a followed source. The atomic flag avoids
-        // acquiring the RwLock on every call when no follow is active.
         if !self.is_follower
             && self.has_followed_components
             && self
@@ -1578,15 +1696,11 @@ impl Decomponentize for DBSink<'_> {
                  this may result in data corruption if not intentionally done"
             );
         }
+        let implicit_timestamp = timestamp.is_none();
         let mut timestamp = timestamp.unwrap_or(self.table_received);
-        let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
-        // When processing data from a followed source, skip samples that
-        // are not strictly newer than the latest in the local time series.
-        // This prevents duplicates when the follow stream re-sends the
-        // "latest" value that was already written during backfill.
         if self.is_follower
             && component
                 .time_series
@@ -1596,17 +1710,12 @@ impl Decomponentize for DBSink<'_> {
             return Ok(());
         }
         let time_series_empty = component.time_series.index().is_empty();
-        // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
-        // may occasionally observe a slightly newer last timestamp and reject with
-        // TimeTravel. In that case, clamp the timestamp to last+1 and retry.
         if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
             match err {
-                Error::TimeTravel if timestamp == self.table_received => {
-                    // Retry with a monotonic bump based on the latest sample seen.
+                Error::TimeTravel if implicit_timestamp => {
                     let mut attempts = 0u8;
                     loop {
                         if let Some((last_ts, _)) = component.time_series.latest() {
-                            // ensure strictly non-decreasing order
                             timestamp = Timestamp(last_ts.0.saturating_add(1));
                         } else {
                             timestamp = self.table_received;
@@ -1615,7 +1724,6 @@ impl Decomponentize for DBSink<'_> {
                             Ok(()) => break,
                             Err(Error::TimeTravel) if attempts < 8 => {
                                 attempts = attempts.saturating_add(1);
-                                continue;
                             }
                             Err(e) => return Err(e),
                         }
@@ -1643,6 +1751,18 @@ impl Decomponentize for DBSink<'_> {
             self.batch_has_ts = true;
         }
         Ok(())
+    }
+}
+
+impl Decomponentize for DBSink<'_> {
+    type Error = Error;
+    fn apply_value(
+        &mut self,
+        component_id: ComponentId,
+        value: impeller2::types::ComponentView<'_>,
+        timestamp: Option<Timestamp>,
+    ) -> Result<(), Error> {
+        self.apply_buf(component_id, value.as_bytes(), timestamp)
     }
 }
 
@@ -3470,6 +3590,53 @@ mod tests {
 
         send.await
             .expect("send should complete after mutex release");
+    }
+
+    #[test]
+    fn db_sink_preserves_distinct_values_at_one_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let component_id = ComponentId::new("test.duplicate");
+        db.with_state_mut(|state| {
+            state
+                .insert_component(
+                    component_id,
+                    ComponentSchema::new(PrimType::U64, &[]),
+                    &db.path,
+                )
+                .unwrap();
+        });
+
+        db.with_state(|state| {
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &db.last_updated,
+                earliest_timestamp: &db.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: Timestamp(10),
+                followed_components: &db.followed_components,
+                has_followed_components: false,
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            let value = 42_u64.to_le_bytes();
+            sink.apply_buf(component_id, &value, Some(Timestamp(10)))
+                .unwrap();
+            sink.apply_buf(component_id, &43_u64.to_le_bytes(), Some(Timestamp(10)))
+                .unwrap();
+        });
+
+        assert_eq!(
+            db.with_state(|state| state
+                .get_component(component_id)
+                .unwrap()
+                .time_series
+                .sample_count()),
+            2
+        );
     }
 
     #[test]

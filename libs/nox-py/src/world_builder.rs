@@ -127,13 +127,20 @@ pub struct WorldBuilder {
 
 impl WorldBuilder {
     fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
+        let mut depends_on = self
+            .recipes
+            .iter()
+            .filter(|(_, recipe)| recipe.has_ready_probe())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        depends_on.sort();
         let sim = SimRecipe {
             path,
             addr,
             optimize,
             env: HashMap::new(),
             log_path: None,
-            depends_on: Vec::new(),
+            depends_on,
             ready: None,
             ready_timeout: None,
             own_process_group: false,
@@ -666,6 +673,19 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                let grpc_addr = elodin_db::grpc::grpc_addr(addr);
+                let grpc_db = db_server.db.clone();
+                let listener = std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                    crate::Error::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("failed to bind gRPC server at {grpc_addr}: {e}"),
+                    ))
+                })?;
+                stellarator::struc_con::tokio(move |_| async move {
+                    if let Err(error) = elodin_db::grpc::serve_listener(listener, grpc_db).await {
+                        tracing::error!(?error, "gRPC server exited");
+                    }
+                });
                 crate::impeller2_server::prime_schematic_assets(
                     &db_server.db,
                     exec.world_mut(),
@@ -1949,6 +1969,43 @@ impl WorldBuilder {
 mod test {
     use super::*;
     use convert_case::Casing;
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn sim_recipe_waits_for_ready_sidecars() {
+        let mut builder = WorldBuilder::default();
+        builder.recipes.insert(
+            "controller".into(),
+            ::s10::Recipe::Process(::s10::ProcessRecipe {
+                cmd: "true".into(),
+                process_args: ::s10::ProcessArgs {
+                    args: Vec::new(),
+                    cwd: None,
+                    env: HashMap::new(),
+                    restart_policy: ::s10::RestartPolicy::Never,
+                    fail_on_error: false,
+                    log_path: None,
+                    silence: true,
+                    depends_on: Vec::new(),
+                    ready: Some(::s10::ReadyProbe::Delay { ms: 100 }),
+                    ready_timeout: Some("1s".into()),
+                    own_process_group: false,
+                },
+                no_watch: true,
+            }),
+        );
+        let ::s10::Recipe::Group(group) = builder.sim_recipe(
+            PathBuf::from("main.py"),
+            "127.0.0.1:2240".parse().unwrap(),
+            false,
+        ) else {
+            panic!("expected recipe group");
+        };
+        let ::s10::Recipe::Sim(sim) = &group.recipes["sim"] else {
+            panic!("expected simulation recipe");
+        };
+        assert_eq!(sim.depends_on, ["controller"]);
+    }
 
     #[test]
     fn test_snake_case() {

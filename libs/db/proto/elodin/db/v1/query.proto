@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+import "elodin/db/v1/common.proto";
+
+service QueryService {
+  rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse);
+  rpc GetTimeRange(GetTimeRangeRequest) returns (GetTimeRangeResponse);
+  rpc DumpMetadata(DumpMetadataRequest) returns (DumpMetadataResponse);
+  rpc DumpSchema(DumpSchemaRequest) returns (DumpSchemaResponse);
+  rpc GetTimeSeries(GetTimeSeriesRequest) returns (stream GetTimeSeriesResponse);
+  rpc Sql(SqlRequest) returns (stream SqlResponse);
+}
+
+message GetServerInfoRequest {}
+
+message GetServerInfoResponse {
+  string build_version = 1; // diagnostic only; feature-detect via `features`
+  uint32 max_message_size_bytes = 2; // encode/decode cap for every service
+  repeated string features = 3; // stable capability identifiers
+}
+
+message GetTimeRangeRequest {}
+
+message GetTimeRangeResponse {
+  bool has_data = 1;
+  sfixed64 earliest_ns = 2;
+  sfixed64 last_updated_ns = 3;
+}
+
+message DumpMetadataRequest {}
+
+message DumpMetadataResponse {
+  repeated ComponentMetadata components = 1;
+  repeated MessageMetadata messages = 2;
+  DbConfig config = 3;
+}
+
+message DumpSchemaRequest {}
+
+message DumpSchemaResponse {
+  repeated ComponentSchemaSnapshot components = 1;
+}
+
+// Reads one component's rows over the half-open range [start_ns, end_ns),
+// ordered by timestamp. Rows at exactly end_ns are excluded, so adjacent
+// pages compose without duplicates.
+message GetTimeSeriesRequest {
+  string component = 1;
+  optional sfixed64 start_ns = 2; // omitted = earliest
+  optional sfixed64 end_ns = 3; // omitted = open-ended
+  optional uint64 limit = 4; // max rows, >= 1; omitted = unlimited
+  // When set (>= 3), rows beyond this count are LTTB-downsampled using
+  // element_index as the selection signal. Omitted = raw rows.
+  optional uint32 max_points = 5;
+  uint32 element_index = 6;
+}
+
+message TimeSeriesHeader {
+  string component = 1;
+  PrimType prim_type = 2;
+  repeated uint64 dims = 3;
+  repeated string element_names = 4;
+}
+
+message TimeSeriesData {
+  repeated sfixed64 timestamps_ns = 1;
+  bytes packed_values = 2; // rows of packed little-endian component values
+}
+
+// Exactly one header frame, then data chunks. Chunk boundaries are a
+// performance detail, not a contract.
+message GetTimeSeriesResponse {
+  oneof chunk {
+    TimeSeriesHeader header = 1;
+    TimeSeriesData data = 2;
+  }
+}
+
+message SqlRequest {
+  string sql = 1;
+}
+
+message SqlResponse {
+  // One self-contained Arrow IPC stream (schema + one record batch) per
+  // message; concatenating decoded batches yields the full result.
+  bytes ipc = 1;
+}

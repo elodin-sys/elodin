@@ -48,6 +48,7 @@
       [
         (rustToolchain pkgs)
         maturin
+        protobuf
         python3
         which
       ]

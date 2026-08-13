@@ -92,6 +92,13 @@ struct RunArgs {
     #[cfg(feature = "axum")]
     #[clap(long, help = "Address to bind the HTTP server to")]
     http_addr: Option<SocketAddr>,
+    #[cfg(feature = "grpc")]
+    #[clap(
+        long,
+        value_parser = clap::builder::NonEmptyStringValueParser::new(),
+        help = "Bearer token required by the gRPC server"
+    )]
+    grpc_auth_token: Option<String>,
     #[clap(long, hide = true)]
     reset: bool,
     #[clap(
@@ -423,7 +430,10 @@ async fn main() -> miette::Result<()> {
     match args.command {
         Commands::Run(RunArgs {
             addr,
+            #[cfg(feature = "axum")]
             http_addr,
+            #[cfg(feature = "grpc")]
+            grpc_auth_token,
             path,
             config,
             reset,
@@ -523,13 +533,23 @@ async fn main() -> miette::Result<()> {
                 Some(server.db.clone()),
             )
             .into_diagnostic()?;
+            #[cfg(feature = "grpc")]
+            let grpc_listener = {
+                let grpc_addr = elodin_db::grpc::grpc_addr(addr);
+                std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                    miette::miette!("failed to bind gRPC server at {grpc_addr}: {e}")
+                })?
+            };
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
                     .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
             }
+            #[cfg(feature = "axum")]
             let axum_db = server.db.clone();
+            #[cfg(feature = "grpc")]
+            let grpc_db = server.db.clone();
             if let Some(config) = follow_config {
                 let follow_db = server.db.clone();
                 stellarator::struc_con::stellar(move || {
@@ -537,11 +557,24 @@ async fn main() -> miette::Result<()> {
                 });
             }
             let db = stellarator::spawn(server.run());
+            #[cfg(feature = "axum")]
             if let Some(http_addr) = http_addr {
                 stellarator::struc_con::tokio(move |_| async move {
                     elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
                 });
             }
+            #[cfg(feature = "grpc")]
+            stellarator::struc_con::tokio(move |_| async move {
+                if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
+                    grpc_listener,
+                    grpc_db,
+                    grpc_auth_token,
+                )
+                .await
+                {
+                    tracing::error!(?error, "gRPC server exited");
+                }
+            });
             if let Some(lua_config) = config {
                 let args = impeller2_cli::Args {
                     config: Some(lua_config),
@@ -1036,4 +1069,41 @@ void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, co
         id0 = set_msg_meta_id[0],
         id1 = set_msg_meta_id[1],
     ))
+}
+
+#[cfg(all(test, feature = "grpc"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grpc_addr_is_not_a_run_flag() {
+        assert!(
+            Cli::try_parse_from([
+                "elodin-db",
+                "run",
+                "127.0.0.1:2240",
+                "/tmp/elodin-db-grpc-cli-test",
+                "--grpc-addr",
+                "127.0.0.1:2242",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn grpc_auth_token_uses_derived_address() {
+        let cli = Cli::try_parse_from([
+            "elodin-db",
+            "run",
+            "127.0.0.1:2240",
+            "/tmp/elodin-db-grpc-cli-test",
+            "--grpc-auth-token",
+            "secret",
+        ])
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.grpc_auth_token.as_deref(), Some("secret"));
+    }
 }

@@ -1,0 +1,609 @@
+use std::{borrow::Cow, ops::Range, sync::Arc};
+
+use arrow::ipc::writer::StreamWriter;
+use futures_lite::StreamExt;
+use impeller2::types::{ComponentId, PrimType as DbPrimType, Timestamp};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Code, Request, Response, Status};
+
+use super::{
+    common, ingest,
+    v1::{
+        self, DumpMetadataRequest, DumpMetadataResponse, DumpSchemaRequest, DumpSchemaResponse,
+        GetServerInfoRequest, GetServerInfoResponse, GetTimeRangeRequest, GetTimeRangeResponse,
+        GetTimeSeriesRequest, GetTimeSeriesResponse, SqlRequest, SqlResponse,
+        get_time_series_response, query_service_server::QueryService,
+    },
+};
+use crate::{
+    DB,
+    arrow::lttb::{DataPoint, lttb_downsample},
+};
+
+const CHUNK_BYTES: usize = 1024 * 1024;
+type Downsampled<'a> = (Cow<'a, [Timestamp]>, Cow<'a, [u8]>);
+
+#[derive(Clone)]
+pub(super) struct QueryServiceImpl {
+    db: Arc<DB>,
+}
+
+impl QueryServiceImpl {
+    pub(super) fn new(db: Arc<DB>) -> Self {
+        Self { db }
+    }
+}
+
+#[tonic::async_trait]
+impl QueryService for QueryServiceImpl {
+    type GetTimeSeriesStream = ReceiverStream<Result<GetTimeSeriesResponse, Status>>;
+    type SqlStream = ReceiverStream<Result<SqlResponse, Status>>;
+
+    async fn get_server_info(
+        &self,
+        _request: Request<GetServerInfoRequest>,
+    ) -> Result<Response<GetServerInfoResponse>, Status> {
+        Ok(Response::new(GetServerInfoResponse {
+            build_version: env!("CARGO_PKG_VERSION").to_string(),
+            max_message_size_bytes: ingest::MAX_GRPC_MESSAGE_SIZE as u32,
+            features: ["sql-arrow-ipc", "lttb-downsample", "message-resume"]
+                .map(str::to_string)
+                .to_vec(),
+        }))
+    }
+
+    async fn get_time_range(
+        &self,
+        _request: Request<GetTimeRangeRequest>,
+    ) -> Result<Response<GetTimeRangeResponse>, Status> {
+        let last = self.db.last_updated.latest();
+        Ok(Response::new(GetTimeRangeResponse {
+            has_data: last.0 != i64::MIN,
+            earliest_ns: self.db.earliest_timestamp.latest().0.saturating_mul(1000),
+            last_updated_ns: last.0.saturating_mul(1000),
+        }))
+    }
+
+    async fn dump_metadata(
+        &self,
+        _request: Request<DumpMetadataRequest>,
+    ) -> Result<Response<DumpMetadataResponse>, Status> {
+        let (mut components, messages, config) = self.db.with_state(|state| {
+            (
+                state
+                    .component_metadata
+                    .values()
+                    .map(common::component_metadata)
+                    .collect::<Vec<_>>(),
+                state
+                    .msg_logs
+                    .values()
+                    .filter_map(|log| log.metadata())
+                    .map(common::message_metadata)
+                    .collect::<Result<Vec<_>, _>>(),
+                common::db_config(&state.db_config),
+            )
+        });
+        let mut messages = messages?;
+        components.sort_by(|a, b| a.name.cmp(&b.name));
+        messages.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(Response::new(DumpMetadataResponse {
+            components,
+            messages,
+            config: Some(config),
+        }))
+    }
+
+    async fn dump_schema(
+        &self,
+        _request: Request<DumpSchemaRequest>,
+    ) -> Result<Response<DumpSchemaResponse>, Status> {
+        let mut components = self.db.with_state(|state| {
+            state
+                .components
+                .values()
+                .map(|component| {
+                    let name = state
+                        .component_metadata
+                        .get(&component.component_id)
+                        .map_or_else(
+                            || component.component_id.to_string(),
+                            |value| value.name.clone(),
+                        );
+                    v1::ComponentSchemaSnapshot {
+                        name,
+                        prim_type: common::prim_type(component.schema.prim_type) as i32,
+                        dims: component.schema.shape().into_vec(),
+                        start_time_ns: component
+                            .time_series
+                            .start_timestamp()
+                            .0
+                            .saturating_mul(1000),
+                    }
+                })
+                .collect::<Vec<_>>()
+        });
+        components.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(Response::new(DumpSchemaResponse { components }))
+    }
+
+    async fn get_time_series(
+        &self,
+        request: Request<GetTimeSeriesRequest>,
+    ) -> Result<Response<Self::GetTimeSeriesStream>, Status> {
+        let request = request.into_inner();
+        if request.component.is_empty() {
+            return Err(Status::invalid_argument("component must be non-empty"));
+        }
+        let component_id = ComponentId::new(&request.component);
+        let (component, element_names) = self
+            .db
+            .with_state(|state| {
+                let component = state.get_component(component_id)?.clone();
+                let element_names = state
+                    .get_component_metadata(component_id)
+                    .map(|metadata| common::element_names(metadata.element_names()))
+                    .unwrap_or_default();
+                Some((component, element_names))
+            })
+            .ok_or_else(|| {
+                common::status_with_reason(
+                    Code::NotFound,
+                    format!("component {} not found", request.component),
+                    "COMPONENT_NOT_FOUND",
+                )
+            })?;
+
+        // TimeSeries::get_range treats the end as inclusive; subtracting one
+        // microsecond turns the public half-open [start_ns, end_ns) contract
+        // into the accessor's closed range.
+        let range = Range {
+            start: common::range_start(request.start_ns),
+            end: Timestamp(
+                common::range_end_exclusive(request.end_ns)
+                    .0
+                    .saturating_sub(1),
+            ),
+        };
+        let Some((timestamps, _)) = component.time_series.get_range(&range) else {
+            return Err(common::status_with_reason(
+                Code::OutOfRange,
+                "requested time range has no samples".to_string(),
+                "TIME_RANGE_EMPTY",
+            ));
+        };
+        let row_size = component.schema.size();
+        let limit = common::row_limit(request.limit)?.min(timestamps.len());
+        let max_points = match request.max_points {
+            None => None,
+            Some(points) if points < 3 => {
+                return Err(Status::invalid_argument(
+                    "max_points must be at least 3; omit it for raw rows",
+                ));
+            }
+            Some(points) => Some(points as usize),
+        };
+        let (tx, rx) = mpsc::channel(16);
+        let header = v1::TimeSeriesHeader {
+            component: request.component,
+            prim_type: common::prim_type(component.schema.prim_type) as i32,
+            dims: component.schema.shape().into_vec(),
+            element_names,
+        };
+        tx.send(Ok(GetTimeSeriesResponse {
+            chunk: Some(get_time_series_response::Chunk::Header(header)),
+        }))
+        .await
+        .map_err(|_| Status::cancelled("client closed response stream"))?;
+
+        if max_points.is_none_or(|points| limit <= points) {
+            let rows_per_chunk = (CHUNK_BYTES / row_size.max(1)).max(1);
+            tokio::spawn(async move {
+                let mut offset = 0;
+                while offset < limit {
+                    let Some((timestamps, data)) = component.time_series.get_range_chunk(
+                        &range,
+                        offset,
+                        rows_per_chunk.min(limit - offset),
+                    ) else {
+                        break;
+                    };
+                    let count = timestamps.len();
+                    let response = time_series_data(timestamps, data);
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
+                    offset += count;
+                }
+            });
+        } else {
+            let max_points = max_points.expect("checked above");
+            let (timestamps, data) = component.time_series.get_range(&range).unwrap();
+            let (timestamps, data) = downsample(
+                &timestamps[..limit],
+                &data[..limit * row_size],
+                row_size,
+                component.schema.prim_type,
+                component.schema.dim.iter().product(),
+                request.element_index as usize,
+                max_points,
+            )?;
+            let timestamps = timestamps.into_owned();
+            let data = data.into_owned();
+            tokio::spawn(async move {
+                let _ = tx.send(Ok(time_series_data(&timestamps, &data))).await;
+            });
+        }
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn sql(&self, request: Request<SqlRequest>) -> Result<Response<Self::SqlStream>, Status> {
+        let sql = request.into_inner().sql;
+        if sql.trim().is_empty() {
+            return Err(Status::invalid_argument("sql must be non-empty"));
+        }
+        let db = self.db.clone();
+        let (tx, rx) = mpsc::channel(4);
+        tokio::spawn(async move {
+            let result = async {
+                let mut context = db.as_session_context().map_err(common::internal)?;
+                db.insert_views(&mut context)
+                    .await
+                    .map_err(common::internal)?;
+                let frame = context.sql(&sql).await.map_err(common::internal)?;
+                let mut stream = frame.execute_stream().await.map_err(common::internal)?;
+                while let Some(batch) = stream.next().await {
+                    let batch = batch.map_err(common::internal)?;
+                    let mut bytes = Vec::new();
+                    let mut writer = StreamWriter::try_new(&mut bytes, batch.schema_ref())
+                        .map_err(common::internal)?;
+                    writer.write(&batch).map_err(common::internal)?;
+                    writer.finish().map_err(common::internal)?;
+                    if tx.send(Ok(SqlResponse { ipc: bytes })).await.is_err() {
+                        return Ok::<_, Status>(());
+                    }
+                }
+                Ok(())
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = tx.send(Err(error)).await;
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+fn downsample<'a>(
+    timestamps: &'a [Timestamp],
+    data: &'a [u8],
+    row_size: usize,
+    prim_type: DbPrimType,
+    elements: usize,
+    element_index: usize,
+    max_points: usize,
+) -> Result<Downsampled<'a>, Status> {
+    if timestamps.len() <= max_points {
+        return Ok((Cow::Borrowed(timestamps), Cow::Borrowed(data)));
+    }
+    if element_index >= elements {
+        return Err(Status::invalid_argument("element_index is out of bounds"));
+    }
+    let element_size = prim_type.size();
+    let points = timestamps
+        .iter()
+        .enumerate()
+        .map(|(index, timestamp)| {
+            let offset = index * row_size + element_index * element_size;
+            Ok(DataPoint {
+                time: timestamp.0,
+                value: element_as_f64(prim_type, &data[offset..offset + element_size])?,
+            })
+        })
+        .collect::<Result<Vec<_>, Status>>()?;
+    let selected = lttb_downsample(&points, max_points);
+    let mut output_timestamps = Vec::with_capacity(selected.len());
+    let mut output_data = Vec::with_capacity(selected.len() * row_size);
+    let mut cursor = 0;
+    for point in selected {
+        let relative = points[cursor..]
+            .iter()
+            .position(|candidate| {
+                candidate.time == point.time && candidate.value.to_bits() == point.value.to_bits()
+            })
+            .ok_or_else(|| Status::internal("downsampled point was not in source data"))?;
+        let index = cursor + relative;
+        output_timestamps.push(timestamps[index]);
+        output_data.extend_from_slice(&data[index * row_size..(index + 1) * row_size]);
+        cursor = index + 1;
+    }
+    Ok((Cow::Owned(output_timestamps), Cow::Owned(output_data)))
+}
+
+fn element_as_f64(prim_type: DbPrimType, bytes: &[u8]) -> Result<f64, Status> {
+    macro_rules! read {
+        ($ty:ty) => {
+            <$ty>::from_le_bytes(
+                bytes
+                    .try_into()
+                    .map_err(|_| Status::internal("component value has invalid length"))?,
+            ) as f64
+        };
+    }
+    Ok(match prim_type {
+        DbPrimType::U8 => bytes[0] as f64,
+        DbPrimType::U16 => read!(u16),
+        DbPrimType::U32 => read!(u32),
+        DbPrimType::U64 => read!(u64),
+        DbPrimType::I8 => (bytes[0] as i8) as f64,
+        DbPrimType::I16 => read!(i16),
+        DbPrimType::I32 => read!(i32),
+        DbPrimType::I64 => read!(i64),
+        DbPrimType::Bool => {
+            if bytes[0] == 0 {
+                0.0
+            } else {
+                1.0
+            }
+        }
+        DbPrimType::F32 => read!(f32),
+        DbPrimType::F64 => read!(f64),
+    })
+}
+
+fn time_series_data(timestamps: &[Timestamp], data: &[u8]) -> GetTimeSeriesResponse {
+    GetTimeSeriesResponse {
+        chunk: Some(get_time_series_response::Chunk::Data(v1::TimeSeriesData {
+            timestamps_ns: timestamps
+                .iter()
+                .map(|timestamp| timestamp.0.saturating_mul(1000))
+                .collect(),
+            packed_values: data.to_vec(),
+        })),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use impeller2::types::PrimType;
+    use impeller2_wkt::ComponentMetadata;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::ComponentSchema;
+
+    fn test_db() -> (TempDir, Arc<DB>) {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = ComponentId::new("demo.signal");
+        db.with_state_mut(|state| {
+            state
+                .insert_component(id, ComponentSchema::new(PrimType::F64, &[]), &db.path)
+                .unwrap();
+            state
+                .set_component_metadata(
+                    ComponentMetadata {
+                        component_id: id,
+                        name: "demo.signal".into(),
+                        metadata: Default::default(),
+                    },
+                    &db.path,
+                )
+                .unwrap();
+        });
+        for index in 0..8 {
+            db.apply_component_row(
+                Timestamp(100 + index),
+                &[(id, (index as f64).to_le_bytes().to_vec())],
+                false,
+            )
+            .unwrap();
+        }
+        (directory, db)
+    }
+
+    #[tokio::test]
+    async fn discovery_and_time_series_match_db() {
+        let (_directory, db) = test_db();
+        let service = QueryServiceImpl::new(db);
+
+        let time_range = service
+            .get_time_range(Request::new(GetTimeRangeRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(time_range.has_data);
+        assert_eq!(time_range.earliest_ns, 100_000);
+        assert_eq!(time_range.last_updated_ns, 107_000);
+
+        let metadata = service
+            .dump_metadata(Request::new(DumpMetadataRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            metadata
+                .components
+                .iter()
+                .any(|item| item.name == "demo.signal")
+        );
+
+        let schema = service
+            .dump_schema(Request::new(DumpSchemaRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        let snapshot = schema
+            .components
+            .iter()
+            .find(|item| item.name == "demo.signal")
+            .expect("demo.signal schema snapshot");
+        assert_eq!(snapshot.start_time_ns, 100_000);
+
+        let mut stream = service
+            .get_time_series(Request::new(GetTimeSeriesRequest {
+                component: "demo.signal".into(),
+                start_ns: Some(100_000),
+                end_ns: Some(108_000),
+                limit: None,
+                max_points: Some(4),
+                element_index: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            futures_lite::StreamExt::next(&mut stream)
+                .await
+                .unwrap()
+                .unwrap()
+                .chunk,
+            Some(get_time_series_response::Chunk::Header(_))
+        ));
+        let data = futures_lite::StreamExt::next(&mut stream)
+            .await
+            .unwrap()
+            .unwrap();
+        let Some(get_time_series_response::Chunk::Data(data)) = data.chunk else {
+            panic!("expected data");
+        };
+        assert_eq!(data.timestamps_ns.len(), 4);
+        assert_eq!(data.packed_values.len(), 4 * size_of::<f64>());
+    }
+
+    #[tokio::test]
+    async fn server_info_reports_capabilities() {
+        let (_directory, db) = test_db();
+        let info = QueryServiceImpl::new(db)
+            .get_server_info(Request::new(GetServerInfoRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(info.build_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.max_message_size_bytes, 16 * 1024 * 1024);
+        assert!(info.features.iter().any(|f| f == "sql-arrow-ipc"));
+    }
+
+    #[tokio::test]
+    async fn time_series_range_is_half_open() {
+        let (_directory, db) = test_db();
+        let service = QueryServiceImpl::new(db);
+        let collect = |start_ns: Option<i64>, end_ns: Option<i64>| {
+            let service = service.clone();
+            async move {
+                let mut stream = service
+                    .get_time_series(Request::new(GetTimeSeriesRequest {
+                        component: "demo.signal".into(),
+                        start_ns,
+                        end_ns,
+                        limit: None,
+                        max_points: None,
+                        element_index: 0,
+                    }))
+                    .await
+                    .unwrap()
+                    .into_inner();
+                let mut timestamps = Vec::new();
+                while let Some(response) = futures_lite::StreamExt::next(&mut stream).await {
+                    if let Some(get_time_series_response::Chunk::Data(data)) =
+                        response.unwrap().chunk
+                    {
+                        timestamps.extend(data.timestamps_ns);
+                    }
+                }
+                timestamps
+            }
+        };
+        // Rows exist at 100..=107 µs; a row exactly at end_ns is excluded.
+        assert_eq!(
+            collect(Some(100_000), Some(102_000)).await,
+            vec![100_000, 101_000]
+        );
+        // Adjacent pages compose without duplicating the boundary row.
+        assert_eq!(
+            collect(Some(102_000), Some(104_000)).await,
+            vec![102_000, 103_000]
+        );
+        // Sub-microsecond bounds select whole buckets inside the range.
+        assert_eq!(
+            collect(Some(100_500), Some(102_500)).await,
+            vec![101_000, 102_000]
+        );
+    }
+
+    #[tokio::test]
+    async fn sql_returns_arrow_ipc() {
+        let (_directory, db) = test_db();
+        let service = QueryServiceImpl::new(db);
+        let mut stream = service
+            .sql(Request::new(SqlRequest {
+                sql: "select * from demo_signal".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let response = futures_lite::StreamExt::next(&mut stream)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!response.ipc.is_empty());
+    }
+
+    #[tokio::test]
+    async fn raw_time_series_streams_multiple_chunks() {
+        let directory = TempDir::new().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = ComponentId::new("demo.large");
+        let row_size = CHUNK_BYTES / 4;
+        db.with_state_mut(|state| {
+            state
+                .insert_component(
+                    id,
+                    ComponentSchema::new(PrimType::U8, &[row_size]),
+                    &db.path,
+                )
+                .unwrap();
+            state
+                .set_component_metadata(
+                    ComponentMetadata {
+                        component_id: id,
+                        name: "demo.large".into(),
+                        metadata: Default::default(),
+                    },
+                    &db.path,
+                )
+                .unwrap();
+        });
+        for sequence in 1..=5 {
+            db.apply_component_row(
+                Timestamp(sequence),
+                &[(id, vec![sequence as u8; row_size])],
+                false,
+            )
+            .unwrap();
+        }
+        let mut stream = QueryServiceImpl::new(db)
+            .get_time_series(Request::new(GetTimeSeriesRequest {
+                component: "demo.large".into(),
+                start_ns: None,
+                end_ns: None,
+                limit: None,
+                max_points: None,
+                element_index: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let mut chunks = 0;
+        let mut bytes = 0;
+        while let Some(response) = futures_lite::StreamExt::next(&mut stream).await {
+            if let Some(get_time_series_response::Chunk::Data(data)) = response.unwrap().chunk {
+                chunks += 1;
+                bytes += data.packed_values.len();
+            }
+        }
+        assert_eq!(chunks, 2);
+        assert_eq!(bytes, row_size * 5);
+    }
+}

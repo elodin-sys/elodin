@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+import "elodin/db/v1/common.proto";
+
+service MessageService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // At-least-once delivery: resend messages above PublishAccept.resume_from_seq
+  // after a reconnect. Validation failures are reported per message via
+  // MessageError and the sequence still advances; storage failures terminate
+  // the stream without advancing, so the failed message is retried on resume.
+  rpc Publish(stream PublishRequest) returns (stream PublishResponse);
+  rpc GetMessages(GetMessagesRequest) returns (stream GetMessagesResponse);
+}
+
+message OpaqueKind {}
+
+message LogKind {}
+
+message RegisterRequest {
+  string name = 1;
+
+  oneof kind {
+    OpaqueKind opaque = 2;
+    LogKind log = 3;
+    bytes postcard_schema = 4;
+  }
+
+  map<string, string> metadata = 5;
+}
+
+message RegisterResponse {
+  // Stable handle derived from the message name; valid across sessions.
+  uint32 message_handle = 1;
+}
+
+message PublishOpen {
+  string client_name = 1; // 1..=128 non-control UTF-8 bytes
+  bytes client_instance_id = 2; // 1..=128 bytes
+  AckPolicy ack_policy = 3;
+}
+
+message LogPayload {
+  uint32 level = 1;
+  string message = 2;
+}
+
+message OutgoingMessage {
+  uint32 message_handle = 1;
+  // Record time, floored to the containing microsecond.
+  // Omitted = server-assigned time.
+  optional sfixed64 timestamp_ns = 2;
+
+  oneof payload {
+    bytes raw = 3;
+    LogPayload log = 4;
+  }
+}
+
+message PublishBatch {
+  uint64 first_seq = 1; // message i has sequence first_seq + i; starts at 1
+  repeated OutgoingMessage messages = 2;
+}
+
+message PublishRequest {
+  oneof request {
+    PublishOpen open = 1;
+    PublishBatch batch = 2;
+  }
+}
+
+message PublishAccept {
+  uint64 resume_from_seq = 1; // persisted; survives server restarts
+}
+
+message MessageError {
+  uint64 seq = 1;
+  string message = 2;
+  string detail = 3; // non-fatal validation failure; stream continues
+}
+
+message PublishResponse {
+  oneof response {
+    PublishAccept accept = 1;
+    WriteAck ack = 2;
+    MessageError error = 3;
+  }
+}
+
+// Reads messages in the half-open range [start_ns, end_ns), ordered by
+// timestamp. Messages at exactly end_ns are excluded, so adjacent pages
+// compose without duplicates.
+message GetMessagesRequest {
+  string name = 1;
+  optional sfixed64 start_ns = 2; // omitted = earliest
+  optional sfixed64 end_ns = 3; // omitted = open-ended
+  optional uint64 limit = 4; // max messages, >= 1; omitted = unlimited
+}
+
+message GetMessagesResponse {
+  sfixed64 timestamp_ns = 1;
+
+  oneof payload {
+    bytes raw = 2;
+    LogPayload log = 3;
+  }
+}
