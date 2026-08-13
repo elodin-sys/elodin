@@ -23,6 +23,7 @@ use crate::{
         },
         sql_eql::{eql_to_sql_with_time, process_sql_record_batch},
         tiles::WindowState,
+        timeline::TelemetryMode,
         widgets::WidgetSystem,
     },
 };
@@ -168,6 +169,7 @@ pub struct QueryPlotWidget<'w, 's> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    telemetry_mode: Res<'w, TelemetryMode>,
     window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
@@ -293,8 +295,9 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     graph_state.y_range.end,
                 )
                 .offset(DVec2::new(0.0, -offset_y)); // Only subtract Y offset
+                let telemetry = state.telemetry_mode.0;
                 let rect = ui.max_rect();
-                let inner_rect = get_inner_rect(ui.max_rect(), false);
+                let inner_rect = get_inner_rect(ui.max_rect(), telemetry);
                 let bounds = sync_bounds_query(&mut graph_state, data_bounds, rect, inner_rect);
 
                 graph_state.widget_width = ui.max_rect().width() as f64;
@@ -347,6 +350,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         selected_range,
                         earliest_timestamp,
                         current_timestamp,
+                        telemetry,
                     ),
                     PlotMode::TimeSeries => TimeseriesPlot::from_bounds_with_relative_time(
                         rect,
@@ -355,6 +359,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         earliest_timestamp,
                         current_timestamp,
                         true, // is_relative_time = true for query plots
+                        telemetry,
                     ),
                 }
                 .with_labels(x_label, y_label);
@@ -376,7 +381,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     entity,
                     &mut window_state.ui_state.selected_object,
                     state.time_range_behavior.as_mut(),
-                    false,
+                    telemetry,
                 );
             }
             match &plot.state {

@@ -362,6 +362,7 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
         is_relative_time: bool,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -374,7 +375,7 @@ impl TimeseriesPlot {
             } else {
                 XAxisMode::TimestampAbsolute
             },
-            false,
+            telemetry_mode,
         )
     }
 
@@ -385,6 +386,7 @@ impl TimeseriesPlot {
         selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -393,7 +395,7 @@ impl TimeseriesPlot {
             earliest_timestamp,
             current_timestamp,
             XAxisMode::Numeric,
-            false,
+            telemetry_mode,
         )
     }
 
@@ -861,7 +863,7 @@ impl TimeseriesPlot {
                                 ui.add_space(6.);
                                 ui.label(RichText::new(series.label.clone()).size(11.0));
                                 let value = nearest_value
-                                    .map(|v| format_num(v as f64))
+                                    .map(format_num)
                                     .unwrap_or_else(|| "N/A".to_string());
                                 ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                                     ui.add_space(3.0);
