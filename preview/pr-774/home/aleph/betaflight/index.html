@@ -416,6 +416,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-774/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
         </ul>
          
          
@@ -497,20 +505,19 @@
                   
                   <p class="lead">Install Betaflight onto your Aleph</p>
                    <h3 id="betaflight-installation">Betaflight Installation</h3>
-<p>Download the patched Betaflight firmware <a href="https://assets.elodin.systems/bin/betaflight_STM32H743_ALEPH_FC.elf">here</a></p>
+<p>Download the patched Betaflight firmware <a rel="external" href="https://assets.elodin.systems/bin/betaflight_STM32H743_ALEPH_FC.elf">here</a></p>
 <div class="el-notice warning container-fluid">
     <div class="row g-0 align-items-center">
         <div class="col-1" style="padding: 4px">
             <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
         </div>
-        <div class="col-15"><p>the Betaflight patches needed to support Aleph are trivial and <a href="https://github.com/betaflight/betaflight/compare/4.5-maintenance...elodin-sys:betaflight:4.5/aleph">open source</a>.</p>
+        <div class="col-15"><p>the Betaflight patches needed to support Aleph are trivial and <a rel="external" href="https://github.com/betaflight/betaflight/compare/4.5-maintenance...elodin-sys:betaflight:4.5/aleph">open source</a>.</p>
 </div>
     </div>
 </div>
 <p>Flash the Betaflight firmware using the following command:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">probe-rs</span></span><span class="z-meta z-function-call z-arguments z-shell"> run<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>chip</span> STM32H747IITx betaflight_STM32H743_ALEPH_FC.elf</span>
-</span></code></pre>
-<p>Keep Aleph FC plugged into your computer, and visit <a href="http://app.betaflight.com">app.betaflight.com</a>.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">probe-rs</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-chip</span><span style="color: light-dark(#2AA198, #2AA198);"> STM32H747IITx</span><span style="color: light-dark(#2AA198, #2AA198);"> betaflight_STM32H743_ALEPH_FC.elf</span></span></code></pre>
+<p>Keep Aleph FC plugged into your computer, and visit <a rel="external" href="http://app.betaflight.com">app.betaflight.com</a>.</p>
 <div class="el-notice warning container-fluid">
     <div class="row g-0 align-items-center">
         <div class="col-1" style="padding: 4px">
@@ -541,14 +548,14 @@
 <br></br>
 <p>If you'd like to replicate our quadcopter design, the shopping list includes:</p>
 <ul>
-<li>4x V2306 V3.0 KV1750 motors <a href="https://www.getfpv.com/t-motor-velox-v2306-v3-motor-1500kv-1750kv-1950kv-2550kv.html">link</a></li>
-<li>Generic 1300 mAh 3S Battery <a href="https://www.getfpv.com/lumenier-1300mah-3s-35c-lipo-battery-xt60.html">link</a></li>
-<li>Generic 7" Carbon Fiber Frame <a href="https://pyrodrone.com/products/hyperlite-floss-3-0-long-range-7-frame">link</a></li>
-<li>Generic 3-blade propellers <a href="https://www.getfpv.com/gemfan-hurricane-5536-3-blade-propeller-set-of-4.html">link</a></li>
-<li>RadioMaster Pocket ELRS controller <a href="https://www.getfpv.com/radiomaster-pocket-radio-cc2500-elrs-2-4ghz.html">link</a></li>
-<li>RadioMaster ELRS receiver <a href="https://www.amazon.com/RadioMaster-Receiver-ExpressLRS-Antenna-Transmitter/dp/B0BZY2M4BS/">link</a></li>
-<li>XT60 pass-through power module <a href="https://holybro.com/collections/power-modules-pdbs/products/pm02-v3-12s-power-module">link</a></li>
-<li>Generic 4-in-1 30x30 ESC <a href="https://www.getfpv.com/speedybee-60a-3-6s-blheli-s-4-in-1-esc-30x30.html">link</a></li>
+<li>4x V2306 V3.0 KV1750 motors <a rel="external" href="https://www.getfpv.com/t-motor-velox-v2306-v3-motor-1500kv-1750kv-1950kv-2550kv.html">link</a></li>
+<li>Generic 1300 mAh 3S Battery <a rel="external" href="https://www.getfpv.com/lumenier-1300mah-3s-35c-lipo-battery-xt60.html">link</a></li>
+<li>Generic 7" Carbon Fiber Frame <a rel="external" href="https://pyrodrone.com/products/hyperlite-floss-3-0-long-range-7-frame">link</a></li>
+<li>Generic 3-blade propellers <a rel="external" href="https://www.getfpv.com/gemfan-hurricane-5536-3-blade-propeller-set-of-4.html">link</a></li>
+<li>RadioMaster Pocket ELRS controller <a rel="external" href="https://www.getfpv.com/radiomaster-pocket-radio-cc2500-elrs-2-4ghz.html">link</a></li>
+<li>RadioMaster ELRS receiver <a rel="external" href="https://www.amazon.com/RadioMaster-Receiver-ExpressLRS-Antenna-Transmitter/dp/B0BZY2M4BS/">link</a></li>
+<li>XT60 pass-through power module <a rel="external" href="https://holybro.com/collections/power-modules-pdbs/products/pm02-v3-12s-power-module">link</a></li>
+<li>Generic 4-in-1 30x30 ESC <a rel="external" href="https://www.getfpv.com/speedybee-60a-3-6s-blheli-s-4-in-1-esc-30x30.html">link</a></li>
 </ul>
 <img src="/assets/aleph-drone-pins.jpg" alt="aleph-drone-pins"/>
 <br></br>
@@ -582,6 +589,12 @@
     <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-774&#x2F;home&#x2F;db&#x2F;python-client&#x2F;">
         <div>
             <div class="footer-card">Python Client &rarr;</div>
+        </div>
+    </a>
+       
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-774&#x2F;home&#x2F;db&#x2F;grpc-client&#x2F;">
+        <div>
+            <div class="footer-card">gRPC Client &rarr;</div>
         </div>
     </a>
                             

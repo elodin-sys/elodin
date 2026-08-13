@@ -40,6 +40,9 @@
         <loc>https://docs.elodin.systems/preview/pr-774/home/db/architecture/</loc>
     </url>
     <url>
+        <loc>https://docs.elodin.systems/preview/pr-774/home/db/grpc-client/</loc>
+    </url>
+    <url>
         <loc>https://docs.elodin.systems/preview/pr-774/home/db/overview/</loc>
     </url>
     <url>
@@ -83,6 +86,9 @@
     </url>
     <url>
         <loc>https://docs.elodin.systems/preview/pr-774/reference/elodin-cli/</loc>
+    </url>
+    <url>
+        <loc>https://docs.elodin.systems/preview/pr-774/reference/grpc-client/</loc>
     </url>
     <url>
         <loc>https://docs.elodin.systems/preview/pr-774/reference/migration/</loc>

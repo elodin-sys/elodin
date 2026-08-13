@@ -419,6 +419,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-774/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
         </ul>
          
          
@@ -560,7 +568,7 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>NumPy, JAX &amp; NOX</h1>
                    <p>When setting about to develop an open and composable physics engine, deciding how to support numerical computation in an efficient and
-expressive manner was a key exploration. An obvious inspiration we looked to was the <a href="https://numpy.org/">Python NumPy</a> ecosystem.</p>
+expressive manner was a key exploration. An obvious inspiration we looked to was the <a rel="external" href="https://numpy.org/">Python NumPy</a> ecosystem.</p>
 <p>If you're not familiar with NumPy, imagine you're working with a massive dataset or a matrix of numbers, and you need to perform calculations
 efficiently. Normally, doing that with regular Python lists would be slow and memory-hungry. Enter NumPy: a tool
 for high-performance number crunching in Python. NumPy solves this problem by offloading expensive math operations to a fast hyper-optimized C library.</p>
@@ -575,7 +583,7 @@ Python. It's commonly used in virtually every field, and has developed a large e
 <h2 id="jax">JAX</h2>
 <p>NumPy sounds great! So why not use it for Elodin?</p>
 <p>Millions of simulations running in parallel is a common use case for Elodin. When you are trying to perform a large series of mathematical
-expressions, finding a way to optimize becomes important. That's where <a href="https://jax.readthedocs.io/en/latest/">JAX</a> comes in.</p>
+expressions, finding a way to optimize becomes important. That's where <a rel="external" href="https://jax.readthedocs.io/en/latest/">JAX</a> comes in.</p>
 <p>JAX is like NumPy’s supercharged cousin. It gives you all the things you love about NumPy—fast, efficient array operations—but with some
 game-changing extras that make it ideal for machine learning and other performance-heavy tasks.</p>
 <h4 id="automatic-differentiation">Automatic Differentiation</h4>
@@ -587,9 +595,9 @@ popular in machine learning because finding the gradient of a function is crucia
 which can be slow. But JAX can take your code and compile it to run way faster, like low-level machine code. So you get the flexibility of
 Python but with near-C++ performance.</p>
 <h4 id="gpu-tpu-acceleration">GPU &amp; TPU Acceleration</h4>
-<p>Third, it can easily run your computations on GPUs and TPUs by compiling to <a href="https://openxla.org/xla">XLA</a>, without you having to manage
+<p>Third, it can easily run your computations on GPUs and TPUs by compiling to <a rel="external" href="https://openxla.org/xla">XLA</a>, without you having to manage
 all that complexity. You just write Python code, and JAX handles sending it to the GPU in the background.</p>
-<p>In Elodin, JAX code is compiled to native machine code via our <a href="https://cranelift.dev/">Cranelift</a>-based JIT backend by default for Python-free execution each tick, or can target XLA via <code>backend="jax-cpu"</code> or <code>backend="jax-gpu"</code> for full compatibility and GPU acceleration.</p>
+<p>In Elodin, JAX code is compiled to native machine code via our <a rel="external" href="https://cranelift.dev/">Cranelift</a>-based JIT backend by default for Python-free execution each tick, or can target XLA via <code>backend="jax-cpu"</code> or <code>backend="jax-gpu"</code> for full compatibility and GPU acceleration.</p>
 <p>JAX is like NumPy, but optimized for high-performance computing, like running massive monte-carlo simulations.</p>
 <h2 id="nox">Nox</h2>
 <p>Enter Nox, a Rust implementation of JAX. Nox is a Rust library that provides a NumPy-like interface for numerical computing, but with the
@@ -610,7 +618,7 @@ integrate with the simulation but is still flight-ready.</p>
 "software in the loop" and "hardware in the loop" testing of your flight software.</p>
 <h2 id="and-the-sharp-bits">And The "Sharp Bits"</h2>
 <p>While it's tempting dive in thinking the use of JAX/NOX in Elodin will be just like NumPy, the
-<a href="https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html">Sharp Bits</a> still apply, namely:</p>
+<a rel="external" href="https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html">Sharp Bits</a> still apply, namely:</p>
 <h4 id="immutable-arrays">Immutable Arrays</h4>
 <p>In JAX, once you create an array, you can’t change it directly. Think of it like a "look but don’t touch" rule. Instead of modifying an
 array in place, JAX forces you to create new arrays with your changes. This can feel weird if you’re used to NumPy, where you can just tweak
@@ -627,7 +635,7 @@ little differently. JAX is really built for numbers and arrays—if you try to w
 <div class="footer-line-padding"></div>
 <div class="footer-line"></div>
 <div class="docs-navigation d-flex justify-content-between">
-                                                   
+                                                      
     <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-774&#x2F;home&#x2F;tao&#x2F;monte-carlo&#x2F;">
         <div>
             <div class="footer-card">&larr; Monte Carlo</div>
