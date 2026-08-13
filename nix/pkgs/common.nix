@@ -292,6 +292,16 @@ in {
     ALSA_CONFIG_PATH = "${asoundConf}";
   };
 
+  # Tools required to launch Gamescope and run scripts/elodin_capture.sh.
+  linuxCaptureTools = with pkgs; [
+    gamescope
+    xwayland
+    util-linux # setsid for capture process-group cleanup
+    procps # pkill / pgrep
+    jq
+    libva-utils
+  ];
+
   # Common wrapper arguments for executables
   makeWrapperArgs = {
     pkgs,
