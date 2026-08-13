@@ -1396,6 +1396,15 @@ pub fn auto_y_bounds(
     let due = last_run
         .map(|t| t.elapsed() >= std::time::Duration::from_millis(50))
         .unwrap_or(true);
+
+    // Drop the cache while auto-Y is off, even between 50ms ticks, so turning
+    // Auto Bounds back on after a manual min/max does not reuse the old pass.
+    for mut graph_state in graph_states.iter_mut() {
+        if !graph_state.auto_y_range {
+            graph_state.auto_y_cache = None;
+        }
+    }
+
     if short {
         if !due {
             return;

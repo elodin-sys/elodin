@@ -47,6 +47,7 @@ pub struct GraphState {
     pub y_range: Range<f64>,
     /// `(range_start, range_end, content_sig)` of the last auto-Y pass.
     /// Unchanged FULL RANGE views skip the percentile walk after the first hit.
+    /// Cleared whenever auto-Y is off so re-enabling Auto Bounds recomputes.
     pub(crate) auto_y_cache: Option<(i64, i64, u64)>,
     pub auto_x_range: bool,
     pub x_range: Range<f64>,
