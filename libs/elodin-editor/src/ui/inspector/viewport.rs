@@ -1612,6 +1612,7 @@ mod tests {
         // Origin near the rocket so Plane ECEF→Bevy keeps metre-scale precision.
         let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
         app.insert_resource(GeoContext::from(origin).with_present(Present::Plane));
+        app.init_resource::<Time>();
         crate::register_world_pos_components(&mut app);
         app.add_systems(
             bevy::app::Update,
