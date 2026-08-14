@@ -1661,6 +1661,7 @@ mod tests {
                 editable("rocket.world_pos"),
                 EditableEQL::default(),
                 Some(frame),
+                0.0,
             ),
             EditorCam::default(),
         ));
