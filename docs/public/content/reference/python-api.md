@@ -1362,9 +1362,9 @@ Directed converters re-express positions (and free directions) between `ENU`, `N
 
 - `ecef_to_ned()`, `ned_to_ecef()`, `ecef_to_enu()`, `enu_to_ecef()`, `enu_to_ned()`, `ned_to_enu()`
 
-**Directions** (rotation only — use for velocities, `up=` vectors, etc.):
+**Vectors** (rotation only — use for velocities, `up=` vectors, etc.):
 
-- `ecef_to_ned_direction()`, `ned_to_ecef_direction()`, `ecef_to_enu_direction()`, `enu_to_ecef_direction()`, `enu_to_ned_direction()`, `ned_to_enu_direction()`
+- `ecef_to_ned_vector()`, `ned_to_ecef_vector()`, `ecef_to_enu_vector()`, `enu_to_ecef_vector()`, `enu_to_ned_vector()`, `ned_to_enu_vector()`
 
 These work in viewport / object_3d EQL and in `query_plot` EQL (translated to SQL with the schematic origin baked in). ENU ↔ NED needs no origin; ECEF conversions error if origin is unset.
 

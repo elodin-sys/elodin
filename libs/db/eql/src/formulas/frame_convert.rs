@@ -1,4 +1,4 @@
-//! Directed geo-frame conversions: `ecef_to_ned()`, `ned_to_ecef_direction()`, etc.
+//! Directed geo-frame conversions: `ecef_to_ned()`, `ned_to_ecef_vector()`, etc.
 
 use crate::{Context, Error, Expr};
 use bevy_geo_frames::{GeoFrame, GeoOrigin};
@@ -73,38 +73,38 @@ pub const ENU_TO_ECEF: FrameConvert = FrameConvert::new(
     FrameConvertKind::Point,
 );
 
-pub const ECEF_TO_NED_DIRECTION: FrameConvert = FrameConvert::new(
-    "ecef_to_ned_direction",
+pub const ECEF_TO_NED_VECTOR: FrameConvert = FrameConvert::new(
+    "ecef_to_ned_vector",
     GeoFrame::ECEF,
     GeoFrame::NED,
     FrameConvertKind::Direction,
 );
-pub const NED_TO_ECEF_DIRECTION: FrameConvert = FrameConvert::new(
-    "ned_to_ecef_direction",
+pub const NED_TO_ECEF_VECTOR: FrameConvert = FrameConvert::new(
+    "ned_to_ecef_vector",
     GeoFrame::NED,
     GeoFrame::ECEF,
     FrameConvertKind::Direction,
 );
-pub const ENU_TO_NED_DIRECTION: FrameConvert = FrameConvert::new(
-    "enu_to_ned_direction",
+pub const ENU_TO_NED_VECTOR: FrameConvert = FrameConvert::new(
+    "enu_to_ned_vector",
     GeoFrame::ENU,
     GeoFrame::NED,
     FrameConvertKind::Direction,
 );
-pub const NED_TO_ENU_DIRECTION: FrameConvert = FrameConvert::new(
-    "ned_to_enu_direction",
+pub const NED_TO_ENU_VECTOR: FrameConvert = FrameConvert::new(
+    "ned_to_enu_vector",
     GeoFrame::NED,
     GeoFrame::ENU,
     FrameConvertKind::Direction,
 );
-pub const ECEF_TO_ENU_DIRECTION: FrameConvert = FrameConvert::new(
-    "ecef_to_enu_direction",
+pub const ECEF_TO_ENU_VECTOR: FrameConvert = FrameConvert::new(
+    "ecef_to_enu_vector",
     GeoFrame::ECEF,
     GeoFrame::ENU,
     FrameConvertKind::Direction,
 );
-pub const ENU_TO_ECEF_DIRECTION: FrameConvert = FrameConvert::new(
-    "enu_to_ecef_direction",
+pub const ENU_TO_ECEF_VECTOR: FrameConvert = FrameConvert::new(
+    "enu_to_ecef_vector",
     GeoFrame::ENU,
     GeoFrame::ECEF,
     FrameConvertKind::Direction,
@@ -118,12 +118,12 @@ pub fn all_frame_converts() -> [FrameConvert; 12] {
         NED_TO_ENU,
         ECEF_TO_ENU,
         ENU_TO_ECEF,
-        ECEF_TO_NED_DIRECTION,
-        NED_TO_ECEF_DIRECTION,
-        ENU_TO_NED_DIRECTION,
-        NED_TO_ENU_DIRECTION,
-        ECEF_TO_ENU_DIRECTION,
-        ENU_TO_ECEF_DIRECTION,
+        ECEF_TO_NED_VECTOR,
+        NED_TO_ECEF_VECTOR,
+        ENU_TO_NED_VECTOR,
+        NED_TO_ENU_VECTOR,
+        ECEF_TO_ENU_VECTOR,
+        ENU_TO_ECEF_VECTOR,
     ]
 }
 
@@ -226,7 +226,7 @@ fn position_start_index(n_elems: usize, kind: FrameConvertKind) -> Result<usize,
         (3, _) => Ok(0),
         (7, FrameConvertKind::Point) => Ok(4),
         (7, FrameConvertKind::Direction) => Err(Error::InvalidMethodCall(
-            "direction frame conversion expects a 3-vector, not a 7-element pose".to_string(),
+            "vector frame conversion expects a 3-vector, not a 7-element pose".to_string(),
         )),
         (n, _) => Err(Error::InvalidMethodCall(format!(
             "frame conversion expects a 3-vector or 7-element pose, got {n} elements"
@@ -404,11 +404,11 @@ mod tests {
         ctx.parse_str("(0,0,0,1, rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_enu()")
             .expect("point conversion accepts a 7-element pose tuple");
         let err = ctx
-            .parse_str("(0,0,0,1, 1,2,3).ecef_to_enu_direction()")
+            .parse_str("(0,0,0,1, 1,2,3).ecef_to_enu_vector()")
             .unwrap_err();
         assert!(
             err.to_string().contains("3-vector"),
-            "direction must reject poses: {err}"
+            "vector must reject poses: {err}"
         );
     }
 

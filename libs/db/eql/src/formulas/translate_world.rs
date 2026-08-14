@@ -199,7 +199,7 @@ impl super::Formula for TranslateWorld {
                     ));
                 }
             } else {
-                // Single 3-vector: translate_world(offset.enu_to_ecef_direction())
+                // Single 3-vector: translate_world(offset.enu_to_ecef_vector())
                 let v = args[0].clone();
                 (
                     Expr::ArrayAccess(Box::new(v.clone()), 0),
@@ -327,10 +327,10 @@ mod tests {
     }
 
     #[test]
-    fn test_translate_world_accepts_direction_vector() {
+    fn test_translate_world_accepts_rotated_vector() {
         let context = create_test_context();
         let expr = context
-            .parse_str("bdx.world_pos.translate_world((0.0, 2.0, 2.0).enu_to_ecef_direction())")
+            .parse_str("bdx.world_pos.translate_world((0.0, 2.0, 2.0).enu_to_ecef_vector())")
             .expect("3-vector offset");
         if let Expr::Formula(formula, inner) = expr {
             assert_eq!(formula.name(), "translate_world");

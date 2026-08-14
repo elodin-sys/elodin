@@ -850,8 +850,7 @@ fn compile_frame_conversion(
                     ))
                 }
                 (FrameConvertKind::Direction, n) => Err(ComponentError::Message(
-                    format!("direction frame conversion expects a 3-vector, got {n} elements")
-                        .into(),
+                    format!("vector frame conversion expects a 3-vector, got {n} elements").into(),
                 )),
                 (FrameConvertKind::Point, n) => Err(ComponentError::Message(
                     format!("frame conversion expects a 3-vector or 7-element pose, got {n}")
@@ -3121,16 +3120,12 @@ mod frame_convert_eql_tests {
     }
 
     #[test]
-    fn ecef_direction_differs_from_point_far_from_origin() {
+    fn ecef_vector_differs_from_point_far_from_origin() {
         let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
         let geo = GeoContext::from(origin).with_present(Present::Plane);
         let v = DVec3::new(1000.0, 0.0, 0.0);
         let point = eval_vec3("rocket.world_pos.ecef_to_ned()", f64_vec3(v), &geo);
-        let dir = eval_vec3(
-            "rocket.world_pos.ecef_to_ned_direction()",
-            f64_vec3(v),
-            &geo,
-        );
+        let dir = eval_vec3("rocket.world_pos.ecef_to_ned_vector()", f64_vec3(v), &geo);
         assert!(
             (point - dir).length() > 1.0,
             "point affine must include origin translation; got point={point:?} dir={dir:?}"
