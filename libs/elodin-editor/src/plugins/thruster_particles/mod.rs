@@ -1692,8 +1692,14 @@ mod tests {
         assert!(is_playhead_seek(5.1, false), "forward jump over 5s");
         assert!(is_playhead_seek(-5.1, false), "backward jump over 5s");
         assert!(!is_playhead_seek(5.0, false), "exactly 5s is not a seek");
-        assert!(!is_playhead_seek(1.0, false), "playback-sized step is not a seek");
-        assert!(!is_playhead_seek(0.0, false), "still playhead is not a seek");
+        assert!(
+            !is_playhead_seek(1.0, false),
+            "playback-sized step is not a seek"
+        );
+        assert!(
+            !is_playhead_seek(0.0, false),
+            "still playhead is not a seek"
+        );
         assert!(
             !is_playhead_seek(6.0, true),
             "follow-latest catch-up is not a scrub"

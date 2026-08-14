@@ -476,6 +476,7 @@ fn eql_component_fingerprint(ctx: &eql::Context) -> u64 {
 /// scene: a full reopen respawns every viewport camera and GLB, which DeviceLost
 /// on large FSW schematics (earth + ~24 cameras). Late components compile in
 /// place (`retry_viewport_eql_compile`, pending `object_3d` spawns).
+#[allow(clippy::too_many_arguments)]
 pub fn reload_sticky_kdl_when_eql_ready(
     eql: Res<crate::EqlContext>,
     initial: Res<InitialKdlPath>,
