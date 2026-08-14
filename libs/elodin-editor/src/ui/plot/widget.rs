@@ -333,6 +333,62 @@ pub fn get_inner_rect(rect: egui::Rect, telemetry_mode: bool) -> egui::Rect {
     rect.shrink4(plot_margin(telemetry_mode))
 }
 
+const MODAL_SWATCH: f32 = 8.0;
+const MODAL_SWATCH_GAP: f32 = 6.0;
+const MODAL_ROW_FONT_SIZE: f32 = 11.0;
+
+fn modal_swatch(ui: &mut egui::Ui, color: egui::Color32) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(MODAL_SWATCH, MODAL_SWATCH), egui::Sense::click());
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(2),
+        color,
+        egui::Stroke::NONE,
+        egui::StrokeKind::Middle,
+    );
+}
+
+/// Color swatch + series label + value. If they do not fit on one line, the
+/// value wraps as a whole (never mid-digit).
+fn modal_series_row(ui: &mut egui::Ui, color: egui::Color32, label: &str, value: &str) {
+    ui.scope(|ui| {
+        ui.style_mut().override_font_id = Some(egui::TextStyle::Monospace.resolve(ui.style()));
+        let font_id = egui::FontId::monospace(MODAL_ROW_FONT_SIZE);
+        let measure = |text: &str| {
+            ui.painter()
+                .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
+                .size()
+                .x
+        };
+        let needed = MODAL_SWATCH + MODAL_SWATCH_GAP + measure(label) + measure(value);
+        let label_text = RichText::new(label).size(MODAL_ROW_FONT_SIZE);
+        let value_text = RichText::new(value).size(MODAL_ROW_FONT_SIZE);
+
+        if needed <= ui.available_width() {
+            ui.horizontal(|ui| {
+                modal_swatch(ui, color);
+                ui.add_space(MODAL_SWATCH_GAP);
+                ui.label(label_text);
+                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                    ui.add_space(3.0);
+                    ui.add(egui::Label::new(value_text).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add_space(3.0);
+                });
+            });
+        } else {
+            ui.horizontal(|ui| {
+                modal_swatch(ui, color);
+                ui.add_space(MODAL_SWATCH_GAP);
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(label_text).wrap());
+                    ui.add(egui::Label::new(value_text).wrap_mode(egui::TextWrapMode::Extend));
+                });
+            });
+        }
+    });
+}
+
 impl TimeseriesPlot {
     /// Create a plot with absolute timestamp X-axis (default for standard graph panels)
     pub fn from_bounds(
@@ -769,33 +825,12 @@ impl TimeseriesPlot {
                                 continue;
                             };
 
-                            ui.horizontal(|ui| {
-                                ui.style_mut().override_font_id =
-                                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::click(),
-                                );
-                                ui.painter().rect(
-                                    rect,
-                                    egui::CornerRadius::same(2),
-                                    *color,
-                                    egui::Stroke::NONE,
-                                    egui::StrokeKind::Middle,
-                                );
-                                ui.add_space(6.);
-                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                                let value = line
-                                    .data
-                                    .get_nearest(timestamp)
-                                    .map(|(_time, x)| format_num(*x as f64))
-                                    .unwrap_or_else(|| "N/A".to_string());
-                                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                    ui.add_space(3.0);
-                                    ui.label(RichText::new(value).size(11.0));
-                                    ui.add_space(3.0);
-                                })
-                            });
+                            let value = line
+                                .data
+                                .get_nearest(timestamp)
+                                .map(|(_time, x)| format_num(*x as f64))
+                                .unwrap_or_else(|| "N/A".to_string());
+                            modal_series_row(ui, *color, &line_data.label, &value);
                         }
                     }
                     PlotDataSource::XY {
@@ -846,31 +881,10 @@ impl TimeseriesPlot {
                             let nearest_value =
                                 nearest_xy_value(xy_line, relative_seconds).map(|(_, y)| y);
 
-                            ui.horizontal(|ui| {
-                                ui.style_mut().override_font_id =
-                                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::click(),
-                                );
-                                ui.painter().rect(
-                                    rect,
-                                    egui::CornerRadius::same(2),
-                                    series.color,
-                                    egui::Stroke::NONE,
-                                    egui::StrokeKind::Middle,
-                                );
-                                ui.add_space(6.);
-                                ui.label(RichText::new(series.label.clone()).size(11.0));
-                                let value = nearest_value
-                                    .map(format_num)
-                                    .unwrap_or_else(|| "N/A".to_string());
-                                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                    ui.add_space(3.0);
-                                    ui.label(RichText::new(value).size(11.0));
-                                    ui.add_space(3.0);
-                                })
-                            });
+                            let value = nearest_value
+                                .map(format_num)
+                                .unwrap_or_else(|| "N/A".to_string());
+                            modal_series_row(ui, series.color, &series.label, &value);
                         }
                     }
                 }
