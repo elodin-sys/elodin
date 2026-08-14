@@ -263,9 +263,8 @@ fn source_fields(expr: &Expr, kind: FrameConvertKind) -> Result<[String; 3], Err
         }
         Expr::Tuple(_) => {
             let elements = tuple_elements(expr);
-            let [x, y, z] = elements[..] else {
-                return Err(tuple_arity_error(elements.len()));
-            };
+            let start = position_start_index(elements.len(), kind)?;
+            let (x, y, z) = (elements[start], elements[start + 1], elements[start + 2]);
             Ok([
                 x.to_qualified_field()?,
                 y.to_qualified_field()?,
@@ -276,12 +275,6 @@ fn source_fields(expr: &Expr, kind: FrameConvertKind) -> Result<[String; 3], Err
             "frame conversion SQL expects a component or 3-tuple receiver".to_string(),
         )),
     }
-}
-
-fn tuple_arity_error(got: usize) -> Error {
-    Error::InvalidMethodCall(format!(
-        "frame conversion on a tuple expects 3 elements, got {got}"
-    ))
 }
 
 impl super::Formula for FrameConvert {
@@ -305,10 +298,7 @@ impl super::Formula for FrameConvert {
                 position_start_index(component_elem_count(part)?, self.conversion.kind)?;
             }
             Expr::Tuple(_) => {
-                let n = tuple_elements(&recv).len();
-                if n != 3 {
-                    return Err(tuple_arity_error(n));
-                }
+                position_start_index(tuple_elements(&recv).len(), self.conversion.kind)?;
             }
             _ => {}
         }
@@ -406,6 +396,20 @@ mod tests {
             }
             _ => panic!("expected formula"),
         }
+    }
+
+    #[test]
+    fn parse_seven_element_pose_tuple() {
+        let ctx = ctx_with_pos(7);
+        ctx.parse_str("(0,0,0,1, rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_enu()")
+            .expect("point conversion accepts a 7-element pose tuple");
+        let err = ctx
+            .parse_str("(0,0,0,1, 1,2,3).ecef_to_enu_direction()")
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("3-vector"),
+            "direction must reject poses: {err}"
+        );
     }
 
     #[test]
