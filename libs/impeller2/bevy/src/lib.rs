@@ -250,6 +250,18 @@ impl TelemetryCache {
             .unwrap_or(0)
     }
 
+    /// True if at least one sample exists in `[range.start, range.end)`.
+    /// O(log n), unlike `sample_count_in_range` which walks the whole range.
+    pub fn has_samples_in_range(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> bool {
+        self.components
+            .get(component_id)
+            .is_some_and(|s| s.range(range.start..range.end).next().is_some())
+    }
+
     /// First/last sample timestamps in range, if any.
     pub fn sample_span_in_range(
         &self,

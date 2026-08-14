@@ -48,7 +48,7 @@ use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
-    create_egui_context, default_present_mode,
+    create_egui_context,
     inspector::viewport::{
         retry_viewport_eql_compile, set_viewport_pos, sync_viewport_focus_pick_targets,
     },
@@ -196,16 +196,18 @@ impl Plugin for EditorPlugin {
         } else {
             bevy::window::CompositeAlphaMode::Opaque
         };
-        let winit_settings = if cfg!(feature = "tracy") {
+        // `ELODIN_WINIT_MODE=continuous` forces Continuous regardless of focus;
+        // used to benchmark without focus-dependent Reactive throttling.
+        let winit_settings = if cfg!(feature = "tracy")
+            || std::env::var("ELODIN_WINIT_MODE").as_deref() == Ok("continuous")
+        {
             WinitSettings::continuous()
         } else if cfg!(target_os = "macos") {
             WinitSettings {
-                focused_mode: bevy::winit::UpdateMode::Reactive {
-                    wait: Duration::from_millis(16),
-                    react_to_device_events: true,
-                    react_to_user_events: true,
-                    react_to_window_events: true,
-                },
+                // Continuous + Fifo vsync paces to the display refresh. A
+                // `Reactive { wait: 16ms }` mode adds the wait *after* frame
+                // work, capping a vsynced editor at ~50 FPS regardless of load.
+                focused_mode: bevy::winit::UpdateMode::Continuous,
                 unfocused_mode: bevy::winit::UpdateMode::Reactive {
                     wait: Duration::from_millis(32),
                     react_to_device_events: false,
@@ -216,6 +218,7 @@ impl Plugin for EditorPlugin {
         } else {
             WinitSettings::game()
         };
+        plugins::gpu_info::install_gpu_panic_handler();
         app
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
@@ -226,7 +229,7 @@ impl Plugin for EditorPlugin {
                     .set(WindowPlugin {
                         primary_window: Some(Window {
                             title: "Elodin".into(),
-                            present_mode: default_present_mode(),
+                            present_mode: ui::window::present_mode_from_env(),
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -258,6 +261,7 @@ impl Plugin for EditorPlugin {
                     .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
                     .build(),
             )
+            .add_plugins(plugins::gpu_info::GpuInfoPlugin)
             .add_plugins(plugins::kdl_document::plugin)
             .add_plugins(skybox_asset_plugin())
             .add_plugins(skybox_generation_plugin())
@@ -300,6 +304,8 @@ impl Plugin for EditorPlugin {
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::fps_log::EnvFpsLogPlugin);
         app.add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())

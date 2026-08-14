@@ -61,6 +61,7 @@ impl Plugin for HeadlessEditorPlugin {
     fn build(&self, app: &mut App) {
         // Must run before anything can spawn a `WorldPos` entity.
         crate::register_world_pos_components(app);
+        crate::plugins::gpu_info::install_gpu_panic_handler();
         app.add_plugins(crate::plugins::WebAssetPlugin)
             .add_plugins(crate::plugins::env_asset_source::plugin)
             .add_plugins(
