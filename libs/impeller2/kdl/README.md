@@ -46,7 +46,7 @@ coordinate frame="NED" lat=34.72 lon=-86.64 alt=180.0
 
 - `tabs { ... }`: container of panels.
 - `hsplit` / `vsplit`: container of panels. Child `share=<f32>` controls split weight.
-- `viewport`: camera panel (`fov`, `active`, `show_grid`, `show_arrows`, `show_view_cube`, `hdr`, `name`, `pos`, `look_at`, `frame`) and optional local child `vector_arrow` nodes.
+- `viewport`: camera panel (`fov`, `active`, `show_grid`, `show_arrows`, `show_view_cube`, `view_cube_frame`, `hdr`, `name`, `pos`, `look_at`, `frame`) and optional local child `vector_arrow` nodes.
 - `graph`: positional EQL string + optional `name`, `type` (`line|point|bar`), `lock`, `auto_y_range`, `y_min`, `y_max`, child `color` nodes.
 - `component_monitor`: requires `component_name`; optional `name`.
 - `geo_position_gauge`: positional `eql` (required; a 3-vector position or a 7-vector pose; named `eql=` also accepted); optional `name`, `source` (`ECEF`/`NED`/`ENU`; inherits from global `coordinate` if omitted, else `ENU`), `display` (`ECEF`/`NED`/`ENU`/`LLA`, default `NED`).

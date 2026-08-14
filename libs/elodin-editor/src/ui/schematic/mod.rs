@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     GridHandle, TimeRangeBehavior,
     object_3d::Object3DState,
+    plugins::render_layer_alloc::VIEW_CUBE_RENDER_LAYERS,
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
@@ -212,6 +213,12 @@ impl SchematicParam<'_, '_> {
                             .map(|c| c.frustums_thickness)
                             .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
                         let show_view_cube = viewport.view_cube_layer.is_some();
+                        let view_cube_frame = viewport.view_cube_layer.and_then(|layer| {
+                            VIEW_CUBE_RENDER_LAYERS
+                                .iter()
+                                .find(|(_, l)| *l == layer)
+                                .map(|(frame, _)| *frame)
+                        });
 
                         let local_arrows: Vec<VectorArrow3d> = self
                             .vector_arrows
@@ -247,6 +254,7 @@ impl SchematicParam<'_, '_> {
                             projection_color,
                             frustums_thickness,
                             show_view_cube,
+                            view_cube_frame,
                             // ViewportConfig does not yet track `effects`; default
                             // on so schematic dumps keep thruster particles visible.
                             effects: true,

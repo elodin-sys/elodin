@@ -1870,8 +1870,11 @@ impl ViewportPane {
         }
 
         // Shared frame cube layer plus a per-viewport layer for overlay UI.
-        let frame = viewport.frame.unwrap_or_default();
-        let view_cube_layer = view_cube_render_layer(frame);
+        let cube_frame = viewport
+            .view_cube_frame
+            .or(viewport.frame)
+            .unwrap_or_default();
+        let view_cube_layer = view_cube_render_layer(cube_frame);
         let Some(ui_lease) = render_layer_alloc.alloc() else {
             return Self {
                 parent: Some(parent),
@@ -1891,7 +1894,7 @@ impl ViewportPane {
             .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         let mut view_cube_config = ViewCubeConfig::editor_mode();
-        view_cube_config.system = CoordinateSystem(frame);
+        view_cube_config.system = CoordinateSystem(cube_frame);
         info!("Setting frame to {:?}", &view_cube_config.system);
 
         let spawned = spawn_view_cube_overlay(
@@ -1900,7 +1903,7 @@ impl ViewportPane {
             meshes,
             materials,
             &view_cube_config,
-            frame,
+            cube_frame,
             camera,
             ui_lease,
         );
