@@ -410,6 +410,7 @@ fn component_value(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_component_widget(
     ui: &mut egui::Ui,
     search_icon: egui::TextureId,
@@ -633,13 +634,13 @@ fn add_components_from_eql(
         }
 
         for index in indexes {
-            if let Some((enabled, color)) = component_values.get_mut(index) {
-                if !*enabled {
-                    *enabled = true;
-                    *color = get_color_by_index_all(next_color_index);
-                    next_color_index += 1;
-                    added_lines += 1;
-                }
+            if let Some((enabled, color)) = component_values.get_mut(index)
+                && !*enabled
+            {
+                *enabled = true;
+                *color = get_color_by_index_all(next_color_index);
+                next_color_index += 1;
+                added_lines += 1;
             }
         }
     }
