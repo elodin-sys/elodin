@@ -434,16 +434,20 @@ fn put_db_asset(
 /// Feeds `InitialKdlPath` into `sync_document_from_config` as an explicit path
 /// override. Sticky for the session: every sync receives the CLI path while it
 /// remains set, so later `DbConfig` / `schematic.active` updates cannot fall
-/// through and replace the local file. `current_document_matches_path` in
-/// `sync_document_from_config` prevents re-open spam once loaded.
+/// through and replace the local file. The actual open is done once by
+/// `reload_sticky_kdl_when_eql_ready` after metadata settles.
 pub fn apply_initial_kdl_path(initial: Res<InitialKdlPath>) -> Option<PathBuf> {
     initial.0.clone()
 }
 
-/// Settle time after the EQL component fingerprint last changes before a sticky
-/// `--kdl` reopen. Metadata dumps often arrive in several packets; reloading on
-/// the first non-empty context still leaves graphs with `ComponentNotFound`.
-const STICKY_KDL_EQL_SETTLE_SECS: f64 = 0.35;
+/// Quiet time after the EQL component set last changes before the first `--kdl`
+/// open. FSW dumps arrive as several packets (metadata, then schema); opening
+/// on the first non-empty context still leaves `ComponentNotFound`.
+pub(crate) const STICKY_KDL_EQL_SETTLE_SECS: f64 = 1.0;
+
+/// If no EQL components ever appear (offline `--kdl`, no DB), open anyway so
+/// the local file is not stuck behind an empty context forever.
+pub(crate) const STICKY_KDL_EMPTY_EQL_FALLBACK_SECS: f64 = 2.5;
 
 /// Topology fingerprint of leaf components in an EQL context. Ignores
 /// timestamp-range updates so sticky-KDL reloads only run when the component
@@ -467,29 +471,54 @@ fn eql_component_fingerprint(ctx: &eql::Context) -> u64 {
     hash
 }
 
-/// When CLI `--kdl` is sticky and the EQL component set changes (then settles),
-/// reopen the local schematic so panels that hit `ComponentNotFound` on an
-/// empty/partial first open can compile against the real component set.
+/// Opens the CLI `--kdl` file once, after EQL metadata settles (or after the
+/// empty-context fallback). Later fingerprint changes must not tear down the
+/// scene: a full reopen respawns every viewport camera and GLB, which DeviceLost
+/// on large FSW schematics (earth + ~24 cameras). Late components compile in
+/// place (`retry_viewport_eql_compile`, pending `object_3d` spawns).
 pub fn reload_sticky_kdl_when_eql_ready(
     eql: Res<crate::EqlContext>,
     initial: Res<InitialKdlPath>,
+    current_document: Res<CurrentDocument>,
     time: Res<Time>,
     mut open: MessageWriter<OpenDocumentRequest>,
     mut last_fingerprint: Local<u64>,
     mut pending_since: Local<Option<f64>>,
-    mut last_reloaded_fp: Local<u64>,
+    mut empty_since: Local<Option<f64>>,
+    mut opened: Local<bool>,
 ) {
     let Some(path) = initial.0.clone() else {
         *last_fingerprint = 0;
         *pending_since = None;
-        *last_reloaded_fp = 0;
+        *empty_since = None;
+        *opened = false;
         return;
     };
-    if eql.0.component_parts.is_empty() {
+    if current_document_matches_path(&current_document, &schematic_file(&path)) {
+        *opened = true;
         return;
     }
-    let fingerprint = eql_component_fingerprint(&eql.0);
+    if *opened {
+        return;
+    }
+
     let now = time.elapsed_secs_f64();
+    if eql.0.component_parts.is_empty() {
+        let since = *empty_since.get_or_insert(now);
+        if now - since < STICKY_KDL_EMPTY_EQL_FALLBACK_SECS {
+            return;
+        }
+        *opened = true;
+        info!(
+            path = %path.display(),
+            "Opening --kdl schematic after empty-EQL fallback"
+        );
+        open.write(OpenDocumentRequest(path));
+        return;
+    }
+    *empty_since = None;
+
+    let fingerprint = eql_component_fingerprint(&eql.0);
     if fingerprint != *last_fingerprint {
         *last_fingerprint = fingerprint;
         *pending_since = Some(now);
@@ -500,15 +529,12 @@ pub fn reload_sticky_kdl_when_eql_ready(
     if now - since < STICKY_KDL_EQL_SETTLE_SECS {
         return;
     }
+    *opened = true;
     *pending_since = None;
-    if fingerprint == *last_reloaded_fp {
-        return;
-    }
-    *last_reloaded_fp = fingerprint;
     info!(
         path = %path.display(),
         fingerprint,
-        "Reloading --kdl schematic after EQL metadata settled"
+        "Opening --kdl schematic after EQL metadata settled"
     );
     open.write(OpenDocumentRequest(path));
 }
@@ -537,7 +563,6 @@ pub fn sync_document_from_config(
     mut pending_active: ResMut<PendingActiveSchematic>,
     save_in_flight: Option<Res<crate::ui::command_palette::palette_items::SchematicSaveInFlight>>,
     mut current_document: ResMut<CurrentDocument>,
-    mut open_document: MessageWriter<OpenDocumentRequest>,
     mut open_document_from_active: MessageWriter<OpenDocumentFromActiveRequest>,
     mut cleared: MessageWriter<DocumentCleared>,
 ) {
@@ -545,14 +570,13 @@ pub fn sync_document_from_config(
         return;
     }
 
-    // An explicit path override (user opened a specific file) wins outright.
+    // CLI `--kdl` pin: keep the local file in front of `schematic.active`, but
+    // do not open it here. `reload_sticky_kdl_when_eql_ready` opens once after
+    // metadata settles. Opening (and re-opening) from sync spawned the scene
+    // before EQL existed, then tore it down on every dump packet.
     if let Some(path) = given_path {
         let resolved_path = schematic_file(&path);
         if resolved_path.try_exists().unwrap_or(false) {
-            if current_document_matches_path(&current_document, &resolved_path) {
-                return;
-            }
-            open_document.write(OpenDocumentRequest(path));
             return;
         }
         // Overridden path is missing: fall through to the DB-backed sources.

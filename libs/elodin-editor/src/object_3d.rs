@@ -90,7 +90,7 @@ pub fn resolve_db_asset_url_prefer_local(
     {
         let key = key.trim_start_matches('/');
         if root.join(key).is_file() {
-            bevy::log::info!(
+            bevy::log::info_once!(
                 key = %key,
                 root = %root.display(),
                 "db asset shadowed by local file (--kdl session)"
@@ -154,6 +154,17 @@ impl EditableEQL {
         Self {
             eql,
             compiled_expr: Some(compiled_expr),
+        }
+    }
+
+    /// Retry a spawn-time compile that failed because the component set was
+    /// still empty or partial. No-op when the text is empty or already compiled.
+    pub fn retry_compile(&mut self, ctx: &eql::Context) {
+        if self.eql.trim().is_empty() || self.compiled_expr.is_some() {
+            return;
+        }
+        if let Ok(expr) = ctx.parse_str(&self.eql) {
+            self.compiled_expr = compile_eql_expr(expr).ok();
         }
     }
 }

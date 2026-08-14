@@ -7,9 +7,10 @@
 //!
 //! Particle integration uses hanabi `Time<EffectSimulation>`, synced each
 //! frame to the Impeller playhead (`CurrentTimestamp` / `Paused`): pause freezes
-//! trails, playback speed scales spawn/integration, and backward seeks rebuild
-//! thruster rigs so particles do not integrate in reverse. Live 1x viewing does
-//! not require paced sim ticks for trail correctness under timeline replay.
+//! trails, playback speed scales spawn/integration, and playhead seeks despawn
+//! jet entities so Hanabi frees the GPU particle slab (there is no clear API).
+//! `ensure_kdl_thrusters` rebuilds from cached effect/image handles. Live 1x
+//! viewing does not require paced sim ticks for trail correctness.
 //!
 //! Effects come from two sources:
 //! - built-in Rust presets (`plume`, `cold_gas`), or
@@ -61,6 +62,7 @@ use crate::object_3d::{
 use crate::plugins::kdl_document::InitialKdlPath;
 use crate::plugins::render_layer_alloc::THRUSTER_PARTICLES_RENDER_LAYER;
 use crate::ui::Paused;
+use crate::ui::timeline::LatestFollow;
 use crate::vector_arrow::component_value_tail_to_vec3;
 
 /// Reference exhaust axis used to build each emitter's local orientation (Bevy Y-up).
@@ -101,12 +103,8 @@ impl ThrusterEffectAssets {
     }
 }
 
-/// Retained strong handles for hanabi `.effect` files loaded from the DB /
-/// asset root. Seek rebuilds and schematic refresh despawn jet entities (and
-/// their `pending_effect` / `ParticleEffect` handles); without this map Bevy
-/// unloads the asset and the next `ensure_kdl_thrusters` re-enters
-/// `AssetReader::read` (another HTTP GET). Presets already live forever in
-/// [`ThrusterEffectAssets`]; file effects need the same residency.
+/// Retained strong handles for hanabi `.effect` files. Schematic refresh still
+/// despawns jets; this map keeps the asset resident across that rebuild.
 #[derive(Resource, Default)]
 struct FileEffectAssets {
     /// Keyed by the resolved load path (`db:…` → `http://…` URL, or bare path).
@@ -123,6 +121,36 @@ impl FileEffectAssets {
         handle
     }
 }
+
+/// Retained sprite handles (`smoke` / fallback). Seek despawns jets; this map
+/// keeps textures resident so `slot_image` does not call `AssetServer::load`.
+#[derive(Resource, Default)]
+struct FileImageAssets {
+    /// Keyed by the logical `db:` path so resolve + load run only on first miss.
+    handles: HashMap<String, Handle<Image>>,
+}
+
+impl FileImageAssets {
+    fn get_or_load(
+        &mut self,
+        db_path: &str,
+        asset_server: &AssetServer,
+        connection_addr: Option<std::net::SocketAddr>,
+        local_root: Option<&std::path::Path>,
+    ) -> Handle<Image> {
+        if let Some(handle) = self.handles.get(db_path) {
+            return handle.clone();
+        }
+        let resolved = resolve_db_asset_url_prefer_local(db_path, connection_addr, local_root);
+        let handle = asset_server.load::<Image>(resolved);
+        self.handles.insert(db_path.to_string(), handle.clone());
+        handle
+    }
+}
+
+/// One-shot flag: a playhead seek should despawn jets so Hanabi drops GPU particles.
+#[derive(Resource, Default)]
+struct SeekParticleReset(bool);
 
 #[derive(Component)]
 struct KdlThrusterRig {
@@ -199,12 +227,19 @@ impl Plugin for ThrusterParticlesPlugin {
         app.add_plugins(HanabiPlugin)
             .init_resource::<EffectPlayheadClock>()
             .init_resource::<FileEffectAssets>()
+            .init_resource::<FileImageAssets>()
+            .init_resource::<SeekParticleReset>()
             .add_systems(Startup, setup_thruster_effects)
             // Drive hanabi's EffectSimulation clock from the Impeller playhead
             // before TimeSystems advances it from Virtual.
             .add_systems(
                 First,
-                sync_effect_simulation_clock.before(bevy::time::TimeSystems),
+                (
+                    sync_effect_simulation_clock,
+                    reset_thruster_particles_on_seek,
+                )
+                    .chain()
+                    .before(bevy::time::TimeSystems),
             )
             .add_systems(
                 PostUpdate,
@@ -223,28 +258,40 @@ impl Plugin for ThrusterParticlesPlugin {
 }
 
 /// Tracks the last Impeller playhead sample so we can derive sim-time Δt and
-/// detect backward seeks (which reset thruster instances).
+/// detect playhead seeks (which reset thruster GPU instances).
 #[derive(Resource, Default)]
 struct EffectPlayheadClock {
     last_playhead_us: Option<i64>,
     last_wall: Option<std::time::Instant>,
+    last_seek_wall: Option<std::time::Instant>,
 }
 
 /// Max sim-time advance applied to particles in one render frame (avoids
 /// spawn bursts / capacity clamps at high playback speeds).
 const MAX_EFFECT_DT_S: f64 = 0.25;
 
+/// Playhead jump (seconds) that counts as a timeline scrub in either direction.
+const SEEK_SIM_DT_S: f64 = 5.0;
+/// Wall-time gap between jet despawns so a dragged slider cannot rebuild every frame.
+const SEEK_DEBOUNCE_S: f64 = 0.5;
+
+/// True when the playhead jumped by more than [`SEEK_SIM_DT_S`] and the user
+/// is not in follow-latest (live-tail snaps are not scrubs).
+fn is_playhead_seek(sim_dt: f64, following_latest: bool) -> bool {
+    !following_latest && sim_dt.abs() > SEEK_SIM_DT_S
+}
+
 /// Sync `Time<EffectSimulation>` to the editor playhead: pause when the
 /// timeline is paused or the playhead stalls; set `relative_speed` so particle
-/// integration tracks sim time; on backward seek, tear down thruster rigs so
-/// they rebuild empty (no reverse integration).
+/// integration tracks sim time; on a seek, despawn jets so Hanabi frees the
+/// GPU slab (no reverse integration; caches keep assets resident).
 fn sync_effect_simulation_clock(
     mut effect_time: ResMut<Time<EffectSimulation>>,
     current: Res<CurrentTimestamp>,
     paused: Res<Paused>,
+    latest_follow: Res<LatestFollow>,
     mut clock: ResMut<EffectPlayheadClock>,
-    mut commands: Commands,
-    rigs: Query<(Entity, &KdlThrusterRig)>,
+    mut seek_reset: ResMut<SeekParticleReset>,
 ) {
     let now = std::time::Instant::now();
     let playhead = current.0.0;
@@ -261,12 +308,13 @@ fn sync_effect_simulation_clock(
         .max(1e-6);
     let sim_dt = (playhead - last_ph) as f64 * 1e-6;
 
-    if sim_dt < -0.05 {
-        for (object, rig) in &rigs {
-            for &jet in &rig.jets {
-                commands.entity(jet).despawn();
-            }
-            commands.entity(object).remove::<KdlThrusterRig>();
+    if is_playhead_seek(sim_dt, latest_follow.0) {
+        let cooled_down = clock
+            .last_seek_wall
+            .is_none_or(|t| now.saturating_duration_since(t).as_secs_f64() >= SEEK_DEBOUNCE_S);
+        if cooled_down {
+            seek_reset.0 = true;
+            clock.last_seek_wall = Some(now);
         }
         effect_time.pause();
         clock.last_playhead_us = Some(playhead);
@@ -285,6 +333,25 @@ fn sync_effect_simulation_clock(
 
     clock.last_playhead_us = Some(playhead);
     clock.last_wall = Some(now);
+}
+
+/// Despawn jet entities so Hanabi drops the GPU particle slab (no public
+/// clear API; the cache is keyed by entity). `ensure_kdl_thrusters` rebuilds
+/// from `FileEffectAssets` / `FileImageAssets`.
+fn reset_thruster_particles_on_seek(
+    mut pending: ResMut<SeekParticleReset>,
+    mut commands: Commands,
+    rigs: Query<(Entity, &KdlThrusterRig)>,
+) {
+    if !std::mem::take(&mut pending.0) {
+        return;
+    }
+    for (object, rig) in &rigs {
+        for &jet in &rig.jets {
+            commands.entity(jet).despawn();
+        }
+        commands.entity(object).remove::<KdlThrusterRig>();
+    }
 }
 
 fn setup_thruster_effects(
@@ -665,22 +732,25 @@ fn spawn_thruster_light(
 fn slot_image(
     slot: &str,
     assets: &ThrusterEffectAssets,
+    file_images: &mut FileImageAssets,
     asset_server: &AssetServer,
     connection_addr: Option<std::net::SocketAddr>,
     local_root: Option<&std::path::Path>,
 ) -> Handle<Image> {
     match slot {
         "mask" => assets.mask.clone(),
-        "smoke" => asset_server.load(resolve_db_asset_url_prefer_local(
+        "smoke" => file_images.get_or_load(
             "db:textures/smoke_puff.png",
+            asset_server,
             connection_addr,
             local_root,
-        )),
-        _ => asset_server.load(resolve_db_asset_url_prefer_local(
+        ),
+        _ => file_images.get_or_load(
             "db:textures/soft_circle.png",
+            asset_server,
             connection_addr,
             local_root,
-        )),
+        ),
     }
 }
 
@@ -710,16 +780,24 @@ fn frame_up(frame: GeoFrame, position_in_frame: DVec3) -> DVec3 {
 /// Caller must pass a pose that has already been set from telemetry
 /// (`WorldPosReceived`); default/missing `(0,0,0)` would pin ECEF trails at
 /// Earth's center for the whole flight.
+fn trail_anchor_pose(frame: Option<GeoFrame>, world_pos: &WorldPos) -> (GeoPosition, GeoRotation) {
+    let frame = frame.unwrap_or_default();
+    let position = world_pos.pos();
+    let up = frame_up(frame, position);
+    let rotation = DQuat::from_rotation_arc(DVec3::Y, up);
+    (
+        GeoPosition(frame, position),
+        GeoRotation::absolute(frame, rotation),
+    )
+}
+
 fn spawn_trail_anchor(
     commands: &mut Commands,
     jet_entity: Entity,
     frame: Option<GeoFrame>,
     world_pos: &WorldPos,
 ) -> Entity {
-    let frame = frame.unwrap_or_default();
-    let position = world_pos.pos();
-    let up = frame_up(frame, position);
-    let rotation = DQuat::from_rotation_arc(DVec3::Y, up);
+    let (geo_pos, geo_rot) = trail_anchor_pose(frame, world_pos);
     commands
         .spawn((
             KdlTrailAnchorOf(jet_entity),
@@ -730,8 +808,8 @@ fn spawn_trail_anchor(
             // The `GridCell` add hook parents this under the big_space root.
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
-            GeoPosition(frame, position),
-            GeoRotation::absolute(frame, rotation),
+            geo_pos,
+            geo_rot,
         ))
         .id()
 }
@@ -751,6 +829,7 @@ fn bind_file_effect_assets(
     objects: Query<&WorldPos, (With<Object3DState>, With<WorldPosReceived>)>,
     effects: Res<Assets<EffectAsset>>,
     assets: Res<ThrusterEffectAssets>,
+    mut file_images: ResMut<FileImageAssets>,
     asset_server: Res<AssetServer>,
     connection_addr: Option<Res<ConnectionAddr>>,
     initial_kdl: Option<Res<InitialKdlPath>>,
@@ -785,6 +864,7 @@ fn bind_file_effect_assets(
                 slot_image(
                     &slot.name,
                     &assets,
+                    &mut file_images,
                     &asset_server,
                     connection_addr,
                     local_root.as_deref(),
@@ -1484,9 +1564,23 @@ mod tests {
         );
     }
 
-    /// Seek rebuilds despawn jets (and their EffectAsset handles). The file
-    /// cache must keep a strong handle so Bevy does not unload the asset and
-    /// the next ensure reuses the same handle id.
+    fn test_jet(frame: Option<GeoFrame>) -> KdlThrusterJet {
+        KdlThrusterJet {
+            body_offset: Vec3::ZERO,
+            fixed_exhaust: DPS_EXHAUST_BODY,
+            vector_intensity: false,
+            body_frame: true,
+            frame,
+            intensity: None,
+            scale: 1.0,
+            base_rate: Some(100.0),
+            pending_effect: None,
+            authored_settings: None,
+            has_intensity_property: false,
+            cutoff: 0.0,
+        }
+    }
+
     #[test]
     fn trail_anchor_freezes_telemetry_pose_not_default_origin() {
         let mut world = World::new();
@@ -1554,5 +1648,153 @@ mod tests {
             "rebuild must clone the retained handle, not allocate a new asset"
         );
         assert_eq!(cache.handles.len(), 1);
+    }
+
+    #[test]
+    fn file_image_cache_survives_material_drop() {
+        let mut images = Assets::<Image>::default();
+        let mut cache = FileImageAssets::default();
+        let path = "db:textures/smoke_puff.png".to_string();
+
+        let loaded = images.add(build_soft_particle_image());
+        cache.handles.insert(path.clone(), loaded.clone());
+
+        let jet_handle = cache
+            .handles
+            .get(&path)
+            .cloned()
+            .expect("cache populated on first load");
+        assert_eq!(jet_handle.id(), loaded.id());
+
+        drop(jet_handle);
+        drop(loaded);
+
+        let retained = cache
+            .handles
+            .get(&path)
+            .expect("FileImageAssets must retain across seek recycle");
+        assert!(
+            images.get(retained).is_some(),
+            "Image must stay resident while the cache holds a strong handle"
+        );
+
+        let again = cache.handles.get(&path).cloned().unwrap();
+        assert_eq!(
+            retained.id(),
+            again.id(),
+            "rebind must clone the retained handle, not allocate a new asset"
+        );
+        assert_eq!(cache.handles.len(), 1);
+    }
+
+    #[test]
+    fn playhead_seek_is_five_second_jump() {
+        assert!(is_playhead_seek(5.1, false), "forward jump over 5s");
+        assert!(is_playhead_seek(-5.1, false), "backward jump over 5s");
+        assert!(!is_playhead_seek(5.0, false), "exactly 5s is not a seek");
+        assert!(!is_playhead_seek(1.0, false), "playback-sized step is not a seek");
+        assert!(!is_playhead_seek(0.0, false), "still playhead is not a seek");
+        assert!(
+            !is_playhead_seek(6.0, true),
+            "follow-latest catch-up is not a scrub"
+        );
+    }
+
+    #[test]
+    fn seek_despawns_jets_and_removes_rig() {
+        let mut app = App::new();
+        app.init_resource::<SeekParticleReset>()
+            .add_systems(Update, reset_thruster_particles_on_seek);
+
+        let configs = vec![test_thruster((0.0, -1.9, 0.0))];
+        let object = app
+            .world_mut()
+            .spawn(test_object_state(configs.clone()))
+            .id();
+        let jet = app
+            .world_mut()
+            .spawn((test_jet(None), KdlThrusterJetOf(object)))
+            .id();
+        app.world_mut().entity_mut(object).insert(KdlThrusterRig {
+            jets: vec![jet],
+            configs,
+        });
+
+        app.world_mut().resource_mut::<SeekParticleReset>().0 = true;
+        app.update();
+
+        assert!(
+            app.world().get::<KdlThrusterRig>(object).is_none(),
+            "seek must remove the rig so ensure rebuilds new jet entities"
+        );
+        assert!(
+            app.world().get_entity(jet).is_err(),
+            "seek must despawn jets so Hanabi frees the GPU slab"
+        );
+    }
+
+    #[test]
+    fn backward_seek_clock_flags_reset() {
+        let mut app = App::new();
+        app.init_resource::<Time<EffectSimulation>>()
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<SeekParticleReset>()
+            .insert_resource(Paused(false))
+            .insert_resource(LatestFollow(false))
+            .insert_resource(CurrentTimestamp(impeller2::types::Timestamp(6_000_000)))
+            .add_systems(Update, sync_effect_simulation_clock);
+
+        app.update();
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 = impeller2::types::Timestamp(0);
+        app.update();
+
+        assert!(
+            app.world().resource::<SeekParticleReset>().0,
+            "backward jump over 5s must flag a particle reset"
+        );
+    }
+
+    #[test]
+    fn forward_seek_clock_flags_reset() {
+        let mut app = App::new();
+        app.init_resource::<Time<EffectSimulation>>()
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<SeekParticleReset>()
+            .insert_resource(Paused(false))
+            .insert_resource(LatestFollow(false))
+            .insert_resource(CurrentTimestamp(impeller2::types::Timestamp(0)))
+            .add_systems(Update, sync_effect_simulation_clock);
+
+        app.update();
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 =
+            impeller2::types::Timestamp(6_000_000);
+        app.update();
+
+        assert!(
+            app.world().resource::<SeekParticleReset>().0,
+            "forward jump over 5s must flag a particle reset"
+        );
+    }
+
+    #[test]
+    fn follow_latest_jump_does_not_flag_reset() {
+        let mut app = App::new();
+        app.init_resource::<Time<EffectSimulation>>()
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<SeekParticleReset>()
+            .insert_resource(Paused(false))
+            .insert_resource(LatestFollow(true))
+            .insert_resource(CurrentTimestamp(impeller2::types::Timestamp(0)))
+            .add_systems(Update, sync_effect_simulation_clock);
+
+        app.update();
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 =
+            impeller2::types::Timestamp(6_000_000);
+        app.update();
+
+        assert!(
+            !app.world().resource::<SeekParticleReset>().0,
+            "follow-latest must not despawn jets on a live-tail jump"
+        );
     }
 }

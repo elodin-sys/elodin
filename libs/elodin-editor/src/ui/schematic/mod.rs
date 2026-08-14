@@ -655,6 +655,7 @@ impl Plugin for SchematicPlugin {
                 (
                     load::apply_document_cleared,
                     load::retry_pending_data_overview,
+                    load::retry_pending_object_3d_spawns,
                     load::apply_document_loaded.before(crate::ui::sync_windows),
                     load::apply_document_reloaded.before(crate::ui::sync_windows),
                     load::apply_pending_window_schematics.before(crate::ui::sync_windows),

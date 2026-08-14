@@ -789,6 +789,19 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
     }
 }
 
+/// Compile viewport pos/look_at/up that failed at spawn because EQL metadata
+/// had not landed yet. `--kdl` no longer full-reloads the schematic for that.
+pub fn retry_viewport_eql_compile(
+    mut viewports: Query<&mut Viewport>,
+    eql_context: Res<EqlContext>,
+) {
+    for mut viewport in &mut viewports {
+        viewport.pos.retry_compile(&eql_context.0);
+        viewport.look_at.retry_compile(&eql_context.0);
+        viewport.up.retry_compile(&eql_context.0);
+    }
+}
+
 fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Context) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
