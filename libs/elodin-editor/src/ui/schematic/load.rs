@@ -244,10 +244,18 @@ pub struct PendingWindowSchematics {
 #[derive(Component)]
 pub struct MonitorsRoot;
 
+/// `object_3d` nodes that failed to parse at load because EQL metadata was
+/// still incomplete. Retried in place so `--kdl` does not need a full reopen.
+#[derive(Resource, Default)]
+pub struct PendingObject3dSpawns {
+    objects: Vec<impeller2_wkt::Object3D>,
+}
+
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(Startup, |mut commands: Commands| {
-        commands.spawn((MonitorsRoot, Name::new("monitors")));
-    });
+    app.init_resource::<PendingObject3dSpawns>()
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((MonitorsRoot, Name::new("monitors")));
+        });
 }
 
 #[derive(SystemParam)]
@@ -284,6 +292,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
     pending_windows: ResMut<'w, PendingWindowSchematics>,
+    pending_object_3d: Option<ResMut<'w, PendingObject3dSpawns>>,
     /// Records each spawned `db:` window's stored KDL so a revision-gated
     /// refetch can tell a window-only remote save apart from an unrelated
     /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
@@ -454,6 +463,9 @@ impl LoadSchematicParams<'_, '_> {
         // Drop any remote window fetches still in flight from a prior load so
         // their windows can't spawn into this freshly-cleared document.
         self.pending_windows.loads.clear();
+        if let Some(pending) = self.pending_object_3d.as_mut() {
+            pending.objects.clear();
+        }
         for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
                 continue;
@@ -950,6 +962,9 @@ impl LoadSchematicParams<'_, '_> {
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
         let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
+            if let Some(pending) = self.pending_object_3d.as_mut() {
+                pending.objects.push(object_3d);
+            }
             return;
         };
         let icon = object_3d.icon.clone();
@@ -1705,6 +1720,26 @@ pub fn apply_document_cleared(
     }
 }
 
+/// Spawn `object_3d` nodes that failed EQL parse on the first load, now that
+/// more components are registered. Failures are re-queued.
+pub fn retry_pending_object_3d_spawns(mut params: LoadSchematicParams) {
+    if params.eql.0.component_parts.is_empty() {
+        return;
+    }
+    let objects = {
+        let Some(pending) = params.pending_object_3d.as_mut() else {
+            return;
+        };
+        if pending.objects.is_empty() {
+            return;
+        }
+        std::mem::take(&mut pending.objects)
+    };
+    for object_3d in objects {
+        params.spawn_object_3d(object_3d);
+    }
+}
+
 /// Finish a pending Data Overview once component metadata is available.
 pub fn retry_pending_data_overview(
     mut pending: ResMut<PendingDataOverview>,
@@ -1803,6 +1838,7 @@ mod tests {
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
             .init_resource::<super::PendingWindowSchematics>()
+            .init_resource::<super::PendingObject3dSpawns>()
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));

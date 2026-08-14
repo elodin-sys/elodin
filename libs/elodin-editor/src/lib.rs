@@ -49,7 +49,9 @@ use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     create_egui_context, default_present_mode,
-    inspector::viewport::{set_viewport_pos, sync_viewport_focus_pick_targets},
+    inspector::viewport::{
+        retry_viewport_eql_compile, set_viewport_pos, sync_viewport_focus_pick_targets,
+    },
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
     utils::FriendlyEpoch,
@@ -363,7 +365,8 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                ui::gauges::compile_gauge_exprs.after(update_eql_context),
+                (ui::gauges::compile_gauge_exprs, retry_viewport_eql_compile)
+                    .after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
