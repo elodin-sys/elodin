@@ -389,6 +389,85 @@ fn modal_series_row(ui: &mut egui::Ui, color: egui::Color32, label: &str, value:
     });
 }
 
+const PLOT_MODAL_ID: &str = "plot_modal";
+const PLOT_MODAL_FALLBACK_HEIGHT: f32 = 120.0;
+
+fn clamp_rect_to(rect: egui::Rect, screen: egui::Rect) -> egui::Rect {
+    let size = rect.size();
+    let mut min = rect.min;
+    if min.x + size.x > screen.max.x {
+        min.x = screen.max.x - size.x;
+    }
+    if min.y + size.y > screen.max.y {
+        min.y = screen.max.y - size.y;
+    }
+    min.x = min.x.max(screen.min.x);
+    min.y = min.y.max(screen.min.y);
+    egui::Rect::from_min_size(min, size)
+}
+
+fn pointer_gap(rect: egui::Rect, pointer: egui::Pos2) -> f32 {
+    if rect.contains(pointer) {
+        let dx = (pointer.x - rect.min.x).min(rect.max.x - pointer.x);
+        let dy = (pointer.y - rect.min.y).min(rect.max.y - pointer.y);
+        -dx.min(dy)
+    } else {
+        let dx = if pointer.x < rect.min.x {
+            rect.min.x - pointer.x
+        } else if pointer.x > rect.max.x {
+            pointer.x - rect.max.x
+        } else {
+            0.0
+        };
+        let dy = if pointer.y < rect.min.y {
+            rect.min.y - pointer.y
+        } else if pointer.y > rect.max.y {
+            pointer.y - rect.max.y
+        } else {
+            0.0
+        };
+        dx.hypot(dy)
+    }
+}
+
+/// Place the hover modal in a pointer-relative quadrant, clamped to `screen`,
+/// preferring a rect that does not contain the pointer.
+fn modal_pos(pointer: egui::Pos2, size: egui::Vec2, screen: egui::Rect) -> egui::Pos2 {
+    let m = MODAL_MARGIN;
+    let candidates = [
+        (
+            egui::Align2::LEFT_TOP,
+            egui::pos2(pointer.x + m, pointer.y + m),
+        ),
+        (
+            egui::Align2::RIGHT_TOP,
+            egui::pos2(pointer.x - m, pointer.y + m),
+        ),
+        (
+            egui::Align2::LEFT_BOTTOM,
+            egui::pos2(pointer.x + m, pointer.y - m),
+        ),
+        (
+            egui::Align2::RIGHT_BOTTOM,
+            egui::pos2(pointer.x - m, pointer.y - m),
+        ),
+    ];
+    let mut best_min = candidates[0].0.anchor_size(candidates[0].1, size).min;
+    let mut best_gap = f32::NEG_INFINITY;
+    for (pivot, pos) in candidates {
+        let clamped = clamp_rect_to(pivot.anchor_size(pos, size), screen);
+        if !clamped.contains(pointer) {
+            return clamped.min;
+        }
+        let gap = pointer_gap(clamped, pointer);
+        if gap > best_gap {
+            best_gap = gap;
+            best_min = clamped.min;
+        }
+    }
+    best_min
+}
+
 impl TimeseriesPlot {
     /// Create a plot with absolute timestamp X-axis (default for standard graph panels)
     pub fn from_bounds(
@@ -739,26 +818,24 @@ impl TimeseriesPlot {
         timestamp: Timestamp,
         relative_seconds: Option<f64>,
     ) {
-        let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right();
+        let size = ui
+            .ctx()
+            .memory(|m| m.area_rect(PLOT_MODAL_ID).map(|r| r.size()))
+            .unwrap_or(egui::vec2(MODAL_WIDTH, PLOT_MODAL_FALLBACK_HEIGHT));
+        let size = egui::vec2(MODAL_WIDTH, size.y);
+        let fixed_pos = modal_pos(pointer_pos, size, ui.ctx().content_rect());
 
-        let (pivot, fixed_pos) = if anchor_left {
-            (
-                egui::Align2::LEFT_TOP,
-                egui::pos2(pointer_pos.x + MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
-            )
-        } else {
-            (
-                egui::Align2::RIGHT_TOP,
-                egui::pos2(pointer_pos.x - MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
-            )
-        };
-
-        egui::Window::new("plot_modal")
-            .pivot(pivot)
+        egui::Window::new(PLOT_MODAL_ID)
+            .pivot(egui::Align2::LEFT_TOP)
             .title_bar(false)
             .resizable(false)
+            .interactable(false)
+            .order(egui::Order::Tooltip)
+            .constrain(false)
             .fixed_pos(fixed_pos)
-            .fixed_size(egui::vec2(MODAL_WIDTH, self.inner_rect.height() / 2.))
+            .default_width(MODAL_WIDTH)
+            .min_width(MODAL_WIDTH)
+            .max_width(MODAL_WIDTH)
             .frame(
                 Frame::default()
                     .inner_margin(Margin::same(8))
@@ -1039,7 +1116,6 @@ impl TimeseriesPlot {
 
         if let Some(pointer_pos) = pointer_pos
             && self.inner_rect.contains(pointer_pos)
-            && ui.ui_contains_pointer()
         {
             let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
             draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
