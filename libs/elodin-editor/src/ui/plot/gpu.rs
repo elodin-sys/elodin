@@ -74,6 +74,7 @@ pub struct PlotGpuPlugin;
 impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
+            .init_resource::<ExtractLinesState>()
             .init_asset::<Line>()
             .init_asset::<XYLine>();
 
@@ -224,6 +225,17 @@ impl LineMut<'_> {
         match self {
             LineMut::Timeseries(line) => line.data.data_buffer_shard_alloc(),
             LineMut::XY(xy_line) => xy_line.y_shard_alloc.as_ref(),
+        }
+    }
+
+    /// Content generation for index-cache invalidation: bumps on any tree
+    /// content change — live appends, clear, rebuild (shard offsets can move
+    /// within the same buffers, and the live tip must keep advancing).
+    /// XY lines are append-only, so the point count serves as their gen.
+    pub fn content_gen(&self) -> u64 {
+        match self {
+            LineMut::Timeseries(line) => line.data.content_gen(),
+            LineMut::XY(xy_line) => xy_line.point_count() as u64,
         }
     }
 }
@@ -463,7 +475,22 @@ pub struct GpuLine {
     last_index_range: Option<(i64, i64)>,
     /// Cache key part B: `(clip_end, pixel_width)`.
     last_clip_range: Option<(i64, i64)>,
+    /// Cache key part C: LineTree `content_gen` — a clear/rebuild moves shard
+    /// offsets inside the same buffers, so the index strip must be rewritten
+    /// even when the visible range is unchanged (same as `plot_3d`).
+    content_gen: u64,
+    /// Identity of the x/y value buffers the bind group references; the bind
+    /// group must be rebuilt if the underlying `BufferShardAlloc` changes.
+    value_buffer_ids: (BufferId, BufferId),
 }
+
+/// Main-world cache of the per-line GPU resources, written back by
+/// `extract_lines` — same pattern as `plot_3d::gpu::GpuLineIndexCache`.
+/// Without it, every frame allocated a fresh 512 KB index buffer, created a
+/// new bind group and rewrote the full index strip for every line, which
+/// dominates frame time on graph-heavy schematics.
+#[derive(Component, Default)]
+pub struct GpuLineCache(Option<GpuLine>);
 
 pub struct SetLineBindGroup;
 
@@ -532,8 +559,31 @@ type LineQueryMut = (
     &'static mut LineVisibleRange,
     &'static mut LineWidgetWidth,
     &'static mut GraphType,
-    Option<&'static mut GpuLine>,
+    Option<&'static mut GpuLineCache>,
 );
+
+type ExtractLinesParams = (
+    Query<'static, 'static, LineQueryMut>,
+    ResMut<'static, Assets<Line>>,
+    ResMut<'static, Assets<XYLine>>,
+    Res<'static, crate::SelectedTimeRange>,
+    Commands<'static, 'static>,
+);
+
+/// Main-world `SystemState` kept across frames; rebuilding it every extract
+/// re-runs query archetype matching.
+#[derive(Resource)]
+struct ExtractLinesState {
+    state: SystemState<ExtractLinesParams>,
+}
+
+impl bevy::prelude::FromWorld for ExtractLinesState {
+    fn from_world(world: &mut bevy::prelude::World) -> Self {
+        Self {
+            state: SystemState::new(world),
+        }
+    }
+}
 
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
@@ -542,124 +592,169 @@ fn extract_lines(
     render_queue: Res<RenderQueue>,
     values_layout: Res<LineValuesLayout>,
 ) {
-    let mut state = SystemState::<(
-        Query<'static, 'static, LineQueryMut>,
-        ResMut<'static, Assets<Line>>,
-        ResMut<'static, Assets<XYLine>>,
-        Res<'static, crate::SelectedTimeRange>,
-    )>::new(&mut main_world);
-    let (mut lines, mut line_assets, mut xy_lines, selected_range) =
-        state.params_mut(&mut main_world);
-    let selected = selected_range.0.clone();
-    let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
-    let short_window = crate::is_short_accuracy_window(&selected);
-    for (entity, line_handle, config, uniform, line_visible_range, width, graph_type, gpu_line) in
-        lines.iter_mut()
-    {
-        let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
-            continue;
-        };
-        // Camera / clip: continuous visible range for short windows (silky scrub);
-        // long windows keep 100 ms quantum to limit index rewrite churn.
-        let visible = line_visible_range.0.clone();
-        let clip_range = if short_window {
-            visible.clone()
-        } else {
-            crate::quantize_visible_range(visible.clone(), crate::TRAILING_RANGE_QUANTUM_MICROS)
-        };
-        // Short windows: step = 1 on clip (truth). Long windows: pixel stride on clip.
-        line.queue_load_range(clip_range.clone(), &render_queue, &render_device);
-        let index_buffer = if let Some(ref gpu_line) = gpu_line {
-            gpu_line.index_buffer.clone()
-        } else {
-            render_device.create_buffer(
-                &(BufferDescriptor {
-                    label: Some("Line index Buffer"),
-                    size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                    usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }),
-            )
-        };
+    main_world.resource_scope(
+        |world, mut cached_state: bevy::prelude::Mut<ExtractLinesState>| {
+            let (mut lines, mut line_assets, mut xy_lines, selected_range, mut main_commands) =
+                cached_state.state.params_mut(world);
+            let selected = selected_range.0.clone();
+            let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
+            let short_window = crate::is_short_accuracy_window(&selected);
+            for (
+                entity,
+                line_handle,
+                config,
+                uniform,
+                line_visible_range,
+                width,
+                graph_type,
+                mut cache,
+            ) in lines.iter_mut()
+            {
+                let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
+                    continue;
+                };
+                // Camera / clip: continuous visible range for short windows (silky scrub);
+                // long windows keep 100 ms quantum to limit index rewrite churn.
+                let visible = line_visible_range.0.clone();
+                let clip_range = if short_window {
+                    visible.clone()
+                } else {
+                    crate::quantize_visible_range(
+                        visible.clone(),
+                        crate::TRAILING_RANGE_QUANTUM_MICROS,
+                    )
+                };
+                // Short windows: step = 1 on clip (truth). Long windows: pixel stride on clip.
+                line.queue_load_range(clip_range.clone(), &render_queue, &render_device);
+                let x_buffer = line
+                    .x_buffer_shard_alloc()
+                    .expect("no x buf")
+                    .buffer()
+                    .clone();
+                let y_buffer = line
+                    .y_buffer_shard_alloc()
+                    .expect("no y buf")
+                    .buffer()
+                    .clone();
+                let value_buffer_ids = (x_buffer.id(), y_buffer.id());
+                // Reuse the cached buffers/bind group unless the value buffers were
+                // reallocated (new `BufferShardAlloc`).
+                let cached = cache
+                    .as_ref()
+                    .and_then(|c| c.0.as_ref())
+                    .filter(|g| g.value_buffer_ids == value_buffer_ids);
+                let (index_buffer, values_bind_group) = if let Some(gpu_line) = cached {
+                    (
+                        gpu_line.index_buffer.clone(),
+                        gpu_line.values_bind_group.clone(),
+                    )
+                } else {
+                    let index_buffer = render_device.create_buffer(
+                        &(BufferDescriptor {
+                            label: Some("Line index Buffer"),
+                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
+                    let size = Some(VALUE_BUFFER_SIZE);
+                    let values_bind_group = render_device.create_bind_group(
+                        "line values",
+                        &values_layout.layout,
+                        &[
+                            BindGroupEntry {
+                                binding: 0,
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: &x_buffer,
+                                    offset: 0,
+                                    size,
+                                }),
+                            },
+                            BindGroupEntry {
+                                binding: 1,
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: &y_buffer,
+                                    offset: 0,
+                                    size,
+                                }),
+                            },
+                            BindGroupEntry {
+                                binding: 2,
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: &index_buffer,
+                                    offset: 0,
+                                    size: Some(INDEX_BUFFER_SIZE),
+                                }),
+                            },
+                        ],
+                    );
+                    (index_buffer, values_bind_group)
+                };
+                let content_gen = line.content_gen();
+                let range_key = (
+                    selected_span_micros,
+                    clip_range.start.0,
+                    clip_range.end.0,
+                    width.0 as i64,
+                );
+                let prev_key = cached.and_then(|g| {
+                    let (sa, sb) = g.last_index_range?;
+                    let (ca, cb) = g.last_clip_range?;
+                    Some((sa, sb, ca, cb, g.content_gen))
+                });
+                let count = if prev_key
+                    == Some((
+                        range_key.0,
+                        range_key.1,
+                        range_key.2,
+                        range_key.3,
+                        content_gen,
+                    )) {
+                    cached.map(|g| g.count).unwrap_or(0)
+                } else {
+                    line.write_to_index_buffer_sampled(
+                        &index_buffer,
+                        &render_queue,
+                        clip_range.clone(),
+                        selected_span_micros,
+                        width.0,
+                    )
+                };
+                let gpu_line = GpuLine {
+                    values_bind_group,
+                    index_buffer,
+                    count,
+                    last_index_range: Some((range_key.0, range_key.1)),
+                    last_clip_range: Some((range_key.2, range_key.3)),
+                    content_gen,
+                    value_buffer_ids,
+                };
 
-        let values_bind_group = if let Some(ref gpu_line) = gpu_line {
-            gpu_line.values_bind_group.clone()
-        } else {
-            let size = Some(VALUE_BUFFER_SIZE);
-            render_device.create_bind_group(
-                "line values",
-                &values_layout.layout,
-                &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: line.x_buffer_shard_alloc().expect("no x buf").buffer(),
-                            offset: 0,
-                            size,
-                        }),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: line.y_buffer_shard_alloc().expect("no y buf").buffer(),
-                            offset: 0,
-                            size,
-                        }),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: &index_buffer,
-                            offset: 0,
-                            size: Some(INDEX_BUFFER_SIZE),
-                        }),
-                    },
-                ],
-            )
-        };
-        let range_key = (
-            selected_span_micros,
-            clip_range.start.0,
-            clip_range.end.0,
-            width.0 as i64,
-        );
-        let prev_key = gpu_line.as_ref().and_then(|g| {
-            let (sa, sb) = g.last_index_range?;
-            let (ca, cb) = g.last_clip_range?;
-            Some((sa, sb, ca, cb))
-        });
-        let count = if prev_key == Some(range_key) {
-            gpu_line.as_ref().map(|g| g.count).unwrap_or(0)
-        } else {
-            line.write_to_index_buffer_sampled(
-                &index_buffer,
-                &render_queue,
-                clip_range.clone(),
-                selected_span_micros,
-                width.0,
-            )
-        };
-        let gpu_line = GpuLine {
-            values_bind_group,
-            index_buffer,
-            count,
-            last_index_range: Some((range_key.0, range_key.1)),
-            last_clip_range: Some((range_key.2, range_key.3)),
-        };
+                // Persist for the next frame's extract.
+                if let Some(ref mut cache) = cache {
+                    cache.0 = Some(gpu_line.clone());
+                } else {
+                    main_commands
+                        .entity(entity)
+                        .insert(GpuLineCache(Some(gpu_line.clone())));
+                }
 
-        commands.spawn((
-            MainEntity::from(entity),
-            LineBundle {
-                line: line_handle.clone(),
-                config: config.clone(),
-                uniform: *uniform,
-                line_visible_range: line_visible_range.clone(),
-                graph_type: *graph_type,
-            },
-            gpu_line,
-            TemporaryRenderEntity,
-        ));
-    }
+                commands.spawn((
+                    MainEntity::from(entity),
+                    LineBundle {
+                        line: line_handle.clone(),
+                        config: config.clone(),
+                        uniform: *uniform,
+                        line_visible_range: line_visible_range.clone(),
+                        graph_type: *graph_type,
+                    },
+                    gpu_line,
+                    TemporaryRenderEntity,
+                ));
+            }
+            cached_state.state.apply(world);
+        },
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

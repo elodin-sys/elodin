@@ -485,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn config_sync_opens_given_path_when_not_loaded() {
+    fn config_sync_defers_given_path_to_sticky_open() {
         let temp = TempTestDir::new("config-sync-open");
         let path = temp.path().join("drone.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
@@ -511,9 +511,12 @@ mod tests {
             );
         app.update();
 
-        assert_eq!(
-            app.world().resource::<SeenOpenDocumentRequests>().0,
-            vec![path]
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "sync must not open --kdl before EQL settles; sticky open owns that"
         );
     }
 
@@ -1189,27 +1192,28 @@ mod tests {
         );
     }
 
-    /// When EQL metadata settles, sticky `--kdl` must re-open so panels that
-    /// failed `ComponentNotFound` on the empty/partial first open can recompile.
-    #[test]
-    fn reload_sticky_kdl_when_eql_ready_reopens_once() {
-        use std::sync::Arc;
-
-        use bevy::time::TimeUpdateStrategy;
+    fn eql_component(name: &str) -> std::sync::Arc<eql::Component> {
         use impeller2::schema::Schema;
-        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use impeller2::types::{ComponentId, PrimType};
 
-        let temp = TempTestDir::new("sticky-kdl-eql-ready");
-        let path = temp.path().join("local.kdl");
-        fs::write(&path, "timeline\n").expect("write kdl");
+        std::sync::Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, [7usize]).unwrap(),
+        ))
+    }
+
+    fn sticky_kdl_test_app(path: PathBuf) -> App {
+        use bevy::time::TimeUpdateStrategy;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(super::InitialKdlPath(Some(path.clone())))
+            .insert_resource(super::InitialKdlPath(Some(path)))
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
                 100,
             )))
             .init_resource::<crate::EqlContext>()
+            .init_resource::<CurrentDocument>()
             .init_resource::<SeenOpenDocumentRequests>()
             .add_message::<OpenDocumentRequest>()
             .add_systems(
@@ -1220,49 +1224,117 @@ mod tests {
                 )
                     .chain(),
             );
+        app
+    }
 
-        app.update();
-        assert!(
-            app.world()
-                .resource::<SeenOpenDocumentRequests>()
-                .0
-                .is_empty(),
-            "must not reload while EQL context is empty"
-        );
-
-        let component = Arc::new(eql::Component::new(
-            "body.WORLD_POS".to_string(),
-            ComponentId::new("body.WORLD_POS"),
-            Schema::new(PrimType::F64, [7usize]).unwrap(),
-        ));
-        app.world_mut().resource_mut::<crate::EqlContext>().0 =
-            eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
-
-        // Fingerprint change arms the settle timer; must not reopen immediately.
-        app.update();
-        assert!(
-            app.world()
-                .resource::<SeenOpenDocumentRequests>()
-                .0
-                .is_empty(),
-            "must wait for EQL metadata settle before reopening"
-        );
-
-        // 0.35s settle; ManualDuration advances 100ms per update.
-        for _ in 0..4 {
+    fn advance_until(app: &mut App, secs: f64) {
+        let steps = (secs / 0.1).ceil() as u32 + 1;
+        for _ in 0..steps {
             app.update();
         }
+    }
+
+    /// Sticky `--kdl` opens once after EQL settles, then ignores later
+    /// fingerprint changes so large FSW dumps cannot respawn the 3D scene.
+    #[test]
+    fn reload_sticky_kdl_when_eql_ready_opens_once() {
+        use impeller2::types::Timestamp;
+
+        let temp = TempTestDir::new("sticky-kdl-eql-ready");
+        let path = temp.path().join("local.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+
+        let mut app = sticky_kdl_test_app(path.clone());
+
+        app.update();
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "must not open while EQL context is empty"
+        );
+
+        app.world_mut().resource_mut::<crate::EqlContext>().0 = eql::Context::from_leaves(
+            [eql_component("body.WORLD_POS")],
+            Timestamp(0),
+            Timestamp(1000),
+        );
+
+        app.update();
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "must wait for EQL metadata settle before opening"
+        );
+
+        advance_until(&mut app, super::operations::STICKY_KDL_EQL_SETTLE_SECS);
         assert_eq!(
             app.world().resource::<SeenOpenDocumentRequests>().0,
             vec![path.clone()],
-            "must reopen sticky --kdl once after metadata settles"
+            "must open sticky --kdl once after metadata settles"
         );
 
-        app.update();
+        app.world_mut().resource_mut::<crate::EqlContext>().0 = eql::Context::from_leaves(
+            [eql_component("body.WORLD_POS"), eql_component("body.VEL")],
+            Timestamp(0),
+            Timestamp(1000),
+        );
+        advance_until(&mut app, super::operations::STICKY_KDL_EQL_SETTLE_SECS);
         assert_eq!(
             app.world().resource::<SeenOpenDocumentRequests>().0.len(),
             1,
-            "must not reopen every frame after EQL is ready"
+            "later EQL fingerprint changes must not reopen the schematic"
+        );
+    }
+
+    #[test]
+    fn reload_sticky_kdl_opens_after_empty_eql_fallback() {
+        let temp = TempTestDir::new("sticky-kdl-empty-fallback");
+        let path = temp.path().join("local.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+
+        let mut app = sticky_kdl_test_app(path.clone());
+        advance_until(
+            &mut app,
+            super::operations::STICKY_KDL_EMPTY_EQL_FALLBACK_SECS,
+        );
+        assert_eq!(
+            app.world().resource::<SeenOpenDocumentRequests>().0,
+            vec![path],
+            "offline --kdl must open after the empty-EQL fallback"
+        );
+    }
+
+    #[test]
+    fn reload_sticky_kdl_skips_when_document_already_loaded() {
+        use impeller2::types::Timestamp;
+
+        let temp = TempTestDir::new("sticky-kdl-already-loaded");
+        let path = temp.path().join("local.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+
+        let mut app = sticky_kdl_test_app(path);
+        {
+            let mut current_document = app.world_mut().resource_mut::<CurrentDocument>();
+            current_document.handle = Some(Handle::<SchematicDocumentAsset>::default());
+            current_document.save_path = Some(resolved_path);
+        }
+        app.world_mut().resource_mut::<crate::EqlContext>().0 = eql::Context::from_leaves(
+            [eql_component("body.WORLD_POS")],
+            Timestamp(0),
+            Timestamp(1000),
+        );
+        advance_until(&mut app, super::operations::STICKY_KDL_EQL_SETTLE_SECS);
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty(),
+            "already-loaded --kdl document must not reopen on EQL settle"
         );
     }
 

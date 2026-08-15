@@ -27,6 +27,8 @@ cargo run --bin elodin editor 127.0.0.1:2240
 |----------|---------|---------|
 | `ELODIN_ASSETS` | `./assets` | Directory for meshes, images, GLB files |
 | `ELODIN_KDL_DIR` | `.` (cwd) | Directory for `.kdl` schematic files |
+| `ELODIN_GPU` | `auto` | Nix shell GPU path (`nvidia` / `mesa` / `nvk`). Set **before** `nix develop`. |
+| `ELODIN_GPU_PANIC` | unset | Set to `true` to force the GPU-not-found panic and print the `ELODIN_GPU=… nix develop` help. |
 
 ## Cargo features
 

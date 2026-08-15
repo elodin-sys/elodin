@@ -49,32 +49,14 @@
       [ -e /proc/driver/nvidia/version ] && [ -n "$nvidia_icd" ]
     }
 
-    # A Mesa-capable GPU (Intel 0x8086 / AMD 0x1002) means the editor has a
-    # working non-NVIDIA path, so do not force the host NVIDIA driver. Match
-    # those vendors explicitly: BMC/IPMI framebuffers (e.g. ASPEED 0x1a03,
-    # Matrox 0x102b) also expose render nodes but are not performance GPUs, so a
-    # "not 0x10de" test would wrongly skip the hook on a Quadro-only server.
-    has_mesa_gpu() {
-      for vendor in /sys/class/drm/renderD*/device/vendor; do
-        case "$(cat "$vendor" 2>/dev/null)" in
-          0x8086 | 0x1002) return 0 ;;
-        esac
-      done
-      return 1
-    }
-
+    # Prefer the discrete NVIDIA GPU whenever its driver is usable, including on
+    # hybrid hosts where an Intel or AMD GPU drives the display. Every other
+    # mode stays on Mesa: `mesa` opts out, and `nvk` reaches the same NVIDIA GPU
+    # through Mesa's own driver, so engaging the proprietary one would break it.
     use_nvidia=0
     case "$mode" in
-      nvidia)
+      nvidia | auto)
         if nvidia_present; then
-          use_nvidia=1
-        fi
-        ;;
-      mesa)
-        use_nvidia=0
-        ;;
-      *)
-        if nvidia_present && ! has_mesa_gpu; then
           use_nvidia=1
         fi
         ;;
@@ -113,6 +95,33 @@
     # __GLX_VENDOR_LIBRARY_NAME would just break GL/Vulkan, so keep the Mesa
     # defaults when the host driver libraries are not present.
     [ "$have_glx" = 1 ] || exit 0
+
+    # The driver links against the host libX11/libxcb, and having two Xlib
+    # copies in one process (Nix's and the host's) crashes inside the driver, so
+    # route the whole process at the host X libraries. glibc is deliberately
+    # left alone: the host libc is older than Nix's and loading it breaks
+    # symbol resolution for everything else.
+    for lib_dir in \
+      /run/opengl-driver/lib \
+      /usr/lib/x86_64-linux-gnu \
+      /usr/lib/aarch64-linux-gnu \
+      /usr/lib64; do
+      for lib in \
+        "$lib_dir"/libX11.so.6 \
+        "$lib_dir"/libXext.so.6 \
+        "$lib_dir"/libXau.so.6 \
+        "$lib_dir"/libXdmcp.so.6 \
+        "$lib_dir"/libbsd.so.0 \
+        "$lib_dir"/libmd.so.0 \
+        "$lib_dir"/libxcb.so.1 \
+        "$lib_dir"/libxcb-*.so.*; do
+        [ -e "$lib" ] || continue
+        lib_name="$(basename "$lib")"
+        [ -z "''${linked_libs[$lib_name]+x}" ] || continue
+        ln -sf "$lib" "$nvidia_lib_dir/$lib_name"
+        linked_libs["$lib_name"]=1
+      done
+    done
 
     printf 'export VK_ICD_FILENAMES=%s\n' "$nvidia_icd"
     printf 'export VK_DRIVER_FILES=%s\n' "$nvidia_icd"
@@ -282,6 +291,16 @@ in {
     ALSA_PLUGIN_DIR = "${alsaPluginDir}/lib/alsa-lib";
     ALSA_CONFIG_PATH = "${asoundConf}";
   };
+
+  # Tools required to launch Gamescope and run scripts/elodin_capture.sh.
+  linuxCaptureTools = with pkgs; [
+    gamescope
+    xwayland
+    util-linux # setsid for capture process-group cleanup
+    procps # pkill / pgrep
+    jq
+    libva-utils
+  ];
 
   # Common wrapper arguments for executables
   makeWrapperArgs = {
