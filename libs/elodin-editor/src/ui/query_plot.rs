@@ -100,7 +100,13 @@ pub enum QueryPlotState {
 }
 
 impl QueryPlotData {
-    fn process_record_batch(&mut self, batch: RecordBatch, xy_lines: &mut Assets<XYLine>) {
+    /// Rebuilds `series` from a SQL batch. Returns leftover line entities from a
+    /// longer previous batch so the caller can despawn them.
+    fn process_record_batch(
+        &mut self,
+        batch: RecordBatch,
+        xy_lines: &mut Assets<XYLine>,
+    ) -> Vec<Entity> {
         let default_color = self.data.color.into_color32();
         let Some(plot) = process_sql_record_batch(
             &batch,
@@ -109,7 +115,7 @@ impl QueryPlotData {
             &self.series_colors,
             default_color,
         ) else {
-            return;
+            return Vec::new();
         };
 
         if let Some(earliest) = plot.earliest_timestamp
@@ -120,7 +126,6 @@ impl QueryPlotData {
         self.x_offset = plot.x_offset;
         self.y_offset = plot.y_offset;
 
-        // Preserve existing line entities when series count matches.
         let mut old_entities: Vec<Option<Entity>> =
             self.series.drain(..).map(|s| s.entity).collect();
         self.series = plot
@@ -135,6 +140,7 @@ impl QueryPlotData {
             })
             .collect();
         self.state = QueryPlotState::Results;
+        old_entities.into_iter().flatten().collect()
     }
 
     fn offset(&self) -> DVec2 {
@@ -237,7 +243,8 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     SQLQuery(query),
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                           mut states: Query<&mut QueryPlotData>,
-                          mut xy_lines: ResMut<Assets<XYLine>>| {
+                          mut xy_lines: ResMut<Assets<XYLine>>,
+                          mut commands: Commands| {
                         let Ok(mut plot) = states.get_mut(entity) else {
                             return true;
                         };
@@ -250,7 +257,11 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                                     if let Some(batch) =
                                         decoder.decode(&mut buffer).ok().and_then(|b| b)
                                     {
-                                        plot.process_record_batch(batch, &mut xy_lines);
+                                        let leftover =
+                                            plot.process_record_batch(batch, &mut xy_lines);
+                                        for line_entity in leftover {
+                                            commands.entity(line_entity).despawn();
+                                        }
                                         plot.state = QueryPlotState::Results;
                                         return false;
                                     }
@@ -483,5 +494,52 @@ pub fn auto_bounds(
             };
             graph_state.x_range = min as f64..max as f64;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::{
+        array::Float64Array,
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+    use std::sync::Arc;
+
+    fn batch_xy(y_columns: usize) -> RecordBatch {
+        let mut fields = vec![Field::new("x", DataType::Float64, false)];
+        let mut columns: Vec<arrow::array::ArrayRef> =
+            vec![Arc::new(Float64Array::from(vec![0.0, 1.0]))];
+        for i in 0..y_columns {
+            fields.push(Field::new(format!("y{i}"), DataType::Float64, false));
+            columns.push(Arc::new(Float64Array::from(vec![i as f64, i as f64 + 1.0])));
+        }
+        RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap()
+    }
+
+    #[test]
+    fn shrinking_series_returns_leftover_line_entities() {
+        let mut xy_lines = Assets::<XYLine>::default();
+        let mut plot = QueryPlotData::default();
+        plot.data.plot_mode = PlotMode::XY;
+
+        assert!(
+            plot.process_record_batch(batch_xy(3), &mut xy_lines)
+                .is_empty()
+        );
+        assert_eq!(plot.series.len(), 3);
+
+        let kept = Entity::from_bits(1);
+        let extra_a = Entity::from_bits(2);
+        let extra_b = Entity::from_bits(3);
+        plot.series[0].entity = Some(kept);
+        plot.series[1].entity = Some(extra_a);
+        plot.series[2].entity = Some(extra_b);
+
+        let leftover = plot.process_record_batch(batch_xy(1), &mut xy_lines);
+        assert_eq!(plot.series.len(), 1);
+        assert_eq!(plot.series[0].entity, Some(kept));
+        assert_eq!(leftover, vec![extra_a, extra_b]);
     }
 }
