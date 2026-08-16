@@ -2071,9 +2071,9 @@ It must evaluate to at least 3 values in meters. The expression can be a literal
 <ul>
 <li><code>ecef_to_ned()</code>, <code>ned_to_ecef()</code>, <code>ecef_to_enu()</code>, <code>enu_to_ecef()</code>, <code>enu_to_ned()</code>, <code>ned_to_enu()</code></li>
 </ul>
-<p><strong>Directions</strong> (rotation only — use for velocities, <code>up=</code> vectors, etc.):</p>
+<p><strong>Vectors</strong> (rotation only — use for velocities, <code>up=</code> vectors, etc.):</p>
 <ul>
-<li><code>ecef_to_ned_direction()</code>, <code>ned_to_ecef_direction()</code>, <code>ecef_to_enu_direction()</code>, <code>enu_to_ecef_direction()</code>, <code>enu_to_ned_direction()</code>, <code>ned_to_enu_direction()</code></li>
+<li><code>ecef_to_ned_vector()</code>, <code>ned_to_ecef_vector()</code>, <code>ecef_to_enu_vector()</code>, <code>enu_to_ecef_vector()</code>, <code>enu_to_ned_vector()</code>, <code>ned_to_enu_vector()</code></li>
 </ul>
 <p>These work in viewport / object_3d EQL and in <code>query_plot</code> EQL (translated to SQL with the schematic origin baked in). ENU ↔ NED needs no origin; ECEF conversions error if origin is unset.</p>
 <p>A plain <code>graph</code> plots raw component elements straight from the database and cannot apply a conversion, so it rejects these formulas — use <code>query_plot</code> instead. Both the whole component (<code>rocket.world_pos.ecef_to_ned()</code>) and an explicit element triple (<code>(rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_ned()</code>) are accepted.</p>
