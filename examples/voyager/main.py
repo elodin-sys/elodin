@@ -14,6 +14,7 @@ from dynamics import (
     gravity_source_entity_names,
     heliocentric_relative_acceleration,
 )
+from time_utils import utc_epoch_microseconds
 
 DEFAULT_SIM_TIME_STEP = 3600.0
 SIM_TIME_STEP = float(os.environ.get("VOYAGER_TIME_STEP", DEFAULT_SIM_TIME_STEP))
@@ -74,7 +75,7 @@ for kernel in SPICE_KERNELS:
 
 START_UTC = os.environ.get(START_UTC_ENV, "1978-01-01T00:00:00")
 start_time_et = spice.utc2et(START_UTC)
-start_time_epoch_us = 252_452_400_000_000
+start_time_epoch_us = utc_epoch_microseconds(START_UTC)
 
 PLANETS = [
     {

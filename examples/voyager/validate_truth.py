@@ -50,6 +50,33 @@ def selected_cases(manifest: dict[str, Any], requested: set[str]) -> list[dict[s
     return [case for case in cases if not requested or case["id"] in requested]
 
 
+def selected_convergence_timesteps(
+    manifest: dict[str, Any],
+    case: dict[str, Any],
+    chapters: list[int],
+    include_convergence: bool,
+    timestep_override: float | None,
+) -> list[float]:
+    """Return non-baseline convergence steps or reject incompatible selections."""
+    if not include_convergence:
+        return []
+    if timestep_override is not None:
+        raise ValueError("--include-convergence cannot be combined with --timestep")
+
+    protocol = manifest["validation_protocol"]
+    convergence_chapter = protocol["convergence_chapter"]
+    if convergence_chapter not in chapters:
+        raise ValueError(
+            f"--include-convergence requires Chapter {convergence_chapter}; "
+            f"selected chapters: {chapters}"
+        )
+
+    baseline_timestep = protocol["baseline_timestep_s"]
+    return [
+        timestep for timestep in case["convergence_timesteps_s"] if timestep != baseline_timestep
+    ]
+
+
 def required_kernel_names(manifest: dict[str, Any], cases: list[dict[str, Any]]) -> set[str]:
     load_order = manifest["kernel_load_order"]
     names = {name for name in load_order if not name.startswith("<")}
@@ -352,6 +379,16 @@ def main() -> None:
     chapters = args.chapter or manifest["validation_protocol"]["chapters"]
     baseline_timestep = manifest["validation_protocol"]["baseline_timestep_s"]
     selected_timestep = args.timestep or baseline_timestep
+    convergence_timesteps = {
+        case["id"]: selected_convergence_timesteps(
+            manifest,
+            case,
+            chapters,
+            args.include_convergence,
+            args.timestep,
+        )
+        for case in cases
+    }
     verify_kernels(manifest, cases, args.spice_dir)
 
     records = []
@@ -370,24 +407,21 @@ def main() -> None:
                     args.spice_dir,
                 )
             )
-        if args.include_convergence and args.timestep is None and not args.chapter:
-            for timestep in case["convergence_timesteps_s"]:
-                if timestep == baseline_timestep:
-                    continue
-                chapter = manifest["validation_protocol"]["convergence_chapter"]
-                print(
-                    f"running {case['id']} Chapter {chapter} timestep control at dt={timestep:g}s",
-                    flush=True,
+        for timestep in convergence_timesteps[case["id"]]:
+            chapter = manifest["validation_protocol"]["convergence_chapter"]
+            print(
+                f"running {case['id']} Chapter {chapter} timestep control at dt={timestep:g}s",
+                flush=True,
+            )
+            records.append(
+                run_case(
+                    manifest,
+                    case,
+                    chapter,
+                    timestep,
+                    args.spice_dir,
                 )
-                records.append(
-                    run_case(
-                        manifest,
-                        case,
-                        chapter,
-                        timestep,
-                        args.spice_dir,
-                    )
-                )
+            )
 
     output = {
         "schema_version": 1,
