@@ -10,12 +10,13 @@ pub mod orientation;
 
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Vec2};
+use bevy_geo_frames::GeoContext;
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{EntityMap, TelemetryCache};
 use impeller2_wkt::ComponentValue;
 
 use crate::EqlContext;
-use crate::object_3d::{CompiledExpr, compile_eql_expr};
+use crate::object_3d::{CompiledExpr, compile_eql_expr_with_geo};
 
 use super::PaneName;
 
@@ -134,11 +135,20 @@ impl EqlBinding {
             .as_ref()
             .and_then(|expr| expr.execute(entity_map, values).ok())
     }
+
+    #[cfg(test)]
+    fn take_compiled_expr(&mut self) -> Option<CompiledExpr> {
+        self.compiled_expr.take()
+    }
 }
 
 /// Recompile each gauge's EQL when its text changes or a previous compile
 /// failed (e.g. the referenced component only became known later).
-pub fn compile_gauge_exprs(mut bindings: Query<&mut EqlBinding>, eql_context: Res<EqlContext>) {
+pub fn compile_gauge_exprs(
+    mut bindings: Query<&mut EqlBinding>,
+    eql_context: Res<EqlContext>,
+    geo_context: Res<GeoContext>,
+) {
     for mut binding in bindings.iter_mut() {
         // Empty EQL is a settled state (`compiled_expr = None`). Non-empty must
         // have a successful compile; failures retry when the context catches up.
@@ -159,7 +169,11 @@ pub fn compile_gauge_exprs(mut bindings: Query<&mut EqlBinding>, eql_context: Re
                     };
                     let mut ids = Vec::new();
                     collect_component_ids(&expr, &mut ids);
-                    (compile_eql_expr(expr).ok(), ids, plain_component_id)
+                    (
+                        compile_eql_expr_with_geo(expr, &geo_context).ok(),
+                        ids,
+                        plain_component_id,
+                    )
                 }
                 Err(_) => (None, Vec::new(), None),
             }
@@ -263,4 +277,77 @@ pub(crate) fn style_gauge_combo(ui: &mut egui::Ui) {
         .text_styles
         .iter_mut()
         .for_each(|(_, font)| font.size = 10.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EqlContext;
+    use crate::ui::widgets::SystemStateExt;
+    use bevy::ecs::system::SystemState;
+    use bevy_geo_frames::{GeoFrame, GeoOrigin};
+    use impeller2::schema::Schema;
+    use impeller2::types::PrimType;
+    use impeller2_bevy::EntityMap;
+    use nox::Array;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    #[test]
+    fn compile_gauge_exprs_uses_schematic_origin() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin);
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let component_id = component.id;
+        let eql_ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+        let mut app = App::new();
+        app.insert_resource(EqlContext(eql_ctx));
+        app.insert_resource(geo);
+        app.world_mut()
+            .spawn(EqlBinding::new("rocket.world_pos.ecef_to_ned()".into()));
+
+        app.world_mut()
+            .run_system_cached(compile_gauge_exprs)
+            .expect("compile_gauge_exprs");
+
+        let compiled = {
+            let mut query = app.world_mut().query::<&mut EqlBinding>();
+            query
+                .iter_mut(app.world_mut())
+                .next()
+                .expect("binding")
+                .take_compiled_expr()
+                .expect("compiled")
+        };
+
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![3],
+                    vec![origin_ecef.x, origin_ecef.y, origin_ecef.z],
+                )
+                .unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = compiled.execute(&entity_map, &values).expect("execute");
+        let pos = component_value_to_position(&out).expect("position");
+        assert!(
+            pos.length() < 1e-6,
+            "ECEF of schematic origin must map to ~0 NED, got {pos:?}"
+        );
+    }
 }
