@@ -19,6 +19,11 @@ The simulation begins at the same SPICE state as the reference trajectory.
 Elodin then propagates the red Voyager bodies while SPICE updates the green
 reference bodies.
 
+The interactive run uses the long-span merged Voyager SPKs. Reconstructed
+encounter arcs are kept separate for scientific validation so disagreement
+between two trajectory solutions is not counted as force-model error. See the
+[truth-reference contract](truth_reference.md) for that distinction.
+
 ## Model
 
 For one gravity source, Chapter 1 uses the direct Newtonian attraction
