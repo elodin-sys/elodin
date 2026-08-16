@@ -9,9 +9,11 @@ from validate_truth import (
     load_manifest,
     required_kernel_names,
     selected_cases,
+    selected_convergence_timesteps,
     sha256,
     validate_run_record,
 )
+from time_utils import utc_epoch_microseconds
 
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
@@ -67,6 +69,37 @@ def test_kernel_precedence_is_unambiguous():
     load_order = manifest["kernel_load_order"]
 
     assert load_order[-2:] == ["<case encounter kernel>", "de440.bsp"]
+
+
+def test_validation_start_utc_controls_database_epoch():
+    assert utc_epoch_microseconds("1978-01-01T00:00:00") == 252_460_800_000_000
+    assert utc_epoch_microseconds("1979-02-01T00:00:00Z") == 286_675_200_000_000
+    assert utc_epoch_microseconds("1979-01-31T16:00:00-08:00") == 286_675_200_000_000
+
+
+def test_explicit_chapter_two_still_runs_convergence_matrix():
+    manifest = load_manifest()
+    case = manifest["cases"][0]
+    baseline = manifest["validation_protocol"]["baseline_timestep_s"]
+
+    selected = selected_convergence_timesteps(manifest, case, [2], True, None)
+
+    assert selected == [
+        timestep for timestep in case["convergence_timesteps_s"] if timestep != baseline
+    ]
+
+
+def test_incompatible_convergence_selections_are_rejected():
+    manifest = load_manifest()
+    case = manifest["cases"][0]
+
+    for chapters, timestep in (([1], None), ([2], 300.0)):
+        try:
+            selected_convergence_timesteps(manifest, case, chapters, True, timestep)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("incompatible convergence selection was silently ignored")
 
 
 def test_checked_in_baseline_matches_the_contract():
