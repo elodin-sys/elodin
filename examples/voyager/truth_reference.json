@@ -19,6 +19,23 @@
     "model_parameters": "preserve each chapter's existing G multiplied by rounded body masses",
     "integrator": "Elodin six_dof classical RK4"
   },
+  "checkpoint_contract": {
+    "version": 1,
+    "primary_definition": "A primary score must lie in a documented maneuver-free pre-encounter window, or be the initialization anchor. Encounter and post-maneuver points remain useful diagnostics but are not headline Chapter 1/2 accuracy claims.",
+    "diagnostic_definition": "A diagnostic score is retained for visibility but overlaps a maneuver phase, an undocumented correction boundary, or an encounter where the simplified force model is not a like-for-like replay.",
+    "excluded_definition": "An excluded score is not used for Chapter 1/2 accuracy claims because a documented maneuver or close-encounter event is known to invalidate an uncontrolled comparison.",
+    "sources": [
+      "https://ntrs.nasa.gov/api/citations/19840003118/downloads/19840003118.pdf",
+      "https://ntrs.nasa.gov/api/citations/19790009610/downloads/19790009610.pdf",
+      "https://ntrs.nasa.gov/api/citations/19810010458/downloads/19810010458.pdf"
+    ],
+    "maneuver_evidence": {
+      "v1_jupiter": "NASA cruise material identifies a Jan 29 correction with additional Feb 20 and Mar 16 correction activity, but does not provide a complete inertial delta-v vector for replay.",
+      "v2_jupiter": "JPL 83-53 places TCM-3/B-3 and TCM-4/B-4 inside the May 29-Jun 27 and Jun 27-Jul 7 far-encounter phases, with TCM-5/B-5 post-encounter; complete inertial vectors are not published in the source.",
+      "v1_saturn": "A-8 occurred Oct 10-11 1980 (1.778 m/s, 806 s, 90 deg roll plus 136.7 deg yaw); A-9 occurred Nov 6 1980. The available report does not provide a complete replay vector for both events.",
+      "v2_saturn": "B-7 occurred Feb 26 1981 (0.574 m/s, 215 s); B-8 occurred Jul 19 with roll/yaw targeting; B-9 occurred Aug 18 (1.018 m/s, 380 s). Complete inertial replay vectors are not available in the cited source."
+    }
+  },
   "kernel_load_order": [
     "naif0012.tls",
     "Voyager_1.a54206u_V0.2_merged.bsp",
@@ -84,12 +101,12 @@
       "scoring_end_utc": "1979-03-18T00:00:00",
       "duration_days": 45,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization"},
-        {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "maneuver-free approach"},
-        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach"},
-        {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach"},
-        {"name": "closest_approach", "elapsed_seconds": 2808286.794, "epoch_utc": "1979-03-05T12:04:46.794", "phase": "close encounter"},
-        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter"}
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor", "maneuver_status": "unknown"},
+        {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "post-correction approach without a replayable maneuver vector", "maneuver_status": "post_maneuver"},
+        {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay", "maneuver_status": "post_maneuver"},
+        {"name": "closest_approach", "elapsed_seconds": 2808286.794, "epoch_utc": "1979-03-05T12:04:46.794", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
       ],
       "convergence_timesteps_s": [3600, 900, 300, 100],
       "convergence_checkpoint": "clean_approach",
@@ -109,12 +126,12 @@
       "scoring_end_utc": "1979-07-20T00:00:00",
       "duration_days": 45,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization"},
-        {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "maneuver-free approach"},
-        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach"},
-        {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach"},
-        {"name": "closest_approach", "elapsed_seconds": 3018532.806, "epoch_utc": "1979-07-09T22:28:52.806", "phase": "close encounter"},
-        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter"}
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor; first usable state in this reconstructed arc", "maneuver_status": "unknown"},
+        {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "inside a documented correction phase without a replayable inertial vector", "maneuver_status": "boundary"},
+        {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score", "maneuver_status": "boundary"},
+        {"name": "closest_approach", "elapsed_seconds": 3018532.806, "epoch_utc": "1979-07-09T22:28:52.806", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter and post-encounter correction history are not replayed", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
       ],
       "convergence_timesteps_s": [3600, 900, 300, 100],
       "convergence_checkpoint": "clean_approach",
@@ -134,12 +151,12 @@
       "scoring_end_utc": "1980-11-18T00:00:00",
       "duration_days": 42,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization"},
-        {"name": "early_approach", "elapsed_seconds": 86400, "phase": "maneuver-free approach"},
-        {"name": "clean_approach", "elapsed_seconds": 259200, "phase": "maneuver-free approach"},
-        {"name": "mid_arc", "elapsed_seconds": 1814400, "phase": "post-maneuver approach"},
-        {"name": "closest_approach", "elapsed_seconds": 3195927.463, "epoch_utc": "1980-11-12T23:45:27.463", "phase": "close encounter"},
-        {"name": "end", "elapsed_seconds": 3628800, "phase": "post-encounter"}
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor", "maneuver_status": "unknown"},
+        {"name": "early_approach", "elapsed_seconds": 86400, "phase": "pre-A-8 approach", "validation_role": "primary", "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn", "maneuver_status": "none_known"},
+        {"name": "clean_approach", "elapsed_seconds": 259200, "phase": "A-8 boundary", "validation_role": "diagnostic", "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1814400, "phase": "post-A-8 approach", "validation_role": "diagnostic", "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed", "maneuver_status": "post_maneuver"},
+        {"name": "closest_approach", "elapsed_seconds": 3195927.463, "epoch_utc": "1980-11-12T23:45:27.463", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3628800, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
       ],
       "convergence_timesteps_s": [3600, 300, 100],
       "convergence_checkpoint": "clean_approach",
@@ -159,12 +176,12 @@
       "scoring_end_utc": "1981-08-29T00:00:00",
       "duration_days": 45,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization"},
-        {"name": "early_approach", "elapsed_seconds": 86400, "phase": "maneuver-free approach"},
-        {"name": "clean_approach", "elapsed_seconds": 345600, "phase": "maneuver-free approach"},
-        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "post-maneuver approach"},
-        {"name": "closest_approach", "elapsed_seconds": 3641030.181, "epoch_utc": "1981-08-26T03:23:50.181", "phase": "close encounter"},
-        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter"}
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor", "maneuver_status": "unknown"},
+        {"name": "early_approach", "elapsed_seconds": 86400, "phase": "pre-B-8 approach", "validation_role": "primary", "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity", "maneuver_status": "none_known"},
+        {"name": "clean_approach", "elapsed_seconds": 345600, "phase": "B-8 boundary", "validation_role": "diagnostic", "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "post-B-8 approach", "validation_role": "diagnostic", "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed", "maneuver_status": "post_maneuver"},
+        {"name": "closest_approach", "elapsed_seconds": 3641030.181, "epoch_utc": "1981-08-26T03:23:50.181", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
       ],
       "convergence_timesteps_s": [3600, 300, 100],
       "convergence_checkpoint": "clean_approach",

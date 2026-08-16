@@ -24,6 +24,8 @@ DEFAULT_OUTPUT = EXAMPLE_DIR / "truth_validation_results.json"
 METRIC_PREFIX = "VOYAGER_VALIDATION_METRIC "
 SEGMENT_PREFIX = "VOYAGER_ACTIVE_SEGMENT "
 INITIAL_STATE_PREFIX = "VOYAGER_INITIAL_STATE "
+GM_SOURCE_PREFIX = "VOYAGER_GM_SOURCE "
+VALIDATION_ROLES = {"primary", "diagnostic", "excluded"}
 
 
 def sha256(path: Path) -> str:
@@ -38,7 +40,26 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("schema_version") != 1:
         raise ValueError("Unsupported Voyager truth-reference schema")
+    contract = manifest.get("checkpoint_contract")
+    if not contract or contract.get("version") != 1:
+        raise ValueError("Missing checkpoint contract")
+    for case in manifest["cases"]:
+        for checkpoint in case["checkpoints"]:
+            role = checkpoint.get("validation_role")
+            if role not in VALIDATION_ROLES:
+                raise ValueError(f"{case['id']} {checkpoint['name']}: invalid validation role")
+            if not checkpoint.get("role_reason") or not checkpoint.get("maneuver_status"):
+                raise ValueError(f"{case['id']} {checkpoint['name']}: incomplete checkpoint contract")
     return manifest
+
+
+def checkpoint_contract(case: dict[str, Any], name: str) -> dict[str, Any]:
+    try:
+        return next(
+            checkpoint for checkpoint in case["checkpoints"] if checkpoint["name"] == name
+        )
+    except StopIteration as exc:
+        raise AssertionError(f"{case['id']}: checkpoint {name!r} is not in the contract") from exc
 
 
 def selected_cases(manifest: dict[str, Any], requested: set[str]) -> list[dict[str, Any]]:
@@ -140,6 +161,12 @@ def validate_run_record(case: dict[str, Any], record: dict[str, Any]) -> None:
         )
 
     for metric in record["metrics"]:
+        contract = checkpoint_contract(case, metric["checkpoint"])
+        for key in ("validation_role", "role_reason", "maneuver_status"):
+            if metric.get(key) != contract[key]:
+                raise AssertionError(
+                    f"{case['id']} {metric['checkpoint']}: {key} does not match contract"
+                )
         if (
             abs(metric["actual_elapsed_seconds"] - metric["requested_elapsed_seconds"])
             > record["timestep_s"] / 2.0
@@ -184,6 +211,10 @@ def run_case(
     chapter: int,
     timestep_s: float,
     spice_dir: Path,
+    gravity_parameters: str,
+    ephemeris_stage_curvature: str,
+    giant_planet_state: str,
+    giant_system_model: str,
 ) -> dict[str, Any]:
     ticks = case["duration_days"] * 86400.0 / timestep_s
     if not ticks.is_integer():
@@ -206,6 +237,10 @@ def run_case(
                     separators=(",", ":"),
                 ),
                 "VOYAGER_DYNAMICS_CHAPTER": str(chapter),
+                "VOYAGER_GRAVITY_PARAMETERS": gravity_parameters,
+                "VOYAGER_EPHEMERIS_STAGE_CURVATURE": ephemeris_stage_curvature,
+                "VOYAGER_GIANT_PLANET_STATE": giant_planet_state,
+                "VOYAGER_GIANT_SYSTEM_MODEL": giant_system_model,
                 "VOYAGER_SCORED_PROBE": case["probe"],
                 "VOYAGER_SPICE_DIR": str(spice_dir),
                 "VOYAGER_START_UTC": case["initialization_utc"],
@@ -250,18 +285,27 @@ def run_case(
         "velocity_residual_mps": zero_vector,
         "velocity_rtn_mps": zero_vector,
     }
+    for key in ("validation_role", "role_reason", "maneuver_status"):
+        initial_metric[key] = checkpoint_contract(case, "start")[key]
+    metrics = [initial_metric, *parse_prefixed_json(process.stdout, METRIC_PREFIX)]
+    for metric in metrics[1:]:
+        contract = checkpoint_contract(case, metric["checkpoint"])
+        for key in ("validation_role", "role_reason", "maneuver_status"):
+            metric[key] = contract[key]
     record = {
         "case": case["id"],
         "chapter": chapter,
+        "gravity_parameters": gravity_parameters,
+        "ephemeris_stage_curvature": ephemeris_stage_curvature,
+        "giant_planet_state": giant_planet_state,
+        "giant_system_model": giant_system_model,
         "timestep_s": timestep_s,
         "truth_kernel": case["kernel"],
         "truth_kernel_sha256": manifest["kernels"][case["kernel"]]["sha256"],
         "initial_state": initial_states[0],
+        "gm_sources": parse_prefixed_json(process.stdout, GM_SOURCE_PREFIX),
         "active_segments": parse_prefixed_json(process.stdout, SEGMENT_PREFIX),
-        "metrics": [
-            initial_metric,
-            *parse_prefixed_json(process.stdout, METRIC_PREFIX),
-        ],
+        "metrics": metrics,
     }
     validate_run_record(case, record)
     print(
@@ -296,6 +340,9 @@ def summarize(manifest: dict[str, Any], records: list[dict[str, Any]]) -> list[d
                 {
                     "case": case["id"],
                     "checkpoint": metric1["checkpoint"],
+                    "validation_role": metric1["validation_role"],
+                    "role_reason": metric1["role_reason"],
+                    "maneuver_status": metric1["maneuver_status"],
                     "elapsed_days": metric1["requested_elapsed_seconds"] / 86400.0,
                     "chapter1_position_error_km": metric1["position_error_km"],
                     "chapter1_velocity_error_mps": metric1["velocity_error_mps"],
@@ -320,7 +367,9 @@ def summarize_timestep_controls(
         case_records = [by_key.get((case["id"], chapter, timestep)) for timestep in timesteps]
         if any(record is None for record in case_records):
             continue
-        for checkpoint_name in (case["convergence_checkpoint"], "end"):
+        checkpoint_names = [case["convergence_checkpoint"], "end"]
+        for checkpoint_name in checkpoint_names:
+            contract = checkpoint_contract(case, checkpoint_name)
             errors = {
                 str(timestep): next(
                     metric["position_error_km"]
@@ -333,6 +382,8 @@ def summarize_timestep_controls(
                 {
                     "case": case["id"],
                     "checkpoint": checkpoint_name,
+                    "validation_role": contract["validation_role"],
+                    "role_reason": contract["role_reason"],
                     "chapter": chapter,
                     "position_error_km_by_timestep_s": errors,
                     "spread_km": max(errors.values()) - min(errors.values()),
@@ -348,6 +399,30 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="case ID to run; repeat for multiple cases (default: all)",
+    )
+    parser.add_argument(
+        "--gravity-parameters",
+        choices=("rounded_mass", "naif_de440"),
+        default="rounded_mass",
+        help="gravity-parameter source for a controlled A/B run",
+    )
+    parser.add_argument(
+        "--ephemeris-stage-curvature",
+        choices=("linear", "spice_central_difference"),
+        default="linear",
+        help="planet-state interpolation used within RK4 stages",
+    )
+    parser.add_argument(
+        "--giant-planet-state",
+        choices=("barycenter", "center"),
+        default="barycenter",
+        help="Jupiter/Saturn source state used by the force model",
+    )
+    parser.add_argument(
+        "--giant-system-model",
+        choices=("barycenter", "jupiter_galilean", "saturn_titan", "major_moons"),
+        default="barycenter",
+        help="non-overlapping Jupiter/Saturn source decomposition",
     )
     parser.add_argument(
         "--chapter",
@@ -405,6 +480,10 @@ def main() -> None:
                     chapter,
                     selected_timestep,
                     args.spice_dir,
+                    args.gravity_parameters,
+                    args.ephemeris_stage_curvature,
+                    args.giant_planet_state,
+                    args.giant_system_model,
                 )
             )
         for timestep in convergence_timesteps[case["id"]]:
@@ -420,15 +499,23 @@ def main() -> None:
                     chapter,
                     timestep,
                     args.spice_dir,
+                    args.gravity_parameters,
+                    args.ephemeris_stage_curvature,
+                    args.giant_planet_state,
+                    args.giant_system_model,
                 )
             )
 
+    summary = summarize(manifest, records)
     output = {
         "schema_version": 1,
         "manifest_sha256": sha256(MANIFEST_PATH),
         "kernel_load_order": manifest["kernel_load_order"],
         "records": records,
-        "summary": summarize(manifest, records),
+        "summary": summary,
+        "primary_summary": [row for row in summary if row["validation_role"] == "primary"],
+        "diagnostic_summary": [row for row in summary if row["validation_role"] == "diagnostic"],
+        "excluded_summary": [row for row in summary if row["validation_role"] == "excluded"],
         "timestep_controls": summarize_timestep_controls(manifest, records),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
