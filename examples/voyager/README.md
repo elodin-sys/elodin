@@ -105,6 +105,15 @@ Read the derivation, experiment, and measured results here:
 The chapters intentionally build on one another rather than turning the first
 example into a single high-fidelity mission reconstruction.
 
+## Truth reference and reproducible validation
+
+The interactive journey uses long-span merged Voyager SPKs for mission-scale
+visualization. A separate headless benchmark uses NAIF's current-best
+reconstructed Jupiter and Saturn encounter SPKs, initializing and scoring from
+the same solution.
+
+[Read the truth-reference contract and Chapter 1–2 revalidation](docs/truth_reference.md)
+
 ## Troubleshooting
 
 If SPICE reports a missing kernel, rerun:

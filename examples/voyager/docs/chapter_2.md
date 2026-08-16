@@ -60,7 +60,7 @@ because the propagated coordinate is `R_probe - R_sun`.
 For the Sun's own gravity edge, the source position is the origin, so the
 indirect contribution is zero and the usual central attraction remains.
 
-## Controlled experiment
+## Original long-span controlled experiment
 
 Chapter 2 changes only this force formulation.
 
@@ -75,7 +75,8 @@ The comparison keeps the same:
 - 3,600-second timestep;
 - telemetry and visualization.
 
-The canonical 400-day runs used native Elodin/Cranelift.
+The original 400-day runs used native Elodin/Cranelift and the long-span merged
+Voyager SPKs.
 
 | Probe | Chapter 1 position error | Chapter 2 position error | Chapter 1 velocity error | Chapter 2 velocity error |
 | --- | ---: | ---: | ---: | ---: |
@@ -88,6 +89,11 @@ That is:
 - 72.0% lower Voyager 2 position disagreement;
 - 78.5% lower Voyager 1 velocity disagreement;
 - 78.2% lower Voyager 2 velocity disagreement.
+
+These numbers measure agreement with the published merged supertrajectory.
+They should not be read as absolute navigation accuracy: the separate
+current-best encounter solutions differ materially over overlapping early
+mission coverage.
 
 The improvement grows smoothly over the trajectory rather than appearing only
 at the final endpoint.
@@ -121,6 +127,16 @@ The focused Chapter 2 tests cover:
 The native Chapter 1 runs reproduce the original reference checkpoints, while
 Chapter 2 improves both position and velocity disagreement for both probes at
 4, 100, and 400 days.
+
+The later truth-reference audit re-ran both chapters against four independent
+NAIF reconstructed encounter solutions. Each case initializes from the same
+SPK segment that it scores, with explicit kernel hashes and runtime segment
+audits. At eight selected pre-encounter checkpoints, Chapter 2 reduced
+position disagreement by 8.97% to 97.49%. At the cleaner early checkpoints it
+reduced both position and velocity disagreement; near Jupiter encounter, the
+simple model no longer improves every velocity metric.
+
+[Read the complete truth contract, results, and limitations](truth_reference.md).
 
 Equivalent alternating native runs measured roughly 3% runtime overhead for
 Chapter 2. Treat that as an indicative microbenchmark rather than a universal
