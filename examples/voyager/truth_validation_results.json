@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_sha256": "cbacff8bff559172c15c287dba8fcc83adc90e2bdcc39d0c803e56a6020fe06e",
+  "manifest_sha256": "bd9d310bf5257d25bfed98d89d17fa47465accb6ea795311c5308a5a0493dbcd",
   "kernel_load_order": [
     "naif0012.tls",
     "Voyager_1.a54206u_V0.2_merged.bsp",
@@ -12,6 +12,10 @@
     {
       "case": "v1_jupiter",
       "chapter": 1,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -31,6 +35,7 @@
           -6.8990140887426055
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -81,7 +86,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -110,7 +118,10 @@
             0.35108494149886266,
             0.08750199308983375,
             0.00636739520506737
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -139,7 +150,10 @@
             0.20862584015458804,
             0.09051589031545806,
             0.49956581859971155
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-correction approach without a replayable maneuver vector",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -168,7 +182,10 @@
             0.18303481078037812,
             0.05158318336168897,
             0.36768146948146563
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2808300.0,
@@ -197,7 +214,10 @@
             -7.669597178205545,
             18.924229763868585,
             -15.527783107684115
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -226,13 +246,20 @@
             7.457616359474294,
             -13.794997266840715,
             -18.618984386575523
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -252,6 +279,7 @@
           -6.8990140887426055
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -302,7 +330,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -331,7 +362,10 @@
             -0.06734096260718887,
             0.031794807996183644,
             0.004478120918129403
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -360,7 +394,10 @@
             -0.2674484988042744,
             0.034270587654516245,
             0.49790188117815176
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-correction approach without a replayable maneuver vector",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -389,7 +426,10 @@
             -0.9029039555826905,
             0.24520118940284114,
             0.3902762393780848
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2808300.0,
@@ -418,7 +458,10 @@
             12.783798528806116,
             -77.33020594673395,
             -18.36053298575755
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -447,13 +490,20 @@
             13.729160162067126,
             -17.022367193905183,
             -18.763885617771273
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -473,6 +523,7 @@
           -6.8990140887426055
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -523,7 +574,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -552,7 +606,10 @@
             -0.06737609977906513,
             0.03181074112733966,
             0.004479590193230339
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -581,7 +638,10 @@
             -0.26752799402900423,
             0.0343061907157752,
             0.4979051930800453
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-correction approach without a replayable maneuver vector",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -610,7 +670,10 @@
             -0.9121467086055909,
             0.2480735077092285,
             0.3905734686970285
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2808000.0,
@@ -639,7 +702,10 @@
             7.7885562423079895,
             -233.5602821543755,
             -22.601789225508494
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -668,13 +734,20 @@
             204.96482077173113,
             -42.87916738442343,
             -19.588912955661055
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 900,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -694,6 +767,7 @@
           -6.8990140887426055
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -744,7 +818,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -773,7 +850,10 @@
             -0.0673431323598227,
             0.03179579195196426,
             0.004478211655796241
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -802,7 +882,10 @@
             -0.2674534071536589,
             0.034272786268886274,
             0.49790208570025
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-correction approach without a replayable maneuver vector",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -831,7 +914,10 @@
             -0.9034738668685719,
             0.2453787340287608,
             0.3902946091639941
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2808000.0,
@@ -860,7 +946,10 @@
             10.219917676505585,
             -87.09365851509932,
             -18.454514332412252
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -889,13 +978,20 @@
             23.736416546046758,
             -20.22334913121225,
             -18.854174956234818
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -915,6 +1011,7 @@
           -6.8990140887426055
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -965,7 +1062,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -994,7 +1094,10 @@
             -0.06734117961118745,
             0.03179490627159201,
             0.004478129989475307
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -1023,7 +1126,10 @@
             -0.26744898964137553,
             0.034270807306313204,
             0.497901901624977
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-correction approach without a replayable maneuver vector",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -1052,7 +1158,10 @@
             -0.9029609206099696,
             0.24521894332422134,
             0.39027807638504747
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 2808300.0,
@@ -1081,7 +1190,10 @@
             12.708054810496831,
             -78.35443889510714,
             -18.38904831717236
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -1110,13 +1222,20 @@
             14.679532963320957,
             -17.379288789444356,
             -18.773809786368613
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_jupiter",
       "chapter": 1,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1136,6 +1255,7 @@
           -564.4276098688595
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1186,7 +1306,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1215,7 +1338,10 @@
             0.24555936268601686,
             0.05603699926423374,
             0.015716378545644945
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -1244,7 +1370,10 @@
             0.25932799117920324,
             0.07053126757025102,
             0.02041070979178338
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "inside a documented correction phase without a replayable inertial vector",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -1273,7 +1402,10 @@
             0.19089113654268464,
             0.2739237102792942,
             -0.6303596729958529
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 3018500.0,
@@ -1302,7 +1434,10 @@
             5.826853558288307,
             -13.419926021188424,
             -7.323755060072648
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and post-encounter correction history are not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -1331,13 +1466,20 @@
             75.74226235568652,
             -2.256848971290483,
             5.031609694236065
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1357,6 +1499,7 @@
           -564.4276098688595
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1407,7 +1550,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1436,7 +1582,10 @@
             -0.11895103078323246,
             0.07541174361730137,
             0.019371810121445596
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -1465,7 +1614,10 @@
             -0.15632783280424842,
             0.09886604226639018,
             0.026513231330078484
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "inside a documented correction phase without a replayable inertial vector",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -1494,7 +1646,10 @@
             -0.5320947642521381,
             0.4534891148186649,
             -0.571261011954711
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 3018500.0,
@@ -1523,7 +1678,10 @@
             2.2320140304864196,
             -43.153993406503176,
             -11.02717964377686
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and post-encounter correction history are not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -1552,13 +1710,20 @@
             77.89274061243007,
             -4.508622781501466,
             5.022710840326879
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1578,6 +1743,7 @@
           -564.4276098688595
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1628,7 +1794,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1657,7 +1826,10 @@
             -0.11900407914202224,
             0.07544959174591233,
             0.019382599704383986
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -1686,7 +1858,10 @@
             -0.1564302241553129,
             0.09893719888532891,
             0.026533941958494824
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "inside a documented correction phase without a replayable inertial vector",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -1715,7 +1890,10 @@
             -0.5345064007809808,
             0.4547488688982729,
             -0.5708258456343664
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 3016800.0,
@@ -1744,7 +1922,10 @@
             -3.242685873402071,
             -53.41989086620051,
             -13.02928344459155
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and post-encounter correction history are not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -1773,13 +1954,20 @@
             90.38142208948969,
             -13.23645128099215,
             3.9352404931773357
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 900,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1799,6 +1987,7 @@
           -564.4276098688595
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1849,7 +2038,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1878,7 +2070,10 @@
             -0.11895430667799932,
             0.0754140813135763,
             0.019372476520284062
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -1907,7 +2102,10 @@
             -0.15633415531196304,
             0.09887043714600846,
             0.026514510438053748
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "inside a documented correction phase without a replayable inertial vector",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -1936,7 +2134,10 @@
             -0.5322435820892287,
             0.45356694025064503,
             -0.5712341344242778
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 3018600.0,
@@ -1965,7 +2166,10 @@
             2.018354195673336,
             -43.963606629004545,
             -11.091679845313562
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and post-encounter correction history are not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -1994,13 +2198,20 @@
             78.60066538831443,
             -5.063625810020475,
             4.956485824026875
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_jupiter",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -2020,6 +2231,7 @@
           -564.4276098688595
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -2070,7 +2282,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -2099,7 +2314,10 @@
             -0.11895135832751041,
             0.07541197756274917,
             0.019371876791949103
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -2128,7 +2346,10 @@
             -0.15632846501802844,
             0.09886648201831699,
             0.02651335929453858
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "inside a documented correction phase without a replayable inertial vector",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 2592000.0,
@@ -2157,7 +2378,10 @@
             -0.5321096434059239,
             0.4534968988764172,
             -0.5712583238941266
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 3018600.0,
@@ -2186,7 +2410,10 @@
             2.2676431863796216,
             -43.289500991712245,
             -11.005829144056758
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter and post-encounter correction history are not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -2215,13 +2442,20 @@
             77.96206952179199,
             -4.564430174444976,
             5.016114676128935
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_saturn",
       "chapter": 1,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2241,6 +2475,7 @@
           826.9305078636578
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -2291,7 +2526,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -2320,7 +2558,10 @@
             0.01641734733245632,
             -0.004416877040378543,
             -0.0005925692484477209
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 259200.0,
@@ -2349,7 +2590,10 @@
             0.04794593327553093,
             -0.013405223802936725,
             -0.0017715726355556846
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1814400.0,
@@ -2378,7 +2622,10 @@
             -0.9636689602310631,
             0.8649927994846826,
             0.6573135732738619
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3195900.0,
@@ -2407,7 +2654,10 @@
             50.43548569812194,
             -234.2064997597563,
             -305.5133545106339
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3628800.0,
@@ -2436,13 +2686,20 @@
             295.49571624966893,
             25.093387656087092,
             -301.78620546410866
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_saturn",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2462,6 +2719,7 @@
           826.9305078636578
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -2512,7 +2770,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -2541,7 +2802,10 @@
             0.00012996395741950506,
             1.5307226326234468e-05,
             -0.00042379428638051383
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 259200.0,
@@ -2570,7 +2834,10 @@
             -0.0010512488480081703,
             4.098842550662187e-08,
             -0.0012660885022454174
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1814400.0,
@@ -2599,7 +2866,10 @@
             -1.3152180281819301,
             0.965045984264592,
             0.6607120743023206
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3195900.0,
@@ -2628,7 +2898,10 @@
             85.23002345172108,
             -268.46280578405316,
             -316.39021981606015
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3628800.0,
@@ -2657,13 +2930,20 @@
             289.5580384898991,
             19.596444408720938,
             -281.9825591008577
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_saturn",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2683,6 +2963,7 @@
           826.9305078636578
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -2733,7 +3014,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -2762,7 +3046,10 @@
             0.0001299629878897194,
             1.5306593873334497e-05,
             -0.0004237943394905646
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 259200.0,
@@ -2791,7 +3078,10 @@
             -0.0010512526937494844,
             3.896032161623739e-08,
             -0.0012660886697674965
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1814400.0,
@@ -2820,7 +3110,10 @@
             -1.315218457528271,
             0.9650458823002325,
             0.6607120684293829
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3196800.0,
@@ -2849,7 +3142,10 @@
             183.88004214656843,
             -413.47966650123374,
             -447.4582338409079
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3628800.0,
@@ -2878,13 +3174,20 @@
             533.4818641843714,
             -22.443548117629323,
             -357.64359363635793
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v1_saturn",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2904,6 +3207,7 @@
           826.9305078636578
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -2954,7 +3258,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -2983,7 +3290,10 @@
             0.00012996394643368232,
             1.5307231834096745e-05,
             -0.0004237942893364118
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 259200.0,
@@ -3012,7 +3322,10 @@
             -0.0010512488746601879,
             4.105597814598114e-08,
             -0.0012660885052705698
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1814400.0,
@@ -3041,7 +3354,10 @@
             -1.3152180308109218,
             0.9650459837286042,
             0.6607120742579684
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3195900.0,
@@ -3070,7 +3386,10 @@
             85.38812571075931,
             -269.30715707701904,
             -317.00527064062567
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3628800.0,
@@ -3099,13 +3418,20 @@
             290.8731320303113,
             19.093842576162857,
             -282.5424090210553
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_saturn",
       "chapter": 1,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3125,6 +3451,7 @@
           628.4029205927233
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3175,7 +3502,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3204,7 +3534,10 @@
             0.018721936687725184,
             2.5495781407449436e-05,
             -0.006007931415293479
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 345600.0,
@@ -3233,7 +3566,10 @@
             0.07442299487234219,
             0.00016958722216501524,
             -0.024016226515547214
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -3262,7 +3598,10 @@
             0.0961750298218018,
             0.5993160685508214,
             0.8118514311649049
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3641000.0,
@@ -3291,7 +3630,10 @@
             -168.55025584412778,
             268.8170487590966,
             -156.94768163381949
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -3320,13 +3662,20 @@
             -45.8620036301228,
             -4.858513031106723,
             -125.62970025700628
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_saturn",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3346,6 +3695,7 @@
           628.4029205927233
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3396,7 +3746,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3425,7 +3778,10 @@
             -0.0007247145297030331,
             -0.0022719546156125224,
             -0.005674390095884574
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 345600.0,
@@ -3454,7 +3810,10 @@
             -0.003105322260852518,
             -0.009090993652718949,
             -0.022696286184241576
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -3483,7 +3842,10 @@
             -0.3403813385631607,
             0.5485046875838394,
             0.8180511069141588
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3641000.0,
@@ -3512,7 +3874,10 @@
             -24.48586467701827,
             138.21021655675656,
             -152.24521674523479
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -3541,13 +3906,20 @@
             -46.18967904575655,
             -5.155935059440659,
             -126.4637733938721
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_saturn",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3567,6 +3939,7 @@
           628.4029205927233
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3617,7 +3990,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3646,7 +4022,10 @@
             -0.0007247192892254039,
             -0.002271954359359184,
             -0.005674390238877988
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 345600.0,
@@ -3675,7 +4054,10 @@
             -0.0031053470889242313,
             -0.009090993731734701,
             -0.022696286730457756
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -3704,7 +4086,10 @@
             -0.3403823110596139,
             0.5485045308604247,
             0.8180511089422221
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3639600.0,
@@ -3733,7 +4118,10 @@
             111.84326491321616,
             -133.95662668683883,
             -125.66687464910328
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -3762,13 +4150,20 @@
             460.3498840915603,
             139.6805928816127,
             -126.42868238079681
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     },
     {
       "case": "v2_saturn",
       "chapter": 2,
+      "gravity_parameters": "rounded_mass",
+      "ephemeris_stage_curvature": "linear",
+      "giant_planet_state": "barycenter",
+      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3788,6 +4183,7 @@
           628.4029205927233
         ]
       },
+      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3838,7 +4234,10 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "initialization anchor",
+          "maneuver_status": "unknown"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3867,7 +4266,10 @@
             -0.0007247145463535916,
             -0.002271954625591456,
             -0.005674390097200342
-          ]
+          ],
+          "validation_role": "primary",
+          "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 345600.0,
@@ -3896,7 +4298,10 @@
             -0.003105322369652278,
             -0.00909099364969764,
             -0.02269628618869312
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1944000.0,
@@ -3925,7 +4330,10 @@
             -0.340381344488893,
             0.5485046865060202,
             0.8180511069358077
-          ]
+          ],
+          "validation_role": "diagnostic",
+          "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3641100.0,
@@ -3954,7 +4362,10 @@
             -26.25474567496936,
             136.63490169838772,
             -153.2776002695102
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 3888000.0,
@@ -3983,7 +4394,10 @@
             -43.3292647433879,
             -5.065015354235416,
             -126.43831317310986
-          ]
+          ],
+          "validation_role": "excluded",
+          "role_reason": "post-encounter state includes unmodeled maneuver history",
+          "maneuver_status": "post_maneuver"
         }
       ]
     }
@@ -3992,6 +4406,9 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+      "maneuver_status": "boundary",
       "elapsed_days": 20.0,
       "chapter1_position_error_km": 338.58032096679256,
       "chapter1_velocity_error_mps": 0.3618808901609073,
@@ -4002,6 +4419,9 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "post-correction approach without a replayable maneuver vector",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 22.5,
       "chapter1_position_error_km": 400.7162454020164,
       "chapter1_velocity_error_mps": 0.548893318134779,
@@ -4012,6 +4432,9 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "late_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 30.0,
       "chapter1_position_error_km": 675.8895280859023,
       "chapter1_velocity_error_mps": 0.41394713401977357,
@@ -4022,6 +4445,9 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 32.503319375000004,
       "chapter1_position_error_km": 904.8377346391785,
       "chapter1_velocity_error_mps": 25.652704365639664,
@@ -4032,6 +4458,9 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 45.0,
       "chapter1_position_error_km": 29289.431253903942,
       "chapter1_velocity_error_mps": 24.343060016045325,
@@ -4042,6 +4471,9 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+      "maneuver_status": "boundary",
       "elapsed_days": 20.0,
       "chapter1_position_error_km": 227.3244984958045,
       "chapter1_velocity_error_mps": 0.25236194333514805,
@@ -4052,6 +4484,9 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "inside a documented correction phase without a replayable inertial vector",
+      "maneuver_status": "boundary",
       "elapsed_days": 22.5,
       "chapter1_position_error_km": 283.60912246192146,
       "chapter1_velocity_error_mps": 0.26952228811048573,
@@ -4062,6 +4497,9 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "late_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+      "maneuver_status": "boundary",
       "elapsed_days": 30.0,
       "chapter1_position_error_km": 632.2747774479303,
       "chapter1_velocity_error_mps": 0.7133210654419028,
@@ -4072,6 +4510,9 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter and post-encounter correction history are not replayed",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 34.93672229166666,
       "chapter1_position_error_km": 1239.1710824141016,
       "chapter1_velocity_error_mps": 16.36105207448002,
@@ -4082,6 +4523,9 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 45.0,
       "chapter1_position_error_km": 60199.09698760914,
       "chapter1_velocity_error_mps": 75.94274665925636,
@@ -4092,6 +4536,9 @@
     {
       "case": "v1_saturn",
       "checkpoint": "early_approach",
+      "validation_role": "primary",
+      "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
+      "maneuver_status": "none_known",
       "elapsed_days": 1.0,
       "chapter1_position_error_km": 0.7285002867284305,
       "chapter1_velocity_error_mps": 0.01701144422259732,
@@ -4102,6 +4549,9 @@
     {
       "case": "v1_saturn",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+      "maneuver_status": "boundary",
       "elapsed_days": 3.0,
       "chapter1_position_error_km": 6.509332089644968,
       "chapter1_velocity_error_mps": 0.04981617219810787,
@@ -4112,6 +4562,9 @@
     {
       "case": "v1_saturn",
       "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 21.0,
       "chapter1_position_error_km": 2333.1664701548398,
       "chapter1_velocity_error_mps": 1.4522160795429924,
@@ -4122,6 +4575,9 @@
     {
       "case": "v1_saturn",
       "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 36.98990119212963,
       "chapter1_position_error_km": 6174.863920547962,
       "chapter1_velocity_error_mps": 388.24584032757184,
@@ -4132,6 +4588,9 @@
     {
       "case": "v1_saturn",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 42.0,
       "chapter1_position_error_km": 190861.73744516686,
       "chapter1_velocity_error_mps": 423.11028140945564,
@@ -4142,6 +4601,9 @@
     {
       "case": "v2_saturn",
       "checkpoint": "early_approach",
+      "validation_role": "primary",
+      "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
+      "maneuver_status": "none_known",
       "elapsed_days": 1.0,
       "chapter1_position_error_km": 0.8498583769305214,
       "chapter1_velocity_error_mps": 0.019662319376536688,
@@ -4152,6 +4614,9 @@
     {
       "case": "v2_saturn",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+      "maneuver_status": "boundary",
       "elapsed_days": 4.0,
       "chapter1_position_error_km": 13.549833828544603,
       "chapter1_velocity_error_mps": 0.07820223821375363,
@@ -4162,6 +4627,9 @@
     {
       "case": "v2_saturn",
       "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 22.5,
       "chapter1_position_error_km": 1672.4098133060538,
       "chapter1_velocity_error_mps": 1.0136725963884698,
@@ -4172,6 +4640,9 @@
     {
       "case": "v2_saturn",
       "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 42.141553020833335,
       "chapter1_position_error_km": 4870.770147467719,
       "chapter1_velocity_error_mps": 353.98357196189517,
@@ -4182,6 +4653,275 @@
     {
       "case": "v2_saturn",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 45.0,
+      "chapter1_position_error_km": 37015.73143689103,
+      "chapter1_velocity_error_mps": 133.82731452326195,
+      "chapter2_position_error_km": 37073.26376183482,
+      "chapter2_velocity_error_mps": 134.73364872111125,
+      "position_error_reduction_percent": -0.1554266867369122
+    }
+  ],
+  "primary_summary": [
+    {
+      "case": "v1_saturn",
+      "checkpoint": "early_approach",
+      "validation_role": "primary",
+      "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
+      "maneuver_status": "none_known",
+      "elapsed_days": 1.0,
+      "chapter1_position_error_km": 0.7285002867284305,
+      "chapter1_velocity_error_mps": 0.01701144422259732,
+      "chapter2_position_error_km": 0.01829887537942534,
+      "chapter2_velocity_error_mps": 0.00044353865510765844,
+      "position_error_reduction_percent": 97.48814438198748
+    },
+    {
+      "case": "v2_saturn",
+      "checkpoint": "early_approach",
+      "validation_role": "primary",
+      "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
+      "maneuver_status": "none_known",
+      "elapsed_days": 1.0,
+      "chapter1_position_error_km": 0.8498583769305214,
+      "chapter1_velocity_error_mps": 0.019662319376536688,
+      "chapter2_position_error_km": 0.26587948235613607,
+      "chapter2_velocity_error_mps": 0.006155135407546993,
+      "position_error_reduction_percent": 68.71484831197087
+    }
+  ],
+  "diagnostic_summary": [
+    {
+      "case": "v1_jupiter",
+      "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
+      "maneuver_status": "boundary",
+      "elapsed_days": 20.0,
+      "chapter1_position_error_km": 338.58032096679256,
+      "chapter1_velocity_error_mps": 0.3618808901609073,
+      "chapter2_position_error_km": 33.69857169438939,
+      "chapter2_velocity_error_mps": 0.07460407916015303,
+      "position_error_reduction_percent": 90.04709677214392
+    },
+    {
+      "case": "v1_jupiter",
+      "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "post-correction approach without a replayable maneuver vector",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 22.5,
+      "chapter1_position_error_km": 400.7162454020164,
+      "chapter1_velocity_error_mps": 0.548893318134779,
+      "chapter2_position_error_km": 133.29835883164282,
+      "chapter2_velocity_error_mps": 0.5662238567665515,
+      "position_error_reduction_percent": 66.73497509492984
+    },
+    {
+      "case": "v1_jupiter",
+      "checkpoint": "late_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 30.0,
+      "chapter1_position_error_km": 675.8895280859023,
+      "chapter1_velocity_error_mps": 0.41394713401977357,
+      "chapter2_position_error_km": 555.3206400177319,
+      "chapter2_velocity_error_mps": 1.0137429256544963,
+      "position_error_reduction_percent": 17.838549505215397
+    },
+    {
+      "case": "v2_jupiter",
+      "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
+      "maneuver_status": "boundary",
+      "elapsed_days": 20.0,
+      "chapter1_position_error_km": 227.3244984958045,
+      "chapter1_velocity_error_mps": 0.25236194333514805,
+      "chapter2_position_error_km": 99.3662586000908,
+      "chapter2_velocity_error_mps": 0.1421673163113676,
+      "position_error_reduction_percent": 56.288803337259004
+    },
+    {
+      "case": "v2_jupiter",
+      "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "inside a documented correction phase without a replayable inertial vector",
+      "maneuver_status": "boundary",
+      "elapsed_days": 22.5,
+      "chapter1_position_error_km": 283.60912246192146,
+      "chapter1_velocity_error_mps": 0.26952228811048573,
+      "chapter2_position_error_km": 134.5345322017574,
+      "chapter2_velocity_error_mps": 0.1868577990297835,
+      "position_error_reduction_percent": 52.56339745565816
+    },
+    {
+      "case": "v2_jupiter",
+      "checkpoint": "late_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score",
+      "maneuver_status": "boundary",
+      "elapsed_days": 30.0,
+      "chapter1_position_error_km": 632.2747774479303,
+      "chapter1_velocity_error_mps": 0.7133210654419028,
+      "chapter2_position_error_km": 575.5358026213137,
+      "chapter2_velocity_error_mps": 0.9028379473543827,
+      "position_error_reduction_percent": 8.97378431820954
+    },
+    {
+      "case": "v1_saturn",
+      "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+      "maneuver_status": "boundary",
+      "elapsed_days": 3.0,
+      "chapter1_position_error_km": 6.509332089644968,
+      "chapter1_velocity_error_mps": 0.04981617219810787,
+      "chapter2_position_error_km": 0.17851994787141812,
+      "chapter2_velocity_error_mps": 0.0016456318657696808,
+      "position_error_reduction_percent": 97.25747672091569
+    },
+    {
+      "case": "v1_saturn",
+      "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 21.0,
+      "chapter1_position_error_km": 2333.1664701548398,
+      "chapter1_velocity_error_mps": 1.4522160795429924,
+      "chapter2_position_error_km": 2613.1227980419103,
+      "chapter2_velocity_error_mps": 1.760014959745756,
+      "position_error_reduction_percent": -11.9989864190227
+    },
+    {
+      "case": "v2_saturn",
+      "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+      "maneuver_status": "boundary",
+      "elapsed_days": 4.0,
+      "chapter1_position_error_km": 13.549833828544603,
+      "chapter1_velocity_error_mps": 0.07820223821375363,
+      "chapter2_position_error_km": 4.256615375311923,
+      "chapter2_velocity_error_mps": 0.024645701420217634,
+      "position_error_reduction_percent": 68.58547913447637
+    },
+    {
+      "case": "v2_saturn",
+      "checkpoint": "mid_arc",
+      "validation_role": "diagnostic",
+      "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 22.5,
+      "chapter1_position_error_km": 1672.4098133060538,
+      "chapter1_velocity_error_mps": 1.0136725963884698,
+      "chapter2_position_error_km": 1725.5515847062604,
+      "chapter2_velocity_error_mps": 1.0420769940205834,
+      "position_error_reduction_percent": -3.177556779289334
+    }
+  ],
+  "excluded_summary": [
+    {
+      "case": "v1_jupiter",
+      "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 32.503319375000004,
+      "chapter1_position_error_km": 904.8377346391785,
+      "chapter1_velocity_error_mps": 25.652704365639664,
+      "chapter2_position_error_km": 1708.8183782827505,
+      "chapter2_velocity_error_mps": 80.50152438376857,
+      "position_error_reduction_percent": -88.85357151513743
+    },
+    {
+      "case": "v1_jupiter",
+      "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 45.0,
+      "chapter1_position_error_km": 29289.431253903942,
+      "chapter1_velocity_error_mps": 24.343060016045325,
+      "chapter2_position_error_km": 35494.56382865734,
+      "chapter2_velocity_error_mps": 28.815520594232446,
+      "position_error_reduction_percent": -21.18556868162581
+    },
+    {
+      "case": "v2_jupiter",
+      "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter and post-encounter correction history are not replayed",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 34.93672229166666,
+      "chapter1_position_error_km": 1239.1710824141016,
+      "chapter1_velocity_error_mps": 16.36105207448002,
+      "chapter2_position_error_km": 2157.119245599024,
+      "chapter2_velocity_error_mps": 44.596499015695564,
+      "position_error_reduction_percent": -74.07759721092053
+    },
+    {
+      "case": "v2_jupiter",
+      "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 45.0,
+      "chapter1_position_error_km": 60199.09698760914,
+      "chapter1_velocity_error_mps": 75.94274665925636,
+      "chapter2_position_error_km": 62618.40250361525,
+      "chapter2_velocity_error_mps": 78.18461705275998,
+      "position_error_reduction_percent": -4.018840210350798
+    },
+    {
+      "case": "v1_saturn",
+      "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 36.98990119212963,
+      "chapter1_position_error_km": 6174.863920547962,
+      "chapter1_velocity_error_mps": 388.24584032757184,
+      "chapter2_position_error_km": 6496.068696052292,
+      "chapter2_velocity_error_mps": 423.6026512927911,
+      "position_error_reduction_percent": -5.201811402441813
+    },
+    {
+      "case": "v1_saturn",
+      "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 42.0,
+      "chapter1_position_error_km": 190861.73744516686,
+      "chapter1_velocity_error_mps": 423.11028140945564,
+      "chapter2_position_error_km": 182531.9607643122,
+      "chapter2_velocity_error_mps": 404.6505182557545,
+      "position_error_reduction_percent": 4.364298885861147
+    },
+    {
+      "case": "v2_saturn",
+      "checkpoint": "closest_approach",
+      "validation_role": "excluded",
+      "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses",
+      "maneuver_status": "post_maneuver",
+      "elapsed_days": 42.141553020833335,
+      "chapter1_position_error_km": 4870.770147467719,
+      "chapter1_velocity_error_mps": 353.98357196189517,
+      "chapter2_position_error_km": 2517.6072171372825,
+      "chapter2_velocity_error_mps": 207.0754151304551,
+      "position_error_reduction_percent": 48.31192725351308
+    },
+    {
+      "case": "v2_saturn",
+      "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
+      "maneuver_status": "post_maneuver",
       "elapsed_days": 45.0,
       "chapter1_position_error_km": 37015.73143689103,
       "chapter1_velocity_error_mps": 133.82731452326195,
@@ -4194,6 +4934,8 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 33.711215867221874,
@@ -4206,6 +4948,8 @@
     {
       "case": "v1_jupiter",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 245827.21119258954,
@@ -4218,6 +4962,8 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 99.39163294651752,
@@ -4230,6 +4976,8 @@
     {
       "case": "v2_jupiter",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 76072.82415395082,
@@ -4242,6 +4990,8 @@
     {
       "case": "v1_saturn",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 0.17851896850641916,
@@ -4253,6 +5003,8 @@
     {
       "case": "v1_saturn",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 288914.9685943234,
@@ -4264,6 +5016,8 @@
     {
       "case": "v2_saturn",
       "checkpoint": "clean_approach",
+      "validation_role": "diagnostic",
+      "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 4.256615712513273,
@@ -4275,6 +5029,8 @@
     {
       "case": "v2_saturn",
       "checkpoint": "end",
+      "validation_role": "excluded",
+      "role_reason": "post-encounter state includes unmodeled maneuver history",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
         "3600": 125846.633010589,

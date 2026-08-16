@@ -64,6 +64,32 @@ checkpoints are recorded in the manifest. The closest-approach epochs were
 derived by minimizing the spacecraft-to-native-center distance within each
 selected reconstructed segment.
 
+## Maneuver-aware checkpoint contract
+
+The validation harness labels every checkpoint as `primary`, `diagnostic`, or
+`excluded`. This is executable: the role, maneuver status, and reason are copied
+into every metric and into the result summaries.
+
+| Role | Use |
+| --- | --- |
+| **Primary** | Headline Chapter 1/2 score for an initialization anchor or documented pre-maneuver approach point. |
+| **Diagnostic** | Trend evidence that overlaps a correction boundary or lacks a replayable inertial maneuver vector. |
+| **Excluded** | Retained for visibility, but not used for accuracy claims because close-encounter or post-maneuver dynamics are not a controlled replay. |
+
+The contract is conservative. Voyager 1 Saturn's Oct 8 point and Voyager 2
+Saturn's Jul 16 point are primary pre-A-8/pre-B-8 windows. Jupiter clean/mid/late
+points remain diagnostics because the published TCM windows do not provide
+complete inertial vectors for a controlled replay. Closest-approach and
+post-encounter points are excluded from headline claims for all four arcs.
+
+The audit uses the NASA/JPL operations and cruise reports cited in the manifest:
+Voyager 1 Jupiter correction activity around Jan 29/Feb 20, Voyager 2 Jupiter
+TCM-3/4/5 phases, Voyager 1 Saturn A-8/A-9, and Voyager 2 Saturn B-7/B-8/B-9.
+Those reports provide dates and phase windows, and sometimes burn magnitudes and
+attitude descriptions, but not a complete inertial delta-v vector for every
+event. Until that data exists, post-maneuver error cannot be attributed to the
+force model alone.
+
 ## Kernel precedence
 
 SPICE gives a competing segment from the file loaded later higher priority.
@@ -104,9 +130,11 @@ and in the truth trajectory's radial-transverse-normal basis.
 | V2 Saturn | 1 | 0.850 km | 0.266 km | **68.71%** | 0.0197 m/s | 0.0062 m/s |
 | V2 Saturn | 4 | 13.550 km | 4.257 km | **68.59%** | 0.0782 m/s | 0.0246 m/s |
 
-Chapter 2 reduces position disagreement at all eight selected maneuver-free
-approach checkpoints. At the earlier checkpoints it also reduces velocity
-disagreement. The two
+Chapter 2 reduces position disagreement at both controlled primary approach
+checkpoints and at the four legacy `clean_approach` diagnostics. The revised
+contract distinguishes those controlled scores from diagnostic checkpoints; it
+does not hide the diagnostic mid-arc regressions. At the earlier checkpoints it
+also reduces velocity disagreement. The two
 Jupiter day-30 velocity values are not improvements, even though their
 position values remain smaller. They are reported rather than hidden: the
 simple point-mass model is approaching a close-encounter regime where omitted
@@ -114,10 +142,11 @@ physics and trajectory events become more important.
 
 The defensible Chapter 2 conclusion is consequently narrow and strong:
 
-> The heliocentric indirect-acceleration correction materially improves all
-> four reconstructed, pre-encounter position comparisons. It is not a claim
-> that the educational gravity model reconstructs each flyby or every velocity
-> component throughout an encounter arc.
+> The heliocentric indirect-acceleration correction materially improves the
+> controlled pre-maneuver position comparisons and the clean-approach trend
+> across all four reconstructed arcs. It is not a claim that the educational
+> gravity model reconstructs each flyby or every velocity component throughout
+> an encounter arc.
 
 The labeled mid-arc, closest-approach, and end checkpoints deliberately remain
 in the result artifact even when Chapter 2 is worse. They expose where omitted

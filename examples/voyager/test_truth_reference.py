@@ -71,6 +71,29 @@ def test_kernel_precedence_is_unambiguous():
     assert load_order[-2:] == ["<case encounter kernel>", "de440.bsp"]
 
 
+def test_checkpoint_contract_has_one_explicit_role_per_checkpoint():
+    manifest = load_manifest()
+    assert set(manifest["checkpoint_contract"]) >= {
+        "version",
+        "primary_definition",
+        "diagnostic_definition",
+        "excluded_definition",
+        "sources",
+        "maneuver_evidence",
+    }
+    for case in manifest["cases"]:
+        checkpoints = case["checkpoints"]
+        assert all(
+            checkpoint["validation_role"] in {"primary", "diagnostic", "excluded"}
+            for checkpoint in checkpoints
+        )
+        assert all(
+            checkpoint["role_reason"] and checkpoint["maneuver_status"]
+            for checkpoint in checkpoints
+        )
+        assert sum(checkpoint["validation_role"] == "primary" for checkpoint in checkpoints) >= 1
+
+
 def test_validation_start_utc_controls_database_epoch():
     assert utc_epoch_microseconds("1978-01-01T00:00:00") == 252_460_800_000_000
     assert utc_epoch_microseconds("1979-02-01T00:00:00Z") == 286_675_200_000_000
@@ -131,6 +154,10 @@ def test_checked_in_baseline_matches_the_contract():
     clean_rows = [row for row in results["summary"] if row["checkpoint"] == "clean_approach"]
     assert len(clean_rows) == len(cases)
     assert all(row["position_error_reduction_percent"] > 0 for row in clean_rows)
+    assert results["primary_summary"]
+    assert all(row["validation_role"] == "primary" for row in results["primary_summary"])
+    assert all(row["validation_role"] != "excluded" for row in results["diagnostic_summary"])
+    assert all(row["validation_role"] == "excluded" for row in results["excluded_summary"])
     assert len(results["timestep_controls"]) == len(cases) * 2
     for control in results["timestep_controls"]:
         case = cases[control["case"]]
