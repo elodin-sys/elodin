@@ -28,7 +28,7 @@ use bevy::{
     math::{DVec3, Mat4, Vec3, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup, ViewKeyCache},
-    prelude::{Color, Reflect, Resource},
+    prelude::{Color, Reflect, Resource, warn_once},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -646,6 +646,18 @@ fn anchor_local(sample: DVec3, anchor: DVec3) -> Vec3 {
     (sample - anchor).as_vec3()
 }
 
+/// Residual length at which f32 ULP exceeds 1 cm (`M * 2^-23 > 0.01`).
+///
+/// First-point subtract only helps when the leftover is small. A zero (or
+/// otherwise far) first sample leaves Earth-radius ECEF intact and the GPU
+/// `f32` cast staircases again (~0.5 m ULP at 6.4e6 m).
+const F32_ANCHOR_RESIDUAL_WARN_M: f64 = 0.01 * ((1u32 << 23) as f64);
+const F32_ANCHOR_RESIDUAL_WARN_M_SQ: f64 = F32_ANCHOR_RESIDUAL_WARN_M * F32_ANCHOR_RESIDUAL_WARN_M;
+
+fn f32_residual_too_large(residual: DVec3) -> bool {
+    residual.length_squared() > F32_ANCHOR_RESIDUAL_WARN_M_SQ
+}
+
 /// Build dense first-point-relative XYZ value buffers + remapped strip indices.
 ///
 /// `anchor` is the line's first sample in frame coordinates (entity
@@ -660,7 +672,7 @@ fn write_anchor_local_line_buffers(
     anchor: DVec3,
     render_device: &RenderDevice,
     render_queue: &RenderQueue,
-) -> Option<([Buffer; 3], [Buffer; 3], u32)> {
+) -> Option<([Buffer; 3], [Buffer; 3], u32, bool)> {
     let n = xs.len().min(ys.len()).min(zs.len());
     if n < 2 {
         return None;
@@ -671,8 +683,11 @@ fn write_anchor_local_line_buffers(
     let mut x_local = vec![f32::NAN; n + 1];
     let mut y_local = vec![f32::NAN; n + 1];
     let mut z_local = vec![f32::NAN; n + 1];
+    let mut residual_too_large = false;
     for i in 0..n {
-        let local = anchor_local(DVec3::new(xs[i], ys[i], zs[i]), anchor);
+        let residual = DVec3::new(xs[i], ys[i], zs[i]) - anchor;
+        residual_too_large |= f32_residual_too_large(residual);
+        let local = residual.as_vec3();
         x_local[i + 1] = local.x;
         y_local[i + 1] = local.y;
         z_local[i + 1] = local.z;
@@ -717,7 +732,7 @@ fn write_anchor_local_line_buffers(
 
     let _ = render_queue;
 
-    Some((value_bufs, index_bufs, count))
+    Some((value_bufs, index_bufs, count, residual_too_large))
 }
 
 fn extract_lines(
@@ -924,14 +939,21 @@ fn extract_lines(
                 let ys = axis_values(1);
                 let zs = axis_values(2);
 
-                let (value_buffers, index_buffers, count) = write_anchor_local_line_buffers(
-                    &xs,
-                    &ys,
-                    &zs,
-                    line_anchor,
-                    &render_device,
-                    &render_queue,
-                )?;
+                let (value_buffers, index_buffers, count, residual_too_large) =
+                    write_anchor_local_line_buffers(
+                        &xs,
+                        &ys,
+                        &zs,
+                        line_anchor,
+                        &render_device,
+                        &render_queue,
+                    )?;
+                if residual_too_large {
+                    let eql = line_3d.map(|l| l.eql.as_str()).unwrap_or("<unknown>");
+                    warn_once!(
+                        "line_3d first-point subtract left a residual large enough that f32 ULP is visible (usually a zero/near-zero first sample): {eql}"
+                    );
+                }
 
                 let value_entries = [0, 1, 2].map(|i| BindGroupEntry {
                     binding: i as u32,
@@ -1228,6 +1250,33 @@ mod tests {
             .zip(zs)
             .map(|((x, y), z)| anchor_local(DVec3::new(x, y, z), anchor))
             .collect()
+    }
+
+    #[test]
+    fn zero_anchor_on_ecef_defeats_f32_subtract() {
+        let samples = ecef_ramp(64);
+        assert!(
+            samples
+                .iter()
+                .any(|&p| f32_residual_too_large(p - DVec3::ZERO))
+        );
+        assert!(
+            !samples
+                .iter()
+                .any(|&p| f32_residual_too_large(p - samples[0]))
+        );
+    }
+
+    #[test]
+    fn short_local_trail_from_origin_stays_quiet() {
+        let samples: Vec<DVec3> = (0..32)
+            .map(|i| DVec3::new(i as f64 * 0.5, 2.0, -1.0))
+            .collect();
+        assert!(
+            !samples
+                .iter()
+                .any(|&p| f32_residual_too_large(p - DVec3::ZERO))
+        );
     }
 
     #[test]
