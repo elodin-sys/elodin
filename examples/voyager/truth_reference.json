@@ -16,12 +16,23 @@
     "initialization": "query the selected reconstructed segment at initialization_utc",
     "scoring": "query that same selected segment at each predeclared checkpoint",
     "planet_state_source": "de440.bsp",
+    "planet_spice_names": [
+      "MERCURY BARYCENTER",
+      "VENUS BARYCENTER",
+      "EARTH",
+      "MARS BARYCENTER",
+      "JUPITER BARYCENTER",
+      "SATURN BARYCENTER",
+      "URANUS BARYCENTER",
+      "NEPTUNE BARYCENTER"
+    ],
     "model_parameters": "preserve each chapter's existing G multiplied by rounded body masses",
     "integrator": "Elodin six_dof classical RK4"
   },
   "checkpoint_contract": {
     "version": 1,
-    "primary_definition": "A primary score must lie in a documented maneuver-free pre-encounter window, or be the initialization anchor. Encounter and post-maneuver points remain useful diagnostics but are not headline Chapter 1/2 accuracy claims.",
+    "anchor_definition": "Initialization audit only. Position and velocity error are identically zero by construction and are not a Chapter 1/2 accuracy score.",
+    "primary_definition": "A primary score must lie in a documented maneuver-free pre-encounter window. Initialization is an anchor, not a headline score. Encounter and post-maneuver points remain useful diagnostics but are not headline Chapter 1/2 accuracy claims.",
     "diagnostic_definition": "A diagnostic score is retained for visibility but overlaps a maneuver phase, an undocumented correction boundary, or an encounter where the simplified force model is not a like-for-like replay.",
     "excluded_definition": "An excluded score is not used for Chapter 1/2 accuracy claims because a documented maneuver or close-encounter event is known to invalidate an uncontrolled comparison.",
     "sources": [
@@ -101,7 +112,7 @@
       "scoring_end_utc": "1979-03-18T00:00:00",
       "duration_days": 45,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor", "maneuver_status": "unknown"},
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit after the Jan 29 correction; not a scientific score", "maneuver_status": "post_maneuver"},
         {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available", "maneuver_status": "boundary"},
         {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "post-correction approach without a replayable maneuver vector", "maneuver_status": "post_maneuver"},
         {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay", "maneuver_status": "post_maneuver"},
@@ -126,7 +137,7 @@
       "scoring_end_utc": "1979-07-20T00:00:00",
       "duration_days": 45,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor; first usable state in this reconstructed arc", "maneuver_status": "unknown"},
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score", "maneuver_status": "boundary"},
         {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases", "maneuver_status": "boundary"},
         {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "inside a documented correction phase without a replayable inertial vector", "maneuver_status": "boundary"},
         {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score", "maneuver_status": "boundary"},
@@ -151,7 +162,7 @@
       "scoring_end_utc": "1980-11-18T00:00:00",
       "duration_days": 42,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor", "maneuver_status": "unknown"},
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit in the documented pre-A-8 window; not a scientific score", "maneuver_status": "none_known"},
         {"name": "early_approach", "elapsed_seconds": 86400, "phase": "pre-A-8 approach", "validation_role": "primary", "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn", "maneuver_status": "none_known"},
         {"name": "clean_approach", "elapsed_seconds": 259200, "phase": "A-8 boundary", "validation_role": "diagnostic", "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window", "maneuver_status": "boundary"},
         {"name": "mid_arc", "elapsed_seconds": 1814400, "phase": "post-A-8 approach", "validation_role": "diagnostic", "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed", "maneuver_status": "post_maneuver"},
@@ -159,7 +170,7 @@
         {"name": "end", "elapsed_seconds": 3628800, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
       ],
       "convergence_timesteps_s": [3600, 300, 100],
-      "convergence_checkpoint": "clean_approach",
+      "convergence_checkpoint": "early_approach",
       "solution_status": "current-best encounter solution identified by the NAIF Voyager kernel archive; case begins after its center transition"
     },
     {
@@ -176,7 +187,7 @@
       "scoring_end_utc": "1981-08-29T00:00:00",
       "duration_days": 45,
       "checkpoints": [
-        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "primary", "role_reason": "initialization anchor", "maneuver_status": "unknown"},
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit in the documented pre-B-8 window; not a scientific score", "maneuver_status": "none_known"},
         {"name": "early_approach", "elapsed_seconds": 86400, "phase": "pre-B-8 approach", "validation_role": "primary", "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity", "maneuver_status": "none_known"},
         {"name": "clean_approach", "elapsed_seconds": 345600, "phase": "B-8 boundary", "validation_role": "diagnostic", "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary", "maneuver_status": "boundary"},
         {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "post-B-8 approach", "validation_role": "diagnostic", "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed", "maneuver_status": "post_maneuver"},
@@ -184,7 +195,7 @@
         {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
       ],
       "convergence_timesteps_s": [3600, 300, 100],
-      "convergence_checkpoint": "clean_approach",
+      "convergence_checkpoint": "early_approach",
       "solution_status": "current-best encounter solution identified by the NAIF Voyager kernel archive"
     }
   ],

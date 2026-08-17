@@ -72,17 +72,20 @@ into every metric and into the result summaries.
 
 | Role | Use |
 | --- | --- |
-| **Primary** | Headline Chapter 1/2 score for an initialization anchor or documented pre-maneuver approach point. |
+| **Anchor** | Initialization audit only. Error is identically zero by construction and is not a Chapter 1/2 accuracy score. |
+| **Primary** | Headline Chapter 1/2 score for a documented pre-maneuver approach point. |
 | **Diagnostic** | Trend evidence that overlaps a correction boundary or lacks a replayable inertial maneuver vector. |
 | **Excluded** | Retained for visibility, but not used for accuracy claims because close-encounter or post-maneuver dynamics are not a controlled replay. |
 
-The contract is conservative. The only primary approach scores in this baseline
-are Voyager 1 Saturn on Oct 8 (pre-A-8) and Voyager 2 Saturn on Jul 16
-(pre-B-8). Jupiter `clean`/`mid`/`late` points remain diagnostics: the
-Voyager 1 reconstructed arc begins after the Jan 29 correction and its day-20
-point is after the Feb 20 window, while Voyager 2 starts inside the TCM-3
-phase. Closest-approach and post-encounter points are excluded from headline
-claims for all four arcs.
+The contract is conservative. `start` is an initialization **anchor**, not a
+score. The only primary approach scores in this baseline are Voyager 1 Saturn
+on Oct 8 (pre-A-8) and Voyager 2 Saturn on Jul 16 (pre-B-8). Jupiter
+`clean`/`mid`/`late` points remain diagnostics: the Voyager 1 reconstructed
+arc begins after the Jan 29 correction and its day-20 point is after the
+Feb 20 window, while Voyager 2 starts inside the TCM-3 phase. Saturn
+`clean_approach` is the A-8/B-8 boundary and is diagnostic, not a clean
+pre-maneuver score. Closest-approach and post-encounter points are excluded
+from headline claims for all four arcs.
 
 A later campaign can add a Voyager 1 Jupiter checkpoint strictly before Feb 20
 without changing Chapters 1 or 2. That is a contract extension, not a
@@ -111,8 +114,10 @@ The encounter file wins for the selected spacecraft target. DE440 wins for the
 planetary targets that are also embedded in the merged kernels. The harness
 uses SPICE's segment-selection API to verify the winning spacecraft file,
 segment, target, center, native frame, and type at both initialization and the
-end of the scoring interval. A run fails instead of producing metrics if that
-selection differs from the manifest.
+end of the scoring interval. It also records the winning planetary segment for
+every declared planet at those same epochs and fails if that file is not
+`de440.bsp`. A run fails instead of producing metrics if either selection
+differs from the manifest.
 
 See [NAIF's SPK data-precedence documentation](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/spk.html#Data%20Precedence).
 
@@ -175,19 +180,26 @@ approach-only score to stand in for flyby reconstruction:
 ## Timestep control and the remaining floor
 
 The investigation also ran the Jupiter cases at 3,600, 900, 300, and 100
-seconds and the Saturn cases at 3,600, 300, and 100 seconds. At clean Chapter 2
-checkpoints, the full position-error spread was:
+seconds and the Saturn cases at 3,600, 300, and 100 seconds.
 
-| Case | Checkpoint | Position-error spread |
-| --- | ---: | ---: |
-| V1 Jupiter | day 20 | 0.0126 km |
-| V2 Jupiter | day 20 | 0.0254 km |
-| V1 Saturn | day 3 | <0.000002 km |
-| V2 Saturn | day 4 | <0.000002 km |
+Saturn timestep controls use the **primary** `early_approach` points (V1 Oct 8
+pre-A-8, V2 Jul 16 pre-B-8). Jupiter has no primary approach window, so its
+controls use the **diagnostic** `clean_approach` points (day 20). Those Jupiter
+points are not called clean force-model scores; they sit near documented TCM
+windows. Saturn `clean_approach` (day 3 / day 4) is the A-8 / B-8 boundary and
+is diagnostic only — it is not used for convergence headlines.
+
+| Case | Checkpoint | Role | Position-error spread |
+| --- | ---: | --- | ---: |
+| V1 Saturn | day 1 `early_approach` | primary | 3.6e-8 km |
+| V2 Saturn | day 1 `early_approach` | primary | 9.2e-8 km |
+| V1 Jupiter | day 20 `clean_approach` | diagnostic | 0.0126 km |
+| V2 Jupiter | day 20 `clean_approach` | diagnostic | 0.0254 km |
 
 Those spreads are far smaller than the Chapter 1-to-Chapter 2 changes, so the
-clean-approach improvement is a force-model effect rather than ordinary RK4
-truncation error.
+primary Saturn improvement is a force-model effect rather than ordinary RK4
+truncation error. The diagnostic Jupiter day-20 spreads support the same
+numerical conclusion without promoting those points to headline scores.
 
 One-hour integration is inadequate through the close flybys. Smaller steps
 reduce that numerical error, but a substantial residual remains because the
@@ -213,6 +225,23 @@ interval in the NAIF Voyager archive or NASA technical material surveyed.
 The merged SPKs can therefore support a claim of **agreement with the published
 mission-design/supertrajectory reference** during that interval. This work does
 not label the same comparison **absolute navigation accuracy**.
+
+## Tutorial database epoch
+
+The interactive example's SPICE start string is `1978-01-01T00:00:00`.
+Propagation has always used `spice.utc2et` of that string.
+
+The Elodin-DB `start_timestamp` was previously hardcoded to
+`252_452_400_000_000` (1977-12-31 21:40:00 UTC), 8400 seconds earlier than
+UTC midnight on 1978-01-01. That offset did not change the force model or
+SPICE queries. It only mislabeled sample wall-clock times in the tutorial
+database.
+
+`utc_epoch_microseconds` now converts the same UTC string the SPICE query
+uses. The tutorial DB epoch is `252_460_800_000_000`. Validation cases use
+each reconstructed-arc `initialization_utc` the same way. Existing tutorial
+databases recorded under the old constant are 8400 seconds behind UTC; create
+a new `DB_PATH` if you need the labels to match.
 
 That is a data limitation, not a force-model diagnosis. If a navigation-grade
 cruise reconstruction becomes available, it can be added as another manifest
@@ -241,10 +270,15 @@ uv run python examples/voyager/validate_truth.py --include-convergence
 
 The command verifies every required SHA-256 before propagation, runs both
 chapters across all four cases, adds the declared Chapter 2 timestep-control
-matrix, audits active segment precedence, and writes
+matrix, audits spacecraft and DE440 planetary segment precedence, and writes
 `examples/voyager/truth_validation_results.json`. The checked-in artifact
 contains 18 runs: eight 100-second Chapter 1/2 baselines and ten additional
 Chapter 2 convergence runs.
+
+This refresh did not rerun those 18 native propagations. Residuals are the
+previous campaign. The contract labels, Saturn `early_approach` timestep
+controls, and DE440 planetary segment audits were rebuilt from that artifact
+plus a live SPICE load-order check.
 
 For a focused reproduction:
 

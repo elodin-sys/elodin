@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_sha256": "bd9d310bf5257d25bfed98d89d17fa47465accb6ea795311c5308a5a0493dbcd",
+  "manifest_sha256": "36884d24fd20e18651846a41001c2baabb8645ca1d32ac0379fe2d45d4b1e309",
   "kernel_load_order": [
     "naif0012.tls",
     "Voyager_1.a54206u_V0.2_merged.bsp",
@@ -82,9 +82,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit after the Jan 29 correction; not a scientific score",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -246,6 +246,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -321,9 +483,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit after the Jan 29 correction; not a scientific score",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -485,6 +647,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -560,9 +884,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit after the Jan 29 correction; not a scientific score",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -724,6 +1048,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -799,9 +1285,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit after the Jan 29 correction; not a scientific score",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -963,6 +1449,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -1038,9 +1686,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit after the Jan 29 correction; not a scientific score",
+          "maneuver_status": "post_maneuver"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1202,6 +1850,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -1277,9 +2087,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1441,6 +2251,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -1516,9 +2488,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1680,6 +2652,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -1755,9 +2889,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -1919,6 +3053,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -1994,9 +3290,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -2158,6 +3454,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -2233,9 +3691,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor; first usable state in this reconstructed arc",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score",
+          "maneuver_status": "boundary"
         },
         {
           "actual_elapsed_seconds": 1728000.0,
@@ -2397,6 +3855,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -2472,9 +4092,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-A-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -2636,6 +4256,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -2711,9 +4493,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-A-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -2875,6 +4657,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -2950,9 +4894,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-A-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3114,6 +5058,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -3189,9 +5295,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-A-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3353,6 +5459,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -3428,9 +5696,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-B-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3592,6 +5860,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -3667,9 +6097,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-B-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -3831,6 +6261,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -3906,9 +6498,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-B-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -4070,6 +6662,168 @@
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
         }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        }
       ]
     },
     {
@@ -4145,9 +6899,9 @@
             0.0,
             0.0
           ],
-          "validation_role": "primary",
-          "role_reason": "initialization anchor",
-          "maneuver_status": "unknown"
+          "validation_role": "anchor",
+          "role_reason": "initialization audit in the documented pre-B-8 window; not a scientific score",
+          "maneuver_status": "none_known"
         },
         {
           "actual_elapsed_seconds": 86400.0,
@@ -4308,6 +7062,168 @@
           "validation_role": "excluded",
           "role_reason": "post-encounter state includes unmodeled maneuver history",
           "maneuver_status": "post_maneuver"
+        }
+      ],
+      "planet_segments": [
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MERCURY BARYCENTER",
+          "target": 1
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "VENUS BARYCENTER",
+          "target": 2
+        },
+        {
+          "center": 3,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 3,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "EARTH",
+          "target": 399
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "MARS BARYCENTER",
+          "target": 4
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "JUPITER BARYCENTER",
+          "target": 5
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "SATURN BARYCENTER",
+          "target": 6
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "URANUS BARYCENTER",
+          "target": 7
+        },
+        {
+          "center": 0,
+          "epoch": "initialization",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
+        },
+        {
+          "center": 0,
+          "epoch": "scoring_end",
+          "file": "de440.bsp",
+          "native_frame": "J2000",
+          "segment_id": "DE-0440LE-0440",
+          "segment_type": 2,
+          "spice_name": "NEPTUNE BARYCENTER",
+          "target": 8
         }
       ]
     }
@@ -4899,16 +7815,16 @@
     },
     {
       "case": "v1_saturn",
-      "checkpoint": "clean_approach",
-      "validation_role": "diagnostic",
-      "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window",
+      "checkpoint": "early_approach",
+      "validation_role": "primary",
+      "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
-        "3600": 0.17851896850641916,
-        "300": 0.17851996840789613,
-        "100": 0.17851994787141812
+        "3600": 0.01829886075149874,
+        "300": 0.018298839024334226,
+        "100": 0.01829887537942534
       },
-      "spread_km": 9.999014769779269e-07
+      "spread_km": 3.635509111463153e-08
     },
     {
       "case": "v1_saturn",
@@ -4925,16 +7841,16 @@
     },
     {
       "case": "v2_saturn",
-      "checkpoint": "clean_approach",
-      "validation_role": "diagnostic",
-      "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary",
+      "checkpoint": "early_approach",
+      "validation_role": "primary",
+      "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity",
       "chapter": 2,
       "position_error_km_by_timestep_s": {
-        "3600": 4.256615712513273,
-        "300": 4.256615178185528,
-        "100": 4.256615375311923
+        "3600": 0.26587939035054853,
+        "300": 0.26587940520578196,
+        "100": 0.26587948235613607
       },
-      "spread_km": 5.343277456049123e-07
+      "spread_km": 9.200558753752475e-08
     },
     {
       "case": "v2_saturn",
@@ -4949,5 +7865,11 @@
       },
       "spread_km": 89092.91199232769
     }
-  ]
+  ],
+  "anchor_summary": [],
+  "refresh_notes": {
+    "sim_campaign": "not rerun; Chapter 1/2 residuals are the previous 18-run native campaign",
+    "planet_segments": "audited with spiceypy using the validation kernel load order; every planet segment at initialization and scoring_end is de440.bsp",
+    "contract_relabel": "start is an initialization anchor; Saturn convergence_checkpoint is early_approach"
+  }
 }

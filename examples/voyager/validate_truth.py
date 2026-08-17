@@ -7,13 +7,12 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import Any
-
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXAMPLE_DIR.parents[1]
@@ -23,8 +22,10 @@ DEFAULT_OUTPUT = EXAMPLE_DIR / "truth_validation_results.json"
 
 METRIC_PREFIX = "VOYAGER_VALIDATION_METRIC "
 SEGMENT_PREFIX = "VOYAGER_ACTIVE_SEGMENT "
+PLANET_SEGMENT_PREFIX = "VOYAGER_PLANET_SEGMENT "
 INITIAL_STATE_PREFIX = "VOYAGER_INITIAL_STATE "
-VALIDATION_ROLES = {"primary", "diagnostic", "excluded"}
+VALIDATION_ROLES = {"anchor", "primary", "diagnostic", "excluded"}
+ACCURACY_ROLES = {"primary", "diagnostic", "excluded"}
 UNIMPLEMENTED_FORCE_MODEL_KEYS = (
     "gravity_parameters",
     "ephemeris_stage_curvature",
@@ -46,6 +47,9 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("schema_version") != 1:
         raise ValueError("Unsupported Voyager truth-reference schema")
+    protocol = manifest.get("validation_protocol") or {}
+    if protocol.get("planet_state_source") != "de440.bsp" or not protocol.get("planet_spice_names"):
+        raise ValueError("Missing DE440 planetary provenance contract")
     contract = manifest.get("checkpoint_contract")
     if not contract or contract.get("version") != 1:
         raise ValueError("Missing checkpoint contract")
@@ -55,15 +59,15 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
             if role not in VALIDATION_ROLES:
                 raise ValueError(f"{case['id']} {checkpoint['name']}: invalid validation role")
             if not checkpoint.get("role_reason") or not checkpoint.get("maneuver_status"):
-                raise ValueError(f"{case['id']} {checkpoint['name']}: incomplete checkpoint contract")
+                raise ValueError(
+                    f"{case['id']} {checkpoint['name']}: incomplete checkpoint contract"
+                )
     return manifest
 
 
 def checkpoint_contract(case: dict[str, Any], name: str) -> dict[str, Any]:
     try:
-        return next(
-            checkpoint for checkpoint in case["checkpoints"] if checkpoint["name"] == name
-        )
+        return next(checkpoint for checkpoint in case["checkpoints"] if checkpoint["name"] == name)
     except StopIteration as exc:
         raise AssertionError(f"{case['id']}: checkpoint {name!r} is not in the contract") from exc
 
@@ -134,7 +138,11 @@ def parse_prefixed_json(output: str, prefix: str) -> list[dict[str, Any]]:
     ]
 
 
-def validate_run_record(case: dict[str, Any], record: dict[str, Any]) -> None:
+def validate_run_record(
+    case: dict[str, Any], record: dict[str, Any], manifest: dict[str, Any] | None = None
+) -> None:
+    if manifest is None:
+        manifest = load_manifest()
     segments = record["active_segments"]
     if {segment["epoch"] for segment in segments} != {
         "initialization",
@@ -159,6 +167,27 @@ def validate_run_record(case: dict[str, Any], record: dict[str, Any]) -> None:
                     f"got {segment[key]!r}"
                 )
 
+    planet_names = manifest["validation_protocol"]["planet_spice_names"]
+    planet_source = manifest["validation_protocol"]["planet_state_source"]
+    planet_segments = record["planet_segments"]
+    expected_planet_epochs = {
+        (name, epoch) for name in planet_names for epoch in ("initialization", "scoring_end")
+    }
+    actual_planet_epochs = {
+        (segment["spice_name"], segment["epoch"]) for segment in planet_segments
+    }
+    if actual_planet_epochs != expected_planet_epochs:
+        raise AssertionError(
+            f"{case['id']}: expected planet segment audits {sorted(expected_planet_epochs)}, "
+            f"got {sorted(actual_planet_epochs)}"
+        )
+    for segment in planet_segments:
+        if segment["file"] != planet_source:
+            raise AssertionError(
+                f"{case['id']} {segment['spice_name']} {segment['epoch']}: "
+                f"expected planetary file {planet_source!r}, got {segment['file']!r}"
+            )
+
     expected_checkpoints = [checkpoint["name"] for checkpoint in case["checkpoints"]]
     actual_checkpoints = [metric["checkpoint"] for metric in record["metrics"]]
     if actual_checkpoints != expected_checkpoints:
@@ -173,6 +202,8 @@ def validate_run_record(case: dict[str, Any], record: dict[str, Any]) -> None:
                 raise AssertionError(
                     f"{case['id']} {metric['checkpoint']}: {key} does not match contract"
                 )
+        if metric["checkpoint"] == "start" and contract["validation_role"] != "anchor":
+            raise AssertionError(f"{case['id']}: start must be an initialization anchor")
         if (
             abs(metric["actual_elapsed_seconds"] - metric["requested_elapsed_seconds"])
             > record["timestep_s"] / 2.0
@@ -304,9 +335,10 @@ def run_case(
         "truth_kernel_sha256": manifest["kernels"][case["kernel"]]["sha256"],
         "initial_state": initial_states[0],
         "active_segments": parse_prefixed_json(process.stdout, SEGMENT_PREFIX),
+        "planet_segments": parse_prefixed_json(process.stdout, PLANET_SEGMENT_PREFIX),
         "metrics": metrics,
     }
-    validate_run_record(case, record)
+    validate_run_record(case, record, manifest)
     print(
         f"finished {case['id']} Chapter {chapter} in {elapsed_s:.1f}s",
         flush=True,
@@ -328,7 +360,7 @@ def summarize(manifest: dict[str, Any], records: list[dict[str, Any]]) -> list[d
         chapter1 = by_key[chapter1_key]
         chapter2 = by_key[chapter2_key]
         for metric1, metric2 in zip(chapter1["metrics"], chapter2["metrics"], strict=True):
-            if metric1["checkpoint"] == "start":
+            if metric1["checkpoint"] == "start" or metric1["validation_role"] not in ACCURACY_ROLES:
                 continue
             reduction = (
                 100.0
@@ -483,6 +515,7 @@ def main() -> None:
         "primary_summary": [row for row in summary if row["validation_role"] == "primary"],
         "diagnostic_summary": [row for row in summary if row["validation_role"] == "diagnostic"],
         "excluded_summary": [row for row in summary if row["validation_role"] == "excluded"],
+        "anchor_summary": [row for row in summary if row["validation_role"] == "anchor"],
         "timestep_controls": summarize_timestep_controls(manifest, records),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

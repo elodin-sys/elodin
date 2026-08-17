@@ -1,19 +1,18 @@
 import json
 import os
 import typing as ty
+from pathlib import Path
 
 import elodin as el
 import jax
-from jax import numpy as jnp
-from jax.numpy import linalg as la
-import spiceypy as spice
 import numpy as np
-from pathlib import Path
-
+import spiceypy as spice
 from dynamics import (
     gravity_source_entity_names,
     heliocentric_relative_acceleration,
 )
+from jax import numpy as jnp
+from jax.numpy import linalg as la
 from time_utils import utc_epoch_microseconds
 
 DEFAULT_SIM_TIME_STEP = 3600.0
@@ -32,6 +31,7 @@ SCORED_PROBE_ENV = "VOYAGER_SCORED_PROBE"
 CHECKPOINTS_ENV = "VOYAGER_CHECKPOINTS_JSON"
 METRIC_PREFIX = "VOYAGER_VALIDATION_METRIC"
 SEGMENT_PREFIX = "VOYAGER_ACTIVE_SEGMENT"
+PLANET_SEGMENT_PREFIX = "VOYAGER_PLANET_SEGMENT"
 INITIAL_STATE_PREFIX = "VOYAGER_INITIAL_STATE"
 
 SPICE_DIR = Path(
@@ -447,7 +447,7 @@ body_objects = "\n".join(
 )
 
 w.schematic(
-    """
+    f"""
     hsplit {{
         tabs share=0.2 {{
             hierarchy
@@ -471,7 +471,7 @@ w.schematic(
         }}
     }}
 {body_objects}
-""".format(body_objects=body_objects)
+"""
 )
 
 dynamics_chapter = os.environ.get(DYNAMICS_CHAPTER_ENV, "1")
@@ -494,30 +494,37 @@ if truth_kernel_name:
     if max_ticks is not None:
         validation_epochs["scoring_end"] = start_time_et + max_ticks * SIM_TIME_STEP
 
-    for probe in PROBES:
-        if probe["entity_name"] not in SCORED_PROBES:
-            continue
-        target_code = spice.bodn2c(probe["spice_name"])
+    def emit_segment(prefix: str, spice_name: str, extra: dict) -> None:
+        target_code = spice.bodn2c(spice_name)
         for epoch_name, epoch_et in validation_epochs.items():
             handle, descriptor, identifier = spice.spksfs(target_code, epoch_et, 256)
             target, center, frame, segment_type, *_ = spice.spkuds(descriptor)
             print(
-                SEGMENT_PREFIX,
+                prefix,
                 json.dumps(
                     {
                         "center": center,
                         "epoch": epoch_name,
                         "file": Path(loaded_spk_files[handle]).name,
                         "native_frame": spice.frmnam(frame),
-                        "probe": probe["entity_name"],
                         "segment_id": identifier.strip(),
                         "segment_type": segment_type,
+                        "spice_name": spice_name,
                         "target": target,
+                        **extra,
                     },
                     sort_keys=True,
                 ),
                 flush=True,
             )
+
+    for probe in PROBES:
+        if probe["entity_name"] not in SCORED_PROBES:
+            continue
+        emit_segment(SEGMENT_PREFIX, probe["spice_name"], {"probe": probe["entity_name"]})
+
+    for body in PLANETS:
+        emit_segment(PLANET_SEGMENT_PREFIX, body["spice_name"], {})
 
 # sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
 sim = w.run(
