@@ -76,11 +76,17 @@ into every metric and into the result summaries.
 | **Diagnostic** | Trend evidence that overlaps a correction boundary or lacks a replayable inertial maneuver vector. |
 | **Excluded** | Retained for visibility, but not used for accuracy claims because close-encounter or post-maneuver dynamics are not a controlled replay. |
 
-The contract is conservative. Voyager 1 Saturn's Oct 8 point and Voyager 2
-Saturn's Jul 16 point are primary pre-A-8/pre-B-8 windows. Jupiter clean/mid/late
-points remain diagnostics because the published TCM windows do not provide
-complete inertial vectors for a controlled replay. Closest-approach and
-post-encounter points are excluded from headline claims for all four arcs.
+The contract is conservative. The only primary approach scores in this baseline
+are Voyager 1 Saturn on Oct 8 (pre-A-8) and Voyager 2 Saturn on Jul 16
+(pre-B-8). Jupiter `clean`/`mid`/`late` points remain diagnostics: the
+Voyager 1 reconstructed arc begins after the Jan 29 correction and its day-20
+point is after the Feb 20 window, while Voyager 2 starts inside the TCM-3
+phase. Closest-approach and post-encounter points are excluded from headline
+claims for all four arcs.
+
+A later campaign can add a Voyager 1 Jupiter checkpoint strictly before Feb 20
+without changing Chapters 1 or 2. That is a contract extension, not a
+Chapter 3 force-model change.
 
 The audit uses the NASA/JPL operations and cruise reports cited in the manifest:
 Voyager 1 Jupiter correction activity around Jan 29/Feb 20, Voyager 2 Jupiter
@@ -119,23 +125,29 @@ planet states are identical within every Chapter 1/Chapter 2 pair. Every run
 records position and velocity residuals both as `ECLIPJ2000` Cartesian vectors
 and in the truth trajectory's radial-transverse-normal basis.
 
+Primary pre-maneuver approach scores:
+
+| Case | Day | Chapter 1 position | Chapter 2 position | Reduction | Chapter 1 velocity | Chapter 2 velocity |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| V1 Saturn | 1 | 0.729 km | 0.018 km | **97.49%** | 0.0170 m/s | 0.0004 m/s |
+| V2 Saturn | 1 | 0.850 km | 0.266 km | **68.71%** | 0.0197 m/s | 0.0062 m/s |
+
+Diagnostic approach scores, retained for trend inspection:
+
 | Case | Day | Chapter 1 position | Chapter 2 position | Reduction | Chapter 1 velocity | Chapter 2 velocity |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | V1 Jupiter | 20 | 338.580 km | 33.699 km | **90.05%** | 0.3619 m/s | 0.0746 m/s |
 | V1 Jupiter | 30 | 675.890 km | 555.321 km | **17.84%** | 0.4139 m/s | 1.0137 m/s |
 | V2 Jupiter | 20 | 227.324 km | 99.366 km | **56.29%** | 0.2524 m/s | 0.1422 m/s |
 | V2 Jupiter | 30 | 632.275 km | 575.536 km | **8.97%** | 0.7133 m/s | 0.9028 m/s |
-| V1 Saturn | 1 | 0.729 km | 0.018 km | **97.49%** | 0.0170 m/s | 0.0004 m/s |
 | V1 Saturn | 3 | 6.509 km | 0.179 km | **97.26%** | 0.0498 m/s | 0.0016 m/s |
-| V2 Saturn | 1 | 0.850 km | 0.266 km | **68.71%** | 0.0197 m/s | 0.0062 m/s |
 | V2 Saturn | 4 | 13.550 km | 4.257 km | **68.59%** | 0.0782 m/s | 0.0246 m/s |
 
-Chapter 2 reduces position disagreement at both controlled primary approach
-checkpoints and at the four legacy `clean_approach` diagnostics. The revised
-contract distinguishes those controlled scores from diagnostic checkpoints; it
-does not hide the diagnostic mid-arc regressions. At the earlier checkpoints it
-also reduces velocity disagreement. The two
-Jupiter day-30 velocity values are not improvements, even though their
+Chapter 2 reduces position disagreement at the two controlled primary approach
+checkpoints and at the four legacy `clean_approach` diagnostics. The contract
+keeps those classes separate and does not hide the diagnostic mid-arc
+regressions. At the earlier checkpoints it also reduces velocity disagreement.
+The two Jupiter day-30 velocity values are not improvements, even though their
 position values remain smaller. They are reported rather than hidden: the
 simple point-mass model is approaching a close-encounter regime where omitted
 physics and trajectory events become more important.
@@ -143,10 +155,10 @@ physics and trajectory events become more important.
 The defensible Chapter 2 conclusion is consequently narrow and strong:
 
 > The heliocentric indirect-acceleration correction materially improves the
-> controlled pre-maneuver position comparisons and the clean-approach trend
-> across all four reconstructed arcs. It is not a claim that the educational
-> gravity model reconstructs each flyby or every velocity component throughout
-> an encounter arc.
+> controlled pre-maneuver Saturn approach scores and the diagnostic
+> clean-approach trend across all four reconstructed arcs. It is not a claim
+> that the educational gravity model reconstructs each flyby or every velocity
+> component throughout an encounter arc.
 
 The labeled mid-arc, closest-approach, and end checkpoints deliberately remain
 in the result artifact even when Chapter 2 is worse. They expose where omitted
@@ -245,3 +257,8 @@ uv run python examples/voyager/validate_truth.py \
 
 No editor, GUI, or Elodin DB query tooling is required to obtain the numerical
 measurements.
+
+The harness scores only the existing Chapter 1 and Chapter 2 force models. It
+does not accept gravity-parameter, RK-stage ephemeris, or moon-system flags.
+Those belong to a later Chapter 3 experiment after this contract is the
+scoring gate.

@@ -131,9 +131,9 @@ Chapter 2 improves both position and velocity disagreement for both probes at
 The later truth-reference audit re-ran both chapters against four independent
 NAIF reconstructed encounter solutions. Each case initializes from the same
 SPK segment that it scores, with explicit kernel hashes and runtime segment
-audits. At eight selected pre-encounter checkpoints, Chapter 2 reduced
-position disagreement by 8.97% to 97.49%. At the cleaner early checkpoints it
-reduced both position and velocity disagreement; near Jupiter encounter, the
+audits. The two primary pre-maneuver Saturn scores improve by 68.71% and
+97.49%. Diagnostic Jupiter/Saturn approach points still trend better, from
+8.97% to 90.05%, but they are not headline claims. Near Jupiter encounter, the
 simple model no longer improves every velocity metric.
 
 [Read the complete truth contract, results, and limitations](truth_reference.md).

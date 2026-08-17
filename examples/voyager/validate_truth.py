@@ -24,8 +24,14 @@ DEFAULT_OUTPUT = EXAMPLE_DIR / "truth_validation_results.json"
 METRIC_PREFIX = "VOYAGER_VALIDATION_METRIC "
 SEGMENT_PREFIX = "VOYAGER_ACTIVE_SEGMENT "
 INITIAL_STATE_PREFIX = "VOYAGER_INITIAL_STATE "
-GM_SOURCE_PREFIX = "VOYAGER_GM_SOURCE "
 VALIDATION_ROLES = {"primary", "diagnostic", "excluded"}
+UNIMPLEMENTED_FORCE_MODEL_KEYS = (
+    "gravity_parameters",
+    "ephemeris_stage_curvature",
+    "giant_planet_state",
+    "giant_system_model",
+    "gm_sources",
+)
 
 
 def sha256(path: Path) -> str:
@@ -204,6 +210,12 @@ def validate_run_record(case: dict[str, Any], record: dict[str, Any]) -> None:
     if initial_state["epoch_utc"] != case["initialization_utc"]:
         raise AssertionError(f"{case['id']}: initialization epoch changed")
 
+    leaked = [key for key in UNIMPLEMENTED_FORCE_MODEL_KEYS if key in record]
+    if leaked:
+        raise AssertionError(
+            f"{case['id']}: record claims unimplemented force-model knobs: {leaked}"
+        )
+
 
 def run_case(
     manifest: dict[str, Any],
@@ -211,10 +223,6 @@ def run_case(
     chapter: int,
     timestep_s: float,
     spice_dir: Path,
-    gravity_parameters: str,
-    ephemeris_stage_curvature: str,
-    giant_planet_state: str,
-    giant_system_model: str,
 ) -> dict[str, Any]:
     ticks = case["duration_days"] * 86400.0 / timestep_s
     if not ticks.is_integer():
@@ -237,10 +245,6 @@ def run_case(
                     separators=(",", ":"),
                 ),
                 "VOYAGER_DYNAMICS_CHAPTER": str(chapter),
-                "VOYAGER_GRAVITY_PARAMETERS": gravity_parameters,
-                "VOYAGER_EPHEMERIS_STAGE_CURVATURE": ephemeris_stage_curvature,
-                "VOYAGER_GIANT_PLANET_STATE": giant_planet_state,
-                "VOYAGER_GIANT_SYSTEM_MODEL": giant_system_model,
                 "VOYAGER_SCORED_PROBE": case["probe"],
                 "VOYAGER_SPICE_DIR": str(spice_dir),
                 "VOYAGER_START_UTC": case["initialization_utc"],
@@ -295,15 +299,10 @@ def run_case(
     record = {
         "case": case["id"],
         "chapter": chapter,
-        "gravity_parameters": gravity_parameters,
-        "ephemeris_stage_curvature": ephemeris_stage_curvature,
-        "giant_planet_state": giant_planet_state,
-        "giant_system_model": giant_system_model,
         "timestep_s": timestep_s,
         "truth_kernel": case["kernel"],
         "truth_kernel_sha256": manifest["kernels"][case["kernel"]]["sha256"],
         "initial_state": initial_states[0],
-        "gm_sources": parse_prefixed_json(process.stdout, GM_SOURCE_PREFIX),
         "active_segments": parse_prefixed_json(process.stdout, SEGMENT_PREFIX),
         "metrics": metrics,
     }
@@ -401,30 +400,6 @@ def parse_args() -> argparse.Namespace:
         help="case ID to run; repeat for multiple cases (default: all)",
     )
     parser.add_argument(
-        "--gravity-parameters",
-        choices=("rounded_mass", "naif_de440"),
-        default="rounded_mass",
-        help="gravity-parameter source for a controlled A/B run",
-    )
-    parser.add_argument(
-        "--ephemeris-stage-curvature",
-        choices=("linear", "spice_central_difference"),
-        default="linear",
-        help="planet-state interpolation used within RK4 stages",
-    )
-    parser.add_argument(
-        "--giant-planet-state",
-        choices=("barycenter", "center"),
-        default="barycenter",
-        help="Jupiter/Saturn source state used by the force model",
-    )
-    parser.add_argument(
-        "--giant-system-model",
-        choices=("barycenter", "jupiter_galilean", "saturn_titan", "major_moons"),
-        default="barycenter",
-        help="non-overlapping Jupiter/Saturn source decomposition",
-    )
-    parser.add_argument(
         "--chapter",
         action="append",
         type=int,
@@ -480,10 +455,6 @@ def main() -> None:
                     chapter,
                     selected_timestep,
                     args.spice_dir,
-                    args.gravity_parameters,
-                    args.ephemeris_stage_curvature,
-                    args.giant_planet_state,
-                    args.giant_system_model,
                 )
             )
         for timestep in convergence_timesteps[case["id"]]:
@@ -499,10 +470,6 @@ def main() -> None:
                     chapter,
                     timestep,
                     args.spice_dir,
-                    args.gravity_parameters,
-                    args.ephemeris_stage_curvature,
-                    args.giant_planet_state,
-                    args.giant_system_model,
                 )
             )
 

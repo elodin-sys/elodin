@@ -12,10 +12,6 @@
     {
       "case": "v1_jupiter",
       "chapter": 1,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -35,7 +31,6 @@
           -6.8990140887426055
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -256,10 +251,6 @@
     {
       "case": "v1_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -279,7 +270,6 @@
           -6.8990140887426055
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -500,10 +490,6 @@
     {
       "case": "v1_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -523,7 +509,6 @@
           -6.8990140887426055
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -744,10 +729,6 @@
     {
       "case": "v1_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 900,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -767,7 +748,6 @@
           -6.8990140887426055
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -988,10 +968,6 @@
     {
       "case": "v1_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr1_jup230.bsp",
       "truth_kernel_sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9",
@@ -1011,7 +987,6 @@
           -6.8990140887426055
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1232,10 +1207,6 @@
     {
       "case": "v2_jupiter",
       "chapter": 1,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1255,7 +1226,6 @@
           -564.4276098688595
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1476,10 +1446,6 @@
     {
       "case": "v2_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1499,7 +1465,6 @@
           -564.4276098688595
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1720,10 +1685,6 @@
     {
       "case": "v2_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1743,7 +1704,6 @@
           -564.4276098688595
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -1964,10 +1924,6 @@
     {
       "case": "v2_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 900,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -1987,7 +1943,6 @@
           -564.4276098688595
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -2208,10 +2163,6 @@
     {
       "case": "v2_jupiter",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr2_jup230.bsp",
       "truth_kernel_sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a",
@@ -2231,7 +2182,6 @@
           -564.4276098688595
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 5,
@@ -2452,10 +2402,6 @@
     {
       "case": "v1_saturn",
       "chapter": 1,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2475,7 +2421,6 @@
           826.9305078636578
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -2696,10 +2641,6 @@
     {
       "case": "v1_saturn",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2719,7 +2660,6 @@
           826.9305078636578
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -2940,10 +2880,6 @@
     {
       "case": "v1_saturn",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -2963,7 +2899,6 @@
           826.9305078636578
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3184,10 +3119,6 @@
     {
       "case": "v1_saturn",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr1_sat337.bsp",
       "truth_kernel_sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa",
@@ -3207,7 +3138,6 @@
           826.9305078636578
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3428,10 +3358,6 @@
     {
       "case": "v2_saturn",
       "chapter": 1,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3451,7 +3377,6 @@
           628.4029205927233
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3672,10 +3597,6 @@
     {
       "case": "v2_saturn",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 100,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3695,7 +3616,6 @@
           628.4029205927233
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -3916,10 +3836,6 @@
     {
       "case": "v2_saturn",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 3600,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -3939,7 +3855,6 @@
           628.4029205927233
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,
@@ -4160,10 +4075,6 @@
     {
       "case": "v2_saturn",
       "chapter": 2,
-      "gravity_parameters": "rounded_mass",
-      "ephemeris_stage_curvature": "linear",
-      "giant_planet_state": "barycenter",
-      "giant_system_model": "barycenter",
       "timestep_s": 300,
       "truth_kernel": "vgr2_sat337.bsp",
       "truth_kernel_sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8",
@@ -4183,7 +4094,6 @@
           628.4029205927233
         ]
       },
-      "gm_sources": [],
       "active_segments": [
         {
           "center": 6,

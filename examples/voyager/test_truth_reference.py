@@ -3,10 +3,13 @@
 from datetime import datetime
 import json
 from pathlib import Path
+import sys
 
 from validate_truth import (
     MANIFEST_PATH,
+    UNIMPLEMENTED_FORCE_MODEL_KEYS,
     load_manifest,
+    parse_args,
     required_kernel_names,
     selected_cases,
     selected_convergence_timesteps,
@@ -125,6 +128,53 @@ def test_incompatible_convergence_selections_are_rejected():
             raise AssertionError("incompatible convergence selection was silently ignored")
 
 
+def test_cli_has_no_chapter_three_force_model_flags():
+    argv = sys.argv
+    sys.argv = ["validate_truth.py"]
+    try:
+        args = parse_args()
+    finally:
+        sys.argv = argv
+
+    for key in UNIMPLEMENTED_FORCE_MODEL_KEYS:
+        assert not hasattr(args, key)
+
+
+def test_jupiter_has_no_primary_approach_checkpoint():
+    """Jupiter reconstructed arcs start inside or after documented TCM windows."""
+    manifest = load_manifest()
+    for case_id in ("v1_jupiter", "v2_jupiter"):
+        case = next(case for case in manifest["cases"] if case["id"] == case_id)
+        primary = [
+            checkpoint
+            for checkpoint in case["checkpoints"]
+            if checkpoint["validation_role"] == "primary" and checkpoint["name"] != "start"
+        ]
+        assert primary == []
+
+
+def test_primary_approach_scores_are_saturn_pre_maneuver_windows():
+    manifest = load_manifest()
+    results = json.loads(
+        (EXAMPLE_DIR / "truth_validation_results.json").read_text(encoding="utf-8")
+    )
+    expected = {
+        ("v1_saturn", "early_approach"),
+        ("v2_saturn", "early_approach"),
+    }
+    actual = {(row["case"], row["checkpoint"]) for row in results["primary_summary"]}
+    assert actual == expected
+    assert all(row["position_error_reduction_percent"] > 50.0 for row in results["primary_summary"])
+    saturn = {case["id"]: case for case in manifest["cases"]}
+    for row in results["primary_summary"]:
+        contract = next(
+            checkpoint
+            for checkpoint in saturn[row["case"]]["checkpoints"]
+            if checkpoint["name"] == row["checkpoint"]
+        )
+        assert contract["maneuver_status"] == "none_known"
+
+
 def test_checked_in_baseline_matches_the_contract():
     manifest = load_manifest()
     results = json.loads(
@@ -149,6 +199,7 @@ def test_checked_in_baseline_matches_the_contract():
         assert record["chapter"] in (1, 2)
         assert record["truth_kernel"] == case["kernel"]
         assert record["truth_kernel_sha256"] == manifest["kernels"][case["kernel"]]["sha256"]
+        assert not any(key in record for key in UNIMPLEMENTED_FORCE_MODEL_KEYS)
         validate_run_record(case, record)
 
     clean_rows = [row for row in results["summary"] if row["checkpoint"] == "clean_approach"]
