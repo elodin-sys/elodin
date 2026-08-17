@@ -25,7 +25,7 @@ use bevy::{
         },
         world::{FromWorld, Mut, World},
     },
-    math::{DVec3, Mat4, Vec3, Vec4},
+    math::{DVec3, Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup, ViewKeyCache},
     prelude::{Color, Reflect, Resource, warn_once},
@@ -636,16 +636,6 @@ pub(super) fn line_first_point_frame(
     Some(DVec3::from_array(point))
 }
 
-/// Vertex position for one sample: its frame-space offset from the line's anchor.
-///
-/// The subtraction stays in f64 and only the small residual is cast, so an ECEF
-/// sample keeps sub-millimetre resolution instead of the ~0.5 m f32 ULP it would
-/// have at 6.4e6 m. This only holds if `sample` itself arrived in f64 — see
-/// [`LineSources`].
-fn anchor_local(sample: DVec3, anchor: DVec3) -> Vec3 {
-    (sample - anchor).as_vec3()
-}
-
 /// Residual length at which f32 ULP exceeds 1 cm (`M * 2^-23 > 0.01`).
 ///
 /// First-point subtract only helps when the leftover is small. A zero (or
@@ -1110,6 +1100,7 @@ fn queue_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::math::Vec3;
 
     const PLAYED_TL: Vec4 = Vec4::new(1.0, 1.0, 0.0, 1.0); // timeline played (yalk-ish)
     const FUTURE_TL: Vec4 = Vec4::new(1.0, 1.0, 1.0, 1.0); // timeline future (white)
@@ -1250,6 +1241,16 @@ mod tests {
             .zip(zs)
             .map(|((x, y), z)| anchor_local(DVec3::new(x, y, z), anchor))
             .collect()
+    }
+
+    /// Vertex position for one sample: its frame-space offset from the line's anchor.
+    ///
+    /// The subtraction stays in f64 and only the small residual is cast, so an ECEF
+    /// sample keeps sub-millimetre resolution instead of the ~0.5 m f32 ULP it would
+    /// have at 6.4e6 m. This only holds if `sample` itself arrived in f64 — see
+    /// [`LineSources`].
+    fn anchor_local(sample: DVec3, anchor: DVec3) -> Vec3 {
+        (sample - anchor).as_vec3()
     }
 
     #[test]
