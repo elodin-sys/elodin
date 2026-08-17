@@ -22,9 +22,20 @@ pub fn default_composite_alpha_mode() -> CompositeAlphaMode {
     }
 }
 
+/// `ELODIN_PRESENT_MODE=novsync|vsync|fifo` overrides the compiled-in default;
+/// used to diagnose presentation-pacing FPS caps (e.g. ProMotion settling low).
+pub fn present_mode_from_env() -> PresentMode {
+    match std::env::var("ELODIN_PRESENT_MODE").as_deref() {
+        Ok("novsync") => PresentMode::AutoNoVsync,
+        Ok("vsync") => PresentMode::AutoVsync,
+        Ok("fifo") => PresentMode::Fifo,
+        _ => default_present_mode(),
+    }
+}
+
 pub fn base_window() -> Window {
     Window {
-        present_mode: default_present_mode(),
+        present_mode: present_mode_from_env(),
         window_theme: default_window_theme(),
         composite_alpha_mode: default_composite_alpha_mode(),
         ..Default::default()

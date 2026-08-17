@@ -1396,6 +1396,15 @@ pub fn auto_y_bounds(
     let due = last_run
         .map(|t| t.elapsed() >= std::time::Duration::from_millis(50))
         .unwrap_or(true);
+
+    // Drop the cache while auto-Y is off, even between 50ms ticks, so turning
+    // Auto Bounds back on after a manual min/max does not reuse the old pass.
+    for mut graph_state in graph_states.iter_mut() {
+        if !graph_state.auto_y_range {
+            graph_state.auto_y_cache = None;
+        }
+    }
+
     if short {
         if !due {
             return;
@@ -1406,63 +1415,72 @@ pub fn auto_y_bounds(
     *last_run = Some(std::time::Instant::now());
 
     for mut graph_state in graph_states.iter_mut() {
-        if graph_state.auto_y_range {
-            let mut y_min: Option<f32> = None;
-            let mut y_max: Option<f32> = None;
+        if !graph_state.auto_y_range {
+            continue;
+        }
 
-            for (entity, _) in graph_state.enabled_lines.values() {
-                let Ok(handle) = line_handles.get(*entity) else {
-                    continue;
-                };
-                let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
-                    continue;
-                };
-                if let gpu::LineMut::Timeseries(line) = line {
-                    // For small datasets (live streaming), use fast range_summary
-                    // For large datasets (historical/overview), use percentile_bounds to filter outliers
-                    let summary = line.data.range_summary(selected_range.0.clone());
+        let mut content_sig = graph_state.enabled_lines.len() as u64;
+        for (entity, _) in graph_state.enabled_lines.values() {
+            let Ok(handle) = line_handles.get(*entity) else {
+                continue;
+            };
+            let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
+                continue;
+            };
+            content_sig = content_sig
+                .rotate_left(7)
+                .wrapping_add(line.content_gen())
+                .wrapping_add(entity.to_bits());
+        }
+        let cache_key = (
+            selected_range.0.start.0,
+            selected_range.0.end.0,
+            content_sig,
+        );
+        if graph_state.auto_y_cache == Some(cache_key) {
+            continue;
+        }
 
-                    let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
-                        // Large dataset - use percentile bounds to filter outliers
-                        // This is expensive but necessary for historical data with corrupt values
-                        line.data
-                            .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
-                            .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
-                    } else {
-                        // Small dataset (live streaming) - use fast summary
-                        // Fresh data from sensors doesn't have the outlier problem
-                        (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
-                    };
+        let mut y_min: Option<f32> = None;
+        let mut y_max: Option<f32> = None;
+        for (entity, _) in graph_state.enabled_lines.values() {
+            let Ok(handle) = line_handles.get(*entity) else {
+                continue;
+            };
+            let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
+                continue;
+            };
+            let gpu::LineMut::Timeseries(line) = line else {
+                continue;
+            };
+            let summary = line.data.range_summary(selected_range.0.clone());
+            let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
+                line.data
+                    .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
+                    .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
+            } else {
+                (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
+            };
 
-                    if line_min.is_finite() {
-                        if let Some(v) = &mut y_min {
-                            *v = v.min(line_min);
-                        } else {
-                            y_min = Some(line_min)
-                        }
-                    }
-                    if line_max.is_finite() {
-                        if let Some(v) = &mut y_max {
-                            *v = v.max(line_max);
-                        } else {
-                            y_max = Some(line_max)
-                        }
-                    }
-                }
+            if line_min.is_finite() {
+                y_min = Some(y_min.map_or(line_min, |v| v.min(line_min)));
             }
-
-            // Only update y_range if we found valid data from enabled_lines
-            // Skip if no lines found - this prevents overwriting y_range set by other systems
-            // (e.g., query_plot's auto_bounds which uses line_entity, not enabled_lines)
-            if let (Some(min), Some(max)) = (y_min, y_max) {
-                let (padded_min, padded_max) = calculate_padded_y_bounds(min as f64, max as f64);
-                if short
-                    && !should_update_short_window_y(&graph_state.y_range, padded_min, padded_max)
-                {
-                    continue;
-                }
-                graph_state.y_range = padded_min..padded_max;
+            if line_max.is_finite() {
+                y_max = Some(y_max.map_or(line_max, |v| v.max(line_max)));
             }
+        }
+
+        // Skip if no lines found — do not overwrite y_range set by other systems
+        // (e.g., query_plot's auto_bounds which uses line_entity, not enabled_lines).
+        if let (Some(min), Some(max)) = (y_min, y_max) {
+            let (padded_min, padded_max) = calculate_padded_y_bounds(min as f64, max as f64);
+            if short && !should_update_short_window_y(&graph_state.y_range, padded_min, padded_max)
+            {
+                graph_state.auto_y_cache = Some(cache_key);
+                continue;
+            }
+            graph_state.y_range = padded_min..padded_max;
+            graph_state.auto_y_cache = Some(cache_key);
         }
     }
 }

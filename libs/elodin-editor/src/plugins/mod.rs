@@ -3,10 +3,13 @@ pub(crate) mod camera_anchor;
 pub mod editor_cam_input;
 pub mod editor_cam_touch;
 pub(crate) mod env_asset_source;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod fps_log;
 pub mod frustum;
 pub(crate) mod frustum_common;
 pub mod frustum_intersection;
 pub mod gizmos;
+pub(crate) mod gpu_info;
 pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
 mod logical_key;

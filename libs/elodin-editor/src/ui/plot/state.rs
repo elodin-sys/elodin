@@ -45,6 +45,10 @@ pub struct GraphState {
     pub label: String,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
+    /// `(range_start, range_end, content_sig)` of the last auto-Y pass.
+    /// Unchanged FULL RANGE views skip the percentile walk after the first hit.
+    /// Cleared whenever auto-Y is off so re-enabling Auto Bounds recomputes.
+    pub(crate) auto_y_cache: Option<(i64, i64, u64)>,
     pub auto_x_range: bool,
     pub x_range: Range<f64>,
     pub widget_width: f64,
@@ -74,6 +78,7 @@ impl GraphBundle {
             graph_type: GraphType::Line,
             label,
             y_range: 0.0..1.0,
+            auto_y_cache: None,
             x_range: 0.0..1.0,
             auto_y_range: true,
             auto_x_range: true,
