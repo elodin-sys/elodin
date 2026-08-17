@@ -14,16 +14,19 @@ import time
 from pathlib import Path
 from typing import Any
 
+from validation_io import (
+    INITIAL_STATE_PREFIX,
+    METRIC_PREFIX,
+    PLANET_SEGMENT_PREFIX,
+    SEGMENT_PREFIX,
+    parse_prefixed_json,
+)
+
 EXAMPLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXAMPLE_DIR.parents[1]
 MANIFEST_PATH = EXAMPLE_DIR / "truth_reference.json"
 DEFAULT_SPICE_DIR = EXAMPLE_DIR / "nasa_spice_data"
 DEFAULT_OUTPUT = EXAMPLE_DIR / "truth_validation_results.json"
-
-METRIC_PREFIX = "VOYAGER_VALIDATION_METRIC "
-SEGMENT_PREFIX = "VOYAGER_ACTIVE_SEGMENT "
-PLANET_SEGMENT_PREFIX = "VOYAGER_PLANET_SEGMENT "
-INITIAL_STATE_PREFIX = "VOYAGER_INITIAL_STATE "
 VALIDATION_ROLES = {"anchor", "primary", "diagnostic", "excluded"}
 ACCURACY_ROLES = {"primary", "diagnostic", "excluded"}
 UNIMPLEMENTED_FORCE_MODEL_KEYS = (
@@ -54,6 +57,8 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
     if not contract or contract.get("version") != 1:
         raise ValueError("Missing checkpoint contract")
     for case in manifest["cases"]:
+        if not case.get("checkpoints"):
+            raise ValueError(f"{case['id']}: missing checkpoints")
         for checkpoint in case["checkpoints"]:
             role = checkpoint.get("validation_role")
             if role not in VALIDATION_ROLES:
@@ -62,6 +67,9 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
                 raise ValueError(
                     f"{case['id']} {checkpoint['name']}: incomplete checkpoint contract"
                 )
+        start = case["checkpoints"][0]
+        if start.get("name") != "start" or start.get("validation_role") != "anchor":
+            raise ValueError(f"{case['id']}: first checkpoint must be the start anchor")
     return manifest
 
 
@@ -128,14 +136,6 @@ def verify_kernels(manifest: dict[str, Any], cases: list[dict[str, Any]], spice_
             failures.append(f"SHA-256 mismatch for {path}: expected {expected}, got {actual}")
     if failures:
         raise RuntimeError("Kernel verification failed:\n- " + "\n- ".join(failures))
-
-
-def parse_prefixed_json(output: str, prefix: str) -> list[dict[str, Any]]:
-    return [
-        json.loads(line.removeprefix(prefix))
-        for line in output.splitlines()
-        if line.startswith(prefix)
-    ]
 
 
 def validate_run_record(
@@ -362,11 +362,12 @@ def summarize(manifest: dict[str, Any], records: list[dict[str, Any]]) -> list[d
         for metric1, metric2 in zip(chapter1["metrics"], chapter2["metrics"], strict=True):
             if metric1["checkpoint"] == "start" or metric1["validation_role"] not in ACCURACY_ROLES:
                 continue
-            reduction = (
-                100.0
-                * (metric1["position_error_km"] - metric2["position_error_km"])
-                / metric1["position_error_km"]
-            )
+            chapter1_error = metric1["position_error_km"]
+            if chapter1_error == 0.0:
+                raise AssertionError(
+                    f"{case['id']} {metric1['checkpoint']}: Chapter 1 position error is zero"
+                )
+            reduction = 100.0 * (chapter1_error - metric2["position_error_km"]) / chapter1_error
             rows.append(
                 {
                     "case": case["id"],
@@ -423,7 +424,7 @@ def summarize_timestep_controls(
     return rows
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--case",
@@ -451,7 +452,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--spice-dir", type=Path, default=DEFAULT_SPICE_DIR)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> None:

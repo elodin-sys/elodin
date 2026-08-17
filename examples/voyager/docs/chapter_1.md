@@ -12,6 +12,12 @@ It answers the first question in the educational journey:
 From the repository root:
 
 ```bash
+elodin editor examples/voyager/main.py
+```
+
+Headless:
+
+```bash
 python examples/voyager/main.py run
 ```
 

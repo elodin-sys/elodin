@@ -1,4 +1,3 @@
-import json
 import os
 import typing as ty
 from pathlib import Path
@@ -10,14 +9,22 @@ import spiceypy as spice
 from dynamics import (
     gravity_source_entity_names,
     heliocentric_relative_acceleration,
+    radial_transverse_normal_basis,
 )
 from jax import numpy as jnp
 from jax.numpy import linalg as la
 from time_utils import utc_epoch_microseconds
+from validation_io import (
+    INITIAL_STATE_PREFIX,
+    METRIC_PREFIX,
+    PLANET_SEGMENT_PREFIX,
+    SEGMENT_PREFIX,
+    emit_prefixed_json,
+    load_checkpoints_json,
+)
 
 DEFAULT_SIM_TIME_STEP = 3600.0
 SIM_TIME_STEP = float(os.environ.get("VOYAGER_TIME_STEP", DEFAULT_SIM_TIME_STEP))
-# Set the gravitational constant for Newton's law of universal gravitation
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
 G = 6.6743e-11
 DEFAULT_DB_PATH = "dbs/voyager"
@@ -29,10 +36,6 @@ SPICE_DIR_ENV = "VOYAGER_SPICE_DIR"
 TRUTH_KERNEL_ENV = "VOYAGER_TRUTH_KERNEL"
 SCORED_PROBE_ENV = "VOYAGER_SCORED_PROBE"
 CHECKPOINTS_ENV = "VOYAGER_CHECKPOINTS_JSON"
-METRIC_PREFIX = "VOYAGER_VALIDATION_METRIC"
-SEGMENT_PREFIX = "VOYAGER_ACTIVE_SEGMENT"
-PLANET_SEGMENT_PREFIX = "VOYAGER_PLANET_SEGMENT"
-INITIAL_STATE_PREFIX = "VOYAGER_INITIAL_STATE"
 
 SPICE_DIR = Path(
     os.environ.get(
@@ -69,6 +72,14 @@ else:
         PLANET_KERNEL,
         *MERGED_VOYAGER_KERNELS,
     ]
+
+missing_kernels = [kernel for kernel in SPICE_KERNELS if not kernel.is_file()]
+if missing_kernels:
+    raise FileNotFoundError(
+        "Missing SPICE kernels:\n"
+        + "\n".join(f"  {kernel}" for kernel in missing_kernels)
+        + "\nDownload them with examples/voyager/download_spice_data.sh"
+    )
 
 for kernel in SPICE_KERNELS:
     spice.furnsh(str(kernel))
@@ -172,7 +183,7 @@ if unknown_scored_probes:
         f"{SCORED_PROBE_ENV} contains an unknown probe: {sorted(unknown_scored_probes)}"
     )
 
-CHECKPOINTS = tuple(json.loads(os.environ.get(CHECKPOINTS_ENV, "[]")))
+CHECKPOINTS = load_checkpoints_json(os.environ.get(CHECKPOINTS_ENV, "[]"))
 TRUTH_PROBES = [
     {
         "spice_name": "VOYAGER 1",
@@ -235,20 +246,16 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
     init_vel = jnp.array(init_state[3:]) * 1000.0
 
     if truth_kernel_name and body in PROBES and body["entity_name"] in SCORED_PROBES:
-        print(
+        emit_prefixed_json(
             INITIAL_STATE_PREFIX,
-            json.dumps(
-                {
-                    "epoch_utc": START_UTC,
-                    "frame": "ECLIPJ2000",
-                    "observer": "SUN",
-                    "position_m": np.asarray(init_pos, dtype=np.float64).tolist(),
-                    "probe": body["entity_name"],
-                    "velocity_mps": np.asarray(init_vel, dtype=np.float64).tolist(),
-                },
-                sort_keys=True,
-            ),
-            flush=True,
+            {
+                "epoch_utc": START_UTC,
+                "frame": "ECLIPJ2000",
+                "observer": "SUN",
+                "position_m": np.asarray(init_pos, dtype=np.float64).tolist(),
+                "probe": body["entity_name"],
+                "velocity_mps": np.asarray(init_vel, dtype=np.float64).tolist(),
+            },
         )
 
     print(body["spice_name"])
@@ -331,30 +338,25 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         if checkpoint is not None:
             position_residual_km = (simulated_pos - truth_pos) / 1000.0
             velocity_residual_mps = simulated_vel - truth_vel
-            radial = truth_pos / np.linalg.norm(truth_pos)
-            normal = np.cross(truth_pos, truth_vel)
-            normal /= np.linalg.norm(normal)
-            transverse = np.cross(normal, radial)
-            rtn_basis = np.stack((radial, transverse, normal))
-            print(
+            rtn_basis = np.asarray(
+                radial_transverse_normal_basis(truth_pos, truth_vel),
+                dtype=np.float64,
+            )
+            emit_prefixed_json(
                 METRIC_PREFIX,
-                json.dumps(
-                    {
-                        "actual_elapsed_seconds": completed_seconds,
-                        "actual_epoch_utc": spice.et2utc(current_time_et, "ISOC", 3),
-                        "checkpoint": checkpoint["name"],
-                        "position_error_km": position_error_km,
-                        "position_residual_km": position_residual_km.tolist(),
-                        "position_rtn_km": (rtn_basis @ position_residual_km).tolist(),
-                        "probe": probe["entity_name"],
-                        "requested_elapsed_seconds": checkpoint["elapsed_seconds"],
-                        "velocity_error_mps": velocity_error_mps,
-                        "velocity_residual_mps": velocity_residual_mps.tolist(),
-                        "velocity_rtn_mps": (rtn_basis @ velocity_residual_mps).tolist(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
+                {
+                    "actual_elapsed_seconds": completed_seconds,
+                    "actual_epoch_utc": spice.et2utc(current_time_et, "ISOC", 3),
+                    "checkpoint": checkpoint["name"],
+                    "position_error_km": position_error_km,
+                    "position_residual_km": position_residual_km.tolist(),
+                    "position_rtn_km": (rtn_basis @ position_residual_km).tolist(),
+                    "probe": probe["entity_name"],
+                    "requested_elapsed_seconds": checkpoint["elapsed_seconds"],
+                    "velocity_error_mps": velocity_error_mps,
+                    "velocity_residual_mps": velocity_residual_mps.tolist(),
+                    "velocity_rtn_mps": (rtn_basis @ velocity_residual_mps).tolist(),
+                },
             )
 
         ctx.write_component(
@@ -490,32 +492,33 @@ if truth_kernel_name:
         for index in range(spice.ktotal("SPK"))
         for filename, _, _, handle in (spice.kdata(index, "SPK"),)
     }
-    validation_epochs = {"initialization": start_time_et}
-    if max_ticks is not None:
-        validation_epochs["scoring_end"] = start_time_et + max_ticks * SIM_TIME_STEP
+    if max_ticks is None:
+        raise ValueError(
+            f"{TRUTH_KERNEL_ENV} requires {MAX_TICKS_ENV} so scoring_end can be audited"
+        )
+    validation_epochs = {
+        "initialization": start_time_et,
+        "scoring_end": start_time_et + max_ticks * SIM_TIME_STEP,
+    }
 
     def emit_segment(prefix: str, spice_name: str, extra: dict) -> None:
         target_code = spice.bodn2c(spice_name)
         for epoch_name, epoch_et in validation_epochs.items():
             handle, descriptor, identifier = spice.spksfs(target_code, epoch_et, 256)
             target, center, frame, segment_type, *_ = spice.spkuds(descriptor)
-            print(
+            emit_prefixed_json(
                 prefix,
-                json.dumps(
-                    {
-                        "center": center,
-                        "epoch": epoch_name,
-                        "file": Path(loaded_spk_files[handle]).name,
-                        "native_frame": spice.frmnam(frame),
-                        "segment_id": identifier.strip(),
-                        "segment_type": segment_type,
-                        "spice_name": spice_name,
-                        "target": target,
-                        **extra,
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
+                {
+                    "center": center,
+                    "epoch": epoch_name,
+                    "file": Path(loaded_spk_files[handle]).name,
+                    "native_frame": spice.frmnam(frame),
+                    "segment_id": identifier.strip(),
+                    "segment_type": segment_type,
+                    "spice_name": spice_name,
+                    "target": target,
+                    **extra,
+                },
             )
 
     for probe in PROBES:
@@ -526,7 +529,6 @@ if truth_kernel_name:
     for body in PLANETS:
         emit_segment(PLANET_SEGMENT_PREFIX, body["spice_name"], {})
 
-# sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
 sim = w.run(
     sys,
     simulation_rate=SIMULATION_RATE_HZ,

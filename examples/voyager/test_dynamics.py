@@ -10,6 +10,7 @@ from dynamics import (
     gravity_source_entity_names,
     heliocentric_relative_acceleration,
     planetary_acceleration_of_sun,
+    radial_transverse_normal_basis,
 )
 
 
@@ -107,3 +108,24 @@ def test_truth_probes_are_not_wired_into_chapter_2_gravity():
         and node.func.id == "heliocentric_relative_acceleration"
     ]
     assert len(relative_acceleration_calls) == 1
+
+
+def test_rtn_basis_is_orthonormal_for_a_typical_heliocentric_state():
+    position = jnp.array([3.0, 0.0, 0.0])
+    velocity = jnp.array([0.0, 2.0, 0.0])
+    basis = np.asarray(radial_transverse_normal_basis(position, velocity))
+
+    np.testing.assert_allclose(basis[0], [1.0, 0.0, 0.0])
+    np.testing.assert_allclose(basis[1], [0.0, 1.0, 0.0])
+    np.testing.assert_allclose(basis[2], [0.0, 0.0, 1.0])
+    np.testing.assert_allclose(basis @ basis.T, np.eye(3), atol=1e-12)
+
+
+def test_rtn_basis_stays_finite_when_velocity_is_radial():
+    position = jnp.array([4.0, 0.0, 0.0])
+    velocity = jnp.array([1.0, 0.0, 0.0])
+    basis = np.asarray(radial_transverse_normal_basis(position, velocity))
+
+    assert np.isfinite(basis).all()
+    np.testing.assert_allclose(basis @ basis.T, np.eye(3), atol=1e-12)
+    np.testing.assert_allclose(basis[0], [1.0, 0.0, 0.0])

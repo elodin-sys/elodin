@@ -275,10 +275,10 @@ matrix, audits spacecraft and DE440 planetary segment precedence, and writes
 contains 18 runs: eight 100-second Chapter 1/2 baselines and ten additional
 Chapter 2 convergence runs.
 
-This refresh did not rerun those 18 native propagations. Residuals are the
-previous campaign. The contract labels, Saturn `early_approach` timestep
-controls, and DE440 planetary segment audits were rebuilt from that artifact
-plus a live SPICE load-order check.
+Those residuals come from the native 18-run campaign. Later contract-label,
+Saturn `early_approach` timestep-control, and DE440 planetary-audit updates
+were rebuilt from that artifact plus a live SPICE load-order check; the 18
+propagations were not repeated.
 
 For a focused reproduction:
 

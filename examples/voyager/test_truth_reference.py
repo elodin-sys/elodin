@@ -1,10 +1,11 @@
 """Contract tests for the Voyager reconstructed-arc validation harness."""
 
 import json
-import sys
+import re
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from time_utils import (
     LEGACY_TUTORIAL_DB_EPOCH_US,
     TUTORIAL_START_UTC,
@@ -21,6 +22,7 @@ from validate_truth import (
     sha256,
     validate_run_record,
 )
+from validation_io import METRIC_PREFIX, load_checkpoints_json, parse_prefixed_json
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
@@ -125,25 +127,68 @@ def test_incompatible_convergence_selections_are_rejected():
     manifest = load_manifest()
     case = manifest["cases"][0]
 
-    for chapters, timestep in (([1], None), ([2], 300.0)):
-        try:
-            selected_convergence_timesteps(manifest, case, chapters, True, timestep)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("incompatible convergence selection was silently ignored")
+    with pytest.raises(ValueError, match="--include-convergence requires Chapter"):
+        selected_convergence_timesteps(manifest, case, [1], True, None)
+    with pytest.raises(ValueError, match="cannot be combined with --timestep"):
+        selected_convergence_timesteps(manifest, case, [2], True, 300.0)
 
 
 def test_cli_has_no_chapter_three_force_model_flags():
-    argv = sys.argv
-    sys.argv = ["validate_truth.py"]
-    try:
-        args = parse_args()
-    finally:
-        sys.argv = argv
-
+    args = parse_args([])
     for key in UNIMPLEMENTED_FORCE_MODEL_KEYS:
         assert not hasattr(args, key)
+
+
+def test_unknown_case_ids_are_rejected():
+    manifest = load_manifest()
+    with pytest.raises(ValueError, match="Unknown validation case"):
+        selected_cases(manifest, {"not_a_case"})
+
+
+def test_load_manifest_requires_start_anchor(tmp_path):
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest["cases"][0]["checkpoints"][0]["validation_role"] = "primary"
+    path = tmp_path / "truth_reference.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="start anchor"):
+        load_manifest(path)
+
+
+def test_prefixed_json_lines_ignore_noise_and_extra_spaces():
+    output = "\n".join(
+        (
+            "noise",
+            f'{METRIC_PREFIX}   {{"checkpoint": "end"}}',
+            f'{METRIC_PREFIX}{{"checkpoint": "start"}}',
+        )
+    )
+    assert parse_prefixed_json(output, METRIC_PREFIX) == [
+        {"checkpoint": "end"},
+        {"checkpoint": "start"},
+    ]
+
+
+def test_checkpoint_json_rejects_invalid_payloads():
+    with pytest.raises(ValueError, match="not valid JSON"):
+        load_checkpoints_json("{")
+    with pytest.raises(TypeError, match="JSON array"):
+        load_checkpoints_json("{}")
+    with pytest.raises(ValueError, match="name and elapsed_seconds"):
+        load_checkpoints_json('[{"name": "start"}]')
+
+
+def test_download_script_checksums_match_the_manifest():
+    manifest = load_manifest()
+    script = (EXAMPLE_DIR / "download_spice_data.sh").read_text(encoding="utf-8")
+    downloads = re.findall(
+        r"download \\\s+(\S+) \\\s+(\S+) \\\s+([0-9a-f]{64})",
+        script,
+    )
+    assert {name for name, _url, _digest in downloads} == set(manifest["kernels"])
+    for name, url, digest in downloads:
+        kernel = manifest["kernels"][name]
+        assert kernel["url"] == url
+        assert kernel["sha256"] == digest
 
 
 def test_jupiter_has_no_primary_checkpoint():

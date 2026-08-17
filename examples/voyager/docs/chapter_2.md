@@ -11,13 +11,19 @@ assumption, derive the correction, and measure its effect.
 From the repository root:
 
 ```bash
+VOYAGER_DYNAMICS_CHAPTER=2 elodin editor examples/voyager/main.py
+```
+
+Headless:
+
+```bash
 python examples/voyager/chapter_2.py run
 ```
 
 For comparison, Chapter 1 remains:
 
 ```bash
-python examples/voyager/main.py run
+elodin editor examples/voyager/main.py
 ```
 
 ## The subtlety

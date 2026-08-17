@@ -65,7 +65,14 @@ The example loads:
 
 ## Run Chapter 1
 
-From the repository root:
+From the repository root, open the editor to see the trajectories and error
+graphs:
+
+```bash
+elodin editor examples/voyager/main.py
+```
+
+Headless Chapter 1:
 
 ```bash
 python examples/voyager/main.py run
@@ -81,7 +88,11 @@ Read the Chapter 1 notes after you have the example running:
 
 ## Run Chapter 2
 
-From the repository root:
+```bash
+VOYAGER_DYNAMICS_CHAPTER=2 elodin editor examples/voyager/main.py
+```
+
+Headless Chapter 2:
 
 ```bash
 python examples/voyager/chapter_2.py run
@@ -97,10 +108,10 @@ Read the derivation, experiment, and measured results here:
 
 ## Educational journey
 
-| Chapter | Topic | Run |
-| --- | --- | --- |
-| [1](docs/chapter_1.md) | Simple interplanetary gravity | `python examples/voyager/main.py run` |
-| [2](docs/chapter_2.md) | Heliocentric relative dynamics | `python examples/voyager/chapter_2.py run` |
+| Chapter | Topic | Editor | Headless |
+| --- | --- | --- | --- |
+| [1](docs/chapter_1.md) | Simple interplanetary gravity | `elodin editor examples/voyager/main.py` | `python examples/voyager/main.py run` |
+| [2](docs/chapter_2.md) | Heliocentric relative dynamics | `VOYAGER_DYNAMICS_CHAPTER=2 elodin editor examples/voyager/main.py` | `python examples/voyager/chapter_2.py run` |
 
 The chapters intentionally build on one another rather than turning the first
 example into a single high-fidelity mission reconstruction.
