@@ -666,7 +666,7 @@
 <p><code>frame_orientation</code>: optional; <code>ENU</code>, <code>NED</code>, or <code>ECEF</code>. Coordinate frame used for orientation (<code>GeoRotation</code>). Falls back to <code>frame</code>, then the global default, when omitted.</p>
 </li>
 <li>
-<p><code>orientation</code>: optional; <code>relative</code> (default) or <code>absolute</code>. With <code>relative</code>, an identity rotation in any frame maps to identity in the editor's Bevy view (legacy ENU-compatible behavior). With <code>absolute</code>, mesh geometry is oriented to the declared orientation frame's axes — use this for frame-aligned visuals such as compasses in multi-frame scenes.</p>
+<p><code>orientation</code>: optional; <code>relative</code> (default) or <code>absolute</code>. Both compose the object's attitude with the frame→Bevy basis (<code>bevy_R * att</code>). An identity attitude therefore aligns mesh local axes with the schematic frame (ENU: +X east, +Y north, +Z up) — not with the editor's Bevy Y-up axes. Use <code>absolute</code> when you want to be explicit about frame-aligned geometry (compasses, multi-frame scenes).</p>
 </li>
 <li>
 <p>Mesh child (required, exactly one):</p>
@@ -692,7 +692,7 @@
 <li><code>sphere</code>: <code>radius</code> (required); <code>color</code> (default white).</li>
 <li><code>box</code>: <code>x</code>, <code>y</code>, <code>z</code> (all required); <code>color</code> (default white).</li>
 <li><code>cylinder</code>: <code>radius</code>, <code>height</code> (both required); <code>color</code> (default white).</li>
-<li><code>plane</code>: <code>width</code>/<code>depth</code> (default <code>size</code> if set, else 10.0); optional <code>size</code> shorthand; <code>color</code> (default white).</li>
+<li><code>plane</code>: <code>width</code>/<code>depth</code> (default <code>size</code> if set, else 10.0); optional <code>size</code> shorthand; <code>color</code> (default white). Horizontal ground rectangle in the object frame (XY, normal +Z / up).</li>
 <li><code>ellipsoid</code>: <code>color</code> (default white), <code>show_grid</code> (default <code>#false</code>).
 <ul>
 <li>Physical measure
