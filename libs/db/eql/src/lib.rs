@@ -7,12 +7,33 @@ use std::{
 };
 use unicode_ident::*;
 
+use convert_case::Casing;
 use impeller2::{
     schema::Schema,
     types::{ComponentId, Timestamp},
 };
 use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
+
+/// DataFusion table/column ident for a component name.
+///
+/// Must match `elodin-db` table registration: snake_case (digits are word
+/// boundaries) then replace non-alphanumeric characters with `_`.
+///
+/// `CANOPENMOTORMESSAGE3.ACTUAL_POSITION` → `canopenmotormessage_3_actual_position`
+pub fn sql_table_name(component_name: &str) -> String {
+    component_name
+        .to_case(convert_case::Case::Snake)
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
 
 pub mod formulas;
 
@@ -125,7 +146,7 @@ pub enum Expr {
 impl Expr {
     fn to_field(&self) -> Result<String, Error> {
         match self {
-            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
+            Expr::ComponentPart(component) => Ok(sql_table_name(&component.name)),
             Expr::Time(_) => Ok("time".to_string()),
             Expr::Formula(formula, expr) => formula.to_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
@@ -137,7 +158,7 @@ impl Expr {
 
             Expr::ArrayAccess(inner_expr, index) => match inner_expr.as_ref() {
                 Expr::ComponentPart(part) if part.component.is_some() => {
-                    Ok(format!("{}[{}]", part.name.replace(".", "_"), index + 1))
+                    Ok(format!("{}[{}]", sql_table_name(&part.name), index + 1))
                 }
                 _ => Err(Error::InvalidFieldAccess(
                     "array access on non-component".to_string(),
@@ -153,9 +174,9 @@ impl Expr {
 
     fn to_table(&self) -> Result<String, Error> {
         match self {
-            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
+            Expr::ComponentPart(component) => Ok(sql_table_name(&component.name)),
 
-            Expr::Time(component) => Ok(component.name.replace(".", "_")),
+            Expr::Time(component) => Ok(sql_table_name(&component.name)),
             Expr::Formula(_, expr) => expr.to_table(),
             Expr::BinaryOp(left, right, _) => {
                 // Try left first, fall back to right if left is a literal
@@ -862,6 +883,36 @@ mod tests {
             Timestamp(0),    // earliest_timestamp
             Timestamp(1000), // last_timestamp
         )
+    }
+
+    #[test]
+    fn sql_table_name_splits_digits_like_datafusion_registration() {
+        assert_eq!(
+            sql_table_name("CANOPENMOTORMESSAGE3.ACTUAL_POSITION"),
+            "canopenmotormessage_3_actual_position"
+        );
+        assert_eq!(
+            sql_table_name("GpsPosMessage1.VACC"),
+            "gps_pos_message_1_vacc"
+        );
+        assert_eq!(sql_table_name("a.world_pos"), "a_world_pos");
+    }
+
+    #[test]
+    fn test_screaming_snake_component_sql() {
+        let component = Arc::new(Component::new(
+            "CANOPENMOTORMESSAGE3.ACTUAL_POSITION".to_string(),
+            ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION"),
+            Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let context = Context::from_leaves([component.clone()], Timestamp(0), Timestamp(1000));
+        let expr = context
+            .parse_str("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")
+            .unwrap();
+        assert_eq!(
+            expr.to_sql(&context).unwrap(),
+            "select canopenmotormessage_3_actual_position.canopenmotormessage_3_actual_position as 'CANOPENMOTORMESSAGE3.ACTUAL_POSITION' from canopenmotormessage_3_actual_position"
+        );
     }
 
     #[test]

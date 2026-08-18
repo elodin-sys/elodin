@@ -75,6 +75,22 @@ fn assert_query_success(output: std::process::Output) -> String {
 }
 
 #[test]
+fn eql_query_resolves_screaming_snake_component_with_trailing_digit() {
+    let dir = create_fixture(
+        "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
+        PrimType::F64,
+        &[
+            1.0f64.to_le_bytes().to_vec(),
+            2.0f64.to_le_bytes().to_vec(),
+            3.0f64.to_le_bytes().to_vec(),
+        ],
+    );
+    let output = run_eql_query(dir.path(), "CANOPENMOTORMESSAGE3.ACTUAL_POSITION");
+    let stdout = assert_query_success(output);
+    assert_eq!(csv_values(&stdout), vec!["1", "2", "3"]);
+}
+
+#[test]
 fn eql_cast_identifier_syntax_allows_u16_float_arithmetic() {
     let dir = create_fixture(
         "sensor.count",
