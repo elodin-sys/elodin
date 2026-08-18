@@ -1187,10 +1187,13 @@ impl BevyExt for impeller2_wkt::Mesh {
                 bevy::math::primitives::Cylinder::new(radius, height).into()
             }
             impeller2_wkt::Mesh::Plane { width, depth } => {
-                bevy::math::primitives::Plane3d::default()
-                    .mesh()
-                    .size(width, depth)
-                    .into()
+                // Schematic-frame Z-up (not Bevy Y-up): identity att is ground.
+                bevy::math::primitives::Plane3d {
+                    normal: Dir3::Z,
+                    half_size: Vec2::new(width * 0.5, depth * 0.5),
+                }
+                .mesh()
+                .into()
             }
         }
     }
@@ -2471,6 +2474,7 @@ mod tests {
     use super::*;
     use bevy::app::App;
     use bevy::math::{DQuat, EulerRot};
+    use bevy::mesh::VertexAttributeValues;
     use impeller2::types::{ComponentId, Timestamp};
     use impeller2_wkt::ComponentValue;
 
@@ -2510,6 +2514,33 @@ mod tests {
             q.dot(expected).abs() > 1.0 - 1e-9,
             "got {q:?}, expected {expected:?}"
         );
+    }
+
+    #[test]
+    fn plane_mesh_is_horizontal_in_schematic_frame() {
+        let mesh = impeller2_wkt::Mesh::plane(10.0, 20.0).into_bevy();
+        let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("plane mesh missing normals");
+        };
+        assert!(!normals.is_empty());
+        for n in normals {
+            assert!(
+                n[2].abs() > 0.99 && n[0].abs() < 1e-5 && n[1].abs() < 1e-5,
+                "plane normal should be ±Z, got {n:?}"
+            );
+        }
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("plane mesh missing positions");
+        };
+        for p in positions {
+            assert!(
+                p[2].abs() < 1e-5,
+                "plane vertices should lie in XY, got {p:?}"
+            );
+        }
     }
 
     fn sample_addr(port: u16) -> std::net::SocketAddr {
