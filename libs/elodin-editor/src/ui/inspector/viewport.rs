@@ -796,11 +796,12 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 pub fn retry_viewport_eql_compile(
     mut viewports: Query<&mut Viewport>,
     eql_context: Res<EqlContext>,
+    geo_context: Res<GeoContext>,
 ) {
     for mut viewport in &mut viewports {
-        viewport.pos.retry_compile(&eql_context.0);
-        viewport.look_at.retry_compile(&eql_context.0);
-        viewport.up.retry_compile(&eql_context.0);
+        viewport.pos.retry_compile(&eql_context.0, &geo_context);
+        viewport.look_at.retry_compile(&eql_context.0, &geo_context);
+        viewport.up.retry_compile(&eql_context.0, &geo_context);
     }
 }
 
@@ -1693,6 +1694,91 @@ mod tests {
         assert!(
             (delta_bevy - expected_bevy).length() < 1e-4,
             "Bevy delta must be Absolute(ECEF,att)*body(−2,0,0): got {delta_bevy:?}, expected {expected_bevy:?}"
+        );
+    }
+
+    /// A viewport EQL that failed to compile at spawn is retried once the
+    /// component metadata lands. The retry must bake the schematic origin, not
+    /// `GeoContext::default()` (lat/lon 0).
+    #[test]
+    fn retried_viewport_eql_uses_schematic_origin() {
+        use bevy::ecs::system::SystemState;
+        use bevy::math::DVec3;
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin};
+        use impeller2::schema::Schema;
+        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use nox::Array;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let geo = GeoContext::from(GeoOrigin::new_from_degrees(28.5, -80.6, 0.0));
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let component_id = component.id;
+
+        let mut app = bevy::app::App::new();
+        app.insert_resource(geo);
+        // Spawn-time compile failed: the component was still unknown then.
+        let viewport = app
+            .world_mut()
+            .spawn(super::Viewport::new(
+                Entity::PLACEHOLDER,
+                EditableEQL {
+                    eql: "rocket.world_pos.ecef_to_ned()".to_string(),
+                    compiled_expr: None,
+                },
+                EditableEQL::default(),
+                EditableEQL::default(),
+                Some(GeoFrame::NED),
+                0.0,
+            ))
+            .id();
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1000),
+        )));
+        app.add_systems(bevy::app::Update, super::retry_viewport_eql_compile);
+        app.update();
+
+        let expr = app
+            .world_mut()
+            .get_mut::<super::Viewport>(viewport)
+            .expect("viewport entity")
+            .pos
+            .compiled_expr
+            .take()
+            .expect("retry must compile once the component is known");
+
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![3],
+                    vec![origin_ecef.x, origin_ecef.y, origin_ecef.z],
+                )
+                .unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = expr
+            .execute(&entity_map, &values)
+            .expect("execute retry expr");
+        let pos =
+            crate::ui::gauges::component_value_to_position(&out).expect("expected a 3-vector");
+        assert!(
+            pos.length() < 1e-6,
+            "ECEF of the schematic origin must map to ~0 NED, got {pos:?}"
         );
     }
 
