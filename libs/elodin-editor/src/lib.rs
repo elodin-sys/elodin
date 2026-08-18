@@ -2519,7 +2519,8 @@ mod tests {
     #[test]
     fn plane_mesh_is_horizontal_in_schematic_frame() {
         let mesh = impeller2_wkt::Mesh::plane(10.0, 20.0).into_bevy();
-        let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        let Some(VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
         else {
             panic!("plane mesh missing normals");
         };
