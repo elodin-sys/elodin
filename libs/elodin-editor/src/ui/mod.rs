@@ -99,6 +99,7 @@ pub mod plot_3d;
 pub mod query_plot;
 pub mod query_table;
 pub mod schematic;
+pub mod sql_eql;
 mod theme;
 pub mod tiles;
 pub mod time_label;

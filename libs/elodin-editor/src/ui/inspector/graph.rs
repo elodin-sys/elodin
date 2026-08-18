@@ -6,7 +6,7 @@ use std::{
 
 use bevy::ecs::{
     entity::Entity,
-    system::{Local, Query, Res, SystemParam, SystemState},
+    system::{Commands, Local, Query, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
@@ -49,6 +49,7 @@ pub struct InspectorGraph<'w, 's> {
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     eql_context: Res<'w, EqlContext>,
+    commands: Commands<'w, 's>,
     add_component_state: Local<'s, HashMap<Entity, AddComponentState>>,
 }
 
@@ -72,6 +73,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             mut graph_states,
             mut query_plots,
             eql_context,
+            mut commands,
             mut add_component_state,
         } = state_mut;
 
@@ -313,10 +315,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             add_component_widget(
                 ui,
                 icons.search,
+                graph_id,
                 graph_state,
                 &metadata_store,
                 &schema_store,
                 &eql_context.0,
+                &mut commands,
                 add_component_state.entry(graph_id).or_default(),
             );
         }
@@ -406,13 +410,16 @@ fn component_value(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_component_widget(
     ui: &mut egui::Ui,
     search_icon: egui::TextureId,
+    graph_id: Entity,
     graph_state: &mut GraphState,
     metadata_store: &ComponentMetadataRegistry,
     schema_store: &ComponentSchemaRegistry,
     eql_context: &eql::Context,
+    commands: &mut Commands,
     add_state: &mut AddComponentState,
 ) {
     let mut component_names = Vec::new();
@@ -467,10 +474,12 @@ fn add_component_widget(
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             if ui.add(EButton::highlight("ADD").width(88.0)).clicked() {
                                 let _ = add_components_from_eql(
+                                    graph_id,
                                     graph_state,
                                     metadata_store,
                                     schema_store,
                                     eql_context,
+                                    commands,
                                     component_name,
                                 );
                             }
@@ -522,10 +531,12 @@ fn add_component_widget(
                 let query = add_state.expression.trim().to_string();
                 if !query.is_empty()
                     && add_components_from_eql(
+                        graph_id,
                         graph_state,
                         metadata_store,
                         schema_store,
                         eql_context,
+                        commands,
                         &query,
                     )
                     .unwrap_or(false)
@@ -549,15 +560,49 @@ fn collect_component_names(
 }
 
 fn add_components_from_eql(
+    graph_id: Entity,
     graph_state: &mut GraphState,
     metadata_store: &ComponentMetadataRegistry,
     schema_store: &ComponentSchemaRegistry,
     eql_context: &eql::Context,
+    commands: &mut Commands,
     query: &str,
 ) -> Result<bool, String> {
     let expr = eql_context
         .parse_str(query)
         .map_err(|err| format!("Invalid EQL expression: {err}"))?;
+
+    if expr.frame_conversion_name().is_some() {
+        // Frame converters need SQL evaluation — attach QueryPlotData and clear SeriesStore lines.
+        // `sync_graphs` skips QueryPlotData graphs, so it can never reclaim these
+        // entities: dropping them from `enabled_lines` alone leaves them rendering
+        // their stale timeseries on the graph's render layer.
+        for (entity, _) in graph_state.enabled_lines.values() {
+            commands.entity(*entity).despawn();
+        }
+        graph_state.components.clear();
+        graph_state.enabled_lines.clear();
+        let color = get_scheme().highlight;
+        commands.entity(graph_id).insert(QueryPlotData {
+            data: impeller2_wkt::QueryPlot {
+                name: graph_state.label.clone(),
+                query: query.to_string(),
+                refresh_interval: Duration::from_millis(500),
+                auto_refresh: true,
+                color: impeller2_wkt::Color::from_color32(color),
+                query_type: QueryType::EQL,
+                plot_mode: impeller2_wkt::PlotMode::TimeSeries,
+                x_label: None,
+                y_label: None,
+                node_id: Default::default(),
+            },
+            auto_color: true,
+            series_colors: Vec::new(),
+            last_refresh: None,
+            ..Default::default()
+        });
+        return Ok(true);
+    }
 
     let mut requested_components = expr.to_graph_components();
     requested_components.sort();
@@ -595,10 +640,9 @@ fn add_components_from_eql(
         }
 
         for index in indexes {
-            let Some((enabled, color)) = component_values.get_mut(index) else {
-                continue;
-            };
-            if !*enabled {
+            if let Some((enabled, color)) = component_values.get_mut(index)
+                && !*enabled
+            {
                 *enabled = true;
                 *color = get_color_by_index_all(next_color_index);
                 next_color_index += 1;
@@ -655,4 +699,67 @@ fn default_component_values(path: &ComponentPath, len: usize) -> Vec<(bool, Colo
     (0..len)
         .map(|i| (false, get_color_by_index_all(path.id.0 as usize + i)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use crate::ui::plot::GraphBundle;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::World;
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use std::sync::Arc;
+
+    /// Converting a graph to a SQL query plot must despawn the timeseries lines
+    /// it used to draw. `sync_graphs` skips `QueryPlotData` graphs, so nothing
+    /// else can reclaim them and they keep rendering over the query plot.
+    #[test]
+    fn frame_conversion_despawns_previous_graph_lines() {
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let eql_context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+        let mut world = World::new();
+        let mut render_layer_alloc = RenderLayerAllocator::default();
+        let mut graph_state = GraphBundle::try_new(
+            &mut render_layer_alloc,
+            BTreeMap::new(),
+            "graph".to_string(),
+        )
+        .expect("a free render layer")
+        .graph_state;
+        let line = world.spawn_empty().id();
+        graph_state.enabled_lines.insert(
+            (ComponentPath::from_name("rocket.world_pos"), 0),
+            (line, Color32::RED),
+        );
+        let graph_id = world.spawn_empty().id();
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        let converted = add_components_from_eql(
+            graph_id,
+            &mut graph_state,
+            &ComponentMetadataRegistry::default(),
+            &ComponentSchemaRegistry::default(),
+            &eql_context,
+            &mut commands,
+            "rocket.world_pos.ecef_to_ned()",
+        )
+        .expect("frame conversion must be accepted");
+        system_state.apply(&mut world);
+
+        assert!(converted, "expected a conversion to a query plot");
+        assert!(graph_state.enabled_lines.is_empty());
+        assert!(
+            world.get_entity(line).is_err(),
+            "the stale timeseries line must be despawned"
+        );
+        assert!(world.entity(graph_id).contains::<QueryPlotData>());
+    }
 }

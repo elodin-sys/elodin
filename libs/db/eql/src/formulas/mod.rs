@@ -10,6 +10,7 @@ mod degrees;
 mod direction;
 mod fft;
 mod fftfreq;
+mod frame_convert;
 mod linear;
 mod norm;
 mod rotate;
@@ -29,6 +30,7 @@ pub use degrees::*;
 pub use direction::*;
 pub use fft::*;
 pub use fftfreq::*;
+pub use frame_convert::*;
 pub use linear::*;
 pub use norm::*;
 pub use rotate::*;
@@ -87,6 +89,11 @@ pub trait Formula: Send + Sync + std::fmt::Debug {
 
     /// When this formula is `cast`, the resolved target type for editor-side evaluation.
     fn editor_cast_target(&self) -> Option<cast::CastTarget> {
+        None
+    }
+
+    /// Directed ENU/NED/ECEF conversion metadata for editor runtime.
+    fn frame_conversion(&self) -> Option<FrameConversion> {
         None
     }
 }
@@ -174,6 +181,9 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(TranslateWorldZ);
     registry.register(TranslateWorld);
     registry.register(Direction);
+    for fc in all_frame_converts() {
+        registry.register(fc);
+    }
 
     registry
 }

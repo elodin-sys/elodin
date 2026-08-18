@@ -184,6 +184,13 @@ impl XAxisMode {
     }
 }
 
+/// One XY series for query-plot rendering / hover modal.
+pub struct XYPlotSeries {
+    pub handle: Handle<XYLine>,
+    pub label: String,
+    pub color: egui::Color32,
+}
+
 /// Data source for plot rendering - either timeseries (Line) or XY (XYLine) data
 pub enum PlotDataSource<'a> {
     Timeseries {
@@ -193,9 +200,9 @@ pub enum PlotDataSource<'a> {
     },
     XY {
         xy_lines: &'a Assets<XYLine>,
-        xy_line_handle: Handle<XYLine>,
+        /// Plot title shown at the top of the hover modal.
         query_label: String,
-        query_color: egui::Color32,
+        series: Vec<XYPlotSeries>,
     },
 }
 
@@ -326,6 +333,141 @@ pub fn get_inner_rect(rect: egui::Rect, telemetry_mode: bool) -> egui::Rect {
     rect.shrink4(plot_margin(telemetry_mode))
 }
 
+const MODAL_SWATCH: f32 = 8.0;
+const MODAL_SWATCH_GAP: f32 = 6.0;
+const MODAL_ROW_FONT_SIZE: f32 = 11.0;
+
+fn modal_swatch(ui: &mut egui::Ui, color: egui::Color32) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(MODAL_SWATCH, MODAL_SWATCH), egui::Sense::click());
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(2),
+        color,
+        egui::Stroke::NONE,
+        egui::StrokeKind::Middle,
+    );
+}
+
+/// Color swatch + series label + value. If they do not fit on one line, the
+/// value wraps as a whole (never mid-digit).
+fn modal_series_row(ui: &mut egui::Ui, color: egui::Color32, label: &str, value: &str) {
+    ui.scope(|ui| {
+        ui.style_mut().override_font_id = Some(egui::TextStyle::Monospace.resolve(ui.style()));
+        let font_id = egui::FontId::monospace(MODAL_ROW_FONT_SIZE);
+        let measure = |text: &str| {
+            ui.painter()
+                .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
+                .size()
+                .x
+        };
+        let needed = MODAL_SWATCH + MODAL_SWATCH_GAP + measure(label) + measure(value);
+        let label_text = RichText::new(label).size(MODAL_ROW_FONT_SIZE);
+        let value_text = RichText::new(value).size(MODAL_ROW_FONT_SIZE);
+
+        if needed <= ui.available_width() {
+            ui.horizontal(|ui| {
+                modal_swatch(ui, color);
+                ui.add_space(MODAL_SWATCH_GAP);
+                ui.label(label_text);
+                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                    ui.add_space(3.0);
+                    ui.add(egui::Label::new(value_text).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add_space(3.0);
+                });
+            });
+        } else {
+            ui.horizontal(|ui| {
+                modal_swatch(ui, color);
+                ui.add_space(MODAL_SWATCH_GAP);
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(label_text).wrap());
+                    ui.add(egui::Label::new(value_text).wrap_mode(egui::TextWrapMode::Extend));
+                });
+            });
+        }
+    });
+}
+
+const PLOT_MODAL_ID: &str = "plot_modal";
+const PLOT_MODAL_FALLBACK_HEIGHT: f32 = 120.0;
+
+fn clamp_rect_to(rect: egui::Rect, screen: egui::Rect) -> egui::Rect {
+    let size = rect.size();
+    let mut min = rect.min;
+    if min.x + size.x > screen.max.x {
+        min.x = screen.max.x - size.x;
+    }
+    if min.y + size.y > screen.max.y {
+        min.y = screen.max.y - size.y;
+    }
+    min.x = min.x.max(screen.min.x);
+    min.y = min.y.max(screen.min.y);
+    egui::Rect::from_min_size(min, size)
+}
+
+fn pointer_gap(rect: egui::Rect, pointer: egui::Pos2) -> f32 {
+    if rect.contains(pointer) {
+        let dx = (pointer.x - rect.min.x).min(rect.max.x - pointer.x);
+        let dy = (pointer.y - rect.min.y).min(rect.max.y - pointer.y);
+        -dx.min(dy)
+    } else {
+        let dx = if pointer.x < rect.min.x {
+            rect.min.x - pointer.x
+        } else if pointer.x > rect.max.x {
+            pointer.x - rect.max.x
+        } else {
+            0.0
+        };
+        let dy = if pointer.y < rect.min.y {
+            rect.min.y - pointer.y
+        } else if pointer.y > rect.max.y {
+            pointer.y - rect.max.y
+        } else {
+            0.0
+        };
+        dx.hypot(dy)
+    }
+}
+
+/// Place the hover modal in a pointer-relative quadrant, clamped to `screen`,
+/// preferring a rect that does not contain the pointer.
+fn modal_pos(pointer: egui::Pos2, size: egui::Vec2, screen: egui::Rect) -> egui::Pos2 {
+    let m = MODAL_MARGIN;
+    let candidates = [
+        (
+            egui::Align2::LEFT_TOP,
+            egui::pos2(pointer.x + m, pointer.y + m),
+        ),
+        (
+            egui::Align2::RIGHT_TOP,
+            egui::pos2(pointer.x - m, pointer.y + m),
+        ),
+        (
+            egui::Align2::LEFT_BOTTOM,
+            egui::pos2(pointer.x + m, pointer.y - m),
+        ),
+        (
+            egui::Align2::RIGHT_BOTTOM,
+            egui::pos2(pointer.x - m, pointer.y - m),
+        ),
+    ];
+    let mut best_min = candidates[0].0.anchor_size(candidates[0].1, size).min;
+    let mut best_gap = f32::NEG_INFINITY;
+    for (pivot, pos) in candidates {
+        let clamped = clamp_rect_to(pivot.anchor_size(pos, size), screen);
+        if !clamped.contains(pointer) {
+            return clamped.min;
+        }
+        let gap = pointer_gap(clamped, pointer);
+        if gap > best_gap {
+            best_gap = gap;
+            best_min = clamped.min;
+        }
+    }
+    best_min
+}
+
 impl TimeseriesPlot {
     /// Create a plot with absolute timestamp X-axis (default for standard graph panels)
     pub fn from_bounds(
@@ -355,6 +497,7 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
         is_relative_time: bool,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -367,7 +510,7 @@ impl TimeseriesPlot {
             } else {
                 XAxisMode::TimestampAbsolute
             },
-            false,
+            telemetry_mode,
         )
     }
 
@@ -378,6 +521,7 @@ impl TimeseriesPlot {
         selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -386,7 +530,7 @@ impl TimeseriesPlot {
             earliest_timestamp,
             current_timestamp,
             XAxisMode::Numeric,
-            false,
+            telemetry_mode,
         )
     }
 
@@ -674,26 +818,24 @@ impl TimeseriesPlot {
         timestamp: Timestamp,
         relative_seconds: Option<f64>,
     ) {
-        let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right();
+        let size = ui
+            .ctx()
+            .memory(|m| m.area_rect(PLOT_MODAL_ID).map(|r| r.size()))
+            .unwrap_or(egui::vec2(MODAL_WIDTH, PLOT_MODAL_FALLBACK_HEIGHT));
+        let size = egui::vec2(MODAL_WIDTH, size.y);
+        let fixed_pos = modal_pos(pointer_pos, size, ui.ctx().content_rect());
 
-        let (pivot, fixed_pos) = if anchor_left {
-            (
-                egui::Align2::LEFT_TOP,
-                egui::pos2(pointer_pos.x + MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
-            )
-        } else {
-            (
-                egui::Align2::RIGHT_TOP,
-                egui::pos2(pointer_pos.x - MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
-            )
-        };
-
-        egui::Window::new("plot_modal")
-            .pivot(pivot)
+        egui::Window::new(PLOT_MODAL_ID)
+            .pivot(egui::Align2::LEFT_TOP)
             .title_bar(false)
             .resizable(false)
+            .interactable(false)
+            .order(egui::Order::Tooltip)
+            .constrain(false)
             .fixed_pos(fixed_pos)
-            .fixed_size(egui::vec2(MODAL_WIDTH, self.inner_rect.height() / 2.))
+            .default_width(MODAL_WIDTH)
+            .min_width(MODAL_WIDTH)
+            .max_width(MODAL_WIDTH)
             .frame(
                 Frame::default()
                     .inner_margin(Margin::same(8))
@@ -760,120 +902,66 @@ impl TimeseriesPlot {
                                 continue;
                             };
 
-                            ui.horizontal(|ui| {
-                                ui.style_mut().override_font_id =
-                                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::click(),
-                                );
-                                ui.painter().rect(
-                                    rect,
-                                    egui::CornerRadius::same(2),
-                                    *color,
-                                    egui::Stroke::NONE,
-                                    egui::StrokeKind::Middle,
-                                );
-                                ui.add_space(6.);
-                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                                let value = line
-                                    .data
-                                    .get_nearest(timestamp)
-                                    .map(|(_time, x)| format_num(*x as f64))
-                                    .unwrap_or_else(|| "N/A".to_string());
-                                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                    ui.add_space(3.0);
-                                    ui.label(RichText::new(value).size(11.0));
-                                    ui.add_space(3.0);
-                                })
-                            });
+                            let value = line
+                                .data
+                                .get_nearest(timestamp)
+                                .map(|(_time, x)| format_num(*x as f64))
+                                .unwrap_or_else(|| "N/A".to_string());
+                            modal_series_row(ui, *color, &line_data.label, &value);
                         }
                     }
                     PlotDataSource::XY {
                         xy_lines,
-                        xy_line_handle,
                         query_label,
-                        query_color,
+                        series,
                     } => {
-                        if let Some(xy_line) = xy_lines.get(xy_line_handle) {
-                            // Show query label
-                            ui.label(
-                                egui::RichText::new(query_label.clone())
-                                    .size(11.0)
-                                    .color(with_opacity(get_scheme().text_primary, 0.6)),
-                            );
-                            ui.add_space(8.0);
-                            ui.add(egui::Separator::default().grow(16.0 * 2.0));
-                            ui.add_space(8.0);
+                        // Show query label
+                        ui.label(
+                            egui::RichText::new(query_label.clone())
+                                .size(11.0)
+                                .color(with_opacity(get_scheme().text_primary, 0.6)),
+                        );
+                        ui.add_space(8.0);
+                        ui.add(egui::Separator::default().grow(16.0 * 2.0));
+                        ui.add_space(8.0);
 
-                            // Show X-axis value based on mode
-                            match self.x_axis_mode {
-                                XAxisMode::Numeric => {
-                                    // For numeric XY plots, show X as a number
-                                    if let Some(x_value) = relative_seconds {
-                                        ui.label(format!("X: {}", format_num(x_value)));
-                                    }
-                                }
-                                XAxisMode::TimestampRelative => {
-                                    // For relative time, show as duration
-                                    if let Some(relative_seconds) = relative_seconds {
-                                        let duration = hifitime::Duration::from_nanoseconds(
-                                            relative_seconds * 1_000_000_000.0,
-                                        );
-                                        ui.label(PrettyDuration(duration).to_string());
-                                    }
-                                }
-                                XAxisMode::TimestampAbsolute => {
-                                    // For absolute time, show as epoch
-                                    let time: hifitime::Epoch = timestamp.into();
-                                    ui.add(time_label(time));
+                        // Show X-axis value based on mode
+                        match self.x_axis_mode {
+                            XAxisMode::Numeric => {
+                                if let Some(x_value) = relative_seconds {
+                                    ui.label(format!("X: {}", format_num(x_value)));
                                 }
                             }
-
-                            // Find and show nearest value
-                            if let Some(relative_seconds) = relative_seconds {
-                                let mut nearest_value = None;
-                                let mut min_dist = f64::INFINITY;
-                                for (x_chunk, y_chunk) in
-                                    xy_line.x_values.iter().zip(xy_line.y_values.iter())
-                                {
-                                    for (x_val, y_val) in
-                                        x_chunk.cpu().iter().zip(y_chunk.cpu().iter())
-                                    {
-                                        let dist = (*x_val as f64 - relative_seconds).abs();
-                                        if dist < min_dist {
-                                            min_dist = dist;
-                                            nearest_value = Some(*y_val);
-                                        }
-                                    }
+                            XAxisMode::TimestampRelative => {
+                                if let Some(relative_seconds) = relative_seconds {
+                                    let duration = hifitime::Duration::from_nanoseconds(
+                                        relative_seconds * 1_000_000_000.0,
+                                    );
+                                    ui.label(PrettyDuration(duration).to_string());
                                 }
-
-                                ui.horizontal(|ui| {
-                                    ui.style_mut().override_font_id =
-                                        Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(8.0, 8.0),
-                                        egui::Sense::click(),
-                                    );
-                                    ui.painter().rect(
-                                        rect,
-                                        egui::CornerRadius::same(2),
-                                        *query_color,
-                                        egui::Stroke::NONE,
-                                        egui::StrokeKind::Middle,
-                                    );
-                                    ui.add_space(6.);
-                                    ui.label(RichText::new(query_label.clone()).size(11.0));
-                                    let value = nearest_value
-                                        .map(|v| format_num(v as f64))
-                                        .unwrap_or_else(|| "N/A".to_string());
-                                    ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                        ui.add_space(3.0);
-                                        ui.label(RichText::new(value).size(11.0));
-                                        ui.add_space(3.0);
-                                    })
-                                });
                             }
+                            XAxisMode::TimestampAbsolute => {
+                                let time: hifitime::Epoch = timestamp.into();
+                                ui.add(time_label(time));
+                            }
+                        }
+
+                        let Some(relative_seconds) = relative_seconds else {
+                            return;
+                        };
+
+                        ui.add_space(8.0);
+                        for series in series {
+                            let Some(xy_line) = xy_lines.get(&series.handle) else {
+                                continue;
+                            };
+                            let nearest_value =
+                                nearest_xy_value(xy_line, relative_seconds).map(|(_, y)| y);
+
+                            let value = nearest_value
+                                .map(format_num)
+                                .unwrap_or_else(|| "N/A".to_string());
+                            modal_series_row(ui, series.color, &series.label, &value);
                         }
                     }
                 }
@@ -967,13 +1055,13 @@ impl TimeseriesPlot {
         let (has_data, xy_point_count) = match &data_source {
             PlotDataSource::Timeseries { .. } => (!graph_state.components.is_empty(), 0),
             PlotDataSource::XY {
-                xy_lines,
-                xy_line_handle,
-                ..
+                xy_lines, series, ..
             } => {
-                let count = xy_lines
-                    .get(xy_line_handle)
+                let count = series
+                    .iter()
+                    .filter_map(|s| xy_lines.get(&s.handle))
                     .map(|line| line.point_count())
+                    .max()
                     .unwrap_or(0);
                 (count > 1, count)
             }
@@ -1028,7 +1116,6 @@ impl TimeseriesPlot {
 
         if let Some(pointer_pos) = pointer_pos
             && self.inner_rect.contains(pointer_pos)
-            && ui.ui_contains_pointer()
         {
             let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
             draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
@@ -1091,39 +1178,25 @@ impl TimeseriesPlot {
                     }
                 }
                 PlotDataSource::XY {
-                    xy_lines,
-                    xy_line_handle,
-                    query_color,
-                    ..
+                    xy_lines, series, ..
                 } => {
-                    if let Some(xy_line) = xy_lines.get(xy_line_handle)
-                        && let Some(relative_seconds) = relative_seconds
-                    {
-                        // Find nearest point across all chunks
-                        let mut nearest_x = 0.0;
-                        let mut nearest_y = 0.0;
-                        let mut min_dist = f64::INFINITY;
-                        for (x_chunk, y_chunk) in
-                            xy_line.x_values.iter().zip(xy_line.y_values.iter())
-                        {
-                            for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
-                                let dist = (*x_val as f64 - relative_seconds).abs();
-                                if dist < min_dist {
-                                    min_dist = dist;
-                                    nearest_x = *x_val as f64;
-                                    nearest_y = *y_val as f64;
-                                }
-                            }
-                        }
-                        // Draw circle at nearest point
-                        if min_dist < f64::INFINITY {
+                    if let Some(relative_seconds) = relative_seconds {
+                        for series in series {
+                            let Some(xy_line) = xy_lines.get(&series.handle) else {
+                                continue;
+                            };
+                            let Some((nearest_x, nearest_y)) =
+                                nearest_xy_value(xy_line, relative_seconds)
+                            else {
+                                continue;
+                            };
                             let value = DVec2::new(nearest_x, nearest_y);
                             let pos = self.bounds.value_to_screen_pos(self.rect, value);
                             ui.painter().circle(
                                 pos,
                                 4.5,
                                 get_scheme().bg_secondary,
-                                egui::Stroke::new(2.0, *query_color),
+                                egui::Stroke::new(2.0, series.color),
                             );
                         }
                     }
@@ -1198,6 +1271,22 @@ impl TimeseriesPlot {
                 ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
         }
     }
+}
+
+/// Nearest `(x, y)` sample on an XY line to the scrub X value.
+fn nearest_xy_value(xy_line: &XYLine, x: f64) -> Option<(f64, f64)> {
+    let mut nearest = None;
+    let mut min_dist = f64::INFINITY;
+    for (x_chunk, y_chunk) in xy_line.x_values.iter().zip(xy_line.y_values.iter()) {
+        for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
+            let dist = (*x_val as f64 - x).abs();
+            if dist < min_dist {
+                min_dist = dist;
+                nearest = Some((*x_val as f64, *y_val as f64));
+            }
+        }
+    }
+    nearest
 }
 
 pub fn draw_y_axis(
@@ -1487,7 +1576,7 @@ pub fn auto_y_bounds(
 
 #[allow(clippy::type_complexity)]
 pub fn sync_graphs(
-    mut graph_states: Query<&mut GraphState>,
+    mut graph_states: Query<&mut GraphState, Without<crate::ui::query_plot::QueryPlotData>>,
     metadata_store: Res<ComponentMetadataRegistry>,
     schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,

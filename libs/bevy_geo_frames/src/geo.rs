@@ -5,10 +5,10 @@
 //! a right-multiplication as $v_{bevy} = {bevy}_R_{enu} * v_{enu}$. This
 //! convention was chosen so that frames can be easily checked by adjacency.
 #![allow(non_snake_case)]
-use crate::{GeoFrame, RotationKind};
+use crate::Ellipsoid;
+use crate::{GeoFrame, GeoOrigin, RotationKind};
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
-pub use map_3d::Ellipsoid;
 
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;
@@ -46,42 +46,6 @@ pub enum Present {
     /// Here the latitude and longitude place us on the sphere, and then we use
     /// the coordinates from there.
     Sphere,
-}
-
-/// Where the Bevy world origin lives on Earth.
-///
-/// Used to turn ECEF positions into local ENU, then ENU → Bevy.
-#[derive(Default, Debug, Clone, Copy, Reflect)]
-pub struct GeoOrigin {
-    /// Geodetic latitude [rad]
-    pub latitude: f64,
-    /// Geodetic longitude [rad]
-    pub longitude: f64,
-    /// Altitude above mean radius [m]
-    pub altitude: f64,
-    #[reflect(ignore)]
-    /// Planet/body shape model (currently used primarily for reference radius).
-    pub ellipsoid: Ellipsoid,
-}
-
-impl GeoOrigin {
-    /// Uses default Earth radius.
-    pub fn new_from_degrees(latitude_deg: f64, longitude_deg: f64, altitude: f64) -> Self {
-        let latitude = latitude_deg.to_radians();
-        let longitude = longitude_deg.to_radians();
-        Self {
-            latitude,
-            longitude,
-            altitude,
-            ..default()
-        }
-    }
-
-    /// Provide an ellipsoid.
-    pub fn with_ellipsoid(mut self, shape: Ellipsoid) -> Self {
-        self.ellipsoid = shape;
-        self
-    }
 }
 
 /// Global geospatial context:
@@ -145,19 +109,6 @@ impl GeoContext {
 }
 
 impl GeoFrame {
-    fn origin_ecef(origin: &GeoOrigin) -> DVec3 {
-        map_3d::enu2ecef(
-            0.0,
-            0.0,
-            0.0,
-            origin.latitude,
-            origin.longitude,
-            origin.altitude,
-            &origin.ellipsoid,
-        )
-        .into()
-    }
-
     fn bevy_R_enu_plane() -> DMat3 {
         // Columns are frame basis vectors expressed in Bevy world space.
         // ENU: e_hat = +X, n_hat = -Z, u_hat = +Y
@@ -175,9 +126,14 @@ impl GeoFrame {
     /// The general transformation matrix for ${self}_M_{from}$ of the two
     /// coordinate frames.
     pub fn _M_(&self, from: &GeoFrame, context: &GeoContext) -> DMat4 {
-        let R = self._R_(from, context);
-        let O = self._O_(from, context);
-        DMat4::from_mat3_translation(R, O)
+        match context.present {
+            Present::Plane => self.plane_M_(from, &context.origin),
+            Present::Sphere => {
+                let R = self._R_(from, context);
+                let O = self._O_(from, context);
+                DMat4::from_mat3_translation(R, O)
+            }
+        }
     }
 
     /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
@@ -207,16 +163,7 @@ impl GeoFrame {
     /// Provides the origin vector ${self}_O_{from}$ of the coordinate frame.
     pub fn _O_(&self, from: &Self, context: &GeoContext) -> DVec3 {
         match context.present {
-            Present::Plane => {
-                let origin_ecef = Self::origin_ecef(&context.origin);
-                match (from, *self) {
-                    (GeoFrame::ECEF, GeoFrame::ENU | GeoFrame::NED) => {
-                        -self._R_(from, context) * origin_ecef
-                    }
-                    (GeoFrame::ENU | GeoFrame::NED, GeoFrame::ECEF) => origin_ecef,
-                    _ => DVec3::ZERO,
-                }
-            }
+            Present::Plane => self.plane_O_(from, &context.origin),
             Present::Sphere => {
                 match (from, *self) {
                     (GeoFrame::ECEF, GeoFrame::ENU | GeoFrame::NED) => {
@@ -233,7 +180,7 @@ impl GeoFrame {
         }
     }
 
-    /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
+    /// Provides the origin vector ${ecef}_O_{from}$ of the coordinate frame.
     pub fn ecef_O_(from: &Self, context: &GeoContext) -> DVec3 {
         match context.present {
             Present::Plane => match from {
@@ -254,16 +201,7 @@ impl GeoFrame {
     /// The general rotation matrix for ${self}_R_{from}$ of the two
     /// coordinate frames.
     pub fn _R_(&self, from: &GeoFrame, context: &GeoContext) -> DMat3 {
-        use crate::GeoFrame::*;
-        match (*from, *self) {
-            (x, y) if x == y => DMat3::IDENTITY,
-            (ENU, NED) => Self::ned_R_enu(),
-            (NED, ENU) => Self::enu_R_ned(),
-            // ecef_R_(x) maps x -> ECEF, so self_R_ecef is its inverse.
-            (ECEF, x) => Self::ecef_R_(&x, &context.origin).inverse(),
-            (x, ECEF) => Self::ecef_R_(&x, &context.origin),
-            (x, y) => unreachable!("{x:?} -> {y:?}"),
-        }
+        self.plane_R_(from, &context.origin)
     }
 
     /// Provides the rotation matrix ${bevy}_R_{from}$.
@@ -291,48 +229,6 @@ impl GeoFrame {
         let R = Self::ecef_R_(from, &context.origin);
         let O = Self::ecef_O_(from, context);
         DMat4::from_mat3_translation(R, O)
-    }
-
-    /// Provides the matrix ${ecef}_R_{self}$.
-    ///
-    /// Given from this [reference.](https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates)
-    pub fn ecef_R_(from: &Self, origin: &GeoOrigin) -> DMat3 {
-        use std::f64::consts::FRAC_PI_2;
-        if *from == GeoFrame::ECEF {
-            return DMat3::IDENTITY;
-        }
-
-        // The reference uses this formula.
-        //
-        // $ \begin{bmatrix} x \\ y \\ z \end{bmatrix} = R_3[-(\pi/2 + \lambda)]~R_1[-(\pi/2 - \varphi)]\begin{bmatrix} E \\ N \\ U \end{bmatrix}
-        //
-        // Implementing on inspection results in this code:
-        //
-        // let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
-        //      * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
-        //
-        // However, the matrix implementations differ. Essentially the signs are
-        // flipped in the rotation matrices.
-        //
-        // `DMat3::from_rotation_x(-\theta) = R_1[\theta]`
-        let ecef_R_enu = DMat3::from_rotation_z(FRAC_PI_2 + origin.longitude)
-            * DMat3::from_rotation_x(FRAC_PI_2 - origin.latitude);
-        match from {
-            GeoFrame::ECEF => DMat3::IDENTITY,
-            GeoFrame::ENU => ecef_R_enu,
-            GeoFrame::NED => ecef_R_enu * Self::enu_R_ned(),
-        }
-    }
-
-    #[inline]
-    fn enu_R_ned() -> DMat3 {
-        DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
-    }
-
-    #[allow(dead_code)]
-    #[inline]
-    fn ned_R_enu() -> DMat3 {
-        DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
     }
 }
 
@@ -384,13 +280,17 @@ impl GeoRotation {
     ///
     /// If `up` is `None` (or collinear with `dir`), the frame's natural camera
     /// up — the frame direction that maps to Bevy `+Y` — is used.
+    ///
+    /// The stored quaternion is the camera's local→frame attitude for
+    /// [`Self::to_bevy`]'s basis composition (`bevy_R * att`).
     pub fn look_at(
         frame: GeoFrame,
         dir: impl Into<DVec3>,
         up: Option<DVec3>,
         context: &GeoContext,
     ) -> Self {
-        let frame_R_bevy = GeoFrame::bevy_R_(&frame, context).transpose();
+        let bevy_R = GeoFrame::bevy_R_(&frame, context);
+        let frame_R_bevy = bevy_R.transpose();
         // The camera's identity axes expressed in `frame` coordinates.
         let f0 = frame_R_bevy * DVec3::NEG_Z;
         let u0 = frame_R_bevy * DVec3::Y;
@@ -409,26 +309,26 @@ impl GeoRotation {
         let s = f.cross(up).normalize();
         let u = s.cross(f);
 
-        // Rotation taking the identity camera axes to the desired ones.
+        // Rotation taking the identity camera axes (in frame) to the desired
+        // ones. Historically this `r_frame` was applied via similarity
+        // (`bevy_R ∘ r ∘ bevy_R⁻¹`). With composition `to_bevy = bevy_R ∘ att`,
+        // store `r_frame ∘ bevy_R⁻¹` so Bevy output is unchanged.
         let m0 = DMat3::from_cols(f0.cross(u0), f0, u0);
         let m = DMat3::from_cols(s, f, u);
-        GeoRotation(
-            frame,
-            DQuat::from_mat3(&(m * m0.transpose())),
-            RotationKind::Relative,
-        )
+        let r_frame = DQuat::from_mat3(&(m * m0.transpose()));
+        let q = DQuat::from_mat3(&bevy_R);
+        GeoRotation(frame, r_frame * q.conjugate(), RotationKind::Relative)
     }
 
     /// Convert orientation to Bevy.
+    ///
+    /// Both [`RotationKind`]s compose the local→frame attitude with the
+    /// frame→Bevy basis (`bevy_R * att`), so body-frame EQL offsets and the
+    /// rendered mesh share the same Bevy axes.
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
         let local_rot = self.1;
         let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&self.0, context));
-        match self.2 {
-            // Re-express the rotation operator in Bevy coordinates.
-            RotationKind::Relative => q * local_rot * q.conjugate(),
-            // Compose with the frame's basis change into Bevy.
-            RotationKind::Absolute => q * local_rot,
-        }
+        q * local_rot
     }
 
     /// Convert a [RotationKind::Relative] orientation from Bevy.
@@ -445,22 +345,14 @@ impl GeoRotation {
     ) -> Self {
         let v = v_bevy.into();
         let q = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context));
-        let local_rot = match kind {
-            RotationKind::Relative => q.conjugate() * v * q,
-            RotationKind::Absolute => q.conjugate() * v,
-        };
-        GeoRotation(frame, local_rot, kind)
+        GeoRotation(frame, q.conjugate() * v, kind)
     }
 
     /// Re-express the rotation in another frame, preserving the rotation it
     /// produces in Bevy and its [RotationKind].
     pub fn as_frame(&self, to_frame: GeoFrame, context: &GeoContext) -> GeoRotation {
         let R = DQuat::from_mat3(&to_frame._R_(&self.0, context));
-        let local_rot = match self.2 {
-            RotationKind::Relative => R * self.1 * R.conjugate(),
-            RotationKind::Absolute => R * self.1,
-        };
-        GeoRotation(to_frame, local_rot, self.2)
+        GeoRotation(to_frame, R * self.1, self.2)
     }
 
     /// Create from a Bevy Transform's rotation.
@@ -826,11 +718,17 @@ mod tests {
     }
 
     #[test]
-    fn test_as_frame() {
+    fn test_from_bevy_identity_round_trips_to_bevy() {
         let ctx = dummy_ctx();
         let geo_rotation = GeoRotation::from_bevy(GeoFrame::ENU, DQuat::IDENTITY, &ctx);
-        assert_eq!(geo_rotation.1.as_quat(), Quat::IDENTITY);
+        // Composition stores bevy_R⁻¹ so to_bevy recovers Bevy identity.
         assert_eq!(geo_rotation.to_bevy(&ctx).as_quat(), Quat::IDENTITY);
+        let basis = DQuat::from_mat3(&GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx));
+        assert!(
+            geo_rotation.1.dot(basis.conjugate()).abs() > 1.0 - 1e-9,
+            "local att should be basis conjugate, got {:?}",
+            geo_rotation.1
+        );
     }
 
     /// Quaternion equality up to sign (double cover), robust to fp noise.
@@ -852,12 +750,13 @@ mod tests {
     }
 
     #[test]
-    fn relative_identity_is_identity_in_bevy() {
+    fn relative_identity_composes_with_frame_basis() {
         let ctx = dummy_ctx();
         for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
             let r = GeoRotation::relative(frame, DQuat::IDENTITY);
             assert_eq!(r.2, RotationKind::Relative);
-            assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?}");
+            let basis = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, &ctx));
+            assert_quat_eq!(r.to_bevy(&ctx), basis, "{frame:?}");
         }
     }
 
@@ -931,8 +830,8 @@ mod tests {
         }
     }
 
-    /// Looking "north" with frame-up must be the identity attitude in both
-    /// ENU and NED (their camera identity axes differ, the result must not).
+    /// Looking "north" with frame-up must yield Bevy identity in both ENU and
+    /// NED (their camera identity axes differ; the Bevy result must not).
     #[test]
     fn look_at_identity_per_frame() {
         let ctx = dummy_ctx();
@@ -942,7 +841,6 @@ mod tests {
         ];
         for (frame, north, up) in cases {
             let r = GeoRotation::look_at(frame, north, Some(up), &ctx);
-            assert_quat_eq!(r.1, DQuat::IDENTITY, "{frame:?} local");
             assert_quat_eq!(r.to_bevy(&ctx), DQuat::IDENTITY, "{frame:?} bevy");
         }
     }

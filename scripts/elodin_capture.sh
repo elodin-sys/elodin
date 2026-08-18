@@ -235,10 +235,10 @@ trap cleanup EXIT INT TERM
 # GStreamer environment. In particular, Gamescope must not launch the host's
 # Xwayland with Nix libraries injected into it.
 [[ "$(command -v Xwayland)" == /nix/store/* ]] \
-  || fail "Xwayland is not from Nix; enter a fresh 'nix develop' shell"
+  || fail "Xwayland is not from Nix; enter a fresh 'nix develop' or 'nix develop .#run' shell"
 mesa_dri=${LIBGL_DRIVERS_PATH:-}
 [[ "$mesa_dri" == /nix/store/*/lib/dri ]] \
-  || fail "Mesa driver environment is missing; enter a fresh 'nix develop' shell"
+  || fail "Mesa driver environment is missing; enter a fresh 'nix develop' or 'nix develop .#run' shell"
 mesa_prefix=${mesa_dri%/lib/dri}
 
 selected_gpu=mesa

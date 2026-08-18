@@ -103,14 +103,11 @@ with pkgs; let
       # Linux-specific dependencies
       ++ lib.optionals pkgs.stdenv.isLinux (
         common.linuxGraphicsAudioDeps
+        ++ common.linuxCaptureTools
         ++ [
           # Additional Linux-specific tools not in common
-          gamescope
-          xwayland
-          util-linux # Provides setsid for capture process-group cleanup
           iproute2
           tcpdump
-          libva-utils
           alsa-oss
           alsa-utils
           gtk3
@@ -144,17 +141,10 @@ with pkgs; let
     GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
 
     # GStreamer plugin path for capture and elodinsink
-    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
-      [
-        gst_all_1.gstreamer
-        gst_all_1.gst-plugins-base
-        gst_all_1.gst-plugins-good
-        gst_all_1.gst-plugins-bad
-        gst_all_1.gst-plugins-ugly
-        config.packages.elodinsink
-      ]
-      ++ lib.optionals pkgs.stdenv.isLinux [pipewire]
-    );
+    GST_PLUGIN_PATH = common.makeGstPluginPath {
+      inherit pkgs;
+      extra = [config.packages.elodinsink];
+    };
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
@@ -173,27 +163,7 @@ with pkgs; let
         Linux*)
           export CC=clang
           export CXX=clang++
-          # Use existing DISPLAY if set, otherwise default to :0
-          if [ -z "$DISPLAY" ]; then
-            export DISPLAY=:0
-          fi
-          export WINIT_UNIX_BACKEND=x11
-          unset WAYLAND_DISPLAY
-          export XDG_SESSION_TYPE=x11
-          # Ensure X11 libraries are available
-          export LD_LIBRARY_PATH="${lib.makeLibraryPath (with pkgs; [
-        libx11
-        libxcursor
-        libxrandr
-        libxi
-        libxext
-        libxkbcommon
-        mesa
-        libGL
-      ])}:''${LD_LIBRARY_PATH}"
-          # Route to the host NVIDIA driver when one is usable, including on
-          # hybrid hosts. Set ELODIN_GPU=mesa to stay on Mesa.
-          . ${common.nvidiaHookScript}
+          ${common.linuxEditorShellHook}
         ;;
       esac
       # start the shell if we're in an interactive shell

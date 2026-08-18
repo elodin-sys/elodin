@@ -482,6 +482,13 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
             .push(KdlEntry::new_prop("show_view_cube", false));
     }
 
+    if let Some(view_cube_frame) = viewport.view_cube_frame {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "view_cube_frame",
+            <&str>::from(view_cube_frame),
+        ));
+    }
+
     if !viewport.effects {
         node.entries_mut()
             .push(KdlEntry::new_prop("effects", false));
@@ -1555,6 +1562,7 @@ environment {
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
+                view_cube_frame: None,
                 effects: true,
                 hdr: false,
                 bloom: None,
@@ -1604,6 +1612,7 @@ environment {
                 projection_color: Color::MINT,
                 frustums_thickness: 0.012,
                 show_view_cube: false,
+                view_cube_frame: None,
                 effects: true,
                 hdr: true,
                 bloom: None,
@@ -2254,6 +2263,33 @@ object_3d lander.world_pos {
     }
 
     #[test]
+    fn test_serialize_viewport_with_view_cube_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                frame: Some(GeoFrame::ECEF),
+                view_cube_frame: Some(GeoFrame::ENU),
+                ..Default::default()
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("view_cube_frame=ENU")
+                || serialized.contains(r#"view_cube_frame="ENU""#),
+            "serialized output should contain view_cube_frame=ENU, got:\n{serialized}"
+        );
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ECEF));
+            assert_eq!(viewport.view_cube_frame, Some(GeoFrame::ENU));
+        } else {
+            panic!("Expected viewport");
+        }
+    }
+
+    #[test]
     fn test_serialize_line_3d_with_frame() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Line3d(Line3d {
@@ -2319,6 +2355,7 @@ object_3d lander.world_pos {
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
+                view_cube_frame: None,
                 effects: true,
                 hdr: false,
                 bloom: None,

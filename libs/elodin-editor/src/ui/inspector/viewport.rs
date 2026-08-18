@@ -19,7 +19,7 @@ use nox::ArrayBuf;
 
 use crate::EqlContext;
 use crate::WorldPosExt;
-use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
+use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
@@ -440,6 +440,7 @@ pub struct InspectorViewport<'w, 's> {
     editor_cams: Query<'w, 's, &'static mut EditorCam>,
     object_3d_states: Query<'w, 's, &'static Object3DState>,
     eql_ctx: ResMut<'w, EqlContext>,
+    geo_context: Res<'w, GeoContext>,
 }
 
 impl WidgetSystem for InspectorViewport<'_, '_> {
@@ -465,6 +466,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             mut editor_cams,
             object_3d_states,
             eql_ctx,
+            geo_context,
         } = state_mut;
 
         let Ok(mut cam) = camera_query.get_mut(camera) else {
@@ -499,13 +501,13 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         );
 
         ui.label(egui::RichText::new("POSITION").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.pos, &eql_ctx.0);
+        eql_input(ui, &mut viewport.pos, &eql_ctx.0, &geo_context);
         ui.separator();
         ui.label(egui::RichText::new("LOOK AT").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.look_at, &eql_ctx.0);
+        eql_input(ui, &mut viewport.look_at, &eql_ctx.0, &geo_context);
         ui.separator();
         ui.label(egui::RichText::new("UP").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.up, &eql_ctx.0);
+        eql_input(ui, &mut viewport.up, &eql_ctx.0, &geo_context);
         ui.separator();
 
         if ui.add(EButton::highlight("Reset Pos")).clicked() {
@@ -794,15 +796,21 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 pub fn retry_viewport_eql_compile(
     mut viewports: Query<&mut Viewport>,
     eql_context: Res<EqlContext>,
+    geo_context: Res<GeoContext>,
 ) {
     for mut viewport in &mut viewports {
-        viewport.pos.retry_compile(&eql_context.0);
-        viewport.look_at.retry_compile(&eql_context.0);
-        viewport.up.retry_compile(&eql_context.0);
+        viewport.pos.retry_compile(&eql_context.0, &geo_context);
+        viewport.look_at.retry_compile(&eql_context.0, &geo_context);
+        viewport.up.retry_compile(&eql_context.0, &geo_context);
     }
 }
 
-fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Context) {
+fn eql_input(
+    ui: &mut egui::Ui,
+    editable_expr: &mut EditableEQL,
+    ctx: &eql::Context,
+    geo: &GeoContext,
+) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         configure_input_with_border(ui.style_mut());
@@ -815,7 +823,8 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
             }
             match ctx.parse_str(&editable_expr.eql) {
                 Ok(expr) => {
-                    editable_expr.compiled_expr = compile_eql_expr(expr).ok();
+                    editable_expr.compiled_expr =
+                        crate::object_3d::compile_eql_expr_with_geo(expr, geo).ok();
                 }
                 Err(err) => {
                     ui.colored_label(get_scheme().error, err.to_string());
@@ -1560,6 +1569,219 @@ mod tests {
         }
     }
 
+    /// ECEF chase camera: `rocket.world_pos.translate(-2,0,0)` must place the
+    /// viewport 2 m along body −X (aft), not along ECEF −X, then look at the
+    /// rocket. Reproduces the body-local translate failure in ECEF scenes.
+    #[test]
+    fn ecef_viewport_body_translate_behind_rocket() {
+        use crate::object_3d::{EditableEQL, compile_eql_expr};
+        use bevy::math::{DQuat, DVec3};
+        use bevy::prelude::{IntoScheduleConfigs, Transform};
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, GeoPosition, GeoRotation, Present};
+        use impeller2::schema::Schema;
+        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use impeller2_wkt::ComponentValue;
+        use nox::Array;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let rocket_ecef = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+        // Nose along ECEF +Z: body −X (aft / "behind") maps to ECEF −Z.
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let expected_cam_ecef = rocket_ecef + att * DVec3::new(-2.0, 0.0, 0.0);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ));
+        let component_id = component.id;
+        let eql_ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let editable = |s: &str| EditableEQL {
+            eql: s.to_string(),
+            compiled_expr: Some(
+                compile_eql_expr(
+                    eql_ctx
+                        .parse_str(s)
+                        .unwrap_or_else(|e| panic!("parse {s:?}: {e}")),
+                )
+                .unwrap_or_else(|e| panic!("compile {s:?}: {e}")),
+            ),
+        };
+
+        let mut app = bevy::app::App::new();
+        // Origin near the rocket so Plane ECEF→Bevy keeps metre-scale precision.
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        app.insert_resource(GeoContext::from(origin).with_present(Present::Plane));
+        app.init_resource::<Time>();
+        crate::register_world_pos_components(&mut app);
+        app.add_systems(
+            bevy::app::Update,
+            (
+                super::set_viewport_pos,
+                crate::sync_pos,
+                bevy_geo_frames::apply_transforms,
+                bevy_geo_frames::apply_geo_rotation,
+            )
+                .chain(),
+        );
+
+        let rocket_entity = app
+            .world_mut()
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![7],
+                    vec![
+                        att.x,
+                        att.y,
+                        att.z,
+                        att.w,
+                        rocket_ecef.x,
+                        rocket_ecef.y,
+                        rocket_ecef.z,
+                    ],
+                )
+                .unwrap(),
+            ))
+            .id();
+        app.insert_resource(EntityMap(HashMap::from([(component_id, rocket_entity)])));
+
+        let frame = GeoFrame::ECEF;
+        let parent = app
+            .world_mut()
+            .spawn((
+                super::WorldPos::default(),
+                GeoPosition(frame, DVec3::ZERO),
+                GeoRotation::relative(frame, DQuat::IDENTITY),
+                Transform::default(),
+            ))
+            .id();
+        app.world_mut().spawn((
+            super::Viewport::new(
+                parent,
+                editable("rocket.world_pos.translate(-2.0, 0.0, 0.0)"),
+                editable("rocket.world_pos"),
+                EditableEQL::default(),
+                Some(frame),
+                0.0,
+            ),
+            EditorCam::default(),
+        ));
+        app.update();
+
+        let cam_pos = app.world().get::<super::WorldPos>(parent).unwrap();
+        let pos_err = (cam_pos.pos() - expected_cam_ecef).length();
+        assert!(
+            pos_err < 1e-6,
+            "viewport WorldPos must sit 2 m aft in body frame: got {:?}, expected {:?}, err={pos_err}",
+            cam_pos.pos(),
+            expected_cam_ecef
+        );
+
+        // World-frame translate would leave the camera at rocket + (−2,0,0) ECEF.
+        let world_frame_cam = rocket_ecef + DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (cam_pos.pos() - world_frame_cam).length() > 1.0,
+            "camera must not use world-frame −X when attitude is non-identity"
+        );
+
+        let geo_ctx = app.world().resource::<GeoContext>();
+        let cam_bevy = GeoPosition(frame, cam_pos.pos()).to_bevy(geo_ctx);
+        let rocket_bevy = GeoPosition(frame, rocket_ecef).to_bevy(geo_ctx);
+        let delta_bevy = cam_bevy - rocket_bevy;
+        let expected_bevy =
+            GeoRotation::absolute(frame, att).to_bevy(geo_ctx) * DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (delta_bevy - expected_bevy).length() < 1e-4,
+            "Bevy delta must be Absolute(ECEF,att)*body(−2,0,0): got {delta_bevy:?}, expected {expected_bevy:?}"
+        );
+    }
+
+    /// A viewport EQL that failed to compile at spawn is retried once the
+    /// component metadata lands. The retry must bake the schematic origin, not
+    /// `GeoContext::default()` (lat/lon 0).
+    #[test]
+    fn retried_viewport_eql_uses_schematic_origin() {
+        use bevy::ecs::system::SystemState;
+        use bevy::math::DVec3;
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin};
+        use impeller2::schema::Schema;
+        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use nox::Array;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let geo = GeoContext::from(GeoOrigin::new_from_degrees(28.5, -80.6, 0.0));
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let component_id = component.id;
+
+        let mut app = bevy::app::App::new();
+        app.insert_resource(geo);
+        // Spawn-time compile failed: the component was still unknown then.
+        let viewport = app
+            .world_mut()
+            .spawn(super::Viewport::new(
+                Entity::PLACEHOLDER,
+                EditableEQL {
+                    eql: "rocket.world_pos.ecef_to_ned()".to_string(),
+                    compiled_expr: None,
+                },
+                EditableEQL::default(),
+                EditableEQL::default(),
+                Some(GeoFrame::NED),
+                0.0,
+            ))
+            .id();
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1000),
+        )));
+        app.add_systems(bevy::app::Update, super::retry_viewport_eql_compile);
+        app.update();
+
+        let expr = app
+            .world_mut()
+            .get_mut::<super::Viewport>(viewport)
+            .expect("viewport entity")
+            .pos
+            .compiled_expr
+            .take()
+            .expect("retry must compile once the component is known");
+
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![3],
+                    vec![origin_ecef.x, origin_ecef.y, origin_ecef.z],
+                )
+                .unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = expr
+            .execute(&entity_map, &values)
+            .expect("execute retry expr");
+        let pos =
+            crate::ui::gauges::component_value_to_position(&out).expect("expected a 3-vector");
+        assert!(
+            pos.length() < 1e-6,
+            "ECEF of the schematic origin must map to ~0 NED, got {pos:?}"
+        );
+    }
+
     /// Full pipeline test with real EQL: `set_viewport_pos` -> `sync_pos` ->
     /// `apply_geo_rotation`. A NED viewport with an explicit `up="(0,0,-1)"`
     /// (up, away from the ground in NED) must produce a right-side-up rig
@@ -1936,9 +2158,11 @@ mod tests {
         );
     }
 
-    /// `WorldPosExt::bevy_att` must match `GeoRotation::to_bevy` in plane mode.
+    /// Relative and Absolute local→frame attitudes share composition
+    /// (`bevy_R * att`) in plane mode. Legacy `bevy_att` is the ENU similarity
+    /// swizzle and is not the GeoRotation path.
     #[test]
-    fn test_bevy_att_vs_geo_frames_plane() {
+    fn test_relative_and_absolute_agree_in_plane() {
         use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
 
         let ctx = GeoContext::default().with_present(Present::Plane);
@@ -1953,12 +2177,11 @@ mod tests {
                 pos: nox::Vec3::new(0.0, 0.0, 0.0),
             };
 
-            let elodin_bevy = world_pos.bevy_att();
-            let geo_frames_bevy =
-                GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let relative = GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let absolute = GeoRotation::absolute(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
             assert_eq_quat!(
-                elodin_bevy.as_quat(),
-                geo_frames_bevy.as_quat(),
+                relative.as_quat(),
+                absolute.as_quat(),
                 "case {i} dir {dir} up {up}"
             );
         }

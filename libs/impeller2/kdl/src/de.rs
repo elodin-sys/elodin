@@ -855,6 +855,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
     }
 
     let show_view_cube = bool_prop(node, "show_view_cube").unwrap_or(true);
+    let view_cube_frame = parse_optional_geo_frame(node, "view_cube_frame", "viewport", kdl_src)?;
     let effects = bool_prop(node, "effects").unwrap_or(true);
 
     let hdr = bool_prop(node, "hdr").unwrap_or(false);
@@ -945,6 +946,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         projection_color,
         frustums_thickness,
         show_view_cube,
+        view_cube_frame,
         effects,
         hdr,
         bloom,
@@ -2624,6 +2626,31 @@ timeline follow_latest=#true {
         } else {
             panic!("Expected viewport panel");
         }
+    }
+
+    #[test]
+    fn test_parse_viewport_with_view_cube_frame() {
+        let kdl = r#"viewport frame="ECEF" view_cube_frame="ENU""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ECEF));
+            assert_eq!(viewport.view_cube_frame, Some(GeoFrame::ENU));
+        } else {
+            panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_invalid_view_cube_frame_is_an_error() {
+        let err = parse_schematic(r#"viewport view_cube_frame="ECI""#)
+            .expect_err("invalid view_cube_frame should fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("view_cube_frame") && msg.contains("ENU"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]

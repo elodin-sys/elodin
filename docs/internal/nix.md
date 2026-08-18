@@ -25,9 +25,9 @@ Only the exact value `true` triggers it (`1` / `false` are ignored). The process
 
 ## Linux headless capture
 
-The Linux shell includes Gamescope, Nix's Xwayland, PipeWire/GStreamer tools,
-and VA-API diagnostics. Run the capture helper from the repository root inside
-`nix develop`:
+Both `nix develop` and `nix develop .#run` include Gamescope, Nix's Xwayland,
+PipeWire/GStreamer tools, and VA-API diagnostics. Run the capture helper from
+the repository root inside either shell:
 
 ```bash
 ./scripts/elodin_capture.sh --duration 10 --output /tmp/elodin.mp4 examples/cube-sat/main.py

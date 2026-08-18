@@ -83,7 +83,7 @@ def _ecef_marker_objects() -> str:
                 color {PURPLE}
             }}
         }}
-        object_3d frame="ECEF" {name}.world_pos {{
+        object_3d frame="ECEF" frame_orientation="ENU" orientation=absolute "(0,0,0,1, {name}.world_pos[4],{name}.world_pos[5],{name}.world_pos[6])" {{
             glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}""".rstrip()
         for name, _ in ECEF_MARKERS
@@ -135,7 +135,7 @@ def world() -> el.World:
                 color 244 67 54
             }}
         }}
-        object_3d frame="NED" ned_origin.world_pos {{
+        object_3d frame="NED" frame_orientation="ENU" orientation=absolute "(0,0,0,1, ned_origin.world_pos[4],ned_origin.world_pos[5],ned_origin.world_pos[6])" {{
             glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}
         object_3d frame="ENU" enu_far_east.world_pos {{
@@ -146,7 +146,7 @@ def world() -> el.World:
                 color 33 150 243
             }}
         }}
-        object_3d frame="ENU" enu_far_east.world_pos {{
+        object_3d frame="ENU" frame_orientation="ENU" orientation=absolute "(0,0,0,1, enu_far_east.world_pos[4],enu_far_east.world_pos[5],enu_far_east.world_pos[6])" {{
             glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}
         object_3d frame="ECEF" ecef_far_up.world_pos {{
@@ -157,7 +157,7 @@ def world() -> el.World:
                 color 76 175 80
             }}
         }}
-        object_3d frame="ECEF" ecef_far_up.world_pos {{
+        object_3d frame="ECEF" frame_orientation="ENU" orientation=absolute "(0,0,0,1, ecef_far_up.world_pos[4],ecef_far_up.world_pos[5],ecef_far_up.world_pos[6])" {{
             glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
         }}
         object_3d frame="ECEF" ecef_orbit_line.world_pos {{

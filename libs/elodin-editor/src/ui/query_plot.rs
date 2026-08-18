@@ -1,14 +1,6 @@
 use std::time::{Duration, Instant};
 
-use arrow::{
-    array::{
-        Array, ArrayRef, FixedSizeListArray, Float32Array, Float64Array, Int32Array, Int64Array,
-        TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-        TimestampSecondArray, UInt32Array, UInt64Array,
-    },
-    datatypes::{DataType, TimeUnit},
-    record_batch::RecordBatch,
-};
+use arrow::record_batch::RecordBatch;
 use bevy::{
     asset::{Assets, Handle},
     camera::Projection,
@@ -16,7 +8,7 @@ use bevy::{
     math::DVec2,
     prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
 };
-use egui::RichText;
+use egui::{Color32, RichText};
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, PlotMode, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
@@ -29,7 +21,9 @@ use crate::{
             GraphState, PlotBounds, PlotDataSource, TimeseriesPlot, XYLine, get_inner_rect,
             gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
         },
+        sql_eql::{eql_to_sql_with_time, process_sql_record_batch},
         tiles::WindowState,
+        timeline::TelemetryMode,
         widgets::WidgetSystem,
     },
 };
@@ -38,6 +32,8 @@ use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use super::plot::{Line, gpu};
 use crate::ui::widgets::SystemStateExt;
 
+pub use crate::ui::sql_eql::array_iter;
+
 #[derive(Clone)]
 pub struct QueryPlotPane {
     pub entity: Entity,
@@ -45,13 +41,22 @@ pub struct QueryPlotPane {
     pub scrub_icon: Option<egui::TextureId>,
 }
 
+#[derive(Clone)]
+pub struct QueryPlotSeries {
+    pub handle: Handle<XYLine>,
+    pub entity: Option<Entity>,
+    pub color: Color32,
+    pub label: String,
+}
+
 #[derive(Component)]
 pub struct QueryPlotData {
     pub data: QueryPlot,
     pub state: QueryPlotState,
     pub auto_color: bool,
-    pub xy_line_handle: Option<Handle<XYLine>>,
-    pub line_entity: Option<Entity>,
+    /// Per-series colors from `graph` KDL `color` children; empty falls back to `data.color`.
+    pub series_colors: Vec<Color32>,
+    pub series: Vec<QueryPlotSeries>,
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
@@ -75,8 +80,8 @@ impl Default for QueryPlotData {
             },
             state: Default::default(),
             auto_color: true,
-            xy_line_handle: Default::default(),
-            line_entity: Default::default(),
+            series_colors: Vec::new(),
+            series: Vec::new(),
             x_offset: Default::default(),
             y_offset: Default::default(),
             last_refresh: Some(Instant::now()),
@@ -95,169 +100,47 @@ pub enum QueryPlotState {
 }
 
 impl QueryPlotData {
-    fn process_record_batch(&mut self, batch: RecordBatch, xy_lines: &mut Assets<XYLine>) {
-        if batch.num_columns() < 2 || batch.num_rows() == 0 {
-            return;
-        }
-
-        let x_col = batch.column(0);
-        let y_col = batch.column(1);
-
-        let (x_values, earliest_abs_timestamp_micros): (Vec<f64>, Option<i64>) = match x_col
-            .data_type()
-        {
-            DataType::Timestamp(TimeUnit::Microsecond, _) => {
-                let values: Vec<i64> = x_col
-                    .as_any()
-                    .downcast_ref::<TimestampMicrosecondArray>()
-                    .unwrap()
-                    .iter()
-                    .map(|x| x.unwrap_or_default())
-                    .collect();
-                let earliest = values.iter().min().copied();
-                let relative: Vec<f64> = values.iter().map(|&x| x as f64 / 1_000_000.0).collect();
-                // Already in microseconds, no conversion needed
-                (relative, earliest)
-            }
-            DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-                let values: Vec<i64> = x_col
-                    .as_any()
-                    .downcast_ref::<TimestampNanosecondArray>()
-                    .unwrap()
-                    .iter()
-                    .map(|x| x.unwrap_or_default())
-                    .collect();
-                let earliest = values.iter().min().copied();
-                let relative: Vec<f64> =
-                    values.iter().map(|&x| x as f64 / 1_000_000_000.0).collect();
-                // Convert nanoseconds to microseconds
-                (relative, earliest.map(|ns| ns / 1_000))
-            }
-            DataType::Timestamp(TimeUnit::Millisecond, _) => {
-                let values: Vec<i64> = x_col
-                    .as_any()
-                    .downcast_ref::<TimestampMillisecondArray>()
-                    .unwrap()
-                    .iter()
-                    .map(|x| x.unwrap_or_default())
-                    .collect();
-                let earliest = values.iter().min().copied();
-                let relative: Vec<f64> = values.iter().map(|&x| x as f64 / 1_000.0).collect();
-                // Convert milliseconds to microseconds
-                (relative, earliest.map(|ms| ms * 1_000))
-            }
-            DataType::Timestamp(TimeUnit::Second, _) => {
-                let values: Vec<i64> = x_col
-                    .as_any()
-                    .downcast_ref::<TimestampSecondArray>()
-                    .unwrap()
-                    .iter()
-                    .map(|x| x.unwrap_or_default())
-                    .collect();
-                let earliest = values.iter().min().copied();
-                let relative: Vec<f64> = values.iter().map(|&x| x as f64).collect();
-                // Convert seconds to microseconds
-                (relative, earliest.map(|s| s * 1_000_000))
-            }
-            _ => {
-                // For non-timestamp types, use the existing array_iter logic
-                let values: Vec<f64> = array_iter(x_col).collect();
-                (values, None)
-            }
+    /// Rebuilds `series` from a SQL batch. Returns leftover line entities from a
+    /// longer previous batch so the caller can despawn them.
+    fn process_record_batch(
+        &mut self,
+        batch: RecordBatch,
+        xy_lines: &mut Assets<XYLine>,
+    ) -> Vec<Entity> {
+        let default_color = self.data.color.into_color32();
+        let Some(plot) = process_sql_record_batch(
+            &batch,
+            self.data.plot_mode,
+            xy_lines,
+            &self.series_colors,
+            default_color,
+        ) else {
+            return Vec::new();
         };
 
-        if let Some(earliest_micros) = earliest_abs_timestamp_micros
-            && (self.earliest_timestamp.is_none()
-                || Some(impeller2::types::Timestamp(earliest_micros)) < self.earliest_timestamp)
+        if let Some(earliest) = plot.earliest_timestamp
+            && (self.earliest_timestamp.is_none() || Some(earliest) < self.earliest_timestamp)
         {
-            self.earliest_timestamp = Some(impeller2::types::Timestamp(earliest_micros));
+            self.earliest_timestamp = Some(earliest);
         }
+        self.x_offset = plot.x_offset;
+        self.y_offset = plot.y_offset;
 
-        let finite_x_values: Vec<f64> = x_values
-            .iter()
-            .copied()
-            .filter(|&x| x.is_finite())
+        let mut old_entities: Vec<Option<Entity>> =
+            self.series.drain(..).map(|s| s.entity).collect();
+        self.series = plot
+            .series
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| QueryPlotSeries {
+                handle: s.handle,
+                entity: old_entities.get_mut(i).and_then(|e| e.take()),
+                color: s.color,
+                label: s.label,
+            })
             .collect();
-
-        // In XY mode, don't subtract x_offset so we preserve absolute coordinates
-        // In TimeSeries mode, subtract x_offset to make time relative (starting from 0)
-        let is_xy_mode = self.data.plot_mode == PlotMode::XY;
-        if is_xy_mode {
-            self.x_offset = 0.0;
-        } else {
-            self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-            if !self.x_offset.is_finite() {
-                self.x_offset = 0.0;
-            }
-        }
-        self.y_offset = 0.0;
-
-        let mut xy_line = XYLine {
-            label: "SQL Data".to_string(),
-            x_shard_alloc: None,
-            y_shard_alloc: None,
-            x_values: vec![],
-            y_values: vec![],
-        };
-
-        let mut y_iter = array_iter(y_col);
-        let mut points: Vec<(f64, f64)> = Vec::new();
-
-        for x_value in x_values {
-            if let Some(y_value) = y_iter.next()
-                && x_value.is_finite()
-                && y_value.is_finite()
-            {
-                points.push((x_value, y_value));
-            }
-        }
-
-        // Skip initial points that might be initialization artifacts.
-        // Only do this heuristic for time-series mode, not XY mode where all points are meaningful.
-        let skip_initial_points = if !is_xy_mode && points.len() > 2 {
-            // Find how many initial points share the same timestamp.
-            let first_time = points[0].0;
-            let mut last_same = 0usize;
-
-            // Count consecutive points with the same initial timestamp.
-            for (i, (time, _)) in points.iter().enumerate().skip(1) {
-                if (*time - first_time).abs() < 0.001 {
-                    // Same timestamp (within floating point tolerance).
-                    last_same = i;
-                } else {
-                    break; // Found a different timestamp, stop counting.
-                }
-            }
-
-            if last_same > 0 && last_same + 1 < points.len() {
-                // Only skip if we have data beyond the initial duplicates.
-                last_same + 1
-            } else if points.len() >= 3 {
-                // No duplicate timestamps (or all timestamps are equal), but check for a huge
-                // value jump that indicates initialization artifacts.
-                let first_y = points[0].1;
-                let second_y = points[1].1;
-                if (second_y - first_y).abs() > 50.0 {
-                    1 // Skip just the first point.
-                } else {
-                    0 // Keep all points.
-                }
-            } else {
-                0
-            }
-        } else {
-            0 // Not enough points to analyze, or XY mode where we keep all points.
-        };
-
-        // Add the points to the plot, skipping initial bad points if needed
-        for (x_value, y_value) in points.into_iter().skip(skip_initial_points) {
-            xy_line.push_x_value((x_value - self.x_offset) as f32);
-            xy_line.push_y_value((y_value - self.y_offset) as f32);
-        }
-
-        let handle = xy_lines.add(xy_line);
-        self.xy_line_handle = Some(handle);
         self.state = QueryPlotState::Results;
+        old_entities.into_iter().flatten().collect()
     }
 
     fn offset(&self) -> DVec2 {
@@ -292,6 +175,7 @@ pub struct QueryPlotWidget<'w, 's> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    telemetry_mode: Res<'w, TelemetryMode>,
     window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
@@ -345,48 +229,11 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 let query = match plot.data.query_type {
                     QueryType::SQL => plot.data.query.to_string(),
                     QueryType::EQL => {
-                        // Parse the EQL expression
-                        let expr = match state.eql_context.0.parse_str(&plot.data.query) {
-                            Ok(expr) => expr,
+                        match eql_to_sql_with_time(&state.eql_context.0, &plot.data.query) {
+                            Ok(sql) => sql,
                             Err(err) => {
-                                plot.state = QueryPlotState::Error(ErrorResponse {
-                                    description: err.to_string(),
-                                });
-                                return;
-                            }
-                        };
-                        // Get time field for query plots (they need time as first column, value as second)
-                        let time_field = match expr.to_sql_time_field() {
-                            Ok(field) => field,
-                            Err(err) => {
-                                plot.state = QueryPlotState::Error(ErrorResponse {
-                                    description: err.to_string(),
-                                });
-                                return;
-                            }
-                        };
-                        // Generate SQL and prepend time column
-                        match expr.to_sql(&state.eql_context.0) {
-                            Ok(mut sql) => {
-                                // Insert time column after "select " (case-insensitive)
-                                if let Some(pos) = sql.to_lowercase().find("select ") {
-                                    let after_select = pos + 7;
-                                    sql.insert_str(after_select, &format!("{}, ", time_field));
-                                } else {
-                                    // Fallback: prepend time at the beginning
-                                    sql = format!(
-                                        "select {}, {}",
-                                        time_field,
-                                        sql.trim_start_matches("select ")
-                                            .trim_start_matches("SELECT ")
-                                    );
-                                }
-                                sql
-                            }
-                            Err(err) => {
-                                plot.state = QueryPlotState::Error(ErrorResponse {
-                                    description: err.to_string(),
-                                });
+                                plot.state =
+                                    QueryPlotState::Error(ErrorResponse { description: err });
                                 return;
                             }
                         }
@@ -396,7 +243,8 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     SQLQuery(query),
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                           mut states: Query<&mut QueryPlotData>,
-                          mut xy_lines: ResMut<Assets<XYLine>>| {
+                          mut xy_lines: ResMut<Assets<XYLine>>,
+                          mut commands: Commands| {
                         let Ok(mut plot) = states.get_mut(entity) else {
                             return true;
                         };
@@ -409,7 +257,11 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                                     if let Some(batch) =
                                         decoder.decode(&mut buffer).ok().and_then(|b| b)
                                     {
-                                        plot.process_record_batch(batch, &mut xy_lines);
+                                        let leftover =
+                                            plot.process_record_batch(batch, &mut xy_lines);
+                                        for line_entity in leftover {
+                                            commands.entity(line_entity).despawn();
+                                        }
                                         plot.state = QueryPlotState::Results;
                                         return false;
                                     }
@@ -424,14 +276,13 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 );
             }
 
-            if let Some(xy_line_handle) = plot.xy_line_handle.clone() {
+            if !plot.series.is_empty() {
                 let Ok(mut graph_state) = state.graphs_state.get_mut(entity) else {
                     return;
                 };
 
                 // Store values we need before borrowing plot
                 let query_label = plot.data.name.clone();
-                let query_color = plot.data.color.into_color32();
                 let plot_mode = plot.data.plot_mode;
                 let x_label = plot.data.x_label.clone();
                 let y_label = plot.data.y_label.clone();
@@ -441,6 +292,11 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     .unwrap_or(state.earliest_timestamp.0);
                 let selected_range = state.selected_time_range.0.clone();
                 let current_timestamp = state.current_timestamp.0;
+                let series_snapshot: Vec<_> = plot
+                    .series
+                    .iter()
+                    .map(|s| (s.handle.clone(), s.entity, s.color, s.label.clone()))
+                    .collect();
 
                 // X-range is already relative (time starts from 0), Y-range needs offset subtracted
                 let data_bounds = PlotBounds::new(
@@ -450,38 +306,51 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     graph_state.y_range.end,
                 )
                 .offset(DVec2::new(0.0, -offset_y)); // Only subtract Y offset
+                let telemetry = state.telemetry_mode.0;
                 let rect = ui.max_rect();
-                let inner_rect = get_inner_rect(ui.max_rect(), false);
+                let inner_rect = get_inner_rect(ui.max_rect(), telemetry);
                 let bounds = sync_bounds_query(&mut graph_state, data_bounds, rect, inner_rect);
 
                 graph_state.widget_width = ui.max_rect().width() as f64;
+                let line_width = graph_state.line_width;
+                let render_layers = graph_state.render_layers.clone();
+                let visible_range = graph_state.visible_range.clone();
+                let graph_type = graph_state.graph_type;
+                let widget_width = ui.max_rect().width() as usize;
 
                 state
                     .commands
                     .entity(entity)
                     .try_insert(Projection::Orthographic(bounds.as_projection()));
 
-                let line_entity = if let Some(entity) = plot.line_entity {
-                    entity
-                } else {
-                    state.commands.spawn_empty().id()
-                };
-                state
-                    .commands
-                    .entity(line_entity)
-                    .insert(LineBundle {
-                        line: LineHandle::XY(xy_line_handle.clone()),
-                        uniform: LineUniform::new(graph_state.line_width, query_color.into_bevy()),
-                        config: LineConfig {
-                            render_layers: graph_state.render_layers.clone(),
-                        },
-                        line_visible_range: graph_state.visible_range.clone(),
-                        graph_type: graph_state.graph_type,
-                    })
-                    .insert(ChildOf(entity))
-                    .insert(LineWidgetWidth(ui.max_rect().width() as usize));
-
-                plot.line_entity = Some(line_entity);
+                let mut updated_entities = Vec::with_capacity(series_snapshot.len());
+                let mut xy_series = Vec::with_capacity(series_snapshot.len());
+                for (handle, existing, color, label) in series_snapshot {
+                    let line_entity = existing.unwrap_or_else(|| state.commands.spawn_empty().id());
+                    state
+                        .commands
+                        .entity(line_entity)
+                        .insert(LineBundle {
+                            line: LineHandle::XY(handle.clone()),
+                            uniform: LineUniform::new(line_width, color.into_bevy()),
+                            config: LineConfig {
+                                render_layers: render_layers.clone(),
+                            },
+                            line_visible_range: visible_range.clone(),
+                            graph_type,
+                        })
+                        .insert(ChildOf(entity))
+                        .insert(LineWidgetWidth(widget_width));
+                    updated_entities.push(line_entity);
+                    xy_series.push(crate::ui::plot::XYPlotSeries {
+                        handle,
+                        label,
+                        color,
+                    });
+                }
+                for (series, entity) in plot.series.iter_mut().zip(updated_entities) {
+                    series.entity = Some(entity);
+                }
 
                 // Use TimeseriesPlot for unified rendering
                 // In XY mode, use numeric X-axis labels; otherwise use time labels
@@ -492,6 +361,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         selected_range,
                         earliest_timestamp,
                         current_timestamp,
+                        telemetry,
                     ),
                     PlotMode::TimeSeries => TimeseriesPlot::from_bounds_with_relative_time(
                         rect,
@@ -500,15 +370,15 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         earliest_timestamp,
                         current_timestamp,
                         true, // is_relative_time = true for query plots
+                        telemetry,
                     ),
                 }
                 .with_labels(x_label, y_label);
 
                 let data_source = PlotDataSource::XY {
                     xy_lines: &state.xy_lines,
-                    xy_line_handle,
                     query_label,
-                    query_color,
+                    series: xy_series,
                 };
 
                 let Ok(mut window_state) = state.window_states.get_mut(target_window) else {
@@ -522,7 +392,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     entity,
                     &mut window_state.ui_state.selected_object,
                     state.time_range_behavior.as_mut(),
-                    false,
+                    telemetry,
                 );
             }
             match &plot.state {
@@ -533,7 +403,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 }
                 QueryPlotState::Requested(_instant) => {
                     ui.centered_and_justified(|ui| {
-                        if plot.line_entity.is_none() {
+                        if plot.series.is_empty() {
                             ui.label("Loading...");
                         }
                     });
@@ -558,204 +428,118 @@ pub fn auto_bounds(
     mut xy_lines: ResMut<Assets<XYLine>>,
 ) {
     for (mut graph_state, plot) in &mut graph_states {
-        if let Some(entity) = plot.line_entity {
+        let mut y_min: Option<f32> = None;
+        let mut y_max: Option<f32> = None;
+        let mut x_min: Option<f32> = None;
+        let mut x_max: Option<f32> = None;
+
+        for series in &plot.series {
+            let Some(entity) = series.entity else {
+                continue;
+            };
             let Ok(handle) = line_handles.get(entity) else {
                 continue;
             };
             let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
                 continue;
             };
-            if let gpu::LineMut::XY(xy) = line {
-                if graph_state.auto_y_range {
-                    let (min, max) = match xy.y_values.iter().flat_map(|c| c.cpu()).minmax() {
-                        itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
-                        itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
-                        itertools::MinMaxResult::NoElements => continue,
-                    };
-                    let (min, max) = if (max - min).abs() < f32::EPSILON {
-                        (min - 1.0, max + 1.0)
-                    } else {
-                        (min, max)
-                    };
-
-                    let min = min as f64 + plot.y_offset;
-                    let max = max as f64 + plot.y_offset;
-
-                    graph_state.y_range = min..max;
-                }
-
-                if graph_state.auto_x_range {
-                    let (min, max) = match xy.x_values.iter().flat_map(|c| c.cpu()).minmax() {
-                        itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
-                        itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
-                        itertools::MinMaxResult::NoElements => continue,
-                    };
-                    let (min, max) = if (max - min).abs() < f32::EPSILON {
-                        (min - 1.0, max + 1.0)
-                    } else {
-                        (min, max)
-                    };
-
-                    // For X-axis (time), keep relative values (x_values already have offset subtracted)
-                    // Don't add x_offset back - we want time to start from 0
-                    let min = min as f64;
-                    let max = max as f64;
-
-                    graph_state.x_range = min..max;
+            let gpu::LineMut::XY(xy) = line else {
+                continue;
+            };
+            if graph_state.auto_y_range {
+                match xy.y_values.iter().flat_map(|c| c.cpu()).minmax() {
+                    itertools::MinMaxResult::OneElement(elem) => {
+                        y_min = Some(y_min.map_or(elem - 1.0, |m| m.min(elem - 1.0)));
+                        y_max = Some(y_max.map_or(elem + 1.0, |m| m.max(elem + 1.0)));
+                    }
+                    itertools::MinMaxResult::MinMax(min, max) => {
+                        y_min = Some(y_min.map_or(*min, |m| m.min(*min)));
+                        y_max = Some(y_max.map_or(*max, |m| m.max(*max)));
+                    }
+                    itertools::MinMaxResult::NoElements => {}
                 }
             }
+            if graph_state.auto_x_range {
+                match xy.x_values.iter().flat_map(|c| c.cpu()).minmax() {
+                    itertools::MinMaxResult::OneElement(elem) => {
+                        x_min = Some(x_min.map_or(elem - 1.0, |m| m.min(elem - 1.0)));
+                        x_max = Some(x_max.map_or(elem + 1.0, |m| m.max(elem + 1.0)));
+                    }
+                    itertools::MinMaxResult::MinMax(min, max) => {
+                        x_min = Some(x_min.map_or(*min, |m| m.min(*min)));
+                        x_max = Some(x_max.map_or(*max, |m| m.max(*max)));
+                    }
+                    itertools::MinMaxResult::NoElements => {}
+                }
+            }
+        }
+
+        if graph_state.auto_y_range
+            && let (Some(min), Some(max)) = (y_min, y_max)
+        {
+            let (min, max) = if (max - min).abs() < f32::EPSILON {
+                (min - 1.0, max + 1.0)
+            } else {
+                (min, max)
+            };
+            graph_state.y_range = (min as f64 + plot.y_offset)..(max as f64 + plot.y_offset);
+        }
+        if graph_state.auto_x_range
+            && let (Some(min), Some(max)) = (x_min, x_max)
+        {
+            let (min, max) = if (max - min).abs() < f32::EPSILON {
+                (min - 1.0, max + 1.0)
+            } else {
+                (min, max)
+            };
+            graph_state.x_range = min as f64..max as f64;
         }
     }
 }
 
-pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {
-    match array_ref.data_type() {
-        DataType::Float32 => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::Float64 => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default()),
-        ),
-        DataType::Int32 => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<Int32Array>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::Int64 => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::UInt32 => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<UInt32Array>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::UInt64 => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<UInt64Array>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::Timestamp(TimeUnit::Second, _) => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<TimestampSecondArray>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::{
+        array::Float64Array,
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+    use std::sync::Arc;
 
-        DataType::Timestamp(TimeUnit::Millisecond, _) => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<TimestampMillisecondArray>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::Timestamp(TimeUnit::Microsecond, _) => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<TimestampMicrosecondArray>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::Timestamp(TimeUnit::Nanosecond, _) => Box::new(
-            array_ref
-                .as_any()
-                .downcast_ref::<TimestampNanosecondArray>()
-                .unwrap()
-                .iter()
-                .map(|x| x.unwrap_or_default() as f64),
-        ),
-        DataType::FixedSizeList(_, list_size) => {
-            let list_array = array_ref
-                .as_any()
-                .downcast_ref::<FixedSizeListArray>()
-                .unwrap();
-            let list_size = *list_size as usize;
-            if list_size == 0 {
-                Box::new(std::iter::empty())
-            } else {
-                let values = list_array.values();
-                let inner_values: Vec<f64> = array_iter(values).collect();
-                if inner_values.is_empty() {
-                    println!("Unsupported list data type: {:?}", values.data_type());
-                    Box::new(std::iter::empty())
-                } else {
-                    let len = list_array.len();
-                    let mut min_vals = vec![f64::INFINITY; list_size];
-                    let mut max_vals = vec![f64::NEG_INFINITY; list_size];
-                    for row in 0..len {
-                        if list_array.is_null(row) {
-                            continue;
-                        }
-                        let base = row * list_size;
-                        for i in 0..list_size {
-                            if let Some(value) = inner_values.get(base + i)
-                                && value.is_finite()
-                            {
-                                if *value < min_vals[i] {
-                                    min_vals[i] = *value;
-                                }
-                                if *value > max_vals[i] {
-                                    max_vals[i] = *value;
-                                }
-                            }
-                        }
-                    }
-                    let mut selected_index = 0usize;
-                    let mut best_range = f64::NEG_INFINITY;
-                    for i in 0..list_size {
-                        let min = min_vals[i];
-                        let max = max_vals[i];
-                        if min.is_finite() && max.is_finite() {
-                            let range = max - min;
-                            if range > best_range {
-                                best_range = range;
-                                selected_index = i;
-                            }
-                        }
-                    }
-                    Box::new((0..len).map(move |row| {
-                        if list_array.is_null(row) {
-                            0.0
-                        } else {
-                            inner_values
-                                .get(row * list_size + selected_index)
-                                .copied()
-                                .unwrap_or_default()
-                        }
-                    }))
-                }
-            }
+    fn batch_xy(y_columns: usize) -> RecordBatch {
+        let mut fields = vec![Field::new("x", DataType::Float64, false)];
+        let mut columns: Vec<arrow::array::ArrayRef> =
+            vec![Arc::new(Float64Array::from(vec![0.0, 1.0]))];
+        for i in 0..y_columns {
+            fields.push(Field::new(format!("y{i}"), DataType::Float64, false));
+            columns.push(Arc::new(Float64Array::from(vec![i as f64, i as f64 + 1.0])));
         }
-        ty => {
-            println!("Unsupported data type: {:?}", ty);
-            Box::new(std::iter::empty())
-        }
+        RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap()
+    }
+
+    #[test]
+    fn shrinking_series_returns_leftover_line_entities() {
+        let mut xy_lines = Assets::<XYLine>::default();
+        let mut plot = QueryPlotData::default();
+        plot.data.plot_mode = PlotMode::XY;
+
+        assert!(
+            plot.process_record_batch(batch_xy(3), &mut xy_lines)
+                .is_empty()
+        );
+        assert_eq!(plot.series.len(), 3);
+
+        let kept = Entity::from_bits(1);
+        let extra_a = Entity::from_bits(2);
+        let extra_b = Entity::from_bits(3);
+        plot.series[0].entity = Some(kept);
+        plot.series[1].entity = Some(extra_a);
+        plot.series[2].entity = Some(extra_b);
+
+        let leftover = plot.process_record_batch(batch_xy(1), &mut xy_lines);
+        assert_eq!(plot.series.len(), 1);
+        assert_eq!(plot.series[0].entity, Some(kept));
+        assert_eq!(leftover, vec![extra_a, extra_b]);
     }
 }

@@ -1861,6 +1861,7 @@ dependencies = [
  "bevy",
  "bevy-inspector-egui",
  "bevy_editor_cam",
+ "bevy_math",
  "big_space",
  "map_3d",
  "serde",
@@ -5979,6 +5980,8 @@ checksum = "f8970033a4282a7bcf899b38b5ed3a58b732fe093d03785d58648515d8d309da"
 name = "eql"
 version = "0.18.1-alpha.0"
 dependencies = [
+ "bevy_geo_frames",
+ "bevy_math",
  "hifitime",
  "impeller2",
  "impeller2-wkt",

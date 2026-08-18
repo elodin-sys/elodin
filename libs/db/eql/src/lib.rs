@@ -18,7 +18,8 @@ pub mod formulas;
 
 use formulas::{FormulaRegistry, create_default_registry};
 
-pub use formulas::{CastTarget, Formula};
+pub use bevy_geo_frames::GeoFrame;
+pub use formulas::{CastTarget, Formula, FrameConversion, FrameConvertKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -484,6 +485,8 @@ pub struct Context {
     pub earliest_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
     pub formula_registry: FormulaRegistry,
+    /// Schematic / editor geo origin for ECEF ↔ ENU/NED EQL converters.
+    pub geo_origin: Option<bevy_geo_frames::GeoOrigin>,
 }
 
 impl Default for Context {
@@ -493,6 +496,7 @@ impl Default for Context {
             earliest_timestamp: Timestamp(i64::MIN),
             last_timestamp: Timestamp(i64::MAX),
             formula_registry: create_default_registry(),
+            geo_origin: None,
         }
     }
 }
@@ -549,6 +553,7 @@ impl Context {
             earliest_timestamp,
             last_timestamp,
             formula_registry: create_default_registry(),
+            geo_origin: None,
         }
     }
 
@@ -562,7 +567,14 @@ impl Context {
             earliest_timestamp,
             last_timestamp,
             formula_registry: create_default_registry(),
+            geo_origin: None,
         }
+    }
+
+    /// Set the geo origin used by `ecef_to_ned()` / friends when emitting SQL.
+    pub fn with_geo_origin(mut self, origin: bevy_geo_frames::GeoOrigin) -> Self {
+        self.geo_origin = Some(origin);
+        self
     }
 
     pub fn sql(&self, query: &str) -> Result<String, Error> {

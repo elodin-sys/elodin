@@ -41,7 +41,7 @@ w.schematic(
         }
     }
 
-    object_3d "(0,0,0,1, cube.world_pos[4],cube.world_pos[5],cube.world_pos[6])" {
+    object_3d frame_orientation=ENU orientation=absolute "(0,0,0,1, cube.world_pos[4],cube.world_pos[5],cube.world_pos[6])" {
         glb path="compass.glb"
     }
     object_3d cube.world_pos {

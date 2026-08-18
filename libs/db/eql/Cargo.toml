@@ -19,3 +19,7 @@ thiserror = "1"
 # time
 hifitime = "4"
 jiff = "0.2"
+
+# geo-frame math for ecef_to_ned() / friends (SQL emission; no Bevy ECS)
+bevy_geo_frames = { path = "../../bevy_geo_frames", default-features = false }
+bevy_math = { workspace = true }

@@ -364,6 +364,7 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(Update, update_eql_context)
+            .add_systems(Update, sync_eql_geo_origin.after(update_eql_context))
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(
                 Update,
@@ -2411,6 +2412,7 @@ pub fn update_eql_context(
     }
     let earliest = eql_context.0.earliest_timestamp;
     let latest = eql_context.0.last_timestamp;
+    let geo_origin = eql_context.0.geo_origin;
     eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
@@ -2434,6 +2436,21 @@ pub fn update_eql_context(
         earliest,
         latest,
     );
+    eql_context.0.geo_origin = geo_origin;
+}
+
+/// Keep `EqlContext.geo_origin` aligned with the schematic [`GeoContext`] so
+/// `ecef_to_ned()` and friends can emit SQL for query plots.
+pub fn sync_eql_geo_origin(geo: Res<GeoContext>, mut eql: ResMut<EqlContext>) {
+    let dirty = eql.0.geo_origin.is_none_or(|o| {
+        o.latitude != geo.origin.latitude
+            || o.longitude != geo.origin.longitude
+            || o.altitude != geo.origin.altitude
+            || o.ellipsoid.parameters() != geo.origin.ellipsoid.parameters()
+    });
+    if dirty {
+        eql.0.geo_origin = Some(geo.origin);
+    }
 }
 
 pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<EqlContext>) {
@@ -2458,10 +2475,9 @@ mod tests {
     use impeller2_wkt::ComponentValue;
 
     /// Inserting a bare `WorldPos` must pull in the `Geo*` components
-    /// (required components) and end up at the same Bevy pose the old
-    /// `sync_pos` fallback (`bevy_pos()`/`bevy_att()`) produced.
+    /// (required components) and map through composition (`bevy_R * att`).
     #[test]
-    fn world_pos_geo_pipeline_matches_legacy_swizzle() {
+    fn world_pos_geo_pipeline_uses_frame_composition() {
         let ctx = GeoContext::default();
         let mut app = App::new();
         app.insert_resource(ctx.clone());
@@ -2489,10 +2505,10 @@ mod tests {
             wp.bevy_pos()
         );
         let q = geo_rot.to_bevy(&ctx);
+        let expected = GeoRotation::absolute(GeoFrame::ENU, wp.att()).to_bevy(&ctx);
         assert!(
-            q.dot(wp.bevy_att()).abs() > 1.0 - 1e-9,
-            "got {q:?}, expected {:?}",
-            wp.bevy_att()
+            q.dot(expected).abs() > 1.0 - 1e-9,
+            "got {q:?}, expected {expected:?}"
         );
     }
 

@@ -163,10 +163,10 @@ impl InputReader {
             }
         };
 
-        // Only device_query's Linux backend needs an X display; macOS and
-        // Windows read the keyboard without one.
-        let has_display = !cfg!(target_os = "linux") || std::env::var_os("DISPLAY").is_some();
-        let device_state = has_display.then(DeviceState::new);
+        // device_query's Linux backend panics if it cannot open DISPLAY.
+        // The nix develop hook sets DISPLAY=:0 even on headless CI, so "is
+        // DISPLAY set?" is not enough — probe the X11 socket first.
+        let device_state = try_device_state();
         if device_state.is_none() {
             tracing::info!("No X display; keyboard input disabled, idle pilot flies");
         }
@@ -328,6 +328,39 @@ impl InputReader {
             throttle: self.keyboard_throttle,
         }
     }
+}
+
+fn try_device_state() -> Option<DeviceState> {
+    #[cfg(target_os = "linux")]
+    {
+        if !x11_display_reachable() {
+            return None;
+        }
+    }
+    Some(DeviceState::new())
+}
+
+#[cfg(target_os = "linux")]
+fn x11_display_reachable() -> bool {
+    let Ok(display) = std::env::var("DISPLAY") else {
+        return false;
+    };
+    let Some(path) = x11_unix_socket_path(&display) else {
+        return false;
+    };
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
+/// Filesystem socket for a local `DISPLAY` (`:0`, `:0.0`, `unix:0`).
+fn x11_unix_socket_path(display: &str) -> Option<std::path::PathBuf> {
+    let rest = display
+        .strip_prefix("unix:")
+        .or_else(|| display.strip_prefix(':'))?;
+    let n = rest.split('.').next()?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(std::path::PathBuf::from(format!("/tmp/.X11-unix/X{n}")))
 }
 
 /// Apply deadzone to axis value
@@ -553,5 +586,23 @@ mod tests {
             ..IDLE_KEYBOARD
         };
         assert!(!is_flying(&combine(IDLE_GAMEPAD, keyboard, false)));
+    }
+
+    #[test]
+    fn x11_unix_socket_path_parses_local_displays() {
+        assert_eq!(
+            x11_unix_socket_path(":0").as_deref(),
+            Some(std::path::Path::new("/tmp/.X11-unix/X0"))
+        );
+        assert_eq!(
+            x11_unix_socket_path(":0.0").as_deref(),
+            Some(std::path::Path::new("/tmp/.X11-unix/X0"))
+        );
+        assert_eq!(
+            x11_unix_socket_path("unix:1").as_deref(),
+            Some(std::path::Path::new("/tmp/.X11-unix/X1"))
+        );
+        assert_eq!(x11_unix_socket_path("localhost:0"), None);
+        assert_eq!(x11_unix_socket_path(""), None);
     }
 }

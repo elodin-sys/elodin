@@ -470,6 +470,10 @@ pub struct Viewport {
     pub frustums_thickness: f32,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
+    /// Which shared view-cube mesh (ENU/NED/ECEF) this viewport shows.
+    /// Falls back to [`Self::frame`], then ENU, when omitted.
+    #[serde(default)]
+    pub view_cube_frame: Option<bevy_geo_frames::GeoFrame>,
     /// When true (default), this viewport's camera includes the thruster
     /// particle render layer. Set `#false` to hide Hanabi thruster effects in
     /// this viewport only (shared simulation; draw is per-camera).
@@ -515,6 +519,7 @@ impl Default for Viewport {
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
+            view_cube_frame: None,
             effects: true,
             hdr: false,
             bloom: None,

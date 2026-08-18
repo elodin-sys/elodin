@@ -1354,6 +1354,33 @@ World-frame translations move the camera in world coordinates (the offset stays 
 viewport name=Viewport pos="drone.world_pos.translate_world(-5, -5, 3)" look_at="drone.world_pos"
 ```
 
+### Geo-Frame Conversion Formulas
+
+Directed converters re-express positions (and free directions) between `ENU`, `NED`, and `ECEF`. The **source frame is in the method name** — it is never inferred from schematic `coordinate`.
+
+**Points / poses** (affine; ECEF ↔ local uses the schematic `coordinate` lat/lon/alt origin):
+
+- `ecef_to_ned()`, `ned_to_ecef()`, `ecef_to_enu()`, `enu_to_ecef()`, `enu_to_ned()`, `ned_to_enu()`
+
+**Vectors** (rotation only — use for velocities, `up=` vectors, etc.):
+
+- `ecef_to_ned_vector()`, `ned_to_ecef_vector()`, `ecef_to_enu_vector()`, `enu_to_ecef_vector()`, `enu_to_ned_vector()`, `ned_to_enu_vector()`
+
+These work in viewport / object_3d EQL and in `query_plot` EQL (translated to SQL with the schematic origin baked in). ENU ↔ NED needs no origin; ECEF conversions error if origin is unset.
+
+A plain `graph` plots raw component elements straight from the database and cannot apply a conversion, so it rejects these formulas — use `query_plot` instead. Both the whole component (`rocket.world_pos.ecef_to_ned()`) and an explicit element triple (`(rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_ned()`) are accepted.
+
+```kdl
+coordinate frame="ECEF" lat=28.5 lon=-80.6
+
+# Local NED chase offset while the sim pose is ECEF
+viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0).ned_to_ecef()"
+         look_at="rocket.world_pos"
+
+# Plot NED northing from an ECEF world_pos (query_plot)
+query_plot query="rocket.world_pos.ecef_to_ned()"
+```
+
 ### Chaining Formulas
 
 All rotation and translation formulas can be chained together to create complex camera behaviors:

@@ -159,12 +159,15 @@ impl EditableEQL {
 
     /// Retry a spawn-time compile that failed because the component set was
     /// still empty or partial. No-op when the text is empty or already compiled.
-    pub fn retry_compile(&mut self, ctx: &eql::Context) {
+    ///
+    /// `geo` must be the schematic `coordinate` origin: a retry that fell back
+    /// to the default origin would silently misplace ECEF converters.
+    pub fn retry_compile(&mut self, ctx: &eql::Context, geo: &GeoContext) {
         if self.eql.trim().is_empty() || self.compiled_expr.is_some() {
             return;
         }
         if let Ok(expr) = ctx.parse_str(&self.eql) {
-            self.compiled_expr = compile_eql_expr(expr).ok();
+            self.compiled_expr = compile_eql_expr_with_geo(expr, geo).ok();
         }
     }
 }
@@ -573,15 +576,20 @@ fn cast_component_value(
 fn compile_formula(
     formula: Arc<dyn eql::Formula>,
     inner_expr: eql::Expr,
+    geo: &GeoContext,
 ) -> Result<CompiledExpr, CompileError> {
     if let Some(target) = formula.editor_cast_target() {
-        let inner_compiled = compile_eql_expr(inner_expr)?;
+        let inner_compiled = compile_eql_expr_with_geo(inner_expr, geo)?;
         return Ok(CompiledExpr::closure(
             move |entity_map, component_values| {
                 let v = inner_compiled.execute(entity_map, component_values)?;
                 cast_component_value(v, target)
             },
         ));
+    }
+
+    if let Some(conv) = formula.frame_conversion() {
+        return compile_frame_conversion(conv, inner_expr, geo);
     }
 
     let n = formula.name();
@@ -606,8 +614,8 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndAngle(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let angle_compiled = compile_eql_expr(elements[1].clone())?;
+            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
+            let angle_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -643,10 +651,10 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndThreeAngles(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let x_angle_compiled = compile_eql_expr(elements[1].clone())?;
-            let y_angle_compiled = compile_eql_expr(elements[2].clone())?;
-            let z_angle_compiled = compile_eql_expr(elements[3].clone())?;
+            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
+            let x_angle_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
+            let y_angle_compiled = compile_eql_expr_with_geo(elements[2].clone(), geo)?;
+            let z_angle_compiled = compile_eql_expr_with_geo(elements[3].clone(), geo)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -696,8 +704,8 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndDistance(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let distance_compiled = compile_eql_expr(elements[1].clone())?;
+            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
+            let distance_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -741,10 +749,10 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndThreeDistances(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let x_dist_compiled = compile_eql_expr(elements[1].clone())?;
-            let y_dist_compiled = compile_eql_expr(elements[2].clone())?;
-            let z_dist_compiled = compile_eql_expr(elements[3].clone())?;
+            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
+            let x_dist_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
+            let y_dist_compiled = compile_eql_expr_with_geo(elements[2].clone(), geo)?;
+            let z_dist_compiled = compile_eql_expr_with_geo(elements[3].clone(), geo)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -778,10 +786,10 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndThreeComponents(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let x_compiled = compile_eql_expr(elements[1].clone())?;
-            let y_compiled = compile_eql_expr(elements[2].clone())?;
-            let z_compiled = compile_eql_expr(elements[3].clone())?;
+            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
+            let x_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
+            let y_compiled = compile_eql_expr_with_geo(elements[2].clone(), geo)?;
+            let z_compiled = compile_eql_expr_with_geo(elements[3].clone(), geo)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -801,8 +809,74 @@ fn compile_formula(
     })
 }
 
-/// Compiles an EQL expression into a closure-based form
+fn compile_frame_conversion(
+    conv: eql::FrameConversion,
+    inner_expr: eql::Expr,
+    geo: &GeoContext,
+) -> Result<CompiledExpr, CompileError> {
+    use eql::FrameConvertKind;
+    use nox::ArrayBuf;
+
+    let from = conv.from;
+    let to = conv.to;
+    let geo = geo.clone();
+    let receiver_compiled = compile_eql_expr_with_geo(inner_expr, &geo)?;
+
+    Ok(CompiledExpr::closure(
+        move |entity_map, component_values| {
+            let val = receiver_compiled.execute(entity_map, component_values)?;
+            let ComponentValue::F64(array) = val else {
+                return Err(ComponentError::Message(
+                    "frame conversion expects an f64 array".into(),
+                ));
+            };
+            let data = array.buf.as_buf();
+            match (conv.kind, data.len()) {
+                (FrameConvertKind::Direction, 3) => {
+                    let v = DVec3::new(data[0], data[1], data[2]);
+                    let out = to._R_(&from, &geo) * v;
+                    Ok(build_vec3_result((out.x, out.y, out.z)))
+                }
+                (FrameConvertKind::Point, 3) => {
+                    let v = DVec3::new(data[0], data[1], data[2]);
+                    let out = to._M_(&from, &geo).transform_point3(v);
+                    Ok(build_vec3_result((out.x, out.y, out.z)))
+                }
+                (FrameConvertKind::Point, 7) => {
+                    let att = DQuat::from_xyzw(data[0], data[1], data[2], data[3]);
+                    let pos = DVec3::new(data[4], data[5], data[6]);
+                    let new_pos = to._M_(&from, &geo).transform_point3(pos);
+                    let new_att = GeoRotation::absolute(from, att).as_frame(to, &geo).1;
+                    Ok(build_spatial_result(
+                        (new_att.x, new_att.y, new_att.z, new_att.w),
+                        (new_pos.x, new_pos.y, new_pos.z),
+                    ))
+                }
+                (FrameConvertKind::Direction, n) => Err(ComponentError::Message(
+                    format!("vector frame conversion expects a 3-vector, got {n} elements").into(),
+                )),
+                (FrameConvertKind::Point, n) => Err(ComponentError::Message(
+                    format!("frame conversion expects a 3-vector or 7-element pose, got {n}")
+                        .into(),
+                )),
+            }
+        },
+    ))
+}
+
+/// Compiles an EQL expression with the default geo origin (lat/lon 0).
+/// Prefer [`compile_eql_expr_with_geo`] when the schematic `coordinate` origin is available.
 pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileError> {
+    compile_eql_expr_with_geo(expression, &GeoContext::default())
+}
+
+/// Compiles an EQL expression into a closure-based form.
+///
+/// `geo` supplies the schematic origin for ECEF ↔ ENU/NED converters.
+pub fn compile_eql_expr_with_geo(
+    expression: eql::Expr,
+    geo: &GeoContext,
+) -> Result<CompiledExpr, CompileError> {
     Ok(match expression {
         Expr::ComponentPart(component) => {
             let component_id = component.id;
@@ -817,7 +891,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::ArrayAccess(expr, index) => {
-            let compiled_expr = compile_eql_expr(*expr)?;
+            let compiled_expr = compile_eql_expr_with_geo(*expr, geo)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let resolved_expr = compiled_expr.execute(entity_map, component_value_maps)?;
                 match resolved_expr {
@@ -854,8 +928,10 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::Tuple(exprs) => {
-            let compiled_exprs: Result<Vec<CompiledExpr>, CompileError> =
-                exprs.into_iter().map(compile_eql_expr).collect();
+            let compiled_exprs: Result<Vec<CompiledExpr>, CompileError> = exprs
+                .into_iter()
+                .map(|e| compile_eql_expr_with_geo(e, geo))
+                .collect();
             let compiled_exprs = compiled_exprs?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 use nox::ArrayBuf;
@@ -878,8 +954,8 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::BinaryOp(left, right, op) => {
-            let left_compiled = compile_eql_expr(*left)?;
-            let right_compiled = compile_eql_expr(*right)?;
+            let left_compiled = compile_eql_expr_with_geo(*left, geo)?;
+            let right_compiled = compile_eql_expr_with_geo(*right, geo)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let left_val = left_compiled.execute(entity_map, component_value_maps)?;
                 let right_val = right_compiled.execute(entity_map, component_value_maps)?;
@@ -898,7 +974,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
-        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr)?,
+        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr, geo)?,
         expr => {
             return Err(CompileError::CannotConvert(expr));
         }
@@ -1813,7 +1889,7 @@ pub fn create_object_3d_entity(
     let entity_id = commands
         .spawn((
             Object3DState {
-                compiled_expr: Some(compile_eql_expr(expr)?),
+                compiled_expr: Some(compile_eql_expr_with_geo(expr, geo_context)?),
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
@@ -2743,6 +2819,367 @@ mod ellipsoid_covariance_tests {
         assert_eq!(
             resolve_covariance_frame(&object, &Coordinate(None)),
             GeoFrame::NED
+        );
+    }
+}
+
+#[cfg(test)]
+mod translate_body_frame_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::math::{DQuat, DVec3};
+    use bevy::prelude::{Query, World};
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller2_bevy::EntityMap;
+    use impeller2_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::{ComponentArrayExt, compile_eql_expr};
+    use crate::WorldPosExt;
+    use crate::ui::widgets::SystemStateExt;
+
+    /// Cape Canaveral–scale ECEF position so we exercise planetary magnitudes.
+    const ROCKET_ECEF: DVec3 = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+
+    fn world_pos_component() -> Arc<eql::Component> {
+        Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ))
+    }
+
+    fn spatial_value(att: DQuat, pos: DVec3) -> ComponentValue {
+        let buf = vec![att.x, att.y, att.z, att.w, pos.x, pos.y, pos.z];
+        ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![7], buf)
+                .expect("spatial buffer"),
+        )
+    }
+
+    fn eval_eql(expr: &str, att: DQuat, pos: DVec3) -> impeller2_wkt::WorldPos {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        compiled
+            .execute(&entity_map, &values)
+            .expect("execute")
+            .as_world_pos()
+            .expect("WorldPos")
+    }
+
+    #[test]
+    fn body_translate_with_identity_matches_world_axes() {
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            DQuat::IDENTITY,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        assert!(
+            (delta - DVec3::new(-2.0, 0.0, 0.0)).length() < 1e-9,
+            "identity attitude: body translate must equal ECEF axes, got {delta:?}"
+        );
+    }
+
+    /// Chase camera: 2 m aft along body −X with a non-identity ECEF attitude.
+    /// Body +X is pitched 90° onto ECEF +Z (nose "up" along +Z).
+    #[test]
+    fn body_translate_neg_x_follows_attitude_in_ecef() {
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        let expected = att * DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (delta - expected).length() < 1e-9,
+            "body −X must rotate into ECEF by attitude: got {delta:?}, expected {expected:?}"
+        );
+        // Must not silently fall back to world-frame axes.
+        assert!(
+            (delta - DVec3::new(-2.0, 0.0, 0.0)).length() > 1.0,
+            "body translate must differ from world translate for this attitude"
+        );
+    }
+
+    #[test]
+    fn body_translate_differs_from_translate_world_when_rotated() {
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.4, -1.1, 0.7);
+        let body = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let world = eval_eql(
+            "rocket.world_pos.translate_world(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let body_delta = body.pos() - ROCKET_ECEF;
+        let world_delta = world.pos() - ROCKET_ECEF;
+        assert!(
+            (world_delta - DVec3::new(-2.0, 0.0, 0.0)).length() < 1e-9,
+            "translate_world must ignore attitude"
+        );
+        assert!(
+            (body_delta - (att * DVec3::new(-2.0, 0.0, 0.0))).length() < 1e-9,
+            "translate must apply attitude: got {body_delta:?}"
+        );
+        assert!(
+            (body_delta - world_delta).length() > 1e-6,
+            "body and world translates must diverge when attitude is non-identity"
+        );
+    }
+
+    #[test]
+    fn body_translate_xyz_combined_in_ecef() {
+        let att = DQuat::from_euler(bevy::math::EulerRot::ZYX, 0.9, -0.3, 1.2);
+        let offset = DVec3::new(-2.0, 0.5, 1.0);
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.5, 1.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        let expected = att * offset;
+        assert!(
+            (delta - expected).length() < 1e-9,
+            "combined body translate: got {delta:?}, expected {expected:?}"
+        );
+    }
+
+    /// Camera from `.translate(-2,0,0)` must sit on the rendered mesh's body
+    /// aft axis. With default [`RotationKind::Relative`] in ECEF, Absolute
+    /// body→frame attitudes are re-expressed into Bevy and the visual aft
+    /// diverges from the EQL body offset — the chase camera is not behind
+    /// the mesh.
+    #[test]
+    fn ecef_body_translate_matches_rendered_aft_with_default_relative_orientation() {
+        use bevy_geo_frames::{
+            GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind,
+        };
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+
+        let translated = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
+
+        // Default object_3d orientation is Relative; sync_pos writes WorldPos.att
+        // into GeoRotation while preserving RotationKind.
+        assert_eq!(RotationKind::default(), RotationKind::Relative);
+        let rendered_aft = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+
+        assert!(
+            (cam_delta_bevy - rendered_aft).length() < 1e-6,
+            "ECEF Relative mesh aft must match body translate offset in Bevy:\n\
+             translate Δ={cam_delta_bevy:?}\n\
+             rendered aft={rendered_aft:?}\n\
+             (Absolute aft would be {:?})",
+            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft
+        );
+    }
+
+    /// Same contract with `orientation=absolute` (Falcon-style ECEF objects):
+    /// body translate and rendered aft must agree.
+    #[test]
+    fn ecef_body_translate_matches_rendered_aft_with_absolute_orientation() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+
+        let translated = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
+        let rendered_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+
+        assert!(
+            (cam_delta_bevy - rendered_aft).length() < 1e-6,
+            "ECEF Absolute mesh aft must match body translate: Δ={cam_delta_bevy:?}, aft={rendered_aft:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_convert_eql_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::math::{DQuat, DVec3};
+    use bevy::prelude::{Query, World};
+    use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, Present};
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller2_bevy::EntityMap;
+    use impeller2_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::{ComponentArrayExt, compile_eql_expr_with_geo};
+    use crate::WorldPosExt;
+    use crate::ui::widgets::SystemStateExt;
+
+    const ROCKET_ECEF: DVec3 = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+
+    fn world_pos_component(name: &str, dim: u64) -> Arc<eql::Component> {
+        Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![dim]).unwrap(),
+        ))
+    }
+
+    fn eval_vec3(expr: &str, value: ComponentValue, geo: &GeoContext) -> DVec3 {
+        let component = world_pos_component("rocket.world_pos", 3);
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_geo(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+            geo,
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(value).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = compiled.execute(&entity_map, &values).expect("execute");
+        let ComponentValue::F64(arr) = out else {
+            panic!("expected f64");
+        };
+        use nox::ArrayBuf;
+        let d = arr.buf.as_buf();
+        DVec3::new(d[0], d[1], d[2])
+    }
+
+    fn f64_vec3(v: DVec3) -> ComponentValue {
+        ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![v.x, v.y, v.z])
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn enu_to_ned_swaps_axes() {
+        let geo = GeoContext::default();
+        let out = eval_vec3(
+            "rocket.world_pos.enu_to_ned()",
+            f64_vec3(DVec3::new(1.0, 2.0, 3.0)),
+            &geo,
+        );
+        assert!((out - DVec3::new(2.0, 1.0, -3.0)).length() < 1e-12);
+    }
+
+    #[test]
+    fn ecef_to_ned_origin_is_near_zero() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+        // Inverse: ECEF of NED origin → NED ≈ 0
+        let out = eval_vec3(
+            "rocket.world_pos.ecef_to_ned()",
+            f64_vec3(origin_ecef),
+            &geo,
+        );
+        assert!(
+            out.length() < 1e-6,
+            "ECEF of local origin must map to ~0 NED, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn ecef_vector_differs_from_point_far_from_origin() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let v = DVec3::new(1000.0, 0.0, 0.0);
+        let point = eval_vec3("rocket.world_pos.ecef_to_ned()", f64_vec3(v), &geo);
+        let dir = eval_vec3("rocket.world_pos.ecef_to_ned_vector()", f64_vec3(v), &geo);
+        assert!(
+            (point - dir).length() > 1.0,
+            "point affine must include origin translation; got point={point:?} dir={dir:?}"
+        );
+    }
+
+    #[test]
+    fn ecef_to_ned_pose_converts_position() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let component = world_pos_component("rocket.world_pos", 7);
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_geo(
+            ctx.parse_str("rocket.world_pos.ecef_to_ned()").unwrap(),
+            &geo,
+        )
+        .unwrap();
+
+        let att = DQuat::IDENTITY;
+        let buf = vec![
+            att.x,
+            att.y,
+            att.z,
+            att.w,
+            ROCKET_ECEF.x,
+            ROCKET_ECEF.y,
+            ROCKET_ECEF.z,
+        ];
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![7], buf).unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let wp = compiled
+            .execute(&entity_map, &values)
+            .unwrap()
+            .as_world_pos()
+            .unwrap();
+        let expected = GeoFrame::NED
+            ._M_(&GeoFrame::ECEF, &geo)
+            .transform_point3(ROCKET_ECEF);
+        assert!(
+            (wp.pos() - expected).length() < 1e-6,
+            "got {:?}, expected {expected:?}",
+            wp.pos()
         );
     }
 }

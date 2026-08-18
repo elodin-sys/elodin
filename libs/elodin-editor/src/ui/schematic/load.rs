@@ -459,6 +459,7 @@ impl LoadSchematicParams<'_, '_> {
         {
             self.geo_context.origin = origin;
         }
+        // `sync_eql_geo_origin` copies this into `EqlContext` for query_plot SQL.
 
         // Drop any remote window fetches still in flight from a prior load so
         // their windows can't spawn into this freshly-cleared document.
@@ -1039,14 +1040,14 @@ impl LoadSchematicParams<'_, '_> {
         vector_arrow: VectorArrow3d,
         viewport_camera: Option<Entity>,
     ) {
-        use crate::object_3d::compile_eql_expr;
+        use crate::object_3d::compile_eql_expr_with_geo;
 
         let vector_expr = self
             .eql
             .0
             .parse_str(&vector_arrow.vector)
             .map_err(CompileError::Parse)
-            .and_then(compile_eql_expr)
+            .and_then(|expr| compile_eql_expr_with_geo(expr, &self.geo_context))
             .ok();
 
         let origin_expr = vector_arrow.origin.as_ref().and_then(|origin| {
@@ -1054,7 +1055,7 @@ impl LoadSchematicParams<'_, '_> {
                 .0
                 .parse_str(origin)
                 .map_err(CompileError::Parse)
-                .and_then(compile_eql_expr)
+                .and_then(|expr| compile_eql_expr_with_geo(expr, &self.geo_context))
                 .ok()
         });
 
@@ -1110,6 +1111,7 @@ impl LoadSchematicParams<'_, '_> {
                     &mut self.materials,
                     &mut self.render_layer_alloc,
                     &self.eql.0,
+                    &self.geo_context,
                     viewport,
                     label,
                 );
@@ -1254,32 +1256,35 @@ impl LoadSchematicParams<'_, '_> {
                         }
                     })
                     .ok()?;
-                let mut component_vec = eql.to_graph_components();
-                component_vec.sort();
+                let graph_label = graph_label(graph);
+                let uses_sql = eql.frame_conversion_name().is_some();
+
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
-                for (j, (component, i)) in component_vec.iter().enumerate() {
-                    let line_color = graph
-                        .colors
-                        .get(j)
-                        .copied()
-                        .map(EColor::into_color32)
-                        .unwrap_or_else(|| colors::get_color_by_index_all(j));
-                    if let Some(elements) = components_tree.get_mut(component) {
-                        elements[*i] = (true, line_color);
-                    } else {
-                        let Some(schema) = self.schema_reg.0.get(&component.id) else {
-                            continue;
-                        };
-                        let len: usize = schema.shape().iter().copied().product();
-                        let mut elements: Vec<(bool, Color32)> =
-                            (0..len).map(|_| (false, line_color)).collect();
-                        elements[*i] = (true, line_color);
-                        components_tree.insert(component.clone(), elements);
+                if !uses_sql {
+                    let mut component_vec = eql.to_graph_components();
+                    component_vec.sort();
+                    for (j, (component, i)) in component_vec.iter().enumerate() {
+                        let line_color = graph
+                            .colors
+                            .get(j)
+                            .copied()
+                            .map(EColor::into_color32)
+                            .unwrap_or_else(|| colors::get_color_by_index_all(j));
+                        if let Some(elements) = components_tree.get_mut(component) {
+                            elements[*i] = (true, line_color);
+                        } else {
+                            let Some(schema) = self.schema_reg.0.get(&component.id) else {
+                                continue;
+                            };
+                            let len: usize = schema.shape().iter().copied().product();
+                            let mut elements: Vec<(bool, Color32)> =
+                                (0..len).map(|_| (false, line_color)).collect();
+                            elements[*i] = (true, line_color);
+                            components_tree.insert(component.clone(), elements);
+                        }
                     }
                 }
-
-                let graph_label = graph_label(graph);
 
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
@@ -1293,7 +1298,39 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
-                let graph_id = self.commands.spawn(bundle).id();
+
+                let mut entity_cmds = self.commands.spawn(bundle);
+                if uses_sql {
+                    let series_colors: Vec<_> = graph
+                        .colors
+                        .iter()
+                        .copied()
+                        .map(EColor::into_color32)
+                        .collect();
+                    let default_color = series_colors
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| colors::get_scheme().highlight);
+                    entity_cmds.insert(QueryPlotData {
+                        data: impeller2_wkt::QueryPlot {
+                            name: graph_label.clone(),
+                            query: graph.eql.clone(),
+                            refresh_interval: std::time::Duration::from_millis(500),
+                            auto_refresh: true,
+                            color: impeller2_wkt::Color::from_color32(default_color),
+                            query_type: impeller2_wkt::QueryType::EQL,
+                            plot_mode: impeller2_wkt::PlotMode::TimeSeries,
+                            x_label: None,
+                            y_label: None,
+                            node_id: Default::default(),
+                        },
+                        auto_color: series_colors.is_empty(),
+                        series_colors,
+                        last_refresh: None,
+                        ..Default::default()
+                    });
+                }
+                let graph_id = entity_cmds.id();
                 if matches!(context, PanelContext::Window(_)) {
                     self.commands.entity(graph_id).remove::<MainCamera>();
                 }
@@ -2619,5 +2656,87 @@ mod tests {
             cleared_count, baseline,
             "clearing the schematic should restore the entity count to baseline"
         );
+    }
+
+    /// ECEF converters on arrow vector/origin must bake the schematic
+    /// `coordinate` origin, not `GeoContext::default()` (lat/lon 0).
+    #[test]
+    fn vector_arrow_ecef_converters_use_schematic_origin() {
+        use crate::vector_arrow::VectorArrowState;
+        use bevy::ecs::system::SystemState;
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin};
+        use impeller2::schema::Schema;
+        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use impeller2_bevy::EntityMap;
+        use impeller2_wkt::ComponentValue;
+        use nox::Array;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin);
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let component_id = component.id;
+
+        let mut app = test_app();
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1000),
+        )));
+
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame=ECEF lat=28.5 lon=-80.6
+            vector_arrow "rocket.world_pos.ecef_to_ned()" origin="rocket.world_pos.ecef_to_ned()"
+            "#,
+        )
+        .expect("parse test schematic");
+        load_schematic(&mut app, &schematic);
+
+        let (vector_expr, origin_expr) = {
+            let mut query = app.world_mut().query::<&mut VectorArrowState>();
+            let mut state = query
+                .iter_mut(app.world_mut())
+                .next()
+                .expect("vector_arrow entity");
+            (
+                state.vector_expr.take().expect("compiled vector"),
+                state.origin_expr.take().expect("compiled origin"),
+            )
+        };
+
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![3],
+                    vec![origin_ecef.x, origin_ecef.y, origin_ecef.z],
+                )
+                .unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+
+        for (label, expr) in [("vector", &vector_expr), ("origin", &origin_expr)] {
+            let out = expr.execute(&entity_map, &values).expect(label);
+            let pos = crate::ui::gauges::component_value_to_position(&out)
+                .unwrap_or_else(|| panic!("{label}: expected a 3-vector"));
+            assert!(
+                pos.length() < 1e-6,
+                "{label}: ECEF of schematic origin must map to ~0 NED, got {pos:?}"
+            );
+        }
     }
 }

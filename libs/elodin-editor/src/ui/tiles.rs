@@ -59,7 +59,7 @@ use super::{
 };
 use crate::{
     EqlContext, GridHandle, MainCamera,
-    object_3d::{CompileError, ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr},
+    object_3d::{ELLIPSOID_RENDER_LAYER, EditableEQL},
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
@@ -1180,11 +1180,29 @@ impl Pane {
                     PointerOwner::Graph { graph: pane.id },
                 );
 
-                ui.add_widget_with::<PlotWidget>(
-                    world,
-                    "graph",
-                    (pane.id, icons.scrub, target_window),
-                );
+                let has_query = world
+                    .get::<super::query_plot::QueryPlotData>(pane.id)
+                    .is_some();
+                if has_query {
+                    ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
+                        world,
+                        "graph_sql",
+                        (
+                            super::query_plot::QueryPlotPane {
+                                entity: pane.id,
+                                rect: pane.rect,
+                                scrub_icon: Some(icons.scrub),
+                            },
+                            target_window,
+                        ),
+                    );
+                } else {
+                    ui.add_widget_with::<PlotWidget>(
+                        world,
+                        "graph",
+                        (pane.id, icons.scrub, target_window),
+                    );
+                }
 
                 egui_tiles::UiResponse::None
             }
@@ -1644,6 +1662,7 @@ impl ViewportPane {
         materials: &mut ResMut<Assets<StandardMaterial>>,
         render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
         eql_ctx: &eql::Context,
+        geo_context: &bevy_geo_frames::GeoContext,
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
@@ -1683,66 +1702,35 @@ impl ViewportPane {
         }
 
         let parent = parent_cmd.id();
+        let compile = |eql: &str, label: &str| match eql_ctx.parse_str(eql) {
+            Ok(expr) => crate::object_3d::compile_eql_expr_with_geo(expr, geo_context).ok(),
+            Err(e) => {
+                bevy::log::error!("Failed to parse viewport {label} expression '{eql}': {e}");
+                None
+            }
+        };
         let pos = viewport
             .pos
             .as_ref()
-            .map(|eql| {
-                let compiled_expr = eql_ctx
-                    .parse_str(eql)
-                    .inspect_err(|e| {
-                        bevy::log::error!(
-                            "Failed to parse viewport pos expression '{}': {}",
-                            eql,
-                            e
-                        )
-                    })
-                    .map_err(CompileError::Parse)
-                    .and_then(compile_eql_expr)
-                    .ok();
-                EditableEQL {
-                    eql: eql.to_string(),
-                    compiled_expr,
-                }
+            .map(|eql| EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: compile(eql, "pos"),
             })
             .unwrap_or_default();
         let look_at = viewport
             .look_at
             .as_ref()
-            .map(|eql| {
-                let compiled_expr = eql_ctx
-                    .parse_str(eql)
-                    .inspect_err(|e| {
-                        bevy::log::error!(
-                            "Failed to parse viewport look_at expression '{}': {}",
-                            eql,
-                            e
-                        )
-                    })
-                    .map_err(CompileError::Parse)
-                    .and_then(compile_eql_expr)
-                    .ok();
-                EditableEQL {
-                    eql: eql.to_string(),
-                    compiled_expr,
-                }
+            .map(|eql| EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: compile(eql, "look_at"),
             })
             .unwrap_or_default();
         let up = viewport
             .up
             .as_ref()
-            .map(|eql| {
-                let compiled_expr = eql_ctx
-                    .parse_str(eql)
-                    .inspect_err(|e| {
-                        bevy::log::error!("Failed to parse viewport up expression '{}': {}", eql, e)
-                    })
-                    .map_err(CompileError::Parse)
-                    .and_then(compile_eql_expr)
-                    .ok();
-                EditableEQL {
-                    eql: eql.to_string(),
-                    compiled_expr,
-                }
+            .map(|eql| EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: compile(eql, "up"),
             })
             .unwrap_or_default();
 
@@ -1882,8 +1870,11 @@ impl ViewportPane {
         }
 
         // Shared frame cube layer plus a per-viewport layer for overlay UI.
-        let frame = viewport.frame.unwrap_or_default();
-        let view_cube_layer = view_cube_render_layer(frame);
+        let cube_frame = viewport
+            .view_cube_frame
+            .or(viewport.frame)
+            .unwrap_or_default();
+        let view_cube_layer = view_cube_render_layer(cube_frame);
         let Some(ui_lease) = render_layer_alloc.alloc() else {
             return Self {
                 parent: Some(parent),
@@ -1903,7 +1894,7 @@ impl ViewportPane {
             .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         let mut view_cube_config = ViewCubeConfig::editor_mode();
-        view_cube_config.system = CoordinateSystem(frame);
+        view_cube_config.system = CoordinateSystem(cube_frame);
         info!("Setting frame to {:?}", &view_cube_config.system);
 
         let spawned = spawn_view_cube_overlay(
@@ -1912,7 +1903,7 @@ impl ViewportPane {
             meshes,
             materials,
             &view_cube_config,
-            frame,
+            cube_frame,
             camera,
             ui_lease,
         );
@@ -3024,6 +3015,7 @@ pub struct TileLayout<'w, 's> {
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
+    geo_context: Res<'w, bevy_geo_frames::GeoContext>,
     tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
@@ -3260,6 +3252,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             &mut state_mut.materials,
                             &mut state_mut.render_layer_alloc,
                             &state_mut.eql_ctx.0,
+                            &state_mut.geo_context,
                             &viewport,
                             label,
                         );
