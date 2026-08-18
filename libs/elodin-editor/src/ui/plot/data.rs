@@ -1170,6 +1170,32 @@ impl XYLine {
         }
     }
 
+    pub fn unload_gpu(&mut self) {
+        for buf in &self.x_values {
+            buf.release_gpu();
+        }
+        for buf in &self.y_values {
+            buf.release_gpu();
+        }
+        self.x_shard_alloc = None;
+        self.y_shard_alloc = None;
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&self) {
+        for buf in self.x_values.iter().chain(self.y_values.iter()) {
+            buf.mark_gpu_clean();
+        }
+    }
+
+    #[cfg(test)]
+    fn all_gpu_dirty(&self) -> bool {
+        self.x_values
+            .iter()
+            .chain(self.y_values.iter())
+            .all(|buf| buf.gpu_is_dirty())
+    }
+
     pub fn write_to_index_buffer(
         &mut self,
         index_buffer: &Buffer,
@@ -1300,6 +1326,21 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
 impl<T, const N: usize> SharedBuffer<T, N> {
     pub fn cpu(&self) -> &[T] {
         &self.cpu
+    }
+
+    fn release_gpu(&self) {
+        let _ = self.gpu.lock().take();
+        self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn gpu_is_dirty(&self) -> bool {
+        self.gpu_dirty.load(atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&self) {
+        self.gpu_dirty.store(false, atomic::Ordering::SeqCst);
     }
 }
 
@@ -2082,6 +2123,35 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             }
         }
         self.clear_raw();
+    }
+
+    pub fn unload_gpu(&mut self) {
+        for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+            chunk.data.release_gpu();
+            chunk.timestamps_float.release_gpu();
+        }
+        self.data_buffer_shard_alloc = None;
+        self.timestamp_buffer_shard_alloc = None;
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&mut self) {
+        for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+            chunk.data.mark_gpu_clean();
+            chunk.timestamps_float.mark_gpu_clean();
+        }
+    }
+
+    #[cfg(test)]
+    fn all_gpu_dirty(&self) -> bool {
+        self.tree
+            .iter()
+            .all(|(_, chunk)| chunk.data.gpu_is_dirty() && chunk.timestamps_float.gpu_is_dirty())
+    }
+
+    #[cfg(test)]
+    fn has_gpu_allocs(&self) -> bool {
+        self.data_buffer_shard_alloc.is_some() || self.timestamp_buffer_shard_alloc.is_some()
     }
 }
 
@@ -3160,6 +3230,82 @@ mod tests {
         }
         // Timestamp(i64) = 8 bytes + f32 = 4 bytes => 12 bytes per sample.
         assert_eq!(tree.raw_archive_bytes(), 1_000 * 12);
+    }
+
+    #[test]
+    fn unload_gpu_drops_allocs_and_dirties_shards() {
+        let mut tree = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        tree.insert(chunk);
+        tree.mark_gpu_clean();
+        assert!(!tree.all_gpu_dirty());
+        assert!(!tree.has_gpu_allocs());
+
+        tree.unload_gpu();
+        assert!(tree.all_gpu_dirty());
+        assert!(!tree.has_gpu_allocs());
+    }
+
+    #[test]
+    fn xy_unload_gpu_drops_allocs_and_dirties_shards() {
+        let mut xy = XYLine::default();
+        xy.push_x_value(1.0);
+        xy.push_y_value(2.0);
+        xy.mark_gpu_clean();
+        assert!(!xy.all_gpu_dirty());
+        assert!(xy.x_shard_alloc.is_none());
+        assert!(xy.y_shard_alloc.is_none());
+
+        xy.unload_gpu();
+        assert!(xy.all_gpu_dirty());
+        assert!(xy.x_shard_alloc.is_none());
+        assert!(xy.y_shard_alloc.is_none());
+    }
+
+    #[test]
+    fn shared_line_stays_loaded_while_any_pane_is_on_screen() {
+        use crate::ui::plot::gpu::{
+            LineHandle, unload_plot_gpu_not_on_screen, visible_plot_gpu_asset_ids,
+        };
+
+        let mut lines = Assets::<Line>::default();
+        let mut xy_lines = Assets::<XYLine>::default();
+        let handle = lines.add(Line::default());
+        {
+            let mut line = lines.get_mut(&handle).expect("line");
+            let chunk = Chunk::from_iter(
+                &[Timestamp(1), Timestamp(2)],
+                Timestamp(0),
+                [0.0_f32, 1.0_f32].into_iter(),
+            )
+            .expect("chunk");
+            line.data.insert(chunk);
+            line.data.mark_gpu_clean();
+        }
+
+        let a = LineHandle::Timeseries(handle.clone());
+        let b = LineHandle::Timeseries(handle.clone());
+        let cases = [
+            (true, false, false),
+            (false, true, false),
+            (true, true, false),
+            (false, false, true),
+        ];
+        for (a_on, b_on, expect_unloaded) in cases {
+            lines.get_mut(&handle).expect("line").data.mark_gpu_clean();
+            let (visible_ts, visible_xy) = visible_plot_gpu_asset_ids([(&a, a_on), (&b, b_on)]);
+            unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &visible_ts, &visible_xy);
+            let dirty = lines.get(&handle).expect("line").data.all_gpu_dirty();
+            assert_eq!(
+                dirty, expect_unloaded,
+                "a_on={a_on} b_on={b_on} expect_unloaded={expect_unloaded}"
+            );
+        }
     }
 }
 
