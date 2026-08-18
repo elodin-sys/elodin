@@ -574,6 +574,12 @@ fn add_components_from_eql(
 
     if expr.frame_conversion_name().is_some() {
         // Frame converters need SQL evaluation — attach QueryPlotData and clear SeriesStore lines.
+        // `sync_graphs` skips QueryPlotData graphs, so it can never reclaim these
+        // entities: dropping them from `enabled_lines` alone leaves them rendering
+        // their stale timeseries on the graph's render layer.
+        for (entity, _) in graph_state.enabled_lines.values() {
+            commands.entity(*entity).despawn();
+        }
         graph_state.components.clear();
         graph_state.enabled_lines.clear();
         let color = get_scheme().highlight;
@@ -693,4 +699,67 @@ fn default_component_values(path: &ComponentPath, len: usize) -> Vec<(bool, Colo
     (0..len)
         .map(|i| (false, get_color_by_index_all(path.id.0 as usize + i)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use crate::ui::plot::GraphBundle;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::World;
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use std::sync::Arc;
+
+    /// Converting a graph to a SQL query plot must despawn the timeseries lines
+    /// it used to draw. `sync_graphs` skips `QueryPlotData` graphs, so nothing
+    /// else can reclaim them and they keep rendering over the query plot.
+    #[test]
+    fn frame_conversion_despawns_previous_graph_lines() {
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let eql_context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+        let mut world = World::new();
+        let mut render_layer_alloc = RenderLayerAllocator::default();
+        let mut graph_state = GraphBundle::try_new(
+            &mut render_layer_alloc,
+            BTreeMap::new(),
+            "graph".to_string(),
+        )
+        .expect("a free render layer")
+        .graph_state;
+        let line = world.spawn_empty().id();
+        graph_state.enabled_lines.insert(
+            (ComponentPath::from_name("rocket.world_pos"), 0),
+            (line, Color32::RED),
+        );
+        let graph_id = world.spawn_empty().id();
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        let converted = add_components_from_eql(
+            graph_id,
+            &mut graph_state,
+            &ComponentMetadataRegistry::default(),
+            &ComponentSchemaRegistry::default(),
+            &eql_context,
+            &mut commands,
+            "rocket.world_pos.ecef_to_ned()",
+        )
+        .expect("frame conversion must be accepted");
+        system_state.apply(&mut world);
+
+        assert!(converted, "expected a conversion to a query plot");
+        assert!(graph_state.enabled_lines.is_empty());
+        assert!(
+            world.get_entity(line).is_err(),
+            "the stale timeseries line must be despawned"
+        );
+        assert!(world.entity(graph_id).contains::<QueryPlotData>());
+    }
 }
