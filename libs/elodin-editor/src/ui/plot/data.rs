@@ -830,22 +830,27 @@ fn collect_object_3d_mesh_component_ids(
     eql_ctx: &EqlContext,
     out: &mut HashSet<ComponentId>,
 ) {
-    let impeller2_wkt::Object3DMesh::Ellipsoid {
-        scale,
-        error_covariance_cholesky,
-        error_covariance,
-        ..
-    } = mesh
-    else {
-        return;
-    };
-
-    if let Some(cholesky) = error_covariance_cholesky {
-        collect_eql_component_ids(cholesky, eql_ctx, out);
-    } else if let Some(covariance) = error_covariance {
-        collect_eql_component_ids(covariance, eql_ctx, out);
-    } else {
-        collect_eql_component_ids(scale, eql_ctx, out);
+    match mesh {
+        impeller2_wkt::Object3DMesh::Glb { animations, .. } => {
+            for anim in animations {
+                collect_eql_component_ids(&anim.eql_expr, eql_ctx, out);
+            }
+        }
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky,
+            error_covariance,
+            ..
+        } => {
+            if let Some(cholesky) = error_covariance_cholesky {
+                collect_eql_component_ids(cholesky, eql_ctx, out);
+            } else if let Some(covariance) = error_covariance {
+                collect_eql_component_ids(covariance, eql_ctx, out);
+            } else {
+                collect_eql_component_ids(scale, eql_ctx, out);
+            }
+        }
+        impeller2_wkt::Object3DMesh::Mesh { .. } => {}
     }
 }
 
@@ -2586,6 +2591,62 @@ mod tests {
         ids.clear();
         collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
         assert_eq!(ids, [ComponentId::new("shape.scale")].into_iter().collect());
+    }
+
+    #[test]
+    fn glb_joint_animation_eql_components_are_allowlisted() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+        use impeller2_wkt::{JointAnimation, Object3DMesh};
+
+        let components = [
+            "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
+            "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+        ]
+        .map(|name| {
+            Arc::new(eql::Component::new(
+                name.to_string(),
+                ComponentId::new(name),
+                Schema::new(PrimType::F64, vec![4_u64]).expect("valid schema"),
+            ))
+        });
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            components,
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mesh = Object3DMesh::Glb {
+            path: "models/fins.glb".into(),
+            scale: 1.0,
+            translate: (0.0, 0.0, 0.0),
+            rotate: (0.0, 0.0, 0.0),
+            animations: vec![
+                JointAnimation {
+                    joint_name: "Root.Fin_3".into(),
+                    eql_expr:
+                        "(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+                            .into(),
+                },
+                JointAnimation {
+                    joint_name: "FinGhost_0".into(),
+                    eql_expr: "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)".into(),
+                },
+            ],
+            emissivity: 0.0,
+            glow: 0.0,
+            glow_color: None,
+        };
+
+        let mut ids = HashSet::new();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert!(
+            ids.contains(&ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")),
+            "missing motor position, ids={ids:?}"
+        );
+        assert!(
+            ids.contains(&ComponentId::new("CONTROLMESSAGE.FIN_DEFLECTION_DEG")),
+            "missing ghost deflection, ids={ids:?}"
+        );
     }
 
     #[test]
