@@ -1198,6 +1198,8 @@ object_3d cylinder.world_pos {
 }
 ```
 
+A `plane` is a horizontal ground rectangle in the object's frame (XY, normal +Z / up). Identity attitude `(0,0,0,1, …)` therefore stays a floor after the frame→Bevy basis change.
+
 ### Ellipsoids with Dynamic Scaling
 
 Create ellipsoids that can dynamically change size based on component values:
