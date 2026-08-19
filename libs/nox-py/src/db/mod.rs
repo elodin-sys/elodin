@@ -13,7 +13,6 @@
 //! Python-facing calls communicate over bounded std channels and release the
 //! GIL while blocking.
 
-use convert_case::Casing;
 use impeller2::types::PrimType;
 use pyo3::prelude::*;
 
@@ -88,7 +87,7 @@ pub(crate) fn format_prim_type(prim_type: PrimType) -> String {
 /// exact conversion the server uses, so it can never drift.
 #[pyfunction]
 fn sql_table_name(component_name: &str) -> String {
-    elodin_db::sanitize_sql_table_name(&component_name.to_case(convert_case::Case::Snake))
+    elodin_db::sql_table_name(component_name)
 }
 
 pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {

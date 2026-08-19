@@ -1,11 +1,12 @@
 //! GPU rendering for plot data
 #![allow(dead_code)] // Shader struct fields appear unused to Rust but are used by GPU
 
-use bevy::asset::{AssetApp, Assets, uuid_handle};
+use bevy::asset::{AssetApp, AssetId, Assets, Handle, uuid_handle};
 use bevy::color::ColorToComponents;
 use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
 use bevy::ecs::bundle::Bundle;
 use bevy::ecs::entity::Entity;
+use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::math::{FloatOrd, Vec4};
@@ -25,7 +26,7 @@ use bevy::shader::Shader;
 use bevy::sprite_render::{Mesh2dPipeline, SetMesh2dViewBindGroup, init_mesh_2d_pipeline};
 use bevy::{
     app::Plugin,
-    asset::{Handle, load_internal_asset},
+    asset::load_internal_asset,
     core_pipeline::core_2d::Transparent2d,
     ecs::{
         component::Component,
@@ -45,9 +46,11 @@ use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEnti
 use binding_types::storage_buffer_read_only_sized;
 use impeller2::types::Timestamp;
 use impeller2_wkt::GraphType;
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
+use crate::ui::ViewportRect;
 use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
 
 use super::BufferShardAlloc;
@@ -554,6 +557,7 @@ type DrawLine2d = (
 type LineQueryMut = (
     Entity,
     &'static LineHandle,
+    Option<&'static ChildOf>,
     &'static LineConfig,
     &'static mut LineUniform,
     &'static mut LineVisibleRange,
@@ -564,6 +568,7 @@ type LineQueryMut = (
 
 type ExtractLinesParams = (
     Query<'static, 'static, LineQueryMut>,
+    Query<'static, 'static, &'static ViewportRect>,
     ResMut<'static, Assets<Line>>,
     ResMut<'static, Assets<XYLine>>,
     Res<'static, crate::SelectedTimeRange>,
@@ -585,6 +590,80 @@ impl bevy::prelude::FromWorld for ExtractLinesState {
     }
 }
 
+fn line_gpu_pane_on_screen(
+    child_of: Option<&ChildOf>,
+    viewport_rects: &Query<&ViewportRect>,
+) -> bool {
+    let Some(child) = child_of else {
+        return true;
+    };
+    viewport_rects
+        .get(child.parent())
+        .ok()
+        .and_then(|rect| rect.0)
+        .is_some()
+}
+
+pub(crate) fn visible_plot_gpu_asset_ids<'a>(
+    entries: impl IntoIterator<Item = (&'a LineHandle, bool)>,
+) -> (HashSet<AssetId<Line>>, HashSet<AssetId<XYLine>>) {
+    let mut timeseries = HashSet::new();
+    let mut xy = HashSet::new();
+    for (handle, on_screen) in entries {
+        if !on_screen {
+            continue;
+        }
+        match handle {
+            LineHandle::Timeseries(h) => {
+                timeseries.insert(h.id());
+            }
+            LineHandle::XY(h) => {
+                xy.insert(h.id());
+            }
+        }
+    }
+    (timeseries, xy)
+}
+
+pub(crate) fn unload_plot_gpu_not_on_screen(
+    line_assets: &mut Assets<Line>,
+    xy_assets: &mut Assets<XYLine>,
+    visible_ts: &HashSet<AssetId<Line>>,
+    visible_xy: &HashSet<AssetId<XYLine>>,
+) {
+    let ts_unload: Vec<AssetId<Line>> = line_assets
+        .iter()
+        .filter_map(|(id, line)| {
+            if visible_ts.contains(&id) || !line.data.gpu_resident() {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+    for id in ts_unload {
+        if let Some(mut line) = line_assets.get_mut(id) {
+            line.data.unload_gpu();
+        }
+    }
+
+    let xy_unload: Vec<AssetId<XYLine>> = xy_assets
+        .iter()
+        .filter_map(|(id, xy_line)| {
+            if visible_xy.contains(&id) || !xy_line.gpu_resident() {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+    for id in xy_unload {
+        if let Some(mut xy_line) = xy_assets.get_mut(id) {
+            xy_line.unload_gpu();
+        }
+    }
+}
+
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
@@ -594,14 +673,42 @@ fn extract_lines(
 ) {
     main_world.resource_scope(
         |world, mut cached_state: bevy::prelude::Mut<ExtractLinesState>| {
-            let (mut lines, mut line_assets, mut xy_lines, selected_range, mut main_commands) =
-                cached_state.state.params_mut(world);
+            let (
+                mut lines,
+                viewport_rects,
+                mut line_assets,
+                mut xy_lines,
+                selected_range,
+                mut main_commands,
+            ) = cached_state.state.params_mut(world);
             let selected = selected_range.0.clone();
             let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
             let short_window = crate::is_short_accuracy_window(&selected);
+
+            let mut on_screen_entries = Vec::new();
+            for (entity, line_handle, child_of, _, _, _, _, _, mut cache) in lines.iter_mut() {
+                let on_screen = line_gpu_pane_on_screen(child_of, &viewport_rects);
+                if !on_screen && let Some(ref mut cache) = cache {
+                    cache.0 = None;
+                }
+                on_screen_entries.push((entity, line_handle.clone(), on_screen));
+            }
+            let (visible_ts, visible_xy) = visible_plot_gpu_asset_ids(
+                on_screen_entries
+                    .iter()
+                    .map(|(_, handle, on_screen)| (handle, *on_screen)),
+            );
+            unload_plot_gpu_not_on_screen(
+                &mut line_assets,
+                &mut xy_lines,
+                &visible_ts,
+                &visible_xy,
+            );
+
             for (
                 entity,
                 line_handle,
+                child_of,
                 config,
                 uniform,
                 line_visible_range,
@@ -610,6 +717,9 @@ fn extract_lines(
                 mut cache,
             ) in lines.iter_mut()
             {
+                if !line_gpu_pane_on_screen(child_of, &viewport_rects) {
+                    continue;
+                }
                 let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
                     continue;
                 };
