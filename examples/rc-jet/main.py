@@ -133,7 +133,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#false show_frustums=#true active=#true far=100000
                 vsplit share=0.4 {
                     viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#false
-                    viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#false
+                    viewport name=FPVViewport pos="bdx.world_pos.translate(1,0,0.1)" look_at="bdx.world_pos.translate(2,0,0.1)" up="bdx.world_pos.direction(0,0,1)" show_grid=#false
                     sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
                 }
             }
