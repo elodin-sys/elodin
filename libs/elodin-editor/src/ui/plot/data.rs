@@ -1175,7 +1175,14 @@ impl XYLine {
         }
     }
 
+    pub fn gpu_resident(&self) -> bool {
+        self.x_shard_alloc.is_some() || self.y_shard_alloc.is_some()
+    }
+
     pub fn unload_gpu(&mut self) {
+        if !self.gpu_resident() {
+            return;
+        }
         for buf in &self.x_values {
             buf.release_gpu();
         }
@@ -2130,7 +2137,14 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.clear_raw();
     }
 
+    pub fn gpu_resident(&self) -> bool {
+        self.data_buffer_shard_alloc.is_some() || self.timestamp_buffer_shard_alloc.is_some()
+    }
+
     pub fn unload_gpu(&mut self) {
+        if !self.gpu_resident() {
+            return;
+        }
         for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
             chunk.data.release_gpu();
             chunk.timestamps_float.release_gpu();
@@ -2152,11 +2166,6 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.tree
             .iter()
             .all(|(_, chunk)| chunk.data.gpu_is_dirty() && chunk.timestamps_float.gpu_is_dirty())
-    }
-
-    #[cfg(test)]
-    fn has_gpu_allocs(&self) -> bool {
-        self.data_buffer_shard_alloc.is_some() || self.timestamp_buffer_shard_alloc.is_some()
     }
 }
 
@@ -3294,7 +3303,7 @@ mod tests {
     }
 
     #[test]
-    fn unload_gpu_drops_allocs_and_dirties_shards() {
+    fn unload_gpu_is_noop_when_already_cleared() {
         let mut tree = LineTree::<f32>::default();
         let chunk = Chunk::from_iter(
             &[Timestamp(10), Timestamp(20)],
@@ -3305,27 +3314,25 @@ mod tests {
         tree.insert(chunk);
         tree.mark_gpu_clean();
         assert!(!tree.all_gpu_dirty());
-        assert!(!tree.has_gpu_allocs());
+        assert!(!tree.gpu_resident());
 
         tree.unload_gpu();
-        assert!(tree.all_gpu_dirty());
-        assert!(!tree.has_gpu_allocs());
+        assert!(!tree.all_gpu_dirty());
+        assert!(!tree.gpu_resident());
     }
 
     #[test]
-    fn xy_unload_gpu_drops_allocs_and_dirties_shards() {
+    fn xy_unload_gpu_is_noop_when_already_cleared() {
         let mut xy = XYLine::default();
         xy.push_x_value(1.0);
         xy.push_y_value(2.0);
         xy.mark_gpu_clean();
         assert!(!xy.all_gpu_dirty());
-        assert!(xy.x_shard_alloc.is_none());
-        assert!(xy.y_shard_alloc.is_none());
+        assert!(!xy.gpu_resident());
 
         xy.unload_gpu();
-        assert!(xy.all_gpu_dirty());
-        assert!(xy.x_shard_alloc.is_none());
-        assert!(xy.y_shard_alloc.is_none());
+        assert!(!xy.all_gpu_dirty());
+        assert!(!xy.gpu_resident());
     }
 
     #[test]
@@ -3352,21 +3359,55 @@ mod tests {
         let a = LineHandle::Timeseries(handle.clone());
         let b = LineHandle::Timeseries(handle.clone());
         let cases = [
-            (true, false, false),
-            (false, true, false),
-            (true, true, false),
-            (false, false, true),
+            (true, false, true),
+            (false, true, true),
+            (true, true, true),
+            (false, false, false),
         ];
-        for (a_on, b_on, expect_unloaded) in cases {
+        for (a_on, b_on, expect_visible) in cases {
             lines.get_mut(&handle).expect("line").data.mark_gpu_clean();
             let (visible_ts, visible_xy) = visible_plot_gpu_asset_ids([(&a, a_on), (&b, b_on)]);
-            unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &visible_ts, &visible_xy);
-            let dirty = lines.get(&handle).expect("line").data.all_gpu_dirty();
             assert_eq!(
-                dirty, expect_unloaded,
-                "a_on={a_on} b_on={b_on} expect_unloaded={expect_unloaded}"
+                visible_ts.contains(&handle.id()),
+                expect_visible,
+                "a_on={a_on} b_on={b_on} expect_visible={expect_visible}"
             );
+            unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &visible_ts, &visible_xy);
+            // No shard allocs ⇒ already cleared; must not walk/lock or dirty shards.
+            assert!(!lines.get(&handle).expect("line").data.all_gpu_dirty());
+            assert!(!lines.get(&handle).expect("line").data.gpu_resident());
         }
+    }
+
+    #[test]
+    fn unload_plot_gpu_skips_already_cleared_assets() {
+        use crate::ui::plot::gpu::unload_plot_gpu_not_on_screen;
+
+        let mut lines = Assets::<Line>::default();
+        let mut xy_lines = Assets::<XYLine>::default();
+        let ts = lines.add(Line::default());
+        let xy = xy_lines.add(XYLine::default());
+        {
+            let mut line = lines.get_mut(&ts).expect("line");
+            let chunk = Chunk::from_iter(
+                &[Timestamp(1), Timestamp(2)],
+                Timestamp(0),
+                [0.0_f32, 1.0_f32].into_iter(),
+            )
+            .expect("chunk");
+            line.data.insert(chunk);
+            line.data.mark_gpu_clean();
+        }
+        {
+            let mut xy_line = xy_lines.get_mut(&xy).expect("xy");
+            xy_line.push_x_value(1.0);
+            xy_line.push_y_value(2.0);
+            xy_line.mark_gpu_clean();
+        }
+
+        unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &HashSet::new(), &HashSet::new());
+        assert!(!lines.get(&ts).expect("line").data.all_gpu_dirty());
+        assert!(!xy_lines.get(&xy).expect("xy").all_gpu_dirty());
     }
 }
 

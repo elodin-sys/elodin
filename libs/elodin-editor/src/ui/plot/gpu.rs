@@ -631,13 +631,34 @@ pub(crate) fn unload_plot_gpu_not_on_screen(
     visible_ts: &HashSet<AssetId<Line>>,
     visible_xy: &HashSet<AssetId<XYLine>>,
 ) {
-    for (id, line) in line_assets.iter_mut() {
-        if !visible_ts.contains(&id) {
+    let ts_unload: Vec<AssetId<Line>> = line_assets
+        .iter()
+        .filter_map(|(id, line)| {
+            if visible_ts.contains(&id) || !line.data.gpu_resident() {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+    for id in ts_unload {
+        if let Some(mut line) = line_assets.get_mut(id) {
             line.data.unload_gpu();
         }
     }
-    for (id, xy_line) in xy_assets.iter_mut() {
-        if !visible_xy.contains(&id) {
+
+    let xy_unload: Vec<AssetId<XYLine>> = xy_assets
+        .iter()
+        .filter_map(|(id, xy_line)| {
+            if visible_xy.contains(&id) || !xy_line.gpu_resident() {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+    for id in xy_unload {
+        if let Some(mut xy_line) = xy_assets.get_mut(id) {
             xy_line.unload_gpu();
         }
     }
