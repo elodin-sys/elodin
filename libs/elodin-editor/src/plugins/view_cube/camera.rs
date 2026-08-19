@@ -10,7 +10,7 @@ use bevy::log::warn;
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldInstance, WorldInstanceSpawner};
-use bevy_editor_cam::controller::component::{EditorCam, OrbitConstraint};
+use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use impeller2_bevy::EntityMap;
@@ -23,7 +23,7 @@ use super::components::{
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
@@ -648,30 +648,15 @@ pub fn handle_view_cube_editor(
             let base_up_world = parent_rotation * base_up_local;
             let base_right_world = parent_rotation * base_right_local;
 
-            // Left/Right is a turntable azimuth: yaw around the orbit's fixed up
-            // (world vertical) like a drag-orbit, so the horizon stays level.
-            // Falls back to the camera up only when the orbit is unconstrained.
-            let orbit_target = view_cube_orbit_target(
-                entity,
-                &lookup.viewports,
-                lookup.entity_map.as_ref(),
-                &lookup.values,
-                &lookup.geo_context,
-                &mut lookup.orbit_cache,
-            );
-            let orbit_up_world = sphere_radial_up(&lookup.geo_context, orbit_target).unwrap_or(
-                match editor_cam.orbit_constraint {
-                    OrbitConstraint::Fixed { up, .. } => up.as_vec3(),
-                    OrbitConstraint::Free => base_up_world,
-                },
-            );
-
+            // Screen-space pairs: Left/Right yaw around camera up, Up/Down
+            // pitch around camera right. World-up yaw collapsed onto pitch
+            // after a side-face snap (NED E/W): camera right became Bevy Y.
             let (step_axis_world, signed_angle, _) = arrow_camera_axis_angle(
                 *arrow,
                 angle,
                 base_right_world,
                 base_forward_world,
-                orbit_up_world,
+                base_up_world,
             );
             let step_rotation_world = Quat::from_axis_angle(*step_axis_world, signed_angle);
 
@@ -684,12 +669,19 @@ pub fn handle_view_cube_editor(
             let new_world_rotation = step_rotation_world * (parent_rotation * base_rotation);
             let new_rotation_local = parent_inv * new_world_rotation;
 
-            let focus_world = orbit_target
-                .map(|target| (target - origin_world).as_vec3())
-                .unwrap_or_else(|| {
-                    camera_pose.translation
-                        + base_forward_world * (editor_cam.last_anchor_depth.abs() as f32)
-                });
+            let focus_world = view_cube_orbit_target(
+                entity,
+                &lookup.viewports,
+                lookup.entity_map.as_ref(),
+                &lookup.values,
+                &lookup.geo_context,
+                &mut lookup.orbit_cache,
+            )
+            .map(|target| (target - origin_world).as_vec3())
+            .unwrap_or_else(|| {
+                camera_pose.translation
+                    + base_forward_world * (editor_cam.last_anchor_depth.abs() as f32)
+            });
 
             // Yaw/pitch orbit the focus object so it stays framed; roll is about
             // the view axis and must spin in place (pivot on the camera itself),
@@ -841,34 +833,23 @@ pub(super) fn camera_dir_in_cube_local(
     cube_world_rotation.inverse() * (camera_world_rotation * Vec3::Z)
 }
 
-fn sphere_radial_up(geo: &GeoContext, look_at_bevy: Option<DVec3>) -> Option<Vec3> {
-    if geo.present != Present::Sphere {
-        return None;
-    }
-    let up = look_at_bevy?.normalize();
-    if !up.is_finite() || up.length_squared() <= 1.0e-12 {
-        return None;
-    }
-    Some(up.as_vec3())
-}
-
 fn arrow_camera_axis_angle(
     arrow: RotationArrow,
     angle: f32,
     camera_right_world: Vec3,
     camera_forward_world: Vec3,
-    orbit_up_world: Vec3,
+    camera_up_world: Vec3,
 ) -> (Dir3, f32, &'static str) {
     match arrow {
         RotationArrow::Left => (
-            Dir3::new(orbit_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
+            Dir3::new(camera_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
             angle,
-            "orbit_up",
+            "camera_up",
         ),
         RotationArrow::Right => (
-            Dir3::new(orbit_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
+            Dir3::new(camera_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
             -angle,
-            "orbit_up",
+            "camera_up",
         ),
         RotationArrow::Up => (
             Dir3::new(camera_right_world).unwrap_or(Dir3::new_unchecked(Vec3::X)),
@@ -1169,6 +1150,7 @@ mod tests {
     use crate::plugins::render_layer_alloc::view_cube_render_layers;
     use bevy::asset::AssetPlugin;
     use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldSerializationPlugin};
+    use bevy_geo_frames::Present;
 
     #[test]
     fn angle_to_target_rotation_default_is_zero() {
@@ -1318,45 +1300,74 @@ mod tests {
         let angle = 0.25;
         let right = Vec3::Y;
         let forward = Vec3::X;
-        // Distinct from the camera up so we can assert yaw uses the orbit axis.
-        let orbit_up = Vec3::Z;
+        let camera_up = Vec3::Z;
 
-        // Left/Right yaw around the orbit (world) up, not the camera up.
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Left, angle, right, forward, orbit_up);
-        assert_eq!(*axis, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Left, angle, right, forward, camera_up);
+        assert_eq!(*axis, camera_up);
         assert_eq!(signed_angle, angle);
-        assert_eq!(source, "orbit_up");
+        assert_eq!(source, "camera_up");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Right, angle, right, forward, orbit_up);
-        assert_eq!(*axis, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Right, angle, right, forward, camera_up);
+        assert_eq!(*axis, camera_up);
         assert_eq!(signed_angle, -angle);
-        assert_eq!(source, "orbit_up");
+        assert_eq!(source, "camera_up");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Up, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Up, angle, right, forward, camera_up);
         assert_eq!(*axis, right);
         assert_eq!(signed_angle, angle);
         assert_eq!(source, "camera_right");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Down, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Down, angle, right, forward, camera_up);
         assert_eq!(*axis, right);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_right");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::RollLeft, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::RollLeft, angle, right, forward, camera_up);
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, angle);
         assert_eq!(source, "camera_forward");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::RollRight, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::RollRight, angle, right, forward, camera_up);
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_forward");
+    }
+
+    #[test]
+    fn side_face_snap_keeps_yaw_orthogonal_to_pitch() {
+        let geo = mojave_geo(Present::Plane);
+        let config = ViewCubeConfig::default();
+        let face = crate::plugins::view_cube::FaceDirection::Up;
+        let look = face_target_camera_dir_world(face, GeoFrame::NED, &geo, &config);
+        let facing = Dir3::new(-look).expect("ned +Y facing");
+        let up = choose_face_upright_up(face, Quat::IDENTITY, facing).expect("up");
+        let rotation = Transform::default().looking_to(*facing, *up).rotation;
+        let right = rotation * Vec3::X;
+        let camera_up = rotation * Vec3::Y;
+        let forward = rotation * Vec3::NEG_Z;
+        assert!(
+            Vec3::Y.dot(right).abs() > 0.9,
+            "NED E-face snap banks camera right onto world up, got {}",
+            Vec3::Y.dot(right)
+        );
+
+        let (yaw, _, yaw_src) =
+            arrow_camera_axis_angle(RotationArrow::Left, 0.2, right, forward, camera_up);
+        let (pitch, _, pitch_src) =
+            arrow_camera_axis_angle(RotationArrow::Up, 0.2, right, forward, camera_up);
+        assert_eq!(yaw_src, "camera_up");
+        assert_eq!(pitch_src, "camera_right");
+        assert!(
+            yaw.dot(*pitch).abs() < 0.15,
+            "Left/Right must stay off the Up/Down axis after an E-face snap, got {}",
+            yaw.dot(*pitch)
+        );
     }
 
     #[test]
@@ -1428,16 +1439,6 @@ mod tests {
             (as_ecef - as_enu).length() > 1.0e3,
             "ECEF vs ENU interpretation of the same metres must diverge at Mojave"
         );
-    }
-
-    #[test]
-    fn sphere_radial_up_is_look_at_direction() {
-        let geo = mojave_geo(Present::Sphere);
-        let look_at = DVec3::new(3.0, 0.0, 4.0);
-        let up = sphere_radial_up(&geo, Some(look_at)).expect("sphere up");
-        let expected = look_at.normalize().as_vec3();
-        assert!((up - expected).length() < 1.0e-5);
-        assert!(sphere_radial_up(&mojave_geo(Present::Plane), Some(look_at)).is_none());
     }
 
     #[test]
