@@ -23,8 +23,6 @@ use super::components::{
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
-use crate::WorldPosExt;
-use crate::object_3d::ComponentArrayExt;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present};
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
@@ -422,6 +420,7 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     overlay_cameras: Query<(&ViewCubeLink, &ViewCubeFrameRef), With<ViewCubeCamera>>,
+    cubes: Query<(&ViewCubeFrame, &GlobalTransform), With<ViewCubeRoot>>,
     mut camera_query: ViewCubeCameraQuery,
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
@@ -437,6 +436,11 @@ pub fn handle_view_cube_editor(
         let Ok((entity, mut transform, parent, mut editor_cam)) = camera_query.get_mut(cam) else {
             continue;
         };
+        let cube_world_rotation = cubes
+            .iter()
+            .find(|(frame, _)| frame.0 == cube_frame)
+            .map(|(_, global)| global.rotation())
+            .unwrap_or(Quat::IDENTITY);
 
         let origin_world = lookup.origin();
         let camera_pose = lookup.current_camera_pose(transform.as_ref(), parent, origin_world);
@@ -461,12 +465,7 @@ pub fn handle_view_cube_editor(
 
         let global_rotation = camera_pose.rotation;
         let parent_rotation = camera_pose.parent_rotation;
-        let cube_rotation = if config.sync_with_camera {
-            global_rotation.conjugate() * config.axis_correction
-        } else {
-            Quat::IDENTITY
-        };
-        let camera_dir_cube = cube_rotation.inverse() * Vec3::Z;
+        let camera_dir_cube = camera_dir_in_cube_local(cube_world_rotation, global_rotation);
 
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
             let clicked_face_dot = direction.to_look_direction().dot(camera_dir_cube);
@@ -835,6 +834,13 @@ fn direction_target_camera_dir_world(
     frame_dir_to_bevy(frame, local, geo)
 }
 
+pub(super) fn camera_dir_in_cube_local(
+    cube_world_rotation: Quat,
+    camera_world_rotation: Quat,
+) -> Vec3 {
+    cube_world_rotation.inverse() * (camera_world_rotation * Vec3::Z)
+}
+
 fn sphere_radial_up(geo: &GeoContext, look_at_bevy: Option<DVec3>) -> Option<Vec3> {
     if geo.present != Present::Sphere {
         return None;
@@ -1143,13 +1149,14 @@ fn view_cube_orbit_target(
 ) -> Option<DVec3> {
     let viewport = viewports.get(camera).ok()?;
     let frame = viewport.frame.unwrap_or_default();
+    // Same 3-vector / WorldPos rule as viewport follow (`POS_ECEF` is 3 elems).
     let resolved = viewport
         .look_at
         .compiled_expr
         .as_ref()
         .and_then(|compiled_expr| compiled_expr.execute(entity_map, values).ok())
-        .and_then(|val| val.as_world_pos())
-        .map(|world_pos| GeoPosition(frame, world_pos.pos()).to_bevy(geo_context));
+        .and_then(|val| crate::ui::gauges::component_value_to_position(&val))
+        .map(|pos| GeoPosition(frame, pos).to_bevy(geo_context));
     match resolved {
         Some(target) => Some(orbit_cache.remember(camera, target)),
         None => orbit_cache.last(camera),
