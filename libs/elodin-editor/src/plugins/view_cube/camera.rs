@@ -482,7 +482,7 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let chosen_up = choose_face_upright_up(*direction, parent_rotation, facing_local)
+                let chosen_up = choose_face_upright_up(parent_rotation, facing_local)
                     .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
                     .unwrap_or_else(|| {
                         choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
@@ -578,7 +578,7 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let chosen_up = choose_face_upright_up(*target_face, parent_rotation, facing_local)
+                let chosen_up = choose_face_upright_up(parent_rotation, facing_local)
                     .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
                     .unwrap_or_else(|| {
                         choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
@@ -897,23 +897,12 @@ fn choose_continuous_up(transform: &Transform, facing_local: Dir3) -> Option<Dir
     None
 }
 
-fn choose_face_upright_up(
-    target_face: super::components::FaceDirection,
-    parent_rotation: Quat,
-    facing_local: Dir3,
-) -> Option<Dir3> {
+fn choose_face_upright_up(parent_rotation: Quat, facing_local: Dir3) -> Option<Dir3> {
     let parent_inverse = parent_rotation.inverse();
-    let world_candidates: &[Vec3] = match target_face {
-        super::components::FaceDirection::East
-        | super::components::FaceDirection::West
-        | super::components::FaceDirection::North
-        | super::components::FaceDirection::South => &[Vec3::Y, Vec3::Z, Vec3::X],
-        super::components::FaceDirection::Up => &[Vec3::Z, Vec3::X, Vec3::Y],
-        super::components::FaceDirection::Down => &[Vec3::NEG_Z, Vec3::X, Vec3::Y],
-    };
-
+    // Local vertical first. FaceDirection names are Bevy-era (Up = cube +Y)
+    // and no longer match geo labels (ENU N / NED E sit on +Y).
     let facing = *facing_local;
-    for world_up in world_candidates.iter().copied() {
+    for world_up in [Vec3::Y, Vec3::Z, Vec3::X] {
         let local_up_candidate = parent_inverse * world_up;
         let projected = local_up_candidate - facing * local_up_candidate.dot(facing);
         if projected.length_squared() <= 1.0e-6 {
@@ -1221,52 +1210,47 @@ mod tests {
         let parent = Quat::IDENTITY;
         let east_facing = Dir3::new(Vec3::NEG_X).expect("unit vector");
         let west_facing = Dir3::new(Vec3::X).expect("unit vector");
-        let east_up = choose_face_upright_up(
-            crate::plugins::view_cube::FaceDirection::East,
-            parent,
-            east_facing,
-        )
-        .expect("upright up for east");
-        let west_up = choose_face_upright_up(
-            crate::plugins::view_cube::FaceDirection::West,
-            parent,
-            west_facing,
-        )
-        .expect("upright up for west");
+        let east_up = choose_face_upright_up(parent, east_facing).expect("upright up for east");
+        let west_up = choose_face_upright_up(parent, west_facing).expect("upright up for west");
         assert!(east_up.dot(Vec3::Y) > 0.99, "east up should be +Y");
         assert!(west_up.dot(Vec3::Y) > 0.99, "west up should be +Y");
     }
 
     #[test]
-    fn choose_face_upright_up_prefers_backward_on_down_face() {
+    fn choose_face_upright_up_uses_north_when_looking_along_vertical() {
         let parent = Quat::IDENTITY;
-        let down_facing = Dir3::new(Vec3::Y).expect("unit vector");
-        let up = choose_face_upright_up(
-            crate::plugins::view_cube::FaceDirection::Down,
-            parent,
-            down_facing,
-        )
-        .expect("upright up for down");
+        let looking_up = choose_face_upright_up(parent, Dir3::new(Vec3::Y).expect("unit vector"))
+            .expect("upright when looking up");
+        let looking_down =
+            choose_face_upright_up(parent, Dir3::new(Vec3::NEG_Y).expect("unit vector"))
+                .expect("upright when looking down");
         assert!(
-            up.dot(Vec3::NEG_Z) > 0.99,
-            "down-face up should align with -Z, got {:?}",
-            *up
+            looking_up.dot(Vec3::Z) > 0.99,
+            "looking up should use +Z, got {:?}",
+            *looking_up
+        );
+        assert!(
+            looking_down.dot(Vec3::Z) > 0.99,
+            "looking down should use +Z, got {:?}",
+            *looking_down
         );
     }
 
     #[test]
-    fn choose_face_upright_up_prefers_forward_on_up_face() {
-        let parent = Quat::IDENTITY;
-        let up_facing = Dir3::new(Vec3::NEG_Y).expect("unit vector");
-        let up = choose_face_upright_up(
+    fn choose_face_upright_up_keeps_world_y_on_ned_east_snap() {
+        let geo = mojave_geo(Present::Plane);
+        let config = ViewCubeConfig::default();
+        let look = face_target_camera_dir_world(
             crate::plugins::view_cube::FaceDirection::Up,
-            parent,
-            up_facing,
-        )
-        .expect("upright up for up-face");
+            GeoFrame::NED,
+            &geo,
+            &config,
+        );
+        let facing = Dir3::new(-look).expect("ned +Y facing");
+        let up = choose_face_upright_up(Quat::IDENTITY, facing).expect("up");
         assert!(
-            up.dot(Vec3::Z) > 0.99,
-            "up-face up should align with +Z, got {:?}",
+            up.dot(Vec3::Y) > 0.9,
+            "NED E (cube +Y) must keep world Y up, got {:?}",
             *up
         );
     }
@@ -1346,14 +1330,18 @@ mod tests {
         let face = crate::plugins::view_cube::FaceDirection::Up;
         let look = face_target_camera_dir_world(face, GeoFrame::NED, &geo, &config);
         let facing = Dir3::new(-look).expect("ned +Y facing");
-        let up = choose_face_upright_up(face, Quat::IDENTITY, facing).expect("up");
+        let up = choose_face_upright_up(Quat::IDENTITY, facing).expect("up");
         let rotation = Transform::default().looking_to(*facing, *up).rotation;
         let right = rotation * Vec3::X;
         let camera_up = rotation * Vec3::Y;
         let forward = rotation * Vec3::NEG_Z;
         assert!(
-            Vec3::Y.dot(right).abs() > 0.9,
-            "NED E-face snap banks camera right onto world up, got {}",
+            camera_up.dot(Vec3::Y) > 0.9,
+            "NED E-face snap should keep camera up on world Y, got {camera_up:?}"
+        );
+        assert!(
+            Vec3::Y.dot(right).abs() < 0.15,
+            "NED E-face snap must not bank camera right onto world up, got {}",
             Vec3::Y.dot(right)
         );
 
