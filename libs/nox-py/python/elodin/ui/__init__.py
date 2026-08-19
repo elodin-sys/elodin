@@ -1,12 +1,22 @@
-"""Typed schematic builders that emit canonical KDL (Phase 1).
+"""Typed schematic builders that emit canonical KDL.
 
 Author schematics in Python; the editor continues to consume KDL artifacts.
-Expressions are still EQL strings — typed expressions arrive in Phase 2.
 """
 
 from __future__ import annotations
 
 from elodin.elodin import ui as _native
+
+from .expr import (
+    ComponentHandle,
+    Expr,
+    ExprError,
+    as_eql_strings,
+    pose,
+    sym_mat3,
+    tuple_expr,
+)
+from .schema import Schema
 
 Schematic = _native.Schematic
 Panel = _native.Panel
@@ -25,6 +35,7 @@ schematic = _native.schematic
 from_kdl = _native.from_kdl
 write = _native.write
 push = _native.push
+set_build_error = _native.set_build_error
 
 coordinate = _native.coordinate
 theme = _native.theme
@@ -66,10 +77,19 @@ __all__ = [
     "Coordinate",
     "Theme",
     "Timeline",
+    "Expr",
+    "ExprError",
+    "ComponentHandle",
+    "Schema",
+    "pose",
+    "sym_mat3",
+    "tuple_expr",
+    "as_eql_strings",
     "schematic",
     "from_kdl",
     "write",
     "push",
+    "set_build_error",
     "coordinate",
     "theme",
     "timeline",

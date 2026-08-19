@@ -3,6 +3,8 @@ use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
+#[cfg(not(target_os = "windows"))]
+mod ui;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -33,6 +35,9 @@ enum Commands {
     /// Start the headless sensor camera render server (managed by s10)
     #[cfg(not(target_os = "windows"))]
     RenderServer(editor::RenderServerArgs),
+    /// Author / push schematics from Python (`elodin.ui`)
+    #[cfg(not(target_os = "windows"))]
+    Ui(ui::Args),
 }
 
 impl Cli {
@@ -104,6 +109,8 @@ impl Cli {
             Some(Commands::MonteCarlo(args)) => self.clone().monte_carlo(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
+            #[cfg(not(target_os = "windows"))]
+            Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }
