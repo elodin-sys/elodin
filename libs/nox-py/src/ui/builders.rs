@@ -120,6 +120,29 @@ fn parse_frame(frame: &str) -> PyResult<GeoFrame> {
         .map_err(|_| PyValueError::new_err(format!("unknown coordinate frame {frame:?}")))
 }
 
+/// Accept `str`, an object with `__str__` (e.g. `ui.Expr`), or a list of those.
+pub(crate) fn extract_eql(obj: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(s);
+    }
+    if let Ok(list) = obj.downcast::<pyo3::types::PyList>() {
+        let mut parts = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            parts.push(extract_eql(&item)?);
+        }
+        return Ok(parts.join(", "));
+    }
+    Ok(obj.str()?.to_string())
+}
+
+fn extract_optional_eql(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<String>> {
+    match obj {
+        None => Ok(None),
+        Some(o) if o.is_none() => Ok(None),
+        Some(o) => Ok(Some(extract_eql(o)?)),
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (frame, lat=None, lon=None, alt=None, body=None))]
 fn coordinate(
@@ -255,7 +278,7 @@ fn vsplit(
 ))]
 #[allow(clippy::too_many_arguments)]
 fn graph(
-    eql: &str,
+    eql: &Bound<'_, PyAny>,
     name: Option<String>,
     graph_type: Option<&str>,
     locked: bool,
@@ -265,6 +288,7 @@ fn graph(
     colors: Option<Vec<String>>,
     share: Option<f32>,
 ) -> PyResult<PyPanel> {
+    let eql = extract_eql(eql)?;
     let graph_type = match graph_type {
         None | Some("line") => GraphType::Line,
         Some("point") => GraphType::Point,
@@ -291,7 +315,7 @@ fn graph(
         .collect::<PyResult<Vec<_>>>()?;
     Ok(PyPanel {
         inner: Panel::Graph(Graph {
-            eql: eql.to_string(),
+            eql,
             name,
             graph_type,
             locked,
@@ -340,9 +364,9 @@ fn viewport(
     show_view_cube: bool,
     effects: bool,
     hdr: bool,
-    pos: Option<String>,
-    look_at: Option<String>,
-    up: Option<String>,
+    pos: Option<&Bound<'_, PyAny>>,
+    look_at: Option<&Bound<'_, PyAny>>,
+    up: Option<&Bound<'_, PyAny>>,
     frame: Option<&str>,
     share: Option<f32>,
 ) -> PyResult<PyPanel> {
@@ -361,9 +385,9 @@ fn viewport(
             effects,
             hdr,
             name,
-            pos,
-            look_at,
-            up,
+            pos: extract_optional_eql(pos)?,
+            look_at: extract_optional_eql(look_at)?,
+            up: extract_optional_eql(up)?,
             frame: frame.map(parse_frame).transpose()?,
             ..Viewport::default()
         }),
@@ -582,24 +606,25 @@ fn glb(
 
 #[pyfunction]
 #[pyo3(signature = (joint, rotation_vector))]
-fn joint(joint: &str, rotation_vector: &str) -> PyJoint {
-    PyJoint {
+fn joint(joint: &str, rotation_vector: &Bound<'_, PyAny>) -> PyResult<PyJoint> {
+    Ok(PyJoint {
         inner: JointAnimation {
             joint_name: joint.to_string(),
-            eql_expr: rotation_vector.to_string(),
+            eql_expr: extract_eql(rotation_vector)?,
         },
-    }
+    })
 }
 
 #[pyfunction]
 #[pyo3(signature = (eql, mesh, frame=None, orientation=None, animate=None))]
 fn object_3d(
-    eql: &str,
+    eql: &Bound<'_, PyAny>,
     mesh: Bound<'_, PyAny>,
     frame: Option<&str>,
     orientation: Option<&str>,
     animate: Option<Vec<Bound<'_, PyAny>>>,
 ) -> PyResult<PyObject3D> {
+    let eql = extract_eql(eql)?;
     let mut mesh = mesh.extract::<PyRef<'_, PyMesh>>()?.inner.clone();
     if let Some(anims) = animate {
         let animations = anims
@@ -645,7 +670,7 @@ fn object_3d(
     };
     Ok(PyObject3D {
         inner: Object3D {
-            eql: eql.to_string(),
+            eql,
             mesh,
             frame: frame.map(parse_frame).transpose()?,
             frame_orientation: None,
@@ -661,7 +686,7 @@ fn object_3d(
 #[pyfunction]
 #[pyo3(signature = (eql, line_width=1.0, color=None, future_color=None, perspective=true, frame=None))]
 fn line_3d(
-    eql: &str,
+    eql: &Bound<'_, PyAny>,
     line_width: f32,
     color: Option<&str>,
     future_color: Option<&str>,
@@ -670,7 +695,7 @@ fn line_3d(
 ) -> PyResult<PyLine3d> {
     Ok(PyLine3d {
         inner: Line3d {
-            eql: eql.to_string(),
+            eql: extract_eql(eql)?,
             line_width,
             color: color.map(parse_color).transpose()?,
             future_color: future_color.map(parse_color).transpose()?,
@@ -685,8 +710,8 @@ fn line_3d(
 #[pyo3(signature = (vector, origin=None, name=None, color=None, scale=None, body_frame=false, normalize=false, frame=None))]
 #[allow(clippy::too_many_arguments)]
 fn vector_arrow(
-    vector: &str,
-    origin: Option<String>,
+    vector: &Bound<'_, PyAny>,
+    origin: Option<&Bound<'_, PyAny>>,
     name: Option<String>,
     color: Option<&str>,
     scale: Option<f64>,
@@ -696,8 +721,8 @@ fn vector_arrow(
 ) -> PyResult<PyVectorArrow> {
     Ok(PyVectorArrow {
         inner: VectorArrow3d {
-            vector: vector.to_string(),
-            origin,
+            vector: extract_eql(vector)?,
+            origin: extract_optional_eql(origin)?,
             scale: scale.unwrap_or(1.0),
             name,
             color: match color {

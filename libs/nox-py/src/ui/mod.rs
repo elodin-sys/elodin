@@ -1,7 +1,7 @@
 //! `elodin.ui` — typed schematic builders that emit canonical KDL.
 //!
-//! Phase 1: 1:1 builders over [`impeller2_wkt`] panel/object types; EQL remains
-//! strings. Expression typing lands in Phase 2.
+//! Phase 1–2: builders over [`impeller2_wkt`]; EQL via strings or Python
+//! `Expr` objects. Phase 3 adds watch/push + build-error metadata.
 
 mod builders;
 
@@ -183,6 +183,8 @@ fn push(schematic: &PySchematic, db: &str, key: Option<String>) -> PyResult<()> 
     };
     let mut metadata = HashMap::new();
     metadata.insert("schematic.active".to_string(), key);
+    // Clear any previous watch/build error on successful push.
+    metadata.insert("ui.build_error".to_string(), String::new());
     let config = SetDbConfig {
         recording: None,
         metadata,
@@ -197,6 +199,35 @@ fn push(schematic: &PySchematic, db: &str, key: Option<String>) -> PyResult<()> 
             .await
             .0
             .map_err(|e| PyRuntimeError::new_err(format!("StoreAsset: {e}")))?;
+        client
+            .send((&config).into_len_packet())
+            .await
+            .0
+            .map_err(|e| PyRuntimeError::new_err(format!("SetDbConfig: {e}")))?;
+        Ok::<(), PyErr>(())
+    })?;
+    Ok(())
+}
+
+const BUILD_ERROR_KEY: &str = "ui.build_error";
+
+/// Publish or clear a schematic build error for the editor status bar (FR-8).
+#[pyfunction]
+#[pyo3(signature = (db, message=None))]
+fn set_build_error(db: &str, message: Option<String>) -> PyResult<()> {
+    let addr = SocketAddr::from_str(db)
+        .map_err(|e| PyValueError::new_err(format!("invalid db address {db:?}: {e}")))?;
+    let mut metadata = HashMap::new();
+    // Empty string deletes the key (see DB apply_set_db_config).
+    metadata.insert(BUILD_ERROR_KEY.to_string(), message.unwrap_or_default());
+    let config = SetDbConfig {
+        recording: None,
+        metadata,
+    };
+    crate::db::block_on(move || async move {
+        let mut client = impeller2_stellar::Client::connect(addr)
+            .await
+            .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
         client
             .send((&config).into_len_packet())
             .await
@@ -238,14 +269,12 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_function(wrap_pyfunction!(from_kdl, &child)?)?;
     child.add_function(wrap_pyfunction!(write, &child)?)?;
     child.add_function(wrap_pyfunction!(push, &child)?)?;
+    child.add_function(wrap_pyfunction!(set_build_error, &child)?)?;
     builders::register_builders(&child)?;
+    // Do not register as `sys.modules["elodin.ui"]` — that would shadow the
+    // Python package (`elodin/ui/`) which wraps this native submodule and adds
+    // Expr/Schema/watch. Native lives at `elodin.elodin.ui` (like monte_carlo).
     parent_module.add_submodule(&child)?;
-    // Ensure `import elodin.ui` resolves via sys.modules (same pattern as db).
-    parent_module
-        .py()
-        .import("sys")?
-        .getattr("modules")?
-        .set_item("elodin.ui", &child)?;
     Ok(())
 }
 
