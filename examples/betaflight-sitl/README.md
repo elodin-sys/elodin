@@ -344,11 +344,11 @@ sequenceDiagram
 
 #### 1. Betaflight Build with GYROPID_SYNC
 
-Modify [build.sh](examples/betaflight-sitl/build.sh) to enable lockstep mode:
+[build.sh](build.sh) enables lockstep mode through Betaflight's `OPTIONS`
+make variable without modifying the submodule:
 
-```c
-// In target.h - uncomment this line:
-#define SIMULATOR_GYROPID_SYNC
+```bash
+make TARGET=SITL OPTIONS=SIMULATOR_GYROPID_SYNC
 ```
 
 When enabled, Betaflight's main loop blocks on a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
