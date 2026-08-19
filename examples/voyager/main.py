@@ -9,10 +9,7 @@ import spiceypy as spice
 import numpy as np
 from pathlib import Path
 
-from dynamics import (
-    gravity_source_entity_names,
-    heliocentric_relative_acceleration,
-)
+from dynamics import heliocentric_relative_acceleration
 
 # SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
@@ -299,17 +296,11 @@ def heliocentric_gravity(
     graph: el.GraphQuery[GravityEdge],
     query: el.Query[el.WorldPos, el.Inertia],
 ) -> el.Query[el.Force]:
-    """Chapter 2 gravity in a nonrotating frame with a Sun-centered origin."""
-
     def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_inertia):
-        probe_mass = probe_inertia.mass()
-        gravitational_parameter = G * source_inertia.mass()
-
-        relative_acceleration = heliocentric_relative_acceleration(
-            probe_pos.linear(), source_pos.linear(), gravitational_parameter
+        acc = heliocentric_relative_acceleration(
+            probe_pos.linear(), source_pos.linear(), G * source_inertia.mass()
         )
-
-        return el.Force(linear=force.force() + probe_mass * relative_acceleration)
+        return el.Force(linear=force.force() + probe_inertia.mass() * acc)
 
     return graph.edge_fold(
         left_query=query,
@@ -322,7 +313,7 @@ def heliocentric_gravity(
 
 for probe in PROBES:
     probe_id = body_entity_ids[probe["entity_name"]]
-    for source_name in gravity_source_entity_names(PLANETS):
+    for source_name in ["Sun", *[planet["entity_name"] for planet in PLANETS]]:
         w.spawn(
             GravityConstraint(probe_id, body_entity_ids[source_name]),
             name=f"{probe['entity_name']} -> {source_name}",
