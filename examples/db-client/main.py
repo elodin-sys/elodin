@@ -244,6 +244,12 @@ def main() -> int:
     parser.add_argument(
         "--duration", type=float, default=30.0, help="headless run length in seconds"
     )
+    parser.add_argument(
+        "--db-schematic",
+        action="store_true",
+        help="load schematic from the DB (schematic.active) instead of --kdl sticky file; "
+        "use with `elodin ui watch examples/db-client/schematic.py`",
+    )
     args = parser.parse_args()
 
     # The server creates the database at a fresh path (an existing directory
@@ -253,6 +259,22 @@ def main() -> int:
     t_start_us = time.time_ns() // 1_000
 
     with edb.Server.start(db_path, args.addr), edb.Client.connect(args.addr) as client:
+        if args.db_schematic:
+            # Seed the active schematic from the Python builder so the editor
+            # has something before `elodin ui watch` attaches.
+            import importlib.util
+
+            import elodin.ui as ui
+
+            spec = importlib.util.spec_from_file_location(
+                "db_client_schematic", EXAMPLE_DIR / "schematic.py"
+            )
+            assert spec and spec.loader
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            ui.push(mod.build(), args.addr)
+            print(f"[ui] seeded schematic.active from schematic.py → {args.addr}")
+
         stop = threading.Event()
         threads = [
             threading.Thread(target=flight_loop, args=(client, stop), daemon=True),
@@ -284,8 +306,11 @@ def main() -> int:
                     )
                     return 1
                 print("[editor] launching; close the window to stop the demo")
+                editor_cmd = ["elodin", "editor", args.addr]
+                if not args.db_schematic:
+                    editor_cmd.extend(["--kdl", str(SCHEMATIC)])
                 subprocess.run(
-                    ["elodin", "editor", args.addr, "--kdl", str(SCHEMATIC)],
+                    editor_cmd,
                     env={**os.environ, "ELODIN_ASSETS_DIR": str(REPO_ROOT / "assets")},
                     check=False,
                 )
