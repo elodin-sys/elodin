@@ -90,6 +90,10 @@ impl ViewCubeOrbitTargetCache {
     fn last(&self, camera: Entity) -> Option<DVec3> {
         self.entries.get(&camera).copied()
     }
+
+    fn forget(&mut self, camera: Entity) {
+        self.entries.remove(&camera);
+    }
 }
 
 /// Cube-local axis → Bevy world. Same `to_bevy` the mesh uses.
@@ -1120,16 +1124,41 @@ fn view_cube_orbit_target(
     let viewport = viewports.get(camera).ok()?;
     let frame = viewport.frame.unwrap_or_default();
     // Same 3-vector / WorldPos rule as viewport follow (`POS_ECEF` is 3 elems).
-    let resolved = viewport
-        .look_at
-        .compiled_expr
-        .as_ref()
-        .and_then(|compiled_expr| compiled_expr.execute(entity_map, values).ok())
-        .and_then(|val| crate::ui::gauges::component_value_to_position(&val))
-        .map(|pos| GeoPosition(frame, pos).to_bevy(geo_context));
-    match resolved {
-        Some(target) => Some(orbit_cache.remember(camera, target)),
-        None => orbit_cache.last(camera),
+    // Missing compiled expr = cleared (don't aim). Execute error = sample gap.
+    let Some(compiled_expr) = viewport.look_at.compiled_expr.as_ref() else {
+        return apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::Cleared);
+    };
+    match compiled_expr.execute(entity_map, values) {
+        Err(_) => apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::Gap),
+        Ok(val) => match crate::ui::gauges::component_value_to_position(&val) {
+            Some(pos) => {
+                let target = GeoPosition(frame, pos).to_bevy(geo_context);
+                apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::Target(target))
+            }
+            None => apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::NotAPosition),
+        },
+    }
+}
+
+enum OrbitLookAt {
+    Cleared,
+    Gap,
+    NotAPosition,
+    Target(DVec3),
+}
+
+fn apply_orbit_look_at(
+    cache: &mut ViewCubeOrbitTargetCache,
+    camera: Entity,
+    look_at: OrbitLookAt,
+) -> Option<DVec3> {
+    match look_at {
+        OrbitLookAt::Cleared | OrbitLookAt::NotAPosition => {
+            cache.forget(camera);
+            None
+        }
+        OrbitLookAt::Gap => cache.last(camera),
+        OrbitLookAt::Target(target) => Some(cache.remember(camera, target)),
     }
 }
 
@@ -1430,13 +1459,36 @@ mod tests {
     }
 
     #[test]
-    fn orbit_cache_keeps_last_target_when_eql_empty() {
+    fn orbit_cache_keeps_last_target_on_gap() {
         let mut cache = ViewCubeOrbitTargetCache::default();
         let camera = Entity::from_bits(9);
         let target = DVec3::new(10.0, 20.0, 30.0);
-        cache.remember(camera, target);
-        assert_eq!(cache.last(camera), Some(target));
+        apply_orbit_look_at(&mut cache, camera, OrbitLookAt::Target(target));
+        assert_eq!(
+            apply_orbit_look_at(&mut cache, camera, OrbitLookAt::Gap),
+            Some(target)
+        );
         assert_eq!(cache.last(Entity::from_bits(10)), None);
+    }
+
+    #[test]
+    fn orbit_cache_forgets_when_look_at_cleared() {
+        let mut cache = ViewCubeOrbitTargetCache::default();
+        let camera = Entity::from_bits(9);
+        apply_orbit_look_at(
+            &mut cache,
+            camera,
+            OrbitLookAt::Target(DVec3::new(10.0, 20.0, 30.0)),
+        );
+        assert_eq!(
+            apply_orbit_look_at(&mut cache, camera, OrbitLookAt::Cleared),
+            None
+        );
+        assert_eq!(cache.last(camera), None);
+        assert_eq!(
+            apply_orbit_look_at(&mut cache, camera, OrbitLookAt::NotAPosition),
+            None
+        );
     }
 
     #[test]
