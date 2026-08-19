@@ -14,6 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BETAFLIGHT_DIR="$SCRIPT_DIR/betaflight"
+BETAFLIGHT_OPTIONS="SIMULATOR_GYROPID_SYNC"
 
 # Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)
 if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
@@ -34,13 +35,14 @@ if [[ "$(uname)" == "Darwin" ]]; then
     MACOS_CFLAGS_DISABLED="-Werror -Wunsafe-loop-optimizations -fuse-linker-plugin"
 fi
 
-# Helper function to run make with proper flags
+# Helper function to run make with lockstep enabled and the proper platform flags
 run_make() {
     if [[ -n "$MACOS_OPTIMISATION_BASE" ]]; then
         # Use EXTRA_FLAGS to add -Wno-error which disables treating warnings as errors
-        make "OPTIMISATION_BASE=$MACOS_OPTIMISATION_BASE" "EXTRA_FLAGS=-Wno-error" "$@"
+        make "OPTIONS=$BETAFLIGHT_OPTIONS" \
+            "OPTIMISATION_BASE=$MACOS_OPTIMISATION_BASE" "EXTRA_FLAGS=-Wno-error" "$@"
     else
-        make "$@"
+        make "OPTIONS=$BETAFLIGHT_OPTIONS" "$@"
     fi
 }
 
@@ -76,20 +78,8 @@ case "${1:-build}" in
             make configs
         fi
         
-        # Enable SIMULATOR_GYROPID_SYNC for lockstep synchronization with Elodin
-        # This makes Betaflight block on FDM packets, allowing tight timing control
-        TARGET_H="$BETAFLIGHT_DIR/src/platform/SIMULATOR/target/SITL/target.h"
-        if grep -q "^//#define SIMULATOR_GYROPID_SYNC" "$TARGET_H"; then
-            echo "Enabling SIMULATOR_GYROPID_SYNC for lockstep mode..."
-            sed -i.bak 's|^//#define SIMULATOR_GYROPID_SYNC|#define SIMULATOR_GYROPID_SYNC|' "$TARGET_H"
-            rm -f "${TARGET_H}.bak"
-        elif grep -q "^#define SIMULATOR_GYROPID_SYNC" "$TARGET_H"; then
-            echo "SIMULATOR_GYROPID_SYNC already enabled."
-        else
-            echo "Warning: Could not find SIMULATOR_GYROPID_SYNC in target.h"
-        fi
-        
-        # Build SITL target
+        # Build SITL target with SIMULATOR_GYROPID_SYNC enabled through OPTIONS.
+        # This makes Betaflight block on FDM packets without modifying the submodule.
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
         
         # On macOS, we need to create stubs for missing SITL symbols and do a two-pass build
@@ -195,7 +185,7 @@ STUBS_EOF
         echo "Building Betaflight SITL with debug symbols..."
         # DEBUG=GDB uses simpler LTO flags that work on macOS
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-        make TARGET=SITL DEBUG=GDB -j"$JOBS"
+        run_make TARGET=SITL DEBUG=GDB -j"$JOBS"
         echo "Debug build complete."
         ;;
     
