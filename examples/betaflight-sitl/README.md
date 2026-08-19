@@ -61,6 +61,15 @@ This compiles the Betaflight firmware for SITL mode. The binary will be at:
 **IMPORTANT**: Before running the simulation, you must configure an ARM switch in Betaflight.
 This only needs to be done once - the config is saved to `eeprom.bin`.
 
+Run the initialization script from the repository root:
+
+```bash
+./examples/betaflight-sitl/init_eeprom.py
+```
+
+It starts SITL, sends the CLI commands, saves `eeprom.bin`, then restarts SITL
+and verifies the persisted settings. To do the same setup manually:
+
 1. **Start SITL** (in terminal 1):
    ```bash
    ./betaflight/obj/main/betaflight_SITL.elf
@@ -152,6 +161,7 @@ Phase 3: Raising throttle...
 ```
 examples/betaflight-sitl/
 ├── build.sh           # Build script for Betaflight SITL
+├── init_eeprom.py     # Create and configure eeprom.bin
 ├── main.py            # Main simulation entry point
 ├── config.py          # Drone physical parameters
 ├── sim.py             # Physics simulation systems
@@ -334,11 +344,11 @@ sequenceDiagram
 
 #### 1. Betaflight Build with GYROPID_SYNC
 
-Modify [build.sh](examples/betaflight-sitl/build.sh) to enable lockstep mode:
+[build.sh](build.sh) enables lockstep mode through Betaflight's `OPTIONS`
+make variable without modifying the submodule:
 
-```c
-// In target.h - uncomment this line:
-#define SIMULATOR_GYROPID_SYNC
+```bash
+make TARGET=SITL OPTIONS=SIMULATOR_GYROPID_SYNC
 ```
 
 When enabled, Betaflight's main loop blocks on a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
