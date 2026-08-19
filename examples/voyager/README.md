@@ -13,9 +13,10 @@ In this example it provides reference
 positions and velocities for the planets and the Voyager spacecraft
 from published files (aka SPICE kernels).
 
-This example is a work in progress. Right now the simulated probes do
-not make it to Saturn. Future work is needed to isolate the error
-sources and improve the simulation.
+This example is a work in progress. The simulated probes still do not
+reproduce the gravity assists or reach Saturn. Chapter 2 below fixes
+one real error in the Sun-centered force model; it does not turn this
+into a mission reconstruction.
 
 The editor exposes that divergence numerically as two telemetry signals
 for each simulated probe:
@@ -60,6 +61,25 @@ which `main.py` loads at startup.
 
 ## Run
 
+Chapter 1 is the original model and the default:
+
 ```bash
 python examples/voyager/main.py run
 ```
+
+Chapter 2 uses the same kernels, masses, RK4 integrator, and timestep,
+but subtracts each planet's acceleration of the Sun. The states are
+Sun-relative (`r = R_probe - R_sun`), so the force model needs
+
+```text
+mu_i * ((r_i - r) / |r_i - r|^3 - r_i / |r_i|^3)
+```
+
+```bash
+python examples/voyager/chapter_2.py run
+```
+
+That correction reduces long-span disagreement with the published
+supertrajectory, but the probes still do not slingshot correctly. This
+example does not reconstruct maneuvers or claim navigation-grade
+accuracy.
