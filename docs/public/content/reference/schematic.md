@@ -57,8 +57,9 @@ order = 6
 
 ### environment
 - Optional top-level node for cinematic scene lighting. Without it the editor renders as always (baked image-based lighting, no sun, theme background).
-- `sun` child (optional): spawns a real directional sun with a visible sun disk.
-  - `azimuth` (degrees, default `0.0`) and `elevation` (degrees, default `45.0`): sun direction in the rendered Y-up world frame. These transcribe 1:1 from pyrotechnique scene values.
+- `sun` child (optional): spawns a real directional sun with a visible sun disk. All placement attributes are optional. A bare `sun` — or `earth` with no `sun` at all — tracks the real sun for the playhead's UTC timestamp (live, replay, and scrubbing; ~0.05°). Most explicit wins:
+  - `direction`: tuple string, direction *toward* the sun in the schematic coordinate frame (e.g. ECEF). Pins the sun. Example: `direction="(1, 0, 0)"` puts local noon on the prime-meridian equator.
+  - `azimuth` / `elevation` (degrees): sun direction in the rendered Y-up world frame. These transcribe 1:1 from pyrotechnique scene values. Setting either one pins the sun; a missing angle uses the old defaults (`azimuth=0`, `elevation=45`).
   - `illuminance`: lux, default `100000` (direct sunlight). Pair with a viewport `ev100` — at the editor's default exposure a full sun blows out the frame.
   - `shadows`: `#true`/`#false`, default `#true`. Enables shadow maps on the sun.
 - `ambient` child (optional): `scale` (required) multiplies the editor's baked image-based lighting intensity. `1.0` = unchanged; near-zero (e.g. `0.02`) keeps shadows black on airless bodies.
@@ -68,6 +69,18 @@ order = 6
   - `inner_radius` / `outer_radius`: meters from the planet center; default Bevy's earth values (`6360000` / `6460000`). In an ECEF scene set `inner_radius` to the launch site's geocentric radius (the WGS84 radius varies with latitude) so the horizon haze sits at the actual local surface.
   - `ground_albedo`: tuple string, average surface color for multiscattering. Default `(0.3, 0.3, 0.3)`.
   - Sun, atmosphere entity, ambient IBL scale, and sky clear color are scene-global. Bevy still opts each camera into atmosphere rendering via `AtmosphereSettings`; Elodin attaches that to **one** active main viewport at a time (Bevy 0.19 fatally fails wgpu validation when several views carry it). The sky hands off when you switch tabs; a side-by-side multi-viewport layout gets the procedural sky in one pane only (warn once). The atmosphere entity is grid-cell anchored so it survives floating-origin rebases.
+- `earth` child (optional): the editor's built-in cinematic Earth for **ECEF** scenes. One word spawns everything from assets embedded in the editor binary: a true-scale WGS84 globe at the ECEF origin (8K day/night/cloud textures), a raymarched atmosphere, the Milky Way skybox, a GPU-particle star field, night city lights, and green/red airglow shells, plus earthshine on the craft. All of it is driven continuously by the cinematic camera: haze density, star/skybox visibility, city-light and airglow intensity, and exposure follow camera altitude and the sun's elevation at the camera, so one schematic works from the launch pad to LEO.
+  - Requires `coordinate frame="ECEF"` and exactly one `viewport cinematic=#true`. That camera owns HDR, atmosphere, the Milky Way skybox, histogram auto-exposure, and the Earth render layer (globe, stars, city lights, airglow, sun, earthshine). Regular viewports in the same schematic keep the editor's IBL look and do not see Earth visuals. A `sun` is implied when omitted (ephemeris, 100 klx, shadows).
+  - Parse errors (not warnings): more than one `cinematic=#true` viewport; any `hdr=#true` viewport in the same schematic as a cinematic viewport; `earth` without a cinematic viewport; `cinematic=#true` without `earth`. Validation is per KDL document (multi-window schematics are not cross-checked).
+  - Night exposure is the cinematic viewport's [`auto_exposure`](#viewport-auto-exposure) child (default on, `max_night_boost=0` — no night lift). The viewport `ev100` is the day anchor (cinematic default 13.5) and is not overwritten; the night look comes from the house OLD SCHOOL bloom (intensity `0.365`) over a dim night map.
+  - Optional children tune the particle fields. Omit a child or property to keep the house look. Density is clamped to `0.05…2.0`. The cinematic viewport inspector edits the same knobs live (density/brightness apply on slider release; size and city height apply immediately).
+    - `stars`: `density` (scale, default `0.05`; 800k dim + 40k bright + 400k milky way at 100%), `size` (scale, default `0.40`), `brightness` (scale, default `1.88`; rebuilds the HDR gradient).
+    - `city_lights`: `density` (scale, default `0.05`; 1.5M at 100%), `size` (screen pixels, default `1.0`), `height` (metres above the ellipsoid, default `0`, clamped `-5000…100000`; negative values are accepted but currently have no visible effect — see the note below), `brightness` (scale, default `0.05`). The house look keeps these minimal and lets the night map plus bloom carry the night side.
+    - `airglow`: `density` (scale, default `0.55`; 520k green + 340k red at 100%), `size` (scale, default `1.05`), `brightness` (scale, default `1.45`).
+    - `night_map`: `brightness` (scale on the globe's emissive night texture, default `0.05`, clamped `0…4`). This is the continuous sheet under the city-light particles — `0` leaves only particles.
+  - Known issue: a negative `city_lights height` does not visibly sink the lights. The particles ride a sphere of the equatorial radius while the globe mesh is squashed to the WGS84 ellipsoid, so the mesh already sits below the shell everywhere but the equator (~7 km at 34°N, ~21 km at the poles) — more than the `-5000` clamp can cross.
+  - Supersedes the `atmosphere` child — the built-in Earth owns its own atmosphere (raymarched, surface radius tracked from the camera's latitude). Remove `atmosphere` when enabling `earth` (it is ignored with a warning). Remove any `object_3d` Earth GLB and `world_mesh "globe"` too; the built-in globe replaces them.
+  - Native editor builds only (the embedded Earth assets and GPU particles are excluded from wasm).
 - Example (lunar scene):
 
 ```kdl
@@ -88,6 +101,19 @@ environment {
 }
 ```
 
+- Example (built-in cinematic Earth, pad to LEO):
+
+```kdl
+coordinate frame="ECEF"
+environment {
+    ambient scale=0.05
+    earth
+}
+viewport name="Chase" cinematic=#true far=120000000.0
+```
+
+The playhead's UTC timestamp aims the sun. Pin it with `sun direction="(x, y, z)"` or `sun azimuth=… elevation=…` if the lighting should stay put.
+
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
 - `title`/`display`: optional window title.
@@ -99,7 +125,7 @@ environment {
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `projection_color` (default `white`; colors this viewport's source frustum 2D projection in target viewports), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `view_cube_frame` (optional; `ENU`, `NED`, or `ECEF`; selects which shared ViewCube mesh/labels this viewport shows — falls back to the viewport's `frame`, then ENU), `effects` (bool, default true; when true the viewport camera includes the thruster-particle render layer so KDL `thruster` jets are visible — set `effects=#false` to hide particles in that pane without cloning emitters), `hdr` (default false; enables the HDR render path and is required for bloom), `ev100` (optional camera exposure in EV100; sunny daylight is ~13-15 — required to balance an [`environment`](#environment) sun, since the default physical-camera exposure is ~EV 8.6), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos` (optional EQL; a 7-vector pose, since a viewport without `look_at` rides its attitude), `look_at` (optional EQL; a bare 3-vector position or a 7-vector pose whose tail 3 elements are the position — aiming only needs a point), `smoothing` (optional, default 0; low-pass time constant in seconds for the follow camera — with `0` the camera pose is applied straight from telemetry, with e.g. `smoothing=0.3` it eases toward its `pos`/`look_at` targets, which cancels high-frequency noise from jittery data; the camera still snaps instantly on seeks or jumps larger than the framing distance, so genuine motion has no lag, and the lag is bounded to a few percent of the framing distance, which also makes the filter fade out as the subject speeds up — full strength while it is slow or parked, all but transparent in flight, so a climbing subject stays centred instead of sliding toward the edge of frame). Note that the smoothed camera steadies the *world* in frame — the followed entity is still drawn from raw telemetry, so its own noise becomes visible against that steady background rather than disappearing. Smoothing relocates the shake rather than removing it, and that trade is what makes a `line_3d` trail readable: the trail is a *history* of world positions while the camera follows the *newest* sample, so only its tip shares the camera's noise. A jittery follow input therefore slides the entire trail, the grid and the terrain across the screen every frame even though their geometry is exactly right, and smoothing is the only thing that can stop that sliding — it never alters the trail's shape, which is data. Measured on a degraded-sensor recording at 35 m framing, static world geometry travels ~23 px per frame at `smoothing=0` versus ~1 px at `smoothing=1` while the vehicle is parked, in exchange for ~1.3 degrees of wobble on the followed entity — which is just the sensor noise over the framing distance, and is therefore the floor rather than a tuning artifact. Once it is flying the filter has largely faded out by design, so the two settings converge: steadying the background there would cost framing accuracy, and a subject drifting off centre is far more objectionable than shimmer in a scene that is already streaming past. With an already-clean follow input it does nothing, which is why the default is `0`. Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors) unless `view_cube_frame` overrides the cube. An optional `bloom` child node tunes the glow post-process — see [viewport bloom](#viewport-bloom).
+- `viewport`: `fov` (default 45.0, or 50.0 when `cinematic=#true`), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `projection_color` (default `white`; colors this viewport's source frustum 2D projection in target viewports), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `view_cube_frame` (optional; `ENU`, `NED`, or `ECEF`; selects which shared ViewCube mesh/labels this viewport shows — falls back to the viewport's `frame`, then ENU), `effects` (bool, default true; when true the viewport camera includes the thruster-particle render layer so KDL `thruster` jets are visible — set `effects=#false` to hide particles in that pane without cloning emitters), `hdr` (default false; enables the HDR render path and is required for bloom; mutually exclusive with `cinematic`), `cinematic` (default false; owns the cinematic Earth camera: inserts HDR, zeros Bevy ambient light, defaults `fov` to 50, `ev100` to 13.5, and bloom to the old-school preset at intensity 0.365, attaches atmosphere and the Milky Way skybox, and includes the Earth render layer — required when `environment { earth }` is set, forbidden alongside any `hdr=#true` viewport, and at most one per schematic), `ev100` (optional camera exposure in EV100; sunny daylight is ~13-15 — required to balance an [`environment`](#environment) sun, since the default physical-camera exposure is ~EV 8.6), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos` (optional EQL; a 7-vector pose, since a viewport without `look_at` rides its attitude), `look_at` (optional EQL; a bare 3-vector position or a 7-vector pose whose tail 3 elements are the position — aiming only needs a point), `smoothing` (optional, default 0; low-pass time constant in seconds for the follow camera — with `0` the camera pose is applied straight from telemetry, with e.g. `smoothing=0.3` it eases toward its `pos`/`look_at` targets, which cancels high-frequency noise from jittery data; the camera still snaps instantly on seeks or jumps larger than the framing distance, so genuine motion has no lag, and the lag is bounded to a few percent of the framing distance, which also makes the filter fade out as the subject speeds up — full strength while it is slow or parked, all but transparent in flight, so a climbing subject stays centred instead of sliding toward the edge of frame). Note that the smoothed camera steadies the *world* in frame — the followed entity is still drawn from raw telemetry, so its own noise becomes visible against that steady background rather than disappearing. Smoothing relocates the shake rather than removing it, and that trade is what makes a `line_3d` trail readable: the trail is a *history* of world positions while the camera follows the *newest* sample, so only its tip shares the camera's noise. A jittery follow input therefore slides the entire trail, the grid and the terrain across the screen every frame even though their geometry is exactly right, and smoothing is the only thing that can stop that sliding — it never alters the trail's shape, which is data. Measured on a degraded-sensor recording at 35 m framing, static world geometry travels ~23 px per frame at `smoothing=0` versus ~1 px at `smoothing=1` while the vehicle is parked, in exchange for ~1.3 degrees of wobble on the followed entity — which is just the sensor noise over the framing distance, and is therefore the floor rather than a tuning artifact. Once it is flying the filter has largely faded out by design, so the two settings converge: steadying the background there would cost framing accuracy, and a subject drifting off centre is far more objectionable than shimmer in a scene that is already streaming past. With an already-clean follow input it does nothing, which is why the default is `0`. Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors) unless `view_cube_frame` overrides the cube. An optional `bloom` child node tunes the glow post-process — see [viewport bloom](#viewport-bloom). An optional `auto_exposure` child (cinematic only) meters the frame — see [viewport auto exposure](#viewport-auto-exposure).
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `geo_position_gauge`: positional `eql` (required; a 3-vector position, or a 7-vector pose whose tail 3 elements are the position; named `eql=` also accepted), `name` (optional), `source` (`ECEF`/`NED`/`ENU`; inherits from global `coordinate` if omitted, else `ENU`), `display` (`ECEF`/`NED`/`ENU`/`LLA`, default `NED`). Reads a position in `source` and shows it converted to `display` as three labelled values.
@@ -114,7 +140,7 @@ environment {
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
 ### viewport bloom
-- Optional `bloom` child of `viewport`. Spreads pixels brighter than 1.0 ("white") into a soft halo — the glow effect for emissive/`glow` materials. Requires `hdr=#true` on the viewport; without HDR the bloom pass does not run.
+- Optional `bloom` child of `viewport`. Spreads pixels brighter than 1.0 ("white") into a soft halo — the glow effect for emissive/`glow` materials. Requires HDR (`hdr=#true` or `cinematic=#true`); without HDR the bloom pass does not run.
 - `preset`: starting point for all values.
   - `natural` (default): energy-conserving mix, no threshold. The whole frame gets a subtle filmic softness; very bright pixels halo. Redistributes light, never adds it.
   - `old_school`: additive with a threshold — only hot pixels glow, everything else stays crisp. Adds light. Defaults: intensity `0.05`, threshold `0.6`, softness `0.2`.
@@ -127,6 +153,21 @@ environment {
 ```kdl
 viewport hdr=#true {
     bloom preset="old_school" intensity=0.35 threshold=0.65 threshold_softness=0.6
+}
+```
+
+### viewport auto exposure
+- Optional `auto_exposure` child of a `cinematic=#true` viewport. Histogram-meters the frame and adds a correction at tonemap on top of the authored `ev100` (the day anchor). Omit the child for house defaults. The cinematic viewport inspector edits the same knobs.
+- `enabled` (default `#true`): insert or remove Bevy `AutoExposure`.
+- `max_night_boost` (default `0`): compensation-curve knee in stops. Deep night can brighten by at most this much; the default of `0` keeps the authored `ev100` only. Note that the live histogram floor is `max(range_min, −max_night_boost)`, so at `0` the `range_min` below has no effect at night.
+- `speed_brighten` / `speed_darken` (default `2` / `5`): adaptation in stops per second. Darken is faster so orbital sunrise clamps like ISS footage.
+- `filter_low` / `filter_high` (default `0.10` / `0.90`): histogram tails to ignore.
+- `range_min` / `range_max` (default `−14` / `8`): log-luminance window. Night star/city pixels sit near −10…−5; Bevy's default floor of −8 would drop them and break metering.
+- Bloom samples the HDR buffer *before* this correction, so night halos are weaker than a pre-tonemap exposure boost. Raise bloom threshold/intensity if cities or stars lose their glow.
+
+```kdl
+viewport cinematic=#true {
+    auto_exposure max_night_boost=1.15 speed_darken=5.0
 }
 ```
 
@@ -321,9 +362,11 @@ skybox = "skybox"
        name=string
 
 environment = "environment"
-            { [sun [azimuth=float] [elevation=float] [illuminance=float] [shadows=bool]]
+            { [sun [azimuth=float] [elevation=float] [direction=tuple] [illuminance=float] [shadows=bool]]
               [ambient scale=float]
-              [sky color=color_name_or_tuple] }
+              [sky color=color_name_or_tuple]
+              [atmosphere …]
+              [earth { [stars [density=float] [size=float] [brightness=float]] [city_lights [density=float] [size=float] [height=float] [brightness=float]] [airglow [density=float] [size=float] [brightness=float]] [night_map [brightness=float]] }] }
 
 window = "window"
        [path|file|name=string]
@@ -369,6 +412,7 @@ viewport = "viewport"
          [projection_color=color_name_or_tuple]
          [frustums_thickness=float]
          [hdr=bool]
+         [cinematic=bool]
          [ev100=float]
          [name=string]
          [frame=ENU|NED|ECEF]
@@ -376,7 +420,7 @@ viewport = "viewport"
          [pos=eql]
          [look_at=eql]
          [smoothing=float]
-         { vector_arrow }
+         { [bloom [preset=natural|old_school] [intensity=float] [threshold=float] [threshold_softness=float]] [auto_exposure [enabled=bool] [max_night_boost=float] [speed_brighten=float] [speed_darken=float] [filter_low=float] [filter_high=float] [range_min=float] [range_max=float]] vector_arrow }
 
 graph = "graph" eql
       [name=string]

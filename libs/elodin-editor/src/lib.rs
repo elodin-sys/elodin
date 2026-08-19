@@ -167,6 +167,19 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
         // Axes Cube 3D model
         embedded_lfs_asset!(app, "assets/axes-cube.glb");
+        // Built-in cinematic Earth (environment `earth` node). Native only:
+        // mesh-only GLB + KTX2 globe/skybox stay out of wasm bundles.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            embedded_lfs_asset!(app, "assets/earth/earth_v5.glb");
+            embedded_lfs_asset!(app, "assets/earth/milky_way.cubemap.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/color.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/night.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/clouds.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/normal.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/metallic_roughness.ktx2");
+            embedded_asset!(app, "assets/earth/sun_flare.png");
+        }
     }
 }
 
@@ -302,6 +315,15 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
+        // Built-in cinematic Earth (environment `earth`): needs hanabi, so
+        // native only, and must come after ThrusterParticlesPlugin
+        // (HanabiPlugin registration).
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(bevy::post_process::auto_exposure::AutoExposurePlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::cinematic_earth::CinematicEarthPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
         #[cfg(not(target_family = "wasm"))]

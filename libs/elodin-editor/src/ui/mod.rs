@@ -912,7 +912,11 @@ fn warn_camera_order_ambiguities(
 
 /// Main viewport cameras only: sensor cameras (Tonemapping::None) and the
 /// view-cube/nav-gizmo overlays must not be switched to HDR targets.
-type MainViewportCameraFilter = (With<Camera>, With<MainCamera>);
+type MainViewportCameraFilter = (
+    With<Camera>,
+    With<MainCamera>,
+    Without<crate::plugins::scene_environment::CinematicViewport>,
+);
 
 fn sync_hdr(
     hdr_enabled: Res<HdrEnabled>,

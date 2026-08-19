@@ -15,27 +15,27 @@ coordinate frame="ECEF"
 timeline follow_latest=#true range="last_30s"
 telemetry_mode #true
 
-// Sun + sky: pyrotechnique falcon9 environment values (100 klx, azimuth 300 /
-// elevation 38 in its pad-local Y-up frame) converted into the editor's Bevy
-// world frame at LC-39A under the ECEF Plane mapping. The atmosphere is
-// Bevy's procedural earth sky centered on the ECEF origin; inner radius is
-// the pad's geocentric radius (~6,373.27 km) so the horizon haze sits at the
-// actual local surface.
+// Sun + sky: no placement — the playhead is the real CRS-12 launch time
+// (2017-08-14T16:31:38Z), so the ephemeris sun is the actual lighting at
+// LC-39A (~71° elevation, near local noon). `earth` is the editor's built-in
+// cinematic Earth: true-scale WGS84 globe at the ECEF origin, raymarched
+// atmosphere (haze density and surface radius track the camera), Milky Way
+// skybox, star fields, night city lights, and airglow — no user-managed
+// Earth assets.
 environment {
-    sun azimuth=146.58 elevation=55.41 illuminance=100000.0 shadows=#true
+    sun illuminance=100000.0 shadows=#true
     ambient scale=0.05
-    atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
+    earth
 }
 
 // Layout: chase viewport (5×3) with a 2-column telemetry strip on the right
 // and a full-width actuator/status strip along the bottom — all graphs visible
-// at once (no tabs). Bevy 0.19 can only put AtmosphereSettings on one active
-// main camera, so keep a single viewport.
+// at once (no tabs). `cinematic=#true` owns HDR, atmosphere, and the Earth
+// render layer; regular viewports can sit beside it without Bevy's
+// multi-AtmosphereSettings crash.
 vsplit {
     hsplit share=0.75 {
-        viewport name="Chase" share=0.72 fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false active=#true {
-            bloom preset="old_school" intensity=0.28
-        }
+        viewport name="Chase" share=0.72 near=1.0 far=120000000.0 pos="booster.world_pos.translate_world(46.740, -100.549, -144.705)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" cinematic=#true show_grid=#false active=#true
         vsplit share=0.28 {
             hsplit {
                 graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
@@ -90,10 +90,6 @@ vsplit {
     }
 }
 
-object_3d frame="ECEF" orientation=absolute earth.world_pos {
-    glb path="earth.glb"
-}
-
 // Booster: the Sketchfab Falcon 9 GLB pyrotechnique authored the effects
 // against, rendered at the same 70 m metric height. The raw model is +Y-up
 // with the engine plane at y~0; body +X is the long axis (nose), so the mesh
@@ -142,13 +138,6 @@ object_3d orientation=absolute lz1.world_pos {
     // deck centered at origin (~52×96 m). Matches surface_attitude (+Y up).
     glb path="spacex_drone_barge.glb"
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
-}
-
-// Local ground: pad disc at LC-39A only (barge is the LZ-1 surface).
-object_3d orientation=absolute ground.world_pos {
-    cylinder radius=10000.0 height=4.0 {
-        color 51 56 46
-    }
 }
 
 // Truth ghost replaying the recorded CRS-12 profile along the ascent track:

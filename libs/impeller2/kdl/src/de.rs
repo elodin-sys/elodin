@@ -61,7 +61,85 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         }
     }
 
+    validate_cinematic_earth(&schematic, input)?;
     Ok(schematic)
+}
+
+fn schematic_viewports(schematic: &Schematic) -> Vec<&Viewport> {
+    let mut out = Vec::new();
+    for elem in &schematic.elems {
+        if let SchematicElem::Panel(panel) = elem {
+            collect_viewports(panel, &mut out);
+        }
+    }
+    out
+}
+
+fn collect_viewports<'a>(panel: &'a Panel, out: &mut Vec<&'a Viewport>) {
+    match panel {
+        Panel::Viewport(viewport) => out.push(viewport),
+        Panel::VSplit(split) | Panel::HSplit(split) => {
+            for child in &split.panels {
+                collect_viewports(child, out);
+            }
+        }
+        Panel::Tabs(tabs) => {
+            for child in tabs {
+                collect_viewports(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn validate_cinematic_earth(schematic: &Schematic, src: &str) -> Result<(), KdlSchematicError> {
+    let viewports = schematic_viewports(schematic);
+    let cinematic_count = viewports.iter().filter(|v| v.cinematic).count();
+    let has_hdr = viewports.iter().any(|v| v.hdr);
+    let has_earth = schematic
+        .environment
+        .as_ref()
+        .is_some_and(|env| env.earth.is_some());
+    let span = (0, src.len()).into();
+
+    if cinematic_count > 1 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "cinematic".to_string(),
+            node: "viewport".to_string(),
+            expected: "at most one cinematic=#true viewport per schematic".to_string(),
+            src: src.to_string(),
+            span,
+        });
+    }
+    if cinematic_count > 0 && has_hdr {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "hdr".to_string(),
+            node: "viewport".to_string(),
+            expected: "hdr=#true cannot mix with cinematic=#true in the same schematic".to_string(),
+            src: src.to_string(),
+            span,
+        });
+    }
+    if has_earth && cinematic_count != 1 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "cinematic".to_string(),
+            node: "viewport".to_string(),
+            expected: "environment { earth } requires exactly one cinematic=#true viewport"
+                .to_string(),
+            src: src.to_string(),
+            span,
+        });
+    }
+    if cinematic_count == 1 && !has_earth {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "cinematic".to_string(),
+            node: "viewport".to_string(),
+            expected: "cinematic=#true requires environment { earth }".to_string(),
+            src: src.to_string(),
+            span,
+        });
+    }
+    Ok(())
 }
 
 fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicError> {
@@ -95,16 +173,19 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
             "sun" => {
                 let mut sun = SunConfig::default();
                 if let Some(azimuth) = float_prop(child, "azimuth") {
-                    sun.azimuth_deg = azimuth;
+                    sun.azimuth_deg = Some(azimuth);
                 }
                 if let Some(elevation) = float_prop(child, "elevation") {
-                    sun.elevation_deg = elevation;
+                    sun.elevation_deg = Some(elevation);
                 }
                 if let Some(illuminance) = float_prop(child, "illuminance") {
                     sun.illuminance = illuminance;
                 }
                 if let Some(shadows) = bool_prop(child, "shadows") {
                     sun.shadows = shadows;
+                }
+                if let Some(direction) = parse_tuple3::<f32>(child, "direction") {
+                    sun.direction = Some(direction);
                 }
                 config.sun = Some(sun);
             }
@@ -158,6 +239,9 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
                 }
                 config.atmosphere = Some(atmosphere);
             }
+            "earth" => {
+                config.earth = Some(parse_earth(child, src, float_prop)?);
+            }
             other => {
                 return Err(KdlSchematicError::UnknownNode {
                     node_type: format!("environment.{other}"),
@@ -168,6 +252,70 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
         }
     }
     Ok(config)
+}
+
+fn parse_earth(
+    node: &KdlNode,
+    src: &str,
+    float_prop: impl Fn(&KdlNode, &str) -> Option<f32>,
+) -> Result<EarthConfig, KdlSchematicError> {
+    let mut earth = EarthConfig::default();
+    let Some(children) = node.children() else {
+        return Ok(earth.clamp());
+    };
+    for child in children.nodes() {
+        match child.name().value() {
+            "stars" => {
+                if let Some(density) = float_prop(child, "density") {
+                    earth.stars.density = density;
+                }
+                if let Some(size) = float_prop(child, "size") {
+                    earth.stars.size = size;
+                }
+                if let Some(brightness) = float_prop(child, "brightness") {
+                    earth.stars.brightness = brightness;
+                }
+            }
+            "city_lights" => {
+                if let Some(density) = float_prop(child, "density") {
+                    earth.city_lights.density = density;
+                }
+                if let Some(size) = float_prop(child, "size") {
+                    earth.city_lights.size = size;
+                }
+                if let Some(height) = float_prop(child, "height") {
+                    earth.city_lights.height = height;
+                }
+                if let Some(brightness) = float_prop(child, "brightness") {
+                    earth.city_lights.brightness = brightness;
+                }
+            }
+            "airglow" => {
+                if let Some(density) = float_prop(child, "density") {
+                    earth.airglow.density = density;
+                }
+                if let Some(size) = float_prop(child, "size") {
+                    earth.airglow.size = size;
+                }
+                if let Some(brightness) = float_prop(child, "brightness") {
+                    earth.airglow.brightness = brightness;
+                }
+            }
+            "night_map" => {
+                if let Some(brightness) = float_prop(child, "brightness") {
+                    earth.night_map.brightness = brightness;
+                }
+            }
+            other => {
+                return Err(KdlSchematicError::UnknownNode {
+                    node_type: format!("environment.earth.{other}"),
+                    src: src.to_string(),
+                    span: child.span(),
+                });
+            }
+        }
+    }
+    Ok(earth.clamp())
 }
 
 fn parse_telemetry_mode(node: &KdlNode, src: &str) -> Result<bool, KdlSchematicError> {
@@ -742,7 +890,17 @@ fn bool_prop(node: &KdlNode, prop: &str) -> Option<bool> {
 }
 
 fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
-    let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
+    let cinematic = bool_prop(node, "cinematic").unwrap_or(false);
+    let default_fov = if cinematic {
+        CINEMATIC_VIEWPORT_FOV_DEG
+    } else {
+        DEFAULT_VIEWPORT_FOV_DEG
+    };
+    let fov = node
+        .get("fov")
+        .and_then(|v| v.as_float())
+        .map(|v| v as f32)
+        .unwrap_or(default_fov);
     let near = node
         .get("near")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
@@ -860,6 +1018,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
 
     let hdr = bool_prop(node, "hdr").unwrap_or(false);
     let bloom = parse_viewport_bloom(node, kdl_src)?;
+    let auto_exposure = parse_viewport_auto_exposure(node, kdl_src)?;
     let ev100 = node
         .get("ev100")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
@@ -949,7 +1108,9 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         view_cube_frame,
         effects,
         hdr,
+        cinematic,
         bloom,
+        auto_exposure,
         ev100,
         name,
         pos,
@@ -1023,6 +1184,60 @@ fn parse_viewport_bloom(
     }
 
     Ok(Some(config))
+}
+
+fn parse_viewport_auto_exposure(
+    node: &KdlNode,
+    src: &str,
+) -> Result<Option<AutoExposureConfig>, KdlSchematicError> {
+    let Some(children) = node.children() else {
+        return Ok(None);
+    };
+    let Some(ae_node) = children
+        .nodes()
+        .iter()
+        .find(|n| n.name().value() == "auto_exposure")
+    else {
+        return Ok(None);
+    };
+
+    let float_prop = |prop: &str| {
+        ae_node
+            .get(prop)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|v| v as f32)
+    };
+    let config = AutoExposureConfig {
+        enabled: bool_prop(ae_node, "enabled").unwrap_or(AutoExposureConfig::default_enabled()),
+        max_night_boost: float_prop("max_night_boost")
+            .unwrap_or(AutoExposureConfig::default_max_night_boost()),
+        speed_brighten: float_prop("speed_brighten")
+            .unwrap_or(AutoExposureConfig::default_speed_brighten()),
+        speed_darken: float_prop("speed_darken")
+            .unwrap_or(AutoExposureConfig::default_speed_darken()),
+        filter_low: float_prop("filter_low").unwrap_or(AutoExposureConfig::default_filter_low()),
+        filter_high: float_prop("filter_high").unwrap_or(AutoExposureConfig::default_filter_high()),
+        range_min: float_prop("range_min").unwrap_or(AutoExposureConfig::default_range_min()),
+        range_max: float_prop("range_max").unwrap_or(AutoExposureConfig::default_range_max()),
+    };
+
+    for (prop, value, min) in [
+        ("max_night_boost", config.max_night_boost, 0.0),
+        ("speed_brighten", config.speed_brighten, 0.0),
+        ("speed_darken", config.speed_darken, 0.0),
+    ] {
+        if value < min {
+            return Err(KdlSchematicError::InvalidValue {
+                property: prop.to_string(),
+                node: "auto_exposure".to_string(),
+                expected: "a non-negative number".to_string(),
+                src: src.to_string(),
+                span: ae_node.span(),
+            });
+        }
+    }
+
+    Ok(Some(config.clamp()))
 }
 
 fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -2667,6 +2882,92 @@ timeline follow_latest=#true {
     }
 
     #[test]
+    fn test_cinematic_viewport_requires_earth() {
+        let err = parse_schematic("viewport cinematic=#true").unwrap_err();
+        let KdlSchematicError::InvalidValue {
+            property, expected, ..
+        } = err
+        else {
+            panic!("expected InvalidValue, got {err:?}");
+        };
+        assert_eq!(property, "cinematic");
+        assert!(expected.contains("earth"), "{expected}");
+    }
+
+    #[test]
+    fn test_earth_requires_cinematic_viewport() {
+        let err = parse_schematic("environment { earth }").unwrap_err();
+        let KdlSchematicError::InvalidValue {
+            property, expected, ..
+        } = err
+        else {
+            panic!("expected InvalidValue, got {err:?}");
+        };
+        assert_eq!(property, "cinematic");
+        assert!(expected.contains("cinematic"), "{expected}");
+    }
+
+    #[test]
+    fn test_cinematic_rejects_hdr_mix() {
+        let kdl = r#"
+environment { earth }
+viewport name="cine" cinematic=#true
+viewport name="hdr" hdr=#true
+"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        let KdlSchematicError::InvalidValue {
+            property, expected, ..
+        } = err
+        else {
+            panic!("expected InvalidValue, got {err:?}");
+        };
+        assert_eq!(property, "hdr");
+        assert!(expected.contains("cinematic"), "{expected}");
+    }
+
+    #[test]
+    fn test_cinematic_rejects_two_cinematic_viewports() {
+        let kdl = r#"
+environment { earth }
+viewport name="a" cinematic=#true
+viewport name="b" cinematic=#true
+"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        let KdlSchematicError::InvalidValue { expected, .. } = err else {
+            panic!("expected InvalidValue, got {err:?}");
+        };
+        assert!(expected.contains("at most one"), "{expected}");
+    }
+
+    #[test]
+    fn test_earth_with_cinematic_and_regular_viewport() {
+        let kdl = r#"
+environment { earth }
+hsplit {
+    viewport name="cine" cinematic=#true
+    viewport name="aux"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        assert!(schematic.environment.unwrap().earth.is_some());
+        let SchematicElem::Panel(Panel::HSplit(split)) = &schematic.elems[0] else {
+            panic!("expected hsplit");
+        };
+        let Panel::Viewport(cine) = &split.panels[0] else {
+            panic!("expected cine viewport");
+        };
+        let Panel::Viewport(aux) = &split.panels[1] else {
+            panic!("expected aux viewport");
+        };
+        assert!(cine.cinematic);
+        assert!(!aux.cinematic);
+        assert!(!cine.hdr);
+        assert!(!aux.hdr);
+        assert!((cine.fov - CINEMATIC_VIEWPORT_FOV_DEG).abs() < f32::EPSILON);
+        assert!((aux.fov - DEFAULT_VIEWPORT_FOV_DEG).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_parse_viewport_show_frustums() {
         let kdl = r#"viewport show_frustums=#true"#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -3437,6 +3738,40 @@ viewport hdr=#true {
         assert!(serialized.contains("intensity=0.4"));
         assert!(serialized.contains("threshold=1.0"));
         assert!(serialized.contains("threshold_softness=0.2"));
+    }
+
+    #[test]
+    fn test_parse_viewport_auto_exposure() {
+        let kdl = r#"
+environment {
+    earth
+}
+viewport cinematic=#true {
+    auto_exposure enabled=#false max_night_boost=3.0 speed_brighten=1.5 speed_darken=8.0 filter_low=0.05 filter_high=0.8 range_min=-12.0 range_max=6.0
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport");
+        };
+        let ae = viewport
+            .auto_exposure
+            .as_ref()
+            .expect("expected auto_exposure");
+        assert!(!ae.enabled);
+        assert_eq!(ae.max_night_boost, 3.0);
+        assert_eq!(ae.speed_brighten, 1.5);
+        assert_eq!(ae.speed_darken, 8.0);
+        assert_eq!(ae.filter_low, 0.05);
+        assert_eq!(ae.filter_high, 0.8);
+        assert_eq!(ae.range_min, -12.0);
+        assert_eq!(ae.range_max, 6.0);
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(serialized.contains("auto_exposure"));
+        assert!(serialized.contains("enabled=#false") || serialized.contains("enabled=false"));
+        assert!(serialized.contains("max_night_boost=3"));
+        assert!(serialized.contains("speed_darken=8"));
     }
 
     #[test]

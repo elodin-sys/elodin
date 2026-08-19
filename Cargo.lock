@@ -2033,6 +2033,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "wgpu-types",
+ "zstd",
 ]
 
 [[package]]

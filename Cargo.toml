@@ -170,7 +170,7 @@ features = [
   "x11",
   "wayland",
   "debug",
-  "zstd_rust",
+  "zstd_c",
 ]
 
 # TODO: switch back to crates.io once big_space 0.13 is released for Bevy 0.19

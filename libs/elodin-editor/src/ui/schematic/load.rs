@@ -1115,7 +1115,7 @@ impl LoadSchematicParams<'_, '_> {
                     viewport,
                     label,
                 );
-                self.hdr_enabled.0 |= viewport.hdr;
+                self.hdr_enabled.0 |= viewport.hdr && !viewport.cinematic;
                 if let Some(camera) = pane.camera {
                     for arrow in viewport.local_arrows.clone() {
                         self.spawn_vector_arrow(arrow, Some(camera));
