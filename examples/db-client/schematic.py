@@ -1,18 +1,28 @@
-"""Rebuild examples/db-client/schematic.kdl via elodin.ui (Phase 1 G1)."""
+"""Rebuild examples/db-client/schematic.kdl via elodin.ui (Phases 1–2).
+
+Watch live::
+
+    elodin ui watch examples/db-client/schematic.py --db 127.0.0.1:2240
+"""
 
 from __future__ import annotations
 
 import elodin.ui as ui
+from elodin.ui import Expr
 
 
 def build() -> ui.Schematic:
+    # Typed expressions (Phase 2): still emit EQL strings into KDL.
+    world_pos = Expr("drone.world_pos")
+    chase_pos = world_pos + Expr("(0,0,0,0, 0.4, 0.4, 0.25)")
+
     return ui.schematic(
         ui.tabs(
             ui.hsplit(
                 ui.viewport(
                     name="Chase",
-                    pos="drone.world_pos + (0,0,0,0, 0.4, 0.4, 0.25)",
-                    look_at="drone.world_pos",
+                    pos=chase_pos,
+                    look_at=world_pos,
                     show_grid=True,
                     active=True,
                     share=0.55,
@@ -39,34 +49,23 @@ def build() -> ui.Schematic:
                 name="Status",
             ),
             ui.vsplit(
-                ui.graph("drone.world_pos", name="World pos (quaternion + xyz)"),
+                ui.graph(world_pos, name="World pos (quaternion + xyz)"),
                 ui.graph("drone.nav.speed", name="Ground speed (m/s)"),
                 name="Pose",
             ),
         ),
         ui.object_3d(
-            "drone.world_pos",
+            world_pos,
             mesh=ui.glb("crazyflie.glb", scale=0.7),
             animate=[
                 ui.joint(
-                    "Root.Propeller_0",
-                    rotation_vector="(0, drone.propeller_angle[0], 0)",
-                ),
-                ui.joint(
-                    "Root.Propeller_1",
-                    rotation_vector="(0, drone.propeller_angle[1], 0)",
-                ),
-                ui.joint(
-                    "Root.Propeller_2",
-                    rotation_vector="(0, drone.propeller_angle[2], 0)",
-                ),
-                ui.joint(
-                    "Root.Propeller_3",
-                    rotation_vector="(0, drone.propeller_angle[3], 0)",
-                ),
+                    f"Root.Propeller_{i}",
+                    rotation_vector=Expr(f"(0, drone.propeller_angle[{i}], 0)"),
+                )
+                for i in range(4)
             ],
         ),
-        ui.line_3d("drone.world_pos", line_width=2.0, color="yalk"),
+        ui.line_3d(world_pos, line_width=2.0, color="yalk"),
         coordinate=ui.coordinate(frame="ENU"),
         theme=ui.theme(mode="dark", scheme="default"),
         timeline=ui.timeline(),
