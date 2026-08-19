@@ -142,12 +142,13 @@ class DroneConfig:
 
     # --- Simulation Settings ---
 
-    # Physics simulation rate in Hz (8kHz for high-performance Betaflight PID loop)
+    # Physics/PID lockstep rate in Hz. 1kHz is the real-time default; higher
+    # rates may run slower than real time because each tick includes a UDP round trip.
     # simulation_rate: float = 8000.0  # 125µs
     # simulation_rate: float = 4000.0  # 250µs
-    simulation_rate: float = 2000.0  # 500µs
+    # simulation_rate: float = 2000.0  # 500µs
     # simulation_rate: float = 1500.0  # 667µs
-    # simulation_rate: float = 1000.0  # 1000µs
+    simulation_rate: float = 1000.0  # 1000µs
 
     # Total simulation time in seconds
     simulation_time: float = 15.0
@@ -159,10 +160,10 @@ class DroneConfig:
     # Based on Elodin Aleph flight controller hardware specifications.
     # See README.md "Sensor Simulation Rates" section for details.
 
-    # Gyroscope rate - drives PID loop (BMI270: 6.4kHz × 3 IMUs = ~19.2kHz effective)
-    gyro_rate: float = 8000.0  # Must match PID loop rate
+    # Gyroscope target rate (capped by the physics/PID rate)
+    gyro_rate: float = 8000.0  # Requested rate; capped by the physics/PID rate
 
-    # Accelerometer rate (BMI270: 1.6kHz × 3 IMUs = ~4.8kHz effective)
+    # Accelerometer target rate (capped by the physics/PID rate)
     accel_rate: float = 4800.0
 
     # Barometer rate (BMP581: up to 480Hz continuous mode)

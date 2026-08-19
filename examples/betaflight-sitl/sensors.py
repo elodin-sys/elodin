@@ -4,17 +4,17 @@ Sensor Simulation for Betaflight SITL
 This module simulates the IMU (Inertial Measurement Unit) and other sensors
 that provide data to Betaflight's flight controller algorithms.
 
-Sensor Models:
-- Gyroscope: Measures angular velocity in body frame (8 kHz - drives PID)
-- Accelerometer: Measures linear acceleration in body frame (4.8 kHz)
-- Barometer: Measures altitude via pressure (480 Hz)
-- Magnetometer: Measures heading reference (200 Hz)
+Sensor Models (configured targets; effective rates are capped by the physics rate):
+- Gyroscope: Measures angular velocity in body frame (8 kHz target, 1 kHz default)
+- Accelerometer: Measures linear acceleration in body frame (4.8 kHz target, 1 kHz default)
+- Barometer: Measures altitude via pressure (480 Hz target, 500 Hz default)
+- Magnetometer: Measures heading reference (200 Hz target and default)
 
 Multi-Rate Simulation:
-Sensors update at their realistic hardware rates based on Aleph flight controller
-specs (BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The simulation runs
-at 8kHz to match Betaflight's high-performance PID loop, but slower sensors
-only update at their native rates using tick decimation.
+Sensors request rates based on the Elodin Aleph flight controller hardware
+(BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The physics/PID lockstep
+runs at 1kHz by default, so faster sensor targets are capped at 1kHz and slower
+sensors use tick decimation.
 
 Noise Model (from proven drone example):
 - Gaussian measurement noise on each sample
@@ -93,7 +93,7 @@ class Noise:
 # Note: Betaflight's attitude estimator is sensitive to noise during the
 # bootgrace/calibration period. High noise causes attitude drift and
 # motor imbalance at liftoff.
-gyro_noise = Noise(0, 0, 0.01, 0.001)  # Gyro noise + bias drift
+gyro_noise = Noise(0, 0, 1e-7, 1e-8)  # Gyro noise + bias drift
 accel_noise = Noise(0, 1, 0.01, 0.001)  # Accel noise (no drift)
 baro_noise = Noise(0, 2, 0.01, 0.001)  # ~0.03m std dev
 mag_noise = Noise(0, 3, 0.01, 0.001)  # Magnetometer noise (very low)
@@ -296,8 +296,8 @@ def create_accel_system(config: DroneConfig):
     in body frame. Applies noise and bias when enabled.
     No filtering - Betaflight handles that.
 
-    Multi-rate: Updates at ~4.8kHz (BMI270 1.6kHz × 3 IMUs). Between updates,
-    the previous reading is held.
+    Multi-rate: Requests ~4.8kHz (BMI270 1.6kHz × 3 IMUs), capped by the
+    physics/PID rate. Between updates, the previous reading is held.
 
     Detects ground contact to correctly report +g when at rest (the ground
     constraint zeros velocity but doesn't add normal force to the Force component).
@@ -364,7 +364,7 @@ def create_accel_system(config: DroneConfig):
         """
         Compute accelerometer reading with multi-rate decimation.
 
-        Updates at accel_tick_interval (e.g., every 2 ticks for 4.8kHz at 8kHz PID).
+        Updates at accel_tick_interval, capped at one update per physics tick.
         Returns previous reading when not updating.
         """
         new_reading = _compute_accel_reading(tick, pos, vel, force, inertia, bias)
@@ -427,7 +427,7 @@ def create_baro_system(config: DroneConfig):
         """
         Compute barometer reading with multi-rate decimation.
 
-        Updates at baro_tick_interval (e.g., every 17 ticks for 480Hz at 8kHz PID).
+        Updates at baro_tick_interval (every 2 ticks at the default 1kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_baro_reading(tick, pos)
@@ -482,7 +482,7 @@ def create_mag_system(config: DroneConfig):
         """
         Compute magnetometer reading with multi-rate decimation.
 
-        Updates at mag_tick_interval (e.g., every 40 ticks for 200Hz at 8kHz PID).
+        Updates at mag_tick_interval (every 5 ticks at the default 1kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_mag_reading(tick, pos)
@@ -533,11 +533,11 @@ def create_sensor_system(config: DroneConfig) -> el.System:
     """
     Create the complete sensor system with multi-rate simulation.
 
-    Combines sensors at their realistic hardware rates:
-    - Gyroscope: 8 kHz (matches PID loop, driven by 3x BMI270)
-    - Accelerometer: 4.8 kHz (3x BMI270 @ 1.6 kHz each)
-    - Barometer: 480 Hz (BMP581 continuous mode)
-    - Magnetometer: 200 Hz (BMM350)
+    Combines sensors at their configured target rates, capped by the physics rate:
+    - Gyroscope: 8 kHz target (1 kHz at the default physics rate)
+    - Accelerometer: 4.8 kHz target (1 kHz at the default physics rate)
+    - Barometer: 480 Hz target (500 Hz after whole-tick rounding at 1 kHz)
+    - Magnetometer: 200 Hz target and effective rate
 
     Args:
         config: Drone configuration
