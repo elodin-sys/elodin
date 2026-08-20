@@ -96,6 +96,9 @@ const SUN_FLARE_GAIN: f32 = 3.0;
 #[derive(Component)]
 pub struct CinematicEarthRoot;
 
+#[derive(Component)]
+struct CinematicEarthEllipsoid;
+
 /// Star-sphere root, Earth-centered. ECEF-fixed galactic frame via [`sky_geo_rotation`].
 #[derive(Component)]
 struct CinematicSkyRoot;
@@ -528,14 +531,16 @@ fn sync_cinematic_earth(
             NoFrustumCulling,
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Name::new("earth model"),
-                WorldAssetRoot(assets.globe_scene.clone()),
-                // Polar axis is model Z; squash it to the WGS84 ellipsoid.
-                Transform::from_scale(Vec3::new(1.0, 1.0, WGS84_POLAR_SCALE)),
-                Visibility::default(),
-            ));
-            spawn_earth_emitters(parent, &assets);
+            parent
+                .spawn((
+                    CinematicEarthEllipsoid,
+                    Name::new("earth model"),
+                    WorldAssetRoot(assets.globe_scene.clone()),
+                    // Scale the model and Earth-attached effects together.
+                    Transform::from_scale(Vec3::new(1.0, 1.0, WGS84_POLAR_SCALE)),
+                    Visibility::default(),
+                ))
+                .with_children(|parent| spawn_earth_emitters(parent, &assets));
         });
 
     commands
@@ -580,7 +585,7 @@ fn sync_cinematic_earth(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct EarthLookEntities<'w, 's> {
-    earth_root: Query<'w, 's, Entity, With<CinematicEarthRoot>>,
+    ellipsoid: Query<'w, 's, Entity, With<CinematicEarthEllipsoid>>,
     sky_root: Query<'w, 's, Entity, With<CinematicSkyRoot>>,
     emitters: Query<'w, 's, Entity, With<CinematicParticleEmitter>>,
 }
@@ -597,7 +602,7 @@ fn sync_earth_look(
     let Some(earth) = environment.0.as_ref().and_then(|env| env.earth) else {
         return;
     };
-    let Ok(earth_root) = entities.earth_root.single() else {
+    let Ok(ellipsoid) = entities.ellipsoid.single() else {
         return;
     };
     let Ok(sky_root) = entities.sky_root.single() else {
@@ -621,7 +626,7 @@ fn sync_earth_look(
         commands.entity(entity).despawn();
     }
     commands
-        .entity(earth_root)
+        .entity(ellipsoid)
         .with_children(|parent| spawn_earth_emitters(parent, &assets));
     commands
         .entity(sky_root)
@@ -632,7 +637,7 @@ fn sync_earth_look(
 /// Tags asynchronously loaded globe meshes and disables limb-unsafe culling.
 #[derive(bevy::ecs::system::SystemParam)]
 struct GlobeMeshParams<'w, 's> {
-    roots: Query<'w, 's, Entity, With<CinematicEarthRoot>>,
+    roots: Query<'w, 's, Entity, With<CinematicEarthEllipsoid>>,
     children: Query<'w, 's, &'static Children>,
     names: Query<'w, 's, &'static Name>,
     untagged: Query<
@@ -643,33 +648,19 @@ struct GlobeMeshParams<'w, 's> {
     >,
     unculled: Query<'w, 's, Entity, (With<Mesh3d>, Without<NoFrustumCulling>)>,
     unlayered: Query<'w, 's, Entity, (With<Mesh3d>, Without<RenderLayers>)>,
-    globe_tags: Query<'w, 's, (), With<EarthGlobeMaterial>>,
-    cloud_tags: Query<'w, 's, (), With<EarthCloudsMaterial>>,
     assets: Option<Res<'w, CinematicEarthAssets>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     night_materials: ResMut<'w, Assets<EarthNightMaterial>>,
 }
 
-fn tag_globe_meshes(
-    mut meshes: GlobeMeshParams,
-    mut commands: Commands,
-    mut tagged_root: Local<Option<Entity>>,
-) {
+fn tag_globe_meshes(mut meshes: GlobeMeshParams, mut commands: Commands) {
     let Ok(root) = meshes.roots.single() else {
-        *tagged_root = None;
         return;
     };
-    if *tagged_root == Some(root) {
-        return;
-    }
     let Some(assets) = meshes.assets.as_deref() else {
         return;
     };
-    let mut globe_ready = false;
-    let mut clouds_ready = false;
     for descendant in meshes.children.iter_descendants(root) {
-        globe_ready |= meshes.globe_tags.contains(descendant);
-        clouds_ready |= meshes.cloud_tags.contains(descendant);
         if meshes.unculled.contains(descendant) {
             commands.entity(descendant).insert(NoFrustumCulling);
         }
@@ -694,7 +685,6 @@ fn tag_globe_meshes(
             material.base_color_texture = Some(assets.clouds.clone());
             material.alpha_mode = AlphaMode::Blend;
             commands.entity(descendant).insert(EarthCloudsMaterial);
-            clouds_ready = true;
         } else {
             let Some(mut base) = meshes.materials.get(&handle.0).cloned() else {
                 continue;
@@ -716,11 +706,7 @@ fn tag_globe_meshes(
                 .remove::<MeshMaterial3d<StandardMaterial>>()
                 .insert(MeshMaterial3d(night))
                 .insert(EarthGlobeMaterial);
-            globe_ready = true;
         }
-    }
-    if globe_ready && clouds_ready {
-        *tagged_root = Some(root);
     }
 }
 
@@ -861,7 +847,7 @@ fn apply_cinematic_earth(
     mut images: ResMut<Assets<Image>>,
     mut ae_curves: ResMut<Assets<AutoExposureCompensationCurve>>,
     mut ae_curve_cache: Local<AeCurveCache>,
-    earth: Query<&GlobalTransform, With<CinematicEarthRoot>>,
+    ellipsoid: Query<&GlobalTransform, With<CinematicEarthEllipsoid>>,
     sky: Query<&GlobalTransform, With<CinematicSkyRoot>>,
     mut cameras: Query<
         (
@@ -913,7 +899,7 @@ fn apply_cinematic_earth(
     let Some(assets) = assets else {
         return;
     };
-    let Ok(earth_gt) = earth.single() else {
+    let Ok(earth_gt) = ellipsoid.single() else {
         return;
     };
     let night_w = (1.0 - frame.sun_elevation.max(0.0)) * frame.space_vis;
@@ -1311,6 +1297,15 @@ mod tests {
             "{label}: got {got:?} expected {expect:?} (dot {})",
             got.dot(expect)
         );
+    }
+
+    #[test]
+    fn ellipsoid_scale_matches_wgs84_axes() {
+        let scale = Vec3::new(1.0, 1.0, WGS84_POLAR_SCALE);
+        let equator = (scale * (Vec3::X * effects::EARTH_R)).length();
+        let pole = (scale * (Vec3::Z * effects::EARTH_R)).length();
+        assert!((equator - effects::EARTH_R).abs() < 1.0);
+        assert!((pole - curves::WGS84_B_M as f32).abs() < 5.0);
     }
 
     #[test]
