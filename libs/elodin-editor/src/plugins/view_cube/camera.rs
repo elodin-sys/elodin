@@ -1710,6 +1710,147 @@ mod tests {
         );
     }
 
+    /// Per-viewport labels hang under the shared cube, so the cube's layer must
+    /// not be forced onto them — otherwise every viewport draws every copy.
+    #[test]
+    fn per_viewport_face_label_subtrees_keep_their_own_render_layers() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<WorldInstanceSpawner>();
+        app.add_systems(Update, apply_render_layers_to_scene);
+
+        let frame_layers = view_cube_render_layers(GeoFrame::ECEF);
+        let viewport_a = RenderLayers::layer(24);
+        let viewport_b = RenderLayers::layer(25);
+
+        let root = app
+            .world_mut()
+            .spawn((ViewCubeRoot, Visibility::Hidden, frame_layers.clone()))
+            .id();
+        let label_a = app
+            .world_mut()
+            .spawn((ChildOf(root), KeepsRenderLayers, viewport_a.clone()))
+            .id();
+        let glyph_a = app
+            .world_mut()
+            .spawn((ChildOf(label_a), RenderLayers::layer(0)))
+            .id();
+        let label_b = app
+            .world_mut()
+            .spawn((ChildOf(root), KeepsRenderLayers, viewport_b.clone()))
+            .id();
+        let glyph_b = app
+            .world_mut()
+            .spawn((ChildOf(label_b), RenderLayers::layer(0)))
+            .id();
+        let shared_axis = app
+            .world_mut()
+            .spawn((ChildOf(root), RenderLayers::layer(0)))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<RenderLayers>(label_a), Some(&viewport_a));
+        assert_eq!(app.world().get::<RenderLayers>(label_b), Some(&viewport_b));
+        assert_eq!(
+            app.world().get::<RenderLayers>(glyph_a),
+            Some(&viewport_a),
+            "glyphs follow their own label, not the shared cube",
+        );
+        assert_eq!(app.world().get::<RenderLayers>(glyph_b), Some(&viewport_b));
+        assert_eq!(
+            app.world().get::<RenderLayers>(shared_axis),
+            Some(&frame_layers),
+            "cube parts that are not per-viewport still take the frame layer",
+        );
+    }
+
+    /// Two viewports on the same frame share one cube, so each has to own its
+    /// copy of the labels and spin it for its own camera.
+    #[test]
+    fn two_viewports_sharing_a_cube_orient_their_own_labels() {
+        let geo = geo_frames_geo();
+        let cube = ecef_cube_rotation(&geo);
+        let label = ecef_face_label("+X");
+        let equator = camera_looking(Vec3::new(0.0, -8.0, 0.0), Vec3::Z);
+        let oblique = camera_looking(Vec3::new(4.6, -4.6, 4.6), Vec3::Z);
+
+        let mut app = App::new();
+        app.add_systems(Update, orient_face_labels_to_view);
+
+        let cube_root = app
+            .world_mut()
+            .spawn((
+                ViewCubeRoot,
+                GlobalTransform::from(Transform::from_rotation(cube)),
+            ))
+            .id();
+
+        let mut spawn_viewport_copy = |camera_rotation: Quat| {
+            let camera = app
+                .world_mut()
+                .spawn((
+                    ViewCubeCamera,
+                    GlobalTransform::from(Transform::from_rotation(camera_rotation)),
+                ))
+                .id();
+            app.world_mut()
+                .spawn((
+                    ChildOf(cube_root),
+                    FaceLabel {
+                        base_rotation: label.rotation,
+                        camera,
+                        last_angle: 0.0,
+                        last_view: None,
+                    },
+                    Transform::from_rotation(label.rotation),
+                ))
+                .id()
+        };
+        let label_equator = spawn_viewport_copy(equator);
+        let label_oblique = spawn_viewport_copy(oblique);
+
+        app.update();
+
+        for (entity, camera, name) in [
+            (label_equator, equator, "equator"),
+            (label_oblique, oblique, "oblique"),
+        ] {
+            let expected = face_label_in_plane_angle(label.rotation, cube, camera)
+                .unwrap_or_else(|| panic!("+X should be visible from the {name} camera"));
+            let solved = app.world().get::<FaceLabel>(entity).expect("label");
+            assert!(
+                (solved.last_angle - expected).abs() <= FACE_LABEL_ANGLE_EPS,
+                "{name} copy should be solved for its own camera, \
+                 got {} expected {expected}",
+                solved.last_angle,
+            );
+            let applied = app.world().get::<Transform>(entity).expect("transform");
+            let wanted = label.rotation * Quat::from_rotation_z(expected);
+            assert!(
+                applied.rotation.abs_diff_eq(wanted, 1.0e-5),
+                "{name} copy should carry its spin: applied={:?} wanted={wanted:?}",
+                applied.rotation,
+            );
+        }
+
+        let angle_equator = app
+            .world()
+            .get::<FaceLabel>(label_equator)
+            .expect("label")
+            .last_angle;
+        let angle_oblique = app
+            .world()
+            .get::<FaceLabel>(label_oblique)
+            .expect("label")
+            .last_angle;
+        assert!(
+            (angle_equator - angle_oblique).abs() > 1.0e-3,
+            "the two viewports look from different angles, so their labels \
+             must not end up sharing one orientation",
+        );
+    }
+
     #[test]
     fn view_cube_scene_root_is_revealed_after_scene_instance_is_ready() {
         let mut app = App::new();
