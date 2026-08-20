@@ -63,3 +63,7 @@ which `main.py` loads at startup.
 ```bash
 python examples/voyager/main.py run
 ```
+
+Chapter 2 (`python examples/voyager/chapter_2.py run`) subtracts each
+planet's acceleration of the Sun. Same kernels, masses, RK4, and
+timestep. It does not reproduce the gravity assists.

@@ -2025,12 +2025,15 @@ pub fn spawn_mesh(
             let scene = assets.load(&url);
 
             let translation = Vec3::new(translate.0, translate.1, translate.2);
-            let rotation = Quat::from_euler(
+            let kdl_rotate = Quat::from_euler(
                 EulerRot::XYZ,
                 rotate.0.to_radians(),
                 rotate.1.to_radians(),
                 rotate.2.to_radians(),
             );
+            // glTF is Y-up; schematic / WorldPos is Z-up. Same lift the
+            // viewport grid applies so `bevy_R * att` does not pitch the mesh.
+            let rotation = GeoRotation::y_up_to_schematic().as_quat() * kdl_rotate;
             let offset_transform = Transform {
                 translation,
                 rotation,
@@ -3026,6 +3029,20 @@ mod translate_body_frame_tests {
         assert!(
             (cam_delta_bevy - rendered_aft).length() < 1e-6,
             "ECEF Absolute mesh aft must match body translate: Δ={cam_delta_bevy:?}, aft={rendered_aft:?}"
+        );
+    }
+
+    #[test]
+    fn glb_y_up_child_cancels_enu_frame_basis() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
+
+        let ctx = GeoContext::default();
+        let parent = GeoRotation::relative(GeoFrame::ENU, DQuat::IDENTITY).to_bevy(&ctx);
+        let child = GeoRotation::y_up_to_schematic();
+        let world = parent * child;
+        assert!(
+            world.dot(DQuat::IDENTITY).abs() > 1.0 - 1e-9,
+            "identity-att GLB should sit level in ENU Bevy, got {world:?}"
         );
     }
 }

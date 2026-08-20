@@ -320,6 +320,25 @@ impl GeoRotation {
         GeoRotation(frame, r_frame * q.conjugate(), RotationKind::Relative)
     }
 
+    /// Bevy / glTF Y-up → schematic Z-up (ENU / body convention).
+    ///
+    /// Viewport grids and GLB children store this so a Z-up schematic/body
+    /// mesh stays level after `to_bevy`. Planar terrain should use
+    /// [`Self::y_up_level`]: `Rx(+π/2)` only cancels ENU `bevy_R`, so NED
+    /// heightfields would land with Bevy normal `-Y`.
+    pub fn y_up_to_schematic() -> DQuat {
+        DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2)
+    }
+
+    /// Local attitude that cancels `bevy_R` for a Y-up mesh (normal `+Y`).
+    ///
+    /// `to_bevy(absolute(frame, y_up_level(frame, ctx)))` is identity, so
+    /// planar heightfields and fallback grids stay a Bevy XZ plane in every
+    /// frame — not only ENU.
+    pub fn y_up_level(frame: GeoFrame, context: &GeoContext) -> DQuat {
+        DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)).conjugate()
+    }
+
     /// Convert orientation to Bevy.
     ///
     /// Both [`RotationKind`]s compose the local→frame attitude with the
@@ -747,6 +766,37 @@ mod tests {
                 b
             );
         };
+    }
+
+    #[test]
+    fn y_up_to_schematic_nets_identity_in_enu_plane() {
+        let ctx = dummy_ctx();
+        let q =
+            GeoRotation::absolute(GeoFrame::ENU, GeoRotation::y_up_to_schematic()).to_bevy(&ctx);
+        assert_quat_eq!(
+            q,
+            DQuat::IDENTITY,
+            "ENU Y-up asset should sit level in Bevy"
+        );
+    }
+
+    #[test]
+    fn y_up_level_nets_identity_in_every_plane_frame() {
+        let ctx = dummy_ctx();
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            let q =
+                GeoRotation::absolute(frame, GeoRotation::y_up_level(frame, &ctx)).to_bevy(&ctx);
+            assert_quat_eq!(
+                q,
+                DQuat::IDENTITY,
+                "{frame:?} Y-up surface should sit level in Bevy"
+            );
+        }
+        assert_quat_eq!(
+            GeoRotation::y_up_level(GeoFrame::ENU, &ctx),
+            GeoRotation::y_up_to_schematic(),
+            "ENU y_up_level is Rx(+π/2)"
+        );
     }
 
     #[test]
