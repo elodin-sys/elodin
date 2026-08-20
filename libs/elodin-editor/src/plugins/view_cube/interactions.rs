@@ -394,18 +394,15 @@ fn edge_interaction_context(
     root_query: &Query<Entity, With<ViewCubeRoot>>,
     main_camera: Entity,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
-    config: &ViewCubeConfig,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
+    _config: &ViewCubeConfig,
 ) -> Option<(Entity, EdgeInteractionContext)> {
     let root = find_root_ancestor(target, parents_query, root_query)?;
     let camera_global = camera_globals.get(main_camera).ok()?;
+    let cube_global = root_globals.get(root).ok()?;
 
-    let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
-    let cube_rotation = if config.sync_with_camera {
-        cam_rotation.conjugate() * config.axis_correction
-    } else {
-        Quat::IDENTITY
-    };
-    let camera_dir_cube = cube_rotation.inverse() * Vec3::Z;
+    let camera_dir_cube =
+        super::camera::camera_dir_in_cube_local(cube_global.rotation(), camera_global.rotation());
     let (front_face, front_dot) = front_face(camera_dir_cube);
 
     Some((
@@ -704,6 +701,7 @@ fn compute_hover_targets(
     parents_query: &Query<&ChildOf>,
     root_query: &Query<Entity, With<ViewCubeRoot>>,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
 ) -> Vec<Entity> {
     let Ok((_, element)) = cube_elements.get(target) else {
@@ -718,6 +716,7 @@ fn compute_hover_targets(
                 root_query,
                 main_camera,
                 camera_globals,
+                root_globals,
                 config,
             ) else {
                 return vec![];
@@ -858,6 +857,7 @@ pub fn on_cube_hover_start(
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
     camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: Res<ViewCubeConfig>,
     children_query: Query<&Children>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
@@ -888,6 +888,7 @@ pub fn on_cube_hover_start(
         &parents_query,
         &root_query,
         &camera_globals,
+        &root_globals,
         &config,
     );
 
@@ -1013,6 +1014,7 @@ fn frame_hover_swap_target(
     main_camera: Entity,
     overlay_camera: Entity,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
 ) -> Option<(FaceDirection, Entity)> {
     if !hovered.entities.contains(&target_entity) {
@@ -1035,6 +1037,7 @@ fn frame_hover_swap_target(
         root_query,
         main_camera,
         camera_globals,
+        root_globals,
         config,
     )?;
     if !is_face_on(context) {
@@ -1130,6 +1133,7 @@ pub fn on_cube_click(
                 main_camera,
                 source,
                 &lookup.camera_globals,
+                &lookup.root_globals,
                 &lookup.config,
             ) {
                 events.write(ViewCubeEvent::FaceClicked { direction, source });
@@ -1142,6 +1146,7 @@ pub fn on_cube_click(
                 &lookup.root_query,
                 main_camera,
                 &lookup.camera_globals,
+                &lookup.root_globals,
                 &lookup.config,
             ) else {
                 return;

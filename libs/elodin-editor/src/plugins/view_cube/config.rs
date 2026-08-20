@@ -34,13 +34,11 @@ pub struct AxisDefinition {
 impl CoordinateSystem {
     /// Get the three axis definitions for XYZ in this coordinate system.
     pub fn get_axes(&self) -> [AxisDefinition; 3] {
+        // Directions are frame-local cube axes. `GeoRotation::absolute`
+        // on the mesh root is what places them in Bevy.
         match self.0 {
             GeoFrame::ENU =>
-            // ENU mapped to Bevy's Y-up coordinate system:
-            // East (red)    -> Bevy +X
-            // North (green) -> Bevy -Z
-            // Up (blue)     -> Bevy +Y
-            // See: https://docs.elodin.systems/reference/coords/
+            // East / North / Up on cube +X / +Y / +Z.
             {
                 [
                     AxisDefinition {
@@ -53,54 +51,48 @@ impl CoordinateSystem {
                     AxisDefinition {
                         positive_label: "N",
                         negative_label: "S",
-                        direction: Vec3::NEG_Z,
+                        direction: Vec3::Y,
                         color: Color::srgb(0.2, 0.8, 0.2), // Green
                         color_dim: Color::srgb(0.15, 0.5, 0.15),
                     },
                     AxisDefinition {
                         positive_label: "U",
                         negative_label: "D",
-                        direction: Vec3::Y,
+                        direction: Vec3::Z,
                         color: Color::srgb(0.2, 0.4, 0.9), // Blue
                         color_dim: Color::srgb(0.15, 0.3, 0.6),
                     },
                 ]
             }
             GeoFrame::NED =>
-            // NED mapped to Bevy's Y-up coordinate system:
-            // North (red)  -> Bevy -Z
-            // East (green) -> Bevy +X
-            // Down (blue)  -> Bevy -Y
+            // North / East / Down on cube +X / +Y / +Z.
             {
                 [
                     AxisDefinition {
                         positive_label: "N",
                         negative_label: "S",
-                        direction: Vec3::NEG_Z,
+                        direction: Vec3::X,
                         color: Color::srgb(0.9, 0.2, 0.2), // Red
                         color_dim: Color::srgb(0.6, 0.15, 0.15),
                     },
                     AxisDefinition {
                         positive_label: "E",
                         negative_label: "W",
-                        direction: Vec3::X,
+                        direction: Vec3::Y,
                         color: Color::srgb(0.2, 0.8, 0.2), // Green
                         color_dim: Color::srgb(0.15, 0.5, 0.15),
                     },
                     AxisDefinition {
                         positive_label: "D",
                         negative_label: "U",
-                        direction: Vec3::NEG_Y,
+                        direction: Vec3::Z,
                         color: Color::srgb(0.2, 0.4, 0.9), // Blue
                         color_dim: Color::srgb(0.15, 0.3, 0.6),
                     },
                 ]
             }
             GeoFrame::ECEF =>
-            // NED mapped to Bevy's Y-up coordinate system:
-            // North (red)  -> Bevy -Z
-            // East (green) -> Bevy +X
-            // Down (blue)  -> Bevy -Y
+            // ECEF +X / +Y / +Z on cube +X / +Y / +Z.
             {
                 [
                     AxisDefinition {
@@ -260,20 +252,20 @@ mod tests {
     }
 
     #[test]
-    fn enu_face_labels_keep_semantic_direction_and_flip_east_west_visual_side() {
+    fn enu_face_labels_sit_on_frame_local_axes() {
         let labels = CoordinateSystem(GeoFrame::ENU).get_face_labels(1.0);
 
         let east = label_by_text(&labels, "E");
         let west = label_by_text(&labels, "W");
+        let north = label_by_text(&labels, "N");
         let up = label_by_text(&labels, "U");
-        let south = label_by_text(&labels, "S");
 
         assert_eq!(east.direction, FaceDirection::East);
         assert_eq!(west.direction, FaceDirection::West);
         assert_eq!(east.position, Vec3::X);
         assert_eq!(west.position, Vec3::NEG_X);
-        assert_eq!(up.position, Vec3::Y);
-        assert_eq!(south.position, Vec3::Z);
+        assert_eq!(north.position, Vec3::Y);
+        assert_eq!(up.position, Vec3::Z);
     }
 
     #[test]
