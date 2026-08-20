@@ -4,7 +4,7 @@ use bevy::{
     pbr::wireframe::{Wireframe, WireframeColor},
     prelude::*,
 };
-use bevy_geo_frames::{GeoPosition, GeoRotation, OrDefault};
+use bevy_geo_frames::{GeoContext, GeoPosition, GeoRotation, OrDefault};
 use bevy_world_mesh::prelude::WorldMeshPlugin as BevyWorldMeshRendererPlugin;
 use bevy_world_mesh::terrain::{
     math::TerrainModel,
@@ -79,6 +79,7 @@ pub(crate) fn spawn_world_mesh_terrain(
     materials: &mut Assets<StandardMaterial>,
     world_mesh_materials: &mut Assets<bevy_world_mesh::prelude::WorldMeshMaterial>,
     world_mesh: &impeller2_wkt::WorldMesh,
+    geo_context: &GeoContext,
 ) -> Entity {
     let region = world_mesh.region.clone();
     let config = if region == "globe" {
@@ -109,11 +110,18 @@ pub(crate) fn spawn_world_mesh_terrain(
                 world_mesh,
                 &region,
                 region != "globe",
+                geo_context,
             )
         }
-        WorldMeshConfig::Fallback(fallback) => {
-            spawn_world_mesh_fallback(commands, meshes, materials, world_mesh, &region, fallback)
-        }
+        WorldMeshConfig::Fallback(fallback) => spawn_world_mesh_fallback(
+            commands,
+            meshes,
+            materials,
+            world_mesh,
+            &region,
+            fallback,
+            geo_context,
+        ),
     }
 }
 
@@ -134,6 +142,7 @@ fn spawn_world_mesh_terrain_bundle(
     world_mesh: &impeller2_wkt::WorldMesh,
     region: &str,
     y_up_surface: bool,
+    geo_context: &GeoContext,
 ) -> Entity {
     let anchor = commands
         .spawn((
@@ -152,7 +161,7 @@ fn spawn_world_mesh_terrain_bundle(
         Name::new(format!("world_mesh terrain renderer ({region})")),
     ));
 
-    insert_geo_components(commands, anchor, world_mesh, y_up_surface);
+    insert_geo_components(commands, anchor, world_mesh, y_up_surface, geo_context);
     insert_big_space_cell(commands, anchor);
     anchor
 }
@@ -177,15 +186,17 @@ fn insert_geo_components(
     entity: Entity,
     world_mesh: &impeller2_wkt::WorldMesh,
     y_up_surface: bool,
+    geo_context: &GeoContext,
 ) {
     let Some(frame) = world_mesh.frame.or_default() else {
         return;
     };
     let (x, y, z) = world_mesh.translate.unwrap_or_default();
     // Planar heightfields are Bevy Y-up (normal +Y), same as InfiniteGrid.
-    // Lift them to schematic Z-up so `to_bevy` leaves the ground horizontal.
+    // Cancel `bevy_R` so `to_bevy` leaves the ground a Bevy XZ plane in
+    // every frame — `y_up_to_schematic` only cancels ENU.
     let att = if y_up_surface {
-        GeoRotation::y_up_to_schematic()
+        GeoRotation::y_up_level(frame, geo_context)
     } else {
         DQuat::IDENTITY
     };
@@ -397,6 +408,7 @@ fn spawn_world_mesh_fallback(
     world_mesh: &impeller2_wkt::WorldMesh,
     region: &str,
     fallback: WorldMeshFallback,
+    geo_context: &GeoContext,
 ) -> Entity {
     let entity = match fallback {
         WorldMeshFallback::PlanarGrid => spawn_planar_fallback_grid(commands, world_mesh, region),
@@ -410,6 +422,7 @@ fn spawn_world_mesh_fallback(
         entity,
         world_mesh,
         matches!(fallback, WorldMeshFallback::PlanarGrid),
+        geo_context,
     );
     insert_big_space_cell(commands, entity);
     entity
@@ -662,6 +675,20 @@ mod tests {
     }
 
     #[test]
+    fn planar_ned_anchor_stays_level_in_bevy() {
+        let (mut app, anchor, _) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::NED), None),
+        );
+        apply_geo_transforms(&mut app);
+        let rotation = app.world().get::<Transform>(anchor).unwrap().rotation;
+        assert!(
+            rotation.dot(Quat::IDENTITY).abs() > 1.0 - 1e-5,
+            "planar NED terrain should sit level in Bevy, got {rotation:?}"
+        );
+    }
+
+    #[test]
     fn framed_world_mesh_anchor_stays_at_origin_for_geo_pipeline() {
         let world_mesh = world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0)));
 
@@ -694,6 +721,7 @@ mod tests {
                 &world_mesh,
                 &world_mesh.region,
                 true,
+                &GeoContext::default(),
             )
         };
         app.world_mut().flush();
