@@ -1,4 +1,3 @@
-use convert_case::Casing;
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
@@ -59,6 +58,7 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 pub mod append_log;
 mod arrow;
 pub use arrow::sanitize_sql_table_name;
+pub use eql::sql_table_name;
 #[cfg(feature = "axum")]
 pub mod assets;
 #[cfg(feature = "axum")]
@@ -2413,9 +2413,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     else {
                         continue;
                     };
-                    let component_name = crate::arrow::sanitize_sql_table_name(
-                        &component_metadata.name.to_case(convert_case::Case::Snake),
-                    );
+                    let component_name = eql::sql_table_name(&component_metadata.name);
 
                     if component_name == table_name {
                         // Get the raw data as byte slices

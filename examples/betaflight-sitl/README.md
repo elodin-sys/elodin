@@ -12,8 +12,8 @@ The simulation provides:
 - **6-DOF Physics**: Rigid body dynamics with motor thrust, drag, and gravity
 - **Betaflight Integration**: Real Betaflight flight controller running as SITL
 - **UDP Communication**: Bidirectional sensor/motor data exchange
-- **8kHz PID Loop**: High-performance control matching Betaflight's fastest rate
-- **Multi-Rate Sensors**: Realistic sensor update rates (gyro 8kHz, accel 4.8kHz, baro 480Hz, mag 200Hz)
+- **1kHz Lockstep Loop**: Real-time physics and Betaflight PID updates by default
+- **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
 
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
@@ -61,6 +61,15 @@ This compiles the Betaflight firmware for SITL mode. The binary will be at:
 **IMPORTANT**: Before running the simulation, you must configure an ARM switch in Betaflight.
 This only needs to be done once - the config is saved to `eeprom.bin`.
 
+Run the initialization script from the repository root:
+
+```bash
+./examples/betaflight-sitl/init_eeprom.py
+```
+
+It starts SITL, sends the CLI commands, saves `eeprom.bin`, then restarts SITL
+and verifies the persisted settings. To do the same setup manually:
+
 1. **Start SITL** (in terminal 1):
    ```bash
    ./betaflight/obj/main/betaflight_SITL.elf
@@ -76,7 +85,7 @@ This only needs to be done once - the config is saved to `eeprom.bin`.
    screen /tmp/bf
    ```
 
-3. **Configure Betaflight for 8kHz operation** (in screen session):
+3. **Configure arming and full-rate PID processing** (in screen session):
    ```
    #
    status
@@ -84,14 +93,15 @@ This only needs to be done once - the config is saved to `eeprom.bin`.
    # Configure ARM switch (AUX1 channel, activated when > 1700)
    aux 0 0 0 1700 2100 0 0
    
-   # Configure 8kHz gyro/PID loop rate
+   # Process every available gyro/PID update
    set gyro_hardware_lpf = NORMAL
    set pid_process_denom = 1
    
    save
    ```
    
-   This sets ARM mode on AUX1 channel and configures Betaflight for 8kHz PID loop operation.
+   This configures ARM on AUX1 and processes every lockstep update. The actual
+   lockstep rate is set by `simulation_rate` (1kHz by default).
 
 4. **Exit screen**: Press `Ctrl+A` then `K` then `Y`
 
@@ -152,6 +162,7 @@ Phase 3: Raising throttle...
 ```
 examples/betaflight-sitl/
 ├── build.sh           # Build script for Betaflight SITL
+├── init_eeprom.py     # Create and configure eeprom.bin
 ├── main.py            # Main simulation entry point
 ├── config.py          # Drone physical parameters
 ├── sim.py             # Physics simulation systems
@@ -263,11 +274,11 @@ DroneConfig(
     arm_length=0.12,             # meters
     motor_max_thrust=15.0,       # Newtons per motor
     motor_time_constant=0.02,    # seconds
-    simulation_rate=8000.0,      # 8kHz physics (matches Betaflight PID)
+    simulation_rate=1000.0,      # 1kHz physics/PID lockstep
     sensor_noise=True,           # Enable realistic sensor noise
-    # Sensor rates (Aleph hardware defaults)
-    gyro_rate=8000.0,            # 8kHz (BMI270 3x IMU)
-    accel_rate=4800.0,           # 4.8kHz (BMI270 3x IMU)
+    # Requested sensor rates (capped by the simulation rate)
+    gyro_rate=8000.0,            # Effective rate is 1kHz by default
+    accel_rate=4800.0,           # Effective rate is 1kHz by default
     baro_rate=480.0,             # 480Hz (BMP581)
     mag_rate=200.0,              # 200Hz (BMM350)
 )
@@ -285,9 +296,11 @@ The simulation includes a realistic sensor noise model based on the proven drone
 - **Accelerometer**: Gaussian noise
 - **Barometer**: Gaussian noise (~0.03m std dev)
 
-Noise levels are tuned for SITL stability (1e-7 covariance). Higher noise levels
-can cause Betaflight's attitude estimator to drift during the bootgrace period,
-leading to motor imbalance at liftoff.
+The gyro uses `1e-7 (rad/s)²` measurement covariance and `1e-8` bias-drift
+covariance. The measurement covariance corresponds to approximately
+`0.000316 rad/s` (`0.018 deg/s`) RMS noise per sample. This matches the
+original example's recommended stable SITL setting while keeping sensor noise
+enabled. Higher gyro noise can produce motor imbalance or destabilize liftoff.
 
 ### Ground Physics
 
@@ -334,11 +347,11 @@ sequenceDiagram
 
 #### 1. Betaflight Build with GYROPID_SYNC
 
-Modify [build.sh](examples/betaflight-sitl/build.sh) to enable lockstep mode:
+[build.sh](build.sh) enables lockstep mode through Betaflight's `OPTIONS`
+make variable without modifying the submodule:
 
-```c
-// In target.h - uncomment this line:
-#define SIMULATOR_GYROPID_SYNC
+```bash
+make TARGET=SITL OPTIONS=SIMULATOR_GYROPID_SYNC
 ```
 
 When enabled, Betaflight's main loop blocks on a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
@@ -515,11 +528,11 @@ lsof -i :5761
 
 ### Performance
 
-**Simulation too slow**: The simulation runs at 8kHz by default to match Betaflight's
-high-performance PID loop. For optimal performance:
-- `simulation_rate = 8000.0` (8kHz) is the default
-- Ensure sufficient CPU for both Elodin and Betaflight
-- 8kHz produces ~160,000 ticks for a 20-second simulation
+**Simulation too slow**: The default `simulation_rate = 1000.0` gives the
+Python/UDP lockstep bridge a 1ms budget per tick and is intended to run in real
+time on typical hosts. Higher rates remain available but may run slower than
+real time because every tick includes DB access and a synchronous Betaflight
+UDP round trip. The default 15-second run produces 15,000 simulation ticks.
 
 ## Development
 
@@ -552,19 +565,24 @@ This simulation models realistic sensor update rates based on the Elodin Aleph f
 controller hardware. Different sensors update at different frequencies within the
 high-rate physics/PID loop.
 
-### Default Rates (Aleph Hardware)
+### Configured and Effective Rates
 
-| Sensor | Hardware | Rate | Datasheet |
-|--------|----------|------|-----------|
-| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
-| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
-| Barometer | BMP581 | 480 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
-| Magnetometer | BMM350 | 200 Hz | [bst-bmm350-ds001.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmm350-ds001.pdf) |
+Configured sensor rates represent hardware targets. A sensor cannot update more
+than once per physics tick, so its effective rate is capped by the 1kHz default
+simulation rate and rounded to a whole number of ticks.
+
+| Sensor | Hardware | Configured rate | Effective default rate | Datasheet |
+|--------|----------|-----------------|------------------------|-----------|
+| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | 1 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | 1 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Barometer | BMP581 | 480 Hz | 500 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
+| Magnetometer | BMM350 | 200 Hz | 200 Hz | [bst-bmm350-ds001.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmm350-ds001.pdf) |
 
 ### Why Multi-Rate?
 
-Real sensors don't all sample at the same frequency. The PID loop runs at 8kHz driven
-by gyroscope data, but other sensors update less frequently:
+Real sensors don't all sample at the same frequency. The physics/PID lockstep
+runs at 1kHz by default. Gyroscope and accelerometer targets above that rate are
+therefore capped at 1kHz, while slower sensors update less frequently:
 
 - **Gyroscope (8 kHz)**: Drives the PID loop. The BMI270 supports up to 6.4 kHz per
   sensor; with 3 IMUs running with timing offsets, effective rate exceeds 8 kHz.
@@ -576,11 +594,11 @@ by gyroscope data, but other sensors update less frequently:
 
 ### How It Works
 
-The simulation uses tick decimation with `jax.lax.cond` to update sensors at their
-native rates while the physics/PID loop runs at 8kHz:
+The simulation uses tick decimation with `jax.lax.cond` to approximate requested
+sensor rates using whole physics ticks:
 
 ```python
-tick_interval = round(PID_RATE / SENSOR_RATE)
+tick_interval = max(1, round(PID_RATE / SENSOR_RATE))
 
 # Sensor updates only when tick is divisible by interval
 sensor_out = jax.lax.cond(
@@ -591,8 +609,8 @@ sensor_out = jax.lax.cond(
 )
 ```
 
-For example, with 8 kHz PID and 200 Hz magnetometer: `tick_interval = 40`
-(magnetometer updates every 40th physics tick).
+For example, with the default 1kHz PID rate and a 200Hz magnetometer,
+`tick_interval = 5` (the magnetometer updates every fifth physics tick).
 
 ### Customizing for Different Hardware
 
@@ -603,7 +621,7 @@ DroneConfig(
     # ... other parameters ...
     
     # Sensor update rates (Hz)
-    gyro_rate=8000.0,    # Must match PID loop rate
+    gyro_rate=8000.0,    # Requested rate; capped by the PID rate
     accel_rate=4800.0,   # BMI270: 1.6kHz × 3 IMUs
     baro_rate=480.0,     # BMP581 continuous mode
     mag_rate=200.0,      # BMM350

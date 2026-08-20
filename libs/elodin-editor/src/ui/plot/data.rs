@@ -830,22 +830,27 @@ fn collect_object_3d_mesh_component_ids(
     eql_ctx: &EqlContext,
     out: &mut HashSet<ComponentId>,
 ) {
-    let impeller2_wkt::Object3DMesh::Ellipsoid {
-        scale,
-        error_covariance_cholesky,
-        error_covariance,
-        ..
-    } = mesh
-    else {
-        return;
-    };
-
-    if let Some(cholesky) = error_covariance_cholesky {
-        collect_eql_component_ids(cholesky, eql_ctx, out);
-    } else if let Some(covariance) = error_covariance {
-        collect_eql_component_ids(covariance, eql_ctx, out);
-    } else {
-        collect_eql_component_ids(scale, eql_ctx, out);
+    match mesh {
+        impeller2_wkt::Object3DMesh::Glb { animations, .. } => {
+            for anim in animations {
+                collect_eql_component_ids(&anim.eql_expr, eql_ctx, out);
+            }
+        }
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky,
+            error_covariance,
+            ..
+        } => {
+            if let Some(cholesky) = error_covariance_cholesky {
+                collect_eql_component_ids(cholesky, eql_ctx, out);
+            } else if let Some(covariance) = error_covariance {
+                collect_eql_component_ids(covariance, eql_ctx, out);
+            } else {
+                collect_eql_component_ids(scale, eql_ctx, out);
+            }
+        }
+        impeller2_wkt::Object3DMesh::Mesh { .. } => {}
     }
 }
 
@@ -1170,6 +1175,39 @@ impl XYLine {
         }
     }
 
+    pub fn gpu_resident(&self) -> bool {
+        self.x_shard_alloc.is_some() || self.y_shard_alloc.is_some()
+    }
+
+    pub fn unload_gpu(&mut self) {
+        if !self.gpu_resident() {
+            return;
+        }
+        for buf in &self.x_values {
+            buf.release_gpu();
+        }
+        for buf in &self.y_values {
+            buf.release_gpu();
+        }
+        self.x_shard_alloc = None;
+        self.y_shard_alloc = None;
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&self) {
+        for buf in self.x_values.iter().chain(self.y_values.iter()) {
+            buf.mark_gpu_clean();
+        }
+    }
+
+    #[cfg(test)]
+    fn all_gpu_dirty(&self) -> bool {
+        self.x_values
+            .iter()
+            .chain(self.y_values.iter())
+            .all(|buf| buf.gpu_is_dirty())
+    }
+
     pub fn write_to_index_buffer(
         &mut self,
         index_buffer: &Buffer,
@@ -1300,6 +1338,21 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
 impl<T, const N: usize> SharedBuffer<T, N> {
     pub fn cpu(&self) -> &[T] {
         &self.cpu
+    }
+
+    fn release_gpu(&self) {
+        let _ = self.gpu.lock().take();
+        self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn gpu_is_dirty(&self) -> bool {
+        self.gpu_dirty.load(atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&self) {
+        self.gpu_dirty.store(false, atomic::Ordering::SeqCst);
     }
 }
 
@@ -2083,6 +2136,37 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         }
         self.clear_raw();
     }
+
+    pub fn gpu_resident(&self) -> bool {
+        self.data_buffer_shard_alloc.is_some() || self.timestamp_buffer_shard_alloc.is_some()
+    }
+
+    pub fn unload_gpu(&mut self) {
+        if !self.gpu_resident() {
+            return;
+        }
+        for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+            chunk.data.release_gpu();
+            chunk.timestamps_float.release_gpu();
+        }
+        self.data_buffer_shard_alloc = None;
+        self.timestamp_buffer_shard_alloc = None;
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&mut self) {
+        for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+            chunk.data.mark_gpu_clean();
+            chunk.timestamps_float.mark_gpu_clean();
+        }
+    }
+
+    #[cfg(test)]
+    fn all_gpu_dirty(&self) -> bool {
+        self.tree
+            .iter()
+            .all(|(_, chunk)| chunk.data.gpu_is_dirty() && chunk.timestamps_float.gpu_is_dirty())
+    }
 }
 
 fn release_line_chunk_gpu(
@@ -2516,6 +2600,62 @@ mod tests {
         ids.clear();
         collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
         assert_eq!(ids, [ComponentId::new("shape.scale")].into_iter().collect());
+    }
+
+    #[test]
+    fn glb_joint_animation_eql_components_are_allowlisted() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+        use impeller2_wkt::{JointAnimation, Object3DMesh};
+
+        let components = [
+            "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
+            "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+        ]
+        .map(|name| {
+            Arc::new(eql::Component::new(
+                name.to_string(),
+                ComponentId::new(name),
+                Schema::new(PrimType::F64, vec![4_u64]).expect("valid schema"),
+            ))
+        });
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            components,
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mesh = Object3DMesh::Glb {
+            path: "models/fins.glb".into(),
+            scale: 1.0,
+            translate: (0.0, 0.0, 0.0),
+            rotate: (0.0, 0.0, 0.0),
+            animations: vec![
+                JointAnimation {
+                    joint_name: "Root.Fin_3".into(),
+                    eql_expr:
+                        "(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+                            .into(),
+                },
+                JointAnimation {
+                    joint_name: "FinGhost_0".into(),
+                    eql_expr: "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)".into(),
+                },
+            ],
+            emissivity: 0.0,
+            glow: 0.0,
+            glow_color: None,
+        };
+
+        let mut ids = HashSet::new();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert!(
+            ids.contains(&ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")),
+            "missing motor position, ids={ids:?}"
+        );
+        assert!(
+            ids.contains(&ComponentId::new("CONTROLMESSAGE.FIN_DEFLECTION_DEG")),
+            "missing ghost deflection, ids={ids:?}"
+        );
     }
 
     #[test]
@@ -3160,6 +3300,114 @@ mod tests {
         }
         // Timestamp(i64) = 8 bytes + f32 = 4 bytes => 12 bytes per sample.
         assert_eq!(tree.raw_archive_bytes(), 1_000 * 12);
+    }
+
+    #[test]
+    fn unload_gpu_is_noop_when_already_cleared() {
+        let mut tree = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        tree.insert(chunk);
+        tree.mark_gpu_clean();
+        assert!(!tree.all_gpu_dirty());
+        assert!(!tree.gpu_resident());
+
+        tree.unload_gpu();
+        assert!(!tree.all_gpu_dirty());
+        assert!(!tree.gpu_resident());
+    }
+
+    #[test]
+    fn xy_unload_gpu_is_noop_when_already_cleared() {
+        let mut xy = XYLine::default();
+        xy.push_x_value(1.0);
+        xy.push_y_value(2.0);
+        xy.mark_gpu_clean();
+        assert!(!xy.all_gpu_dirty());
+        assert!(!xy.gpu_resident());
+
+        xy.unload_gpu();
+        assert!(!xy.all_gpu_dirty());
+        assert!(!xy.gpu_resident());
+    }
+
+    #[test]
+    fn shared_line_stays_loaded_while_any_pane_is_on_screen() {
+        use crate::ui::plot::gpu::{
+            LineHandle, unload_plot_gpu_not_on_screen, visible_plot_gpu_asset_ids,
+        };
+
+        let mut lines = Assets::<Line>::default();
+        let mut xy_lines = Assets::<XYLine>::default();
+        let handle = lines.add(Line::default());
+        {
+            let mut line = lines.get_mut(&handle).expect("line");
+            let chunk = Chunk::from_iter(
+                &[Timestamp(1), Timestamp(2)],
+                Timestamp(0),
+                [0.0_f32, 1.0_f32].into_iter(),
+            )
+            .expect("chunk");
+            line.data.insert(chunk);
+            line.data.mark_gpu_clean();
+        }
+
+        let a = LineHandle::Timeseries(handle.clone());
+        let b = LineHandle::Timeseries(handle.clone());
+        let cases = [
+            (true, false, true),
+            (false, true, true),
+            (true, true, true),
+            (false, false, false),
+        ];
+        for (a_on, b_on, expect_visible) in cases {
+            lines.get_mut(&handle).expect("line").data.mark_gpu_clean();
+            let (visible_ts, visible_xy) = visible_plot_gpu_asset_ids([(&a, a_on), (&b, b_on)]);
+            assert_eq!(
+                visible_ts.contains(&handle.id()),
+                expect_visible,
+                "a_on={a_on} b_on={b_on} expect_visible={expect_visible}"
+            );
+            unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &visible_ts, &visible_xy);
+            // No shard allocs ⇒ already cleared; must not walk/lock or dirty shards.
+            assert!(!lines.get(&handle).expect("line").data.all_gpu_dirty());
+            assert!(!lines.get(&handle).expect("line").data.gpu_resident());
+        }
+    }
+
+    #[test]
+    fn unload_plot_gpu_skips_already_cleared_assets() {
+        use crate::ui::plot::gpu::unload_plot_gpu_not_on_screen;
+
+        let mut lines = Assets::<Line>::default();
+        let mut xy_lines = Assets::<XYLine>::default();
+        let ts = lines.add(Line::default());
+        let xy = xy_lines.add(XYLine::default());
+        {
+            let mut line = lines.get_mut(&ts).expect("line");
+            let chunk = Chunk::from_iter(
+                &[Timestamp(1), Timestamp(2)],
+                Timestamp(0),
+                [0.0_f32, 1.0_f32].into_iter(),
+            )
+            .expect("chunk");
+            line.data.insert(chunk);
+            line.data.mark_gpu_clean();
+        }
+        {
+            let mut xy_line = xy_lines.get_mut(&xy).expect("xy");
+            xy_line.push_x_value(1.0);
+            xy_line.push_y_value(2.0);
+            xy_line.mark_gpu_clean();
+        }
+
+        unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &HashSet::new(), &HashSet::new());
+        assert!(!lines.get(&ts).expect("line").data.all_gpu_dirty());
+        assert!(!xy_lines.get(&xy).expect("xy").all_gpu_dirty());
     }
 }
 

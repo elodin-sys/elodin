@@ -1889,9 +1889,18 @@ impl ViewportPane {
             };
         };
 
-        commands
-            .entity(camera)
-            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
+        commands.entity(camera).insert(ViewCubeTargetCamera);
+        let has_kdl_pose = viewport
+            .pos
+            .as_ref()
+            .is_some_and(|eql| !eql.trim().is_empty())
+            || viewport
+                .look_at
+                .as_ref()
+                .is_some_and(|eql| !eql.trim().is_empty());
+        if !has_kdl_pose {
+            commands.entity(camera).insert(NeedsInitialSnap);
+        }
 
         let mut view_cube_config = ViewCubeConfig::editor_mode();
         view_cube_config.system = CoordinateSystem(cube_frame);

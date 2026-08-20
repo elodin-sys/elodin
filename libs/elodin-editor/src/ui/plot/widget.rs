@@ -1576,14 +1576,17 @@ pub fn auto_y_bounds(
 
 #[allow(clippy::type_complexity)]
 pub fn sync_graphs(
-    mut graph_states: Query<&mut GraphState, Without<crate::ui::query_plot::QueryPlotData>>,
+    mut graph_states: Query<
+        (Entity, &mut GraphState),
+        Without<crate::ui::query_plot::QueryPlotData>,
+    >,
     metadata_store: Res<ComponentMetadataRegistry>,
     schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
 ) {
-    for mut graph_state in graph_states.iter_mut() {
+    for (graph_entity, mut graph_state) in graph_states.iter_mut() {
         let graph_state = &mut *graph_state;
 
         for (component_path, component_values) in &graph_state.components {
@@ -1649,6 +1652,7 @@ pub fn sync_graphs(
                             })
                             .insert(Name::new("line"))
                             .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                            .insert(ChildOf(graph_entity))
                             .id();
                         graph_state
                             .enabled_lines
@@ -1668,7 +1672,8 @@ pub fn sync_graphs(
                             .try_insert(graph_state.graph_type)
                             .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
                             .try_insert(graph_state.visible_range.clone())
-                            .try_insert(LineHandle::Timeseries(line));
+                            .try_insert(LineHandle::Timeseries(line))
+                            .try_insert(ChildOf(graph_entity));
                     }
                     (None, false) => {}
                 }

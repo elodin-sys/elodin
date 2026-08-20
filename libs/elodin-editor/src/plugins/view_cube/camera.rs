@@ -10,7 +10,7 @@ use bevy::log::warn;
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldInstance, WorldInstanceSpawner};
-use bevy_editor_cam::controller::component::{EditorCam, OrbitConstraint};
+use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use impeller2_bevy::EntityMap;
@@ -23,10 +23,7 @@ use super::components::{
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
-use crate::Coordinate;
-use crate::WorldPosExt;
-use crate::object_3d::ComponentArrayExt;
-use bevy_geo_frames::{GeoContext, GeoPosition};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
@@ -79,6 +76,32 @@ pub struct ViewCubeArrowTargetCache {
     entries: HashMap<Entity, ArrowTargetState>,
 }
 
+#[derive(Resource, Default)]
+pub struct ViewCubeOrbitTargetCache {
+    entries: HashMap<Entity, DVec3>,
+}
+
+impl ViewCubeOrbitTargetCache {
+    fn remember(&mut self, camera: Entity, target: DVec3) -> DVec3 {
+        self.entries.insert(camera, target);
+        target
+    }
+
+    fn last(&self, camera: Entity) -> Option<DVec3> {
+        self.entries.get(&camera).copied()
+    }
+
+    fn forget(&mut self, camera: Entity) {
+        self.entries.remove(&camera);
+    }
+}
+
+/// Cube-local axis → Bevy world. Same `to_bevy` the mesh uses.
+pub fn frame_dir_to_bevy(frame: GeoFrame, local_dir: Vec3, geo: &GeoContext) -> Vec3 {
+    let q = GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY).to_bevy(geo);
+    (q * local_dir.as_dvec3()).as_vec3().normalize_or_zero()
+}
+
 impl ViewCubeArrowTargetCache {
     const TTL_SECS: f64 = 1.5;
 
@@ -116,14 +139,14 @@ impl ViewCubeArrowTargetCache {
     }
 }
 
-fn main_camera_for_event(
+fn overlay_for_event(
     event: &ViewCubeEvent,
-    overlay_cameras: &Query<&ViewCubeLink, With<ViewCubeCamera>>,
-) -> Option<Entity> {
+    overlay_cameras: &Query<(&ViewCubeLink, &ViewCubeFrameRef), With<ViewCubeCamera>>,
+) -> Option<(Entity, GeoFrame)> {
     overlay_cameras
         .get(event_source(event))
         .ok()
-        .map(|link| link.main_camera)
+        .map(|(link, frame_ref)| (link.main_camera, frame_ref.0))
 }
 
 fn event_source(event: &ViewCubeEvent) -> Entity {
@@ -308,6 +331,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     geo_context: Res<'w, GeoContext>,
     time: Res<'w, Time>,
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
+    orbit_cache: ResMut<'w, ViewCubeOrbitTargetCache>,
     camera_parents: CameraParentQuery<'w, 's>,
     #[cfg(feature = "big_space")]
     floating_origin: FloatingOriginQuery<'w, 's>,
@@ -399,24 +423,28 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
 #[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
-    overlay_cameras: Query<&ViewCubeLink, With<ViewCubeCamera>>,
+    overlay_cameras: Query<(&ViewCubeLink, &ViewCubeFrameRef), With<ViewCubeCamera>>,
+    cubes: Query<(&ViewCubeFrame, &GlobalTransform), With<ViewCubeRoot>>,
     mut camera_query: ViewCubeCameraQuery,
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
-    geo_context: Res<GeoContext>,
-    coordinate: Res<Coordinate>,
 ) {
     for event in events.read() {
         let now_secs = lookup.time.elapsed_secs_f64();
         lookup.arrow_cache.prune(now_secs);
 
-        let Some(cam) = main_camera_for_event(event, &overlay_cameras) else {
+        let Some((cam, cube_frame)) = overlay_for_event(event, &overlay_cameras) else {
             continue;
         };
         let Ok((entity, mut transform, parent, mut editor_cam)) = camera_query.get_mut(cam) else {
             continue;
         };
+        let cube_world_rotation = cubes
+            .iter()
+            .find(|(frame, _)| frame.0 == cube_frame)
+            .map(|(_, global)| global.rotation())
+            .unwrap_or(Quat::IDENTITY);
 
         let origin_world = lookup.origin();
         let camera_pose = lookup.current_camera_pose(transform.as_ref(), parent, origin_world);
@@ -431,7 +459,7 @@ pub fn handle_view_cube_editor(
                 lookup.entity_map.as_ref(),
                 &lookup.values,
                 &lookup.geo_context,
-                &coordinate,
+                &mut lookup.orbit_cache,
                 origin_world,
             );
         }
@@ -441,12 +469,7 @@ pub fn handle_view_cube_editor(
 
         let global_rotation = camera_pose.rotation;
         let parent_rotation = camera_pose.parent_rotation;
-        let cube_rotation = if config.sync_with_camera {
-            global_rotation.conjugate() * config.axis_correction
-        } else {
-            Quat::IDENTITY
-        };
-        let camera_dir_cube = cube_rotation.inverse() * Vec3::Z;
+        let camera_dir_cube = camera_dir_in_cube_local(cube_world_rotation, global_rotation);
 
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
             let clicked_face_dot = direction.to_look_direction().dot(camera_dir_cube);
@@ -454,7 +477,8 @@ pub fn handle_view_cube_editor(
                 continue;
             }
 
-            let raw_look_dir_world = face_target_camera_dir_world(*direction, &config);
+            let raw_look_dir_world =
+                face_target_camera_dir_world(*direction, cube_frame, &lookup.geo_context, &config);
             if raw_look_dir_world.length_squared() <= 1.0e-6 {
                 continue;
             }
@@ -462,11 +486,16 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let chosen_up = choose_face_upright_up(*direction, parent_rotation, facing_local)
-                    .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
-                    .unwrap_or_else(|| {
-                        choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
-                    });
+                let chosen_up = choose_face_upright_up(
+                    parent_rotation,
+                    facing_local,
+                    cube_frame,
+                    &lookup.geo_context,
+                )
+                .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
+                .unwrap_or_else(|| {
+                    choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
+                });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local.as_dvec3(),
                     target_up_direction: chosen_up.as_dvec3(),
@@ -502,7 +531,12 @@ pub fn handle_view_cube_editor(
             if clicked_corner_dot >= CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD {
                 continue;
             }
-            let raw_look_dir_world = direction_target_camera_dir_world(*local_direction, &config);
+            let raw_look_dir_world = direction_target_camera_dir_world(
+                *local_direction,
+                cube_frame,
+                &lookup.geo_context,
+                &config,
+            );
             if raw_look_dir_world.length_squared() <= 1.0e-6 {
                 continue;
             }
@@ -543,16 +577,26 @@ pub fn handle_view_cube_editor(
             ..
         } = event
         {
-            let raw_look_dir_world = face_target_camera_dir_world(*target_face, &config);
+            let raw_look_dir_world = face_target_camera_dir_world(
+                *target_face,
+                cube_frame,
+                &lookup.geo_context,
+                &config,
+            );
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let chosen_up = choose_face_upright_up(*target_face, parent_rotation, facing_local)
-                    .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
-                    .unwrap_or_else(|| {
-                        choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
-                    });
+                let chosen_up = choose_face_upright_up(
+                    parent_rotation,
+                    facing_local,
+                    cube_frame,
+                    &lookup.geo_context,
+                )
+                .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
+                .unwrap_or_else(|| {
+                    choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
+                });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local.as_dvec3(),
                     target_up_direction: chosen_up.as_dvec3(),
@@ -587,7 +631,7 @@ pub fn handle_view_cube_editor(
                 lookup.entity_map.as_ref(),
                 &lookup.values,
                 &lookup.geo_context,
-                &coordinate,
+                &mut lookup.orbit_cache,
                 origin_world,
             );
 
@@ -618,20 +662,15 @@ pub fn handle_view_cube_editor(
             let base_up_world = parent_rotation * base_up_local;
             let base_right_world = parent_rotation * base_right_local;
 
-            // Left/Right is a turntable azimuth: yaw around the orbit's fixed up
-            // (world vertical) like a drag-orbit, so the horizon stays level.
-            // Falls back to the camera up only when the orbit is unconstrained.
-            let orbit_up_world = match editor_cam.orbit_constraint {
-                OrbitConstraint::Fixed { up, .. } => up.as_vec3(),
-                OrbitConstraint::Free => base_up_world,
-            };
-
+            // Screen-space pairs: Left/Right yaw around camera up, Up/Down
+            // pitch around camera right. World-up yaw collapsed onto pitch
+            // after a side-face snap (NED E/W): camera right became Bevy Y.
             let (step_axis_world, signed_angle, _) = arrow_camera_axis_angle(
                 *arrow,
                 angle,
                 base_right_world,
                 base_forward_world,
-                orbit_up_world,
+                base_up_world,
             );
             let step_rotation_world = Quat::from_axis_angle(*step_axis_world, signed_angle);
 
@@ -649,8 +688,8 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
-                &geo_context,
-                &coordinate,
+                &lookup.geo_context,
+                &mut lookup.orbit_cache,
             )
             .map(|target| (target - origin_world).as_vec3())
             .unwrap_or_else(|| {
@@ -708,8 +747,8 @@ pub fn handle_view_cube_editor(
                         &lookup.viewports,
                         lookup.entity_map.as_ref(),
                         &lookup.values,
-                        &geo_context,
-                        &coordinate,
+                        &lookup.geo_context,
+                        &mut lookup.orbit_cache,
                         origin_world,
                     );
                     if let Ok(facing) = Dir3::new(Vec3::NEG_Z) {
@@ -768,27 +807,44 @@ fn apply_viewport_zoom(out: bool, transform: &mut Transform, editor_cam: &mut Ed
 
 fn face_target_camera_dir_world(
     direction: super::components::FaceDirection,
+    frame: GeoFrame,
+    geo: &GeoContext,
     config: &ViewCubeConfig,
 ) -> Vec3 {
     let local_dir = direction.to_look_direction();
-    direction_target_camera_dir_world(local_dir, config)
+    direction_target_camera_dir_world(local_dir, frame, geo, config)
 }
 
 #[cfg(test)]
 fn corner_target_camera_dir_world(
     position: super::components::CornerPosition,
+    frame: GeoFrame,
+    geo: &GeoContext,
     config: &ViewCubeConfig,
 ) -> Vec3 {
     let local_dir = position.to_look_direction();
-    direction_target_camera_dir_world(local_dir, config)
+    direction_target_camera_dir_world(local_dir, frame, geo, config)
 }
 
-fn direction_target_camera_dir_world(local_dir: Vec3, config: &ViewCubeConfig) -> Vec3 {
-    if config.sync_with_camera {
-        (config.axis_correction * local_dir).normalize_or_zero()
+fn direction_target_camera_dir_world(
+    local_dir: Vec3,
+    frame: GeoFrame,
+    geo: &GeoContext,
+    config: &ViewCubeConfig,
+) -> Vec3 {
+    let local = if config.sync_with_camera {
+        config.axis_correction * local_dir
     } else {
-        local_dir.normalize_or_zero()
-    }
+        local_dir
+    };
+    frame_dir_to_bevy(frame, local, geo)
+}
+
+pub(super) fn camera_dir_in_cube_local(
+    cube_world_rotation: Quat,
+    camera_world_rotation: Quat,
+) -> Vec3 {
+    cube_world_rotation.inverse() * (camera_world_rotation * Vec3::Z)
 }
 
 fn arrow_camera_axis_angle(
@@ -796,18 +852,18 @@ fn arrow_camera_axis_angle(
     angle: f32,
     camera_right_world: Vec3,
     camera_forward_world: Vec3,
-    orbit_up_world: Vec3,
+    camera_up_world: Vec3,
 ) -> (Dir3, f32, &'static str) {
     match arrow {
         RotationArrow::Left => (
-            Dir3::new(orbit_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
+            Dir3::new(camera_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
             angle,
-            "orbit_up",
+            "camera_up",
         ),
         RotationArrow::Right => (
-            Dir3::new(orbit_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
+            Dir3::new(camera_up_world).unwrap_or(Dir3::new_unchecked(Vec3::Y)),
             -angle,
-            "orbit_up",
+            "camera_up",
         ),
         RotationArrow::Up => (
             Dir3::new(camera_right_world).unwrap_or(Dir3::new_unchecked(Vec3::X)),
@@ -855,23 +911,28 @@ fn choose_continuous_up(transform: &Transform, facing_local: Dir3) -> Option<Dir
     None
 }
 
+/// Frame-local "sky": ENU/ECEF +Z, NED −Z (up). Mapped through the same `to_bevy`
+/// the look direction uses, so ECEF snaps stay on the equatorial plane.
+fn frame_camera_up_bevy(frame: GeoFrame, geo: &GeoContext) -> Vec3 {
+    let local = match frame {
+        GeoFrame::NED => Vec3::NEG_Z,
+        GeoFrame::ENU | GeoFrame::ECEF => Vec3::Z,
+    };
+    frame_dir_to_bevy(frame, local, geo)
+}
+
 fn choose_face_upright_up(
-    target_face: super::components::FaceDirection,
     parent_rotation: Quat,
     facing_local: Dir3,
+    frame: GeoFrame,
+    geo: &GeoContext,
 ) -> Option<Dir3> {
     let parent_inverse = parent_rotation.inverse();
-    let world_candidates: &[Vec3] = match target_face {
-        super::components::FaceDirection::East
-        | super::components::FaceDirection::West
-        | super::components::FaceDirection::North
-        | super::components::FaceDirection::South => &[Vec3::Y, Vec3::Z, Vec3::X],
-        super::components::FaceDirection::Up => &[Vec3::Z, Vec3::X, Vec3::Y],
-        super::components::FaceDirection::Down => &[Vec3::NEG_Z, Vec3::X, Vec3::Y],
-    };
-
+    // Frame up first (ECEF Z, not Bevy Y / local vertical). Then Bevy axes
+    // when looking along that up. FaceDirection names are Bevy-era.
     let facing = *facing_local;
-    for world_up in world_candidates.iter().copied() {
+    let frame_up = frame_camera_up_bevy(frame, geo);
+    for world_up in [frame_up, Vec3::Y, Vec3::Z, Vec3::X] {
         let local_up_candidate = parent_inverse * world_up;
         let projected = local_up_candidate - facing * local_up_candidate.dot(facing);
         if projected.length_squared() <= 1.0e-6 {
@@ -1025,7 +1086,7 @@ fn update_anchor_depth_for_view_cube(
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
     geo_context: &GeoContext,
-    coordinate: &Coordinate,
+    orbit_cache: &mut ViewCubeOrbitTargetCache,
     origin_world: DVec3,
 ) {
     let Some(orbit_target_world) = view_cube_orbit_target(
@@ -1034,7 +1095,7 @@ fn update_anchor_depth_for_view_cube(
         entity_map,
         values,
         geo_context,
-        coordinate,
+        orbit_cache,
     ) else {
         return;
     };
@@ -1054,7 +1115,7 @@ fn refresh_anchor_depth_for_arrow(
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
     geo_context: &GeoContext,
-    coordinate: &Coordinate,
+    orbit_cache: &mut ViewCubeOrbitTargetCache,
     origin_world: DVec3,
 ) -> Option<(f32, f32)> {
     let orbit_target_world = view_cube_orbit_target(
@@ -1063,7 +1124,7 @@ fn refresh_anchor_depth_for_arrow(
         entity_map,
         values,
         geo_context,
-        coordinate,
+        orbit_cache,
     )?;
     let orbit_target = (orbit_target_world - origin_world).as_vec3();
     let measured_distance = (orbit_target - camera_translation).length();
@@ -1084,13 +1145,47 @@ fn view_cube_orbit_target(
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
     geo_context: &GeoContext,
-    coordinate: &Coordinate,
+    orbit_cache: &mut ViewCubeOrbitTargetCache,
 ) -> Option<DVec3> {
     let viewport = viewports.get(camera).ok()?;
-    let compiled_expr = viewport.look_at.compiled_expr.as_ref()?;
-    let val = compiled_expr.execute(entity_map, values).ok()?;
-    let world_pos = val.as_world_pos()?;
-    Some(GeoPosition(coordinate.0.unwrap_or_default(), world_pos.pos()).to_bevy(geo_context))
+    let frame = viewport.frame.unwrap_or_default();
+    // Same 3-vector / WorldPos rule as viewport follow (`POS_ECEF` is 3 elems).
+    // Missing compiled expr = cleared (don't aim). Execute error = sample gap.
+    let Some(compiled_expr) = viewport.look_at.compiled_expr.as_ref() else {
+        return apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::Cleared);
+    };
+    match compiled_expr.execute(entity_map, values) {
+        Err(_) => apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::Gap),
+        Ok(val) => match crate::ui::gauges::component_value_to_position(&val) {
+            Some(pos) => {
+                let target = GeoPosition(frame, pos).to_bevy(geo_context);
+                apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::Target(target))
+            }
+            None => apply_orbit_look_at(orbit_cache, camera, OrbitLookAt::NotAPosition),
+        },
+    }
+}
+
+enum OrbitLookAt {
+    Cleared,
+    Gap,
+    NotAPosition,
+    Target(DVec3),
+}
+
+fn apply_orbit_look_at(
+    cache: &mut ViewCubeOrbitTargetCache,
+    camera: Entity,
+    look_at: OrbitLookAt,
+) -> Option<DVec3> {
+    match look_at {
+        OrbitLookAt::Cleared | OrbitLookAt::NotAPosition => {
+            cache.forget(camera);
+            None
+        }
+        OrbitLookAt::Gap => cache.last(camera),
+        OrbitLookAt::Target(target) => Some(cache.remember(camera, target)),
+    }
 }
 
 #[cfg(test)]
@@ -1099,6 +1194,7 @@ mod tests {
     use crate::plugins::render_layer_alloc::view_cube_render_layers;
     use bevy::asset::AssetPlugin;
     use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldSerializationPlugin};
+    use bevy_geo_frames::Present;
 
     #[test]
     fn angle_to_target_rotation_default_is_zero() {
@@ -1164,57 +1260,61 @@ mod tests {
         );
     }
 
+    fn upright_up(facing: Dir3, frame: GeoFrame, geo: &GeoContext) -> Dir3 {
+        choose_face_upright_up(Quat::IDENTITY, facing, frame, geo).expect("upright up")
+    }
+
     #[test]
     fn choose_face_upright_up_keeps_east_west_consistent() {
-        let parent = Quat::IDENTITY;
+        let geo = GeoContext::default();
         let east_facing = Dir3::new(Vec3::NEG_X).expect("unit vector");
         let west_facing = Dir3::new(Vec3::X).expect("unit vector");
-        let east_up = choose_face_upright_up(
-            crate::plugins::view_cube::FaceDirection::East,
-            parent,
-            east_facing,
-        )
-        .expect("upright up for east");
-        let west_up = choose_face_upright_up(
-            crate::plugins::view_cube::FaceDirection::West,
-            parent,
-            west_facing,
-        )
-        .expect("upright up for west");
+        let east_up = upright_up(east_facing, GeoFrame::ENU, &geo);
+        let west_up = upright_up(west_facing, GeoFrame::ENU, &geo);
         assert!(east_up.dot(Vec3::Y) > 0.99, "east up should be +Y");
         assert!(west_up.dot(Vec3::Y) > 0.99, "west up should be +Y");
     }
 
     #[test]
-    fn choose_face_upright_up_prefers_backward_on_down_face() {
-        let parent = Quat::IDENTITY;
-        let down_facing = Dir3::new(Vec3::Y).expect("unit vector");
-        let up = choose_face_upright_up(
-            crate::plugins::view_cube::FaceDirection::Down,
-            parent,
-            down_facing,
-        )
-        .expect("upright up for down");
+    fn choose_face_upright_up_uses_north_when_looking_along_vertical() {
+        let geo = GeoContext::default();
+        let looking_up = upright_up(
+            Dir3::new(Vec3::Y).expect("unit vector"),
+            GeoFrame::ENU,
+            &geo,
+        );
+        let looking_down = upright_up(
+            Dir3::new(Vec3::NEG_Y).expect("unit vector"),
+            GeoFrame::ENU,
+            &geo,
+        );
         assert!(
-            up.dot(Vec3::NEG_Z) > 0.99,
-            "down-face up should align with -Z, got {:?}",
-            *up
+            looking_up.dot(Vec3::Z) > 0.99,
+            "looking up should use +Z, got {:?}",
+            *looking_up
+        );
+        assert!(
+            looking_down.dot(Vec3::Z) > 0.99,
+            "looking down should use +Z, got {:?}",
+            *looking_down
         );
     }
 
     #[test]
-    fn choose_face_upright_up_prefers_forward_on_up_face() {
-        let parent = Quat::IDENTITY;
-        let up_facing = Dir3::new(Vec3::NEG_Y).expect("unit vector");
-        let up = choose_face_upright_up(
+    fn choose_face_upright_up_keeps_world_y_on_ned_east_snap() {
+        let geo = mojave_geo(Present::Plane);
+        let config = ViewCubeConfig::default();
+        let look = face_target_camera_dir_world(
             crate::plugins::view_cube::FaceDirection::Up,
-            parent,
-            up_facing,
-        )
-        .expect("upright up for up-face");
+            GeoFrame::NED,
+            &geo,
+            &config,
+        );
+        let facing = Dir3::new(-look).expect("ned +Y facing");
+        let up = upright_up(facing, GeoFrame::NED, &geo);
         assert!(
-            up.dot(Vec3::Z) > 0.99,
-            "up-face up should align with +Z, got {:?}",
+            up.dot(Vec3::Y) > 0.9,
+            "NED E (cube +Y) must keep world Y up, got {:?}",
             *up
         );
     }
@@ -1248,54 +1348,210 @@ mod tests {
         let angle = 0.25;
         let right = Vec3::Y;
         let forward = Vec3::X;
-        // Distinct from the camera up so we can assert yaw uses the orbit axis.
-        let orbit_up = Vec3::Z;
+        let camera_up = Vec3::Z;
 
-        // Left/Right yaw around the orbit (world) up, not the camera up.
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Left, angle, right, forward, orbit_up);
-        assert_eq!(*axis, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Left, angle, right, forward, camera_up);
+        assert_eq!(*axis, camera_up);
         assert_eq!(signed_angle, angle);
-        assert_eq!(source, "orbit_up");
+        assert_eq!(source, "camera_up");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Right, angle, right, forward, orbit_up);
-        assert_eq!(*axis, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Right, angle, right, forward, camera_up);
+        assert_eq!(*axis, camera_up);
         assert_eq!(signed_angle, -angle);
-        assert_eq!(source, "orbit_up");
+        assert_eq!(source, "camera_up");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Up, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Up, angle, right, forward, camera_up);
         assert_eq!(*axis, right);
         assert_eq!(signed_angle, angle);
         assert_eq!(source, "camera_right");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::Down, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::Down, angle, right, forward, camera_up);
         assert_eq!(*axis, right);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_right");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::RollLeft, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::RollLeft, angle, right, forward, camera_up);
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, angle);
         assert_eq!(source, "camera_forward");
 
         let (axis, signed_angle, source) =
-            arrow_camera_axis_angle(RotationArrow::RollRight, angle, right, forward, orbit_up);
+            arrow_camera_axis_angle(RotationArrow::RollRight, angle, right, forward, camera_up);
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_forward");
     }
 
     #[test]
+    fn side_face_snap_keeps_yaw_orthogonal_to_pitch() {
+        let geo = mojave_geo(Present::Plane);
+        let config = ViewCubeConfig::default();
+        let face = crate::plugins::view_cube::FaceDirection::Up;
+        let look = face_target_camera_dir_world(face, GeoFrame::NED, &geo, &config);
+        let facing = Dir3::new(-look).expect("ned +Y facing");
+        let up = upright_up(facing, GeoFrame::NED, &geo);
+        let rotation = Transform::default().looking_to(*facing, *up).rotation;
+        let right = rotation * Vec3::X;
+        let camera_up = rotation * Vec3::Y;
+        let forward = rotation * Vec3::NEG_Z;
+        assert!(
+            camera_up.dot(Vec3::Y) > 0.9,
+            "NED E-face snap should keep camera up on world Y, got {camera_up:?}"
+        );
+        assert!(
+            Vec3::Y.dot(right).abs() < 0.15,
+            "NED E-face snap must not bank camera right onto world up, got {}",
+            Vec3::Y.dot(right)
+        );
+
+        let (yaw, _, yaw_src) =
+            arrow_camera_axis_angle(RotationArrow::Left, 0.2, right, forward, camera_up);
+        let (pitch, _, pitch_src) =
+            arrow_camera_axis_angle(RotationArrow::Up, 0.2, right, forward, camera_up);
+        assert_eq!(yaw_src, "camera_up");
+        assert_eq!(pitch_src, "camera_right");
+        assert!(
+            yaw.dot(*pitch).abs() < 0.15,
+            "Left/Right must stay off the Up/Down axis after an E-face snap, got {}",
+            yaw.dot(*pitch)
+        );
+    }
+
+    #[test]
     fn corner_target_camera_dir_world_applies_axis_correction() {
         let corner = crate::plugins::view_cube::CornerPosition::TopFrontRight;
         let config = ViewCubeConfig::default();
-        let world = corner_target_camera_dir_world(corner, &config);
-        let expected = Vec3::new(1.0, 1.0, 1.0).normalize();
+        let geo = GeoContext::default();
+        let world = corner_target_camera_dir_world(corner, GeoFrame::ENU, &geo, &config);
+        let expected = frame_dir_to_bevy(GeoFrame::ENU, Vec3::new(1.0, 1.0, 1.0), &geo);
         assert!((world - expected).length() < 1.0e-5);
+    }
+
+    fn mojave_geo(present: Present) -> GeoContext {
+        GeoContext::from(bevy_geo_frames::GeoOrigin::new_from_degrees(
+            35.3506640, -117.80902, 589.2740,
+        ))
+        .with_present(present)
+    }
+
+    fn assert_click_matches_to_bevy(frame: GeoFrame, local: Vec3, geo: &GeoContext) {
+        let config = ViewCubeConfig::default();
+        let world = direction_target_camera_dir_world(local, frame, geo, &config);
+        let expected = frame_dir_to_bevy(frame, local, geo);
+        assert!(
+            (world - expected).length() < 1.0e-5,
+            "{frame:?} click {local:?} = {world:?}, expected {expected:?}"
+        );
+        assert!(
+            world.length() > 0.5,
+            "{frame:?} click produced a near-zero direction"
+        );
+    }
+
+    #[test]
+    fn face_click_plus_x_matches_to_bevy_in_every_frame_plane() {
+        let geo = mojave_geo(Present::Plane);
+        let local = Vec3::X;
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            assert_click_matches_to_bevy(frame, local, &geo);
+        }
+        let ecef = frame_dir_to_bevy(GeoFrame::ECEF, local, &geo);
+        assert!(
+            (ecef - local).length() > 0.25,
+            "Mojave ECEF +X must not be raw Bevy +X, got {ecef:?}"
+        );
+        let enu = frame_dir_to_bevy(GeoFrame::ENU, local, &geo);
+        assert!(
+            (enu - Vec3::X).length() < 1.0e-5,
+            "ENU +X (East) stays Bevy +X, got {enu:?}"
+        );
+    }
+
+    #[test]
+    fn face_click_plus_x_matches_to_bevy_in_every_frame_sphere() {
+        let geo = mojave_geo(Present::Sphere);
+        let local = Vec3::X;
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            assert_click_matches_to_bevy(frame, local, &geo);
+        }
+    }
+
+    #[test]
+    fn ecef_plus_x_snap_keeps_equator_level_in_plane() {
+        let origin = bevy_geo_frames::GeoOrigin::new_from_degrees(34.72, -86.64, 180.5);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let config = ViewCubeConfig::default();
+        let look = face_target_camera_dir_world(
+            crate::plugins::view_cube::FaceDirection::East,
+            GeoFrame::ECEF,
+            &geo,
+            &config,
+        );
+        let facing = Dir3::new(-look).expect("ecef +X facing");
+        let up = upright_up(facing, GeoFrame::ECEF, &geo);
+        let rotation = Transform::default().looking_to(*facing, *up).rotation;
+        let right = rotation * Vec3::X;
+        let ecef_z = frame_dir_to_bevy(GeoFrame::ECEF, Vec3::Z, &geo);
+        assert!(
+            right.dot(ecef_z).abs() < 0.05,
+            "ECEF +X snap must keep ECEF Z in the screen vertical, got right·ecefZ={}",
+            right.dot(ecef_z)
+        );
+        assert!(
+            (rotation * Vec3::Y).dot(ecef_z) > 0.9,
+            "ECEF +X snap must use ECEF Z as camera up, got {:?}",
+            rotation * Vec3::Y
+        );
+    }
+
+    #[test]
+    fn orbit_target_uses_viewport_frame_not_default_enu() {
+        let geo = mojave_geo(Present::Plane);
+        let ecef = DVec3::new(1.0, 2.0, 3.0);
+        let as_ecef = GeoPosition(GeoFrame::ECEF, ecef).to_bevy(&geo);
+        let as_enu = GeoPosition(GeoFrame::ENU, ecef).to_bevy(&geo);
+        assert!(
+            (as_ecef - as_enu).length() > 1.0e3,
+            "ECEF vs ENU interpretation of the same metres must diverge at Mojave"
+        );
+    }
+
+    #[test]
+    fn orbit_cache_keeps_last_target_on_gap() {
+        let mut cache = ViewCubeOrbitTargetCache::default();
+        let camera = Entity::from_bits(9);
+        let target = DVec3::new(10.0, 20.0, 30.0);
+        apply_orbit_look_at(&mut cache, camera, OrbitLookAt::Target(target));
+        assert_eq!(
+            apply_orbit_look_at(&mut cache, camera, OrbitLookAt::Gap),
+            Some(target)
+        );
+        assert_eq!(cache.last(Entity::from_bits(10)), None);
+    }
+
+    #[test]
+    fn orbit_cache_forgets_when_look_at_cleared() {
+        let mut cache = ViewCubeOrbitTargetCache::default();
+        let camera = Entity::from_bits(9);
+        apply_orbit_look_at(
+            &mut cache,
+            camera,
+            OrbitLookAt::Target(DVec3::new(10.0, 20.0, 30.0)),
+        );
+        assert_eq!(
+            apply_orbit_look_at(&mut cache, camera, OrbitLookAt::Cleared),
+            None
+        );
+        assert_eq!(cache.last(camera), None);
+        assert_eq!(
+            apply_orbit_look_at(&mut cache, camera, OrbitLookAt::NotAPosition),
+            None
+        );
     }
 
     #[test]

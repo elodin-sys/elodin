@@ -75,6 +75,7 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_action_button_click);
 
         app.init_resource::<camera::ViewCubeArrowTargetCache>()
+            .init_resource::<camera::ViewCubeOrbitTargetCache>()
             .add_systems(Update, camera::handle_view_cube_editor)
             .add_systems(Update, camera::snap_initial_camera);
 

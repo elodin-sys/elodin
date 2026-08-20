@@ -83,14 +83,12 @@ fn spawn_frame_view_cubes(
             frame,
             render_layers.clone(),
         );
-        if frame == GeoFrame::ECEF {
-            commands
-                .entity(cube_root)
-                .insert(bevy_geo_frames::GeoRotation::absolute(
-                    frame,
-                    bevy::math::DQuat::IDENTITY,
-                ));
-        }
+        commands
+            .entity(cube_root)
+            .insert(bevy_geo_frames::GeoRotation::absolute(
+                frame,
+                bevy::math::DQuat::IDENTITY,
+            ));
         frames.cubes.insert(frame, cube_root);
     }
 }
@@ -372,9 +370,9 @@ mod tests {
 
         assert_eq!(axis_configs[0].0, Vec3::X);
         assert_eq!(axis_configs[0].2, "X");
-        assert_eq!(axis_configs[1].0, Vec3::NEG_Z);
+        assert_eq!(axis_configs[1].0, Vec3::Y);
         assert_eq!(axis_configs[1].2, "Y");
-        assert_eq!(axis_configs[2].0, Vec3::Y);
+        assert_eq!(axis_configs[2].0, Vec3::Z);
         assert_eq!(axis_configs[2].2, "Z");
     }
 
@@ -404,13 +402,13 @@ mod tests {
             .find(|a| a.positive_label == "D")
             .expect("Down axis");
 
-        assert_eq!(north_axis.direction, Vec3::NEG_Z);
+        assert_eq!(north_axis.direction, Vec3::X);
         assert_eq!(north_axis.negative_label, "S");
 
-        assert_eq!(east_axis.direction, Vec3::X);
+        assert_eq!(east_axis.direction, Vec3::Y);
         assert_eq!(east_axis.negative_label, "W");
 
-        assert_eq!(down_axis.direction, Vec3::NEG_Y);
+        assert_eq!(down_axis.direction, Vec3::Z);
         assert_eq!(down_axis.negative_label, "U");
     }
 }
