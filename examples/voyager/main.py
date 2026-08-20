@@ -1,37 +1,92 @@
 import os
 import typing as ty
+from pathlib import Path
 
 import elodin as el
 import jax
+import numpy as np
+import spiceypy as spice
+from dynamics import (
+    gravity_source_entity_names,
+    heliocentric_relative_acceleration,
+    radial_transverse_normal_basis,
+)
 from jax import numpy as jnp
 from jax.numpy import linalg as la
-import spiceypy as spice
-import numpy as np
-from pathlib import Path
+from time_utils import utc_epoch_microseconds
+from validation_io import (
+    INITIAL_STATE_PREFIX,
+    METRIC_PREFIX,
+    PLANET_SEGMENT_PREFIX,
+    SEGMENT_PREFIX,
+    emit_prefixed_json,
+    load_checkpoints_json,
+)
 
-# SIM_TIME_STEP = 1.0 / 120.0
-SIM_TIME_STEP = 3600.0
-# SIM_TIME_STEP = 86400.0
-# Set the gravitational constant for Newton's law of universal gravitation
+DEFAULT_SIM_TIME_STEP = 3600.0
+SIM_TIME_STEP = float(os.environ.get("VOYAGER_TIME_STEP", DEFAULT_SIM_TIME_STEP))
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
 G = 6.6743e-11
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
 MAX_TICKS_ENV = "MAX_TICKS"
+DYNAMICS_CHAPTER_ENV = "VOYAGER_DYNAMICS_CHAPTER"
+START_UTC_ENV = "VOYAGER_START_UTC"
+SPICE_DIR_ENV = "VOYAGER_SPICE_DIR"
+TRUTH_KERNEL_ENV = "VOYAGER_TRUTH_KERNEL"
+SCORED_PROBE_ENV = "VOYAGER_SCORED_PROBE"
+CHECKPOINTS_ENV = "VOYAGER_CHECKPOINTS_JSON"
 
-SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
-SPICE_KERNELS = [
-    SPICE_DIR / "naif0012.tls",
-    SPICE_DIR / "de440.bsp",
+SPICE_DIR = Path(
+    os.environ.get(
+        SPICE_DIR_ENV,
+        Path(__file__).resolve().parent / "nasa_spice_data",
+    )
+)
+LEAP_SECONDS_KERNEL = SPICE_DIR / "naif0012.tls"
+PLANET_KERNEL = SPICE_DIR / "de440.bsp"
+MERGED_VOYAGER_KERNELS = [
     SPICE_DIR / "Voyager_1.a54206u_V0.2_merged.bsp",
     SPICE_DIR / "Voyager_2.m05016u.merged.bsp",
 ]
+truth_kernel_name = os.environ.get(TRUTH_KERNEL_ENV)
+if truth_kernel_name:
+    truth_kernel = Path(truth_kernel_name)
+    if not truth_kernel.is_absolute():
+        truth_kernel = SPICE_DIR / truth_kernel
+
+    # SPICE searches segments in reverse load order. Load DE440 last during a
+    # validation run so its planetary states win over the planetary segments
+    # bundled in the long-span Voyager kernels. The encounter kernel remains
+    # the highest-precedence file containing the selected spacecraft target.
+    SPICE_KERNELS = [
+        LEAP_SECONDS_KERNEL,
+        *MERGED_VOYAGER_KERNELS,
+        truth_kernel,
+        PLANET_KERNEL,
+    ]
+else:
+    # Preserve the tutorial's historical kernel order and numerical behavior.
+    SPICE_KERNELS = [
+        LEAP_SECONDS_KERNEL,
+        PLANET_KERNEL,
+        *MERGED_VOYAGER_KERNELS,
+    ]
+
+missing_kernels = [kernel for kernel in SPICE_KERNELS if not kernel.is_file()]
+if missing_kernels:
+    raise FileNotFoundError(
+        "Missing SPICE kernels:\n"
+        + "\n".join(f"  {kernel}" for kernel in missing_kernels)
+        + "\nDownload them with examples/voyager/download_spice_data.sh"
+    )
 
 for kernel in SPICE_KERNELS:
     spice.furnsh(str(kernel))
 
-start_time_et = spice.utc2et("1978-01-01T00:00:00")
-start_time_epoch_us = 252_452_400_000_000
+START_UTC = os.environ.get(START_UTC_ENV, "1978-01-01T00:00:00")
+start_time_et = spice.utc2et(START_UTC)
+start_time_epoch_us = utc_epoch_microseconds(START_UTC)
 
 PLANETS = [
     {
@@ -118,6 +173,17 @@ PROBES = [
         "mass": 825.0,
     },
 ]
+scored_probe_name = os.environ.get(SCORED_PROBE_ENV)
+SCORED_PROBES = (
+    {scored_probe_name} if scored_probe_name else {probe["entity_name"] for probe in PROBES}
+)
+unknown_scored_probes = SCORED_PROBES - {probe["entity_name"] for probe in PROBES}
+if unknown_scored_probes:
+    raise ValueError(
+        f"{SCORED_PROBE_ENV} contains an unknown probe: {sorted(unknown_scored_probes)}"
+    )
+
+CHECKPOINTS = load_checkpoints_json(os.environ.get(CHECKPOINTS_ENV, "[]"))
 TRUTH_PROBES = [
     {
         "spice_name": "VOYAGER 1",
@@ -179,6 +245,19 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
     init_pos = jnp.array(init_state[:3]) * 1000.0
     init_vel = jnp.array(init_state[3:]) * 1000.0
 
+    if truth_kernel_name and body in PROBES and body["entity_name"] in SCORED_PROBES:
+        emit_prefixed_json(
+            INITIAL_STATE_PREFIX,
+            {
+                "epoch_utc": START_UTC,
+                "frame": "ECLIPJ2000",
+                "observer": "SUN",
+                "position_m": np.asarray(init_pos, dtype=np.float64).tolist(),
+                "probe": body["entity_name"],
+                "velocity_mps": np.asarray(init_vel, dtype=np.float64).tolist(),
+            },
+        )
+
     print(body["spice_name"])
     print(init_pos)
     print(init_vel)
@@ -227,6 +306,8 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
     current_time_et = start_time_et + (tick + 1) * SIM_TIME_STEP
 
     for probe in PROBES:
+        if probe["entity_name"] not in SCORED_PROBES:
+            continue
         simulated_pos = np.asarray(
             ctx.read_component(f"{probe['entity_name']}.world_pos"),
             dtype=np.float64,
@@ -244,6 +325,39 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
 
         position_error_km = np.linalg.norm(simulated_pos - truth_pos) / 1000.0
         velocity_error_mps = np.linalg.norm(simulated_vel - truth_vel)
+
+        completed_seconds = (tick + 1) * SIM_TIME_STEP
+        checkpoint = next(
+            (
+                candidate
+                for candidate in CHECKPOINTS
+                if abs(completed_seconds - candidate["elapsed_seconds"]) <= SIM_TIME_STEP / 2.0
+            ),
+            None,
+        )
+        if checkpoint is not None:
+            position_residual_km = (simulated_pos - truth_pos) / 1000.0
+            velocity_residual_mps = simulated_vel - truth_vel
+            rtn_basis = np.asarray(
+                radial_transverse_normal_basis(truth_pos, truth_vel),
+                dtype=np.float64,
+            )
+            emit_prefixed_json(
+                METRIC_PREFIX,
+                {
+                    "actual_elapsed_seconds": completed_seconds,
+                    "actual_epoch_utc": spice.et2utc(current_time_et, "ISOC", 3),
+                    "checkpoint": checkpoint["name"],
+                    "position_error_km": position_error_km,
+                    "position_residual_km": position_residual_km.tolist(),
+                    "position_rtn_km": (rtn_basis @ position_residual_km).tolist(),
+                    "probe": probe["entity_name"],
+                    "requested_elapsed_seconds": checkpoint["elapsed_seconds"],
+                    "velocity_error_mps": velocity_error_mps,
+                    "velocity_residual_mps": velocity_residual_mps.tolist(),
+                    "velocity_rtn_mps": (rtn_basis @ velocity_residual_mps).tolist(),
+                },
+            )
 
         ctx.write_component(
             f"{probe['entity_name']}.position_error_km",
@@ -288,9 +402,35 @@ def gravity(
     )
 
 
+@el.system
+def heliocentric_gravity(
+    graph: el.GraphQuery[GravityEdge],
+    query: el.Query[el.WorldPos, el.Inertia],
+) -> el.Query[el.Force]:
+    """Chapter 2 gravity in a nonrotating frame with a Sun-centered origin."""
+
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_inertia):
+        probe_mass = probe_inertia.mass()
+        gravitational_parameter = G * source_inertia.mass()
+
+        relative_acceleration = heliocentric_relative_acceleration(
+            probe_pos.linear(), source_pos.linear(), gravitational_parameter
+        )
+
+        return el.Force(linear=force.force() + probe_mass * relative_acceleration)
+
+    return graph.edge_fold(
+        left_query=query,
+        right_query=query,
+        return_type=el.Force,
+        init_value=el.Force(),
+        fold_fn=gravity_fn,
+    )
+
+
 for probe in PROBES:
     probe_id = body_entity_ids[probe["entity_name"]]
-    for source_name in ["Sun", *[planet["entity_name"] for planet in PLANETS]]:
+    for source_name in gravity_source_entity_names(PLANETS):
         w.spawn(
             GravityConstraint(probe_id, body_entity_ids[source_name]),
             name=f"{probe['entity_name']} -> {source_name}",
@@ -309,7 +449,7 @@ body_objects = "\n".join(
 )
 
 w.schematic(
-    """
+    f"""
     hsplit {{
         tabs share=0.2 {{
             hierarchy
@@ -333,15 +473,62 @@ w.schematic(
         }}
     }}
 {body_objects}
-""".format(body_objects=body_objects)
+"""
 )
 
-sys = el.six_dof(sys=gravity)
+dynamics_chapter = os.environ.get(DYNAMICS_CHAPTER_ENV, "1")
+if dynamics_chapter not in ("1", "2"):
+    raise ValueError(f"{DYNAMICS_CHAPTER_ENV} must be '1' or '2'")
+
+gravity_system = gravity if dynamics_chapter == "1" else heliocentric_gravity
+sys = el.six_dof(sys=gravity_system)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
 max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
 
-# sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
+if truth_kernel_name:
+    loaded_spk_files = {
+        handle: filename
+        for index in range(spice.ktotal("SPK"))
+        for filename, _, _, handle in (spice.kdata(index, "SPK"),)
+    }
+    if max_ticks is None:
+        raise ValueError(
+            f"{TRUTH_KERNEL_ENV} requires {MAX_TICKS_ENV} so scoring_end can be audited"
+        )
+    validation_epochs = {
+        "initialization": start_time_et,
+        "scoring_end": start_time_et + max_ticks * SIM_TIME_STEP,
+    }
+
+    def emit_segment(prefix: str, spice_name: str, extra: dict) -> None:
+        target_code = spice.bodn2c(spice_name)
+        for epoch_name, epoch_et in validation_epochs.items():
+            handle, descriptor, identifier = spice.spksfs(target_code, epoch_et, 256)
+            target, center, frame, segment_type, *_ = spice.spkuds(descriptor)
+            emit_prefixed_json(
+                prefix,
+                {
+                    "center": center,
+                    "epoch": epoch_name,
+                    "file": Path(loaded_spk_files[handle]).name,
+                    "native_frame": spice.frmnam(frame),
+                    "segment_id": identifier.strip(),
+                    "segment_type": segment_type,
+                    "spice_name": spice_name,
+                    "target": target,
+                    **extra,
+                },
+            )
+
+    for probe in PROBES:
+        if probe["entity_name"] not in SCORED_PROBES:
+            continue
+        emit_segment(SEGMENT_PREFIX, probe["spice_name"], {"probe": probe["entity_name"]})
+
+    for body in PLANETS:
+        emit_segment(PLANET_SEGMENT_PREFIX, body["spice_name"], {})
+
 sim = w.run(
     sys,
     simulation_rate=SIMULATION_RATE_HZ,

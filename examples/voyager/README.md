@@ -1,65 +1,150 @@
 # Voyager
 
-This example simulates Voyager 1 and Voyager 2 under gravity from
-the Sun and major planets, while also drawing SPICE-driven "truth"
-trajectories for comparison. The planets and truth probes are updated
-directly from NASA SPICE kernels each tick, and the simulated probes
-are integrated by Elodin.
+This example simulates Voyager 1 and Voyager 2 under gravity from the Sun and
+major planets, while drawing NASA SPICE trajectories for comparison.
 
-SPICE is NASA's toolkit and data format for spacecraft geometry,
-time systems, and ephemerides (time-indexed descriptions of where
-celestial bodies and spacecraft are, and how fast they are moving).
-In this example it provides reference
-positions and velocities for the planets and the Voyager spacecraft
-from published files (aka SPICE kernels).
+The example is an educational journey. `main.py` is the intentionally simple
+Chapter 1 model; later chapters add one astrodynamics idea at a time.
 
-This example is a work in progress. Right now the simulated probes do
-not make it to Saturn. Future work is needed to isolate the error
-sources and improve the simulation.
+## What you will see
 
-The editor exposes that divergence numerically as two telemetry signals
-for each simulated probe:
+The editor shows:
 
-- `position_error_km`: Euclidean distance from the matching SPICE truth
-  position, in kilometers.
-- `velocity_error_mps`: Euclidean difference from the matching SPICE truth
-  velocity, in meters per second.
+- red propagated Voyager trajectories;
+- green SPICE reference trajectories;
+- `position_error_km` for Voyager 1 and Voyager 2;
+- `velocity_error_mps` for Voyager 1 and Voyager 2.
 
-The default schematic graphs both signals for Voyager 1 and Voyager 2.
-These diagnostics make it possible to see when the trajectory starts
-diverging instead of relying only on the red simulated and green truth
-paths in the 3D viewport.
+The error telemetry makes the difference between the simulated and reference
+trajectories visible without relying only on the 3D paths.
 
+## Prerequisites
 
-## Setup
+Run these commands from the repository root unless noted otherwise.
 
-Create the repo-local Python venv if needed:
+Create the repo-local Python environment if needed:
 
 ```bash
-cd elodin
 uv venv --python=3.13 python-env
 ```
 
-Install `spiceypy` into that venv:
+Activate it:
 
 ```bash
 source python-env/bin/activate
+```
+
+Install `spiceypy`:
+
+```bash
 uv pip install spiceypy
 ```
 
-Download the required SPICE kernels:
+## Download the SPICE data
+
+From the Voyager example directory:
+
+```bash
+cd examples/voyager
+./download_spice_data.sh
+cd ../..
+```
+
+The script writes the required kernels to:
+
+```text
+examples/voyager/nasa_spice_data/
+```
+
+The example loads:
+
+- the NAIF leap-seconds kernel;
+- DE440 planetary ephemerides;
+- Voyager 1 trajectory data;
+- Voyager 2 trajectory data.
+
+## Run Chapter 1
+
+From the repository root, open the editor to see the trajectories and error
+graphs:
+
+```bash
+elodin editor examples/voyager/main.py
+```
+
+Headless Chapter 1:
+
+```bash
+python examples/voyager/main.py run
+```
+
+Chapter 1 is the original gravity "hello world": the Sun is placed at the
+origin and the probes receive direct gravitational attraction from the Sun and
+major planets.
+
+Read the Chapter 1 notes after you have the example running:
+
+[Chapter 1 — Simple interplanetary gravity](docs/chapter_1.md)
+
+## Run Chapter 2
+
+```bash
+VOYAGER_DYNAMICS_CHAPTER=2 elodin editor examples/voyager/main.py
+```
+
+Headless Chapter 2:
+
+```bash
+python examples/voyager/chapter_2.py run
+```
+
+Chapter 2 keeps the same kernels, constants, timestep, integrator, telemetry,
+and visualization, but adds the heliocentric indirect acceleration required
+when the coordinate origin follows the accelerating Sun.
+
+Read the derivation, experiment, and measured results here:
+
+[Chapter 2 — Heliocentric relative dynamics](docs/chapter_2.md)
+
+## Educational journey
+
+| Chapter | Topic | Editor | Headless |
+| --- | --- | --- | --- |
+| [1](docs/chapter_1.md) | Simple interplanetary gravity | `elodin editor examples/voyager/main.py` | `python examples/voyager/main.py run` |
+| [2](docs/chapter_2.md) | Heliocentric relative dynamics | `VOYAGER_DYNAMICS_CHAPTER=2 elodin editor examples/voyager/main.py` | `python examples/voyager/chapter_2.py run` |
+
+The chapters intentionally build on one another rather than turning the first
+example into a single high-fidelity mission reconstruction.
+
+## Truth reference and reproducible validation
+
+The interactive journey uses long-span merged Voyager SPKs for mission-scale
+visualization. A separate headless benchmark uses NAIF's current-best
+reconstructed Jupiter and Saturn encounter SPKs, initializing and scoring from
+the same solution.
+
+[Read the truth-reference contract and Chapter 1–2 revalidation](docs/truth_reference.md)
+
+## Troubleshooting
+
+If SPICE reports a missing kernel, rerun:
 
 ```bash
 cd examples/voyager
 ./download_spice_data.sh
 ```
 
-This writes the kernels into `examples/voyager/nasa_spice_data/`,
-which `main.py` loads at startup.
-
-
-## Run
+If Python cannot import `spiceypy`, activate `python-env` and install it with:
 
 ```bash
-python examples/voyager/main.py run
+uv pip install spiceypy
 ```
+
+If you want a fresh persistent simulation database, set `DB_PATH` to a new
+location before running the example.
+
+## Next step
+
+Start with Chapter 1, watch the position and velocity error graphs, and then
+continue to Chapter 2 to see how one coordinate-system correction changes the
+long-horizon trajectory.

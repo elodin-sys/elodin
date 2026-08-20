@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "reference_state": {
+    "observer": "SUN",
+    "output_frame": "ECLIPJ2000",
+    "aberration_correction": "NONE",
+    "units": {
+      "position": "km",
+      "velocity": "km/s"
+    }
+  },
+  "validation_protocol": {
+    "baseline_timestep_s": 100,
+    "chapters": [1, 2],
+    "convergence_chapter": 2,
+    "initialization": "query the selected reconstructed segment at initialization_utc",
+    "scoring": "query that same selected segment at each predeclared checkpoint",
+    "planet_state_source": "de440.bsp",
+    "planet_spice_names": [
+      "MERCURY BARYCENTER",
+      "VENUS BARYCENTER",
+      "EARTH",
+      "MARS BARYCENTER",
+      "JUPITER BARYCENTER",
+      "SATURN BARYCENTER",
+      "URANUS BARYCENTER",
+      "NEPTUNE BARYCENTER"
+    ],
+    "model_parameters": "preserve each chapter's existing G multiplied by rounded body masses",
+    "integrator": "Elodin six_dof classical RK4"
+  },
+  "checkpoint_contract": {
+    "version": 1,
+    "anchor_definition": "Initialization audit only. Position and velocity error are identically zero by construction and are not a Chapter 1/2 accuracy score.",
+    "primary_definition": "A primary score must lie in a documented maneuver-free pre-encounter window. Initialization is an anchor, not a headline score. Encounter and post-maneuver points remain useful diagnostics but are not headline Chapter 1/2 accuracy claims.",
+    "diagnostic_definition": "A diagnostic score is retained for visibility but overlaps a maneuver phase, an undocumented correction boundary, or an encounter where the simplified force model is not a like-for-like replay.",
+    "excluded_definition": "An excluded score is not used for Chapter 1/2 accuracy claims because a documented maneuver or close-encounter event is known to invalidate an uncontrolled comparison.",
+    "sources": [
+      "https://ntrs.nasa.gov/api/citations/19840003118/downloads/19840003118.pdf",
+      "https://ntrs.nasa.gov/api/citations/19790009610/downloads/19790009610.pdf",
+      "https://ntrs.nasa.gov/api/citations/19810010458/downloads/19810010458.pdf"
+    ],
+    "maneuver_evidence": {
+      "v1_jupiter": "NASA cruise material identifies a Jan 29 correction with additional Feb 20 and Mar 16 correction activity, but does not provide a complete inertial delta-v vector for replay.",
+      "v2_jupiter": "JPL 83-53 places TCM-3/B-3 and TCM-4/B-4 inside the May 29-Jun 27 and Jun 27-Jul 7 far-encounter phases, with TCM-5/B-5 post-encounter; complete inertial vectors are not published in the source.",
+      "v1_saturn": "A-8 occurred Oct 10-11 1980 (1.778 m/s, 806 s, 90 deg roll plus 136.7 deg yaw); A-9 occurred Nov 6 1980. The available report does not provide a complete replay vector for both events.",
+      "v2_saturn": "B-7 occurred Feb 26 1981 (0.574 m/s, 215 s); B-8 occurred Jul 19 with roll/yaw targeting; B-9 occurred Aug 18 (1.018 m/s, 380 s). Complete inertial replay vectors are not available in the cited source."
+    }
+  },
+  "kernel_load_order": [
+    "naif0012.tls",
+    "Voyager_1.a54206u_V0.2_merged.bsp",
+    "Voyager_2.m05016u.merged.bsp",
+    "<case encounter kernel>",
+    "de440.bsp"
+  ],
+  "kernel_precedence": "SPICE gives the last-loaded competing SPK segment the highest priority. The encounter kernel therefore wins for the selected spacecraft, and DE440 wins for planetary states.",
+  "kernels": {
+    "naif0012.tls": {
+      "role": "leap-seconds",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls",
+      "sha256": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"
+    },
+    "de440.bsp": {
+      "role": "planetary ephemeris for translation and model source states",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440.bsp",
+      "sha256": "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5"
+    },
+    "Voyager_1.a54206u_V0.2_merged.bsp": {
+      "role": "long-span educational/mission-design reference and fallback spacecraft coverage",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_1.a54206u_V0.2_merged.bsp",
+      "sha256": "47c6f2be03668b50a1efb5f96978a2b68b2b501dae6f585841b1569baa3f4311"
+    },
+    "Voyager_2.m05016u.merged.bsp": {
+      "role": "long-span educational/mission-design reference and fallback spacecraft coverage",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_2.m05016u.merged.bsp",
+      "sha256": "ce66cba12cf77bf3a1097f44142ef978f46656788ed08f9052238a102ed2e706"
+    },
+    "vgr1_jup230.bsp": {
+      "role": "NAIF current-best Voyager 1 Jupiter encounter reconstruction",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/vgr1_jup230.bsp",
+      "sha256": "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9"
+    },
+    "vgr2_jup230.bsp": {
+      "role": "NAIF current-best Voyager 2 Jupiter encounter reconstruction",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/vgr2_jup230.bsp",
+      "sha256": "9c00be3c83915f6c1fd8448d9266420e3c462e9d78e4c32b17145dac81529d5a"
+    },
+    "vgr1_sat337.bsp": {
+      "role": "NAIF current-best Voyager 1 Saturn encounter reconstruction",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/vgr1_sat337.bsp",
+      "sha256": "f451f9f095bc4ad175cde701367cbf1ccc061dd706ad0008cda75fd939d94efa"
+    },
+    "vgr2_sat337.bsp": {
+      "role": "NAIF current-best Voyager 2 Saturn encounter reconstruction",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/vgr2_sat337.bsp",
+      "sha256": "1d15debf7bdc6c6ba4c0462b5f4f6af85ddf9948735f434792a1c41418bb39a8"
+    }
+  },
+  "cases": [
+    {
+      "id": "v1_jupiter",
+      "probe": "voyager1",
+      "spice_target": -31,
+      "kernel": "vgr1_jup230.bsp",
+      "segment_id": "vgr1.jup230.nio",
+      "native_center": 5,
+      "native_frame": "J2000",
+      "segment_type": 1,
+      "coverage_utc": ["1979-02-01T00:00:00", "1979-03-19T00:00:00"],
+      "initialization_utc": "1979-02-01T00:00:00",
+      "scoring_end_utc": "1979-03-18T00:00:00",
+      "duration_days": 45,
+      "checkpoints": [
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit after the Jan 29 correction; not a scientific score", "maneuver_status": "post_maneuver"},
+        {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "near the documented Jan 29/Feb 20 correction window; no complete inertial vector is available", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "post-correction approach without a replayable maneuver vector", "maneuver_status": "post_maneuver"},
+        {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "late approach remains useful for trend inspection but is not a controlled maneuver replay", "maneuver_status": "post_maneuver"},
+        {"name": "closest_approach", "elapsed_seconds": 2808286.794, "epoch_utc": "1979-03-05T12:04:46.794", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter and subsequent correction activity are not represented as commanded impulses", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
+      ],
+      "convergence_timesteps_s": [3600, 900, 300, 100],
+      "convergence_checkpoint": "clean_approach",
+      "solution_status": "current-best encounter solution identified by the NAIF Voyager kernel archive"
+    },
+    {
+      "id": "v2_jupiter",
+      "probe": "voyager2",
+      "spice_target": -32,
+      "kernel": "vgr2_jup230.bsp",
+      "segment_id": "vgr2.jup230.nio",
+      "native_center": 5,
+      "native_frame": "J2000",
+      "segment_type": 1,
+      "coverage_utc": ["1979-06-04T17:00:00", "1979-07-21T00:00:00"],
+      "initialization_utc": "1979-06-05T00:00:00",
+      "scoring_end_utc": "1979-07-20T00:00:00",
+      "duration_days": 45,
+      "checkpoints": [
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit inside the TCM-3 phase; not a scientific score", "maneuver_status": "boundary"},
+        {"name": "clean_approach", "elapsed_seconds": 1728000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "TCM-3/B-3 and TCM-4/B-4 occur inside the documented far-encounter phases", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "inside a documented correction phase without a replayable inertial vector", "maneuver_status": "boundary"},
+        {"name": "late_approach", "elapsed_seconds": 2592000, "phase": "approach", "validation_role": "diagnostic", "role_reason": "near TCM-5/B-5 activity and therefore not a controlled force-only score", "maneuver_status": "boundary"},
+        {"name": "closest_approach", "elapsed_seconds": 3018532.806, "epoch_utc": "1979-07-09T22:28:52.806", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter and post-encounter correction history are not replayed", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
+      ],
+      "convergence_timesteps_s": [3600, 900, 300, 100],
+      "convergence_checkpoint": "clean_approach",
+      "solution_status": "current-best encounter solution identified by the NAIF Voyager kernel archive"
+    },
+    {
+      "id": "v1_saturn",
+      "probe": "voyager1",
+      "spice_target": -31,
+      "kernel": "vgr1_sat337.bsp",
+      "segment_id": "vgr1.sat337.nio",
+      "native_center": 6,
+      "native_frame": "J2000",
+      "segment_type": 1,
+      "coverage_utc": ["1980-10-06T10:10:09.657", "1980-11-20T00:00:00"],
+      "initialization_utc": "1980-10-07T00:00:00",
+      "scoring_end_utc": "1980-11-18T00:00:00",
+      "duration_days": 42,
+      "checkpoints": [
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit in the documented pre-A-8 window; not a scientific score", "maneuver_status": "none_known"},
+        {"name": "early_approach", "elapsed_seconds": 86400, "phase": "pre-A-8 approach", "validation_role": "primary", "role_reason": "pre-maneuver window before the documented Oct 10-11 A-8 burn", "maneuver_status": "none_known"},
+        {"name": "clean_approach", "elapsed_seconds": 259200, "phase": "A-8 boundary", "validation_role": "diagnostic", "role_reason": "checkpoint epoch overlaps the documented A-8 maneuver window", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1814400, "phase": "post-A-8 approach", "validation_role": "diagnostic", "role_reason": "post-A-8 and before A-9, but the maneuver is not replayed", "maneuver_status": "post_maneuver"},
+        {"name": "closest_approach", "elapsed_seconds": 3195927.463, "epoch_utc": "1980-11-12T23:45:27.463", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter follows A-8/A-9 activity that is not represented as commanded impulses", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3628800, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
+      ],
+      "convergence_timesteps_s": [3600, 300, 100],
+      "convergence_checkpoint": "early_approach",
+      "solution_status": "current-best encounter solution identified by the NAIF Voyager kernel archive; case begins after its center transition"
+    },
+    {
+      "id": "v2_saturn",
+      "probe": "voyager2",
+      "spice_target": -32,
+      "kernel": "vgr2_sat337.bsp",
+      "segment_id": "vgr2.sat337.nio",
+      "native_center": 6,
+      "native_frame": "J2000",
+      "segment_type": 1,
+      "coverage_utc": ["1981-07-04T11:59:58.942", "1981-09-22T00:00:00"],
+      "initialization_utc": "1981-07-15T00:00:00",
+      "scoring_end_utc": "1981-08-29T00:00:00",
+      "duration_days": 45,
+      "checkpoints": [
+        {"name": "start", "elapsed_seconds": 0, "phase": "initialization", "validation_role": "anchor", "role_reason": "initialization audit in the documented pre-B-8 window; not a scientific score", "maneuver_status": "none_known"},
+        {"name": "early_approach", "elapsed_seconds": 86400, "phase": "pre-B-8 approach", "validation_role": "primary", "role_reason": "pre-maneuver window before the documented Jul 19 B-8 activity", "maneuver_status": "none_known"},
+        {"name": "clean_approach", "elapsed_seconds": 345600, "phase": "B-8 boundary", "validation_role": "diagnostic", "role_reason": "checkpoint epoch is on the documented B-8 roll/yaw boundary", "maneuver_status": "boundary"},
+        {"name": "mid_arc", "elapsed_seconds": 1944000, "phase": "post-B-8 approach", "validation_role": "diagnostic", "role_reason": "post-B-8 and before B-9, but the maneuver is not replayed", "maneuver_status": "post_maneuver"},
+        {"name": "closest_approach", "elapsed_seconds": 3641030.181, "epoch_utc": "1981-08-26T03:23:50.181", "phase": "close encounter", "validation_role": "excluded", "role_reason": "close encounter follows B-8/B-9 activity that is not represented as commanded impulses", "maneuver_status": "post_maneuver"},
+        {"name": "end", "elapsed_seconds": 3888000, "phase": "post-encounter", "validation_role": "excluded", "role_reason": "post-encounter state includes unmodeled maneuver history", "maneuver_status": "post_maneuver"}
+      ],
+      "convergence_timesteps_s": [3600, 300, 100],
+      "convergence_checkpoint": "early_approach",
+      "solution_status": "current-best encounter solution identified by the NAIF Voyager kernel archive"
+    }
+  ],
+  "cruise_reference": {
+    "interval_investigated": ["1978-01-01T00:00:00", "1979-02-01T00:00:00"],
+    "available_reference": "the spacecraft segments in the merged Voyager supertrajectory kernels",
+    "status": "educational/mission-design reference; not established here as a navigation-grade reconstructed orbit",
+    "supported_claim": "agreement with the published merged supertrajectory",
+    "unsupported_claim": "absolute navigation accuracy over the cruise interval",
+    "research_result": "No separate public tracking-fit state-vector SPK for this complete interval was identified in the NAIF Voyager archive or the NASA technical material surveyed. Navigation reports describe orbit determination and maneuvers but do not publish a machine-readable reconstructed trajectory covering the interval."
+  }
+}
