@@ -278,6 +278,7 @@ impl Plugin for CinematicEarthPlugin {
         app.init_resource::<ViewerFrame>()
             .init_resource::<DensityTune>()
             .init_resource::<EarthLookTune>()
+            // The chain flushes emitter swaps before Hanabi runs in PostUpdate.
             .add_systems(
                 Update,
                 (sync_cinematic_earth, sync_earth_look, tag_globe_meshes).chain(),
@@ -606,10 +607,10 @@ fn sync_earth_look(
     if look.last == Some(fingerprint) || look.idle_s < 0.15 {
         return;
     }
-    write_effects(&assets, &mut effects, &earth);
     for entity in &entities.emitters {
         commands.entity(entity).despawn();
     }
+    write_effects(&assets, &mut effects, &earth);
     commands
         .entity(ellipsoid)
         .with_children(|parent| spawn_earth_emitters(parent, &assets));

@@ -17,6 +17,7 @@ use super::{
 const STAR_DIM_COUNT: u32 = 800_000;
 const STAR_BRIGHT_COUNT: u32 = 40_000;
 const MILKY_WAY_COUNT: u32 = 400_000;
+const MILKY_WAY_FALLOFF: f32 = 10.3;
 const CITY_COUNT: u32 = 1_500_000;
 const AIRGLOW_GREEN_COUNT: u32 = 520_000;
 const AIRGLOW_RED_COUNT: u32 = 340_000;
@@ -156,8 +157,10 @@ fn star_field(
             .normalized()
             .dot(writer.lit(Vec3::Y))
             .abs();
-        let keep = (lat.clone() * lat * writer.lit(-falloff)).exp();
-        writer.lit(VACUUM_LIFETIME) * keep.step(writer.rand(ScalarType::Float))
+        let keep_probability = (lat.clone() * lat * writer.lit(-falloff)).exp();
+        let random_sample = writer.rand(ScalarType::Float);
+        // Hanabi's x.step(edge) emits WGSL step(edge, x).
+        writer.lit(VACUUM_LIFETIME) * keep_probability.step(random_sample)
     } else {
         writer.lit(VACUUM_LIFETIME)
     };
@@ -258,7 +261,7 @@ pub fn milky_way(earth: &EarthConfig) -> EffectAsset {
         0.95,
         scale_hdr(MILKY_WAY_HDR, earth.stars.brightness),
         false,
-        Some(10.3),
+        Some(MILKY_WAY_FALLOFF),
     )
 }
 
@@ -479,4 +482,20 @@ fn gray_image(size: u32, data: Vec<u8>) -> Image {
         TextureFormat::R8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn milky_way_keep_probability(sin_lat: f32) -> f32 {
+        (-MILKY_WAY_FALLOFF * sin_lat * sin_lat).exp()
+    }
+
+    #[test]
+    fn milky_way_probability_peaks_in_galactic_plane() {
+        assert_eq!(milky_way_keep_probability(0.0), 1.0);
+        assert!(milky_way_keep_probability(0.25) > milky_way_keep_probability(0.5));
+        assert!(milky_way_keep_probability(1.0) < 1e-4);
+    }
 }
