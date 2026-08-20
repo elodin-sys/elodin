@@ -190,6 +190,15 @@ pub struct AxisLabelBillboard {
     pub base_position: Vec3,
 }
 
+/// Face label painted on the cube: the baked face pose plus the in-plane spin
+/// that keeps the word horizontal on screen. `last_angle` is both the fallback
+/// for edge-on faces and the guard that avoids rewriting an unchanged transform.
+#[derive(Component, Clone, Copy)]
+pub struct FaceLabel {
+    pub base_rotation: Quat,
+    pub last_angle: f32,
+}
+
 // ============================================================================
 // Resources
 // ============================================================================

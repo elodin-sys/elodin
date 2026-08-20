@@ -85,11 +85,19 @@ impl Plugin for ViewCubePlugin {
                 (
                     camera::sync_view_cube_camera_orientation,
                     camera::orient_axis_labels_to_screen_plane,
+                    camera::orient_face_labels_to_view,
                 )
                     .chain(),
             );
         } else {
-            app.add_systems(PostUpdate, camera::orient_axis_labels_to_screen_plane);
+            app.add_systems(
+                PostUpdate,
+                (
+                    camera::orient_axis_labels_to_screen_plane,
+                    camera::orient_face_labels_to_view,
+                )
+                    .chain(),
+            );
         }
 
         app.add_systems(Update, camera::apply_render_layers_to_scene);

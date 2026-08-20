@@ -460,6 +460,10 @@ fn spawn_face_labels(
                 .with_rotation(label.rotation)
                 .with_scale(Vec3::splat(label_scale)),
             Pickable::IGNORE,
+            FaceLabel {
+                base_rotation: label.rotation,
+                last_angle: 0.0,
+            },
             ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
         ));
