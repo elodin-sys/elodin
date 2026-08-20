@@ -521,36 +521,6 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
         node.set_children(children);
     }
 
-    if let Some(ae) = &viewport.auto_exposure {
-        let defaults = AutoExposureConfig::default();
-        if ae != &defaults {
-            let mut ae_node = KdlNode::new("auto_exposure");
-            if ae.enabled != defaults.enabled {
-                ae_node
-                    .entries_mut()
-                    .push(KdlEntry::new_prop("enabled", ae.enabled));
-            }
-            for (name, value, default) in [
-                (
-                    "max_night_boost",
-                    ae.max_night_boost,
-                    defaults.max_night_boost,
-                ),
-                ("speed_brighten", ae.speed_brighten, defaults.speed_brighten),
-                ("speed_darken", ae.speed_darken, defaults.speed_darken),
-                ("filter_low", ae.filter_low, defaults.filter_low),
-                ("filter_high", ae.filter_high, defaults.filter_high),
-                ("range_min", ae.range_min, defaults.range_min),
-                ("range_max", ae.range_max, defaults.range_max),
-            ] {
-                push_float_prop_if_ne(&mut ae_node, name, value, default);
-            }
-            let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
-            children.nodes_mut().push(ae_node);
-            node.set_children(children);
-        }
-    }
-
     if viewport.show_grid {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_grid", true));
@@ -1618,7 +1588,7 @@ mod tests {
 
     #[test]
     fn test_environment_earth_roundtrip() {
-        // earth requires a cinematic viewport; defaults serialize without auto_exposure.
+        // Earth requires a cinematic viewport.
         let parsed =
             parse_schematic("environment {\n    earth\n}\nviewport cinematic=#true").unwrap();
         let environment = parsed.environment.expect("environment parsed");
@@ -1627,7 +1597,6 @@ mod tests {
             panic!("expected cinematic viewport");
         };
         assert!(viewport.cinematic);
-        assert!(viewport.auto_exposure.is_none());
 
         let serialized = serialize_schematic(&Schematic {
             environment: Some(environment.clone()),
@@ -1636,7 +1605,6 @@ mod tests {
         });
         assert!(serialized.contains("earth"));
         assert!(serialized.contains("cinematic"));
-        assert!(!serialized.contains("auto_exposure"));
         assert!(!serialized.contains("night_ev100"));
         assert!(!serialized.contains("stars"));
         assert!(!serialized.contains("city_lights"));
@@ -1646,37 +1614,6 @@ mod tests {
             reparsed.environment.unwrap().earth,
             Some(EarthConfig::default())
         );
-
-        // Non-default auto-exposure round-trips on the viewport.
-        let parsed = parse_schematic(
-            "environment {\n    earth\n}\nviewport cinematic=#true {\n    auto_exposure max_night_boost=3.0 speed_darken=8.0\n}",
-        )
-        .unwrap();
-        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
-            panic!("expected cinematic viewport");
-        };
-        let ae = viewport.auto_exposure.as_ref().expect("auto_exposure");
-        assert!((ae.max_night_boost - 3.0).abs() < f32::EPSILON);
-        assert!((ae.speed_darken - 8.0).abs() < f32::EPSILON);
-        assert!(
-            (ae.speed_brighten - AutoExposureConfig::default_speed_brighten()).abs() < f32::EPSILON
-        );
-        let serialized = serialize_schematic(&Schematic {
-            environment: parsed.environment.clone(),
-            elems: parsed.elems.clone(),
-            ..Default::default()
-        });
-        assert!(serialized.contains("auto_exposure"));
-        assert!(serialized.contains("max_night_boost=3"));
-        assert!(serialized.contains("speed_darken=8"));
-        assert!(!serialized.contains("speed_brighten"));
-        let reparsed = parse_schematic(&serialized).unwrap();
-        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
-            panic!("expected cinematic viewport");
-        };
-        let ae = viewport.auto_exposure.as_ref().expect("auto_exposure");
-        assert!((ae.max_night_boost - 3.0).abs() < f32::EPSILON);
-        assert!((ae.speed_darken - 8.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1927,7 +1864,6 @@ viewport name="main" cinematic=#true ev100=13.5
                 hdr: false,
                 cinematic: false,
                 bloom: None,
-                auto_exposure: None,
                 ev100: None,
                 pos: None,
                 look_at: None,
@@ -1979,7 +1915,6 @@ viewport name="main" cinematic=#true ev100=13.5
                 hdr: true,
                 cinematic: false,
                 bloom: None,
-                auto_exposure: None,
                 ev100: None,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
@@ -2724,7 +2659,6 @@ object_3d lander.world_pos {
                 hdr: false,
                 cinematic: false,
                 bloom: None,
-                auto_exposure: None,
                 ev100: None,
                 pos: None,
                 look_at: None,

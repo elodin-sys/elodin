@@ -23,7 +23,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{AutoExposureConfig, BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
+use impeller2_wkt::{BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{
@@ -264,10 +264,8 @@ pub struct ViewportConfig {
     pub projection_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
     pub cinematic: bool,
-    /// Authored bloom; `None` keeps house defaults (cinematic OLD_SCHOOL 0.06).
+    /// Authored bloom; `None` keeps house defaults.
     pub bloom: Option<BloomConfig>,
-    /// Cinematic histogram auto-exposure; `None` keeps house defaults.
-    pub auto_exposure: Option<AutoExposureConfig>,
 }
 
 #[derive(Clone)]
@@ -1853,7 +1851,6 @@ impl ViewportPane {
                 frustums_thickness: viewport.frustums_thickness,
                 cinematic: viewport.cinematic,
                 bloom: viewport.bloom.clone(),
-                auto_exposure: viewport.auto_exposure.clone(),
             },
             crate::ui::inspector::viewport::Viewport::new(
                 parent,

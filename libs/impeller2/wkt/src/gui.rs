@@ -685,9 +685,6 @@ pub struct Viewport {
     pub cinematic: bool,
     #[serde(default)]
     pub bloom: Option<BloomConfig>,
-    /// Cinematic-only histogram auto-exposure. `None` = house defaults.
-    #[serde(default)]
-    pub auto_exposure: Option<AutoExposureConfig>,
     /// Camera exposure (EV100). Sunny-16 daylight is ~14-15. Absent = the
     /// editor's default physical-camera exposure (~EV 8.6).
     #[serde(default)]
@@ -730,7 +727,6 @@ impl Default for Viewport {
             hdr: false,
             cinematic: false,
             bloom: None,
-            auto_exposure: None,
             ev100: None,
             name: None,
             pos: None,
@@ -740,92 +736,6 @@ impl Default for Viewport {
             smoothing: 0.0,
             local_arrows: Vec::new(),
             node_id: NodeId::default(),
-        }
-    }
-}
-
-/// Per-viewport auto-exposure tuning.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct AutoExposureConfig {
-    #[serde(default = "AutoExposureConfig::default_enabled")]
-    pub enabled: bool,
-    #[serde(default = "AutoExposureConfig::default_max_night_boost")]
-    pub max_night_boost: f32,
-    #[serde(default = "AutoExposureConfig::default_speed_brighten")]
-    pub speed_brighten: f32,
-    #[serde(default = "AutoExposureConfig::default_speed_darken")]
-    pub speed_darken: f32,
-    #[serde(default = "AutoExposureConfig::default_filter_low")]
-    pub filter_low: f32,
-    #[serde(default = "AutoExposureConfig::default_filter_high")]
-    pub filter_high: f32,
-    #[serde(default = "AutoExposureConfig::default_range_min")]
-    pub range_min: f32,
-    #[serde(default = "AutoExposureConfig::default_range_max")]
-    pub range_max: f32,
-}
-
-impl Default for AutoExposureConfig {
-    fn default() -> Self {
-        Self {
-            enabled: Self::default_enabled(),
-            max_night_boost: Self::default_max_night_boost(),
-            speed_brighten: Self::default_speed_brighten(),
-            speed_darken: Self::default_speed_darken(),
-            filter_low: Self::default_filter_low(),
-            filter_high: Self::default_filter_high(),
-            range_min: Self::default_range_min(),
-            range_max: Self::default_range_max(),
-        }
-    }
-}
-
-impl AutoExposureConfig {
-    pub fn default_enabled() -> bool {
-        true
-    }
-    pub fn default_max_night_boost() -> f32 {
-        0.0
-    }
-    pub fn default_speed_brighten() -> f32 {
-        2.0
-    }
-    pub fn default_speed_darken() -> f32 {
-        5.0
-    }
-    pub fn default_filter_low() -> f32 {
-        0.10
-    }
-    pub fn default_filter_high() -> f32 {
-        0.90
-    }
-    pub fn default_range_min() -> f32 {
-        -14.0
-    }
-    pub fn default_range_max() -> f32 {
-        8.0
-    }
-
-    pub fn clamp(&self) -> Self {
-        let mut filter_low = self.filter_low.clamp(0.0, 1.0);
-        let mut filter_high = self.filter_high.clamp(0.0, 1.0);
-        if filter_low > filter_high {
-            std::mem::swap(&mut filter_low, &mut filter_high);
-        }
-        let mut range_min = self.range_min.clamp(-20.0, 10.0);
-        let mut range_max = self.range_max.clamp(-20.0, 10.0);
-        if range_min > range_max {
-            std::mem::swap(&mut range_min, &mut range_max);
-        }
-        Self {
-            enabled: self.enabled,
-            max_night_boost: self.max_night_boost.clamp(0.0, 8.0),
-            speed_brighten: self.speed_brighten.clamp(0.1, 10.0),
-            speed_darken: self.speed_darken.clamp(0.1, 10.0),
-            filter_low,
-            filter_high,
-            range_min,
-            range_max,
         }
     }
 }

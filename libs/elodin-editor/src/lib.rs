@@ -318,8 +318,6 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
         #[cfg(not(target_family = "wasm"))]
-        app.add_plugins(bevy::post_process::auto_exposure::AutoExposurePlugin);
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::CinematicEarthPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);

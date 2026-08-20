@@ -537,58 +537,6 @@ fn cinematic_look_ui(
             }
         });
 
-    ui.separator();
-    ui.label(egui::RichText::new("AUTO EXPOSURE").color(scheme.text_secondary));
-    egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(8, 8))
-        .show(ui, |ui| {
-            let mut config = viewport_config.auto_exposure.clone().unwrap_or_default();
-            let mut dirty = false;
-
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("ENABLED").color(scheme.text_secondary));
-                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                    if ui.checkbox(&mut config.enabled, "").changed() {
-                        dirty = true;
-                    }
-                });
-            });
-
-            dirty |= labeled_float_slider(
-                ui,
-                "NIGHT BOOST ST",
-                &mut config.max_night_boost,
-                0.05,
-                0.0..=8.0,
-            );
-            dirty |= labeled_float_slider(
-                ui,
-                "BRIGHTEN ST/S",
-                &mut config.speed_brighten,
-                0.05,
-                0.1..=10.0,
-            );
-            dirty |= labeled_float_slider(
-                ui,
-                "DARKEN ST/S",
-                &mut config.speed_darken,
-                0.05,
-                0.1..=10.0,
-            );
-            dirty |=
-                labeled_float_slider(ui, "FILTER LOW", &mut config.filter_low, 0.01, 0.0..=1.0);
-            dirty |=
-                labeled_float_slider(ui, "FILTER HIGH", &mut config.filter_high, 0.01, 0.0..=1.0);
-            dirty |=
-                labeled_float_slider(ui, "RANGE MIN", &mut config.range_min, 0.1, -20.0..=10.0);
-            dirty |=
-                labeled_float_slider(ui, "RANGE MAX", &mut config.range_max, 0.1, -20.0..=10.0);
-
-            if dirty {
-                viewport_config.auto_exposure = Some(config.clamp());
-            }
-        });
-
     let Some(earth) = scene_environment
         .0
         .as_mut()

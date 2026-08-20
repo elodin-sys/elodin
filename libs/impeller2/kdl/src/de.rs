@@ -1009,7 +1009,6 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
 
     let hdr = bool_prop(node, "hdr").unwrap_or(false);
     let bloom = parse_viewport_bloom(node, kdl_src)?;
-    let auto_exposure = parse_viewport_auto_exposure(node, kdl_src)?;
     let ev100 = node
         .get("ev100")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
@@ -1101,7 +1100,6 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         hdr,
         cinematic,
         bloom,
-        auto_exposure,
         ev100,
         name,
         pos,
@@ -1169,58 +1167,6 @@ fn parse_viewport_bloom(
     }
 
     Ok(Some(config))
-}
-
-fn parse_viewport_auto_exposure(
-    node: &KdlNode,
-    src: &str,
-) -> Result<Option<AutoExposureConfig>, KdlSchematicError> {
-    let Some(children) = node.children() else {
-        return Ok(None);
-    };
-    let Some(ae_node) = children
-        .nodes()
-        .iter()
-        .find(|n| n.name().value() == "auto_exposure")
-    else {
-        return Ok(None);
-    };
-
-    let config = AutoExposureConfig {
-        enabled: bool_prop(ae_node, "enabled").unwrap_or(AutoExposureConfig::default_enabled()),
-        max_night_boost: float_prop(ae_node, "max_night_boost")
-            .unwrap_or(AutoExposureConfig::default_max_night_boost()),
-        speed_brighten: float_prop(ae_node, "speed_brighten")
-            .unwrap_or(AutoExposureConfig::default_speed_brighten()),
-        speed_darken: float_prop(ae_node, "speed_darken")
-            .unwrap_or(AutoExposureConfig::default_speed_darken()),
-        filter_low: float_prop(ae_node, "filter_low")
-            .unwrap_or(AutoExposureConfig::default_filter_low()),
-        filter_high: float_prop(ae_node, "filter_high")
-            .unwrap_or(AutoExposureConfig::default_filter_high()),
-        range_min: float_prop(ae_node, "range_min")
-            .unwrap_or(AutoExposureConfig::default_range_min()),
-        range_max: float_prop(ae_node, "range_max")
-            .unwrap_or(AutoExposureConfig::default_range_max()),
-    };
-
-    for (prop, value, min) in [
-        ("max_night_boost", config.max_night_boost, 0.0),
-        ("speed_brighten", config.speed_brighten, 0.0),
-        ("speed_darken", config.speed_darken, 0.0),
-    ] {
-        if value < min {
-            return Err(KdlSchematicError::InvalidValue {
-                property: prop.to_string(),
-                node: "auto_exposure".to_string(),
-                expected: "a non-negative number".to_string(),
-                src: src.to_string(),
-                span: ae_node.span(),
-            });
-        }
-    }
-
-    Ok(Some(config.clamp()))
 }
 
 fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -3721,40 +3667,6 @@ viewport hdr=#true {
         assert!(serialized.contains("intensity=0.4"));
         assert!(serialized.contains("threshold=1.0"));
         assert!(serialized.contains("threshold_softness=0.2"));
-    }
-
-    #[test]
-    fn test_parse_viewport_auto_exposure() {
-        let kdl = r#"
-environment {
-    earth
-}
-viewport cinematic=#true {
-    auto_exposure enabled=#false max_night_boost=3.0 speed_brighten=1.5 speed_darken=8.0 filter_low=0.05 filter_high=0.8 range_min=-12.0 range_max=6.0
-}
-"#;
-        let schematic = parse_schematic(kdl).unwrap();
-        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
-            panic!("Expected viewport");
-        };
-        let ae = viewport
-            .auto_exposure
-            .as_ref()
-            .expect("expected auto_exposure");
-        assert!(!ae.enabled);
-        assert_eq!(ae.max_night_boost, 3.0);
-        assert_eq!(ae.speed_brighten, 1.5);
-        assert_eq!(ae.speed_darken, 8.0);
-        assert_eq!(ae.filter_low, 0.05);
-        assert_eq!(ae.filter_high, 0.8);
-        assert_eq!(ae.range_min, -12.0);
-        assert_eq!(ae.range_max, 6.0);
-
-        let serialized = serialize_schematic(&schematic);
-        assert!(serialized.contains("auto_exposure"));
-        assert!(serialized.contains("enabled=#false") || serialized.contains("enabled=false"));
-        assert!(serialized.contains("max_night_boost=3"));
-        assert!(serialized.contains("speed_darken=8"));
     }
 
     #[test]

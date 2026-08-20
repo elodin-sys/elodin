@@ -267,7 +267,6 @@ impl SchematicParam<'_, '_> {
                             hdr: self.hdr_enabled.0 && !cinematic,
                             cinematic,
                             bloom: vp_config.and_then(|c| c.bloom.clone()),
-                            auto_exposure: vp_config.and_then(|c| c.auto_exposure.clone()),
                             ev100: persist_viewport_ev100(
                                 cinematic,
                                 self.exposures.get(cam_entity).ok().map(|e| e.ev100),

@@ -12,9 +12,7 @@ use bevy::image::{
 };
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::light::{Atmosphere, NotShadowCaster, Skybox, SunDisk};
-use bevy::math::cubic_splines::LinearSpline;
 use bevy::math::{DMat3, DQuat, DVec3};
-use bevy::post_process::auto_exposure::{AutoExposure, AutoExposureCompensationCurve};
 use bevy::prelude::*;
 use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
 use bevy::transform::TransformSystems;
@@ -26,8 +24,6 @@ use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 use crate::plugins::scene_environment::{
     CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun, SpaceVisibility,
 };
-use crate::ui::tiles::ViewportConfig;
-use impeller2_wkt::AutoExposureConfig;
 
 use earth_night_material::{EarthNightExt, EarthNightMaterial, EarthNightParams};
 
@@ -180,13 +176,6 @@ struct NightGlobeFill;
 /// Camera carrying the built-in Milky Way [`Skybox`].
 #[derive(Component)]
 struct CinematicSkybox;
-
-/// Cached compensation curve.
-#[derive(Default)]
-struct AeCurveCache {
-    key: Option<(u32, u32, u32)>,
-    handle: Handle<AutoExposureCompensationCurve>,
-}
 
 /// Strong handles retained across Earth activation cycles.
 #[derive(Resource, Clone)]
@@ -459,7 +448,6 @@ fn sync_cinematic_earth(
     roots: Query<Entity, With<CinematicEarthRoot>>,
     spawned: Query<Entity, With<CinematicEarthEntity>>,
     skybox_cameras: Query<Entity, With<CinematicSkybox>>,
-    ae_cameras: Query<Entity, (With<CinematicViewport>, With<AutoExposure>)>,
     mut tune: ResMut<DensityTune>,
     mut look: ResMut<EarthLookTune>,
 ) {
@@ -478,9 +466,6 @@ fn sync_cinematic_earth(
                     .entity(camera)
                     .remove::<Skybox>()
                     .remove::<CinematicSkybox>();
-            }
-            for camera in &ae_cameras {
-                commands.entity(camera).remove::<AutoExposure>();
             }
             tune.last_density = None;
             look.last = None;
@@ -845,18 +830,10 @@ fn apply_cinematic_earth(
     frame: Res<ViewerFrame>,
     assets: Option<Res<CinematicEarthAssets>>,
     mut images: ResMut<Assets<Image>>,
-    mut ae_curves: ResMut<Assets<AutoExposureCompensationCurve>>,
-    mut ae_curve_cache: Local<AeCurveCache>,
     ellipsoid: Query<&GlobalTransform, With<CinematicEarthEllipsoid>>,
     sky: Query<&GlobalTransform, With<CinematicSkyRoot>>,
     mut cameras: Query<
-        (
-            Entity,
-            &GlobalTransform,
-            Option<&mut Skybox>,
-            Option<&ViewportConfig>,
-            Option<&AutoExposure>,
-        ),
+        (Entity, &GlobalTransform, Option<&mut Skybox>),
         (With<CinematicViewport>, With<Camera3d>),
     >,
     mut earthshine: Query<
@@ -910,19 +887,11 @@ fn apply_cinematic_earth(
         .unwrap_or(Quat::IDENTITY);
 
     let mut chosen_cam_pos = None;
-    for (entity, cam_gt, skybox, vp_config, auto_exposure) in &mut cameras {
+    for (entity, cam_gt, skybox) in &mut cameras {
         let chosen = frame.camera == Some(entity);
         if chosen {
             chosen_cam_pos = Some(cam_gt.translation());
         }
-        sync_cinematic_auto_exposure(
-            &mut commands,
-            entity,
-            vp_config,
-            auto_exposure,
-            &mut ae_curves,
-            &mut ae_curve_cache,
-        );
         // Star visibility keeps the Milky Way out of daylight.
         if skybox_ready {
             let brightness = SKYBOX_NIGHT_BRIGHTNESS * frame.star_vis;
@@ -1176,117 +1145,6 @@ fn tune_atmosphere(
     }
 }
 
-fn sync_cinematic_auto_exposure(
-    commands: &mut Commands,
-    entity: Entity,
-    vp_config: Option<&ViewportConfig>,
-    existing: Option<&AutoExposure>,
-    curves: &mut Assets<AutoExposureCompensationCurve>,
-    cache: &mut AeCurveCache,
-) {
-    let cfg = vp_config
-        .and_then(|c| c.auto_exposure.clone())
-        .unwrap_or_default()
-        .clamp();
-    if !cfg.enabled {
-        if existing.is_some() {
-            commands.entity(entity).remove::<AutoExposure>();
-        }
-        return;
-    }
-    let handle = ensure_ae_curve(&cfg, curves, cache);
-    // The histogram floor also caps the flat curve at `max_night_boost`.
-    let range_min = cfg.range_min.max(-cfg.max_night_boost);
-    if existing.is_some_and(|ae| ae_fields_match(ae, &cfg, range_min, &handle)) {
-        return;
-    }
-    commands.entity(entity).insert(AutoExposure {
-        range: range_min..=cfg.range_max,
-        filter: cfg.filter_low..=cfg.filter_high,
-        speed_brighten: cfg.speed_brighten,
-        speed_darken: cfg.speed_darken,
-        exponential_transition_distance: 1.5,
-        metering_mask: Handle::default(),
-        compensation_curve: handle,
-    });
-}
-
-fn ae_fields_match(
-    ae: &AutoExposure,
-    cfg: &AutoExposureConfig,
-    range_min: f32,
-    curve: &Handle<AutoExposureCompensationCurve>,
-) -> bool {
-    *ae.range.start() == range_min
-        && *ae.range.end() == cfg.range_max
-        && *ae.filter.start() == cfg.filter_low
-        && *ae.filter.end() == cfg.filter_high
-        && ae.speed_brighten == cfg.speed_brighten
-        && ae.speed_darken == cfg.speed_darken
-        && ae.compensation_curve == *curve
-}
-
-fn ensure_ae_curve(
-    cfg: &AutoExposureConfig,
-    curves: &mut Assets<AutoExposureCompensationCurve>,
-    cache: &mut AeCurveCache,
-) -> Handle<AutoExposureCompensationCurve> {
-    let key = (
-        cfg.max_night_boost.to_bits(),
-        cfg.range_min.to_bits(),
-        cfg.range_max.to_bits(),
-    );
-    if cache.key == Some(key) && cache.handle != Handle::default() {
-        return cache.handle.clone();
-    }
-    let curve = night_boost_compensation_curve(cfg.max_night_boost, cfg.range_min, cfg.range_max);
-    let handle = curves.add(curve);
-    cache.key = Some(key);
-    cache.handle = handle.clone();
-    handle
-}
-
-/// Snap coordinates because `LinearSpline::from_curve` requires exact endpoints.
-fn snap_curve_coord(v: f32) -> f32 {
-    (v * 64.0).round() / 64.0
-}
-
-/// Builds a night boost with a tight knee at middle gray.
-fn night_boost_compensation_curve(
-    boost: f32,
-    range_min: f32,
-    range_max: f32,
-) -> AutoExposureCompensationCurve {
-    let boost = snap_curve_coord(boost.max(0.0));
-    let x0 = snap_curve_coord(range_min.min(range_max - 0.5));
-    let x1 = snap_curve_coord(range_max.max(x0 + 0.5));
-    let mut pts = Vec::new();
-    let push = |pts: &mut Vec<Vec2>, x: f32, y: f32| {
-        let x = snap_curve_coord(x);
-        let y = snap_curve_coord(y);
-        if pts.last().is_none_or(|last| x > last.x + 1.0 / 64.0 - 1e-6) {
-            pts.push(vec2(x, y));
-        }
-    };
-    if x0 < 0.0 {
-        push(&mut pts, x0, x0 + boost);
-        push(&mut pts, (-0.25_f32).max(x0 + 0.5), -0.25 + boost);
-    }
-    if x1 > 0.0 {
-        push(&mut pts, 0.0, 0.0);
-        push(&mut pts, x1, x1);
-    } else {
-        push(&mut pts, x1, x1 + boost);
-    }
-    if pts.len() < 2 {
-        push(&mut pts, x0 + 1.0, x0 + 1.0 + boost);
-    }
-    AutoExposureCompensationCurve::from_curve(LinearSpline::new(pts)).unwrap_or_else(|_| {
-        AutoExposureCompensationCurve::from_curve(LinearSpline::new([vec2(x0, x0), vec2(x1, x1)]))
-            .unwrap_or_default()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1340,22 +1198,5 @@ mod tests {
             "local +X toward galactic center, dot {}",
             x.dot(center)
         );
-    }
-
-    #[test]
-    fn night_boost_curve_builds() {
-        let _ = night_boost_compensation_curve(4.5, -14.0, 8.0);
-        let _ = night_boost_compensation_curve(0.0, -8.0, 8.0);
-        let _ = night_boost_compensation_curve(8.0, -20.0, 10.0);
-    }
-
-    #[test]
-    fn night_boost_curve_survives_inspector_knobs() {
-        for i in 0..=160 {
-            let boost = i as f32 * 0.05;
-            for (lo, hi) in [(-14.0, 8.0), (-20.0, 10.0), (-8.0, 8.0), (-2.0, 2.0)] {
-                let _ = night_boost_compensation_curve(boost, lo, hi);
-            }
-        }
     }
 }
