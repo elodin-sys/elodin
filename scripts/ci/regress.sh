@@ -188,6 +188,7 @@ PY
     rm -rf "${baseline_dir}"
     mkdir -p "${baseline_dir}"
     cp -r "${export_dir}/." "${baseline_dir}/"
+    "${python_bin}" scripts/ci/windows_paths.py sanitize-dir "${baseline_dir}"
     cp "${metrics_path}" "${baseline_dir}/profile-metrics.json"
     return 0
   fi
