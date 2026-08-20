@@ -486,11 +486,16 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let chosen_up = choose_face_upright_up(parent_rotation, facing_local)
-                    .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
-                    .unwrap_or_else(|| {
-                        choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
-                    });
+                let chosen_up = choose_face_upright_up(
+                    parent_rotation,
+                    facing_local,
+                    cube_frame,
+                    &lookup.geo_context,
+                )
+                .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
+                .unwrap_or_else(|| {
+                    choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
+                });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local.as_dvec3(),
                     target_up_direction: chosen_up.as_dvec3(),
@@ -582,11 +587,16 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let chosen_up = choose_face_upright_up(parent_rotation, facing_local)
-                    .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
-                    .unwrap_or_else(|| {
-                        choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
-                    });
+                let chosen_up = choose_face_upright_up(
+                    parent_rotation,
+                    facing_local,
+                    cube_frame,
+                    &lookup.geo_context,
+                )
+                .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
+                .unwrap_or_else(|| {
+                    choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
+                });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local.as_dvec3(),
                     target_up_direction: chosen_up.as_dvec3(),
@@ -901,12 +911,28 @@ fn choose_continuous_up(transform: &Transform, facing_local: Dir3) -> Option<Dir
     None
 }
 
-fn choose_face_upright_up(parent_rotation: Quat, facing_local: Dir3) -> Option<Dir3> {
+/// Frame-local "sky": ENU/ECEF +Z, NED −Z (up). Mapped through the same `to_bevy`
+/// the look direction uses, so ECEF snaps stay on the equatorial plane.
+fn frame_camera_up_bevy(frame: GeoFrame, geo: &GeoContext) -> Vec3 {
+    let local = match frame {
+        GeoFrame::NED => Vec3::NEG_Z,
+        GeoFrame::ENU | GeoFrame::ECEF => Vec3::Z,
+    };
+    frame_dir_to_bevy(frame, local, geo)
+}
+
+fn choose_face_upright_up(
+    parent_rotation: Quat,
+    facing_local: Dir3,
+    frame: GeoFrame,
+    geo: &GeoContext,
+) -> Option<Dir3> {
     let parent_inverse = parent_rotation.inverse();
-    // Local vertical first. FaceDirection names are Bevy-era (Up = cube +Y)
-    // and no longer match geo labels (ENU N / NED E sit on +Y).
+    // Frame up first (ECEF Z, not Bevy Y / local vertical). Then Bevy axes
+    // when looking along that up. FaceDirection names are Bevy-era.
     let facing = *facing_local;
-    for world_up in [Vec3::Y, Vec3::Z, Vec3::X] {
+    let frame_up = frame_camera_up_bevy(frame, geo);
+    for world_up in [frame_up, Vec3::Y, Vec3::Z, Vec3::X] {
         let local_up_candidate = parent_inverse * world_up;
         let projected = local_up_candidate - facing * local_up_candidate.dot(facing);
         if projected.length_squared() <= 1.0e-6 {
@@ -1234,25 +1260,34 @@ mod tests {
         );
     }
 
+    fn upright_up(facing: Dir3, frame: GeoFrame, geo: &GeoContext) -> Dir3 {
+        choose_face_upright_up(Quat::IDENTITY, facing, frame, geo).expect("upright up")
+    }
+
     #[test]
     fn choose_face_upright_up_keeps_east_west_consistent() {
-        let parent = Quat::IDENTITY;
+        let geo = GeoContext::default();
         let east_facing = Dir3::new(Vec3::NEG_X).expect("unit vector");
         let west_facing = Dir3::new(Vec3::X).expect("unit vector");
-        let east_up = choose_face_upright_up(parent, east_facing).expect("upright up for east");
-        let west_up = choose_face_upright_up(parent, west_facing).expect("upright up for west");
+        let east_up = upright_up(east_facing, GeoFrame::ENU, &geo);
+        let west_up = upright_up(west_facing, GeoFrame::ENU, &geo);
         assert!(east_up.dot(Vec3::Y) > 0.99, "east up should be +Y");
         assert!(west_up.dot(Vec3::Y) > 0.99, "west up should be +Y");
     }
 
     #[test]
     fn choose_face_upright_up_uses_north_when_looking_along_vertical() {
-        let parent = Quat::IDENTITY;
-        let looking_up = choose_face_upright_up(parent, Dir3::new(Vec3::Y).expect("unit vector"))
-            .expect("upright when looking up");
-        let looking_down =
-            choose_face_upright_up(parent, Dir3::new(Vec3::NEG_Y).expect("unit vector"))
-                .expect("upright when looking down");
+        let geo = GeoContext::default();
+        let looking_up = upright_up(
+            Dir3::new(Vec3::Y).expect("unit vector"),
+            GeoFrame::ENU,
+            &geo,
+        );
+        let looking_down = upright_up(
+            Dir3::new(Vec3::NEG_Y).expect("unit vector"),
+            GeoFrame::ENU,
+            &geo,
+        );
         assert!(
             looking_up.dot(Vec3::Z) > 0.99,
             "looking up should use +Z, got {:?}",
@@ -1276,7 +1311,7 @@ mod tests {
             &config,
         );
         let facing = Dir3::new(-look).expect("ned +Y facing");
-        let up = choose_face_upright_up(Quat::IDENTITY, facing).expect("up");
+        let up = upright_up(facing, GeoFrame::NED, &geo);
         assert!(
             up.dot(Vec3::Y) > 0.9,
             "NED E (cube +Y) must keep world Y up, got {:?}",
@@ -1359,7 +1394,7 @@ mod tests {
         let face = crate::plugins::view_cube::FaceDirection::Up;
         let look = face_target_camera_dir_world(face, GeoFrame::NED, &geo, &config);
         let facing = Dir3::new(-look).expect("ned +Y facing");
-        let up = choose_face_upright_up(Quat::IDENTITY, facing).expect("up");
+        let up = upright_up(facing, GeoFrame::NED, &geo);
         let rotation = Transform::default().looking_to(*facing, *up).rotation;
         let right = rotation * Vec3::X;
         let camera_up = rotation * Vec3::Y;
@@ -1444,6 +1479,34 @@ mod tests {
         for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
             assert_click_matches_to_bevy(frame, local, &geo);
         }
+    }
+
+    #[test]
+    fn ecef_plus_x_snap_keeps_equator_level_in_plane() {
+        let origin = bevy_geo_frames::GeoOrigin::new_from_degrees(34.72, -86.64, 180.5);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let config = ViewCubeConfig::default();
+        let look = face_target_camera_dir_world(
+            crate::plugins::view_cube::FaceDirection::East,
+            GeoFrame::ECEF,
+            &geo,
+            &config,
+        );
+        let facing = Dir3::new(-look).expect("ecef +X facing");
+        let up = upright_up(facing, GeoFrame::ECEF, &geo);
+        let rotation = Transform::default().looking_to(*facing, *up).rotation;
+        let right = rotation * Vec3::X;
+        let ecef_z = frame_dir_to_bevy(GeoFrame::ECEF, Vec3::Z, &geo);
+        assert!(
+            right.dot(ecef_z).abs() < 0.05,
+            "ECEF +X snap must keep ECEF Z in the screen vertical, got right·ecefZ={}",
+            right.dot(ecef_z)
+        );
+        assert!(
+            (rotation * Vec3::Y).dot(ecef_z) > 0.9,
+            "ECEF +X snap must use ECEF Z as camera up, got {:?}",
+            rotation * Vec3::Y
+        );
     }
 
     #[test]
