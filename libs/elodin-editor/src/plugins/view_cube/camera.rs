@@ -178,11 +178,16 @@ pub fn sync_view_cube_camera_orientation(
         };
 
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
-        // Mirror the camera's global rotation.
+        let translation = rotation * Vec3::new(0.0, 0.0, config.camera_distance);
+        if camera_transform.rotation.abs_diff_eq(rotation, 1.0e-6)
+            && camera_transform
+                .translation
+                .abs_diff_eq(translation, 1.0e-5)
+        {
+            continue;
+        }
         camera_transform.rotation = rotation;
-        // Keep it at its given distance.
-        camera_transform.translation =
-            camera_transform.rotation * Vec3::new(0.0, 0.0, config.camera_distance);
+        camera_transform.translation = translation;
     }
 }
 
@@ -289,23 +294,28 @@ pub(super) fn face_label_in_plane_angle(
     (baseline.length_squared() > FACE_LABEL_EPS * FACE_LABEL_EPS).then_some(angle)
 }
 
-/// Spins each face label so its word reads horizontally in the viewport that
-/// owns it.
+/// Spins each face label so its word reads horizontally in the viewport
+/// that owns it.
 ///
-/// Every label knows the overlay camera it belongs to, so two viewports on the
-/// same frame — which share a single cube — each orient their own copy. Reading
-/// through `Mut` does not flag a change, so a still viewport costs one
-/// comparison per label and triggers no transform propagation.
+/// Cube pose comes from the overlay camera's frame, not `ChildOf` — the
+/// GLB instance can reparent children. After propagation we also write
+/// `GlobalTransform`, otherwise extract still sees the baked pose.
 pub fn orient_face_labels_to_view(
-    mut labels: Query<(&ChildOf, &mut FaceLabel, &mut Transform)>,
-    cubes: Query<&GlobalTransform, With<ViewCubeRoot>>,
-    cube_cameras: Query<&GlobalTransform, With<ViewCubeCamera>>,
+    mut labels: Query<
+        (&mut FaceLabel, &mut Transform, &mut GlobalTransform),
+        (Without<ViewCubeCamera>, Without<ViewCubeRoot>),
+    >,
+    cubes: Query<(&ViewCubeFrame, &GlobalTransform), (With<ViewCubeRoot>, Without<FaceLabel>)>,
+    cube_cameras: Query<
+        (&ViewCubeFrameRef, &GlobalTransform),
+        (With<ViewCubeCamera>, Without<FaceLabel>),
+    >,
 ) {
-    for (parent, mut face_label, mut label_transform) in labels.iter_mut() {
-        let Ok(cube_global) = cubes.get(parent.0) else {
+    for (mut face_label, mut label_transform, mut label_global) in labels.iter_mut() {
+        let Ok((frame_ref, camera_global)) = cube_cameras.get(face_label.camera) else {
             continue;
         };
-        let Ok(camera_global) = cube_cameras.get(face_label.camera) else {
+        let Some((_, cube_global)) = cubes.iter().find(|(frame, _)| frame.0 == frame_ref.0) else {
             continue;
         };
 
@@ -318,11 +328,11 @@ pub fn orient_face_labels_to_view(
         let base_rotation = face_label.base_rotation;
         let angle = face_label_in_plane_angle(base_rotation, view.0, view.1)
             .unwrap_or(face_label.last_angle);
-        if (angle - face_label.last_angle).abs() <= FACE_LABEL_ANGLE_EPS {
-            continue;
+        if (angle - face_label.last_angle).abs() > FACE_LABEL_ANGLE_EPS {
+            face_label.last_angle = angle;
+            label_transform.rotation = base_rotation * Quat::from_rotation_z(angle);
         }
-        face_label.last_angle = angle;
-        label_transform.rotation = base_rotation * Quat::from_rotation_z(angle);
+        *label_global = cube_global.mul_transform(*label_transform);
     }
 }
 
@@ -332,7 +342,7 @@ pub fn apply_render_layers_to_scene(
     scene_instances: Query<&WorldInstance>,
     scene_spawner: Res<WorldInstanceSpawner>,
     view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
-    own_layers: Query<&RenderLayers, With<KeepsRenderLayers>>,
+    current_layers: Query<(&RenderLayers, Has<KeepsRenderLayers>)>,
     mut commands: Commands,
 ) {
     for (cube_root, render_layers, visibility) in view_cube_query.iter() {
@@ -340,7 +350,7 @@ pub fn apply_render_layers_to_scene(
             cube_root,
             &children_query,
             &view_cube_entities,
-            &own_layers,
+            &current_layers,
             render_layers,
             &mut commands,
         );
@@ -358,15 +368,22 @@ fn apply_layers_recursive(
     entity: Entity,
     children_query: &Query<&Children>,
     view_cube_entities: &Query<Entity, Without<ViewCubeCamera>>,
-    own_layers: &Query<&RenderLayers, With<KeepsRenderLayers>>,
+    current_layers: &Query<(&RenderLayers, Has<KeepsRenderLayers>)>,
     render_layers: &RenderLayers,
     commands: &mut Commands,
 ) {
     // A per-viewport subtree keeps its own layer and hands it down, otherwise
     // the shared cube's layer would leak in and every viewport would see every
-    // copy of the face labels.
-    let render_layers = match own_layers.get(entity) {
-        Ok(own) => own,
+    // copy of the face labels. Rewriting an unchanged layer still trips Bevy
+    // change detection, so skip the insert when the mask is already right.
+    let render_layers = match current_layers.get(entity) {
+        Ok((own, true)) => own,
+        Ok((current, false)) => {
+            if view_cube_entities.get(entity).is_ok() && current != render_layers {
+                commands.entity(entity).insert(render_layers.clone());
+            }
+            render_layers
+        }
         Err(_) => {
             if view_cube_entities.get(entity).is_ok() {
                 commands.entity(entity).insert(render_layers.clone());
@@ -381,7 +398,7 @@ fn apply_layers_recursive(
                 child,
                 children_query,
                 view_cube_entities,
-                own_layers,
+                current_layers,
                 render_layers,
                 commands,
             );
@@ -1782,6 +1799,8 @@ mod tests {
             .world_mut()
             .spawn((
                 ViewCubeRoot,
+                ViewCubeFrame(GeoFrame::ECEF),
+                Transform::from_rotation(cube),
                 GlobalTransform::from(Transform::from_rotation(cube)),
             ))
             .id();
@@ -1791,6 +1810,8 @@ mod tests {
                 .world_mut()
                 .spawn((
                     ViewCubeCamera,
+                    ViewCubeFrameRef(GeoFrame::ECEF),
+                    Transform::from_rotation(camera_rotation),
                     GlobalTransform::from(Transform::from_rotation(camera_rotation)),
                 ))
                 .id();
@@ -1804,6 +1825,7 @@ mod tests {
                         last_view: None,
                     },
                     Transform::from_rotation(label.rotation),
+                    GlobalTransform::from(Transform::from_rotation(label.rotation)),
                 ))
                 .id()
         };
@@ -2123,6 +2145,46 @@ mod tests {
         assert!(
             face_label_in_plane_angle(label.rotation, Quat::IDENTITY, camera).is_none(),
             "an edge-on face has no meaningful in-plane angle"
+        );
+    }
+
+    /// geo-frames' two ECEF cameras: look-at in ECEF, converted the same way
+    /// the viewport does. +X on the oblique view must actually spin — baked
+    /// orientation leaves it vertical on screen.
+    #[test]
+    fn geo_frames_ecef_cameras_spin_plus_x_off_its_baked_pose() {
+        let geo = geo_frames_geo();
+        let cube = ecef_cube_rotation(&geo);
+        let label = ecef_face_label("+X");
+
+        let equator = GeoRotation::look_at(
+            GeoFrame::ECEF,
+            DVec3::new(-8_000_000.0, 80_000_000.0, 0.0),
+            Some(DVec3::Z),
+            &geo,
+        )
+        .to_bevy(&geo)
+        .as_quat();
+        let oblique = GeoRotation::look_at(
+            GeoFrame::ECEF,
+            DVec3::new(-46_000_000.0, 46_000_000.0, -46_000_000.0),
+            Some(DVec3::Z),
+            &geo,
+        )
+        .to_bevy(&geo)
+        .as_quat();
+
+        assert_reads_horizontally("+X", cube, equator);
+        assert_reads_horizontally("+X", cube, oblique);
+        assert_reads_horizontally("+Z", cube, oblique);
+        assert_reads_horizontally("-Y", cube, equator);
+
+        let baked = 0.0;
+        let spun = face_label_in_plane_angle(label.rotation, cube, oblique)
+            .expect("+X visible from the oblique ECEF camera");
+        assert!(
+            (spun - baked).abs() > 15.0_f32.to_radians(),
+            "oblique +X must leave its baked pose, got {spun} rad"
         );
     }
 }
