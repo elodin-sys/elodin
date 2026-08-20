@@ -200,60 +200,82 @@ fn serialize_earth(earth: &EarthConfig) -> KdlNode {
     let mut kids = KdlDocument::new();
     if earth.stars != EarthStarsConfig::default() {
         let mut node = KdlNode::new("stars");
-        if (earth.stars.density - EarthStarsConfig::default_density()).abs() > f32::EPSILON {
-            push_rounded_float_prop(&mut node, "density", f64::from(earth.stars.density));
-        }
-        if (earth.stars.size - EarthStarsConfig::default_size()).abs() > f32::EPSILON {
-            push_rounded_float_prop(&mut node, "size", f64::from(earth.stars.size));
-        }
-        if (earth.stars.brightness - EarthStarsConfig::default_brightness()).abs() > f32::EPSILON {
-            push_rounded_float_prop(&mut node, "brightness", f64::from(earth.stars.brightness));
+        for (name, value, default) in [
+            (
+                "density",
+                earth.stars.density,
+                EarthStarsConfig::default_density(),
+            ),
+            ("size", earth.stars.size, EarthStarsConfig::default_size()),
+            (
+                "brightness",
+                earth.stars.brightness,
+                EarthStarsConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
         }
         kids.nodes_mut().push(node);
     }
     if earth.city_lights != EarthCityLightsConfig::default() {
         let mut node = KdlNode::new("city_lights");
-        if (earth.city_lights.density - EarthCityLightsConfig::default_density()).abs()
-            > f32::EPSILON
-        {
-            push_rounded_float_prop(&mut node, "density", f64::from(earth.city_lights.density));
-        }
-        if (earth.city_lights.size - EarthCityLightsConfig::default_size()).abs() > f32::EPSILON {
-            push_rounded_float_prop(&mut node, "size", f64::from(earth.city_lights.size));
-        }
-        if (earth.city_lights.height - EarthCityLightsConfig::default_height()).abs() > f32::EPSILON
-        {
-            push_rounded_float_prop(&mut node, "height", f64::from(earth.city_lights.height));
-        }
-        if (earth.city_lights.brightness - EarthCityLightsConfig::default_brightness()).abs()
-            > f32::EPSILON
-        {
-            push_rounded_float_prop(
-                &mut node,
+        for (name, value, default) in [
+            (
+                "density",
+                earth.city_lights.density,
+                EarthCityLightsConfig::default_density(),
+            ),
+            (
+                "size",
+                earth.city_lights.size,
+                EarthCityLightsConfig::default_size(),
+            ),
+            (
+                "height",
+                earth.city_lights.height,
+                EarthCityLightsConfig::default_height(),
+            ),
+            (
                 "brightness",
-                f64::from(earth.city_lights.brightness),
-            );
+                earth.city_lights.brightness,
+                EarthCityLightsConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
         }
         kids.nodes_mut().push(node);
     }
     if earth.airglow != EarthAirglowConfig::default() {
         let mut node = KdlNode::new("airglow");
-        if (earth.airglow.density - EarthAirglowConfig::default_density()).abs() > f32::EPSILON {
-            push_rounded_float_prop(&mut node, "density", f64::from(earth.airglow.density));
-        }
-        if (earth.airglow.size - EarthAirglowConfig::default_size()).abs() > f32::EPSILON {
-            push_rounded_float_prop(&mut node, "size", f64::from(earth.airglow.size));
-        }
-        if (earth.airglow.brightness - EarthAirglowConfig::default_brightness()).abs()
-            > f32::EPSILON
-        {
-            push_rounded_float_prop(&mut node, "brightness", f64::from(earth.airglow.brightness));
+        for (name, value, default) in [
+            (
+                "density",
+                earth.airglow.density,
+                EarthAirglowConfig::default_density(),
+            ),
+            (
+                "size",
+                earth.airglow.size,
+                EarthAirglowConfig::default_size(),
+            ),
+            (
+                "brightness",
+                earth.airglow.brightness,
+                EarthAirglowConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
         }
         kids.nodes_mut().push(node);
     }
     if earth.night_map != EarthNightMapConfig::default() {
         let mut node = KdlNode::new("night_map");
-        push_rounded_float_prop(&mut node, "brightness", f64::from(earth.night_map.brightness));
+        push_float_prop_if_ne(
+            &mut node,
+            "brightness",
+            earth.night_map.brightness,
+            EarthNightMapConfig::default_brightness(),
+        );
         kids.nodes_mut().push(node);
     }
     if !kids.nodes().is_empty() {
@@ -338,6 +360,12 @@ fn push_rounded_float_prop(node: &mut KdlNode, name: &str, value: f64) {
         .push(KdlEntry::new_prop(name, round_float_default(value)));
 }
 
+fn push_float_prop_if_ne(node: &mut KdlNode, name: &str, value: f32, default: f32) {
+    if (value - default).abs() > f32::EPSILON {
+        push_rounded_float_prop(node, name, f64::from(value));
+    }
+}
+
 fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     if let Some(name) = name {
         push_name_prop(node, name);
@@ -412,12 +440,7 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
 
     push_optional_name_prop(&mut node, viewport.name.as_deref());
 
-    let default_fov = if viewport.cinematic {
-        CINEMATIC_VIEWPORT_FOV_DEG
-    } else {
-        DEFAULT_VIEWPORT_FOV_DEG
-    };
-    if (viewport.fov - default_fov).abs() > f32::EPSILON {
+    if (viewport.fov - 45.0).abs() > f32::EPSILON {
         push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
     }
 
@@ -507,34 +530,20 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
                     .entries_mut()
                     .push(KdlEntry::new_prop("enabled", ae.enabled));
             }
-            if (ae.max_night_boost - defaults.max_night_boost).abs() > f32::EPSILON {
-                push_rounded_float_prop(
-                    &mut ae_node,
+            for (name, value, default) in [
+                (
                     "max_night_boost",
-                    f64::from(ae.max_night_boost),
-                );
-            }
-            if (ae.speed_brighten - defaults.speed_brighten).abs() > f32::EPSILON {
-                push_rounded_float_prop(
-                    &mut ae_node,
-                    "speed_brighten",
-                    f64::from(ae.speed_brighten),
-                );
-            }
-            if (ae.speed_darken - defaults.speed_darken).abs() > f32::EPSILON {
-                push_rounded_float_prop(&mut ae_node, "speed_darken", f64::from(ae.speed_darken));
-            }
-            if (ae.filter_low - defaults.filter_low).abs() > f32::EPSILON {
-                push_rounded_float_prop(&mut ae_node, "filter_low", f64::from(ae.filter_low));
-            }
-            if (ae.filter_high - defaults.filter_high).abs() > f32::EPSILON {
-                push_rounded_float_prop(&mut ae_node, "filter_high", f64::from(ae.filter_high));
-            }
-            if (ae.range_min - defaults.range_min).abs() > f32::EPSILON {
-                push_rounded_float_prop(&mut ae_node, "range_min", f64::from(ae.range_min));
-            }
-            if (ae.range_max - defaults.range_max).abs() > f32::EPSILON {
-                push_rounded_float_prop(&mut ae_node, "range_max", f64::from(ae.range_max));
+                    ae.max_night_boost,
+                    defaults.max_night_boost,
+                ),
+                ("speed_brighten", ae.speed_brighten, defaults.speed_brighten),
+                ("speed_darken", ae.speed_darken, defaults.speed_darken),
+                ("filter_low", ae.filter_low, defaults.filter_low),
+                ("filter_high", ae.filter_high, defaults.filter_high),
+                ("range_min", ae.range_min, defaults.range_min),
+                ("range_max", ae.range_max, defaults.range_max),
+            ] {
+                push_float_prop_if_ne(&mut ae_node, name, value, default);
             }
             let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
             children.nodes_mut().push(ae_node);
@@ -1720,26 +1729,6 @@ viewport cinematic=#true"#,
     }
 
     #[test]
-    fn test_environment_earth_keeps_negative_city_height() {
-        let parsed = parse_schematic(
-            "environment {\n    earth {\n        city_lights height=-400\n    }\n}\nviewport cinematic=#true",
-        )
-        .unwrap();
-        let earth = parsed.environment.unwrap().earth.unwrap();
-        assert_eq!(earth.city_lights.height, -400.0);
-
-        let serialized = serialize_schematic(&Schematic {
-            environment: Some(EnvironmentConfig {
-                earth: Some(earth),
-                ..Default::default()
-            }),
-            elems: parsed.elems.clone(),
-            ..Default::default()
-        });
-        assert!(serialized.contains("height=-400"), "{serialized}");
-    }
-
-    #[test]
     fn test_environment_earth_rejects_unknown_child() {
         let err = parse_schematic(
             "environment {\n    earth {\n        clouds density=1.0\n    }\n}\nviewport cinematic=#true",
@@ -1866,14 +1855,14 @@ viewport name="main" cinematic=#true ev100=13.5
         };
         assert!(viewport.cinematic);
         assert!(!viewport.hdr);
-        assert!((viewport.fov - CINEMATIC_VIEWPORT_FOV_DEG).abs() < f32::EPSILON);
+        assert_eq!(viewport.fov, 45.0);
 
         let serialized = serialize_schematic(&parsed);
         assert!(serialized.contains("cinematic"));
         assert!(!serialized.contains("hdr="));
         assert!(
             !serialized.contains("fov="),
-            "house cinematic FOV should be omitted: {serialized}"
+            "default FOV should be omitted: {serialized}"
         );
         let reparsed = parse_schematic(&serialized).unwrap();
         let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {

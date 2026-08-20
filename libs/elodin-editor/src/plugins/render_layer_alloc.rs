@@ -17,8 +17,7 @@ use bevy_geo_frames::GeoFrame;
 use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
-/// Cinematic Earth globe, star fields, city lights, airglow, sun, and
-/// earthshine. Only cameras with `cinematic=#true` include this layer.
+/// Cinematic Earth visuals and lighting.
 pub const CINEMATIC_EARTH_RENDER_LAYER: usize = 27;
 /// Thruster `ParticleEffect` entities. Viewport cameras include this layer when
 /// KDL `effects` is true (default); `effects=#false` hides plumes in that view.

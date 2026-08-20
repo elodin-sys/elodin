@@ -108,5 +108,5 @@ All scene nodes support an optional `frame` attribute (`ENU`, `NED`, or `ECEF`) 
 
 ## Serialization Notes
 
-- Many default scalar properties are omitted (for example `viewport fov=45.0`, cinematic `fov=50.0`, `show_arrows=#true`).
+- Many default scalar properties are omitted (for example `viewport fov=45.0`, `show_arrows=#true`).
 - Several nodes always serialize explicit color children, including `line_3d`, `vector_arrow`, `query_plot`, and mesh materials.

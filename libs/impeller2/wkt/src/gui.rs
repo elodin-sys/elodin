@@ -92,9 +92,7 @@ pub struct EnvironmentConfig {
     /// no atmosphere.
     #[serde(default)]
     pub atmosphere: Option<AtmosphereConfig>,
-    /// Built-in cinematic Earth for ECEF scenes: true-scale globe at the ECEF
-    /// origin plus atmosphere, star field, city lights, airglow, and night
-    /// lighting, all driven by the active camera. Supersedes `atmosphere`.
+    /// Built-in camera-driven Earth for ECEF scenes.
     #[serde(default)]
     pub earth: Option<EarthConfig>,
 }
@@ -111,12 +109,8 @@ impl Default for EnvironmentConfig {
     }
 }
 
-/// `earth` child of the `environment` node: the editor's built-in cinematic
-/// Earth. Everything (globe GLB, skybox, particle sky, curves) is embedded in
-/// the editor binary; the schematic toggles it and tunes the particle-field
-/// look (`stars` / `city_lights` / `airglow` children). Night exposure is
-/// the cinematic viewport's `auto_exposure` child.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+/// Built-in cinematic Earth configuration.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 pub struct EarthConfig {
     #[serde(default)]
     pub stars: EarthStarsConfig,
@@ -128,8 +122,7 @@ pub struct EarthConfig {
     pub night_map: EarthNightMapConfig,
 }
 
-/// Star-field look. `density` / `size` / `brightness` are scales vs the baked
-/// particle recipe; omit to keep house.
+/// Star-field tuning.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct EarthStarsConfig {
     #[serde(default = "EarthStarsConfig::default_density")]
@@ -140,8 +133,7 @@ pub struct EarthStarsConfig {
     pub brightness: f32,
 }
 
-/// City-light look. `density` / `brightness` are scales; `size` is screen
-/// pixels; `height` is metres above the ellipsoid.
+/// City-light tuning.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct EarthCityLightsConfig {
     #[serde(default = "EarthCityLightsConfig::default_density")]
@@ -154,16 +146,14 @@ pub struct EarthCityLightsConfig {
     pub brightness: f32,
 }
 
-/// Globe night-sheet look: `brightness` scales the emissive night texture
-/// under the city-light particles. `0` leaves only the particles.
+/// Emissive night-map tuning.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct EarthNightMapConfig {
     #[serde(default = "EarthNightMapConfig::default_brightness")]
     pub brightness: f32,
 }
 
-/// Airglow look. `density` / `size` / `brightness` are scales vs the baked
-/// particle recipe; omit to keep house.
+/// Airglow tuning.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct EarthAirglowConfig {
     #[serde(default = "EarthAirglowConfig::default_density")]
@@ -172,17 +162,6 @@ pub struct EarthAirglowConfig {
     pub size: f32,
     #[serde(default = "EarthAirglowConfig::default_brightness")]
     pub brightness: f32,
-}
-
-impl Default for EarthConfig {
-    fn default() -> Self {
-        Self {
-            stars: EarthStarsConfig::default(),
-            city_lights: EarthCityLightsConfig::default(),
-            airglow: EarthAirglowConfig::default(),
-            night_map: EarthNightMapConfig::default(),
-        }
-    }
 }
 
 impl Default for EarthStarsConfig {
@@ -292,9 +271,7 @@ impl EarthConfig {
             city_lights: EarthCityLightsConfig {
                 density: clamp_density(self.city_lights.density),
                 size: self.city_lights.size.max(0.5),
-                // Negative sinks the lights into the globe mesh; its facets sit
-                // ~100 m below the ideal ellipsoid, so shallow values dapple.
-                height: self.city_lights.height.clamp(-5_000.0, 100_000.0),
+                height: self.city_lights.height.clamp(0.0, 100_000.0),
                 brightness: clamp_scale(self.city_lights.brightness),
             },
             airglow: EarthAirglowConfig {
@@ -303,8 +280,7 @@ impl EarthConfig {
                 brightness: clamp_scale(self.airglow.brightness),
             },
             night_map: EarthNightMapConfig {
-                // Unlike the particle scales this floors at 0: killing the
-                // sheet entirely is the point of the knob.
+                // Zero disables the emissive sheet.
                 brightness: self.night_map.brightness.clamp(0.0, 4.0),
             },
         }
@@ -668,11 +644,6 @@ pub struct Split {
     pub name: Option<String>,
 }
 
-/// Regular viewport FOV when KDL omits `fov`.
-pub const DEFAULT_VIEWPORT_FOV_DEG: f32 = 45.0;
-/// Cinematic Earth camera FOV when KDL omits `fov`.
-pub const CINEMATIC_VIEWPORT_FOV_DEG: f32 = 50.0;
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport {
@@ -709,9 +680,7 @@ pub struct Viewport {
     #[serde(default = "default_true")]
     pub effects: bool,
     pub hdr: bool,
-    /// Owns the cinematic Earth camera pipeline: HDR, atmosphere, skybox,
-    /// auto-exposure, and the earth render layer. Mutually exclusive
-    /// with `hdr`; required when `environment { earth }` is set.
+    /// Enables the cinematic Earth camera pipeline.
     #[serde(default)]
     pub cinematic: bool,
     #[serde(default)]
@@ -743,7 +712,7 @@ pub struct Viewport {
 impl Default for Viewport {
     fn default() -> Self {
         Self {
-            fov: DEFAULT_VIEWPORT_FOV_DEG,
+            fov: 45.0,
             near: None,
             far: None,
             aspect: None,
@@ -775,9 +744,7 @@ impl Default for Viewport {
     }
 }
 
-/// Per-viewport Bevy `AutoExposure` knobs. Correction stacks on the
-/// authored `ev100` at tonemap; `max_night_boost` is the compensation-curve
-/// knee that caps how far a dark frame can brighten.
+/// Per-viewport auto-exposure tuning.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AutoExposureConfig {
     #[serde(default = "AutoExposureConfig::default_enabled")]

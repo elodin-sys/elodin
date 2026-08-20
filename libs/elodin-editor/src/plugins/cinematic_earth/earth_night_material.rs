@@ -45,10 +45,6 @@ impl MaterialExtension for EarthNightExt {
     fn fragment_shader() -> ShaderRef {
         "embedded://elodin_editor/plugins/cinematic_earth/earth_night.wgsl".into()
     }
-
-    fn deferred_fragment_shader() -> ShaderRef {
-        ShaderRef::Default
-    }
 }
 
 pub type EarthNightMaterial = ExtendedMaterial<StandardMaterial, EarthNightExt>;

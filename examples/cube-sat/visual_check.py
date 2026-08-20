@@ -1,23 +1,5 @@
 #!/usr/bin/env uv run
-"""Parked OreSat LEO sky checks — night-to-day and day-to-night at one spot.
-
-  # Editor reads ELODIN_SCREENSHOT_* at process start — export delay with the launch:
-  ELODIN_CUBESAT_SCENARIO=night ELODIN_SCREENSHOT_DELAY=12 \\
-    elodin editor examples/cube-sat/visual_check.py
-
-  for s in night dawn-limb sunrise morning day afternoon dusk sunset sunset-limb night-am; do
-    ELODIN_CUBESAT_SCENARIO=$s ELODIN_SCREENSHOT_DELAY=12 \\
-      elodin editor examples/cube-sat/visual_check.py
-  done
-
-Parked at 34.05N, 124W (SoCal LEO slot) so equinox UTC maps to the §7 stages.
-cube-sat/main.py currently starts further west (−140°); this harness holds the
-spot so the sun moves, not the craft. Camera offset matches main.py (aft-west
-+ up, look east). Screenshots default to /tmp/cubesat-<scenario>.png.
-
-NOTE: no `from __future__ import annotations` — `@el.system` introspects real
-annotation objects (same constraint as main.py).
-"""
+"""Parked OreSat LEO day/night visual checks."""
 
 import os
 from dataclasses import dataclass
@@ -57,9 +39,7 @@ SCENARIOS = {
     "night-am": "2026-03-21T06:11:00+00:00",
 }
 if SCENARIO not in SCENARIOS:
-    raise SystemExit(
-        f"unknown ELODIN_CUBESAT_SCENARIO={SCENARIO!r}; choose {list(SCENARIOS)}"
-    )
+    raise SystemExit(f"unknown ELODIN_CUBESAT_SCENARIO={SCENARIO!r}; choose {list(SCENARIOS)}")
 
 os.environ.setdefault("ELODIN_SCREENSHOT", f"/tmp/cubesat-{SCENARIO}.png")
 os.environ.setdefault("ELODIN_SCREENSHOT_DELAY", str(DELAY_S))
@@ -128,7 +108,9 @@ w.schematic(
     "cube-sat-visual-check.kdl",
 )
 
-print(f"[cube-sat visual_check] scenario={SCENARIO} utc={SCENARIOS[SCENARIO]} → {os.environ['ELODIN_SCREENSHOT']}")
+print(
+    f"[cube-sat visual_check] scenario={SCENARIO} utc={SCENARIOS[SCENARIO]} → {os.environ['ELODIN_SCREENSHOT']}"
+)
 
 w.run(
     system=park,

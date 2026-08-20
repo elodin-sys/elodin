@@ -1,9 +1,4 @@
-//! Applies the schematic's top-level `environment` node: a directional sun
-//! (with optional shadow maps), ambient/IBL scaling, and viewport sky color.
-//!
-//! Without an `environment` node the editor renders exactly as before: baked
-//! `EnvironmentMapLight` IBL, no sun, theme-colored background. See
-//! docs/design-thruster-effects-port.md §4.2 for the schema and rationale.
+//! Applies the schematic's sun, atmosphere, ambient light, and sky color.
 
 use bevy::camera::ClearColorConfig;
 use bevy::camera::visibility::RenderLayers;
@@ -21,36 +16,29 @@ use impeller2_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunCo
 use crate::MainCamera;
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 
-/// Marker for the viewport that owns the cinematic Earth camera pipeline
-/// (`viewport cinematic=#true`). Atmosphere, HDR, skybox, and earth-layer
-/// content attach only to this camera.
+/// Marks the viewport that owns the cinematic Earth camera pipeline.
 #[derive(Component)]
 pub struct CinematicViewport;
 
-/// The active schematic's `environment` node, set on schematic load
-/// (`None` = default editor look).
+/// Active schematic environment.
 #[derive(Resource, Default, Clone)]
 pub struct SceneEnvironment(pub Option<EnvironmentConfig>);
 
-/// Baked IBL intensity viewport cameras spawn with (see `ViewportPane::spawn`);
-/// `environment { ambient scale=… }` multiplies this.
+#[derive(Resource, Default)]
+pub(crate) struct SpaceVisibility(pub f32);
+
+/// Baked IBL intensity before environment scaling.
 pub const BASE_ENVIRONMENT_MAP_INTENSITY: f32 = 2000.0;
 
-/// Marker for the sun spawned from the schematic `environment` node.
-/// `pub(crate)`: the cinematic-earth plugin reads its direction.
+/// Sun spawned from the schematic environment.
 #[derive(Component)]
 pub(crate) struct SchematicSun;
 
-/// Marker + source config for the atmosphere spawned from the schematic
-/// `environment` node; the stored config detects edits (hot reload).
-/// `pub(crate)`: the cinematic-earth plugin tunes density and surface radius.
+/// Atmosphere spawned from the schematic environment.
 #[derive(Component)]
 pub(crate) struct SchematicAtmosphere(AtmosphereConfig);
 
-/// The atmosphere the scene should actually run: the explicit `atmosphere`
-/// child, or the built-in cinematic Earth's derived one (`environment {
-/// earth }` owns its atmosphere: raymarched, ECEF origin; the cinematic-earth
-/// plugin then drives density and surface radius from the camera).
+/// Returns the explicit atmosphere or cinematic Earth's derived atmosphere.
 fn effective_atmosphere(env: &EnvironmentConfig) -> Option<AtmosphereConfig> {
     if env.earth.is_some() {
         if env.atmosphere.is_some() {
@@ -70,17 +58,14 @@ fn effective_atmosphere(env: &EnvironmentConfig) -> Option<AtmosphereConfig> {
     env.atmosphere
 }
 
-/// Explicit `sun`, or a default (ephemeris, 100 klx, shadows) when `earth`
-/// is set with no sun of its own.
+/// Returns the explicit sun or cinematic Earth's default sun.
 fn effective_sun(env: &EnvironmentConfig) -> Option<SunConfig> {
     env.sun
         .or_else(|| env.earth.is_some().then(SunConfig::default))
 }
 
 fn atmosphere_geo_rotation(frame: GeoFrame, ctx: &GeoContext) -> GeoRotation {
-    // Since #774, `GeoRotation::to_bevy` composes the frame basis for both
-    // rotation kinds. Store its inverse so a spherical atmosphere stays
-    // unrotated in Bevy, matching its pre-#774 placement.
+    // Cancel the frame basis so the spherical atmosphere stays unrotated in Bevy.
     GeoRotation::from_bevy(frame, DQuat::IDENTITY, ctx)
 }
 
@@ -89,14 +74,12 @@ pub struct SceneEnvironmentPlugin;
 impl Plugin for SceneEnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SceneEnvironment>()
+            .init_resource::<SpaceVisibility>()
             .add_systems(Update, (sync_sun, sync_atmosphere, sync_camera_environment));
     }
 }
 
-/// Sun rotation from azimuth/elevation degrees (Bevy Y-up frame; matches the
-/// pyrotechnique authoring convention so scene values transcribe directly).
-/// A missing angle uses the historical default so a partially-specified sun
-/// behaves as it did before az/el became optional.
+/// Builds the sun rotation from Bevy Y-up azimuth and elevation.
 fn sun_rotation(sun: &SunConfig) -> Quat {
     let az = sun.azimuth_deg.unwrap_or(SunConfig::default_azimuth_deg());
     let el = sun
@@ -105,15 +88,13 @@ fn sun_rotation(sun: &SunConfig) -> Quat {
     Quat::from_euler(EulerRot::YXZ, -az.to_radians(), -el.to_radians(), 0.0)
 }
 
-/// Rotate a "toward the sun" vector in `frame` into a Bevy directional-light
-/// orientation (light travels −Z).
+/// Converts a frame-relative sun direction to Bevy light rotation.
 fn rotation_from_frame_direction(to_sun: DVec3, frame: GeoFrame, ctx: &GeoContext) -> Option<Quat> {
     let to_sun = (GeoFrame::bevy_R_(&frame, ctx) * to_sun).try_normalize()?;
     Some(Quat::from_rotation_arc(Vec3::NEG_Z, (-to_sun).as_vec3()))
 }
 
-/// World-frame sun rotation. Most explicit wins: `direction`, then az/el,
-/// then the ECEF ephemeris at `unix_micros`.
+/// Resolves sun rotation from direction, angles, or ephemeris.
 fn sun_rotation_world(
     sun: &SunConfig,
     frame: GeoFrame,
@@ -143,7 +124,7 @@ fn playhead_unix_micros(current: &CurrentTimestamp) -> i64 {
 }
 
 fn cinematic_sun_layers() -> RenderLayers {
-    RenderLayers::layer(CINEMATIC_EARTH_RENDER_LAYER)
+    RenderLayers::from_layers(&[0, CINEMATIC_EARTH_RENDER_LAYER])
 }
 
 fn sync_sun(
@@ -218,11 +199,7 @@ fn sync_sun(
     }
 }
 
-/// Spawns/despawns the planetary atmosphere declared by the schematic. The
-/// entity lives in the same high-precision space as world objects (GeoPosition
-/// in the schematic frame + big_space grid cell), so the planet center stays
-/// put through floating-origin rebases whether the scene is a local ENU pad or
-/// full ECEF Earth.
+/// Synchronizes the schematic atmosphere entity.
 fn sync_atmosphere(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
@@ -283,14 +260,10 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
     }
 }
 
-/// Keeps main viewport cameras in sync with the environment: IBL intensity
-/// scaling, sky (clear) color, and the per-camera `AtmosphereSettings` that
-/// activates the schematic atmosphere. Runs every frame because cameras can
-/// spawn at any time; writes are change-gated.
+/// Synchronizes viewport IBL, clear color, and atmosphere settings.
 fn atmosphere_settings_for(config: AtmosphereConfig) -> AtmosphereSettings {
     if config.raymarched {
-        // Distant planet views (apollo Earth-from-Moon, ~2° disk): raymarch
-        // with a larger sky-view LUT so the blue limb stays resolvable.
+        // A larger sky-view LUT preserves distant planetary limbs.
         AtmosphereSettings {
             aerial_view_lut_max_distance: 3.2e5,
             rendering_method: AtmosphereMode::Raymarched,
@@ -301,29 +274,32 @@ fn atmosphere_settings_for(config: AtmosphereConfig) -> AtmosphereSettings {
         }
     } else {
         AtmosphereSettings {
-            // Ground ECEF scenes (falcon9): default LookupTexture; longer
-            // aerial-view span for chase cams watching multi-km plumes.
+            // Extend aerial perspective for long-range chase cameras.
             aerial_view_lut_max_distance: 3.2e5,
             ..AtmosphereSettings::default()
         }
     }
 }
 
+type EnvironmentCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Camera,
+        &'static mut EnvironmentMapLight,
+        Option<&'static AtmosphereSettings>,
+        Has<CinematicViewport>,
+    ),
+    With<MainCamera>,
+>;
+
 fn sync_camera_environment(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
-    viewer_frame: Res<crate::plugins::cinematic_earth::ViewerFrame>,
+    space_visibility: Res<SpaceVisibility>,
     cinematic: Query<Entity, With<CinematicViewport>>,
-    mut cameras: Query<
-        (
-            Entity,
-            &mut Camera,
-            &mut EnvironmentMapLight,
-            Option<&AtmosphereSettings>,
-            Has<CinematicViewport>,
-        ),
-        With<MainCamera>,
-    >,
+    mut cameras: EnvironmentCameraQuery,
 ) {
     let (ambient_scale, sky_color, atmosphere, earth) = match &environment.0 {
         Some(config) => (
@@ -335,30 +311,32 @@ fn sync_camera_environment(
         None => (1.0, None, None, false),
     };
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
-    let cinematic_clear = match sky_color {
+    let environment_clear = match sky_color {
         Some(color) => ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a)),
         None if earth => ClearColorConfig::Custom(Color::BLACK),
         None => ClearColorConfig::Default,
     };
-    let default_clear = match sky_color {
+    let regular_clear = match sky_color {
         Some(color) if !earth => {
             ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a))
         }
         _ => ClearColorConfig::Default,
     };
-    // Bevy 0.19 fatally fails wgpu validation when several active views carry
-    // AtmosphereSettings. Earth scenes pin it to the cinematic camera. Plain
-    // `atmosphere` (apollo-lander) still elects the lowest-id active camera.
+    // Bevy 0.19 permits AtmosphereSettings on only one active view.
     let cinematic_cam = cinematic.iter().next();
     let chosen = if earth {
         atmosphere.and(cinematic_cam)
     } else {
-        let active: Vec<Entity> = cameras
+        let active_count = cameras
+            .iter()
+            .filter(|(_, camera, ..)| camera.is_active)
+            .count();
+        let active = cameras
             .iter()
             .filter(|(_, camera, ..)| camera.is_active)
             .map(|(entity, ..)| entity)
-            .collect();
-        if atmosphere.is_some() && active.len() > 1 {
+            .min();
+        if atmosphere.is_some() && active_count > 1 {
             warn_once!(
                 "schematic atmosphere renders on only one active main viewport \
                  (Bevy 0.19: several cameras with AtmosphereSettings trip wgpu \
@@ -366,20 +344,19 @@ fn sync_camera_environment(
                  clear-color/IBL; switch tabs to move the sky to another pane."
             );
         }
-        atmosphere.and(active.into_iter().min())
+        atmosphere.and(active)
     };
-    // Pyrotechnique kills ambient in space (`ambient × (1 − space_vis)`): the
-    // studio IBL has no business lighting the night globe from LEO.
-    let space_ibl_fade = 1.0 - viewer_frame.space_vis;
+    // Fade studio IBL out in space.
+    let space_ibl_fade = 1.0 - space_visibility.0;
     for (entity, mut camera, mut light, current_settings, is_cinematic) in &mut cameras {
         let (target_intensity, target_clear) = if earth {
             if is_cinematic {
-                (intensity * space_ibl_fade, cinematic_clear)
+                (intensity * space_ibl_fade, environment_clear)
             } else {
-                (BASE_ENVIRONMENT_MAP_INTENSITY, default_clear)
+                (BASE_ENVIRONMENT_MAP_INTENSITY, regular_clear)
             }
         } else {
-            (intensity, cinematic_clear)
+            (intensity, environment_clear)
         };
         if light.intensity != target_intensity {
             light.intensity = target_intensity;
@@ -421,8 +398,7 @@ mod tests {
             shadows: true,
             direction: None,
         };
-        // Light forward is -Z rotated by the sun rotation; positive elevation
-        // must tilt it below the horizon (negative Y).
+        // Positive elevation must tilt light forward below the horizon.
         let forward = sun_rotation(&sun) * Vec3::NEG_Z;
         assert!(forward.y < -0.5, "sun should shine downward, got {forward}");
     }

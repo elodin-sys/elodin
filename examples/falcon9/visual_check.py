@@ -1,27 +1,5 @@
 #!/usr/bin/env uv run
-"""Lean kinematic visual checks for falcon9 cinematic effects (no FSW).
-
-  # Editor reads ELODIN_SCREENSHOT_* at process start — export delay with the launch:
-  ELODIN_VIZCHECK_SCENARIO=plume-close ELODIN_SCREENSHOT_DELAY=10 \\
-    elodin editor examples/falcon9/visual_check.py
-  ELODIN_VIZCHECK_SCENARIO=rcs-flip ELODIN_SCREENSHOT_DELAY=8 \\
-    elodin editor examples/falcon9/visual_check.py
-  ELODIN_VIZCHECK_SCENARIO=barge ELODIN_SCREENSHOT_DELAY=10 \\
-    elodin editor examples/falcon9/visual_check.py
-  ELODIN_VIZCHECK_SCENARIO=night-sky ELODIN_SCREENSHOT_DELAY=12 \\
-    elodin editor examples/falcon9/visual_check.py
-  # Night-sky phase sweep (same spot, different sun elevation):
-  ELODIN_VIZCHECK_SCENARIO=night-sky-twilight ELODIN_SCREENSHOT_DELAY=12 \\
-    elodin editor examples/falcon9/visual_check.py   # sun on limb, mid-transition
-  ELODIN_VIZCHECK_SCENARIO=night-sky-sunrise ELODIN_SCREENSHOT_DELAY=12 \\
-    elodin editor examples/falcon9/visual_check.py   # clean day, stars gone
-
-Screenshots default to /tmp/f9-<scenario>.png via the editor screenshot plugin.
-Each scenario starts at mission time t0 so the interesting frame is early.
-
-NOTE: no `from __future__ import annotations` — `@el.system` introspects real
-annotation objects (same constraint as sim.py).
-"""
+"""Lean kinematic visual checks for Falcon 9 effects."""
 
 import math
 import os
@@ -59,6 +37,7 @@ _CS_RADIUS_M = 6378.1e3 + 400e3
 def _cs_timestamp_us(hh: int, mm: int) -> int:
     return int(datetime(2026, 3, 20, hh, mm, tzinfo=timezone.utc).timestamp() * 1_000_000)
 
+
 SIM_HZ = 120.0
 SIM_DT = 1.0 / SIM_HZ
 SCENARIO = os.environ.get("ELODIN_VIZCHECK_SCENARIO", "plume-close")
@@ -69,16 +48,9 @@ SCENARIOS = {
     "plume-close": {"t0": 22.0, "t_s": 8.0, "delay": 10.0},
     "rcs-flip": {"t0": 36.0, "t_s": 4.0, "delay": 8.0},
     "barge": {"t0": 0.0, "t_s": 8.0, "delay": 10.0},
-    # Coast near apogee (~118 km): built-in cinematic Earth from space —
-    # black sky, thin haze on the limb, curved horizon behind the booster.
+    # Coast near apogee with the Earth limb behind the booster.
     "apogee": {"t0": 225.0, "t_s": 8.0, "delay": 10.0},
-    # Same SoCal LEO slot as cube-sat/main.py — A/B the house sky at 50° FOV.
-    # Phase sweep along the night curves (limb-relative sun elevation at the
-    # parked spot; equinox day, so UTC maps directly to sinE). From 400 km the
-    # limb dips ~20°, so these UTC stamps are:
-    #   night-sky          10:21Z  deep night, everything saturated, EV 9.0
-    #   night-sky-twilight 12:39Z  sun on the limb: mid-transition, stars fading
-    #   night-sky-sunrise  14:30Z  sun well up, stars gone, day EV
+    # Night phases at the same SoCal LEO slot as cube-sat/main.py.
     "night-sky": {"t0": 0.0, "t_s": 4.0, "delay": 12.0, "utc": (10, 21)},
     "night-sky-twilight": {"t0": 0.0, "t_s": 4.0, "delay": 12.0, "utc": (12, 39)},
     "night-sky-sunrise": {"t0": 0.0, "t_s": 4.0, "delay": 12.0, "utc": (14, 30)},
@@ -95,8 +67,7 @@ os.environ.setdefault("ELODIN_SCREENSHOT_EXIT", "1")
 ThrustViz = ty.Annotated[
     jax.Array, el.Component("thrust_viz", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
-# Thrust-direction × intensity (editor flips to exhaust). Default +X with a
-# small yaw gimbal so TVC vector mode is exercised in plume-close.
+# Thrust direction × intensity, with a small yaw gimbal for plume-close.
 PlumeViz = ty.Annotated[
     jax.Array, el.Component("plume_viz", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
@@ -349,8 +320,6 @@ world.run(
     max_ticks=int((_cfg["t_s"] + 5.0) * SIM_HZ),
     optimize=True,
     interactive=False,
-    start_timestamp=(
-        _cs_timestamp_us(*_cfg["utc"]) if "utc" in _cfg else START_TIMESTAMP_US
-    ),
+    start_timestamp=(_cs_timestamp_us(*_cfg["utc"]) if "utc" in _cfg else START_TIMESTAMP_US),
     log_level="warn",
 )

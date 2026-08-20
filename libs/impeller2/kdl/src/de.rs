@@ -148,6 +148,16 @@ fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicE
     })
 }
 
+fn float_prop(node: &KdlNode, prop: &str) -> Option<f32> {
+    node.get(prop)
+        .and_then(|value| {
+            value
+                .as_float()
+                .or_else(|| value.as_integer().map(|value| value as f64))
+        })
+        .map(|value| value as f32)
+}
+
 /// Parses the top-level `environment` node:
 ///
 /// ```kdl
@@ -161,12 +171,6 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
     let mut config = EnvironmentConfig::default();
     let Some(children) = node.children() else {
         return Ok(config);
-    };
-    let float_prop = |child: &KdlNode, prop: &str| -> Option<f32> {
-        child
-            .get(prop)
-            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-            .map(|v| v as f32)
     };
     for child in children.nodes() {
         match child.name().value() {
@@ -240,7 +244,7 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
                 config.atmosphere = Some(atmosphere);
             }
             "earth" => {
-                config.earth = Some(parse_earth(child, src, float_prop)?);
+                config.earth = Some(parse_earth(child, src)?);
             }
             other => {
                 return Err(KdlSchematicError::UnknownNode {
@@ -254,11 +258,7 @@ fn parse_environment(node: &KdlNode, src: &str) -> Result<EnvironmentConfig, Kdl
     Ok(config)
 }
 
-fn parse_earth(
-    node: &KdlNode,
-    src: &str,
-    float_prop: impl Fn(&KdlNode, &str) -> Option<f32>,
-) -> Result<EarthConfig, KdlSchematicError> {
+fn parse_earth(node: &KdlNode, src: &str) -> Result<EarthConfig, KdlSchematicError> {
     let mut earth = EarthConfig::default();
     let Some(children) = node.children() else {
         return Ok(earth.clamp());
@@ -891,16 +891,7 @@ fn bool_prop(node: &KdlNode, prop: &str) -> Option<bool> {
 
 fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let cinematic = bool_prop(node, "cinematic").unwrap_or(false);
-    let default_fov = if cinematic {
-        CINEMATIC_VIEWPORT_FOV_DEG
-    } else {
-        DEFAULT_VIEWPORT_FOV_DEG
-    };
-    let fov = node
-        .get("fov")
-        .and_then(|v| v.as_float())
-        .map(|v| v as f32)
-        .unwrap_or(default_fov);
+    let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
     let near = node
         .get("near")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
@@ -1152,17 +1143,11 @@ fn parse_viewport_bloom(
         }
     };
 
-    let float_prop = |prop: &str| {
-        bloom_node
-            .get(prop)
-            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-            .map(|v| v as f32)
-    };
     let config = BloomConfig {
         preset,
-        intensity: float_prop("intensity"),
-        threshold: float_prop("threshold"),
-        threshold_softness: float_prop("threshold_softness"),
+        intensity: float_prop(bloom_node, "intensity"),
+        threshold: float_prop(bloom_node, "threshold"),
+        threshold_softness: float_prop(bloom_node, "threshold_softness"),
     };
 
     for (prop, value) in [
@@ -1201,24 +1186,22 @@ fn parse_viewport_auto_exposure(
         return Ok(None);
     };
 
-    let float_prop = |prop: &str| {
-        ae_node
-            .get(prop)
-            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-            .map(|v| v as f32)
-    };
     let config = AutoExposureConfig {
         enabled: bool_prop(ae_node, "enabled").unwrap_or(AutoExposureConfig::default_enabled()),
-        max_night_boost: float_prop("max_night_boost")
+        max_night_boost: float_prop(ae_node, "max_night_boost")
             .unwrap_or(AutoExposureConfig::default_max_night_boost()),
-        speed_brighten: float_prop("speed_brighten")
+        speed_brighten: float_prop(ae_node, "speed_brighten")
             .unwrap_or(AutoExposureConfig::default_speed_brighten()),
-        speed_darken: float_prop("speed_darken")
+        speed_darken: float_prop(ae_node, "speed_darken")
             .unwrap_or(AutoExposureConfig::default_speed_darken()),
-        filter_low: float_prop("filter_low").unwrap_or(AutoExposureConfig::default_filter_low()),
-        filter_high: float_prop("filter_high").unwrap_or(AutoExposureConfig::default_filter_high()),
-        range_min: float_prop("range_min").unwrap_or(AutoExposureConfig::default_range_min()),
-        range_max: float_prop("range_max").unwrap_or(AutoExposureConfig::default_range_max()),
+        filter_low: float_prop(ae_node, "filter_low")
+            .unwrap_or(AutoExposureConfig::default_filter_low()),
+        filter_high: float_prop(ae_node, "filter_high")
+            .unwrap_or(AutoExposureConfig::default_filter_high()),
+        range_min: float_prop(ae_node, "range_min")
+            .unwrap_or(AutoExposureConfig::default_range_min()),
+        range_max: float_prop(ae_node, "range_max")
+            .unwrap_or(AutoExposureConfig::default_range_max()),
     };
 
     for (prop, value, min) in [
@@ -2963,8 +2946,8 @@ hsplit {
         assert!(!aux.cinematic);
         assert!(!cine.hdr);
         assert!(!aux.hdr);
-        assert!((cine.fov - CINEMATIC_VIEWPORT_FOV_DEG).abs() < f32::EPSILON);
-        assert!((aux.fov - DEFAULT_VIEWPORT_FOV_DEG).abs() < f32::EPSILON);
+        assert_eq!(cine.fov, 45.0);
+        assert_eq!(aux.fov, 45.0);
     }
 
     #[test]

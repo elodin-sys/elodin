@@ -1212,9 +1212,7 @@ def upright_attitude() -> el.Quaternion:
 
 
 def surface_attitude(lat_deg: float, lon_deg: float) -> el.Quaternion:
-    """Body +Y along local geodetic up: the pose for surface-fixed scene
-    anchors (pad-smoke emitters, barge), matching the effects' authored
-    Y-up frame."""
+    """Point body +Y along local geodetic up."""
     up = ellipsoid_up(math.radians(lat_deg), math.radians(lon_deg))
     y = jnp.array([0.0, 1.0, 0.0])
     axis = jnp.cross(y, up)
@@ -1574,9 +1572,7 @@ def build_mission(
         StaticSceneObject(el.WorldPos(linear=jnp.zeros(3))),
         name="earth",
     )
-    # Surface-fixed scene anchors: launch pad (world-fixed pad-smoke + pad
-    # cameras) and Landing Zone 1 (landing dust + barge mesh). Ground is the
-    # cinematic Earth's WGS84 globe.
+    # Spawn surface-fixed launch and landing anchors.
     pad_att = surface_attitude(PAD_LAT_DEG, PAD_LON_DEG)
     lz1_att = surface_attitude(LZ1_LAT_DEG, LZ1_LON_DEG)
     world.spawn(

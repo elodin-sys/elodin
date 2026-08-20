@@ -1,17 +1,4 @@
-//! Code-built Hanabi effects for the built-in cinematic Earth: star fields,
-//! Milky Way band, city lights, and airglow shells.
-//!
-//! Ported from pyrotechnique's `effects/builders.rs` (same bevy_hanabi rev),
-//! constructed directly as [`EffectAsset`]s instead of `.effect` RON so no
-//! reflection registry or asset files are involved. Contracts:
-//! - Once-burst spawners at full capacity. Day/night dimming is the
-//!   `intensity` / `sun_dir` properties. Density is authored at build time
-//!   (rebuild the asset); do not scale a live `count`.
-//! - `SimulationSpace::Local`: particles ride their parent entity (globe or
-//!   sky root), which keeps them stable under big_space floating-origin
-//!   rebases.
-//! - Sizes are live `Attribute::SIZE` properties. Stars/airglow are world
-//!   metres; city lights are screen pixels (`ScreenSpaceSizeModifier`).
+//! Code-built Hanabi effects for cinematic Earth.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::math::{Vec3, Vec4};
@@ -101,9 +88,7 @@ fn thicken_shell(writer: &ExprWriter, radius: f32, thickness: f32) -> SetAttribu
     SetAttributeModifier::new(Attribute::POSITION, (n * r).expr())
 }
 
-/// Night-side × limb-band visibility for airglow shells. Frame-agnostic dot
-/// products; `sun_dir` / `view_pos` properties arrive in the emitter's local
-/// (globe model) frame.
+/// Computes airglow visibility in the emitter's local frame.
 fn night_and_limb(
     writer: &ExprWriter,
     sun_dir: PropertyHandle,
@@ -127,7 +112,7 @@ fn night_and_limb(
     night * limb
 }
 
-/// World size that subtends `pixels` at [`STAR_RADIUS`] (50° / 900 px).
+/// Calibrated world size per pixel at [`STAR_RADIUS`].
 fn star_world_size(pixels: f32) -> f32 {
     STAR_RADIUS * 0.000969 * pixels
 }
@@ -152,6 +137,7 @@ fn star_field(
     pixel_size: f32,
     hdr: Vec4,
     color_vary: bool,
+    galactic_falloff: Option<f32>,
 ) -> EffectAsset {
     let writer = ExprWriter::new();
     let intensity = writer.add_property(INTENSITY_PROPERTY, 1.0f32.into());
@@ -161,9 +147,21 @@ fn star_field(
     let init_vel = init_zero_velocity(&writer);
     let mag = power_law_mag(&writer);
     let init_mag = SetAttributeModifier::new(Attribute::F32_0, mag.expr());
-    let tint = writer.rand(ScalarType::Float);
-    let init_tint = SetAttributeModifier::new(Attribute::F32_1, tint.expr());
-    let (init_age, init_lifetime) = init_age_lifetime(&writer, writer.lit(VACUUM_LIFETIME));
+    let init_tint = color_vary.then(|| {
+        SetAttributeModifier::new(Attribute::F32_1, writer.rand(ScalarType::Float).expr())
+    });
+    let lifetime = if let Some(falloff) = galactic_falloff {
+        let lat = writer
+            .attr(Attribute::POSITION)
+            .normalized()
+            .dot(writer.lit(Vec3::Y))
+            .abs();
+        let keep = (lat.clone() * lat * writer.lit(-falloff)).exp();
+        writer.lit(VACUUM_LIFETIME) * keep.step(writer.rand(ScalarType::Float))
+    } else {
+        writer.lit(VACUUM_LIFETIME)
+    };
+    let (init_age, init_lifetime) = init_age_lifetime(&writer, lifetime);
 
     let scale = writer.attr(Attribute::F32_0) * writer.prop(intensity);
     let update_color = if color_vary {
@@ -195,33 +193,37 @@ fn star_field(
     let mut module = writer.finish();
     module.add_texture_slot("mask");
 
-    EffectAsset::new(
+    let effect = EffectAsset::new(
         capacity,
         SpawnerSettings::once((capacity as f32).into()),
         module,
     )
     .with_name(name)
     .with_simulation_space(SimulationSpace::Local)
-    .with_simulation_condition(SimulationCondition::Always)
     .with_alpha_mode(bevy_hanabi::AlphaMode::Add)
     .init(init_pos)
     .init(init_vel)
-    .init(init_mag)
-    .init(init_tint)
-    .init(init_age)
-    .init(init_lifetime)
-    .update(update_color)
-    .update(update_size)
-    .render(OrientModifier::new(OrientMode::FaceCameraPosition))
-    .render(ParticleTextureModifier {
-        texture_slot: mask_slot,
-        sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
-    })
-    .render(ColorOverLifetimeModifier {
-        gradient: color,
-        blend: ColorBlendMode::Modulate,
-        mask: ColorBlendMask::RGBA,
-    })
+    .init(init_mag);
+    let effect = if let Some(init_tint) = init_tint {
+        effect.init(init_tint)
+    } else {
+        effect
+    };
+    effect
+        .init(init_age)
+        .init(init_lifetime)
+        .update(update_color)
+        .update(update_size)
+        .render(OrientModifier::new(OrientMode::FaceCameraPosition))
+        .render(ParticleTextureModifier {
+            texture_slot: mask_slot,
+            sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
+        })
+        .render(ColorOverLifetimeModifier {
+            gradient: color,
+            blend: ColorBlendMode::Modulate,
+            mask: ColorBlendMask::RGBA,
+        })
 }
 
 pub fn stars_dim(earth: &EarthConfig) -> EffectAsset {
@@ -232,6 +234,7 @@ pub fn stars_dim(earth: &EarthConfig) -> EffectAsset {
         0.55,
         scale_hdr(STAR_DIM_HDR, earth.stars.brightness),
         false,
+        None,
     )
 }
 
@@ -243,73 +246,20 @@ pub fn stars_bright(earth: &EarthConfig) -> EffectAsset {
         1.5,
         scale_hdr(STAR_BRIGHT_HDR, earth.stars.brightness),
         true,
+        None,
     )
 }
 
 pub fn milky_way(earth: &EarthConfig) -> EffectAsset {
     let earth = earth.clamp();
-    let capacity = scaled_count(MILKY_WAY_COUNT, earth.stars.density);
-    let hdr = scale_hdr(MILKY_WAY_HDR, earth.stars.brightness);
-    let writer = ExprWriter::new();
-    let intensity = writer.add_property(INTENSITY_PROPERTY, 1.0f32.into());
-    let size_scale = writer.add_property(SIZE_PROPERTY, 1.0f32.into());
-
-    let init_pos = star_sphere(&writer);
-    let init_vel = init_zero_velocity(&writer);
-    let mag = power_law_mag(&writer);
-    let init_mag = SetAttributeModifier::new(Attribute::F32_0, mag.expr());
-
-    let n = writer.attr(Attribute::POSITION).normalized();
-    // Sky-local +Y is galactic north; the sky root maps it onto the IAU pole in ECEF.
-    let pole = writer.lit(Vec3::Y);
-    let lat = n.dot(pole).abs();
-    // Gaussian in galactic latitude so density feathers instead of a hard strip.
-    let keep = (lat.clone() * lat * writer.lit(-10.3)).exp();
-    let (init_age, init_lifetime) = init_age_lifetime(
-        &writer,
-        writer.lit(VACUUM_LIFETIME) * keep.step(writer.rand(ScalarType::Float)),
-    );
-
-    let scale = writer.attr(Attribute::F32_0) * writer.prop(intensity);
-    let update_color = SetAttributeModifier::new(Attribute::COLOR, packed_scale(&writer, scale));
-    let mw_size = star_world_size(0.95);
-    let size = writer.lit(mw_size) * writer.prop(size_scale);
-    let update_size = SetAttributeModifier::new(Attribute::SIZE, size.expr());
-
-    let mut color = Gradient::new();
-    color.add_key(0.0, hdr);
-    color.add_key(1.0, hdr);
-
-    let mask_slot = writer.lit(0u32).expr();
-    let mut module = writer.finish();
-    module.add_texture_slot("mask");
-
-    EffectAsset::new(
-        capacity,
-        SpawnerSettings::once((capacity as f32).into()),
-        module,
+    star_field(
+        "milky_way",
+        scaled_count(MILKY_WAY_COUNT, earth.stars.density),
+        0.95,
+        scale_hdr(MILKY_WAY_HDR, earth.stars.brightness),
+        false,
+        Some(10.3),
     )
-    .with_name("milky_way")
-    .with_simulation_space(SimulationSpace::Local)
-    .with_simulation_condition(SimulationCondition::Always)
-    .with_alpha_mode(bevy_hanabi::AlphaMode::Add)
-    .init(init_pos)
-    .init(init_vel)
-    .init(init_mag)
-    .init(init_age)
-    .init(init_lifetime)
-    .update(update_color)
-    .update(update_size)
-    .render(OrientModifier::new(OrientMode::FaceCameraPosition))
-    .render(ParticleTextureModifier {
-        texture_slot: mask_slot,
-        sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
-    })
-    .render(ColorOverLifetimeModifier {
-        gradient: color,
-        blend: ColorBlendMode::Modulate,
-        mask: ColorBlendMask::RGBA,
-    })
 }
 
 pub fn city_lights(earth: &EarthConfig) -> EffectAsset {
@@ -326,8 +276,7 @@ pub fn city_lights(earth: &EarthConfig) -> EffectAsset {
 
     let init_pos = CityTileCdfModifier::from_bytes(CITY_TILE_CDF, EARTH_R + height);
     let init_vel = init_zero_velocity(&writer);
-    // Geography is the Black Marble sample. Tiny mag jitter only — wide mag
-    // packed into 8-bit COLOR was the limb sparkle.
+    // Keep magnitude jitter narrow to avoid 8-bit limb sparkle.
     let mag = writer.lit(0.96) + writer.lit(0.04) * writer.rand(ScalarType::Float);
     let init_mag = SetAttributeModifier::new(Attribute::F32_0, mag.expr());
     let (init_age, init_lifetime) = init_age_lifetime(&writer, writer.lit(VACUUM_LIFETIME));
@@ -359,7 +308,6 @@ pub fn city_lights(earth: &EarthConfig) -> EffectAsset {
     )
     .with_name("city_lights")
     .with_simulation_space(SimulationSpace::Local)
-    .with_simulation_condition(SimulationCondition::Always)
     .with_alpha_mode(bevy_hanabi::AlphaMode::Add)
     .init(init_pos)
     .init(init_vel)
@@ -434,7 +382,6 @@ fn airglow_shell(
     )
     .with_name(name)
     .with_simulation_space(SimulationSpace::Local)
-    .with_simulation_condition(SimulationCondition::Always)
     .with_alpha_mode(bevy_hanabi::AlphaMode::Add)
     .init(init_pos)
     .init(init_thick)
@@ -486,8 +433,7 @@ pub fn airglow_red(earth: &EarthConfig) -> EffectAsset {
     )
 }
 
-/// Radial falloff sprite: opaque center feathering to transparent rim.
-/// Sampled via `ImageSampleMapping::ModulateOpacityFromR`.
+/// Radial falloff sampled through the red channel.
 pub fn build_soft_circle_image() -> Image {
     const SIZE: u32 = 128;
     let mut data = vec![0u8; (SIZE * SIZE) as usize];
@@ -504,8 +450,7 @@ pub fn build_soft_circle_image() -> Image {
     gray_image(SIZE, data)
 }
 
-/// Wide Gaussian with live corners — no hard disc edge, no hot core after
-/// overlap. Used by city lights and airglow.
+/// Wide Gaussian used by city lights and airglow.
 pub fn build_glow_veil_image() -> Image {
     const SIZE: u32 = 256;
     let mut data = vec![0u8; (SIZE * SIZE) as usize];

@@ -1,20 +1,4 @@
-//! Built-in cinematic Earth (`environment { earth }`).
-//!
-//! One schematic word spawns a validated Earth-from-anywhere look for ECEF
-//! scenes: a true-scale WGS84 globe at the ECEF origin (16K/8K KTX2 maps
-//! bound onto a mesh-only GLB), the raymarched atmosphere, a Milky
-//! Way skybox, GPU-particle star fields, night city lights, airglow shells,
-//! and earthshine on the craft. Everything is driven continuously by the
-//! cinematic camera: haze density follows camera altitude, histogram
-//! auto-exposure meters the frame (capped by a night-boost knee),
-//! airglow and stars follow the sun at the camera, city lights follow the
-//! sun at each location, so a single schematic works from the pad to LEO.
-//!
-//! Ported from pyrotechnique's camera-driven Earth (`earth_env.rs`,
-//! `render.rs`), which was validated against ISS photography. The sun and the
-//! atmosphere *entity* are owned by [`super::scene_environment`]; this plugin
-//! owns the globe, sky, particle fields, night lights, and the per-frame
-//! tuning of both.
+//! Built-in camera-driven Earth for ECEF scenes.
 
 pub mod curves;
 pub mod earth_night_material;
@@ -40,7 +24,7 @@ use bevy_hanabi::{EffectAsset, EffectMaterial, EffectProperties, ParticleEffect}
 
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 use crate::plugins::scene_environment::{
-    CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun,
+    CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun, SpaceVisibility,
 };
 use crate::ui::tiles::ViewportConfig;
 use impeller2_wkt::AutoExposureConfig;
@@ -64,9 +48,7 @@ const EMBEDDED_METALLIC_ROUGHNESS: &str =
     "embedded://elodin_editor/assets/earth/metallic_roughness.ktx2";
 const EMBEDDED_SUN_FLARE: &str = "embedded://elodin_editor/assets/earth/sun_flare.png";
 
-/// WGS84 polar flattening applied to the (spherical) globe mesh. Without it
-/// the LC-39A pad sits ~5 km inside the globe (geocentric radius at 28.6°N is
-/// well below the equatorial radius).
+/// WGS84 polar flattening for the spherical globe mesh.
 const WGS84_POLAR_SCALE: f32 = (curves::WGS84_B_M / curves::WGS84_A_M) as f32;
 
 fn earth_map_sampler() -> ImageSamplerDescriptor {
@@ -92,33 +74,22 @@ fn load_earth_map(asset_server: &AssetServer, path: &'static str, srgb: bool) ->
         .load(path)
 }
 
-/// The Milky Way master is a dim exposure (mean 3/255, dust p99 37/255), so
-/// this gain — not the texture — sets how much band survives tonemapping.
+/// Gain for the deliberately dim Milky Way texture.
 const SKYBOX_NIGHT_BRIGHTNESS: f32 = 4000.0;
 const EARTH_EMISSIVE_NIGHT: f32 = 120.0;
 const CLOUD_NIGHT_ALPHA: f32 = 0.05;
-/// Warm night fill on the camera-facing globe hemisphere (pyrotechnique's
-/// `night_globe_illuminance`). Pyrotechnique used 180 lx tuned on grazing
-/// limb views where incidence dims it 3–5×; our compositions include nadir
-/// ground at full incidence, so 50 lx matches the target's near-black floor.
+/// Warm fill for the camera-facing night hemisphere.
 const NIGHT_GLOBE_ILLUMINANCE: f32 = 50.0;
-/// Earthshine is a camera-riding point light (range-limited so the globe,
-/// which is ≥20 km away whenever earthshine is active, never receives it).
+/// Camera-riding fill whose range keeps it off the globe.
 const EARTHSHINE_OFFSET_M: f32 = 300.0;
 const EARTHSHINE_RANGE_M: f32 = 5_000.0;
-/// Luminous flux for ~2500 lx at [`EARTHSHINE_OFFSET_M`] (pyrotechnique's
-/// validated earthshine illuminance on the craft).
-const EARTHSHINE_LUMENS: f32 = 2_500.0 * 4.0 * std::f32::consts::PI * 300.0 * 300.0;
+/// Luminous flux for ~20 klx at [`EARTHSHINE_OFFSET_M`].
+const EARTHSHINE_LUMENS: f32 = 20_000.0 * 4.0 * std::f32::consts::PI * 300.0 * 300.0;
 /// Sun flare: additive 16:9 billboard riding the chosen camera.
 const SUN_FLARE_DIST_M: f32 = 2_000.0;
 /// Quad width for ~20° angular size at [`SUN_FLARE_DIST_M`]. Height is 9/16.
 const SUN_FLARE_SIZE_M: f32 = 700.0;
-/// Output gain on the flare sprite — NOT an HDR luminance. The quad is
-/// unlit, and unlit colors skip `view.exposure` entirely (bevy_pbr applies
-/// exposure only inside `apply_pbr_lighting`), so this multiplies the
-/// texture straight into tonemapper space: keep it order-1 or the whole
-/// soft glow clips to a white disc. ~3 saturates only the core (past the
-/// 0.6 bloom threshold) while the rays keep the art's gradient.
+/// Unlit colors skip exposure, so this gain must stay order-1.
 const SUN_FLARE_GAIN: f32 = 3.0;
 
 /// Globe root: ECEF origin, model→ECEF alignment rotation, no scale.
@@ -176,6 +147,9 @@ struct EarthCloudsMaterial;
 #[derive(Component)]
 struct SkyEmitter;
 
+#[derive(Component)]
+struct CinematicParticleEmitter;
+
 /// Globe-attached emitter (city lights / airglow).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EarthEmitterKind {
@@ -188,8 +162,7 @@ struct EarthEmitter {
     kind: EarthEmitterKind,
 }
 
-/// Point light riding below the active camera: bluish Earth-reflected fill on
-/// the craft's nadir side.
+/// Camera-riding earthshine.
 #[derive(Component)]
 struct CinematicEarthshine;
 
@@ -197,8 +170,7 @@ struct CinematicEarthshine;
 #[derive(Component)]
 struct CinematicSunFlare;
 
-/// Dim warm directional on the night globe (layer 27). `SunDisk::OFF` —
-/// Bevy defaults a missing disk to `EARTH`.
+/// Dim warm directional on the night globe.
 #[derive(Component)]
 struct NightGlobeFill;
 
@@ -206,16 +178,14 @@ struct NightGlobeFill;
 #[derive(Component)]
 struct CinematicSkybox;
 
-/// Last compensation-curve asset, rebuilt only when the knee or histogram
-/// range changes.
+/// Cached compensation curve.
 #[derive(Default)]
 struct AeCurveCache {
     key: Option<(u32, u32, u32)>,
     handle: Handle<AutoExposureCompensationCurve>,
 }
 
-/// Strong handles for the embedded/code-built assets; created on first
-/// activation and retained so re-activation reuses them.
+/// Strong handles retained across Earth activation cycles.
 #[derive(Resource, Clone)]
 struct CinematicEarthAssets {
     globe_scene: Handle<WorldAsset>,
@@ -236,21 +206,18 @@ struct CinematicEarthAssets {
     airglow_red: Handle<EffectAsset>,
 }
 
-/// Camera-relative Earth frame, computed once per frame after transform
-/// propagation (port of pyrotechnique's `ViewerFrame`).
-/// `pub(crate)`: `scene_environment` fades the cinematic IBL by `space_vis`.
+/// Camera-relative Earth frame, computed once per frame after transform propagation.
 #[derive(Resource, Clone, Debug)]
 pub(crate) struct ViewerFrame {
     active: bool,
-    /// The camera driving the look (lowest-id active main camera — the same
-    /// selection `scene_environment` uses for `AtmosphereSettings`).
+    /// Camera driving the look.
     camera: Option<Entity>,
     /// Camera radial up in render space.
     up: Vec3,
     altitude_m: f32,
     /// WGS84 geocentric surface radius under the camera [m].
     surface_radius_m: f32,
-    pub(crate) space_vis: f32,
+    space_vis: f32,
     star_vis: f32,
     nightglow_vis: f32,
     /// Limb-relative sinE (sun vs the visible horizon, not local horizontal).
@@ -275,8 +242,7 @@ impl Default for ViewerFrame {
     }
 }
 
-/// Density quantization state: the scattering LUT only regenerates on step
-/// changes.
+/// Last density used to regenerate the scattering LUT.
 #[derive(Resource, Default)]
 struct DensityTune {
     last_density: Option<f32>,
@@ -320,7 +286,6 @@ impl Plugin for CinematicEarthPlugin {
         app.init_resource::<ViewerFrame>()
             .init_resource::<DensityTune>()
             .init_resource::<EarthLookTune>()
-            .add_systems(Startup, seed_default_ae_curve)
             .add_systems(
                 Update,
                 (sync_cinematic_earth, sync_earth_look, tag_globe_meshes).chain(),
@@ -466,6 +431,7 @@ fn sky_emitter_bundle(
 ) -> impl Bundle {
     (
         Name::new(name),
+        CinematicParticleEmitter,
         ParticleEffect::new(effect),
         EffectMaterial { images },
         EffectProperties::default(),
@@ -546,10 +512,7 @@ fn sync_cinematic_earth(
         &earth,
     );
 
-    // Globe root: ECEF origin. The GLB's measured convention is north = model
-    // -Z, Greenwich = model +X, 90°E = model -Y, so model→ECEF is a proper
-    // 180° rotation about X. bevy_geo_frames handles ECEF→Bevy (plane or
-    // sphere presentation) from there.
+    // The GLB's model-to-ECEF alignment is a 180° rotation about X.
     commands
         .spawn((
             CinematicEarthRoot,
@@ -615,6 +578,13 @@ fn sync_cinematic_earth(
     info!("cinematic earth spawned (embedded globe + sky)");
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct EarthLookEntities<'w, 's> {
+    earth_root: Query<'w, 's, Entity, With<CinematicEarthRoot>>,
+    sky_root: Query<'w, 's, Entity, With<CinematicSkyRoot>>,
+    emitters: Query<'w, 's, Entity, With<CinematicParticleEmitter>>,
+}
+
 fn sync_earth_look(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
@@ -622,17 +592,15 @@ fn sync_earth_look(
     mut effects: ResMut<Assets<EffectAsset>>,
     mut look: ResMut<EarthLookTune>,
     time: Res<Time>,
-    earth_root: Query<Entity, With<CinematicEarthRoot>>,
-    sky_root: Query<Entity, With<CinematicSkyRoot>>,
-    emitters: Query<Entity, Or<(With<SkyEmitter>, With<EarthEmitter>)>>,
+    entities: EarthLookEntities,
 ) {
     let Some(earth) = environment.0.as_ref().and_then(|env| env.earth) else {
         return;
     };
-    let Ok(earth_root) = earth_root.single() else {
+    let Ok(earth_root) = entities.earth_root.single() else {
         return;
     };
-    let Ok(sky_root) = sky_root.single() else {
+    let Ok(sky_root) = entities.sky_root.single() else {
         return;
     };
     let Some(assets) = assets else {
@@ -649,7 +617,7 @@ fn sync_earth_look(
         return;
     }
     write_effects(&assets, &mut effects, &earth);
-    for entity in &emitters {
+    for entity in &entities.emitters {
         commands.entity(entity).despawn();
     }
     commands
@@ -661,52 +629,74 @@ fn sync_earth_look(
     look.last = Some(fingerprint);
 }
 
-/// Tags globe/cloud materials and disables frustum culling on the GLB meshes
-/// (their AABBs are planet-sized; culling flickers them out near the limb).
-/// Runs every frame while active: the GLB scene instantiates asynchronously.
-fn tag_globe_meshes(
-    roots: Query<Entity, With<CinematicEarthRoot>>,
-    children: Query<&Children>,
-    names: Query<&Name>,
+/// Tags asynchronously loaded globe meshes and disables limb-unsafe culling.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GlobeMeshParams<'w, 's> {
+    roots: Query<'w, 's, Entity, With<CinematicEarthRoot>>,
+    children: Query<'w, 's, &'static Children>,
+    names: Query<'w, 's, &'static Name>,
     untagged: Query<
-        &MeshMaterial3d<StandardMaterial>,
+        'w,
+        's,
+        &'static MeshMaterial3d<StandardMaterial>,
         (Without<EarthGlobeMaterial>, Without<EarthCloudsMaterial>),
     >,
-    unculled: Query<Entity, (With<Mesh3d>, Without<NoFrustumCulling>)>,
-    unlayered: Query<Entity, (With<Mesh3d>, Without<RenderLayers>)>,
-    assets: Option<Res<CinematicEarthAssets>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut night_materials: ResMut<Assets<EarthNightMaterial>>,
+    unculled: Query<'w, 's, Entity, (With<Mesh3d>, Without<NoFrustumCulling>)>,
+    unlayered: Query<'w, 's, Entity, (With<Mesh3d>, Without<RenderLayers>)>,
+    globe_tags: Query<'w, 's, (), With<EarthGlobeMaterial>>,
+    cloud_tags: Query<'w, 's, (), With<EarthCloudsMaterial>>,
+    assets: Option<Res<'w, CinematicEarthAssets>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    night_materials: ResMut<'w, Assets<EarthNightMaterial>>,
+}
+
+fn tag_globe_meshes(
+    mut meshes: GlobeMeshParams,
     mut commands: Commands,
+    mut tagged_root: Local<Option<Entity>>,
 ) {
-    let Ok(root) = roots.single() else {
+    let Ok(root) = meshes.roots.single() else {
+        *tagged_root = None;
         return;
     };
-    let Some(assets) = assets else {
+    if *tagged_root == Some(root) {
+        return;
+    }
+    let Some(assets) = meshes.assets.as_deref() else {
         return;
     };
-    for descendant in children.iter_descendants(root) {
-        if unculled.contains(descendant) {
+    let mut globe_ready = false;
+    let mut clouds_ready = false;
+    for descendant in meshes.children.iter_descendants(root) {
+        globe_ready |= meshes.globe_tags.contains(descendant);
+        clouds_ready |= meshes.cloud_tags.contains(descendant);
+        if meshes.unculled.contains(descendant) {
             commands.entity(descendant).insert(NoFrustumCulling);
         }
-        if unlayered.contains(descendant) {
+        if meshes.unlayered.contains(descendant) {
             commands
                 .entity(descendant)
                 .insert(RenderLayers::layer(CINEMATIC_EARTH_RENDER_LAYER));
         }
-        let Ok(handle) = untagged.get(descendant) else {
+        let Ok(handle) = meshes.untagged.get(descendant) else {
             continue;
         };
-        let name = names.get(descendant).map(|n| n.as_str()).unwrap_or("");
+        let name = meshes
+            .names
+            .get(descendant)
+            .map(|n| n.as_str())
+            .unwrap_or("");
         if name.contains("Cloud") {
-            if let Some(mut material) = materials.get_mut(&handle.0) {
-                material.base_color = Color::WHITE;
-                material.base_color_texture = Some(assets.clouds.clone());
-                material.alpha_mode = AlphaMode::Blend;
-            }
+            let Some(mut material) = meshes.materials.get_mut(&handle.0) else {
+                continue;
+            };
+            material.base_color = Color::WHITE;
+            material.base_color_texture = Some(assets.clouds.clone());
+            material.alpha_mode = AlphaMode::Blend;
             commands.entity(descendant).insert(EarthCloudsMaterial);
+            clouds_ready = true;
         } else {
-            let Some(mut base) = materials.get(&handle.0).cloned() else {
+            let Some(mut base) = meshes.materials.get(&handle.0).cloned() else {
                 continue;
             };
             base.base_color = Color::WHITE;
@@ -715,7 +705,7 @@ fn tag_globe_meshes(
             base.emissive_texture = Some(assets.night.clone());
             base.normal_map_texture = Some(assets.normal.clone());
             base.metallic_roughness_texture = Some(assets.metallic_roughness.clone());
-            let night = night_materials.add(EarthNightMaterial {
+            let night = meshes.night_materials.add(EarthNightMaterial {
                 base,
                 extension: EarthNightExt {
                     params: EarthNightParams::default(),
@@ -726,7 +716,11 @@ fn tag_globe_meshes(
                 .remove::<MeshMaterial3d<StandardMaterial>>()
                 .insert(MeshMaterial3d(night))
                 .insert(EarthGlobeMaterial);
+            globe_ready = true;
         }
+    }
+    if globe_ready && clouds_ready {
+        *tagged_root = Some(root);
     }
 }
 
@@ -738,8 +732,7 @@ type ViewportCameraQuery<'w, 's> = Query<
     (With<CinematicViewport>, With<Camera3d>),
 >;
 
-/// Material/mesh access for [`apply_cinematic_earth`], grouped to stay
-/// under Bevy's 16-system-param limit.
+/// Material access grouped under Bevy's 16-parameter system limit.
 #[derive(bevy::ecs::system::SystemParam)]
 struct EarthMaterialParams<'w, 's> {
     globe: Query<'w, 's, &'static MeshMaterial3d<EarthNightMaterial>, With<EarthGlobeMaterial>>,
@@ -755,7 +748,9 @@ fn compute_viewer_frame(
     earth: Query<&GlobalTransform, With<CinematicEarthRoot>>,
     sun: Query<&GlobalTransform, With<SchematicSun>>,
     mut frame: ResMut<ViewerFrame>,
+    mut space_visibility: ResMut<SpaceVisibility>,
 ) {
+    space_visibility.0 = 0.0;
     let active = environment
         .0
         .as_ref()
@@ -781,8 +776,7 @@ fn compute_viewer_frame(
     } else {
         Vec3::Y
     };
-    // Geocentric latitude of the camera: angle vs the globe's polar axis
-    // (model -Z in render space).
+    // Model -Z is the globe's polar axis.
     let north = (earth_gt.rotation() * Vec3::NEG_Z).normalize_or(Vec3::Y);
     let sin_lat = up.dot(north).clamp(-1.0, 1.0);
     let surface_radius = curves::geocentric_surface_radius_m(f64::from(sin_lat)) as f32;
@@ -795,6 +789,7 @@ fn compute_viewer_frame(
         surface_radius,
     );
     let space_vis = curves::space_visibility(altitude);
+    space_visibility.0 = space_vis;
 
     *frame = ViewerFrame {
         active: true,
@@ -810,9 +805,7 @@ fn compute_viewer_frame(
     };
 }
 
-/// Reinterprets the embedded skybox ktx2 as a cube view once loaded (the
-/// packer writes 6 stacked layers). Same logic bevy_ai_skybox expects before
-/// it stops stripping `Skybox` components.
+/// Reinterprets the loaded skybox as a cube view.
 fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -> bool {
     let Some(image) = images.get(handle) else {
         return false;
@@ -858,8 +851,7 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -
     false
 }
 
-/// Per-frame look: auto-exposure, skybox, globe emissive/clouds, night lights,
-/// and particle-field properties, all from [`ViewerFrame`].
+/// Applies the per-frame look from [`ViewerFrame`].
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn apply_cinematic_earth(
     mut commands: Commands,
@@ -945,8 +937,7 @@ fn apply_cinematic_earth(
             &mut ae_curves,
             &mut ae_curve_cache,
         );
-        // Milky Way skybox on the cinematic camera only; brightness follows
-        // star visibility so noon stays empty.
+        // Star visibility keeps the Milky Way out of daylight.
         if skybox_ready {
             let brightness = SKYBOX_NIGHT_BRIGHTNESS * frame.star_vis;
             match skybox {
@@ -983,13 +974,17 @@ fn apply_cinematic_earth(
             if child_of.parent() != chosen {
                 commands.entity(entity).insert(ChildOf(chosen));
             }
-            // Camera-local offset that lands EARTHSHINE_OFFSET_M below the
-            // camera along the radial up.
+            // Convert the radial earthshine offset into camera-local space.
             if let Ok((_, cam_gt, ..)) = cameras.get(chosen) {
-                transform.translation =
-                    cam_gt.rotation().inverse() * (-frame.up * EARTHSHINE_OFFSET_M);
+                let translation = cam_gt.rotation().inverse() * (-frame.up * EARTHSHINE_OFFSET_M);
+                if transform.translation != translation {
+                    transform.translation = translation;
+                }
             }
-            light.intensity = EARTHSHINE_LUMENS * night_w;
+            let intensity = EARTHSHINE_LUMENS * night_w;
+            if light.intensity != intensity {
+                light.intensity = intensity;
+            }
         }
         if !found {
             commands.spawn((
@@ -1010,9 +1005,7 @@ fn apply_cinematic_earth(
         }
     }
 
-    // Sun starburst flare: additive billboard toward the sun on the chosen
-    // camera. Fades in as the disk clears the visible limb; space only, so
-    // pad/landing looks are untouched.
+    // Show the sun flare only above the limb in space.
     if let Some(chosen) = frame.camera {
         let flare_vis = (frame.sun_elevation / 0.02).clamp(0.0, 1.0) * frame.space_vis;
         let cam_rot = cameras
@@ -1022,6 +1015,8 @@ fn apply_cinematic_earth(
         let sun_cam = (cam_rot.inverse() * frame.to_sun_world).normalize_or(Vec3::Z);
         let c = SUN_FLARE_GAIN * flare_vis;
         let color = Color::from(LinearRgba::rgb(c, c, c));
+        let translation = sun_cam * SUN_FLARE_DIST_M;
+        let rotation = Quat::from_rotation_arc(Vec3::Z, -sun_cam);
         let shown = if flare_vis > 0.0 {
             Visibility::Inherited
         } else {
@@ -1033,8 +1028,12 @@ fn apply_cinematic_earth(
             if child_of.parent() != chosen {
                 commands.entity(entity).insert(ChildOf(chosen));
             }
-            transform.translation = sun_cam * SUN_FLARE_DIST_M;
-            transform.rotation = Quat::from_rotation_arc(Vec3::Z, -sun_cam);
+            if transform.translation != translation {
+                transform.translation = translation;
+            }
+            if transform.rotation != rotation {
+                transform.rotation = rotation;
+            }
             if *visibility != shown {
                 *visibility = shown;
             }
@@ -1060,8 +1059,7 @@ fn apply_cinematic_earth(
                     alpha_mode: AlphaMode::Add,
                     ..default()
                 })),
-                Transform::from_translation(sun_cam * SUN_FLARE_DIST_M)
-                    .with_rotation(Quat::from_rotation_arc(Vec3::Z, -sun_cam)),
+                Transform::from_translation(translation).with_rotation(rotation),
                 Visibility::Hidden,
                 NotShadowCaster,
                 NoFrustumCulling,
@@ -1071,14 +1069,16 @@ fn apply_cinematic_earth(
         }
     }
 
-    // Night fill: shines down along the camera radial onto the globe
-    // hemisphere facing the camera (pyrotechnique's `NightGlobeFill`).
+    // Aim the night fill at the camera-facing hemisphere.
     for (mut transform, mut light) in &mut globe_fill {
         let rotation = Quat::from_rotation_arc(Vec3::Z, frame.up);
         if transform.rotation != rotation {
             transform.rotation = rotation;
         }
-        light.illuminance = NIGHT_GLOBE_ILLUMINANCE * night_w;
+        let illuminance = NIGHT_GLOBE_ILLUMINANCE * night_w;
+        if light.illuminance != illuminance {
+            light.illuminance = illuminance;
+        }
     }
 
     let earth = environment
@@ -1120,34 +1120,48 @@ fn apply_cinematic_earth(
         .map(|pos| earth_inv.transform_point3(pos))
         .unwrap_or(Vec3::Y * 6_778_140.0);
 
-    for mut properties in &mut sky_emitters {
-        properties.set(INTENSITY_PROPERTY, frame.star_vis.into());
-        properties.set(SIZE_PROPERTY, earth.stars.size.into());
+    for properties in &mut sky_emitters {
+        let properties =
+            EffectProperties::set_if_changed(properties, INTENSITY_PROPERTY, frame.star_vis.into());
+        let _ =
+            EffectProperties::set_if_changed(properties, SIZE_PROPERTY, earth.stars.size.into());
     }
-    for (emitter, mut properties) in &mut earth_emitters {
+    for (emitter, properties) in &mut earth_emitters {
         let vis = match emitter.kind {
             EarthEmitterKind::Airglow => frame.nightglow_vis,
             EarthEmitterKind::CityLights => frame.space_vis,
         };
-        properties.set(INTENSITY_PROPERTY, vis.into());
-        properties.set(SUN_DIR_PROPERTY, sun_local.into());
-        properties.set(VIEW_POS_PROPERTY, view_pos_local.into());
+        let properties =
+            EffectProperties::set_if_changed(properties, INTENSITY_PROPERTY, vis.into());
+        let properties =
+            EffectProperties::set_if_changed(properties, SUN_DIR_PROPERTY, sun_local.into());
+        let properties =
+            EffectProperties::set_if_changed(properties, VIEW_POS_PROPERTY, view_pos_local.into());
         match emitter.kind {
             EarthEmitterKind::CityLights => {
-                properties.set(SIZE_PROPERTY, earth.city_lights.size.into());
-                properties.set(HEIGHT_PROPERTY, earth.city_lights.height.into());
+                let properties = EffectProperties::set_if_changed(
+                    properties,
+                    SIZE_PROPERTY,
+                    earth.city_lights.size.into(),
+                );
+                let _ = EffectProperties::set_if_changed(
+                    properties,
+                    HEIGHT_PROPERTY,
+                    earth.city_lights.height.into(),
+                );
             }
             EarthEmitterKind::Airglow => {
-                properties.set(SIZE_PROPERTY, earth.airglow.size.into());
+                let _ = EffectProperties::set_if_changed(
+                    properties,
+                    SIZE_PROPERTY,
+                    earth.airglow.size.into(),
+                );
             }
         }
     }
 }
 
-/// Atmosphere tuning: haze density follows camera altitude (quantized — each
-/// step regenerates the scattering LUT), and the spherical atmosphere's
-/// surface radius tracks the camera's WGS84 geocentric radius so the horizon
-/// sits at the actual local surface.
+/// Tunes atmosphere density and local WGS84 surface radius.
 fn tune_atmosphere(
     frame: Res<ViewerFrame>,
     mut tune: ResMut<DensityTune>,
@@ -1176,18 +1190,6 @@ fn tune_atmosphere(
     }
 }
 
-fn seed_default_ae_curve(mut curves: ResMut<Assets<AutoExposureCompensationCurve>>) {
-    let defaults = AutoExposureConfig::default();
-    let _ = curves.insert(
-        &Handle::default(),
-        night_boost_compensation_curve(
-            defaults.max_night_boost,
-            defaults.range_min,
-            defaults.range_max,
-        ),
-    );
-}
-
 fn sync_cinematic_auto_exposure(
     commands: &mut Commands,
     entity: Entity,
@@ -1207,8 +1209,7 @@ fn sync_cinematic_auto_exposure(
         return;
     }
     let handle = ensure_ae_curve(&cfg, curves, cache);
-    // Histogram floor also caps the default (flat-0) curve at `max_night_boost`
-    // stops: target = −avg_lum ≤ boost. The authored range_min can only tighten.
+    // The histogram floor also caps the flat curve at `max_night_boost`.
     let range_min = cfg.range_min.max(-cfg.max_night_boost);
     if existing.is_some_and(|ae| ae_fields_match(ae, &cfg, range_min, &handle)) {
         return;
@@ -1253,24 +1254,18 @@ fn ensure_ae_curve(
         return cache.handle.clone();
     }
     let curve = night_boost_compensation_curve(cfg.max_night_boost, cfg.range_min, cfg.range_max);
-    // Plugin seeds Handle::default() with a flat-0 curve; keep that slot in
-    // sync so a dropped custom handle still meters through the knee.
-    let _ = curves.insert(&Handle::default(), curve.clone());
     let handle = curves.add(curve);
     cache.key = Some(key);
     cache.handle = handle.clone();
     handle
 }
 
-/// Snap to 1/64 so LinearSpline endpoints stay bit-exact. Bevy's
-/// `from_curve` rejects `a + (b - a) != b` as a discontinuity.
+/// Snap coordinates because `LinearSpline::from_curve` requires exact endpoints.
 fn snap_curve_coord(v: f32) -> f32 {
     (v * 64.0).round() / 64.0
 }
 
-/// Slope-1 dark side: correction stays at `boost` for any under-exposed
-/// frame, then a tight knee at middle gray drops it to 0 so day `ev100`
-/// is not metered toward.
+/// Builds a night boost with a tight knee at middle gray.
 fn night_boost_compensation_curve(
     boost: f32,
     range_min: f32,
@@ -1301,11 +1296,8 @@ fn night_boost_compensation_curve(
         push(&mut pts, x0 + 1.0, x0 + 1.0 + boost);
     }
     AutoExposureCompensationCurve::from_curve(LinearSpline::new(pts)).unwrap_or_else(|_| {
-        AutoExposureCompensationCurve::from_curve(LinearSpline::new([
-            vec2(x0, x0),
-            vec2(x1, x1),
-        ]))
-        .unwrap_or_default()
+        AutoExposureCompensationCurve::from_curve(LinearSpline::new([vec2(x0, x0), vec2(x1, x1)]))
+            .unwrap_or_default()
     })
 }
 

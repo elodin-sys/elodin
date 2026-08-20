@@ -17,8 +17,7 @@ fn all_example_schematics_parse() {
             let path = file.expect("file entry").path();
             if path.extension().is_some_and(|e| e == "kdl") {
                 let text = std::fs::read_to_string(&path).expect("read kdl");
-                // visual_check.kdl is a template: both viewport lines are
-                // cinematic, and visual_check.py keeps exactly one per run.
+                // Validate each generated visual-check viewport separately.
                 if path.file_name().is_some_and(|n| n == "visual_check.kdl") {
                     for keep in ["Chase", "Landing", "NightSky"] {
                         let filtered: String = text

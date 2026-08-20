@@ -336,7 +336,7 @@ A configuration object for creating a panel view in the Elodin Client UI.
 
     - `track_entity` : [elodin.EntityId], optional, the entity to track.
     - `track_rotation` : `boolean`, whether to track the rotation of the entity, defaults to `True`.
-    - `fov` : `float`, the field of view of the camera, defaults to `45.0`. KDL `cinematic=#true` viewports default to `50.0` when `fov` is omitted.
+    - `fov` : `float`, the field of view of the camera, defaults to `45.0`.
     - `active` : `boolean`, whether the panel is active, defaults to `False`.
     - `pos` : `list`, optional, the position of the camera.
     - `looking_at` : `list`, optional, the point the camera is looking at.

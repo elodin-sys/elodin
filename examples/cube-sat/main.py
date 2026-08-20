@@ -21,11 +21,7 @@ earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
-# Offshore SoCal, eastbound. 10:21Z is deep night; orbital sunrise ~8 min
-# later. ELODIN_CUBESAT_T0 (ISO 8601) overrides the epoch — 12:39Z is sun at
-# the 400 km limb (mid-transition), 14:30Z is morning with stars gone
-# (docs/internal/earth-environment.md §7). Parked phase sweep:
-# examples/cube-sat/visual_check.py.
+# Start offshore SoCal at deep night; ELODIN_CUBESAT_T0 overrides the epoch.
 START_LAT_DEG = 34.05
 START_LON_DEG = -140.0
 START_TIMESTAMP_US = int(

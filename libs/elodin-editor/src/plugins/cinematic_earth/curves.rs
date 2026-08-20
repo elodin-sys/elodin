@@ -1,9 +1,4 @@
-//! Camera-driven visibility/density curves for the built-in cinematic Earth.
-//!
-//! Ported from pyrotechnique's `earth_env.rs`, where they were validated
-//! against ISS photography from the launch pad up to LEO. All curves are pure
-//! functions of camera altitude or sun elevation so they stay testable and
-//! portable.
+//! Camera-driven visibility and density curves for cinematic Earth.
 
 use bevy::math::Vec3;
 
@@ -29,8 +24,7 @@ pub fn sun_elevation(to_sun: Vec3, up: Vec3) -> f32 {
     to_sun.normalize_or(up).dot(up)
 }
 
-/// sinE relative to the visible limb: `sin(asin(e) + acos(R / (R + h)))`.
-/// Dip is 0 on the pad; ~20° at 400 km so “sun up” means the disk is in frame.
+/// Returns sinE relative to the visible limb.
 pub fn limb_relative_elevation(sin_e: f32, altitude_m: f32, surface_radius_m: f32) -> f32 {
     let radius = surface_radius_m.max(1.0);
     let height = altitude_m.max(0.0);
@@ -39,16 +33,12 @@ pub fn limb_relative_elevation(sin_e: f32, altitude_m: f32, surface_radius_m: f3
     (elevation + cos_dip.acos()).sin()
 }
 
-/// Star visibility: 1 in eclipse, 0 the moment the sun disk reaches the
-/// visible limb — direct sunlight stops the camera down and floods the
-/// stars out (ISS footage shows a pure black sky at orbital sunrise).
-/// `elevation` is limb-relative sinE.
+/// Star visibility from limb-relative sun elevation.
 pub fn star_visibility(elevation: f32) -> f32 {
     (-elevation / 0.15).clamp(0.0, 1.0)
 }
 
-/// Nightglow: stays off through dusk so Rayleigh fire is not painted green.
-/// `elevation` is limb-relative sinE.
+/// Nightglow stays off through dusk.
 pub fn nightglow_visibility(elevation: f32) -> f32 {
     ((-0.05 - elevation) / 0.3).clamp(0.0, 1.0)
 }
@@ -58,8 +48,7 @@ pub const CITY_NIGHT_START: f32 = -0.05;
 /// Local `n·sun` where city lights are fully on (sun ~17.5° below).
 pub const CITY_NIGHT_FULL: f32 = -0.30;
 
-/// 0 through day and the twilight glow, 1 in true night.
-/// `s` is the local `n · sun` at that point (1 = noon, −1 = midnight).
+/// Maps local `n · sun` to city-light visibility.
 pub fn city_night_mask(s: f32) -> f32 {
     ((CITY_NIGHT_START - s) / (CITY_NIGHT_START - CITY_NIGHT_FULL)).clamp(0.0, 1.0)
 }
@@ -80,10 +69,7 @@ pub fn quantize_density(altitude_m: f32) -> f32 {
     (raw / DENSITY_STEP).round() * DENSITY_STEP
 }
 
-/// WGS84 geocentric surface radius along a direction with geocentric latitude
-/// sine `sin_lat_gc` (= z/|p| of an ECEF position). Bevy's atmosphere is a
-/// sphere, so the built-in Earth tracks the camera's local surface radius with
-/// this instead of one fixed value.
+/// WGS84 surface radius for a geocentric latitude sine.
 pub fn geocentric_surface_radius_m(sin_lat_gc: f64) -> f64 {
     let s2 = sin_lat_gc.clamp(-1.0, 1.0).powi(2);
     let c2 = 1.0 - s2;
@@ -145,8 +131,7 @@ mod tests {
     fn geocentric_radius_matches_wgs84() {
         assert!((geocentric_surface_radius_m(0.0) - WGS84_A_M).abs() < 1.0);
         assert!((geocentric_surface_radius_m(1.0) - WGS84_B_M).abs() < 1.0);
-        // LC-39A sits at geodetic 28.608 N; its geocentric radius is
-        // ~6,373.2 km (the falcon9 example's hand-tuned inner_radius).
+        // LC-39A's geocentric radius is about 6,373.2 km.
         let lat_gc = 28.4_f64.to_radians(); // geocentric ~0.2 deg below geodetic
         let r = geocentric_surface_radius_m(lat_gc.sin());
         assert!((r - 6_373_290.0).abs() < 5_000.0, "got {r}");

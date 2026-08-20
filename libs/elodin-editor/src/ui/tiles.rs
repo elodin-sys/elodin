@@ -117,10 +117,11 @@ pub(crate) fn cinematic_bloom_config() -> BloomConfig {
     }
 }
 
+pub(crate) const CINEMATIC_DEFAULT_EV100: f32 = 13.5;
+
 pub(crate) fn bloom_from_config(config: Option<&BloomConfig>, cinematic: bool) -> Bloom {
     let Some(config) = config else {
-        // Cinematic house bloom: OLD_SCHOOL 0.365; threshold 0.6 leaves
-        // the faint star tail crisp.
+        // Cinematic defaults keep faint stars crisp.
         return if cinematic {
             bloom_from_config(Some(&cinematic_bloom_config()), true)
         } else {
@@ -1819,12 +1820,12 @@ impl ViewportPane {
             },
             Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
-            // KDL `ev100` overrides the default physical-camera exposure
-            // (~EV 8.6). Cinematic viewports default to EV 13.5 so a real
-            // sun does not blow out the frame.
+            // Cinematic viewports default to a daylight exposure.
             match viewport.ev100 {
                 Some(ev100) => Exposure { ev100 },
-                None if viewport.cinematic => Exposure { ev100: 13.5 },
+                None if viewport.cinematic => Exposure {
+                    ev100: CINEMATIC_DEFAULT_EV100,
+                },
                 None => Exposure::from_physical_camera(PhysicalCameraParameters {
                     aperture_f_stops: 2.8,
                     shutter_speed_s: 1.0 / 200.0,
@@ -1879,8 +1880,7 @@ impl ViewportPane {
             ..Default::default()
         });
         if viewport.cinematic {
-            // Bevy's GlobalAmbientLight default is 80 nits and washes the
-            // night globe. Override on this camera only (pad and LEO).
+            // Disable Bevy's ambient light for the cinematic view.
             camera.insert((
                 Hdr,
                 CinematicViewport,

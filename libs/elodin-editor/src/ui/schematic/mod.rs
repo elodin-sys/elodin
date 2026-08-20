@@ -8,7 +8,7 @@ use crate::{
         HdrEnabled, actions, colors,
         colors::EColor,
         gauges, inspector, monitor, plot, query_plot, query_table,
-        tiles::{self, Pane},
+        tiles::{self, CINEMATIC_DEFAULT_EV100, Pane},
         timeline::{TelemetryMode, TimelineSettings},
         window::compute_window_title,
     },
@@ -490,7 +490,7 @@ impl SchematicParam<'_, '_> {
 fn persist_viewport_ev100(cinematic: bool, live: Option<f32>) -> Option<f32> {
     let ev = live?;
     let default_ev = if cinematic {
-        13.5
+        CINEMATIC_DEFAULT_EV100
     } else {
         Exposure::from_physical_camera(PhysicalCameraParameters {
             aperture_f_stops: 2.8,

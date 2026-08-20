@@ -1468,7 +1468,7 @@ pub fn attach_joint_animations(
             );
         }
     } else {
-        warn!(
+        debug!(
             "Could not get `Object3dState` for entity {object_3d_entity} for scene {scene_entity}."
         );
     }

@@ -1874,6 +1874,7 @@ mod tests {
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
+            .init_resource::<crate::plugins::scene_environment::SceneEnvironment>()
             .init_resource::<super::PendingWindowSchematics>()
             .init_resource::<super::PendingObject3dSpawns>()
             .insert_resource(CurrentSchematic(Default::default()));

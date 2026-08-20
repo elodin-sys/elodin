@@ -1,25 +1,11 @@
-//! Custom Hanabi modifiers for the built-in cinematic Earth, ported from
-//! pyrotechnique (`sphere_map.rs`, `city_tile_cdf.rs`).
-//!
-//! Both use the **earth_v5.glb model frame** so particles parented to the
-//! globe root line up with its textures: north pole = model `-Z`, longitude 0
-//! (Greenwich) = model `+X`, 90°E = model `-Y`. (Pyrotechnique's originals
-//! used a +Y-north convention; the WGSL here is re-derived against the GLB's
-//! measured UV mapping.)
+//! Custom Hanabi modifiers aligned to the Earth GLB's model frame.
 
 use bevy::prelude::*;
 use bevy::reflect::Reflect;
 use bevy_hanabi::graph::ExprError;
 use bevy_hanabi::prelude::*;
 
-/// Multiply particle color by an equirectangular map sampled at the particle's
-/// spherical direction (`normalize(position)` in the globe's model frame).
-///
-/// Used for city lights (NASA Black Marble) so geography lives in a texture
-/// while placement is a Hanabi shell. Sampling happens in the fragment shader
-/// (`textureSampleLevel`); init/update compute cannot bind material images.
-/// `textureSample` is avoided: UV is constant across a billboard, so
-/// screen-space derivatives are zero.
+/// Multiplies particle color by an equirectangular map.
 #[derive(Debug, Clone, Copy, PartialEq, Reflect)]
 pub struct SphereMapColorModifier {
     /// Index into the effect's texture layout (`0` = first slot).
@@ -101,12 +87,7 @@ pub const TILES_U: u32 = 128;
 pub const TILES_V: u32 = 64;
 pub const TILE_COUNT: usize = (TILES_U * TILES_V) as usize;
 
-/// Init modifier: place a particle on the Earth shell using a baked
-/// luma×cos(lat) tile CDF (inverse-CDF pick a tile, jitter UV inside it, then
-/// convert with the same equirect convention as [`SphereMapColorModifier`]).
-///
-/// Hanabi init compute cannot bind material images, so the 128×64 city-light
-/// CDF is embedded in the generated WGSL.
+/// Places particles from the embedded city-light tile CDF.
 #[derive(Debug, Clone, PartialEq, Reflect)]
 pub struct CityTileCdfModifier {
     /// Shell radius in metres (`EARTH_R + height`).

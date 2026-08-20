@@ -455,6 +455,18 @@ fn labeled_slider(
     ui.add(egui::Slider::new(value, range).show_value(false))
 }
 
+fn labeled_float_slider(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    speed: f32,
+    range: std::ops::RangeInclusive<f32>,
+) -> bool {
+    let drag_changed = labeled_float(ui, label, value, speed, range.clone()).changed();
+    let slider_changed = labeled_slider(ui, value, range).changed();
+    drag_changed || slider_changed
+}
+
 fn cinematic_look_ui(
     ui: &mut egui::Ui,
     camera: Entity,
@@ -468,10 +480,11 @@ fn cinematic_look_ui(
     egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(8, 8))
         .show(ui, |ui| {
+            let defaults = cinematic_bloom_config();
             let mut config = viewport_config
                 .bloom
                 .clone()
-                .unwrap_or_else(cinematic_bloom_config);
+                .unwrap_or_else(|| defaults.clone());
             let mut dirty = false;
 
             ui.horizontal(|ui| {
@@ -495,32 +508,23 @@ fn cinematic_look_ui(
                 });
             });
 
-            let mut intensity = config.intensity.unwrap_or(0.365);
-            if labeled_float(ui, "INTENSITY", &mut intensity, 0.01, 0.0..=1.0).changed() {
-                config.intensity = Some(intensity.clamp(0.0, 1.0));
-                dirty = true;
-            }
-            if labeled_slider(ui, &mut intensity, 0.0..=1.0).changed() {
+            let mut intensity = config.intensity.or(defaults.intensity).unwrap_or_default();
+            if labeled_float_slider(ui, "INTENSITY", &mut intensity, 0.01, 0.0..=1.0) {
                 config.intensity = Some(intensity);
                 dirty = true;
             }
 
-            let mut threshold = config.threshold.unwrap_or(0.6);
-            if labeled_float(ui, "THRESHOLD", &mut threshold, 0.01, 0.0..=4.0).changed() {
-                config.threshold = Some(threshold.max(0.0));
-                dirty = true;
-            }
-            if labeled_slider(ui, &mut threshold, 0.0..=4.0).changed() {
+            let mut threshold = config.threshold.or(defaults.threshold).unwrap_or_default();
+            if labeled_float_slider(ui, "THRESHOLD", &mut threshold, 0.01, 0.0..=4.0) {
                 config.threshold = Some(threshold);
                 dirty = true;
             }
 
-            let mut softness = config.threshold_softness.unwrap_or(0.2);
-            if labeled_float(ui, "SOFTNESS", &mut softness, 0.01, 0.0..=1.0).changed() {
-                config.threshold_softness = Some(softness.clamp(0.0, 1.0));
-                dirty = true;
-            }
-            if labeled_slider(ui, &mut softness, 0.0..=1.0).changed() {
+            let mut softness = config
+                .threshold_softness
+                .or(defaults.threshold_softness)
+                .unwrap_or_default();
+            if labeled_float_slider(ui, "SOFTNESS", &mut softness, 0.01, 0.0..=1.0) {
                 config.threshold_softness = Some(softness);
                 dirty = true;
             }
@@ -550,62 +554,35 @@ fn cinematic_look_ui(
                 });
             });
 
-            if labeled_float(
+            dirty |= labeled_float_slider(
                 ui,
                 "NIGHT BOOST ST",
                 &mut config.max_night_boost,
                 0.05,
                 0.0..=8.0,
-            )
-            .changed()
-                || labeled_slider(ui, &mut config.max_night_boost, 0.0..=8.0).changed()
-            {
-                dirty = true;
-            }
-            if labeled_float(
+            );
+            dirty |= labeled_float_slider(
                 ui,
                 "BRIGHTEN ST/S",
                 &mut config.speed_brighten,
                 0.05,
                 0.1..=10.0,
-            )
-            .changed()
-                || labeled_slider(ui, &mut config.speed_brighten, 0.1..=10.0).changed()
-            {
-                dirty = true;
-            }
-            if labeled_float(
+            );
+            dirty |= labeled_float_slider(
                 ui,
                 "DARKEN ST/S",
                 &mut config.speed_darken,
                 0.05,
                 0.1..=10.0,
-            )
-            .changed()
-                || labeled_slider(ui, &mut config.speed_darken, 0.1..=10.0).changed()
-            {
-                dirty = true;
-            }
-            if labeled_float(ui, "FILTER LOW", &mut config.filter_low, 0.01, 0.0..=1.0).changed()
-                || labeled_slider(ui, &mut config.filter_low, 0.0..=1.0).changed()
-            {
-                dirty = true;
-            }
-            if labeled_float(ui, "FILTER HIGH", &mut config.filter_high, 0.01, 0.0..=1.0).changed()
-                || labeled_slider(ui, &mut config.filter_high, 0.0..=1.0).changed()
-            {
-                dirty = true;
-            }
-            if labeled_float(ui, "RANGE MIN", &mut config.range_min, 0.1, -20.0..=10.0).changed()
-                || labeled_slider(ui, &mut config.range_min, -20.0..=10.0).changed()
-            {
-                dirty = true;
-            }
-            if labeled_float(ui, "RANGE MAX", &mut config.range_max, 0.1, -20.0..=10.0).changed()
-                || labeled_slider(ui, &mut config.range_max, -20.0..=10.0).changed()
-            {
-                dirty = true;
-            }
+            );
+            dirty |=
+                labeled_float_slider(ui, "FILTER LOW", &mut config.filter_low, 0.01, 0.0..=1.0);
+            dirty |=
+                labeled_float_slider(ui, "FILTER HIGH", &mut config.filter_high, 0.01, 0.0..=1.0);
+            dirty |=
+                labeled_float_slider(ui, "RANGE MIN", &mut config.range_min, 0.1, -20.0..=10.0);
+            dirty |=
+                labeled_float_slider(ui, "RANGE MAX", &mut config.range_max, 0.1, -20.0..=10.0);
 
             if dirty {
                 viewport_config.auto_exposure = Some(config.clamp());
@@ -665,85 +642,63 @@ fn pct_to_scale(pct: f32) -> f32 {
 
 fn earth_scale_knobs(ui: &mut egui::Ui, stars: &mut EarthStarsConfig) {
     let mut density_pct = scale_to_pct(stars.density);
-    if labeled_float(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0).changed()
-        || labeled_slider(ui, &mut density_pct, 5.0..=200.0).changed()
-    {
+    if labeled_float_slider(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0) {
         stars.density = pct_to_scale(density_pct);
     }
 
     let mut size_pct = scale_to_pct(stars.size);
-    if labeled_float(ui, "SIZE %", &mut size_pct, 1.0, 10.0..=400.0).changed()
-        || labeled_slider(ui, &mut size_pct, 10.0..=400.0).changed()
-    {
+    if labeled_float_slider(ui, "SIZE %", &mut size_pct, 1.0, 10.0..=400.0) {
         stars.size = pct_to_scale(size_pct);
     }
 
     let mut brightness_pct = scale_to_pct(stars.brightness);
-    if labeled_float(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0).changed()
-        || labeled_slider(ui, &mut brightness_pct, 5.0..=400.0).changed()
-    {
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0) {
         stars.brightness = pct_to_scale(brightness_pct);
     }
 }
 
 fn earth_city_knobs(ui: &mut egui::Ui, city: &mut EarthCityLightsConfig) {
     let mut density_pct = scale_to_pct(city.density);
-    if labeled_float(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0).changed()
-        || labeled_slider(ui, &mut density_pct, 5.0..=200.0).changed()
-    {
+    if labeled_float_slider(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0) {
         city.density = pct_to_scale(density_pct);
     }
 
     let mut size = city.size;
-    if labeled_float(ui, "SIZE PX", &mut size, 0.1, 1.0..=20.0).changed()
-        || labeled_slider(ui, &mut size, 1.0..=20.0).changed()
-    {
+    if labeled_float_slider(ui, "SIZE PX", &mut size, 0.1, 1.0..=20.0) {
         city.size = size;
     }
 
     let mut height = city.height;
-    if labeled_float(ui, "HEIGHT M", &mut height, 10.0, -5_000.0..=50_000.0).changed()
-        || labeled_slider(ui, &mut height, -5_000.0..=50_000.0).changed()
-    {
+    if labeled_float_slider(ui, "HEIGHT M", &mut height, 10.0, 0.0..=50_000.0) {
         city.height = height;
     }
 
     let mut brightness_pct = scale_to_pct(city.brightness);
-    if labeled_float(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0).changed()
-        || labeled_slider(ui, &mut brightness_pct, 5.0..=400.0).changed()
-    {
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0) {
         city.brightness = pct_to_scale(brightness_pct);
     }
 }
 
 fn earth_airglow_knobs(ui: &mut egui::Ui, airglow: &mut EarthAirglowConfig) {
     let mut density_pct = scale_to_pct(airglow.density);
-    if labeled_float(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0).changed()
-        || labeled_slider(ui, &mut density_pct, 5.0..=200.0).changed()
-    {
+    if labeled_float_slider(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0) {
         airglow.density = pct_to_scale(density_pct);
     }
 
     let mut size_pct = scale_to_pct(airglow.size);
-    if labeled_float(ui, "SIZE %", &mut size_pct, 1.0, 10.0..=400.0).changed()
-        || labeled_slider(ui, &mut size_pct, 10.0..=400.0).changed()
-    {
+    if labeled_float_slider(ui, "SIZE %", &mut size_pct, 1.0, 10.0..=400.0) {
         airglow.size = pct_to_scale(size_pct);
     }
 
     let mut brightness_pct = scale_to_pct(airglow.brightness);
-    if labeled_float(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0).changed()
-        || labeled_slider(ui, &mut brightness_pct, 5.0..=400.0).changed()
-    {
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0) {
         airglow.brightness = pct_to_scale(brightness_pct);
     }
 }
 
 fn earth_night_map_knobs(ui: &mut egui::Ui, night_map: &mut EarthNightMapConfig) {
     let mut brightness_pct = scale_to_pct(night_map.brightness);
-    if labeled_float(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 0.0..=400.0).changed()
-        || labeled_slider(ui, &mut brightness_pct, 0.0..=400.0).changed()
-    {
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 0.0..=400.0) {
         night_map.brightness = pct_to_scale(brightness_pct);
     }
 }

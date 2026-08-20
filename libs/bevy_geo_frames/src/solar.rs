@@ -1,8 +1,4 @@
-//! Low-precision solar position (Astronomical Almanac / Meeus).
-//!
-//! About 0.05° — finer than the sun's 0.53° disk, and well inside the
-//! UTC−UT1 error (~0.004°). Enough to drive the editor sun from a Unix
-//! playhead without a new dependency.
+//! Solar position accurate to about 0.05°.
 
 use bevy::math::DVec3;
 
@@ -14,9 +10,7 @@ fn wrap_deg(deg: f64) -> f64 {
     deg.rem_euclid(360.0)
 }
 
-/// Unit vector *toward* the sun in ECEF at `unix_micros` (μs since 1970-01-01).
-///
-/// ECEF: +X through (lat=0, lon=0), +Y through 90°E, +Z through the north pole.
+/// Unit vector toward the sun in ECEF at `unix_micros`.
 pub fn sun_direction_ecef(unix_micros: i64) -> DVec3 {
     let d = unix_micros as f64 / MICROS_PER_DAY - UNIX_DAYS_TO_J2000;
     let mean_lon = 280.460 + 0.985_647_4 * d;
