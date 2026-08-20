@@ -80,6 +80,7 @@ order = 6
     - `night_map`: `brightness` (scale on the globe's emissive night texture, default `0.05`, clamped `0…4`). This is the continuous sheet under the city-light particles — `0` leaves only particles.
   - Known issue: a negative `city_lights height` does not visibly sink the lights. The particles ride a sphere of the equatorial radius while the globe mesh is squashed to the WGS84 ellipsoid, so the mesh already sits below the shell everywhere but the equator (~7 km at 34°N, ~21 km at the poles) — more than the `-5000` clamp can cross.
   - Supersedes the `atmosphere` child — the built-in Earth owns its own atmosphere (raymarched, surface radius tracked from the camera's latitude). Remove `atmosphere` when enabling `earth` (it is ignored with a warning). Remove any `object_3d` Earth GLB and `world_mesh "globe"` too; the built-in globe replaces them.
+  - Implementation note: since #774, `GeoRotation::relative(frame, IDENTITY)` composes the frame-to-Bevy basis and is not Bevy identity. The spherical atmosphere uses `GeoRotation::from_bevy` to stay unrotated and concentric with the globe; other geo-placed spherical render entities should do the same.
   - Native editor builds only (the embedded Earth assets and GPU particles are excluded from wasm).
 - Example (lunar scene):
 

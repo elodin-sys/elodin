@@ -77,6 +77,13 @@ fn effective_sun(env: &EnvironmentConfig) -> Option<SunConfig> {
         .or_else(|| env.earth.is_some().then(SunConfig::default))
 }
 
+fn atmosphere_geo_rotation(frame: GeoFrame, ctx: &GeoContext) -> GeoRotation {
+    // Since #774, `GeoRotation::to_bevy` composes the frame basis for both
+    // rotation kinds. Store its inverse so a spherical atmosphere stays
+    // unrotated in Bevy, matching its pre-#774 placement.
+    GeoRotation::from_bevy(frame, DQuat::IDENTITY, ctx)
+}
+
 pub struct SceneEnvironmentPlugin;
 
 impl Plugin for SceneEnvironmentPlugin {
@@ -220,6 +227,7 @@ fn sync_atmosphere(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
     coordinate: Res<crate::Coordinate>,
+    geo_ctx: Res<GeoContext>,
     mut media: ResMut<Assets<ScatteringMedium>>,
     existing: Query<(Entity, &SchematicAtmosphere)>,
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
@@ -254,7 +262,7 @@ fn sync_atmosphere(
                     frame,
                     DVec3::new(config.origin.0, config.origin.1, config.origin.2),
                 ),
-                GeoRotation::relative(frame, DQuat::IDENTITY),
+                atmosphere_geo_rotation(frame, &geo_ctx),
             ));
             #[cfg(feature = "big_space")]
             crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
@@ -442,6 +450,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(effective_sun(&env).unwrap().illuminance, 12_000.0);
+    }
+
+    #[test]
+    fn atmosphere_rotation_is_bevy_identity_in_every_frame() {
+        let ctx = GeoContext::default();
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            let rendered = atmosphere_geo_rotation(frame, &ctx).to_bevy(&ctx);
+            assert!(
+                rendered.dot(DQuat::IDENTITY).abs() > 1.0 - 1e-9,
+                "{frame:?} rendered as {rendered:?}"
+            );
+        }
     }
 
     #[test]
