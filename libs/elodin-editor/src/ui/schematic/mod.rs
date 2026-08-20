@@ -8,14 +8,17 @@ use crate::{
         HdrEnabled, actions, colors,
         colors::EColor,
         gauges, inspector, monitor, plot, query_plot, query_table,
-        tiles::{self, Pane},
+        tiles::{self, CINEMATIC_DEFAULT_EV100, Pane},
         timeline::{TelemetryMode, TimelineSettings},
         window::compute_window_title,
     },
     vector_arrow::ViewportArrow,
 };
 use bevy::{
-    camera::visibility::RenderLayers, ecs::system::SystemParam, prelude::*, window::PrimaryWindow,
+    camera::{Exposure, PhysicalCameraParameters, visibility::RenderLayers},
+    ecs::system::SystemParam,
+    prelude::*,
+    window::PrimaryWindow,
 };
 use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
@@ -66,6 +69,7 @@ pub struct SchematicParam<'w, 's> {
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
     pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
+    pub exposures: Query<'w, 's, &'static Exposure>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub camera_layers: Query<'w, 's, &'static RenderLayers>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
@@ -93,6 +97,7 @@ pub struct SchematicParam<'w, 's> {
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
     pub coordinate: Res<'w, crate::Coordinate>,
     pub geo_context: Res<'w, bevy_geo_frames::GeoContext>,
+    pub scene_environment: Res<'w, crate::plugins::scene_environment::SceneEnvironment>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -213,6 +218,7 @@ impl SchematicParam<'_, '_> {
                             .map(|c| c.frustums_thickness)
                             .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
                         let show_view_cube = viewport.view_cube_layer.is_some();
+                        let cinematic = vp_config.map(|c| c.cinematic).unwrap_or(false);
                         let view_cube_frame = viewport.view_cube_layer.and_then(|layer| {
                             VIEW_CUBE_RENDER_LAYERS
                                 .iter()
@@ -258,12 +264,13 @@ impl SchematicParam<'_, '_> {
                             // ViewportConfig does not yet track `effects`; default
                             // on so schematic dumps keep thruster particles visible.
                             effects: true,
-                            hdr: self.hdr_enabled.0,
-                            bloom: None,
-                            // Like bloom, exposure is not read back from the
-                            // live camera; hand-authored ev100 survives via
-                            // CurrentSchematic, not this dump.
-                            ev100: None,
+                            hdr: self.hdr_enabled.0 && !cinematic,
+                            cinematic,
+                            bloom: vp_config.and_then(|c| c.bloom.clone()),
+                            ev100: persist_viewport_ev100(
+                                cinematic,
+                                self.exposures.get(cam_entity).ok().map(|e| e.ev100),
+                            ),
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
                             look_at: Some(viewport_data.look_at.eql.clone()),
@@ -479,6 +486,22 @@ impl SchematicParam<'_, '_> {
     }
 }
 
+fn persist_viewport_ev100(cinematic: bool, live: Option<f32>) -> Option<f32> {
+    let ev = live?;
+    let default_ev = if cinematic {
+        CINEMATIC_DEFAULT_EV100
+    } else {
+        Exposure::from_physical_camera(PhysicalCameraParameters {
+            aperture_f_stops: 2.8,
+            shutter_speed_s: 1.0 / 200.0,
+            sensitivity_iso: 400.0,
+            sensor_height: 24.0 / 1000.0,
+        })
+        .ev100
+    };
+    ((ev - default_ev).abs() > 1e-3).then_some(ev)
+}
+
 pub fn tiles_to_schematic(
     param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
@@ -486,6 +509,7 @@ pub fn tiles_to_schematic(
     mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
+    schematic.environment = param.scene_environment.0.clone();
     schematic.frame = param.coordinate.0;
 
     // Persist the GeoContext origin (radians -> degrees), omitting the

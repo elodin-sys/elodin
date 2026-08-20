@@ -352,6 +352,7 @@ fn x11_display_reachable() -> bool {
 }
 
 /// Filesystem socket for a local `DISPLAY` (`:0`, `:0.0`, `unix:0`).
+#[cfg(any(target_os = "linux", test))]
 fn x11_unix_socket_path(display: &str) -> Option<std::path::PathBuf> {
     let rest = display
         .strip_prefix("unix:")

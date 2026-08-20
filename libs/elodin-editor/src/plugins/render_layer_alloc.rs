@@ -17,6 +17,8 @@ use bevy_geo_frames::GeoFrame;
 use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
+/// Cinematic Earth visuals and lighting.
+pub const CINEMATIC_EARTH_RENDER_LAYER: usize = 27;
 /// Thruster `ParticleEffect` entities. Viewport cameras include this layer when
 /// KDL `effects` is true (default); `effects=#false` hides plumes in that view.
 pub const THRUSTER_PARTICLES_RENDER_LAYER: usize = 28;
@@ -175,6 +177,7 @@ impl RenderLayerAllocator {
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
         let reserved = RenderLayers::layer(0)
+            .with(CINEMATIC_EARTH_RENDER_LAYER)
             .with(THRUSTER_PARTICLES_RENDER_LAYER)
             .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)

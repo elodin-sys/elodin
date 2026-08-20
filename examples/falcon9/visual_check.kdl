@@ -1,27 +1,20 @@
-// Lean cinematic check schematic for visual_check.py (no FSW).
-// __ACTIVE_CAMERA__ is replaced with Chase or Landing per scenario.
+// visual_check.py keeps only the selected viewport.
 
 coordinate frame="ECEF"
 timeline follow_latest=#true range="last_5s"
 
 environment {
-    sun azimuth=146.58 elevation=55.41 illuminance=100000.0 shadows=#true
+    sun illuminance=100000.0 shadows=#true
     ambient scale=0.05
-    atmosphere origin="(0, 0, 0)" inner_radius=6373250.0 outer_radius=6473250.0 ground_albedo="(0.20, 0.22, 0.18)"
+    earth
 }
 
 tabs {
-    viewport name="Chase" fov=24.0 near=1.0 far=40000000.0 pos="booster.world_pos.translate_world(66.772, -143.641, -206.721)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" hdr=#true ev100=13.5 show_grid=#false __CHASE_ACTIVE__ {
-        bloom preset="old_school" intensity=0.28
-    }
-    // Body frame on lz1: +Y = local up (surface_attitude). Stand off to see the deck.
-    viewport name="Landing" fov=40.0 near=1.0 far=40000000.0 pos="lz1.world_pos.translate(140.0, 50.0, 160.0)" look_at="lz1.world_pos" up="(0.1444, -0.8670, 0.4769)" hdr=#true ev100=12.5 show_grid=#false __LANDING_ACTIVE__ {
-        bloom preset="old_school" intensity=0.2
-    }
-}
-
-object_3d frame="ECEF" orientation=absolute earth.world_pos {
-    glb path="earth.glb"
+    viewport name="Chase" near=1.0 far=120000000.0 pos="booster.world_pos.translate_world(46.740, -100.549, -144.705)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" cinematic=#true show_grid=#false active=#true
+    // Body frame on lz1: +Y is local up.
+    viewport name="Landing" near=1.0 far=120000000.0 pos="lz1.world_pos.translate(109.3, 39.0, 124.9)" look_at="lz1.world_pos" up="(0.1444, -0.8670, 0.4769)" cinematic=#true ev100=12.5 show_grid=#false active=#true
+    // Same SoCal LEO night LOS as cube-sat/main.py, pulled back so the 70 m stack fits.
+    viewport name="NightSky" near=1.0 far=120000000.0 pos="booster.world_pos.translate_world(-459.2083, 178.2587, 73.6618)" look_at="booster.world_pos.translate_world(1.6581, -1.1184, 0.0)" up="(-0.46332, -0.68690, 0.55992)" cinematic=#true show_grid=#false active=#true
 }
 
 object_3d orientation=absolute booster.world_pos {
@@ -52,8 +45,3 @@ object_3d orientation=absolute lz1.world_pos {
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
 }
 
-object_3d orientation=absolute ground.world_pos {
-    cylinder radius=10000.0 height=4.0 {
-        color 51 56 46
-    }
-}

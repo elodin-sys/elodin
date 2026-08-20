@@ -16,11 +16,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from windows_paths import windows_safe_rel_path
+
 IGNORED_COLUMNS = {"time"}
-
-
-def _windows_safe_rel_path(rel_path: str) -> str:
-    return rel_path.replace("_>_", "_to_").replace(">", "to")
 
 
 @dataclass
@@ -80,7 +78,7 @@ def _collect_csv_files(root: Path, file_prefix: str = "") -> dict[str, Path]:
             file_name = path.name
             if file_prefix and not file_name.startswith(file_prefix):
                 continue
-            safe_rel_path = _windows_safe_rel_path(rel_path)
+            safe_rel_path = windows_safe_rel_path(rel_path)
             if safe_rel_path in files:
                 raise ValueError(f"CSV path collision after sanitizing for Windows: {rel_path}")
             files[safe_rel_path] = path

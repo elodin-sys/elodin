@@ -28,6 +28,7 @@ bevy = { workspace = true, features = [
   "file_watcher",
   "bevy_audio",
   "vorbis",
+  "jpeg",
 ] }
 # bevy_math.version = "0.19"
 bevy_render.version = "0.19"

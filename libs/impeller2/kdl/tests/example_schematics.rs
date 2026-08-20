@@ -17,6 +17,24 @@ fn all_example_schematics_parse() {
             let path = file.expect("file entry").path();
             if path.extension().is_some_and(|e| e == "kdl") {
                 let text = std::fs::read_to_string(&path).expect("read kdl");
+                // Validate each generated visual-check viewport separately.
+                if path.file_name().is_some_and(|n| n == "visual_check.kdl") {
+                    for keep in ["Chase", "Landing", "NightSky"] {
+                        let filtered: String = text
+                            .lines()
+                            .filter(|line| {
+                                !line.contains("viewport name=\"")
+                                    || line.contains(&format!("name=\"{keep}\""))
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        if let Err(err) = impeller2_kdl::parse_schematic(&filtered) {
+                            panic!("{} ({keep}) failed to parse: {err:?}", path.display());
+                        }
+                    }
+                    checked += 1;
+                    continue;
+                }
                 if let Err(err) = impeller2_kdl::parse_schematic(&text) {
                     panic!("{} failed to parse: {err:?}", path.display());
                 }

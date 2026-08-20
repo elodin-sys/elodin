@@ -1,68 +1,157 @@
-//! Applies the schematic's top-level `environment` node: a directional sun
-//! (with optional shadow maps), ambient/IBL scaling, and viewport sky color.
-//!
-//! Without an `environment` node the editor renders exactly as before: baked
-//! `EnvironmentMapLight` IBL, no sun, theme-colored background. See
-//! docs/design-thruster-effects-port.md §4.2 for the schema and rationale.
+//! Applies the schematic's sun, atmosphere, ambient light, and sky color.
 
 use bevy::camera::ClearColorConfig;
+use bevy::camera::visibility::RenderLayers;
 use bevy::light::SunDisk;
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::math::{DQuat, DVec3};
 use bevy::pbr::{AtmosphereMode, AtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
 use bevy::prelude::*;
-use bevy_geo_frames::{GeoPosition, GeoRotation};
-use impeller2_wkt::{AtmosphereConfig, EnvironmentConfig, SunConfig};
+use bevy_geo_frames::solar::sun_direction_ecef;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+use impeller2::types::Timestamp;
+use impeller2_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
+use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 
-/// The active schematic's `environment` node, set on schematic load
-/// (`None` = default editor look).
+/// Marks the viewport that owns the cinematic Earth camera pipeline.
+#[derive(Component)]
+pub struct CinematicViewport;
+
+/// Active schematic environment.
 #[derive(Resource, Default, Clone)]
 pub struct SceneEnvironment(pub Option<EnvironmentConfig>);
 
-/// Baked IBL intensity viewport cameras spawn with (see `ViewportPane::spawn`);
-/// `environment { ambient scale=… }` multiplies this.
+#[derive(Resource, Default)]
+pub(crate) struct SpaceVisibility(pub f32);
+
+/// Baked IBL intensity before environment scaling.
 pub const BASE_ENVIRONMENT_MAP_INTENSITY: f32 = 2000.0;
 
-/// Marker for the sun spawned from the schematic `environment` node.
+/// Sun spawned from the schematic environment.
 #[derive(Component)]
-struct SchematicSun;
+pub(crate) struct SchematicSun;
 
-/// Marker + source config for the atmosphere spawned from the schematic
-/// `environment` node; the stored config detects edits (hot reload).
+/// Atmosphere spawned from the schematic environment.
 #[derive(Component)]
-struct SchematicAtmosphere(AtmosphereConfig);
+pub(crate) struct SchematicAtmosphere(AtmosphereConfig);
+
+/// Returns the explicit atmosphere or cinematic Earth's derived atmosphere.
+fn effective_atmosphere(env: &EnvironmentConfig) -> Option<AtmosphereConfig> {
+    if env.earth.is_some() {
+        if env.atmosphere.is_some() {
+            warn_once!(
+                "environment has both `earth` and `atmosphere`; `earth` \
+                 supersedes it — remove the `atmosphere` child"
+            );
+        }
+        return Some(AtmosphereConfig {
+            origin: (0.0, 0.0, 0.0),
+            inner_radius: 6_371_000.0,
+            outer_radius: 6_471_000.0,
+            ground_albedo: (0.3, 0.3, 0.3),
+            raymarched: true,
+        });
+    }
+    env.atmosphere
+}
+
+/// Returns the explicit sun or cinematic Earth's default sun.
+fn effective_sun(env: &EnvironmentConfig) -> Option<SunConfig> {
+    env.sun
+        .or_else(|| env.earth.is_some().then(SunConfig::default))
+}
+
+fn atmosphere_geo_rotation(frame: GeoFrame, ctx: &GeoContext) -> GeoRotation {
+    // Cancel the frame basis so the spherical atmosphere stays unrotated in Bevy.
+    GeoRotation::from_bevy(frame, DQuat::IDENTITY, ctx)
+}
 
 pub struct SceneEnvironmentPlugin;
 
 impl Plugin for SceneEnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SceneEnvironment>()
+            .init_resource::<SpaceVisibility>()
             .add_systems(Update, (sync_sun, sync_atmosphere, sync_camera_environment));
     }
 }
 
-/// Sun rotation from azimuth/elevation degrees (Bevy Y-up frame; matches the
-/// pyrotechnique authoring convention so scene values transcribe directly).
+/// Builds the sun rotation from Bevy Y-up azimuth and elevation.
 fn sun_rotation(sun: &SunConfig) -> Quat {
-    Quat::from_euler(
-        EulerRot::YXZ,
-        -sun.azimuth_deg.to_radians(),
-        -sun.elevation_deg.to_radians(),
-        0.0,
-    )
+    let az = sun.azimuth_deg.unwrap_or(SunConfig::default_azimuth_deg());
+    let el = sun
+        .elevation_deg
+        .unwrap_or(SunConfig::default_elevation_deg());
+    Quat::from_euler(EulerRot::YXZ, -az.to_radians(), -el.to_radians(), 0.0)
+}
+
+/// Converts a frame-relative sun direction to Bevy light rotation.
+fn rotation_from_frame_direction(to_sun: DVec3, frame: GeoFrame, ctx: &GeoContext) -> Option<Quat> {
+    let to_sun = (GeoFrame::bevy_R_(&frame, ctx) * to_sun).try_normalize()?;
+    Some(Quat::from_rotation_arc(Vec3::NEG_Z, (-to_sun).as_vec3()))
+}
+
+/// Resolves sun rotation from direction, angles, or ephemeris.
+fn sun_rotation_world(
+    sun: &SunConfig,
+    frame: GeoFrame,
+    ctx: &GeoContext,
+    unix_micros: i64,
+) -> Quat {
+    if let Some((x, y, z)) = sun.direction {
+        return rotation_from_frame_direction(
+            DVec3::new(f64::from(x), f64::from(y), f64::from(z)),
+            frame,
+            ctx,
+        )
+        .unwrap_or_else(|| sun_rotation(sun));
+    }
+    if sun.tracks_ephemeris() {
+        return rotation_from_frame_direction(sun_direction_ecef(unix_micros), GeoFrame::ECEF, ctx)
+            .unwrap_or_else(|| sun_rotation(sun));
+    }
+    sun_rotation(sun)
+}
+
+fn playhead_unix_micros(current: &CurrentTimestamp) -> i64 {
+    match current.0 {
+        Timestamp::EPOCH => Timestamp::now().0,
+        Timestamp(us) => us,
+    }
+}
+
+fn cinematic_sun_layers() -> RenderLayers {
+    RenderLayers::from_layers(&[0, CINEMATIC_EARTH_RENDER_LAYER])
 }
 
 fn sync_sun(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
-    mut suns: Query<(Entity, &mut DirectionalLight, &mut Transform), With<SchematicSun>>,
+    coordinate: Res<crate::Coordinate>,
+    geo_ctx: Res<GeoContext>,
+    current_ts: Res<CurrentTimestamp>,
+    mut suns: Query<
+        (
+            Entity,
+            &mut DirectionalLight,
+            &mut Transform,
+            Option<&RenderLayers>,
+        ),
+        With<SchematicSun>,
+    >,
 ) {
-    let config = environment.0.as_ref().and_then(|env| env.sun);
+    let earth = environment
+        .0
+        .as_ref()
+        .is_some_and(|env| env.earth.is_some());
+    let config = environment.0.as_ref().and_then(effective_sun);
+    let frame = coordinate.0.unwrap_or_default();
+    let unix_micros = playhead_unix_micros(&current_ts);
     match (config, suns.iter_mut().next()) {
-        (Some(sun), Some((_, mut light, mut transform))) => {
+        (Some(sun), Some((entity, mut light, mut transform, layers))) => {
             // Compare before writing: mutations dirty render extraction.
             if light.illuminance != sun.illuminance {
                 light.illuminance = sun.illuminance;
@@ -70,13 +159,25 @@ fn sync_sun(
             if light.shadow_maps_enabled != sun.shadows {
                 light.shadow_maps_enabled = sun.shadows;
             }
-            let rotation = sun_rotation(&sun);
-            if transform.rotation != rotation {
+            let rotation = sun_rotation_world(&sun, frame, &geo_ctx, unix_micros);
+            // ~1e-4 rad: paused playheads do not dirty extraction every frame.
+            if transform.rotation.angle_between(rotation) > 1e-4 {
                 transform.rotation = rotation;
+            }
+            let cine_layers = cinematic_sun_layers();
+            match (earth, layers) {
+                (true, Some(current)) if *current == cine_layers => {}
+                (true, _) => {
+                    commands.entity(entity).insert(cine_layers);
+                }
+                (false, Some(_)) => {
+                    commands.entity(entity).remove::<RenderLayers>();
+                }
+                (false, None) => {}
             }
         }
         (Some(sun), None) => {
-            commands.spawn((
+            let mut entity = commands.spawn((
                 SchematicSun,
                 Name::new("environment sun"),
                 DirectionalLight {
@@ -85,8 +186,11 @@ fn sync_sun(
                     ..default()
                 },
                 SunDisk::EARTH,
-                Transform::from_rotation(sun_rotation(&sun)),
+                Transform::from_rotation(sun_rotation_world(&sun, frame, &geo_ctx, unix_micros)),
             ));
+            if earth {
+                entity.insert(cinematic_sun_layers());
+            }
         }
         (None, Some((entity, ..))) => {
             commands.entity(entity).despawn();
@@ -95,20 +199,17 @@ fn sync_sun(
     }
 }
 
-/// Spawns/despawns the planetary atmosphere declared by the schematic. The
-/// entity lives in the same high-precision space as world objects (GeoPosition
-/// in the schematic frame + big_space grid cell), so the planet center stays
-/// put through floating-origin rebases whether the scene is a local ENU pad or
-/// full ECEF Earth.
+/// Synchronizes the schematic atmosphere entity.
 fn sync_atmosphere(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
     coordinate: Res<crate::Coordinate>,
+    geo_ctx: Res<GeoContext>,
     mut media: ResMut<Assets<ScatteringMedium>>,
     existing: Query<(Entity, &SchematicAtmosphere)>,
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
-    let config = environment.0.as_ref().and_then(|env| env.atmosphere);
+    let config = environment.0.as_ref().and_then(effective_atmosphere);
     let current = existing.iter().next();
     match (config, current) {
         (Some(config), Some((entity, spawned))) if spawned.0 == config => {
@@ -138,7 +239,7 @@ fn sync_atmosphere(
                     frame,
                     DVec3::new(config.origin.0, config.origin.1, config.origin.2),
                 ),
-                GeoRotation::relative(frame, DQuat::IDENTITY),
+                atmosphere_geo_rotation(frame, &geo_ctx),
             ));
             #[cfg(feature = "big_space")]
             crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
@@ -159,14 +260,10 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
     }
 }
 
-/// Keeps main viewport cameras in sync with the environment: IBL intensity
-/// scaling, sky (clear) color, and the per-camera `AtmosphereSettings` that
-/// activates the schematic atmosphere. Runs every frame because cameras can
-/// spawn at any time; writes are change-gated.
+/// Synchronizes viewport IBL, clear color, and atmosphere settings.
 fn atmosphere_settings_for(config: AtmosphereConfig) -> AtmosphereSettings {
     if config.raymarched {
-        // Distant planet views (apollo Earth-from-Moon, ~2° disk): raymarch
-        // with a larger sky-view LUT so the blue limb stays resolvable.
+        // A larger sky-view LUT preserves distant planetary limbs.
         AtmosphereSettings {
             aerial_view_lut_max_distance: 3.2e5,
             rendering_method: AtmosphereMode::Raymarched,
@@ -177,73 +274,99 @@ fn atmosphere_settings_for(config: AtmosphereConfig) -> AtmosphereSettings {
         }
     } else {
         AtmosphereSettings {
-            // Ground ECEF scenes (falcon9): default LookupTexture; longer
-            // aerial-view span for chase cams watching multi-km plumes.
+            // Extend aerial perspective for long-range chase cameras.
             aerial_view_lut_max_distance: 3.2e5,
             ..AtmosphereSettings::default()
         }
     }
 }
 
+type EnvironmentCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Camera,
+        &'static mut EnvironmentMapLight,
+        Option<&'static AtmosphereSettings>,
+        Has<CinematicViewport>,
+    ),
+    With<MainCamera>,
+>;
+
 fn sync_camera_environment(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
-    mut cameras: Query<
-        (
-            Entity,
-            &mut Camera,
-            &mut EnvironmentMapLight,
-            Option<&AtmosphereSettings>,
-        ),
-        With<MainCamera>,
-    >,
+    space_visibility: Res<SpaceVisibility>,
+    cinematic: Query<Entity, With<CinematicViewport>>,
+    mut cameras: EnvironmentCameraQuery,
 ) {
-    let (ambient_scale, sky_color, atmosphere) = match &environment.0 {
+    let (ambient_scale, sky_color, atmosphere, earth) = match &environment.0 {
         Some(config) => (
             config.ambient_scale.max(0.0),
             config.sky_color,
-            config.atmosphere,
+            effective_atmosphere(config),
+            config.earth.is_some(),
         ),
-        None => (1.0, None, None),
+        None => (1.0, None, None, false),
     };
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
-    let clear = match sky_color {
+    let environment_clear = match sky_color {
         Some(color) => ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a)),
+        None if earth => ClearColorConfig::Custom(Color::BLACK),
         None => ClearColorConfig::Default,
     };
-    // The atmosphere entity is scene-global; Bevy still requires per-camera
-    // `AtmosphereSettings` to render it. Putting settings on several active
-    // views in one frame trips wgpu bind-group validation and the editor's
-    // fatal render-error handler. Pick the lowest-id active main camera —
-    // deterministic across frames; tab switches hand the sky over a frame
-    // later. Multi-viewport layouts get the procedural sky in one pane only.
-    let active: Vec<Entity> = cameras
-        .iter()
-        .filter(|(_, camera, _, _)| camera.is_active)
-        .map(|(entity, ..)| entity)
-        .collect();
-    if atmosphere.is_some() && active.len() > 1 {
-        warn_once!(
-            "schematic atmosphere renders on only one active main viewport \
-             (Bevy 0.19: several cameras with AtmosphereSettings trip wgpu \
-             bind-group validation and quit the editor). Other viewports keep \
-             clear-color/IBL; switch tabs to move the sky to another pane."
-        );
-    }
-    let chosen = atmosphere.and(active.into_iter().min());
-    for (entity, mut camera, mut light, current_settings) in &mut cameras {
-        if light.intensity != intensity {
-            light.intensity = intensity;
+    let regular_clear = match sky_color {
+        Some(color) if !earth => {
+            ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a))
         }
-        if !clear_color_matches(&camera.clear_color, &clear) {
-            camera.clear_color = clear;
+        _ => ClearColorConfig::Default,
+    };
+    // Bevy 0.19 permits AtmosphereSettings on only one active view.
+    let cinematic_cam = cinematic.iter().next();
+    let chosen = if earth {
+        atmosphere.and(cinematic_cam)
+    } else {
+        let active_count = cameras
+            .iter()
+            .filter(|(_, camera, ..)| camera.is_active)
+            .count();
+        let active = cameras
+            .iter()
+            .filter(|(_, camera, ..)| camera.is_active)
+            .map(|(entity, ..)| entity)
+            .min();
+        if atmosphere.is_some() && active_count > 1 {
+            warn_once!(
+                "schematic atmosphere renders on only one active main viewport \
+                 (Bevy 0.19: several cameras with AtmosphereSettings trip wgpu \
+                 bind-group validation and quit the editor). Other viewports keep \
+                 clear-color/IBL; switch tabs to move the sky to another pane."
+            );
         }
-        // `AtmosphereSettings` requires `Hdr`, which main viewport cameras get
-        // from the global HDR toggle; cinematic schematics declare hdr=#true.
+        atmosphere.and(active)
+    };
+    // Fade studio IBL out in space.
+    let space_ibl_fade = 1.0 - space_visibility.0;
+    for (entity, mut camera, mut light, current_settings, is_cinematic) in &mut cameras {
+        let (target_intensity, target_clear) = if earth {
+            if is_cinematic {
+                (intensity * space_ibl_fade, environment_clear)
+            } else {
+                (BASE_ENVIRONMENT_MAP_INTENSITY, regular_clear)
+            }
+        } else {
+            (intensity, environment_clear)
+        };
+        if light.intensity != target_intensity {
+            light.intensity = target_intensity;
+        }
+        if !clear_color_matches(&camera.clear_color, &target_clear) {
+            camera.clear_color = target_clear;
+        }
         let wants_atmosphere = chosen == Some(entity);
         if wants_atmosphere {
             let desired = atmosphere_settings_for(atmosphere.unwrap());
-            // AtmosphereMode is not PartialEq; compare the fields we set.
             let needs_write = match current_settings {
                 None => true,
                 Some(s) => {
@@ -269,14 +392,70 @@ mod tests {
     #[test]
     fn sun_rotation_points_light_downward_at_positive_elevation() {
         let sun = SunConfig {
-            azimuth_deg: 0.0,
-            elevation_deg: 45.0,
+            azimuth_deg: Some(0.0),
+            elevation_deg: Some(45.0),
             illuminance: 100_000.0,
             shadows: true,
+            direction: None,
         };
-        // Light forward is -Z rotated by the sun rotation; positive elevation
-        // must tilt it below the horizon (negative Y).
+        // Positive elevation must tilt light forward below the horizon.
         let forward = sun_rotation(&sun) * Vec3::NEG_Z;
         assert!(forward.y < -0.5, "sun should shine downward, got {forward}");
+    }
+
+    #[test]
+    fn earth_implies_default_ephemeris_sun() {
+        let env = EnvironmentConfig {
+            earth: Some(impeller2_wkt::EarthConfig::default()),
+            ..Default::default()
+        };
+        let sun = effective_sun(&env).expect("earth implies a sun");
+        assert!(sun.tracks_ephemeris());
+        assert_eq!(sun.illuminance, SunConfig::default_illuminance());
+        assert!(sun.shadows);
+    }
+
+    #[test]
+    fn explicit_sun_wins_over_earth_default() {
+        let env = EnvironmentConfig {
+            sun: Some(SunConfig {
+                illuminance: 12_000.0,
+                ..Default::default()
+            }),
+            earth: Some(impeller2_wkt::EarthConfig::default()),
+            ..Default::default()
+        };
+        assert_eq!(effective_sun(&env).unwrap().illuminance, 12_000.0);
+    }
+
+    #[test]
+    fn atmosphere_rotation_is_bevy_identity_in_every_frame() {
+        let ctx = GeoContext::default();
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
+            let rendered = atmosphere_geo_rotation(frame, &ctx).to_bevy(&ctx);
+            assert!(
+                rendered.dot(DQuat::IDENTITY).abs() > 1.0 - 1e-9,
+                "{frame:?} rendered as {rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ephemeris_rotation_is_finite_at_j2000() {
+        let sun = SunConfig::default();
+        let ctx = GeoContext::default();
+        let rot = sun_rotation_world(&sun, GeoFrame::ECEF, &ctx, 946_728_000_000_000);
+        assert!(rot.is_finite());
+        assert!(rot.is_normalized());
+    }
+
+    #[test]
+    fn ephemeris_rotation_is_finite_at_crs12() {
+        let sun = SunConfig::default();
+        let ctx = GeoContext::default();
+        // 2017-08-14T16:31:37Z
+        let rot = sun_rotation_world(&sun, GeoFrame::ECEF, &ctx, 1_502_728_297_000_000);
+        assert!(rot.is_finite(), "{rot:?}");
+        assert!(rot.is_normalized(), "{rot:?}");
     }
 }

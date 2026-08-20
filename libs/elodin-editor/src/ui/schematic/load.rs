@@ -1116,7 +1116,7 @@ impl LoadSchematicParams<'_, '_> {
                     viewport,
                     label,
                 );
-                self.hdr_enabled.0 |= viewport.hdr;
+                self.hdr_enabled.0 |= viewport.hdr && !viewport.cinematic;
                 if let Some(camera) = pane.camera {
                     for arrow in viewport.local_arrows.clone() {
                         self.spawn_vector_arrow(arrow, Some(camera));
@@ -1875,6 +1875,7 @@ mod tests {
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
+            .init_resource::<crate::plugins::scene_environment::SceneEnvironment>()
             .init_resource::<super::PendingWindowSchematics>()
             .init_resource::<super::PendingObject3dSpawns>()
             .insert_resource(CurrentSchematic(Default::default()));

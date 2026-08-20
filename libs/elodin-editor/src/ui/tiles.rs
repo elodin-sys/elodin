@@ -1,5 +1,5 @@
 use bevy::camera::visibility::RenderLayers;
-use bevy::camera::{Exposure, PhysicalCameraParameters};
+use bevy::camera::{Exposure, Hdr, PhysicalCameraParameters};
 use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     ecs::system::{SystemParam, SystemState},
@@ -64,9 +64,11 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         render_layer_alloc::{
-            GRID_RENDER_LAYERS, RenderLayerAllocator, RenderLayerLease,
-            THRUSTER_PARTICLES_RENDER_LAYER, grid_render_layer, view_cube_render_layer,
+            CINEMATIC_EARTH_RENDER_LAYER, GRID_RENDER_LAYERS, RenderLayerAllocator,
+            RenderLayerLease, THRUSTER_PARTICLES_RENDER_LAYER, grid_render_layer,
+            view_cube_render_layer,
         },
+        scene_environment::CinematicViewport,
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
             spawn::spawn_view_cube_overlay,
@@ -106,9 +108,25 @@ pub(crate) fn zoom_limits_for_far(far: f32) -> (f64, f64) {
     (min_size_per_pixel, max_size_per_pixel)
 }
 
-fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
+pub(crate) fn cinematic_bloom_config() -> BloomConfig {
+    BloomConfig {
+        preset: BloomPreset::OldSchool,
+        intensity: Some(0.365),
+        threshold: Some(0.6),
+        threshold_softness: Some(0.2),
+    }
+}
+
+pub(crate) const CINEMATIC_DEFAULT_EV100: f32 = 13.5;
+
+pub(crate) fn bloom_from_config(config: Option<&BloomConfig>, cinematic: bool) -> Bloom {
     let Some(config) = config else {
-        return Bloom::default();
+        // Cinematic defaults keep faint stars crisp.
+        return if cinematic {
+            bloom_from_config(Some(&cinematic_bloom_config()), true)
+        } else {
+            Bloom::default()
+        };
     };
     let mut bloom = match config.preset {
         BloomPreset::Natural => Bloom::NATURAL,
@@ -245,6 +263,9 @@ pub struct ViewportConfig {
     /// Color for this viewport's source frustum 2D projection in target viewports.
     pub projection_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
+    pub cinematic: bool,
+    /// Authored bloom; `None` keeps house defaults.
+    pub bloom: Option<BloomConfig>,
 }
 
 #[derive(Clone)]
@@ -1672,6 +1693,9 @@ impl ViewportPane {
         if viewport.effects {
             main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
         }
+        if viewport.cinematic {
+            main_camera_layers = main_camera_layers.with(CINEMATIC_EARTH_RENDER_LAYER);
+        }
         let grid_layer = grid_render_layer(viewport.frame);
         if viewport.show_grid {
             main_camera_layers = main_camera_layers.with(grid_layer);
@@ -1794,11 +1818,12 @@ impl ViewportPane {
             },
             Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
-            // KDL `ev100` overrides the default physical-camera exposure
-            // (~EV 8.6) — required when a schematic `environment` adds a real
-            // sun (100k+ lux would blow out at the default exposure).
+            // Cinematic viewports default to a daylight exposure.
             match viewport.ev100 {
                 Some(ev100) => Exposure { ev100 },
+                None if viewport.cinematic => Exposure {
+                    ev100: CINEMATIC_DEFAULT_EV100,
+                },
                 None => Exposure::from_physical_camera(PhysicalCameraParameters {
                     aperture_f_stops: 2.8,
                     shutter_speed_s: 1.0 / 200.0,
@@ -1824,6 +1849,8 @@ impl ViewportPane {
                 frustums_color: viewport.frustums_color,
                 projection_color: viewport.projection_color,
                 frustums_thickness: viewport.frustums_thickness,
+                cinematic: viewport.cinematic,
+                bloom: viewport.bloom.clone(),
             },
             crate::ui::inspector::viewport::Viewport::new(
                 parent,
@@ -1838,7 +1865,10 @@ impl ViewportPane {
         ));
 
         camera.insert(MeshPickingCamera);
-        camera.insert(bloom_from_config(viewport.bloom.as_ref()));
+        camera.insert(bloom_from_config(
+            viewport.bloom.as_ref(),
+            viewport.cinematic,
+        ));
         camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
@@ -1846,6 +1876,17 @@ impl ViewportPane {
             intensity: 2000.0,
             ..Default::default()
         });
+        if viewport.cinematic {
+            // Disable Bevy's ambient light for the cinematic view.
+            camera.insert((
+                Hdr,
+                CinematicViewport,
+                AmbientLight {
+                    brightness: 0.0,
+                    ..default()
+                },
+            ));
+        }
 
         let camera = camera.id();
 
