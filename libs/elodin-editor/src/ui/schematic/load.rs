@@ -1085,6 +1085,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.materials,
             &mut self.world_mesh_materials,
             &world_mesh,
+            &self.geo_context,
         );
         let mut e = self.commands.entity(entity);
         e.insert((SchematicSpawned, world_mesh));

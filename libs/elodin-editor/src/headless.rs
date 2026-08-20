@@ -348,6 +348,7 @@ fn load_headless_scene(
                     &mut materials,
                     &mut world_mesh_materials,
                     &world_mesh,
+                    &geo_context,
                 ));
             }
             _ => {}
