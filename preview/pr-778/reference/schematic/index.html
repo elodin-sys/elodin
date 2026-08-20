@@ -616,6 +616,7 @@
 </li>
 <li>Known issue: a negative <code>city_lights height</code> does not visibly sink the lights. The particles ride a sphere of the equatorial radius while the globe mesh is squashed to the WGS84 ellipsoid, so the mesh already sits below the shell everywhere but the equator (~7 km at 34°N, ~21 km at the poles) — more than the <code>-5000</code> clamp can cross.</li>
 <li>Supersedes the <code>atmosphere</code> child — the built-in Earth owns its own atmosphere (raymarched, surface radius tracked from the camera's latitude). Remove <code>atmosphere</code> when enabling <code>earth</code> (it is ignored with a warning). Remove any <code>object_3d</code> Earth GLB and <code>world_mesh "globe"</code> too; the built-in globe replaces them.</li>
+<li>Implementation note: since #774, <code>GeoRotation::relative(frame, IDENTITY)</code> composes the frame-to-Bevy basis and is not Bevy identity. The spherical atmosphere uses <code>GeoRotation::from_bevy</code> to stay unrotated and concentric with the globe; other geo-placed spherical render entities should do the same.</li>
 <li>Native editor builds only (the embedded Earth assets and GPU particles are excluded from wasm).</li>
 </ul>
 </li>
