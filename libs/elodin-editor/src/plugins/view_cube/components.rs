@@ -190,14 +190,30 @@ pub struct AxisLabelBillboard {
     pub base_position: Vec3,
 }
 
-/// Face label painted on the cube: the baked face pose plus the in-plane spin
-/// that keeps the word horizontal on screen. `last_angle` is both the fallback
-/// for edge-on faces and the guard that avoids rewriting an unchanged transform.
+/// Face label painted on a cube face, owned by one viewport's overlay camera.
+///
+/// A cube is shared by every viewport on its frame, so each viewport spawns its
+/// own copy of the labels on its own render layer; `camera` is what ties a copy
+/// back to the view it has to stay readable in.
 #[derive(Component, Clone, Copy)]
 pub struct FaceLabel {
     pub base_rotation: Quat,
+    pub camera: Entity,
+    /// Fallback spin for edge-on faces, and the guard against rewriting an
+    /// unchanged transform.
     pub last_angle: f32,
+    /// Cube and camera rotations the spin was last solved for.
+    pub last_view: Option<(Quat, Quat)>,
 }
+
+/// Marks a view-cube subtree that keeps its own render layers instead of
+/// inheriting the shared cube's.
+#[derive(Component, Clone, Copy)]
+pub struct KeepsRenderLayers;
+
+/// Marks an overlay camera whose face labels have been spawned.
+#[derive(Component, Clone, Copy)]
+pub struct ViewportFaceLabels;
 
 // ============================================================================
 // Resources

@@ -112,9 +112,12 @@ def world() -> el.World:
         f"""
         coordinate frame=NED lat={LAT_DEG} lon={LON_DEG} alt={ALT_M}
         hsplit {{
+            vsplit {{
+                viewport name="ECEF Equator" frame="ECEF" pos="(0,0,0,1, 8000000,-80000000, 0)" look_at="(0,0,0,1, 0,0,0)" up="(0,0,1)" far=15000000.0 hdr=#true show_grid=#true active=#true
+                viewport name="ECEF Oblique" frame="ECEF" pos="(0,0,0,1, 46000000,-46000000, 46000000)" look_at="(0,0,0,1, 0,0,0)" up="(0,0,1)" far=15000000.0 hdr=#true show_grid=#true active=#true
+            }}
             tabs {{
                 viewport name=Frames frame="NED" pos="(0,0,0,1, 4000000,4000000,-3000000)" look_at="(0,0,0,1, 0,0,0)" far=15000000.0 hdr=#true show_grid=#false active=#true
-                viewport name=Frames frame="ECEF" pos="(0,0,0,1, 8000000,-80000000, 0)" look_at="(0,0,0,1, 0,0,0)" up="(0,0,1)" far=15000000.0 hdr=#true show_grid=#true active=#true 
                 inspector
                 hierarchy
             }}

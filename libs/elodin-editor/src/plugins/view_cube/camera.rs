@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 
 use super::components::{
-    AxisLabelBillboard, FaceLabel, RotationArrow, ViewCubeCamera, ViewCubeFrame, ViewCubeFrameRef,
-    ViewCubeLink, ViewCubeRoot, ViewportActionButton,
+    AxisLabelBillboard, FaceLabel, KeepsRenderLayers, RotationArrow, ViewCubeCamera, ViewCubeFrame,
+    ViewCubeFrameRef, ViewCubeLink, ViewCubeRoot, ViewportActionButton,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
@@ -289,78 +289,35 @@ pub(super) fn face_label_in_plane_angle(
     (baseline.length_squared() > FACE_LABEL_EPS * FACE_LABEL_EPS).then_some(angle)
 }
 
-/// Per-coordinate-frame view state, kept between runs to detect a still view.
-pub struct FaceLabelView {
-    frame: GeoFrame,
-    cube_rotation: Quat,
-    camera_rotation: Quat,
-    moved: bool,
-}
-
-/// Spins each face label so its word reads horizontally in its own cube's
-/// viewport.
+/// Spins each face label so its word reads horizontally in the viewport that
+/// owns it.
 ///
-/// Only recomputes for cubes whose view actually moved, and leaves the label
-/// transform untouched when the angle is unchanged, so a still viewport costs a
-/// couple of quaternion compares and no transform propagation.
+/// Every label knows the overlay camera it belongs to, so two viewports on the
+/// same frame — which share a single cube — each orient their own copy. Reading
+/// through `Mut` does not flag a change, so a still viewport costs one
+/// comparison per label and triggers no transform propagation.
 pub fn orient_face_labels_to_view(
     mut labels: Query<(&ChildOf, &mut FaceLabel, &mut Transform)>,
-    cubes: Query<(&ViewCubeFrame, &GlobalTransform), With<ViewCubeRoot>>,
-    cube_cameras: Query<(&ViewCubeFrameRef, &GlobalTransform), With<ViewCubeCamera>>,
-    mut views: Local<Vec<FaceLabelView>>,
+    cubes: Query<&GlobalTransform, With<ViewCubeRoot>>,
+    cube_cameras: Query<&GlobalTransform, With<ViewCubeCamera>>,
 ) {
-    if labels.is_empty() {
-        return;
-    }
-
-    // Reused across runs: a handful of frames, so a linear scan beats a map and
-    // never allocates after the first few runs.
-    for view in views.iter_mut() {
-        view.moved = false;
-    }
-
-    for (frame_ref, camera_global) in cube_cameras.iter() {
-        let camera_rotation = camera_global.rotation();
-        let Some((_, cube_global)) = cubes.iter().find(|(frame, _)| frame.0 == frame_ref.0) else {
-            continue;
-        };
-        let cube_rotation = cube_global.rotation();
-
-        match views.iter_mut().find(|view| view.frame == frame_ref.0) {
-            Some(view) => {
-                view.moved =
-                    view.cube_rotation != cube_rotation || view.camera_rotation != camera_rotation;
-                view.cube_rotation = cube_rotation;
-                view.camera_rotation = camera_rotation;
-            }
-            None => views.push(FaceLabelView {
-                frame: frame_ref.0,
-                cube_rotation,
-                camera_rotation,
-                moved: true,
-            }),
-        }
-    }
-
-    if views.iter().all(|view| !view.moved) {
-        return;
-    }
-
     for (parent, mut face_label, mut label_transform) in labels.iter_mut() {
-        let Ok((cube_frame, _)) = cubes.get(parent.0) else {
+        let Ok(cube_global) = cubes.get(parent.0) else {
             continue;
         };
-        let Some(view) = views
-            .iter()
-            .find(|view| view.frame == cube_frame.0 && view.moved)
-        else {
+        let Ok(camera_global) = cube_cameras.get(face_label.camera) else {
             continue;
         };
+
+        let view = (cube_global.rotation(), camera_global.rotation());
+        if face_label.last_view == Some(view) {
+            continue;
+        }
+        face_label.last_view = Some(view);
 
         let base_rotation = face_label.base_rotation;
-        let angle =
-            face_label_in_plane_angle(base_rotation, view.cube_rotation, view.camera_rotation)
-                .unwrap_or(face_label.last_angle);
+        let angle = face_label_in_plane_angle(base_rotation, view.0, view.1)
+            .unwrap_or(face_label.last_angle);
         if (angle - face_label.last_angle).abs() <= FACE_LABEL_ANGLE_EPS {
             continue;
         }
@@ -375,6 +332,7 @@ pub fn apply_render_layers_to_scene(
     scene_instances: Query<&WorldInstance>,
     scene_spawner: Res<WorldInstanceSpawner>,
     view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
+    own_layers: Query<&RenderLayers, With<KeepsRenderLayers>>,
     mut commands: Commands,
 ) {
     for (cube_root, render_layers, visibility) in view_cube_query.iter() {
@@ -382,6 +340,7 @@ pub fn apply_render_layers_to_scene(
             cube_root,
             &children_query,
             &view_cube_entities,
+            &own_layers,
             render_layers,
             &mut commands,
         );
@@ -399,12 +358,22 @@ fn apply_layers_recursive(
     entity: Entity,
     children_query: &Query<&Children>,
     view_cube_entities: &Query<Entity, Without<ViewCubeCamera>>,
+    own_layers: &Query<&RenderLayers, With<KeepsRenderLayers>>,
     render_layers: &RenderLayers,
     commands: &mut Commands,
 ) {
-    if view_cube_entities.get(entity).is_ok() {
-        commands.entity(entity).insert(render_layers.clone());
-    }
+    // A per-viewport subtree keeps its own layer and hands it down, otherwise
+    // the shared cube's layer would leak in and every viewport would see every
+    // copy of the face labels.
+    let render_layers = match own_layers.get(entity) {
+        Ok(own) => own,
+        Err(_) => {
+            if view_cube_entities.get(entity).is_ok() {
+                commands.entity(entity).insert(render_layers.clone());
+            }
+            render_layers
+        }
+    };
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
@@ -412,6 +381,7 @@ fn apply_layers_recursive(
                 child,
                 children_query,
                 view_cube_entities,
+                own_layers,
                 render_layers,
                 commands,
             );
