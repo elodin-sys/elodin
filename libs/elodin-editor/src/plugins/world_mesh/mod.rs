@@ -102,7 +102,14 @@ pub(crate) fn spawn_world_mesh_terrain(
             let material =
                 world_mesh_materials.add(bevy_world_mesh::prelude::WorldMeshMaterial::default());
 
-            spawn_world_mesh_terrain_bundle(commands, terrain_bundle, material, world_mesh, &region)
+            spawn_world_mesh_terrain_bundle(
+                commands,
+                terrain_bundle,
+                material,
+                world_mesh,
+                &region,
+                region != "globe",
+            )
         }
         WorldMeshConfig::Fallback(fallback) => {
             spawn_world_mesh_fallback(commands, meshes, materials, world_mesh, &region, fallback)
@@ -126,6 +133,7 @@ fn spawn_world_mesh_terrain_bundle(
     material: Handle<bevy_world_mesh::prelude::WorldMeshMaterial>,
     world_mesh: &impeller2_wkt::WorldMesh,
     region: &str,
+    y_up_surface: bool,
 ) -> Entity {
     let anchor = commands
         .spawn((
@@ -144,7 +152,7 @@ fn spawn_world_mesh_terrain_bundle(
         Name::new(format!("world_mesh terrain renderer ({region})")),
     ));
 
-    insert_geo_components(commands, anchor, world_mesh);
+    insert_geo_components(commands, anchor, world_mesh, y_up_surface);
     insert_big_space_cell(commands, anchor);
     anchor
 }
@@ -168,14 +176,22 @@ fn insert_geo_components(
     commands: &mut Commands,
     entity: Entity,
     world_mesh: &impeller2_wkt::WorldMesh,
+    y_up_surface: bool,
 ) {
     let Some(frame) = world_mesh.frame.or_default() else {
         return;
     };
     let (x, y, z) = world_mesh.translate.unwrap_or_default();
+    // Planar heightfields are Bevy Y-up (normal +Y), same as InfiniteGrid.
+    // Lift them to schematic Z-up so `to_bevy` leaves the ground horizontal.
+    let att = if y_up_surface {
+        GeoRotation::y_up_to_schematic()
+    } else {
+        DQuat::IDENTITY
+    };
     commands.entity(entity).insert((
         GeoPosition(frame, DVec3::new(x, y, z)),
-        GeoRotation::relative(frame, DQuat::IDENTITY),
+        GeoRotation::absolute(frame, att),
     ));
 }
 
@@ -389,7 +405,12 @@ fn spawn_world_mesh_fallback(
         }
     };
 
-    insert_geo_components(commands, entity, world_mesh);
+    insert_geo_components(
+        commands,
+        entity,
+        world_mesh,
+        matches!(fallback, WorldMeshFallback::PlanarGrid),
+    );
     insert_big_space_cell(commands, entity);
     entity
 }
@@ -627,6 +648,20 @@ mod tests {
     }
 
     #[test]
+    fn planar_enu_anchor_stays_level_in_bevy() {
+        let (mut app, anchor, _) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        apply_geo_transforms(&mut app);
+        let rotation = app.world().get::<Transform>(anchor).unwrap().rotation;
+        assert!(
+            rotation.dot(Quat::IDENTITY).abs() > 1.0 - 1e-5,
+            "planar ENU terrain should sit level in Bevy, got {rotation:?}"
+        );
+    }
+
+    #[test]
     fn framed_world_mesh_anchor_stays_at_origin_for_geo_pipeline() {
         let world_mesh = world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0)));
 
@@ -658,6 +693,7 @@ mod tests {
                 Handle::default(),
                 &world_mesh,
                 &world_mesh.region,
+                true,
             )
         };
         app.world_mut().flush();

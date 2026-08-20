@@ -320,6 +320,16 @@ impl GeoRotation {
         GeoRotation(frame, r_frame * q.conjugate(), RotationKind::Relative)
     }
 
+    /// Bevy / glTF Y-up → schematic Z-up.
+    ///
+    /// Viewport grids already store this as the local attitude so
+    /// `to_bevy(absolute(ENU, y_up_to_schematic()))` is identity (ground stays
+    /// horizontal). Y-up assets (GLB, planar terrain) need the same lift or
+    /// `bevy_R * att` pitches them 90°.
+    pub fn y_up_to_schematic() -> DQuat {
+        DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2)
+    }
+
     /// Convert orientation to Bevy.
     ///
     /// Both [`RotationKind`]s compose the local→frame attitude with the
@@ -747,6 +757,18 @@ mod tests {
                 b
             );
         };
+    }
+
+    #[test]
+    fn y_up_to_schematic_nets_identity_in_enu_plane() {
+        let ctx = dummy_ctx();
+        let q =
+            GeoRotation::absolute(GeoFrame::ENU, GeoRotation::y_up_to_schematic()).to_bevy(&ctx);
+        assert_quat_eq!(
+            q,
+            DQuat::IDENTITY,
+            "ENU Y-up asset should sit level in Bevy"
+        );
     }
 
     #[test]
