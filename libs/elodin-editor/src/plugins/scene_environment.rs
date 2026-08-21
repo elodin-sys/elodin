@@ -9,11 +9,12 @@ use bevy::pbr::{AtmosphereMode, AtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
 use bevy::prelude::*;
 use bevy_geo_frames::solar::sun_direction_ecef;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use impeller2::types::Timestamp;
 use impeller2_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
+use crate::plugins::cinematic_earth::CinematicEarthRoot;
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 
 /// Marks the viewport that owns the cinematic Earth camera pipeline.
@@ -205,10 +206,13 @@ fn sync_atmosphere(
     environment: Res<SceneEnvironment>,
     coordinate: Res<crate::Coordinate>,
     geo_ctx: Res<GeoContext>,
+    earth: Option<Single<Entity, With<CinematicEarthRoot>>>,
     mut media: ResMut<Assets<ScatteringMedium>>,
     existing: Query<(Entity, &SchematicAtmosphere)>,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
+    let Some(earth) = earth.map(|x| *x) else {
+        return;
+    };
     let config = environment.0.as_ref().and_then(effective_atmosphere);
     let current = existing.iter().next();
     match (config, current) {
@@ -222,7 +226,7 @@ fn sync_atmosphere(
             let frame = coordinate.0.unwrap_or_default();
             let medium = media.add(ScatteringMedium::earth(256, 256));
             let (r, g, b) = config.ground_albedo;
-            let mut entity = commands.spawn((
+            commands.spawn((
                 SchematicAtmosphere(config),
                 Name::new("environment atmosphere"),
                 bevy::light::Atmosphere {
@@ -232,18 +236,9 @@ fn sync_atmosphere(
                     medium,
                 },
                 Transform::default(),
-                GlobalTransform::default(),
-                #[cfg(feature = "big_space")]
-                crate::spatial::GridCell::default(),
-                GeoPosition(
-                    frame,
-                    DVec3::new(config.origin.0, config.origin.1, config.origin.2),
-                ),
                 atmosphere_geo_rotation(frame, &geo_ctx),
+                ChildOf(earth),
             ));
-            #[cfg(feature = "big_space")]
-            crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
-            let _ = &mut entity;
         }
         (None, Some((entity, _))) => {
             commands.entity(entity).despawn();
