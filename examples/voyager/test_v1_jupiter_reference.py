@@ -7,7 +7,7 @@ spice = pytest.importorskip("spiceypy")
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 LEAP_SECONDS = SPICE_DIR / "naif0012.tls"
 ENCOUNTER_KERNEL = SPICE_DIR / "vgr1_jup230.bsp"
-START_UTC = "1979-02-01T00:00:00"
+START_UTC = "1979-02-05T00:00:00"
 CHECKPOINTS_S = (0, 5 * 86400, 10 * 86400)
 
 
