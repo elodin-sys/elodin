@@ -302,8 +302,8 @@ Use `--dry-run` to only write the narrowed specs.
     intensity from `lander.dust_viz` (throttle × surface proximity) — the
     regolith sheet ramps in below ~12 m and dies at engine cutoff.
   Spawn rates come from the effect files and scale with intensity; nozzle
-  geometry lives in `apollo-lander.kdl` (RCS positions tuned to the visible
-  four-quad layout after the GLB mesh translate). The schematic
+  geometry lives in `apollo-lander.kdl` (schematic Z-up body offsets, tuned to
+  the four-quad layout after the Y-up GLB is lifted onto ENU). The schematic
   `environment` node (harsh sun + shadows, near-zero ambient, black sky) and
   the viewport's `hdr`/`ev100`/`bloom` reproduce the pyrotechnique lighting;
   effect assets are ingested into the DB and served like the GLBs. Reference

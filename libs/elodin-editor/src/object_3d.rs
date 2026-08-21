@@ -3045,6 +3045,20 @@ mod translate_body_frame_tests {
             "identity-att GLB should sit level in ENU Bevy, got {world:?}"
         );
     }
+
+    #[test]
+    fn glb_y_up_nozzle_offset_is_schematic_down() {
+        use bevy_geo_frames::GeoRotation;
+
+        // Thruster `position`/`direction` are schematic Z-up. A Y-up GLB
+        // nozzle at mesh (0, -1.9, 0) lands at schematic (0, 0, -1.9) after
+        // the same Rx(+π/2) lift applied to the GLB child.
+        let schematic = GeoRotation::y_up_to_schematic() * DVec3::new(0.0, -1.9, 0.0);
+        assert!(
+            (schematic - DVec3::new(0.0, 0.0, -1.9)).length() < 1e-9,
+            "mesh −Y nozzle must become schematic −Z, got {schematic:?}"
+        );
+    }
 }
 
 #[cfg(test)]
