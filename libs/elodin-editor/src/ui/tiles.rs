@@ -1292,7 +1292,7 @@ impl Pane {
                                 .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
                             ui.painter().line_segment(
                                 [monitor_rect.left_top(), monitor_rect.right_top()],
-                                egui::Stroke::new(1.0, scheme.border_primary),
+                                egui::Stroke::new(1.0_f32, scheme.border_primary),
                             );
 
                             if relevant.is_empty() {
@@ -2170,7 +2170,7 @@ impl TreeBehavior<'_> {
             ui.painter().circle_stroke(
                 dot_center,
                 dot_radius,
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             );
         }
     }
@@ -2422,24 +2422,24 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().hline(
                 rect.x_range(),
                 rect.top(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
 
             // Draw separator lines on both sides of each tab
             ui.painter().vline(
                 rect.left(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
         }
 
@@ -2450,10 +2450,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
             ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
             ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                egui::Stroke::new(1.0, scheme.text_primary);
+                egui::Stroke::new(1.0_f32, scheme.text_primary);
             ui.style_mut().visuals.widgets.inactive.bg_fill = colors::TRANSPARENT;
             ui.style_mut().visuals.widgets.inactive.fg_stroke =
-                egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
+                egui::Stroke::new(1.0_f32, scheme.text_primary.opacity(0.5));
 
             egui::Frame::NONE
                 .inner_margin(egui::Margin::same(10))
@@ -2529,7 +2529,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn drag_preview_stroke(&self, _visuals: &Visuals) -> Stroke {
-        Stroke::new(1.0, get_scheme().text_primary)
+        Stroke::new(1.0_f32, get_scheme().text_primary)
     }
 
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
@@ -2589,7 +2589,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.painter().hline(
             top_bar_rect.x_range(),
             top_bar_rect.bottom(),
-            egui::Stroke::new(1.0, get_scheme().border_primary),
+            egui::Stroke::new(1.0_f32, get_scheme().border_primary),
         );
 
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -3832,7 +3832,7 @@ fn render_sidebar_toolbar(
         .exact_size(32.0)
         .frame(Frame {
             fill: get_scheme().bg_secondary,
-            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             inner_margin: egui::Margin::symmetric(8, 0),
             ..Default::default()
         })

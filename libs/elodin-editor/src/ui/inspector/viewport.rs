@@ -942,7 +942,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(frustums_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );
@@ -966,7 +966,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(projection_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );

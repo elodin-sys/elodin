@@ -3438,7 +3438,7 @@ impl DBVisitor {
         components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
     ) {
-        for (_, component) in components.iter() {
+        for component in components.values() {
             // Skip components with no data – the VTable builder
             // (vtable()) excludes them, so we must too.
             if component.time_series.index().is_empty() {

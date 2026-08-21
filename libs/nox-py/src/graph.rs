@@ -442,7 +442,7 @@ impl GraphQueryInner {
         let mut entity_map = BTreeMap::new();
         let mut len = 0;
         let exprs = exprs_from_edges_queries(&self.query.edges, from_query.query, to_query.query);
-        for (_, (from, _to)) in exprs.iter() {
+        for (from, _to) in exprs.values() {
             for (id, index) in from.entity_map.iter() {
                 entity_map.insert(*id, index + len);
             }

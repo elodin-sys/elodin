@@ -1309,7 +1309,7 @@ pub fn sync_object_3d(
             _ => continue,
         };
 
-        let eql = format!("{}.world_pos", &parent.name);
+        let eql = format!("{}.world_pos", parent.name);
         let Ok(expr) = ctx.0.parse_str(&eql) else {
             continue;
         };

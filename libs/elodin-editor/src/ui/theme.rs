@@ -14,10 +14,11 @@ pub fn set_theme(context: &egui::Context) {
 
     style.spacing.item_spacing = egui::vec2(0., 0.);
 
-    style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, scheme.border_primary);
-    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, scheme.text_primary);
-    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, scheme.text_secondary);
-    style.visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, scheme.border_primary);
+    style.visuals.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0_f32, scheme.border_primary);
+    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, scheme.text_primary);
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, scheme.text_secondary);
+    style.visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0_f32, scheme.border_primary);
 
     style.visuals.extreme_bg_color = scheme.bg_secondary;
 
@@ -41,7 +42,7 @@ pub fn set_theme(context: &egui::Context) {
 
     style.visuals.menu_corner_radius = corner_radius_xs();
     style.visuals.window_corner_radius = corner_radius_xs();
-    style.visuals.window_stroke = Stroke::new(1.0, Color32::TRANSPARENT);
+    style.visuals.window_stroke = Stroke::new(1.0_f32, Color32::TRANSPARENT);
     style.visuals.window_shadow = Shadow {
         color: scheme.shadow.opacity(0.2),
         blur: 4,
@@ -114,8 +115,8 @@ fn configure_default_fonts(ctx: &egui::Context) {
 
 pub fn configure_input_with_border(style: &mut Style) {
     let scheme = get_scheme();
-    style.visuals.widgets.active.fg_stroke = Stroke::new(0.0, scheme.border_primary);
-    style.visuals.widgets.inactive.bg_stroke = Stroke::new(0.0, scheme.border_primary);
+    style.visuals.widgets.active.fg_stroke = Stroke::new(0.0_f32, scheme.border_primary);
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(0.0_f32, scheme.border_primary);
     style.visuals.widgets.inactive.bg_fill = scheme.bg_secondary;
     style.visuals.widgets.hovered.bg_fill = scheme.border_primary;
 }

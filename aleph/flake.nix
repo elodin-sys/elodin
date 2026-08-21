@@ -10,7 +10,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/4a4e93a7b3fbe1915870ec54002c616f01367195";
-    rust-overlay.url = "github:oxalica/rust-overlay/77a8263847fb02dc49dbe377278ef6b952f1c6bb";
+    rust-overlay.url = "github:oxalica/rust-overlay/c84e121aaede7ef8c7bd9fb5154ccc1599e07816";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
