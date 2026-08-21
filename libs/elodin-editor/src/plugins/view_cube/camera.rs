@@ -294,6 +294,31 @@ pub(super) fn face_label_in_plane_angle(
     (baseline.length_squared() > FACE_LABEL_EPS * FACE_LABEL_EPS).then_some(angle)
 }
 
+type FaceLabelOrientQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut FaceLabel,
+        &'static mut Transform,
+        &'static mut GlobalTransform,
+    ),
+    (Without<ViewCubeCamera>, Without<ViewCubeRoot>),
+>;
+
+type ViewCubeRootGlobalQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ViewCubeFrame, &'static GlobalTransform),
+    (With<ViewCubeRoot>, Without<FaceLabel>),
+>;
+
+type ViewCubeOverlayGlobalQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ViewCubeFrameRef, &'static GlobalTransform),
+    (With<ViewCubeCamera>, Without<FaceLabel>),
+>;
+
 /// Spins each face label so its word reads horizontally in the viewport
 /// that owns it.
 ///
@@ -301,15 +326,9 @@ pub(super) fn face_label_in_plane_angle(
 /// GLB instance can reparent children. After propagation we also write
 /// `GlobalTransform`, otherwise extract still sees the baked pose.
 pub fn orient_face_labels_to_view(
-    mut labels: Query<
-        (&mut FaceLabel, &mut Transform, &mut GlobalTransform),
-        (Without<ViewCubeCamera>, Without<ViewCubeRoot>),
-    >,
-    cubes: Query<(&ViewCubeFrame, &GlobalTransform), (With<ViewCubeRoot>, Without<FaceLabel>)>,
-    cube_cameras: Query<
-        (&ViewCubeFrameRef, &GlobalTransform),
-        (With<ViewCubeCamera>, Without<FaceLabel>),
-    >,
+    mut labels: FaceLabelOrientQuery<'_, '_>,
+    cubes: ViewCubeRootGlobalQuery<'_, '_>,
+    cube_cameras: ViewCubeOverlayGlobalQuery<'_, '_>,
 ) {
     for (mut face_label, mut label_transform, mut label_global) in labels.iter_mut() {
         let Ok((frame_ref, camera_global)) = cube_cameras.get(face_label.camera) else {
