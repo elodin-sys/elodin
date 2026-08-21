@@ -245,7 +245,7 @@ viewport hdr=#true {
 
 ```kdl
 thruster name="DPS" effect="effects/apollo-lander/descent_plume.effect" body_frame=#true \
-         position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+         position="(0, 0, -1.9)" direction="(0, 0, -1)" intensity="lander.main_thrust_viz[2]" {
     effect "effects/apollo-lander/descent_glow.effect"
     light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
 }
