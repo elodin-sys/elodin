@@ -10,7 +10,7 @@ use std::{
 use stellarator::util::CancelToken;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
-use tracing::{debug, error};
+use tracing::debug;
 use which::which;
 
 use crate::DEFAULT_WATCH_TIMEOUT;
@@ -261,12 +261,7 @@ impl SimRecipe {
             |token| {
                 let this = self.clone();
                 let cgroup = cgroup.clone();
-                async move {
-                    if let Err(err) = this.run(token, cgroup).await {
-                        error!(?err, "error running sim");
-                    }
-                    Ok(())
-                }
+                async move { this.run(token, cgroup).await }
             },
             cancel_token,
             iter::once(dir),
