@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.18.0" selected>
-                        v0.18.0
+                    <option value="v0.19.0" selected>
+                        v0.19.0
                     </option>
                 </select>
             </span>
@@ -320,6 +320,20 @@
         <h3>On this page</h3>
         <nav id="TableOfContents">
             <ul>
+                
+                <li>
+                    <a href="/releases/changelog/#v0-19">v0.19</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-19-0">v0.19.0</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
                 
                 <li>
                     <a href="/releases/changelog/#v0-18">v0.18</a>
@@ -742,7 +756,37 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
-                   <h2 id="v0-18">v0.18</h2>
+                   <h2 id="v0-19">v0.19</h2>
+<h3 id="v0-19-0">v0.19.0</h3>
+<ul>
+<li><strong>(feat)</strong> Add a native Earth environment. (#778, #795)</li>
+<li><strong>(feat)</strong> Add heliocentric relative dynamics to Voyager. (#789)</li>
+<li><strong>(feat)</strong> Add Voyager trajectory error telemetry. (#769)</li>
+<li><strong>(feat)</strong> Add viewport follow-camera smoothing. (#764)</li>
+<li><strong>(feat)</strong> Add an artificial horizon gauge. (#753)</li>
+<li><strong>(feat)</strong> Add headless video capture. (#754, #757)</li>
+<li><strong>(feat)</strong> Add --kdl to allow local KDL and asset development. (#763)</li>
+<li><strong>(feat:aleph)</strong> Add initrd-based one-shot Aleph UEFI and OS flashing over USB-C. (#748)</li>
+<li><strong>(feat:db)</strong> Add Elodin DB gRPC. (#772)</li>
+<li><strong>(feat:db)</strong> Add <code>elodin-db export --format mcap</code>. (#746)</li>
+<li><strong>(fix)</strong> Fix view-cube ECEF face labels, zoom in/out. (#796, #790, #758)</li>
+<li><strong>(fix)</strong> Fix Betaflight takeoff. (#791)</li>
+<li><strong>(fix)</strong> Fix GPU OOM and fins animation. (#788)</li>
+<li><strong>(fix)</strong> Generate schematic planes in Z-up so identity pose is ground. (#786, #793)</li>
+<li><strong>(fix)</strong> Fix ECEF translate and add <code>ned_to_ecef()</code>. (#774)</li>
+<li><strong>(fix)</strong> Prevent an editor crash when scrubbing with particles. (#777)</li>
+<li><strong>(fix)</strong> Fix reconnect replay time travel. (#775)</li>
+<li><strong>(fix)</strong> Fix the Ctrl-P command palette panic. (#770)</li>
+<li><strong>(fix)</strong> Capture headless video on hybrid Intel + NVIDIA hosts. (#768)</li>
+<li><strong>(fix)</strong> Fix <code>line_3d</code> f32 quantization. (#766)</li>
+<li><strong>(fix)</strong> Make <code>elodin_capture.sh</code> work on Ubuntu. (#767)</li>
+<li><strong>(fix)</strong> Restore minimal terrain rendering. (#761)</li>
+<li><strong>(fix:examples)</strong> Put Apollo thruster particles in schematic Z-up. (#797)</li>
+<li><strong>(fix:impeller2)</strong> Skip and log malformed fields instead of dropping the table. (#762)</li>
+<li><strong>(perf)</strong> Improve editor FPS on DB playback. (#771)</li>
+<li><strong>(chore)</strong> Bump Bevy Hanabi. (#773)</li>
+</ul>
+<h2 id="v0-18">v0.18</h2>
 <h3 id="v0-18-0">v0.18.0</h3>
 <ul>
 <li><strong>(breaking:db)</strong> Require clients to consume DB responses; use a silent connection for write-only clients. (#670)</li>
