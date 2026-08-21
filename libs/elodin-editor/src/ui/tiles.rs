@@ -1748,7 +1748,7 @@ impl ViewportPane {
         if let Some(aspect) = viewport.aspect {
             perspective.aspect_ratio = aspect;
         }
-        if !(perspective.near > 0.0) {
+        if !perspective.near.is_finite() || perspective.near <= 0.0 {
             warn!(
                 "Invalid viewport near (near={}), restoring default",
                 perspective.near

@@ -31,11 +31,8 @@ use crate::ui::widgets::WidgetSystem;
 use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
-    plugins::scene_environment::SceneEnvironment,
-    ui::tiles::{
-        DEFAULT_VIEWPORT_FAR, DEFAULT_VIEWPORT_NEAR, ViewportConfig, bloom_from_config,
-        cinematic_bloom_config,
-    },
+    plugins::{frustum_common::presentation_far, scene_environment::SceneEnvironment},
+    ui::tiles::{DEFAULT_VIEWPORT_NEAR, ViewportConfig, bloom_from_config, cinematic_bloom_config},
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
@@ -779,9 +776,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     let mut near = viewport_config
                         .configured_near
                         .unwrap_or(DEFAULT_VIEWPORT_NEAR);
-                    let mut far = viewport_config
-                        .configured_far
-                        .unwrap_or(DEFAULT_VIEWPORT_FAR);
+                    let mut far = presentation_far(near, viewport_config.configured_far);
                     let mut near_changed = false;
                     let mut far_changed = false;
 
@@ -806,9 +801,9 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         near = near.max(0.0001);
 
                         if near_changed {
-                            if viewport_config.configured_far.is_some() && far <= near + 0.0001 {
-                                far = near + 0.0001;
-                                far_changed = true;
+                            far = presentation_far(near, viewport_config.configured_far);
+                            if viewport_config.configured_far.is_some() {
+                                viewport_config.configured_far = Some(far);
                             }
                             persp.near = near;
                             persp.near_clip_plane =
@@ -819,7 +814,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             }
                         }
                         if far_changed {
-                            far = far.max(near + 0.0001);
+                            far = presentation_far(near, Some(far));
                             viewport_config.configured_far = Some(far);
                         }
                     }

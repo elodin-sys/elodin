@@ -19,6 +19,13 @@ pub type SensorCameraFrustumQueryItem = (
     &'static SensorCameraFrustumSource,
 );
 
+pub fn presentation_far(near: f32, configured_far: Option<f32>) -> f32 {
+    match configured_far {
+        Some(far) if far > near => far,
+        _ => DEFAULT_VIEWPORT_FAR.max(near * 2.0),
+    }
+}
+
 pub fn presentation_perspective(
     live: &PerspectiveProjection,
     config: Option<&ViewportConfig>,
@@ -26,9 +33,7 @@ pub fn presentation_perspective(
     let near = config
         .and_then(|config| config.configured_near)
         .unwrap_or(DEFAULT_VIEWPORT_NEAR);
-    let far = config
-        .and_then(|config| config.configured_far)
-        .unwrap_or(DEFAULT_VIEWPORT_FAR);
+    let far = presentation_far(near, config.and_then(|config| config.configured_far));
     PerspectiveProjection {
         near,
         far,
@@ -126,6 +131,17 @@ mod tests {
 
         assert_eq!(presentation.near, DEFAULT_VIEWPORT_NEAR);
         assert_eq!(presentation.far, DEFAULT_VIEWPORT_FAR);
+    }
+
+    #[test]
+    fn presentation_perspective_derives_far_beyond_large_near() {
+        let live = perspective(1.2, 16.0 / 9.0, 9.0, 1.0e16);
+        let config = viewport_config(Some(1_000_000.0), None);
+        let presentation = presentation_perspective(&live, Some(&config));
+
+        assert_eq!(presentation.near, 1_000_000.0);
+        assert_eq!(presentation.far, 2_000_000.0);
+        assert!(frustum_local_points(&presentation).is_some());
     }
 
     #[test]
