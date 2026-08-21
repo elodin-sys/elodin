@@ -4,7 +4,8 @@ This is intentionally a small validation case for issue #794: one Voyager 1
 encounter kernel, one initialization epoch, and three fixed checkpoints. It
 uses the same rounded masses, one-hour timestep, and Sun-centered force models
 as the Voyager example. Planet states are refreshed from DE440 once per step,
-matching the example's pre-step ephemeris update.
+then move through the RK4 stages using their SPICE velocities, matching how
+six_dof integrates the ephemeris bodies between pre-step updates.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import spiceypy as spice
 
 G = 6.6743e-11
 DT_S = 3600.0
-START_UTC = "1979-02-01T00:00:00"
+START_UTC = "1979-02-05T00:00:00"
 CHECKPOINTS_S = (0, 5 * 86400, 10 * 86400)
 
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
@@ -76,30 +77,38 @@ def acceleration(
 def rk4_step(
     chapter: int,
     state: np.ndarray,
-    source_positions_m: tuple[np.ndarray, ...],
+    source_states: tuple[tuple[np.ndarray, np.ndarray], ...],
 ) -> np.ndarray:
-    """Advance one step while holding planetary source positions fixed."""
+    """Advance one step with source bodies drifting at their pre-step velocities."""
 
-    def derivative(candidate: np.ndarray) -> np.ndarray:
+    def source_positions(offset_s: float) -> tuple[np.ndarray, ...]:
+        return tuple(position_m + offset_s * velocity_mps for position_m, velocity_mps in source_states)
+
+    def derivative(candidate: np.ndarray, offset_s: float) -> np.ndarray:
         position_m = candidate[:3]
         velocity_mps = candidate[3:]
         return np.concatenate(
-            (velocity_mps, acceleration(chapter, position_m, source_positions_m))
+            (velocity_mps, acceleration(chapter, position_m, source_positions(offset_s)))
         )
 
-    k1 = derivative(state)
-    k2 = derivative(state + 0.5 * DT_S * k1)
-    k3 = derivative(state + 0.5 * DT_S * k2)
-    k4 = derivative(state + DT_S * k3)
+    k1 = derivative(state, 0.0)
+    k2 = derivative(state + 0.5 * DT_S * k1, 0.5 * DT_S)
+    k3 = derivative(state + 0.5 * DT_S * k2, 0.5 * DT_S)
+    k4 = derivative(state + DT_S * k3, DT_S)
     return state + (DT_S / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
 
-def planet_positions(epoch_et: float) -> tuple[np.ndarray, ...]:
-    return tuple(
-        np.asarray(spice.spkezr(name, epoch_et, "ECLIPJ2000", "NONE", "SUN")[0][:3])
-        * 1000.0
-        for name, _ in PLANETS
-    )
+def planet_states(epoch_et: float) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+    states = []
+    for name, _ in PLANETS:
+        state_km, _ = spice.spkezr(name, epoch_et, "ECLIPJ2000", "NONE", "SUN")
+        states.append(
+            (
+                np.asarray(state_km[:3]) * 1000.0,
+                np.asarray(state_km[3:]) * 1000.0,
+            )
+        )
+    return tuple(states)
 
 
 def voyager_truth(epoch_et: float) -> np.ndarray:
@@ -160,7 +169,7 @@ def run() -> list[ErrorSample]:
             if tick == tick_count:
                 break
 
-            sources = planet_positions(epoch_et)
+            sources = planet_states(epoch_et)
             states[1] = rk4_step(1, states[1], sources)
             states[2] = rk4_step(2, states[2], sources)
 
