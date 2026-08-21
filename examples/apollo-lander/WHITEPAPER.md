@@ -418,7 +418,7 @@ Monte Carlo `attitude_gain` parameter.
 
 [`ground_contact`](sim.py) latches a landing the first time the entity altitude
 drops to `FOOTPAD_HEIGHT_M` (≈ 2.40 m). The LM GLB uses
-`translate="(0, -2.5, 0)"`, so pad bottoms sit that far below the entity origin;
+`translate="(0, 0, -2.5)"`, so pad bottoms sit that far below the entity origin;
 pinning at this height puts the pads on the moon mesh at `z ≈ 0`. On that contact
 tick — *before* the velocity is zeroed — it records the vertical impact speed
 `|v_z|` as `touchdown_speed` and the horizontal impact speed `‖v_xy‖` as
@@ -703,7 +703,7 @@ Earth atmosphere is active); raymarched Earth atmosphere for the blue limb.
 ### 8.1 Figuring out the model units
 
 - **Lunar Module** — meters, Y-up; `LANDER_GLB_SCALE = 1.0`. KDL
-  `translate="(0, -2.5, 0)"` puts pads ≈ `FOOTPAD_HEIGHT_M` (2.40 m) below the
+  `translate="(0, 0, -2.5)"` puts pads ≈ `FOOTPAD_HEIGHT_M` (2.40 m) below the
   entity origin; `ground_contact` pins there.
 - **Moon** — native radius ≈ 0.97, KDL `scale = 1,798,000` → lunar scale.
 - **Earth** — `earth.glb` is already Earth radius at `scale=1`.

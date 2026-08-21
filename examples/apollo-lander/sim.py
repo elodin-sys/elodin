@@ -58,7 +58,7 @@ DEFAULT_MAX_TICKS = int(math.ceil((REFERENCE.t_end + 20.0) * SIMULATION_RATE_HZ)
 # The Apollo LM GLB is modeled in meters (world AABB ~6.4 m footprint, ~5.0 m
 # tall, Y-up), so render it at its modeled scale to be ~life-size.
 LANDER_GLB_SCALE = 1.0
-# KDL translate="(0, -2.5, 0)" puts footpads ≈ 2.40 m below the entity origin
+# KDL translate="(0, 0, -2.5)" puts footpads ≈ 2.40 m below the entity origin
 # (raw ymin≈0.10). Physics contact pins the origin at this height so pads sit
 # on the moon mesh at z ≈ 0. The Sea of Tranquility tile was removed; moon.glb
 # is seated with under-site surface at z = 0 (see apollo-lander.kdl).
