@@ -214,8 +214,8 @@ timeline follow_latest=#true
 tabs {
     hsplit {
         tabs share=0.75 {
-            viewport name=SolarSystem pos="(0,0,0,1, -6,6,6)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#true active=#true
-            viewport name=TopDown pos="(0,0,0,1, 0,0,25)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#true 
+            viewport name=SolarSystem pos="(0,0,0,1, -6,6,6)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#false active=#true
+            viewport name=TopDown pos="(0,0,0,1, 0,0,25)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#false 
         }
         tabs share=0.25 {
             graph "earth.world_pos[4],earth.world_pos[5],earth.world_pos[6],truth_earth.truth_world_pos[4],truth_earth.truth_world_pos[5],truth_earth.truth_world_pos[6]" name="Earth vs Truth (AU)"
