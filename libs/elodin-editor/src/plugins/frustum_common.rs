@@ -1,6 +1,6 @@
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::sensor_camera::SensorCameraFrustumSource;
-use crate::ui::tiles::{DEFAULT_VIEWPORT_FAR, DEFAULT_VIEWPORT_NEAR, ViewportConfig};
+use crate::ui::tiles::{DEFAULT_VIEWPORT_FAR, ViewportConfig};
 use bevy::prelude::*;
 
 pub type MainViewportQueryItem = (
@@ -32,7 +32,7 @@ pub fn presentation_perspective(
 ) -> PerspectiveProjection {
     let near = config
         .and_then(|config| config.configured_near)
-        .unwrap_or(DEFAULT_VIEWPORT_NEAR);
+        .unwrap_or(live.near);
     let far = presentation_far(near, config.and_then(|config| config.configured_far));
     PerspectiveProjection {
         near,
@@ -125,12 +125,14 @@ mod tests {
     }
 
     #[test]
-    fn presentation_perspective_uses_frustum_defaults() {
+    fn presentation_perspective_uses_live_near_when_unconfigured() {
         let live = perspective(1.2, 16.0 / 9.0, 9.0, 1.0e16);
         let presentation = presentation_perspective(&live, None);
 
-        assert_eq!(presentation.near, DEFAULT_VIEWPORT_NEAR);
-        assert_eq!(presentation.far, DEFAULT_VIEWPORT_FAR);
+        assert_eq!(presentation.near, 9.0);
+        assert_eq!(presentation.far, 18.0);
+        assert_eq!(presentation.near_clip_plane, near_clip_plane(9.0));
+        assert!(frustum_local_points(&presentation).is_some());
     }
 
     #[test]

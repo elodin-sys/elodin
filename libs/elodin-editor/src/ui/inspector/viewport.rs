@@ -32,7 +32,7 @@ use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
     plugins::{frustum_common::presentation_far, scene_environment::SceneEnvironment},
-    ui::tiles::{DEFAULT_VIEWPORT_NEAR, ViewportConfig, bloom_from_config, cinematic_bloom_config},
+    ui::tiles::{ViewportConfig, bloom_from_config, cinematic_bloom_config},
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
@@ -773,9 +773,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     }
 
                     ui.add_space(8.0);
-                    let mut near = viewport_config
-                        .configured_near
-                        .unwrap_or(DEFAULT_VIEWPORT_NEAR);
+                    let mut near = viewport_config.configured_near.unwrap_or(persp.near);
                     let mut far = presentation_far(near, viewport_config.configured_far);
                     let mut near_changed = false;
                     let mut far_changed = false;
