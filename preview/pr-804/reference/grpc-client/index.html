@@ -1,0 +1,1968 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-804/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-804/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-804/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-804/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-804/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>gRPC API | Elodin</title>
+<meta name="description" content="Complete Elodin DB gRPC service, RPC, and message reference">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-804/logo.png">
+  
+  <meta name="twitter:title" content="gRPC API">
+  <meta name="twitter:description" content="Complete Elodin DB gRPC service, RPC, and message reference">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="gRPC API">
+  <meta property="og:description" content="Complete Elodin DB gRPC service, RPC, and message reference">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-804/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="gRPC API">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-804/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Reference",
+            "item": "https://docs.elodin.systems/preview/pr-804/reference/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Grpc Client",
+            "item": "https://docs.elodin.systems/preview/pr-804/reference/grpc-client/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.19.0" selected>
+                        v0.19.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-804/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item reference active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-804/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-804/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-blue" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Reference</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/coords/"
+                    >Coordinate Systems</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/python-api/"
+                    >Python API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/elodin-cli/"
+                    >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/"
+                    >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/replays/"
+                    >Replays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/schematic/"
+                    >Schematic KDL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/color-schemes/"
+                    >Color Schemes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/reference/command-palette/"
+                    >Command Palette</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Migration Guides</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/reference/migration/to-0-15/"
+                    >v0.14 to v0.15</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#calling-conventions">Calling conventions</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-shapes">RPC shapes</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#scalar-presence">Scalar presence</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#time">Time</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#sequences-and-delivery">Sequences and delivery</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#authentication-and-transport">Authentication and transport</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#limits-and-structured-errors">Limits and structured errors</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#common-types">Common types</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#enum-primtype">enum PrimType</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-componentvalue">message ComponentValue</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-doublearray">message DoubleArray</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-floatarray">message FloatArray</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-sint64array">message Sint64Array</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-uint64array">message Uint64Array</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-boolarray">message BoolArray</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-ackpolicy">message AckPolicy</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-writeack">message WriteAck</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-dbconfig">message DbConfig</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-componentmetadata">message ComponentMetadata</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-messagemetadata">message MessageMetadata</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-componentschemasnapshot">message ComponentSchemaSnapshot</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#ingestservice">IngestService</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-ingest">rpc Ingest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-ingestrequest">message IngestRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-ingestresponse">message IngestResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-sessionopen">message SessionOpen</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-schemaset">message SchemaSet</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-messageschema">message MessageSchema</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-componentschema">message ComponentSchema</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#enum-rowencoding">enum RowEncoding</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-sessionaccept">message SessionAccept</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-sessionreject">message SessionReject</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-componentschemaconflict">message ComponentSchemaConflict</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-telemetrybatch">message TelemetryBatch</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-row">message Row</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-typedvalues">message TypedValues</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-rowerror">message RowError</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#queryservice">QueryService</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-getserverinfo">rpc GetServerInfo</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getserverinforequest">message GetServerInfoRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getserverinforesponse">message GetServerInfoResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-gettimerange">rpc GetTimeRange</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-gettimerangerequest">message GetTimeRangeRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-gettimerangeresponse">message GetTimeRangeResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-dumpmetadata">rpc DumpMetadata</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-dumpmetadatarequest">message DumpMetadataRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-dumpmetadataresponse">message DumpMetadataResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-dumpschema">rpc DumpSchema</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-dumpschemarequest">message DumpSchemaRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-dumpschemaresponse">message DumpSchemaResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-gettimeseries">rpc GetTimeSeries</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-gettimeseriesrequest">message GetTimeSeriesRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-timeseriesheader">message TimeSeriesHeader</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-timeseriesdata">message TimeSeriesData</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-gettimeseriesresponse">message GetTimeSeriesResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-sql">rpc Sql</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-sqlrequest">message SqlRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-sqlresponse">message SqlResponse</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#streamservice">StreamService</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-realtime">message RealTime</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#enum-initialtimestamp">enum InitialTimestamp</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-fixedrate">message FixedRate</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streamcontrol">message StreamControl</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-streamcomponents">rpc StreamComponents</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streamopen">message StreamOpen</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streamcomponentsrequest">message StreamComponentsRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-componentupdate">message ComponentUpdate</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streamtimestamp">message StreamTimestamp</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streamcomponentsresponse">message StreamComponentsResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streamopened">message StreamOpened</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-streammessages">rpc StreamMessages</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-messagestreamopen">message MessageStreamOpen</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streammessagesrequest">message StreamMessagesRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-streammessagesresponse">message StreamMessagesResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-watchdb">rpc WatchDb</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-watchdbrequest">message WatchDbRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-watchdbresponse">message WatchDbResponse</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#messageservice">MessageService</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-register">rpc Register</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-opaquekind">message OpaqueKind</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-logkind">message LogKind</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-registerrequest">message RegisterRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-registerresponse">message RegisterResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-publish">rpc Publish</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-publishopen">message PublishOpen</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-logpayload">message LogPayload</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-outgoingmessage">message OutgoingMessage</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-publishbatch">message PublishBatch</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-publishrequest">message PublishRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-publishaccept">message PublishAccept</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-messageerror">message MessageError</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-publishresponse">message PublishResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-getmessages">rpc GetMessages</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getmessagesrequest">message GetMessagesRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getmessagesresponse">message GetMessagesResponse</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#adminservice">AdminService</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-getdbconfig">rpc GetDbConfig</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getdbconfigrequest">message GetDbConfigRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getdbconfigresponse">message GetDbConfigResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-setdbconfig">rpc SetDbConfig</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-setdbconfigrequest">message SetDbConfigRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-setdbconfigresponse">message SetDbConfigResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-setcomponentmetadata">rpc SetComponentMetadata</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-setcomponentmetadatarequest">message SetComponentMetadataRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-setcomponentmetadataresponse">message SetComponentMetadataResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-putasset">rpc PutAsset</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-putassetheader">message PutAssetHeader</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-putassetrequest">message PutAssetRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-putassetresponse">message PutAssetResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-getasset">rpc GetAsset</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getassetrequest">message GetAssetRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-getassetresponse">message GetAssetResponse</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#rpc-listassets">rpc ListAssets</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-listassetsrequest">message ListAssetsRequest</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-assetinfo">message AssetInfo</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/reference/grpc-client/#message-listassetsresponse">message ListAssetsResponse</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>gRPC API</h1>
+                  
+                  <p class="lead">Reference for every elodin.db.v1 service, RPC, message, stream workflow, and wire-level contract.</p>
+                   <p>Elodin DB exposes a versioned, language-neutral gRPC API for telemetry ingest,
+queries, playback, message logs, configuration, and assets. This page is the
+wire-contract reference. See the <a href="/home/db/grpc-client">gRPC Client guide</a> for
+stub generation and runnable C++ and Python examples.</p>
+<p>The protobuf package is <code>elodin.db.v1</code>. Its source files are under
+<code>libs/db/proto/elodin/db/v1</code>:</p>
+<ul>
+<li><code>common.proto</code> — shared values, acknowledgements, metadata, and configuration;</li>
+<li><code>ingest.proto</code> — acknowledged component telemetry writes;</li>
+<li><code>query.proto</code> — discovery, historical reads, downsampling, and SQL;</li>
+<li><code>stream.proto</code> — live component/message streams and fixed-rate playback;</li>
+<li><code>msg.proto</code> — message registration, publishing, and historical reads;</li>
+<li><code>admin.proto</code> — configuration, metadata, and asset operations.</li>
+</ul>
+<p>Every database starts gRPC on the native listener's IP at port <code>P + 2</code>. With the
+default native address <code>127.0.0.1:2240</code>, gRPC listens on
+<code>127.0.0.1:2242</code>. Standard gRPC health checking and v1/v1alpha server reflection
+share this endpoint.</p>
+<h2 id="calling-conventions">Calling conventions</h2>
+<h3 id="rpc-shapes">RPC shapes</h3>
+<ul>
+<li><strong>Unary</strong> RPCs accept one request and return one response.</li>
+<li><strong>Server-streaming</strong> RPCs accept one request and return zero or more response
+frames.</li>
+<li><strong>Bidirectional-streaming</strong> RPCs keep independent request and response streams
+open. The first request frame establishes the session; subsequent frames carry
+data or controls.</li>
+</ul>
+<p>An empty request message still must be sent. Fields inside a protobuf <code>oneof</code> are
+mutually exclusive. A request that requires a <code>oneof</code> rejects an unset value.</p>
+<h3 id="scalar-presence">Scalar presence</h3>
+<p>Proto3 fields marked <code>optional</code> preserve the difference between omitted and
+explicitly set to zero or <code>false</code>. Unmarked scalar fields use normal proto3
+defaults: <code>0</code>, <code>false</code>, empty bytes, or an empty string. Repeated fields and maps
+default to empty.</p>
+<h3 id="time">Time</h3>
+<p>All fields ending in <code>*_ns</code> use signed or unsigned nanoseconds on the wire.
+Elodin DB stores record time at microsecond resolution:</p>
+<ul>
+<li>write timestamps are floored to the containing microsecond;</li>
+<li>read ranges are half-open: <code>[start_ns, end_ns)</code>;</li>
+<li>sub-microsecond range bounds are rounded up to the next storage bucket, so
+only buckets fully inside the requested range are returned;</li>
+<li>returned timestamps are microsecond-aligned nanosecond values.</li>
+</ul>
+<p>For example, <code>[100500, 102500)</code> ns returns buckets at <code>101000</code> and <code>102000</code> ns.</p>
+<h3 id="sequences-and-delivery">Sequences and delivery</h3>
+<p>Ingest rows and published messages use client sequences beginning at 1.
+Acknowledgements are cumulative. Both writer APIs provide at-least-once delivery:
+after reconnecting, replay every item above the server's <code>resume_from_seq</code>.</p>
+<p>A clean stream end persists the latest ingest position. Resume state is also
+persisted while streams run. A server crash can therefore return a resume point
+slightly behind the last acknowledgement, and clients must retain enough recent
+items to replay that window. Complete rows in the ambiguous window may appear
+twice.</p>
+<h3 id="authentication-and-transport">Authentication and transport</h3>
+<p>The endpoint is unauthenticated by default. When the server starts with
+<code>--grpc-auth-token TOKEN</code>, application RPCs and reflection require this metadata:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>authorization: Bearer TOKEN</span></span></code></pre>
+<p>Invalid or missing credentials return <code>UNAUTHENTICATED</code>. Health checking remains
+unauthenticated. The server uses plaintext HTTP/2; bind it to loopback or a
+trusted network, or terminate TLS in deployment infrastructure.</p>
+<h3 id="limits-and-structured-errors">Limits and structured errors</h3>
+<p>The encoded and decoded message cap is 16 MiB for every service. Streaming an
+object does not remove the per-frame limit. <code>QueryService.GetServerInfo</code> reports
+the active cap.</p>
+<p>RPC failures use canonical gRPC status codes. Selected failures include
+<code>google.rpc.ErrorInfo</code> with domain <code>db.elodin.systems</code> and one of these stable
+reasons:</p>
+<ul>
+<li><code>COMPONENT_NOT_FOUND</code></li>
+<li><code>MESSAGE_NOT_FOUND</code></li>
+<li><code>MESSAGE_SCHEMA_CONFLICT</code></li>
+<li><code>TIME_RANGE_EMPTY</code></li>
+</ul>
+<p>Branch on the status code and structured reason, not human-readable status text.</p>
+<h2 id="common-types">Common types</h2>
+<h3 id="enum-primtype"><em>enum</em> <code>PrimType</code></h3>
+<p>Primitive element type for a component. <code>PRIM_TYPE_UNSPECIFIED</code> is never valid in
+an ingest schema.</p>
+<ul>
+<li><code>PRIM_TYPE_UNSPECIFIED = 0</code></li>
+<li><code>PRIM_TYPE_U8 = 1</code></li>
+<li><code>PRIM_TYPE_U16 = 2</code></li>
+<li><code>PRIM_TYPE_U32 = 3</code></li>
+<li><code>PRIM_TYPE_U64 = 4</code></li>
+<li><code>PRIM_TYPE_I8 = 5</code></li>
+<li><code>PRIM_TYPE_I16 = 6</code></li>
+<li><code>PRIM_TYPE_I32 = 7</code></li>
+<li><code>PRIM_TYPE_I64 = 8</code></li>
+<li><code>PRIM_TYPE_BOOL = 9</code></li>
+<li><code>PRIM_TYPE_F32 = 10</code></li>
+<li><code>PRIM_TYPE_F64 = 11</code></li>
+</ul>
+<p>Multi-byte packed values use little-endian byte order. A packed boolean is one
+byte and must be <code>0</code> or <code>1</code>.</p>
+<h3 id="message-componentvalue"><em>message</em> <code>ComponentValue</code></h3>
+<p>One component in a typed ingest row.</p>
+<ul>
+<li><code>component_index</code> : <code>uint32</code> — zero-based index into
+<code>MessageSchema.components</code>.</li>
+<li><code>value</code> : <code>oneof</code> — exactly one scalar or array payload:
+<ul>
+<li><code>f64</code> : <code>double</code></li>
+<li><code>f32</code> : <code>float</code></li>
+<li><code>i64</code> : <code>sint64</code></li>
+<li><code>u64</code> : <code>uint64</code></li>
+<li><code>b</code> : <code>bool</code></li>
+<li><code>f64s</code> : <code>DoubleArray</code></li>
+<li><code>f32s</code> : <code>FloatArray</code></li>
+<li><code>i64s</code> : <code>Sint64Array</code></li>
+<li><code>u64s</code> : <code>Uint64Array</code></li>
+<li><code>bools</code> : <code>BoolArray</code></li>
+</ul>
+</li>
+</ul>
+<p>Widths narrower than 64 bits still use the <code>i64</code>/<code>u64</code> alternatives and must fit
+the component's declared type. Scalars require scalar alternatives; tensors
+require array alternatives with exactly the schema's element count.</p>
+<h3 id="message-doublearray"><em>message</em> <code>DoubleArray</code></h3>
+<ul>
+<li><code>v</code> : <code>repeated double</code> — row-major <code>f64</code> tensor elements.</li>
+</ul>
+<h3 id="message-floatarray"><em>message</em> <code>FloatArray</code></h3>
+<ul>
+<li><code>v</code> : <code>repeated float</code> — row-major <code>f32</code> tensor elements.</li>
+</ul>
+<h3 id="message-sint64array"><em>message</em> <code>Sint64Array</code></h3>
+<ul>
+<li><code>v</code> : <code>repeated sint64</code> — row-major signed-integer tensor elements.</li>
+</ul>
+<h3 id="message-uint64array"><em>message</em> <code>Uint64Array</code></h3>
+<ul>
+<li><code>v</code> : <code>repeated uint64</code> — row-major unsigned-integer tensor elements.</li>
+</ul>
+<h3 id="message-boolarray"><em>message</em> <code>BoolArray</code></h3>
+<ul>
+<li><code>v</code> : <code>repeated bool</code> — row-major boolean tensor elements.</li>
+</ul>
+<h3 id="message-ackpolicy"><em>message</em> <code>AckPolicy</code></h3>
+<p>Controls cumulative acknowledgement cadence for ingest and message publishing.</p>
+<ul>
+<li><code>max_unacked_rows</code> : <code>uint32</code> — acknowledge after this many newly processed
+items. <code>0</code> selects the default <code>256</code>; maximum <code>1,000,000</code>.</li>
+<li><code>max_ack_delay_ms</code> : <code>uint32</code> — maximum delay before acknowledging pending
+items. <code>0</code> selects the default <code>100</code> ms; maximum <code>10,000</code> ms.</li>
+</ul>
+<p>The server may acknowledge sooner. An omitted <code>AckPolicy</code> uses both defaults.</p>
+<h3 id="message-writeack"><em>message</em> <code>WriteAck</code></h3>
+<ul>
+<li><code>through_seq</code> : <code>uint64</code> — every sequence less than or equal to this value has
+been processed.</li>
+</ul>
+<p>“Processed” means applied and visible to readers, or rejected by a per-item error
+sent before this acknowledgement. Durability follows the database's storage
+flush policy; the acknowledgement is not an <code>fsync</code> guarantee.</p>
+<h3 id="message-dbconfig"><em>message</em> <code>DbConfig</code></h3>
+<p>Current database configuration.</p>
+<ul>
+<li><code>recording</code> : <code>bool</code> — current database recording flag.</li>
+<li><code>default_stream_time_step_ns</code> : <code>uint64</code> — default playback step used by
+native clients; read-only through the current gRPC admin API.</li>
+<li><code>metadata</code> : <code>map&lt;string, string&gt;</code> — database metadata.</li>
+</ul>
+<h3 id="message-componentmetadata"><em>message</em> <code>ComponentMetadata</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — component name.</li>
+<li><code>metadata</code> : <code>map&lt;string, string&gt;</code> — component metadata keys and values.</li>
+</ul>
+<h3 id="message-messagemetadata"><em>message</em> <code>MessageMetadata</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — registered message-log name.</li>
+<li><code>postcard_schema</code> : <code>bytes</code> — serialized Postcard <code>OwnedNamedType</code> schema.</li>
+<li><code>metadata</code> : <code>map&lt;string, string&gt;</code> — message metadata keys and values.</li>
+</ul>
+<p>Opaque and structured-log registrations also have an internal Postcard schema,
+so discovery can expose this field for every registered log.</p>
+<h3 id="message-componentschemasnapshot"><em>message</em> <code>ComponentSchemaSnapshot</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — component name.</li>
+<li><code>prim_type</code> : <code>PrimType</code> — element type.</li>
+<li><code>dims</code> : <code>repeated uint64</code> — tensor dimensions; empty means scalar.</li>
+<li><code>start_time_ns</code> : <code>sfixed64</code> — first stored sample timestamp.</li>
+</ul>
+<h2 id="ingestservice">IngestService</h2>
+<p><code>IngestService</code> writes fixed-schema telemetry rows. One bidirectional stream is
+one logical writer session.</p>
+<h3 id="rpc-ingest"><em>rpc</em> <code>Ingest</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc Ingest(stream IngestRequest) returns (stream IngestResponse)</span></span></code></pre>
+<p>Workflow:</p>
+<ol>
+<li>Send exactly one <code>SessionOpen</code> as the first frame.</li>
+<li>Read either <code>SessionAccept</code> or <code>SessionReject</code>.</li>
+<li>On acceptance, use the returned session-scoped message handles.</li>
+<li>Start at <code>resume_from_seq + 1</code>, or replay retained batches whose sequences are
+above <code>resume_from_seq</code>.</li>
+<li>Send ordered <code>TelemetryBatch</code> frames while independently reading
+<code>RowError</code> and <code>WriteAck</code> frames.</li>
+<li>Half-close the request stream after all rows are sent, then drain responses.</li>
+</ol>
+<p>The server skips sequences already covered by the session resume position.
+Sequence gaps terminate the stream. A historical replay can repair components
+left missing by a mid-row crash, but complete replayed rows may duplicate. New
+identical rows at later sequences always remain distinct.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — missing or malformed open frame, identity, fingerprint,
+schema, ack policy, request oneof, or sequence overflow.</li>
+<li><code>FAILED_PRECONDITION</code> — first frame is not <code>SessionOpen</code>, a second open frame
+appears, sequences start at zero, or a batch leaves a sequence gap.</li>
+<li><code>INTERNAL</code> — a database storage failure or violated server invariant.</li>
+<li>A schema conflict is a successful <code>SessionReject</code> response frame, not a gRPC
+error status.</li>
+</ul>
+<h3 id="message-ingestrequest"><em>message</em> <code>IngestRequest</code></h3>
+<ul>
+<li><code>req</code> : <code>oneof</code>
+<ul>
+<li><code>open</code> : <code>SessionOpen</code> — valid only as the first request.</li>
+<li><code>batch</code> : <code>TelemetryBatch</code> — valid only after acceptance.</li>
+</ul>
+</li>
+</ul>
+<h3 id="message-ingestresponse"><em>message</em> <code>IngestResponse</code></h3>
+<ul>
+<li><code>resp</code> : <code>oneof</code>
+<ul>
+<li><code>accept</code> : <code>SessionAccept</code> — the opening schema was registered.</li>
+<li><code>ack</code> : <code>WriteAck</code> — cumulative processed position.</li>
+<li><code>error</code> : <code>RowError</code> — non-terminal row rejection.</li>
+<li><code>reject</code> : <code>SessionReject</code> — opening schema conflicts with stored data.</li>
+</ul>
+</li>
+</ul>
+<h3 id="message-sessionopen"><em>message</em> <code>SessionOpen</code></h3>
+<ul>
+<li><code>client_name</code> : <code>string</code> — logical writer name; 1–128 non-control UTF-8 bytes.</li>
+<li><code>schema_fingerprint</code> : <code>bytes</code> — exactly 32 bytes: SHA-256 of the encoded
+<code>SchemaSet</code>.</li>
+<li><code>schema</code> : <code>SchemaSet</code> — required schema declaration.</li>
+<li><code>ack_policy</code> : <code>AckPolicy</code> — optional message; omitted uses defaults.</li>
+<li><code>client_instance_id</code> : <code>bytes</code> — 1–128 bytes. Keep stable across reconnects
+for one process and choose a new value after a process restart.</li>
+</ul>
+<p>Resume state is keyed by <code>(client_name, client_instance_id)</code>. The server records
+the schema fingerprint in database metadata, but always validates the full
+schema on connection.</p>
+<h3 id="message-schemaset"><em>message</em> <code>SchemaSet</code></h3>
+<ul>
+<li><code>messages</code> : <code>repeated MessageSchema</code> — at least one message schema.</li>
+</ul>
+<p>Message names must be unique. Component names must be unique across the entire
+set, including components in different messages.</p>
+<h3 id="message-messageschema"><em>message</em> <code>MessageSchema</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — 1–256 non-control UTF-8 bytes.</li>
+<li><code>encoding</code> : <code>RowEncoding</code> — must be <code>PACKED</code> or <code>TYPED</code>.</li>
+<li><code>packed_size</code> : <code>uint32</code> — exact packed-row byte length for <code>PACKED</code>; must be
+zero for <code>TYPED</code>. Packed rows are limited to 8 MiB.</li>
+<li><code>components</code> : <code>repeated ComponentSchema</code> — one or more components in row
+order.</li>
+</ul>
+<h3 id="message-componentschema"><em>message</em> <code>ComponentSchema</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — 1–256 non-control UTF-8 bytes.</li>
+<li><code>prim_type</code> : <code>PrimType</code> — required element type.</li>
+<li><code>dims</code> : <code>repeated uint64</code> — nonzero dimensions; empty means scalar. The
+product may not exceed <code>16,777,216</code> elements.</li>
+<li><code>element_names</code> : <code>repeated string</code> — optional labels. When present, supply
+exactly one unique, nonempty label per element; labels cannot contain commas.</li>
+<li><code>packed_offset</code> : <code>uint32</code> — byte offset for <code>PACKED</code>; must be aligned to the
+primitive type, in bounds, and non-overlapping. Must be zero for <code>TYPED</code>.</li>
+<li><code>timestamp_source</code> : <code>bool</code> — marks a scalar <code>U64</code> or <code>I64</code> component as a row
+timestamp source.</li>
+</ul>
+<p>Existing component names may be reopened only with the same primitive type and
+shape. Timestamp-source flags and element-name metadata are synchronized without
+clearing unrelated component metadata.</p>
+<h3 id="enum-rowencoding"><em>enum</em> <code>RowEncoding</code></h3>
+<ul>
+<li><code>ROW_ENCODING_UNSPECIFIED = 0</code> — invalid in a session schema.</li>
+<li><code>ROW_ENCODING_PACKED = 1</code> — each row contains one fixed-layout byte buffer.</li>
+<li><code>ROW_ENCODING_TYPED = 2</code> — each row contains indexed <code>ComponentValue</code>s.</li>
+</ul>
+<h3 id="message-sessionaccept"><em>message</em> <code>SessionAccept</code></h3>
+<ul>
+<li><code>message_handles</code> : <code>map&lt;string, uint32&gt;</code> — message name to session-scoped
+handle. Do not cache these handles across sessions.</li>
+<li><code>resume_from_seq</code> : <code>uint64</code> — last persisted sequence for this session
+identity; resend every retained row above it.</li>
+</ul>
+<h3 id="message-sessionreject"><em>message</em> <code>SessionReject</code></h3>
+<ul>
+<li><code>detail</code> : <code>string</code> — summary of why the schema cannot be opened.</li>
+<li><code>conflicts</code> : <code>repeated ComponentSchemaConflict</code> — type/shape conflicts.</li>
+</ul>
+<p>After this frame the response stream closes and no rows are applied.</p>
+<h3 id="message-componentschemaconflict"><em>message</em> <code>ComponentSchemaConflict</code></h3>
+<ul>
+<li><code>component</code> : <code>string</code> — conflicting component name.</li>
+<li><code>expected_prim_type</code> : <code>PrimType</code> — type already stored by the database.</li>
+<li><code>expected_dims</code> : <code>repeated uint64</code> — shape already stored.</li>
+<li><code>actual_prim_type</code> : <code>PrimType</code> — type declared by this session.</li>
+<li><code>actual_dims</code> : <code>repeated uint64</code> — shape declared by this session.</li>
+</ul>
+<h3 id="message-telemetrybatch"><em>message</em> <code>TelemetryBatch</code></h3>
+<ul>
+<li><code>first_seq</code> : <code>uint64</code> — sequence of <code>rows[0]</code>; must begin at 1.</li>
+<li><code>rows</code> : <code>repeated Row</code> — row <code>i</code> has sequence <code>first_seq + i</code>.</li>
+</ul>
+<p>Batches may overlap the already processed prefix; those rows are skipped. Empty
+batches are allowed but do not advance the session. Nonempty batches must not
+start after <code>current_seq + 1</code>.</p>
+<h3 id="message-row"><em>message</em> <code>Row</code></h3>
+<ul>
+<li><code>message_handle</code> : <code>uint32</code> — handle from <code>SessionAccept.message_handles</code>.</li>
+<li><code>time_monotonic_ns</code> : <code>optional sfixed64</code> — explicit record time.</li>
+<li><code>payload</code> : <code>oneof</code>
+<ul>
+<li><code>packed</code> : <code>bytes</code> — exactly <code>MessageSchema.packed_size</code> bytes.</li>
+<li><code>typed</code> : <code>TypedValues</code> — one indexed value for every component.</li>
+</ul>
+</li>
+</ul>
+<p><code>time_monotonic_ns</code> may be omitted only when at least one component is a
+<code>timestamp_source</code>. If explicit and embedded timestamps are both present, all
+must match exactly before microsecond flooring.</p>
+<h3 id="message-typedvalues"><em>message</em> <code>TypedValues</code></h3>
+<ul>
+<li><code>values</code> : <code>repeated ComponentValue</code> — exactly one value for every component;
+order is arbitrary because <code>component_index</code> establishes placement.</li>
+</ul>
+<p>Missing, duplicate, out-of-range, wrong-kind, wrong-length, and integer-overflow
+values reject the row.</p>
+<h3 id="message-rowerror"><em>message</em> <code>RowError</code></h3>
+<ul>
+<li><code>seq</code> : <code>uint64</code> — rejected row's client sequence.</li>
+<li><code>component</code> : <code>string</code> — affected component, or empty for a row-level error.</li>
+<li><code>detail</code> : <code>string</code> — human-readable validation or time-ordering failure.</li>
+</ul>
+<p>A <code>RowError</code> is non-terminal. Its sequence advances and is included in a later
+<code>WriteAck</code>; retrying the same invalid row cannot repair the stream.</p>
+<h2 id="queryservice">QueryService</h2>
+<p><code>QueryService</code> provides discovery and lossless historical reads.</p>
+<h3 id="rpc-getserverinfo"><em>rpc</em> <code>GetServerInfo</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse)</span></span></code></pre>
+<p>Returns limits and stable feature identifiers. Feature-detect from <code>features</code>,
+not <code>build_version</code>.</p>
+<h3 id="message-getserverinforequest"><em>message</em> <code>GetServerInfoRequest</code></h3>
+<p>No fields.</p>
+<h3 id="message-getserverinforesponse"><em>message</em> <code>GetServerInfoResponse</code></h3>
+<ul>
+<li><code>build_version</code> : <code>string</code> — diagnostic package version.</li>
+<li><code>max_message_size_bytes</code> : <code>uint32</code> — current per-message encode/decode cap.</li>
+<li><code>features</code> : <code>repeated string</code> — stable capability identifiers. Current
+values are <code>sql-arrow-ipc</code>, <code>lttb-downsample</code>, and <code>message-resume</code>.</li>
+</ul>
+<h3 id="rpc-gettimerange"><em>rpc</em> <code>GetTimeRange</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc GetTimeRange(GetTimeRangeRequest) returns (GetTimeRangeResponse)</span></span></code></pre>
+<p>Returns the global data range across components and message logs. When
+<code>has_data</code> is false, ignore both timestamp fields.</p>
+<h3 id="message-gettimerangerequest"><em>message</em> <code>GetTimeRangeRequest</code></h3>
+<p>No fields.</p>
+<h3 id="message-gettimerangeresponse"><em>message</em> <code>GetTimeRangeResponse</code></h3>
+<ul>
+<li><code>has_data</code> : <code>bool</code> — whether the database contains component or message data.</li>
+<li><code>earliest_ns</code> : <code>sfixed64</code> — earliest data timestamp.</li>
+<li><code>last_updated_ns</code> : <code>sfixed64</code> — latest global data update.</li>
+</ul>
+<h3 id="rpc-dumpmetadata"><em>rpc</em> <code>DumpMetadata</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc DumpMetadata(DumpMetadataRequest) returns (DumpMetadataResponse)</span></span></code></pre>
+<p>Returns component metadata, registered message metadata, and current database
+configuration. Component and message lists are sorted by name.</p>
+<h3 id="message-dumpmetadatarequest"><em>message</em> <code>DumpMetadataRequest</code></h3>
+<p>No fields.</p>
+<h3 id="message-dumpmetadataresponse"><em>message</em> <code>DumpMetadataResponse</code></h3>
+<ul>
+<li><code>components</code> : <code>repeated ComponentMetadata</code> — all component metadata.</li>
+<li><code>messages</code> : <code>repeated MessageMetadata</code> — all registered message metadata.</li>
+<li><code>config</code> : <code>DbConfig</code> — current database configuration.</li>
+</ul>
+<h3 id="rpc-dumpschema"><em>rpc</em> <code>DumpSchema</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc DumpSchema(DumpSchemaRequest) returns (DumpSchemaResponse)</span></span></code></pre>
+<p>Returns component type, shape, and series-start information sorted by name.</p>
+<h3 id="message-dumpschemarequest"><em>message</em> <code>DumpSchemaRequest</code></h3>
+<p>No fields.</p>
+<h3 id="message-dumpschemaresponse"><em>message</em> <code>DumpSchemaResponse</code></h3>
+<ul>
+<li><code>components</code> : <code>repeated ComponentSchemaSnapshot</code> — all component schemas.</li>
+</ul>
+<h3 id="rpc-gettimeseries"><em>rpc</em> <code>GetTimeSeries</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc GetTimeSeries(GetTimeSeriesRequest)</span></span>
+<span class="giallo-l"><span>    returns (stream GetTimeSeriesResponse)</span></span></code></pre>
+<p>Reads one component in timestamp order. A successful response contains exactly
+one <code>header</code> frame followed by zero or more <code>data</code> frames. Raw data frames target
+about 1 MiB; chunk boundaries are not stable API behavior.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — empty component, <code>limit = 0</code>, <code>max_points &lt; 3</code>, or an
+out-of-bounds <code>element_index</code> when downsampling is required.</li>
+<li><code>NOT_FOUND</code> + <code>COMPONENT_NOT_FOUND</code> — component is unknown.</li>
+<li><code>OUT_OF_RANGE</code> + <code>TIME_RANGE_EMPTY</code> — component exists but the selected range
+contains no samples.</li>
+</ul>
+<h3 id="message-gettimeseriesrequest"><em>message</em> <code>GetTimeSeriesRequest</code></h3>
+<ul>
+<li><code>component</code> : <code>string</code> — required component name.</li>
+<li><code>start_ns</code> : <code>optional sfixed64</code> — inclusive lower bound; omitted means
+earliest.</li>
+<li><code>end_ns</code> : <code>optional sfixed64</code> — exclusive upper bound; omitted means
+open-ended.</li>
+<li><code>limit</code> : <code>optional uint64</code> — maximum source rows before downsampling; must be
+at least 1. Omitted means unlimited.</li>
+<li><code>max_points</code> : <code>optional uint32</code> — LTTB target when selected rows exceed this
+count; must be at least 3. Omitted returns raw rows.</li>
+<li><code>element_index</code> : <code>uint32</code> — flattened row-major tensor element used as the
+LTTB signal.</li>
+</ul>
+<p>Downsampling selects timestamps using one element but returns the complete
+component value for each selected row.</p>
+<h3 id="message-timeseriesheader"><em>message</em> <code>TimeSeriesHeader</code></h3>
+<ul>
+<li><code>component</code> : <code>string</code> — component name.</li>
+<li><code>prim_type</code> : <code>PrimType</code> — packed element type.</li>
+<li><code>dims</code> : <code>repeated uint64</code> — tensor dimensions; empty means scalar.</li>
+<li><code>element_names</code> : <code>repeated string</code> — flattened element labels, when present.</li>
+</ul>
+<h3 id="message-timeseriesdata"><em>message</em> <code>TimeSeriesData</code></h3>
+<ul>
+<li><code>timestamps_ns</code> : <code>repeated sfixed64</code> — one timestamp per packed row.</li>
+<li><code>packed_values</code> : <code>bytes</code> — concatenated, little-endian, row-major component
+values.</li>
+</ul>
+<p>The row byte size is <code>sizeof(prim_type) * product(dims)</code>, with scalar product 1.
+<code>packed_values</code> contains exactly <code>timestamps_ns.size * row_size</code> bytes.</p>
+<h3 id="message-gettimeseriesresponse"><em>message</em> <code>GetTimeSeriesResponse</code></h3>
+<ul>
+<li><code>chunk</code> : <code>oneof</code>
+<ul>
+<li><code>header</code> : <code>TimeSeriesHeader</code> — first and exactly once.</li>
+<li><code>data</code> : <code>TimeSeriesData</code> — zero or more chunks.</li>
+</ul>
+</li>
+</ul>
+<h3 id="rpc-sql"><em>rpc</em> <code>Sql</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc Sql(SqlRequest) returns (stream SqlResponse)</span></span></code></pre>
+<p>Runs SQL through the database's DataFusion context. Each response is a
+self-contained Arrow IPC stream containing a schema and one record batch.
+Decode every response independently, then concatenate the decoded batches.
+Component names become sanitized snake-case table names, such as
+<code>sensor.pressure</code> → <code>sensor_pressure</code>; each table includes a microsecond
+timestamp column named <code>time</code>.</p>
+<p>An empty or whitespace-only query returns <code>INVALID_ARGUMENT</code>. Planning,
+execution, and Arrow encoding failures arrive on the response stream as
+<code>INTERNAL</code>.</p>
+<h3 id="message-sqlrequest"><em>message</em> <code>SqlRequest</code></h3>
+<ul>
+<li><code>sql</code> : <code>string</code> — nonempty DataFusion SQL statement.</li>
+</ul>
+<h3 id="message-sqlresponse"><em>message</em> <code>SqlResponse</code></h3>
+<ul>
+<li><code>ipc</code> : <code>bytes</code> — one complete Arrow IPC stream.</li>
+</ul>
+<h2 id="streamservice">StreamService</h2>
+<p><code>StreamService</code> provides latest-value subscriptions and controllable playback.
+It is not the lossless historical interface; use <code>QueryService</code> for complete
+ranges.</p>
+<h3 id="message-realtime"><em>message</em> <code>RealTime</code></h3>
+<ul>
+<li><code>immediate</code> : <code>bool</code> — when true, each component has its own wake path to
+reduce batching latency. Intermediate rows can still coalesce.</li>
+</ul>
+<h3 id="enum-initialtimestamp"><em>enum</em> <code>InitialTimestamp</code></h3>
+<ul>
+<li><code>INITIAL_TIMESTAMP_UNSPECIFIED = 0</code> — same as <code>LATEST</code>.</li>
+<li><code>INITIAL_TIMESTAMP_EARLIEST = 1</code> — global earliest data timestamp.</li>
+<li><code>INITIAL_TIMESTAMP_LATEST = 2</code> — global latest data timestamp.</li>
+<li><code>INITIAL_TIMESTAMP_MANUAL = 3</code> — use <code>initial_timestamp_ns</code>.</li>
+</ul>
+<h3 id="message-fixedrate"><em>message</em> <code>FixedRate</code></h3>
+<ul>
+<li><code>initial</code> : <code>InitialTimestamp</code> — initial cursor policy.</li>
+<li><code>initial_timestamp_ns</code> : <code>sfixed64</code> — used only for <code>MANUAL</code>; floored to the
+microsecond grid.</li>
+<li><code>timestep_ns</code> : <code>uint64</code> — cursor advance per frame; at least <code>1,000</code>.</li>
+<li><code>frequency</code> : <code>uint64</code> — wall-clock frame rate from 1 through 1,000 Hz.</li>
+</ul>
+<p>The stream starts in the playing state.</p>
+<h3 id="message-streamcontrol"><em>message</em> <code>StreamControl</code></h3>
+<ul>
+<li><code>playing</code> : <code>optional bool</code> — pause or resume playback.</li>
+<li><code>seek_ns</code> : <code>optional sfixed64</code> — replace the cursor; floored to a microsecond.</li>
+<li><code>timestep_ns</code> : <code>optional uint64</code> — replace the step; at least <code>1,000</code>.</li>
+<li><code>frequency</code> : <code>optional uint64</code> — replace the frame rate; 1–1,000 Hz.</li>
+</ul>
+<p>All present fields are validated before any are applied. A seek always forces
+resampling, even when it targets the current cursor.</p>
+<h3 id="rpc-streamcomponents"><em>rpc</em> <code>StreamComponents</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc StreamComponents(stream StreamComponentsRequest)</span></span>
+<span class="giallo-l"><span>    returns (stream StreamComponentsResponse)</span></span></code></pre>
+<p>The first request must contain <code>StreamOpen</code>. An empty component list selects all
+components, sorted by name. The server first sends one <code>TimeSeriesHeader</code> per
+selected component.</p>
+<p>In real-time mode, the stream then sends the latest row for each changed
+component. It can skip intermediate rows under load. Existing latest values are
+emitted when the stream starts; unchanged <code>(timestamp, value)</code> pairs are not
+repeated.</p>
+<p>In fixed-rate mode, headers are followed by <code>StreamOpened</code>. At each cursor, the
+server emits the sample at or before the cursor for every component that has one,
+then emits <code>StreamTimestamp</code>. The cursor advances by <code>timestep_ns</code> at
+<code>frequency</code> frames per second while playing.</p>
+<p>Only an owning fixed-rate component stream accepts controls. Its stream ID lets
+a fixed-rate message stream share the same clock.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — missing/misordered open, invalid step/frequency, invalid
+later frame, or invalid control.</li>
+<li><code>NOT_FOUND</code> — a selected component does not exist.</li>
+<li><code>FAILED_PRECONDITION</code> — a real-time stream receives a control frame.</li>
+</ul>
+<h3 id="message-streamopen"><em>message</em> <code>StreamOpen</code></h3>
+<ul>
+<li><code>components</code> : <code>repeated string</code> — selected names; empty selects all.</li>
+<li><code>behavior</code> : <code>oneof</code>
+<ul>
+<li><code>real_time</code> : <code>RealTime</code></li>
+<li><code>fixed_rate</code> : <code>FixedRate</code></li>
+</ul>
+</li>
+</ul>
+<p>An omitted behavior uses batched real-time mode.</p>
+<h3 id="message-streamcomponentsrequest"><em>message</em> <code>StreamComponentsRequest</code></h3>
+<ul>
+<li><code>request</code> : <code>oneof</code>
+<ul>
+<li><code>open</code> : <code>StreamOpen</code> — first frame only.</li>
+<li><code>control</code> : <code>StreamControl</code> — later frames on fixed-rate playback only.</li>
+</ul>
+</li>
+</ul>
+<h3 id="message-componentupdate"><em>message</em> <code>ComponentUpdate</code></h3>
+<ul>
+<li><code>component</code> : <code>string</code> — component name.</li>
+<li><code>timestamp_ns</code> : <code>sfixed64</code> — sampled row timestamp, which can be older than
+the playback cursor.</li>
+<li><code>packed_value</code> : <code>bytes</code> — one little-endian component value matching its
+preceding header.</li>
+</ul>
+<h3 id="message-streamtimestamp"><em>message</em> <code>StreamTimestamp</code></h3>
+<ul>
+<li><code>timestamp_ns</code> : <code>sfixed64</code> — current fixed-rate playback cursor.</li>
+</ul>
+<p>This frame closes one component playback tick.</p>
+<h3 id="message-streamcomponentsresponse"><em>message</em> <code>StreamComponentsResponse</code></h3>
+<ul>
+<li><code>response</code> : <code>oneof</code>
+<ul>
+<li><code>header</code> : <code>TimeSeriesHeader</code> — schema for one selected component.</li>
+<li><code>update</code> : <code>ComponentUpdate</code> — latest or sampled component value.</li>
+<li><code>timestamp</code> : <code>StreamTimestamp</code> — fixed-rate cursor marker.</li>
+<li><code>opened</code> : <code>StreamOpened</code> — fixed-rate owner identity.</li>
+</ul>
+</li>
+</ul>
+<h3 id="message-streamopened"><em>message</em> <code>StreamOpened</code></h3>
+<ul>
+<li><code>stream_id</code> : <code>uint64</code> — nonzero, process-local identifier for this fixed-rate
+component clock. Valid only while the owning stream is alive.</li>
+</ul>
+<h3 id="rpc-streammessages"><em>rpc</em> <code>StreamMessages</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc StreamMessages(stream StreamMessagesRequest)</span></span>
+<span class="giallo-l"><span>    returns (stream StreamMessagesResponse)</span></span></code></pre>
+<p>The first request must contain <code>MessageStreamOpen</code>. An empty message list selects
+all registered logs, sorted by name.</p>
+<p>Real-time mode primes every selected log with its latest stored message, then
+delivers every append by index while connected. Reconnecting primes again, so
+the first message may duplicate one already consumed. This mode has no resume
+token.</p>
+<p>Independent fixed-rate mode samples each log at or before its cursor and accepts
+controls. It does not return a stream ID or cursor frames. Attached fixed-rate
+mode follows a component stream's clock, including pauses and seeks, and ends
+when the owner ends. Send controls to the owning component stream.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — missing/misordered open, invalid fixed-rate settings,
+zero playback ID, playback ID without fixed-rate behavior, or invalid control.</li>
+<li><code>NOT_FOUND</code> — a selected message or referenced playback stream does not exist.</li>
+<li><code>FAILED_PRECONDITION</code> — live or attached playback receives a control frame.</li>
+</ul>
+<h3 id="message-messagestreamopen"><em>message</em> <code>MessageStreamOpen</code></h3>
+<ul>
+<li><code>messages</code> : <code>repeated string</code> — selected log names; empty selects all.</li>
+<li><code>behavior</code> : <code>oneof</code>
+<ul>
+<li><code>real_time</code> : <code>RealTime</code></li>
+<li><code>fixed_rate</code> : <code>FixedRate</code></li>
+</ul>
+</li>
+<li><code>playback_stream_id</code> : <code>optional uint64</code> — attach to the nonzero stream ID of
+an active fixed-rate component stream. Omitted creates an independent clock.</li>
+</ul>
+<p>When <code>playback_stream_id</code> is present, <code>fixed_rate</code> is still required to select
+fixed-rate behavior, but the owner's clock supplies the effective timing.
+<code>RealTime.immediate</code> does not change message delivery.</p>
+<h3 id="message-streammessagesrequest"><em>message</em> <code>StreamMessagesRequest</code></h3>
+<ul>
+<li><code>request</code> : <code>oneof</code>
+<ul>
+<li><code>open</code> : <code>MessageStreamOpen</code> — first frame only.</li>
+<li><code>control</code> : <code>StreamControl</code> — later frames only for an independent
+fixed-rate clock.</li>
+</ul>
+</li>
+</ul>
+<h3 id="message-streammessagesresponse"><em>message</em> <code>StreamMessagesResponse</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — message-log name.</li>
+<li><code>timestamp_ns</code> : <code>sfixed64</code> — stored message timestamp.</li>
+<li><code>payload</code> : <code>bytes</code> — stored encoded payload. Structured logs are not decoded
+on this streaming RPC.</li>
+</ul>
+<h3 id="rpc-watchdb"><em>rpc</em> <code>WatchDb</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc WatchDb(WatchDbRequest) returns (stream WatchDbResponse)</span></span></code></pre>
+<p>Immediately sends the current <code>last_updated_ns</code> event followed by the current
+<code>DbConfig</code>. It then sends another timestamp or config event whenever that value
+changes. Use <code>GetTimeRange.has_data</code> when the empty-database distinction matters.</p>
+<h3 id="message-watchdbrequest"><em>message</em> <code>WatchDbRequest</code></h3>
+<p>No fields.</p>
+<h3 id="message-watchdbresponse"><em>message</em> <code>WatchDbResponse</code></h3>
+<ul>
+<li><code>event</code> : <code>oneof</code>
+<ul>
+<li><code>last_updated_ns</code> : <code>sfixed64</code> — latest global data update.</li>
+<li><code>config</code> : <code>DbConfig</code> — complete current configuration.</li>
+</ul>
+</li>
+</ul>
+<h2 id="messageservice">MessageService</h2>
+<p><code>MessageService</code> stores variable-length events separately from fixed-schema
+component time series.</p>
+<h3 id="rpc-register"><em>rpc</em> <code>Register</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc Register(RegisterRequest) returns (RegisterResponse)</span></span></code></pre>
+<p>Registers a named log and returns its stable handle. Re-registering the same name
+and schema is idempotent; supplied metadata keys merge into existing metadata.
+A name/hash or schema collision returns <code>ALREADY_EXISTS</code> with
+<code>MESSAGE_SCHEMA_CONFLICT</code>.</p>
+<h3 id="message-opaquekind"><em>message</em> <code>OpaqueKind</code></h3>
+<p>No fields. Selects arbitrary raw byte payloads.</p>
+<h3 id="message-logkind"><em>message</em> <code>LogKind</code></h3>
+<p>No fields. Selects structured <code>LogPayload</code> values encoded by the server.</p>
+<h3 id="message-registerrequest"><em>message</em> <code>RegisterRequest</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — required message-log name.</li>
+<li><code>kind</code> : <code>oneof</code>
+<ul>
+<li><code>opaque</code> : <code>OpaqueKind</code></li>
+<li><code>log</code> : <code>LogKind</code></li>
+<li><code>postcard_schema</code> : <code>bytes</code> — serialized Postcard <code>OwnedNamedType</code>.</li>
+</ul>
+</li>
+<li><code>metadata</code> : <code>map&lt;string, string&gt;</code> — keys to merge into message metadata.</li>
+</ul>
+<p>The selected kind is permanent for a registered name.</p>
+<h3 id="message-registerresponse"><em>message</em> <code>RegisterResponse</code></h3>
+<ul>
+<li><code>message_handle</code> : <code>uint32</code> — stable name-derived handle, valid across
+sessions and server restarts. Current handles fit in <code>uint16</code>.</li>
+</ul>
+<h3 id="rpc-publish"><em>rpc</em> <code>Publish</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc Publish(stream PublishRequest) returns (stream PublishResponse)</span></span></code></pre>
+<p>Workflow:</p>
+<ol>
+<li>Send <code>PublishOpen</code> as the first frame.</li>
+<li>Read <code>PublishAccept</code>.</li>
+<li>Resume with retained messages above <code>resume_from_seq</code>.</li>
+<li>Send ordered, nonempty <code>PublishBatch</code> frames while reading errors and acks.</li>
+<li>Half-close and drain the final acknowledgement.</li>
+</ol>
+<p>Validation failures produce <code>MessageError</code>, advance that sequence, and are
+covered by a later acknowledgement. Storage failures terminate the stream
+without advancing the failed message, so reconnecting retries it.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — missing/misordered open, invalid identity/ack policy,
+empty batch, or a malformed later request frame.</li>
+<li><code>FAILED_PRECONDITION</code> — sequence zero or a sequence gap.</li>
+<li>Invalid handles, payload kinds, and log levels produce <code>MessageError</code> rather
+than a terminal status.</li>
+<li><code>INTERNAL</code>, <code>PERMISSION_DENIED</code>, or a structured database error — storage
+failure; the failed sequence is not acknowledged.</li>
+</ul>
+<h3 id="message-publishopen"><em>message</em> <code>PublishOpen</code></h3>
+<ul>
+<li><code>client_name</code> : <code>string</code> — logical writer name; 1–128 non-control UTF-8 bytes.</li>
+<li><code>client_instance_id</code> : <code>bytes</code> — 1–128 bytes; stable across reconnects for
+this logical session.</li>
+<li><code>ack_policy</code> : <code>AckPolicy</code> — optional message; omitted uses defaults.</li>
+</ul>
+<p>Resume state is independent from <code>IngestService</code> even if the identity bytes are
+the same.</p>
+<h3 id="message-logpayload"><em>message</em> <code>LogPayload</code></h3>
+<ul>
+<li><code>level</code> : <code>uint32</code> — log level; must fit in <code>uint8</code>.</li>
+<li><code>message</code> : <code>string</code> — log text.</li>
+</ul>
+<h3 id="message-outgoingmessage"><em>message</em> <code>OutgoingMessage</code></h3>
+<ul>
+<li><code>message_handle</code> : <code>uint32</code> — handle returned by <code>Register</code>.</li>
+<li><code>timestamp_ns</code> : <code>optional sfixed64</code> — explicit record timestamp; omitted asks
+the server to assign one.</li>
+<li><code>payload</code> : <code>oneof</code>
+<ul>
+<li><code>raw</code> : <code>bytes</code> — required for opaque and custom Postcard registrations.</li>
+<li><code>log</code> : <code>LogPayload</code> — required for structured-log registrations.</li>
+</ul>
+</li>
+</ul>
+<p>Explicit timestamps are floored to the containing microsecond.</p>
+<h3 id="message-publishbatch"><em>message</em> <code>PublishBatch</code></h3>
+<ul>
+<li><code>first_seq</code> : <code>uint64</code> — sequence of <code>messages[0]</code>; starts at 1.</li>
+<li><code>messages</code> : <code>repeated OutgoingMessage</code> — must be nonempty; message <code>i</code> has
+sequence <code>first_seq + i</code>.</li>
+</ul>
+<p>Already processed overlap is skipped. A batch cannot leave a gap after the
+current sequence.</p>
+<h3 id="message-publishrequest"><em>message</em> <code>PublishRequest</code></h3>
+<ul>
+<li><code>request</code> : <code>oneof</code>
+<ul>
+<li><code>open</code> : <code>PublishOpen</code> — first frame only.</li>
+<li><code>batch</code> : <code>PublishBatch</code> — later frames only.</li>
+</ul>
+</li>
+</ul>
+<h3 id="message-publishaccept"><em>message</em> <code>PublishAccept</code></h3>
+<ul>
+<li><code>resume_from_seq</code> : <code>uint64</code> — last persisted sequence for this identity.</li>
+</ul>
+<h3 id="message-messageerror"><em>message</em> <code>MessageError</code></h3>
+<ul>
+<li><code>seq</code> : <code>uint64</code> — rejected message sequence.</li>
+<li><code>message</code> : <code>string</code> — registered message name when it can be resolved.</li>
+<li><code>detail</code> : <code>string</code> — human-readable validation failure.</li>
+</ul>
+<p>This response is non-terminal and precedes the acknowledgement that covers its
+sequence.</p>
+<h3 id="message-publishresponse"><em>message</em> <code>PublishResponse</code></h3>
+<ul>
+<li><code>response</code> : <code>oneof</code>
+<ul>
+<li><code>accept</code> : <code>PublishAccept</code> — opening response.</li>
+<li><code>ack</code> : <code>WriteAck</code> — cumulative processed position.</li>
+<li><code>error</code> : <code>MessageError</code> — non-terminal item rejection.</li>
+</ul>
+</li>
+</ul>
+<h3 id="rpc-getmessages"><em>rpc</em> <code>GetMessages</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc GetMessages(GetMessagesRequest)</span></span>
+<span class="giallo-l"><span>    returns (stream GetMessagesResponse)</span></span></code></pre>
+<p>Streams a lossless, timestamp-ordered historical range. An empty range returns
+an empty successful stream.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — empty name or <code>limit = 0</code>.</li>
+<li><code>NOT_FOUND</code> + <code>MESSAGE_NOT_FOUND</code> — log is not registered.</li>
+<li><code>INTERNAL</code> — a stored structured-log payload cannot be decoded.</li>
+</ul>
+<h3 id="message-getmessagesrequest"><em>message</em> <code>GetMessagesRequest</code></h3>
+<ul>
+<li><code>name</code> : <code>string</code> — required registered log name.</li>
+<li><code>start_ns</code> : <code>optional sfixed64</code> — inclusive lower bound; omitted means
+earliest.</li>
+<li><code>end_ns</code> : <code>optional sfixed64</code> — exclusive upper bound; omitted means
+open-ended.</li>
+<li><code>limit</code> : <code>optional uint64</code> — maximum messages, at least 1; omitted means
+unlimited.</li>
+</ul>
+<h3 id="message-getmessagesresponse"><em>message</em> <code>GetMessagesResponse</code></h3>
+<ul>
+<li><code>timestamp_ns</code> : <code>sfixed64</code> — stored message timestamp.</li>
+<li><code>payload</code> : <code>oneof</code>
+<ul>
+<li><code>raw</code> : <code>bytes</code> — opaque or custom Postcard bytes.</li>
+<li><code>log</code> : <code>LogPayload</code> — decoded structured log.</li>
+</ul>
+</li>
+</ul>
+<h2 id="adminservice">AdminService</h2>
+<p><code>AdminService</code> manages database configuration, component metadata, and asset
+bytes.</p>
+<h3 id="rpc-getdbconfig"><em>rpc</em> <code>GetDbConfig</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc GetDbConfig(GetDbConfigRequest) returns (GetDbConfigResponse)</span></span></code></pre>
+<p>Returns the complete current configuration.</p>
+<h3 id="message-getdbconfigrequest"><em>message</em> <code>GetDbConfigRequest</code></h3>
+<p>No fields.</p>
+<h3 id="message-getdbconfigresponse"><em>message</em> <code>GetDbConfigResponse</code></h3>
+<ul>
+<li><code>config</code> : <code>DbConfig</code> — complete current configuration.</li>
+</ul>
+<h3 id="rpc-setdbconfig"><em>rpc</em> <code>SetDbConfig</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc SetDbConfig(SetDbConfigRequest) returns (SetDbConfigResponse)</span></span></code></pre>
+<p>Applies a patch and returns the complete resulting configuration. Omitted
+recording state remains unchanged. Metadata keys merge; an empty value deletes a
+key except <code>skybox.active</code>, where empty is a preserved explicit-clear signal.</p>
+<p>On a read-only follower mirror, attempts to change replicated asset-pointer keys
+return <code>PERMISSION_DENIED</code>.</p>
+<h3 id="message-setdbconfigrequest"><em>message</em> <code>SetDbConfigRequest</code></h3>
+<ul>
+<li><code>recording</code> : <code>optional bool</code> — new recording state; omitted means unchanged.</li>
+<li><code>metadata</code> : <code>map&lt;string, string&gt;</code> — metadata patch.</li>
+</ul>
+<h3 id="message-setdbconfigresponse"><em>message</em> <code>SetDbConfigResponse</code></h3>
+<ul>
+<li><code>config</code> : <code>DbConfig</code> — complete configuration after the patch.</li>
+</ul>
+<h3 id="rpc-setcomponentmetadata"><em>rpc</em> <code>SetComponentMetadata</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc SetComponentMetadata(SetComponentMetadataRequest)</span></span>
+<span class="giallo-l"><span>    returns (SetComponentMetadataResponse)</span></span></code></pre>
+<p>Sets the supplied component metadata and returns the stored value. The server
+preserves internal metadata keys such as the timestamp-source flag.</p>
+<p>Missing metadata or an empty component name returns <code>INVALID_ARGUMENT</code>.
+Persistence errors map to canonical database statuses.</p>
+<h3 id="message-setcomponentmetadatarequest"><em>message</em> <code>SetComponentMetadataRequest</code></h3>
+<ul>
+<li><code>metadata</code> : <code>ComponentMetadata</code> — required metadata value.</li>
+</ul>
+<h3 id="message-setcomponentmetadataresponse"><em>message</em> <code>SetComponentMetadataResponse</code></h3>
+<ul>
+<li><code>metadata</code> : <code>ComponentMetadata</code> — stored value.</li>
+</ul>
+<h3 id="rpc-putasset"><em>rpc</em> <code>PutAsset</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc PutAsset(stream PutAssetRequest) returns (PutAssetResponse)</span></span></code></pre>
+<p>The first request must be one <code>header</code>; every later request must be <code>data</code>.
+Half-close to commit the asset. The server buffers at most 256 MiB, writes the
+asset under the database's asset directory, and increments <code>assets.revision</code>.</p>
+<p>Specific failures:</p>
+<ul>
+<li><code>INVALID_ARGUMENT</code> — empty stream/key, data before header, repeated header, or
+an invalid relative asset key.</li>
+<li><code>RESOURCE_EXHAUSTED</code> — aggregate asset exceeds 256 MiB.</li>
+<li><code>PERMISSION_DENIED</code> — asset storage is read-only, including follower mirrors.</li>
+<li><code>INTERNAL</code> — storage or task failure.</li>
+</ul>
+<h3 id="message-putassetheader"><em>message</em> <code>PutAssetHeader</code></h3>
+<ul>
+<li><code>key</code> : <code>string</code> — nonempty relative asset key. Absolute paths, traversal, and
+reserved internal keys are rejected.</li>
+</ul>
+<h3 id="message-putassetrequest"><em>message</em> <code>PutAssetRequest</code></h3>
+<ul>
+<li><code>chunk</code> : <code>oneof</code>
+<ul>
+<li><code>header</code> : <code>PutAssetHeader</code> — first frame exactly once.</li>
+<li><code>data</code> : <code>bytes</code> — subsequent asset bytes.</li>
+</ul>
+</li>
+</ul>
+<p>Each data frame must also fit the 16 MiB gRPC message cap.</p>
+<h3 id="message-putassetresponse"><em>message</em> <code>PutAssetResponse</code></h3>
+<ul>
+<li><code>size</code> : <code>uint64</code> — committed asset size in bytes.</li>
+<li><code>assets_revision</code> : <code>uint64</code> — database asset revision after the write.</li>
+</ul>
+<h3 id="rpc-getasset"><em>rpc</em> <code>GetAsset</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc GetAsset(GetAssetRequest) returns (stream GetAssetResponse)</span></span></code></pre>
+<p>Reads one asset in 1 MiB response chunks. Concatenate <code>data</code> in response order;
+chunk boundaries are not file boundaries.</p>
+<p>An unknown key returns <code>NOT_FOUND</code>; an invalid key returns <code>INVALID_ARGUMENT</code>;
+storage failures return <code>INTERNAL</code>.</p>
+<h3 id="message-getassetrequest"><em>message</em> <code>GetAssetRequest</code></h3>
+<ul>
+<li><code>key</code> : <code>string</code> — relative asset key.</li>
+</ul>
+<h3 id="message-getassetresponse"><em>message</em> <code>GetAssetResponse</code></h3>
+<ul>
+<li><code>data</code> : <code>bytes</code> — next asset chunk.</li>
+</ul>
+<h3 id="rpc-listassets"><em>rpc</em> <code>ListAssets</code></h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse)</span></span></code></pre>
+<p>Lists indexed assets whose keys begin with <code>prefix</code>. An empty prefix selects all
+assets. Indexing failures return <code>INTERNAL</code>.</p>
+<h3 id="message-listassetsrequest"><em>message</em> <code>ListAssetsRequest</code></h3>
+<ul>
+<li><code>prefix</code> : <code>string</code> — optional key prefix; empty means all.</li>
+</ul>
+<h3 id="message-assetinfo"><em>message</em> <code>AssetInfo</code></h3>
+<ul>
+<li><code>key</code> : <code>string</code> — relative asset key.</li>
+<li><code>size</code> : <code>uint64</code> — asset size in bytes.</li>
+</ul>
+<h3 id="message-listassetsresponse"><em>message</em> <code>ListAssetsResponse</code></h3>
+<ul>
+<li><code>assets</code> : <code>repeated AssetInfo</code> — matching indexed assets.</li>
+</ul>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/search.js"></script>
+
+
+</body>
+
+</html>

@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-804/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-804/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-804/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-804/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-804/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-804/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Apollo Lander | Elodin</title>
+<meta name="description" content="Run a software-in-the-loop Monte Carlo campaign for the Apollo 11 powered descent.">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-804/logo.png">
+  
+  <meta name="twitter:title" content="Apollo Lander">
+  <meta name="twitter:description" content="Run a software-in-the-loop Monte Carlo campaign for the Apollo 11 powered descent.">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Apollo Lander">
+  <meta property="og:description" content="Run a software-in-the-loop Monte Carlo campaign for the Apollo 11 powered descent.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-804/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Apollo Lander">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-804/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-804/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Apollo Lander",
+            "item": "https://docs.elodin.systems/preview/pr-804/home/apollo-lander/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.19.0" selected>
+                        v0.19.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-804/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-804/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-804/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-804/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/"
+                    >Apollo Lander</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/db/python-client/"
+                    >Python Client</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-804/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#the-big-picture">The big picture</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#run-it-first">Run it first</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#a-guided-tour-of-the-pieces">A guided tour of the pieces</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#declare-tunable-parameters">Declare tunable parameters</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#the-simulation-in-brief">The simulation, in brief</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#run-real-python-every-tick-post-step-and-stepcontext">Run real Python every tick: post_step and StepContext</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#why-software-in-the-loop">Why software-in-the-loop?</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#ways-to-connect-your-flight-software">Ways to connect your flight software</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#the-flight-software-process-an-s10-recipe-with-named-ports">The flight-software process: an s10 recipe with named ports</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#the-campaign-config">The campaign config</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#the-sampling-spec">The sampling spec</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#scoring-each-run">Scoring each run</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#reporting">Reporting</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#calibrate-the-model">Calibrate the model</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#going-further">Going further</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-804/home/apollo-lander/#next-steps">Next Steps</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Apollo Lander</h1>
+                  
+                  <p class="lead">Fly the Apollo 11 descent in a software-in-the-loop Monte Carlo campaign, then calibrate it against real telemetry.</p>
+                   <img src="/assets/apollo-lander.png" alt="apollo-lander-screenshot"/>
+<br></br>
+<p>The bouncing-ball and three-body tutorials build a simulation and watch it run. Real
+aerospace work asks a harder question: <em>does my actual flight software land the
+vehicle, across every dispersion it might see on the day?</em> This tutorial answers it
+with the <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/apollo-lander"><code>examples/apollo-lander</code></a>
+example, which picks up Apollo 11 at landing-radar lock-on (~12 km up, still carrying
+~800 m/s of orbital velocity) and flies the braking burn, pitchover, and touchdown
+with an external Lunar Guidance Computer (LGC) in the loop.</p>
+<p>In this tutorial you'll learn to:</p>
+<ul>
+<li>Declare a simulation's tunable parameters for Monte Carlo</li>
+<li>Run ordinary Python in a <code>post_step</code> callback to drive a <em>live flight-software
+process</em> over a socket (software-in-the-loop)</li>
+<li>Launch and manage that process per run, with each parallel worker isolated</li>
+<li>Run a Monte Carlo campaign, score each run, and read an aggregated report</li>
+<li>Calibrate the model against real telemetry by narrowing parameter ranges</li>
+</ul>
+<p>Rather than re-typing the whole example, we'll <em>tour</em> its key pieces and run them.</p>
+<div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>This tutorial assumes you've installed the Elodin CLI and Python SDK (see the
+<a href="/home/quickstart">Quick Start</a>) and cloned the repo. We'll run everything from the
+repository root.</p>
+</div>
+    </div>
+</div>
+<h3 id="the-big-picture">The big picture</h3>
+<p>A Monte Carlo SITL campaign has three moving parts:</p>
+<ul>
+<li>The <strong>simulation</strong> (<code>sim.py</code>): a 6-DOF lunar lander whose physics — gravity, the
+descent engine, RCS attitude control, and propellant burn-down — runs as JAX
+systems. It also replays the real Apollo descent on a "truth ghost" so you can
+compare against it.</li>
+<li>The <strong>flight software</strong> (<code>controller/</code>): a small Rust LGC that receives telemetry
+and sends back throttle and attitude commands, exactly like the real guidance
+computer. The simulation talks to it over UDP.</li>
+<li>The <strong>campaign runner</strong> (<code>elodin monte-carlo</code>): it samples a set of parameters,
+then fans the runs out across parallel workers. Each worker runs one descent —
+its own sim, its own controller, its own ports — and a pair of hooks score the
+runs and write a report.</li>
+</ul>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>spec.toml ──sample──▶ runner ──┬─▶ worker 1: sim ◀──UDP──▶ LGC ─┐</span></span>
+<span class="giallo-l"><span>                               ├─▶ worker 2: sim ◀──UDP──▶ LGC ─┤─▶ score.py ─▶ report.py</span></span>
+<span class="giallo-l"><span>                               └─▶ worker N: sim ◀──UDP──▶ LGC ─┘</span></span></code></pre><h3 id="run-it-first">Run it first</h3>
+<p>Clone the repo and launch the campaign from the repository root:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> clone</span><span style="color: light-dark(#2AA198, #2AA198);"> https://github.com/elodin-sys/elodin.git</span><span> &amp;&amp;</span><span style="color: light-dark(#268BD2, #268BD2);"> cd</span><span style="color: light-dark(#2AA198, #2AA198);"> elodin</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> monte-carlo</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/apollo-lander/main.py</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-campaign</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/apollo-lander/campaign.toml</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-spec</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/apollo-lander/spec.toml</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-out</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo-lander-demo</span></span></code></pre>
+<p>The runner builds the Rust controller once, samples 30 descents, and runs them in
+parallel (a few minutes on a laptop). When it finishes, it prints — and writes to
+<code>dbs/apollo-lander-demo/post_campaign/apollo_lander_report.txt</code> — a summary like:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>Apollo 11 lander Monte Carlo report</span></span>
+<span class="giallo-l"><span>====================================</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>runs completed: 30/30</span></span>
+<span class="giallo-l"><span>soft landings: 27/30</span></span>
+<span class="giallo-l"><span>success rate: 90.000%</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Vertical touchdown speed</span></span>
+<span class="giallo-l"><span>  mean: 1.471 m/s</span></span>
+<span class="giallo-l"><span>  p95:  2.640 m/s</span></span>
+<span class="giallo-l"><span>  max:  2.880 m/s</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Landing dispersion (downrange miss from site)</span></span>
+<span class="giallo-l"><span>  mean: 38.512 m</span></span>
+<span class="giallo-l"><span>  p95:  94.000 m</span></span>
+<span class="giallo-l"><span>  max:  121.880 m</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Apollo telemetry fit</span></span>
+<span class="giallo-l"><span>  best run: run-00017</span></span>
+<span class="giallo-l"><span>  best altitude RMSE: 41.220 m</span></span>
+<span class="giallo-l"><span>  mean pitch RMSE: 9.840 deg</span></span>
+<span class="giallo-l"><span>  ...</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Calibration hint</span></span>
+<span class="giallo-l"><span>  Narrow spec.toml ranges around the best-fit params and re-run, or use</span></span>
+<span class="giallo-l"><span>  calibrate.py for the optional automated loop.</span></span></code></pre>
+<p>Your exact numbers will vary, but you now have a working SITL campaign. The rest of
+the tutorial explains how each piece produced that report.</p>
+<h3 id="a-guided-tour-of-the-pieces">A guided tour of the pieces</h3>
+<h4 id="declare-tunable-parameters">Declare tunable parameters</h4>
+<p>A Monte Carlo campaign varies <em>parameters</em>. The simulation declares the ones it
+exposes with <code>el.monte_carlo.params_spec(...)</code> — each <code>Param</code> has a default and,
+optionally, a <code>min</code>/<code>max</code> range (<code>sim.py</code>, abbreviated to 3 of its 17):</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">PARAMS</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>monte_carlo</span><span>.</span><span>params_spec</span><span>(</span></span>
+<span class="giallo-l"><span>    init_altitude_m</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>monte_carlo</span><span>.</span><span>Param</span><span>(</span><span style="color: light-dark(#859900, #859900);">float</span><span>,</span><span> default</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">11_800.0</span><span>,</span><span> min</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">11_650.0</span><span>,</span><span> max</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">11_950.0</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    init_pitch_deg</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>monte_carlo</span><span>.</span><span>Param</span><span>(</span><span style="color: light-dark(#859900, #859900);">float</span><span>,</span><span> default</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">77.0</span><span>,</span><span> min</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">80.0</span><span>,</span><span> max</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">70.0</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    propellant_kg</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>monte_carlo</span><span>.</span><span>Param</span><span>(</span><span style="color: light-dark(#859900, #859900);">float</span><span>,</span><span> default</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">3_950.0</span><span>,</span><span> min</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">3_800.0</span><span>,</span><span> max</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">4_200.0</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> ... 14 more: masses, gains, thrust scale, gravity, Isp ...</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>At runtime the sim reads the current row of sampled values with one call:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>params</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>monte_carlo</span><span>.</span><span>params</span><span>(</span><span style="color: light-dark(#CB4B16, #CB4B16);">PARAMS</span><span>)</span></span>
+<span class="giallo-l"><span>init_altitude</span><span style="color: light-dark(#859900, #859900);"> =</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>params</span><span>.</span><span>get</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">init_altitude_m</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>)</span></span></code></pre><div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>This single declaration does double duty: the runner samples it, and
+<code>elodin monte-carlo quickstart</code> reads it to scaffold a <code>spec.toml</code> for you. Params
+with bounds become <code>uniform</code> variables; the rest are held fixed.</p>
+</div>
+    </div>
+</div>
+<h4 id="the-simulation-in-brief">The simulation, in brief</h4>
+<p><code>sim.py</code> exposes a <code>build(params)</code> function that returns <code>(world, system)</code>: a 6-DOF
+lander with lunar gravity, a throttleable descent engine, RCS torque, and a
+mass-burn system, plus a kinematic <em>truth ghost</em> that replays the recorded Apollo
+descent every tick. Authoring physics systems is covered in the
+<a href="/home/bouncing-ball">Bouncing Ball</a> and <a href="/home/3-body">Three-Body</a> tutorials, so we
+won't dwell on it here.</p>
+<p>The important distinction for SITL is this: <strong>the deterministic physics runs as JAX
+systems, but everything that talks to the outside world happens in a <code>post_step</code>
+callback</strong> — plain Python that runs after each tick.</p>
+<h4 id="run-real-python-every-tick-post-step-and-stepcontext">Run real Python every tick: <code>post_step</code> and <code>StepContext</code></h4>
+<p><code>world.run(..., post_step=fn)</code> calls your function after each simulation tick (and
+<code>pre_step=fn</code> before it). Your callback receives the tick number and a
+<code>StepContext</code>, which gives you direct read/write access to the simulation database.
+Crucially, <strong>this is normal Python, not JAX</strong> — so you can open sockets, call
+libraries, and manage state across ticks.</p>
+<p>The Apollo example uses exactly this to drive the live controller (<code>main.py</code>,
+abbreviated):</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> post_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>StepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Read the latest kinematics straight from the simulation database.</span></span>
+<span class="giallo-l"><span>    reads</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>component_batch_operation</span><span>(</span></span>
+<span class="giallo-l"><span>        reads</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.world_vel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.altitude</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">               &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.vertical_speed</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.propellant</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"><span>    altitude</span><span style="color: light-dark(#859900, #859900);"> =</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>reads</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.altitude</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> ... assemble `state` from the readings and the reference profile ...</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Ordinary Python: open the UDP socket once, then trade packets with the</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> live flight-software process.</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    global</span><span> bridge</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    if</span><span> bridge</span><span style="color: light-dark(#859900, #859900);"> is</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span>        bridge</span><span style="color: light-dark(#859900, #859900);"> =</span><span> SitlBridge</span><span>(</span><span>last_throttle</span><span>,</span><span> last_attitude</span><span>)</span></span>
+<span class="giallo-l"><span>    last_throttle</span><span>,</span><span> last_attitude</span><span>,</span><span> _</span><span style="color: light-dark(#859900, #859900);"> =</span><span> bridge</span><span>.</span><span>step</span><span>(</span><span>state</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Write the commands back into the sim.</span></span>
+<span class="giallo-l"><span>    ctx</span><span>.</span><span>component_batch_operation</span><span>(</span></span>
+<span class="giallo-l"><span>        writes</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">            &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.throttle_cmd</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> np</span><span>.</span><span>array</span><span>(</span><span>[</span><span>last_throttle</span><span>]</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">            &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lander.attitude_setpoint</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> np</span><span>.</span><span>array</span><span>(</span><span>last_attitude</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    )</span></span></code></pre>
+<p><code>StepContext</code> also offers single-component <code>read_component</code> / <code>write_component</code> and
+the current <code>ctx.tick</code> / <code>ctx.timestamp</code>; <code>component_batch_operation</code> just does many
+reads and writes under one database lock.</p>
+<p>But how do externally-written commands survive the next physics tick? The components
+the controller drives are tagged as externally controlled (<code>sim.py</code>):</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>ThrottleCmd</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ty</span><span>.</span><span>Annotated</span><span>[</span></span>
+<span class="giallo-l"><span>    jax</span><span>.</span><span>Array</span><span>,</span></span>
+<span class="giallo-l"><span>    el</span><span>.</span><span>Component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">throttle_cmd</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> el</span><span>.</span><span>ComponentType</span><span>(</span><span>el</span><span>.</span><span>PrimitiveType</span><span>.</span><span>F64</span><span>,</span><span> (</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>,</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>                 metadata</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">external_control</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">true</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>}</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>]</span></span></code></pre><div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p><code>external_control</code> is the contract between the simulation and the outside world: JAX
+systems may <em>read</em> these components but never <em>overwrite</em> them, so the value your
+callback (or any external client) writes is the value the physics sees. See the
+<a href="/reference/python-api/#class-elodin-stepcontext"><code>StepContext</code> reference</a> for the
+full API and the <code>external_control</code> metadata.</p>
+</div>
+    </div>
+</div>
+<h4 id="why-software-in-the-loop">Why software-in-the-loop?</h4>
+<p>You could approximate the guidance law inside a JAX system. SITL does something more
+valuable: it flies your <strong>actual flight software</strong> — the same code that will run on
+the vehicle — so the campaign exercises the real guidance and control logic, its
+real timing and lockstep behavior, and the simulation-to-software integration
+boundary, across every Monte Carlo dispersion. Bugs that only appear in the real
+code — numerical edge cases, message framing, off-by-one timing — surface here, in
+simulation, before they reach hardware.</p>
+<h4 id="ways-to-connect-your-flight-software">Ways to connect your flight software</h4>
+<p>The <code>post_step</code> bridge is one option of several. Pick based on where your software
+runs:</p>
+<ul>
+<li><strong>In-process bridge</strong> via <code>post_step</code> / <code>pre_step</code> + <code>StepContext</code> (sockets or IPC
+you open yourself) — what this example does. Lockstep, lowest latency, same
+process.</li>
+<li><strong>A managed external process</strong> via <code>world.recipe(...)</code> — Elodin launches and
+tears down the real flight-software binary alongside the sim (covered next).</li>
+<li><strong>A networked client</strong> over the Impeller2 protocol talking to <code>elodin-db</code>: any
+external program — or <strong>hardware-in-the-loop</strong> rig — reads sensor components and
+writes <code>external_control</code> commands without an in-process bridge.</li>
+</ul>
+<h4 id="the-flight-software-process-an-s10-recipe-with-named-ports">The flight-software process: an <code>s10</code> recipe with named ports</h4>
+<p>The example launches the Rust LGC as a managed process with <code>world.recipe(...)</code>
+(<code>main.py</code>):</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>controller</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>cargo</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">Apollo LGC</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    path</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">str</span><span>(</span><span>controller_dir</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>delay</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">100</span><span>)</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> give it 100 ms to come up</span></span>
+<span class="giallo-l"><span>    ready_timeout</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">1s</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>controller</span><span>)</span></span></code></pre>
+<p>The <code>ready</code> probe gates startup until the process is up; richer probes (<code>tcp</code>,
+<code>unix</code>, <code>file</code>, <code>log</code>) and <code>depends_on</code> let you orchestrate multi-process stacks.</p>
+<p>For the sim and controller to find each other — without colliding when 8 workers run
+at once — the example uses <strong>named ports</strong> instead of hardcoded numbers (<code>main.py</code>):</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">self</span><span>.</span><span>state_port</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>monte_carlo</span><span>.</span><span>port</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">state</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#CB4B16, #CB4B16);"> DEFAULT_STATE_PORT</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">self</span><span>.</span><span>command_port</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>monte_carlo</span><span>.</span><span>port</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#CB4B16, #CB4B16);"> DEFAULT_COMMAND_PORT</span><span>)</span></span></code></pre><div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p><code>el.monte_carlo.port("state", 9013)</code> returns the default outside a campaign, but
+inside one the runner hands each worker its own offset slot, so parallel runs never
+fight over the same UDP port. The controller reads the matching values from
+<code>ELODIN_MC_PORT_STATE</code> / <code>ELODIN_MC_PORT_COMMAND</code> env vars.</p>
+</div>
+    </div>
+</div>
+<h4 id="the-campaign-config">The campaign config</h4>
+<p><code>campaign.toml</code> wires the whole campaign together — it's only ~20 lines:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="toml"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">timeout</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">120s</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">retries</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 0</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">continue_on_error</span><span> =</span><span style="color: light-dark(#B58900, #B58900);"> true</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>[[</span><span>build</span><span>]]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">command</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">cargo</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">args</span><span> =</span><span> [</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">build</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">--release</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">--manifest-path</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">examples/apollo-lander/controller/Cargo.toml</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>[</span><span>resources</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">port_stride</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 40</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">db_port</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 2240</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>[</span><span>resources</span><span>.</span><span>ports</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">state</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 9013</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">command</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 9012</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>[</span><span>retention</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">keep_run_db</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">on-fail</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>[</span><span>hooks</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">post_run</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">examples/apollo-lander/hooks/score.py</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">post_campaign</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">examples/apollo-lander/hooks/report.py</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre>
+<p>Each <code>[[build]]</code> step runs once before any worker starts (and fails the campaign if
+it can't). <code>[resources]</code> declares the named ports and the <code>port_stride</code> between
+workers — the whole plan is validated for every worker before anything launches, and
+a port can also be <code>"auto"</code> to have the runner allocate it dynamically per run.
+<code>[retention] keep_run_db = "on-fail"</code> keeps only failing runs' databases so a big
+campaign doesn't fill your disk. <code>[hooks]</code> points at the two Python lifecycle hooks.
+Add <code>workers = N</code> to pin concurrency (the default sizes itself from CPU cores).</p>
+<h4 id="the-sampling-spec">The sampling spec</h4>
+<p><code>spec.toml</code> says <em>how</em> to sample those parameters into concrete runs:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="toml"><span class="giallo-l"><span>[</span><span>monte_carlo</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">n_samples</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 30</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">seed</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 19690720</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">method</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lhs</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>[</span><span>monte_carlo</span><span>.</span><span>variables</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">init_altitude_m</span><span> =</span><span> {</span><span style="color: light-dark(#268BD2, #268BD2);"> dist</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">uniform</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> min</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 11650.0</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> max</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 11950.0</span><span> }</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">init_pitch_deg</span><span> =</span><span> {</span><span style="color: light-dark(#268BD2, #268BD2);"> dist</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">uniform</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> min</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> -80.0</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> max</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> -70.0</span><span> }</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">propellant_kg</span><span> =</span><span> {</span><span style="color: light-dark(#268BD2, #268BD2);"> dist</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">uniform</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> min</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 3800.0</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> max</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> 4200.0</span><span> }</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> ... one line per variable ...</span></span></code></pre><div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p><code>method = "lhs"</code> is Latin Hypercube Sampling — it spreads samples more evenly across
+the ranges than independent random draws. The fixed <code>seed</code> makes the whole campaign
+reproducible: rerun it and you get the same 30 descents.</p>
+</div>
+    </div>
+</div>
+<h4 id="scoring-each-run">Scoring each run</h4>
+<p>When a run finishes, the sim emits its outcome scalars with
+<code>el.monte_carlo.result(...)</code>, which the runner writes to <code>result.json</code>. The
+<code>post_run</code> hook then reads that file and returns a verdict (<code>hooks/score.py</code>,
+abbreviated):</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> post_run</span><span>(</span><span>ctx</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span>    result</span><span style="color: light-dark(#859900, #859900);"> =</span><span> read_json</span><span>(</span><span>Path</span><span>(</span><span>ctx</span><span>.</span><span>run_dir</span><span>)</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">result.json</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>    passed</span><span style="color: light-dark(#859900, #859900);"> =</span><span> soft_landing</span><span>(</span><span>result</span><span>,</span><span> result</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">valid</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#859900, #859900);"> bool</span><span>(</span><span>result</span><span>)</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">        #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> did the run produce a result at all?</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">pass</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> passed</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">               #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> did it meet the soft-landing criteria?</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">touchdown_speed_mps</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> to_float</span><span>(</span><span>result</span><span>.</span><span>get</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">touchdown_speed</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">inf</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">downrange_miss_m</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> to_float</span><span>(</span><span>result</span><span>.</span><span>get</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">downrange_miss</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">inf</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">traj_rmse_m</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> to_float</span><span>(</span><span>result</span><span>.</span><span>get</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">traj_rmse</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">inf</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">        #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> ...</span></span>
+<span class="giallo-l"><span>    }</span></span></code></pre><div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Runs are tri-state. <code>pass</code> / fail answers "did it land softly?", while <code>valid</code> is
+about the run itself: a crash, timeout, or missing result is <strong>invalid</strong> and is
+excluded from the pass/fail rate rather than counted as a failure. Every scalar you
+return becomes a column in <code>results.csv</code> and is automatically aggregated (mean, p95,
+…) for the report.</p>
+</div>
+    </div>
+</div>
+<h4 id="reporting">Reporting</h4>
+<p>The <code>post_campaign</code> hook (<code>hooks/report.py</code>) runs once at the end. It reads
+<code>results.csv</code>, picks the best-fit run by trajectory RMSE, and writes the human report
+you saw earlier. Because the runner already aggregated the per-run columns, the hook
+stays short — it mostly formats numbers and names the best run.</p>
+<h3 id="calibrate-the-model">Calibrate the model</h3>
+<p>Here's the payoff, and the heart of the Monte Carlo workflow: use the results to
+make the model match reality. The manual loop is:</p>
+<ol>
+<li>Run the campaign.</li>
+<li>Open <code>post_campaign/apollo_lander_report.txt</code> and find the <strong>best-fit run</strong> and
+its parameters.</li>
+<li>Narrow the matching ranges in <code>spec.toml</code> around those values.</li>
+<li>Run again and watch <code>traj_rmse</code> and <code>downrange_miss</code> shrink.</li>
+</ol>
+<p>For example, if the best fit favored a steeper lock-on pitch, tighten that range:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="toml"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> before</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">init_pitch_deg</span><span> =</span><span> {</span><span style="color: light-dark(#268BD2, #268BD2);"> dist</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">uniform</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> min</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> -80.0</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> max</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> -70.0</span><span> }</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> after — narrowed around the best-fit run</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">init_pitch_deg</span><span> =</span><span> {</span><span style="color: light-dark(#268BD2, #268BD2);"> dist</span><span> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">uniform</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> min</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> -78.0</span><span>,</span><span style="color: light-dark(#268BD2, #268BD2);"> max</span><span> =</span><span style="color: light-dark(#D33682, #D33682);"> -75.0</span><span> }</span></span></code></pre>
+<p>Each iteration encodes what you learned into the next spec — samples in, runs scored,
+ranges tightened. <code>calibrate.py</code> automates the same loop:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">python</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/apollo-lander/calibrate.py</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-initial-out</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo-lander-demo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-work-dir</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo-lander-calibration</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-rounds</span><span style="color: light-dark(#D33682, #D33682);"> 2</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-samples</span><span style="color: light-dark(#D33682, #D33682);"> 30</span></span></code></pre><h3 id="going-further">Going further</h3>
+<p>You've now used every core Monte Carlo feature. A few more worth knowing:</p>
+<ul>
+<li><strong>Run-dir hygiene:</strong> <code>--clean</code> prunes stale <code>runs/</code> directories, and <code>[retention]</code>
+controls which per-run databases are kept.</li>
+<li><strong>Robust teardown:</strong> on Linux the runner reaps each run's whole process tree
+(sim + controller) via cgroups, so nothing leaks between runs.</li>
+<li><strong>Readiness &amp; dependencies:</strong> beyond <code>Ready.delay</code>, use <code>tcp</code> / <code>unix</code> / <code>file</code> /
+<code>log</code> probes and <code>depends_on</code> to sequence multi-service stacks.</li>
+<li><strong>File-based params:</strong> if your sim reads params from a file instead of
+<code>el.monte_carlo.params(...)</code>, configure <code>[params_delivery]</code> in <code>campaign.toml</code>.</li>
+<li><strong>Scaffold your own:</strong> <code>elodin monte-carlo quickstart path/to/main.py out/</code> writes
+a <code>spec.toml</code>, <code>campaign.toml</code>, and starter hooks from your declared params.</li>
+<li><strong>CI gates:</strong> add a <code>post_campaign</code> hook that raises when any run failed to turn a
+campaign into a pass/fail check.</li>
+</ul>
+<h3 id="next-steps">Next Steps</h3>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;home&#x2F;tao&#x2F;monte-carlo">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-data"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Monte Carlo: the concept
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Why Monte Carlo, and how Elodin runs campaigns at scale.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;elodin-cli&#x2F;#elodin-monte-carlo">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-cog"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            elodin monte-carlo CLI reference
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Every campaign flag, hook, and config option.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;python-api&#x2F;#class-elodin-stepcontext">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-book"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            StepContext &amp; SITL reference
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>The full pre_step / post_step API and external_control metadata.</p>
+</p>
+    </div>
+</a>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+           
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-804&#x2F;home&#x2F;aleph&#x2F;setup&#x2F;">
+        <div>
+            <div class="footer-card">&larr; Aleph Setup</div>
+        </div>
+    </a>
+           
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-804&#x2F;home&#x2F;aleph&#x2F;reset&#x2F;">
+        <div>
+            <div class="footer-card">Factory Reset &rarr;</div>
+        </div>
+    </a>
+                                                
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-804/js/search.js"></script>
+
+
+</body>
+
+</html>
