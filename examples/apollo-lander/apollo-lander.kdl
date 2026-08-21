@@ -74,6 +74,7 @@ hsplit {
 // Thruster exhaust: hanabi .effect files from pyrotechnique, driven by EQL.
 // Body-frame offsets are schematic Z-up (ENU). The GLB is Y-up and lifted
 // with y_up_to_schematic (Rx(+π/2)): mesh (x,y,z) → schematic (x,-z,y).
+// Keep RCS_THRUSTERS in rcs_geometry.py in lockstep with these nozzles.
 object_3d lander.world_pos frame=ENU {
     glb path=apollo-lunar-module.glb translate="(0, 0, -2.5)"
     thruster name="DPS" effect="effects/apollo-lander/descent_plume.effect" body_frame=#true position="(0, 0, -1.9)" direction="(0, 0, -1)" intensity="lander.main_thrust_viz[2]" {
