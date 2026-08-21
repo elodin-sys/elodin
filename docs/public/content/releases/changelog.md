@@ -13,6 +13,36 @@ order = 1
 +++
 
 
+## v0.19
+
+### v0.19.0
+- **(feat)** Add a native Earth environment. (#778, #795)
+- **(feat)** Add heliocentric relative dynamics to Voyager. (#789)
+- **(feat)** Add Voyager trajectory error telemetry. (#769)
+- **(feat)** Add viewport follow-camera smoothing. (#764)
+- **(feat)** Add an artificial horizon gauge. (#753)
+- **(feat)** Add headless video capture. (#754, #757)
+- **(feat)** Add --kdl to allow local KDL and asset development. (#763)
+- **(feat:aleph)** Add initrd-based one-shot Aleph UEFI and OS flashing over USB-C. (#748)
+- **(feat:db)** Add Elodin DB gRPC. (#772)
+- **(feat:db)** Add `elodin-db export --format mcap`. (#746)
+- **(fix)** Fix view-cube ECEF face labels, zoom in/out. (#796, #790, #758)
+- **(fix)** Fix Betaflight takeoff. (#791)
+- **(fix)** Fix GPU OOM and fins animation. (#788)
+- **(fix)** Generate schematic planes in Z-up so identity pose is ground. (#786, #793)
+- **(fix)** Fix ECEF translate and add `ned_to_ecef()`. (#774)
+- **(fix)** Prevent an editor crash when scrubbing with particles. (#777)
+- **(fix)** Fix reconnect replay time travel. (#775)
+- **(fix)** Fix the Ctrl-P command palette panic. (#770)
+- **(fix)** Capture headless video on hybrid Intel + NVIDIA hosts. (#768)
+- **(fix)** Fix `line_3d` f32 quantization. (#766)
+- **(fix)** Make `elodin_capture.sh` work on Ubuntu. (#767)
+- **(fix)** Restore minimal terrain rendering. (#761)
+- **(fix:examples)** Put Apollo thruster particles in schematic Z-up. (#797)
+- **(fix:impeller2)** Skip and log malformed fields instead of dropping the table. (#762)
+- **(perf)** Improve editor FPS on DB playback. (#771)
+- **(chore)** Bump Bevy Hanabi. (#773)
+
 ## v0.18
 
 ### v0.18.0
