@@ -236,8 +236,6 @@ fn sync_atmosphere(
                     medium,
                 },
                 Transform::default(),
-                #[cfg(feature = "big_space")]
-                crate::spatial::GridCell::default(),
                 atmosphere_geo_rotation(frame, &geo_ctx),
                 ChildOf(earth),
             ));
