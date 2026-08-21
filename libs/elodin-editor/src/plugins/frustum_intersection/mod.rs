@@ -9,7 +9,7 @@ mod volume;
 
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_local_points,
+    frustum_local_points, presentation_perspective,
 };
 use crate::{
     MainCamera,
@@ -461,6 +461,7 @@ fn draw_frustum_ellipsoid_intersections(
             camera_viewport_aspect(camera),
             params.projection_cache.get(camera_entity).ok(),
         );
+        let source_perspective = presentation_perspective(&source_perspective, Some(config));
         let Some(local_points) = frustum_local_points(&source_perspective) else {
             continue;
         };

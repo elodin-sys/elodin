@@ -278,7 +278,7 @@ Use `--dry-run` to only write the narrowed specs.
   - ALSJ sun (`KDL az=268.81 el=10.65`) with shadows; true-scale Earth at
     ALSJ az/el/distance with raymarched atmosphere (blue limb + sun disk).
   - Trails: `line_width=2.0 perspective=#false` (falcon9-style).
-- Single viewport "Tranquility Base" (`far=1e9`, `ev100=13.2`); `timeline range="last_30s"`.
+- Single viewport "Tranquility Base" (`ev100=13.2`); `timeline range="last_30s"`.
 - **Editor preview (native only):** GPU exhaust particles fully declared in
 
   KDL and driven by EQL viz channels, rendering hanabi `.effect` files

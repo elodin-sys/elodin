@@ -1,6 +1,6 @@
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_local_points,
+    frustum_local_points, presentation_perspective,
 };
 use crate::MainCamera;
 use crate::sensor_camera::SensorCameraConfigs;
@@ -284,7 +284,8 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         let Projection::Perspective(perspective) = projection else {
             continue;
         };
-        let Some(points) = frustum_local_points(perspective) else {
+        let presentation = presentation_perspective(perspective, Some(config));
+        let Some(points) = frustum_local_points(&presentation) else {
             continue;
         };
         sources.push((

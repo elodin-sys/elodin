@@ -30,7 +30,7 @@ def world() -> el.World:
         coordinate frame=ENU
         world_mesh "brienz"
 
-        viewport frame=ENU name="Brienz Terrain" hdr=#true active=#true pos="(0,0,0,1, 4560,-4560,2640)" look_at="(0,0,0,1, 0,0,-120)" up="(0,0,1)" near=1.0 far=50000.0 fov=60.0 show_grid=#false show_view_cube=#true
+        viewport frame=ENU name="Brienz Terrain" hdr=#true active=#true pos="(0,0,0,1, 4560,-4560,2640)" look_at="(0,0,0,1, 0,0,-120)" up="(0,0,1)" near=1.0 fov=60.0 show_grid=#false show_view_cube=#true
         """,
         "terrain.kdl",
     )

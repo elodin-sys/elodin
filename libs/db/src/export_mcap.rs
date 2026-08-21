@@ -1661,8 +1661,7 @@ impl<'a> LayoutBuilder<'a> {
                 }
                 let (distance, phi, theta) = camera_orbit_from_offset(offset);
                 let near = viewport.near.unwrap_or(0.01) as f64;
-                // Clamp far so the orbit camera itself is never beyond the far
-                // plane (geo-frames sets far=1.5e7 with an 8e7 m camera offset).
+                // Foxglove uses a finite far plane; keep its orbit camera inside it.
                 let far = viewport
                     .far
                     .map(|f| (f as f64).max(distance * 4.0))

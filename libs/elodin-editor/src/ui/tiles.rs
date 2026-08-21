@@ -85,11 +85,13 @@ use sidebar::tab_add_visible;
 
 pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
 pub(crate) const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+/// Finite only because Bevy's CPU frustum representation cannot use infinity.
+pub(crate) const VIEWPORT_PROJECTION_FAR: f32 = 1.0e16;
 
 fn default_viewport_perspective() -> PerspectiveProjection {
     PerspectiveProjection {
         near: DEFAULT_VIEWPORT_NEAR,
-        far: DEFAULT_VIEWPORT_FAR,
+        far: VIEWPORT_PROJECTION_FAR,
         near_clip_plane: crate::plugins::frustum_common::near_clip_plane(DEFAULT_VIEWPORT_NEAR),
         ..PerspectiveProjection::default()
     }
@@ -98,14 +100,6 @@ fn default_viewport_perspective() -> PerspectiveProjection {
 fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
     perspective.near = near;
     perspective.near_clip_plane = crate::plugins::frustum_common::near_clip_plane(near);
-}
-
-/// Derive zoom bounds from the viewport far plane.
-pub(crate) fn zoom_limits_for_far(far: f32) -> (f64, f64) {
-    let far = (far as f64).max(DEFAULT_VIEWPORT_FAR as f64);
-    let min_size_per_pixel = (far * 1.0e-6).max(1.0e-3);
-    let max_size_per_pixel = (far * 2.0).max(10.0);
-    (min_size_per_pixel, max_size_per_pixel)
 }
 
 pub(crate) fn cinematic_bloom_config() -> BloomConfig {
@@ -147,8 +141,7 @@ pub(crate) fn bloom_from_config(config: Option<&BloomConfig>, cinematic: bool) -
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(Startup, setup_primary_window_state)
-        .add_systems(Update, sync_editor_cam_zoom_limits);
+        .add_systems(Startup, setup_primary_window_state);
     // Must run after the BigSpace root exists; otherwise grids stay parentless
     // and shimmer from float-origin precision loss.
     #[cfg(feature = "big_space")]
@@ -212,20 +205,6 @@ fn viewport_grid_settings(
     }
 }
 
-type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
-
-fn sync_editor_cam_zoom_limits(
-    mut cameras: Query<EditorCamZoomLimitsQuery<'_>, (With<MainCamera>, Changed<Projection>)>,
-) {
-    for (projection, mut editor_cam) in &mut cameras {
-        if let Projection::Perspective(persp) = projection {
-            let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(persp.far);
-            editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
-            editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
-        }
-    }
-}
-
 fn setup_primary_window_state(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
@@ -248,9 +227,9 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
-    /// Schematic near clip; omitted on save when unset. Not the runtime EditorCam value.
+    /// Frustum near distance; also pins the runtime camera near clip when set.
     pub configured_near: Option<f32>,
-    /// Schematic far clip; omitted on save when unset. Not the runtime EditorCam value.
+    /// Frustum far distance; never limits rendering or camera zoom.
     pub configured_far: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
@@ -1766,33 +1745,23 @@ impl ViewportPane {
         if let Some(near) = viewport.near {
             set_perspective_near(&mut perspective, near);
         }
-        if let Some(far) = viewport.far {
-            perspective.far = far;
-        }
         if let Some(aspect) = viewport.aspect {
             perspective.aspect_ratio = aspect;
         }
-        if !(perspective.near > 0.0 && perspective.far > perspective.near) {
+        if !(perspective.near > 0.0) {
             warn!(
-                "Invalid viewport near/far (near={}, far={}), restoring defaults",
-                perspective.near, perspective.far
+                "Invalid viewport near (near={}), restoring default",
+                perspective.near
             );
-            perspective.near = DEFAULT_VIEWPORT_NEAR;
-            perspective.far = DEFAULT_VIEWPORT_FAR;
+            set_perspective_near(&mut perspective, DEFAULT_VIEWPORT_NEAR);
         }
-
-        let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(perspective.far);
 
         let mut editor_cam = EditorCam {
             orbit_constraint: OrbitConstraint::Fixed {
                 up: bevy::math::DVec3::Y,
                 can_pass_tdc: false,
             },
-            zoom_limits: ZoomLimits {
-                min_size_per_pixel,
-                max_size_per_pixel,
-                zoom_through_objects: false,
-            },
+            zoom_limits: ZoomLimits::default(),
             sensitivity: Sensitivity {
                 zoom: 0.2,
                 ..default()
