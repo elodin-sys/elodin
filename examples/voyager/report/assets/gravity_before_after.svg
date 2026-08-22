@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">Voyager Chapter 1 versus Chapter 2 heliocentric gravity</title>
+  <desc id="desc">Chapter 1 applies a planet's direct pull on Voyager. Chapter 2 also subtracts the same planet's acceleration of the Sun so the acceleration is relative to the Sun-centered frame.</desc>
+  <defs>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#3973b8"/></marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#4b9568"/></marker>
+    <style>
+      .title{font:700 28px -apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fill:#172b4d}
+      .sub{font:400 17px -apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fill:#586474}
+      .panel{fill:#fbfcfe;stroke:#dfe5ec;stroke-width:2}
+      .label{font:700 20px -apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fill:#172b4d}
+      .small{font:400 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fill:#586474}
+      .blue{fill:#3973b8}.green{fill:#4b9568}
+      .eq{font:500 18px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#27364a}
+    </style>
+  </defs>
+  <rect width="1200" height="520" fill="#ffffff"/>
+  <text x="52" y="50" class="title">What changes in Chapter 2?</text>
+  <text x="52" y="80" class="sub">Same Sun-centered state. Same planets. Chapter 2 corrects for the fact that the Sun is accelerated too.</text>
+
+  <rect x="52" y="112" rx="18" ry="18" width="520" height="296" class="panel"/>
+  <rect x="628" y="112" rx="18" ry="18" width="520" height="296" class="panel"/>
+
+  <text x="82" y="152" class="label">Chapter 1 — direct planetary gravity</text>
+  <text x="658" y="152" class="label">Chapter 2 — heliocentric relative gravity</text>
+
+  <!-- left panel bodies -->
+  <circle cx="170" cy="270" r="32" fill="#f3c95f" stroke="#d3a835" stroke-width="2"/>
+  <text x="148" y="320" class="small">Sun</text>
+  <circle cx="334" cy="215" r="21" fill="#d88982" stroke="#b7635e" stroke-width="2"/>
+  <text x="307" y="182" class="small">planet</text>
+  <g transform="translate(470,292)">
+    <rect x="-13" y="-9" width="26" height="18" rx="3" fill="#d18a45"/>
+    <line x1="-13" y1="0" x2="-38" y2="-15" stroke="#d18a45" stroke-width="5"/>
+    <line x1="13" y1="0" x2="38" y2="15" stroke="#d18a45" stroke-width="5"/>
+  </g>
+  <text x="435" y="338" class="small">Voyager 1</text>
+  <line x1="352" y1="229" x2="446" y2="279" stroke="#3973b8" stroke-width="5" marker-end="url(#arrowBlue)"/>
+  <text x="300" y="360" class="small" fill="#3973b8">planet pulls Voyager</text>
+  <text x="82" y="390" class="small">The Sun-centered origin is treated as if it were fixed.</text>
+
+  <!-- right panel bodies -->
+  <circle cx="746" cy="270" r="32" fill="#f3c95f" stroke="#d3a835" stroke-width="2"/>
+  <text x="724" y="320" class="small">Sun</text>
+  <circle cx="910" cy="215" r="21" fill="#d88982" stroke="#b7635e" stroke-width="2"/>
+  <text x="883" y="182" class="small">planet</text>
+  <g transform="translate(1046,292)">
+    <rect x="-13" y="-9" width="26" height="18" rx="3" fill="#d18a45"/>
+    <line x1="-13" y1="0" x2="-38" y2="-15" stroke="#d18a45" stroke-width="5"/>
+    <line x1="13" y1="0" x2="38" y2="15" stroke="#d18a45" stroke-width="5"/>
+  </g>
+  <text x="1011" y="338" class="small">Voyager 1</text>
+  <line x1="928" y1="229" x2="1022" y2="279" stroke="#3973b8" stroke-width="5" marker-end="url(#arrowBlue)"/>
+  <text x="929" y="360" class="small" fill="#3973b8">direct pull</text>
+  <line x1="894" y1="231" x2="776" y2="258" stroke="#4b9568" stroke-width="5" stroke-dasharray="10 7" marker-end="url(#arrowGreen)"/>
+  <text x="790" y="345" class="small" fill="#4b9568">planet also accelerates the Sun</text>
+  <text x="658" y="390" class="small">Subtract that origin acceleration to get Voyager's acceleration relative to the Sun.</text>
+
+  <text x="84" y="458" class="eq">a₁ = μ (rᵢ − r) / |rᵢ − r|³</text>
+  <text x="658" y="458" class="eq">a₂ = μ (rᵢ − r) / |rᵢ − r|³ − μ rᵢ / |rᵢ|³</text>
+  <text x="867" y="490" class="small" fill="#4b9568">↑ indirect heliocentric correction</text>
+</svg>
