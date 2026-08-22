@@ -621,8 +621,10 @@ fn read_index_timestamps(index_path: &Path) -> Result<(IndexHeader, Vec<i64>), E
     file.read_exact(&mut ts_data)?;
 
     let timestamps: Vec<i64> = ts_data
-        .chunks_exact(8)
-        .map(|chunk| i64::from_le_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| i64::from_le_bytes(*chunk))
         .collect();
 
     Ok((IndexHeader { start_ts }, timestamps))
@@ -748,8 +750,10 @@ fn read_msg_timestamps(path: &Path) -> Result<Vec<i64>, Error> {
     file.read_exact(&mut ts_data)?;
 
     let timestamps: Vec<i64> = ts_data
-        .chunks_exact(8)
-        .map(|chunk| i64::from_le_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| i64::from_le_bytes(*chunk))
         .collect();
 
     Ok(timestamps)

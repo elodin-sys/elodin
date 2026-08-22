@@ -1905,7 +1905,7 @@ pub fn create_object_3d_entity(
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
-            Name::new(format!("object_3d {}", &data.mesh)),
+            Name::new(format!("object_3d {}", data.mesh)),
         ))
         .id();
 

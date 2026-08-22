@@ -476,7 +476,7 @@ fn live_follow_button(
             rect,
             egui::CornerRadius::same(10),
             fill,
-            egui::Stroke::new(1.0, stroke_color),
+            egui::Stroke::new(1.0_f32, stroke_color),
             egui::StrokeKind::Middle,
         );
 
@@ -498,7 +498,7 @@ fn live_follow_button(
                 egui::pos2(separator_x, rect.top() + 4.0),
                 egui::pos2(separator_x, rect.bottom() - 4.0),
             ],
-            egui::Stroke::new(1.0, stroke_color.opacity(0.65)),
+            egui::Stroke::new(1.0_f32, stroke_color.opacity(0.65)),
         );
         ui.painter().text(
             egui::pos2(separator_x + 6.0, rect.center().y),

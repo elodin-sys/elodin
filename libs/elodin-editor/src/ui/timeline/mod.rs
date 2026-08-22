@@ -466,7 +466,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         egui::Panel::bottom("timeline_panel")
             .frame(egui::Frame {
                 fill: get_scheme().bg_primary,
-                //stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+                //stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                 ..Default::default()
             })
             .resizable(false)

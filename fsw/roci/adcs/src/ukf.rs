@@ -86,7 +86,7 @@ where
 pub fn innovate<S, N, Z, R>(
     x_points: &Tensor<f64, (S, N), R>,
     z: &Tensor<f64, Z, R>,
-    measure_fn: impl for<'a> Fn(Tensor<f64, N, R>, Tensor<f64, Z, R>) -> Tensor<f64, Z, R>,
+    measure_fn: impl Fn(Tensor<f64, N, R>, Tensor<f64, Z, R>) -> Tensor<f64, Z, R>,
     mean_weights: &Tensor<f64, S, R>,
     covar_weights: &Tensor<f64, S, R>,
     noise_covar: &Tensor<f64, (Z, Z), R>,

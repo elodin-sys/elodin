@@ -2558,14 +2558,9 @@ fn parse_emissivity_value(value: &kdl::KdlValue) -> Option<f32> {
     let parsed = if let Some(number) = value.as_float() {
         number as f32
     } else if let Some(integer) = value.as_integer() {
-        let Ok(integer) = i64::try_from(integer) else {
-            return None;
-        };
-        integer as f32
-    } else if let Some(text) = value.as_string() {
-        text.parse::<f32>().ok()?
+        i64::try_from(integer).ok()? as f32
     } else {
-        return None;
+        value.as_string()?.parse::<f32>().ok()?
     };
 
     Some(parsed.clamp(0.0, 1.0))

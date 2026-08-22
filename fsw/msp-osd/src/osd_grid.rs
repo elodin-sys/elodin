@@ -16,9 +16,7 @@ impl OsdGrid {
     }
 
     pub fn clear(&mut self) {
-        for c in &mut self.cells {
-            *c = ' ';
-        }
+        self.cells.fill(' ');
     }
 
     /// Write ASCII/UTF-8 text at (row, col), clipped to the grid.
