@@ -408,84 +408,22 @@
             <ul>
                 
                 <li>
-                    <a href="/reference/replays/#file-layout">File Layout</a>
-                    
-                    <ul>
-                        
-                        <li>
-                            <a href="/reference/replays/#metadata-json">metadata.json</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#assets-bin">assets.bin</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#component-data-parquet-files">Component data Parquet files</a>
-                            
-                        </li>
-                        
-                    </ul>
+                    <a href="/reference/replays/#record-a-simulation">Record a simulation</a>
                     
                 </li>
                 
                 <li>
-                    <a href="/reference/replays/#well-known-archetypes">Well-Known Archetypes</a>
-                    
-                    <ul>
-                        
-                        <li>
-                            <a href="/reference/replays/#body">body</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#shape">shape</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#asset-handle-panel">asset_handle_panel</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#asset-handle-entity-metadata">asset_handle_entity_metadata</a>
-                            
-                        </li>
-                        
-                    </ul>
+                    <a href="/reference/replays/#open-a-recording">Open a recording</a>
                     
                 </li>
                 
                 <li>
-                    <a href="/reference/replays/#well-known-assets">Well-Known Assets</a>
+                    <a href="/reference/replays/#replay-mode">Replay mode</a>
                     
-                    <ul>
-                        
-                        <li>
-                            <a href="/reference/replays/#mesh">Mesh</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#material">Material</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#glb">GLB</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/replays/#panel">Panel</a>
-                            
-                        </li>
-                        
-                    </ul>
+                </li>
+                
+                <li>
+                    <a href="/reference/replays/#choose-a-schematic">Choose a schematic</a>
                     
                 </li>
                 
@@ -496,98 +434,36 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Replays</h1>
-                   <p>Elodin has built-in functionality to save simulation data to a directory. This data can be used to replay the simulation at a later time. This is useful for debugging, testing, and sharing simulations. Replays also enable running simulations in a headless environment, and then replaying them in a graphical environment.</p>
-<p>For <strong>Elodin DB</strong> recordings that bundle schematic assets (GLB, <code>.png</code> icons, skyboxes) under <code>{db}/assets/</code>, see <a href="/reference/db-asset-server">DB Asset Server</a>. The layout below describes the legacy replay directory format (<code>metadata.json</code>, <code>assets.bin</code>, Parquet).</p>
-<p>To replay a simulation using the Elodin editor, run the following command:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#859900, #859900);"> &lt;</span><span style="color: light-dark(#2AA198, #2AA198);">path</span><span style="color: light-dark(#2AA198, #2AA198);"> to</span><span style="color: light-dark(#2AA198, #2AA198);"> replay</span><span style="color: light-dark(#2AA198, #2AA198);"> di</span><span>r</span><span style="color: light-dark(#859900, #859900);">&gt;</span></span></code></pre><h2 id="file-layout">File Layout</h2>
-<p>An Elodin replay directory contains:</p>
-<ul>
-<li><code>metadata.json</code></li>
-<li><code>assets.bin</code></li>
-<li>Component data Parquet files</li>
-</ul>
-<h3 id="metadata-json">metadata.json</h3>
-<p>This file contains all of the metadata that is needed to replay the simulation. Its schema is as follows:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="json"><span class="giallo-l"><span>{</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">  &quot;</span><span style="color: light-dark(#859900, #859900);">sim_time_step</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span style="color: light-dark(#D33682, #D33682);"> 0.008333333</span><span>,</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">  &quot;</span><span style="color: light-dark(#859900, #859900);">archetypes</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span> {</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    &quot;</span><span style="color: light-dark(#859900, #859900);">archetype_a</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span> [</span></span>
-<span class="giallo-l"><span>      {</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        &quot;</span><span style="color: light-dark(#859900, #859900);">name</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">component_1</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        &quot;</span><span style="color: light-dark(#859900, #859900);">component_type</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span> {</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">          &quot;</span><span style="color: light-dark(#859900, #859900);">primitive_ty</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">F64</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">          &quot;</span><span style="color: light-dark(#859900, #859900);">shape</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span> [</span><span style="color: light-dark(#D33682, #D33682);">6</span><span>]</span></span>
-<span class="giallo-l"><span>        }</span><span>,</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        &quot;</span><span style="color: light-dark(#859900, #859900);">tags</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span style="color: light-dark(#B58900, #B58900);"> null</span><span>,</span></span>
-<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        &quot;</span><span style="color: light-dark(#859900, #859900);">asset</span><span style="color: light-dark(#859900, #859900);">&quot;</span><span>:</span><span style="color: light-dark(#B58900, #B58900);"> false</span></span>
-<span class="giallo-l"><span>      }</span></span>
-<span class="giallo-l"><span>    ]</span></span>
-<span class="giallo-l"><span>  }</span></span>
-<span class="giallo-l"><span>}</span></span></code></pre>
-<p>There are two top-level keys in the metadata file:</p>
-<ul>
-<li><code>"time_step"</code>: The time step that the simulation was run with.</li>
-<li><code>"archetypes"</code>: A dictionary where the key is the name of the archetype, and the value is a list of component dictionaries.</li>
-</ul>
-<p>Each component dictionary has the following keys:</p>
-<ul>
-<li><code>"name"</code>: The name of the component.</li>
-<li><code>"component_type"</code>: A dictionary containing the type information of the component.
-<ul>
-<li><code>"primitive_ty"</code>: The primitive type of the component, which can be either "F64" or "U64".</li>
-<li><code>"shape"</code>: The shape is a list of integers that specifies the size of each dimension (e.g. <code>[]</code> for scalars, <code>[3]</code> for 3D vectors).</li>
-</ul>
-</li>
-</ul>
-<h3 id="assets-bin">assets.bin</h3>
-<p>This file is a container of non-component data that's associated with entities. See <a href="/reference/replays/#well-known-assets">Well-Known Assets</a> for some examples. Archetypes are often used to link entities to assets by using the asset handle as scalar component data. Some examples of such archetypes are <code>shape</code>, <code>asset_handle_panel</code>, and <code>asset_handle_entity_metadata</code>.</p>
-<div class="el-warning warning container-fluid">
-    <div class="row g-0 align-items-center">
-        <div class="col-1" style="padding: 4px">
-            <i class="bx bx-error" style="font-size: 1.5rem"></i>
-        </div>
-        <div class="col-15"><p>This file format is currently not suitable for consumption by external tools and is subject to change in the future.</p>
-</div>
-    </div>
-</div>
-<h3 id="component-data-parquet-files">Component data Parquet files</h3>
-<p>Each <a href="/reference/python-api#archetypes">Archetype</a> in the simulation has a Parquet file named after it. The file contains the component data for each entity of that archetype. There is a row for each entity at every tick of the simulation. There are special columns in the Parquet file that are used to store the entity ID and the tick number: "entity_id" and "tick" respectively. The rest of the columns are the components of the archetype. E.g.:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>│ world_pos                 ┆ world_vel                 ┆ tick ┆ entity_id │</span></span>
-<span class="giallo-l"><span>│ array[f64, 7]             ┆ array[f64, 6]             ┆ u64  ┆ u64       │</span></span>
-<span class="giallo-l"><span>│---------------------------┆---------------------------┆------┆-----------│</span></span>
-<span class="giallo-l"><span>│ [0.0, 0.0, ... 5.999659]  ┆ [0.0, 0.0, ... -0.08175]  ┆ 0    ┆ 0         │</span></span>
-<span class="giallo-l"><span>│ [0.0, 0.0, ... 5.9986375] ┆ [0.0, 0.0, ... -0.1635]   ┆ 1    ┆ 0         │</span></span>
-<span class="giallo-l"><span>│ [0.0, 0.0, ... 5.996934]  ┆ [0.0, 0.0, ... -0.24525]  ┆ 2    ┆ 0         │</span></span></code></pre>
-<p>In this simplified example, there is a single entity with two components: <code>world_pos</code> and <code>world_vel</code>. The entity has an ID of <code>0</code>, and the simulation has run for three ticks.</p>
-<h2 id="well-known-archetypes">Well-Known Archetypes</h2>
-<h3 id="body">body</h3>
-<p><code>body</code> is a core archetype that's used in most Elodin simulations. It represents the state of a rigid body with six degrees of freedom, and is used by the built-in 6DOF integrators to propagate the simulation forward in time. It also contains most of the necessary information to render the body in a graphical environment. The components of the <code>Body</code> archetype are:</p>
-<ul>
-<li><code>world_pos</code>: A <a href="/reference/python-api#class-elodin-spatialtransform">SpatialTransform</a> representing the body's position and orientation in the world frame.</li>
-<li><code>world_vel</code>: A <a href="/reference/python-api#class-elodin-spatialmotion">SpatialMotion</a> representing the body's linear and angular velocity in the world frame.</li>
-<li><code>world_accel</code>: A <a href="/reference/python-api#class-elodin-spatialmotion">SpatialMotion</a> representing the body's linear and angular acceleration in the world frame.</li>
-<li><code>force</code>: A <a href="/reference/python-api#class-elodin-spatialforce">SpatialForce</a> representing the net force and torque acting on the body in the world frame.</li>
-<li><code>inertia</code>: A <a href="/reference/python-api#class-elodin-spatialinertia">SpatialInertia</a> representing the body's mass, moment of inertia, and momentum in the body frame.</li>
-</ul>
-<h3 id="shape">shape</h3>
-<p><code>shape</code> represents the primitive shape and color of a body. It serves as a link between entity ids and asset ids, as can be seen from its components:</p>
-<ul>
-<li><code>asset_handle_material</code>: A <code>u64</code> handle to a <a href="/reference/replays/#material">Material</a> asset.</li>
-<li><code>asset_handle_mesh</code>: A <code>u64</code> handle to a <a href="/reference/replays/#mesh">Mesh</a> asset.</li>
-</ul>
-<h3 id="asset-handle-panel">asset_handle_panel</h3>
-<p><code>asset_handle_panel</code> links an entity to a panel asset. It only has one component: <code>asset_handle_panel</code>, which is a <code>u64</code> handle to a [Panel] asset.</p>
-<h3 id="asset-handle-entity-metadata">asset_handle_entity_metadata</h3>
-<p><code>asset_handle_entity_metadata</code> links an entity to a metadata asset. It only has one component: <code>asset_handle_entity_metadata</code>, which is a <code>u64</code> handle to a metadata asset.</p>
-<h2 id="well-known-assets">Well-Known Assets</h2>
-<h3 id="mesh">Mesh</h3>
-<p><code>Mesh</code> assets describe the geometry of a body. Currently, the mesh must be a primitive shape, such as a sphere, box, or cylinder.</p>
-<h3 id="material">Material</h3>
-<p><code>Material</code> assets describe the color, texture, and optional <code>emissivity</code> property (0.0–1.0) that makes simple meshes glow; the property can be emitted directly from the schematic’s mesh node.</p>
-<h3 id="glb">GLB</h3>
-<p><code>GLB</code> assets are 3D models in the GLB format. They can be used to represent complex geometries and textures.</p>
-<h3 id="panel">Panel</h3>
-<p><code>Panel</code> assets describe the layout and contents of the Elodin GUI declaratively. They are used to configure viewports and graphs.</p>
+                   <p>Elodin records simulation telemetry, metadata, schematics, and visual assets in
+an Elodin DB directory. The editor can serve and open that directory directly,
+so replaying a recording does not require a separate <code>elodin-db</code> process.</p>
+<h2 id="record-a-simulation">Record a simulation</h2>
+<p>Set <code>ELODIN_DB_PATH</code> when running a simulation to keep its database:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ELODIN_DB_PATH</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">d</span><span style="color: light-dark(#2AA198, #2AA198);">b</span><span style="color: light-dark(#2AA198, #2AA198);">s</span><span style="color: light-dark(#2AA198, #2AA198);">/</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">p</span><span style="color: light-dark(#2AA198, #2AA198);">o</span><span style="color: light-dark(#2AA198, #2AA198);">l</span><span style="color: light-dark(#2AA198, #2AA198);">l</span><span style="color: light-dark(#2AA198, #2AA198);">o</span><span style="color: light-dark(#268BD2, #268BD2);"> elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/apollo-lander/main.py</span></span></code></pre>
+<p>The recording includes a <code>db_state</code> file, component data, and an <code>assets/</code>
+tree. Keep the whole directory when copying or sharing it.</p>
+<h2 id="open-a-recording">Open a recording</h2>
+<p>Pass the database directory to the editor:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span></span></code></pre>
+<p>The editor starts an embedded database server, connects to it automatically,
+and stops the server when the editor closes. The default Impeller address is
+<code>[::]:2240</code>; assets use port 2241 and gRPC uses port 2242. Use <code>--addr</code> to
+select another base address:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-addr</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:3000</span></span></code></pre>
+<p>The database directory cannot also be open by another <code>elodin-db</code> or <code>elodin</code>
+process on the same ports.</p>
+<p>To serve the recording without opening an editor, use:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span></span></code></pre><h2 id="replay-mode">Replay mode</h2>
+<p>Replay mode reveals recorded data progressively as the playback marker
+advances, simulating a live session:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-replay</span></span></code></pre>
+<p>Without <code>--replay</code>, the full recorded time range is available immediately.</p>
+<h2 id="choose-a-schematic">Choose a schematic</h2>
+<p>By default, the editor opens the active schematic stored in the database.
+Override it with a local KDL file:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-replay</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-kdl</span><span style="color: light-dark(#2AA198, #2AA198);"> schematics/review.kdl</span></span></code></pre>
+<p>For details about bundled GLB files, images, skyboxes, and schematics, see
+<a href="/reference/db-asset-server">DB Asset Server</a>.</p>
 
                   
 <div class="footer-line-padding"></div>
