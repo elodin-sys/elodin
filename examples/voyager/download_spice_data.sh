@@ -12,3 +12,5 @@ curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_1.a54206
     -o ./nasa_spice_data/Voyager_1.a54206u_V0.2_merged.bsp
 curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_2.m05016u.merged.bsp \
     -o ./nasa_spice_data/Voyager_2.m05016u.merged.bsp
+curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/vgr1_jup230.bsp \
+    -o ./nasa_spice_data/vgr1_jup230.bsp
