@@ -18,8 +18,8 @@ import spiceypy as spice
 
 G = 6.6743e-11
 DT_S = 3600.0
-START_UTC = "1979-02-05T00:00:00"
-CHECKPOINTS_S = (0, 5 * 86400, 10 * 86400)
+START_UTC = "1979-02-06T00:00:00"
+CHECKPOINTS_S = (0, 1 * 86400, 2 * 86400)
 
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 KERNELS = (
