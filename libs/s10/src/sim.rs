@@ -16,7 +16,10 @@ use which::which;
 use crate::DEFAULT_WATCH_TIMEOUT;
 use crate::cgroup::CgroupScope;
 use crate::probe::ReadyProbe;
-use crate::{error::Error, watch::watch};
+use crate::{
+    error::Error,
+    watch::{WatchExitPolicy, watch},
+};
 use std::time::Duration;
 #[cfg(target_os = "linux")]
 use std::{collections::HashSet, fs};
@@ -265,6 +268,7 @@ impl SimRecipe {
             },
             cancel_token,
             iter::once(dir),
+            WatchExitPolicy::ReturnOnSuccess,
         )
         .await
     }

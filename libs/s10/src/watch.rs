@@ -8,11 +8,18 @@ use tracing::error;
 
 use crate::error::Error;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WatchExitPolicy {
+    ReturnOnSuccess,
+    WaitForChange,
+}
+
 pub async fn watch<F>(
     timeout: Duration,
     builder: impl Fn(CancelToken) -> F,
     cancel_token: CancelToken,
     dirs: impl Iterator<Item = PathBuf>,
+    exit_policy: WatchExitPolicy,
 ) -> Result<(), Error>
 where
     F: Future<Output = Result<(), Error>> + Send + Sync + 'static,
@@ -41,15 +48,17 @@ where
                 set.join_next().await;
                 break;
             }
-            // The watched process exited on its own (e.g. `interactive=False`
-            // reached `max_ticks`). Propagate that so a sim-led group can tear
-            // down forever-running sidecars. A failure stays in the watch loop
-            // until a file change restarts, matching `elodin run`'s reload DX.
             result = set.join_next() => {
                 match result {
-                    Some(Ok(Ok(()))) => return Ok(()),
-                    Some(Ok(Err(err))) => {
-                        error!(?err, "error running watched process");
+                    Some(Ok(Ok(())))
+                        if exit_policy == WatchExitPolicy::ReturnOnSuccess =>
+                    {
+                        return Ok(());
+                    }
+                    Some(Ok(result)) => {
+                        if let Err(err) = result {
+                            error!(?err, "error running watched process");
+                        }
                         tokio::select! {
                             _ = cancel_token.wait() => break,
                             res = file_events.recv() => {
@@ -97,6 +106,7 @@ mod tests {
                 |_| async { Ok(()) },
                 CancelToken::new(),
                 std::iter::empty(),
+                WatchExitPolicy::ReturnOnSuccess,
             ),
         )
         .await;
@@ -105,6 +115,33 @@ mod tests {
             "watch hung after the watched process exited cleanly"
         );
         assert!(result.unwrap().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn success_stays_in_watch_loop_when_waiting_for_change() {
+        let cancel = CancelToken::new();
+        let cancel_for_watch = cancel.clone();
+        let handle = tokio::spawn(async move {
+            watch(
+                Duration::from_millis(50),
+                |_| async { Ok(()) },
+                cancel_for_watch,
+                std::iter::empty(),
+                WatchExitPolicy::WaitForChange,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            !handle.is_finished(),
+            "watch returned after a successful sidecar exit"
+        );
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("watch did not exit after cancel")
+            .expect("watch task panicked");
+        assert!(result.is_ok());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -117,6 +154,7 @@ mod tests {
                 |_| async { Err(Error::JoinError) },
                 cancel_for_watch,
                 std::iter::empty(),
+                WatchExitPolicy::ReturnOnSuccess,
             )
             .await
         });
