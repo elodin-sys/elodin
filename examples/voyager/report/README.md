@@ -1,56 +1,57 @@
-# Voyager 1 Jupiter validation — one-page report
+# Voyager 1 Jupiter validation
 
-This is the focused reconstructed-trajectory check for PR #801: initialize Voyager 1 from the Jupiter encounter SPK, propagate Chapter 1 and Chapter 2 from the **same initial state**, and compare both against the **same reconstructed SPICE trajectory**.
+quick writeup for #801. I wanted to check whether Chapter 2 actually improves agreement with the reconstructed V1 Jupiter SPICE arc while keeping everything else the same.
 
-## 1. Hypothesis
+## idea
 
-The Voyager example integrates a Sun-relative state. Chapter 1 applies each planet's direct pull on the spacecraft, but does not subtract that planet's acceleration of the Sun. The hypothesis is that this missing heliocentric correction is a meaningful source of propagation error.
+Chapter 1 uses the direct planet-on-Voyager pull. Since the state is Sun-relative, the planet is also accelerating the Sun. Chapter 2 subtracts that part out.
 
 ![Chapter 1 versus Chapter 2 gravity](assets/gravity_before_after.svg)
-
-For Chapter 2, each planet contributes
 
 ```text
 mu_i * ((r_i - r) / |r_i - r|^3 - r_i / |r_i|^3)
 ```
 
-The second term is the indirect heliocentric correction: it removes the acceleration of the Sun-centered origin caused by that planet.
+basically: **planet-on-Voyager gravity - planet-on-Sun gravity**.
 
-## 2. Test
+## setup
 
-| Item | Value |
-| --- | --- |
-| Spacecraft | Voyager 1 |
-| Encounter kernel | `vgr1_jup230.bsp` |
-| Start | 1979-02-06 00:00 UTC |
-| Checkpoints | 0, 1, 2 days |
-| Frame / origin | `ECLIPJ2000` / Sun |
-| Integrator | RK4 |
-| Step | 1 hour |
-| Planet ephemerides | DE440 |
+- Voyager 1 Jupiter kernel: `vgr1_jup230.bsp`
+- start: Feb 6, 1979
+- checkpoints: 0, 1, and 2 days
+- `ECLIPJ2000`, Sun-relative
+- RK4, 1 hour step
+- DE440 for planet states
 
-Both chapters use the same start state, masses, ephemerides, timestep, integrator, and SPICE reference. The validation window is the Feb 6–8 interval described in PR #801; the Feb 5 / Feb 9 maneuver-boundary rationale is therefore treated as PR context rather than independently established maneuver history here.
+Both chapters start from the same SPICE state and use the same masses, ephemerides, timestep, integrator, and reference trajectory.
 
-## 3. Result
+I kept Feb 6-8 because that's the window used in #801. The Feb 5 / Feb 9 maneuver labels come from the PR context, so I'm not treating those dates as independently verified maneuver history here.
 
-A fresh local rerun reproduced the improvement reported in the PR:
+## results
 
-| Checkpoint | Chapter 1 position error | Chapter 2 position error | Reduction | Chapter 1 velocity error | Chapter 2 velocity error |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Day 1 | 0.766 km | 0.166 km | **78.29%** | 0.0177 m/s | 0.0039 m/s |
-| Day 2 | 3.060 km | 0.668 km | **78.16%** | 0.0354 m/s | 0.0078 m/s |
+fresh rerun:
 
-**Takeaway:** in this specific validation run, Chapter 2 reduces both the position and velocity residuals by about 78% at the two scored checkpoints.
+| checkpoint | ch1 position error | ch2 position error | reduction |
+| --- | ---: | ---: | ---: |
+| day 1 | 0.766 km | 0.166 km | **78.29%** |
+| day 2 | 3.060 km | 0.668 km | **78.16%** |
 
-## 4. What this does — and does not — establish
+velocity error moved the same way:
 
-The result supports the hypothesis that the missing heliocentric indirect term was a real dynamics error in the Chapter 1 model. It does **not** mean the remaining residual is bad SPICE data or that the Voyager trajectory is fully reconstructed. The current propagation is still gravity-only, so historical thrust and other unmodeled effects can remain in the residual.
+- day 1: `0.0177 -> 0.0039 m/s`
+- day 2: `0.0354 -> 0.0078 m/s`
 
-The useful pattern is the workflow itself: **identify a model gap → form a hypothesis → change one piece of the dynamics → test both models against the same reconstructed reference → keep the improvement only if the residual actually gets better.**
+so in this case Chapter 2 is about **78% lower** at both checkpoints.
 
-## Sources
+## limits
+
+this doesn't mean the whole Voyager trajectory is solved. the model is still gravity-only, so historical thrust and other missing effects can still show up in the residual.
+
+what I like about this case is that it's small and repeatable: change one piece of the dynamics, keep the rest fixed, and see if the reconstructed-reference error actually gets better.
+
+## sources
 
 - PR #801
-- Issue #794
-- NAIF Voyager 1 Jupiter encounter SPK: `vgr1_jup230.bsp`
-- NASA/JPL Voyager encounter documentation linked from #794
+- issue #794
+- NAIF `vgr1_jup230.bsp`
+- NASA/JPL Voyager encounter material linked from #794
