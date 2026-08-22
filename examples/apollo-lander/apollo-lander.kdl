@@ -23,7 +23,7 @@ environment {
 
 // Single viewport: Bevy atmosphere supports one active atmosphere camera.
 hsplit {
-    viewport name="Tranquility Base" near=1.0 far=1000000000.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true ev100=13.2 show_grid=#false active=#true {
+    viewport name="Tranquility Base" near=1.0 pos="lander.world_pos.translate_world(10.0, 10.0, 4.0)" look_at=lander.world_pos hdr=#true ev100=13.2 show_grid=#false active=#true {
         bloom preset="old_school" intensity=0.22 threshold=0.78 threshold_softness=0.12
     }
     vsplit share=0.536157 {
