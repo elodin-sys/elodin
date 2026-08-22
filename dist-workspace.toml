@@ -51,6 +51,10 @@ libxkbcommon-dev = '*'
 gfortran = '*'
 gfortran-12 = '*'
 libgfortran-12-dev = '*'
+protobuf-compiler = '*'
+
+[dist.dependencies.homebrew]
+protobuf = '*'
 
 [dist.dependencies.chocolatey]
 cmake = '*'

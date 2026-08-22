@@ -367,7 +367,8 @@ jobs:
           sudo apt-get install -y \
             curl libssl-dev \
             g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 \
-            libwayland-dev libxkbcommon-dev libopenblas-dev gfortran gfortran-12 libgfortran-12-dev
+            libwayland-dev libxkbcommon-dev libopenblas-dev gfortran gfortran-12 libgfortran-12-dev \
+            protobuf-compiler
       - name: Install Python dependencies
         run: |
           pip install patchelf jax typing_extensions
@@ -468,6 +469,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          brew install protobuf
       - name: Install Python dependencies
         run: |
           pip install jax typing_extensions
