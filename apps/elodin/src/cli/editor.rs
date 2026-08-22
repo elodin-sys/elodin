@@ -225,10 +225,7 @@ impl Cli {
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         Ok(std::thread::spawn(move || {
             rt.block_on(async move {
-                tokio::spawn(async move {
-                    let _drop = cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
-                    tokio::signal::ctrl_c().await
-                });
+                wait_for_shutdown(cancel_token, tokio::signal::ctrl_c()).await;
                 Ok(())
             })
         }))
@@ -369,6 +366,27 @@ impl Cli {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
+async fn wait_for_shutdown(
+    cancel_token: CancelToken,
+    ctrl_c: impl std::future::Future<Output = std::io::Result<()>>,
+) {
+    tokio::select! {
+        result = ctrl_c => {
+            match result {
+                Ok(()) => {
+                    info!("Received Ctrl-C, shutting down");
+                    cancel_token.cancel();
+                }
+                Err(err) => {
+                    warn!(?err, "failed to listen for Ctrl-C");
+                }
+            }
+        }
+        _ = cancel_token.wait() => {}
+    }
+}
+
 #[derive(Resource)]
 struct BevyCancelToken(CancelToken);
 
@@ -459,5 +477,30 @@ mod tests {
                 .to_string()
                 .contains("expected db_state, s10.toml, or main.py")
         );
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_cancellation() {
+        let cancel = CancelToken::new();
+        let handle = tokio::spawn(wait_for_shutdown(
+            cancel.clone(),
+            std::future::pending::<std::io::Result<()>>(),
+        ));
+        tokio::task::yield_now().await;
+        assert!(!handle.is_finished());
+        assert!(!cancel.is_cancelled());
+
+        cancel.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("shutdown waiter did not observe cancellation")
+            .expect("shutdown waiter panicked");
+    }
+
+    #[tokio::test]
+    async fn shutdown_signal_cancels_token() {
+        let cancel = CancelToken::new();
+        wait_for_shutdown(cancel.clone(), std::future::ready(Ok(()))).await;
+        assert!(cancel.is_cancelled());
     }
 }
