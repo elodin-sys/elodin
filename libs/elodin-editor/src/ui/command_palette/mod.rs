@@ -276,7 +276,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(egui::Frame {
                 fill: scheme.bg_secondary,
-                stroke: egui::Stroke::new(1.0, with_opacity(scheme.text_primary, 0.005)),
+                stroke: egui::Stroke::new(1.0_f32, with_opacity(scheme.text_primary, 0.005)),
                 corner_radius: theme::corner_radius_sm(),
                 shadow: Shadow {
                     color: scheme.shadow.opacity(0.2),

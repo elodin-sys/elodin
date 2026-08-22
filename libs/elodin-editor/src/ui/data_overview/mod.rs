@@ -768,7 +768,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                         if line_points.len() >= 2 {
                             ui.painter().add(egui::Shape::line(
                                 line_points,
-                                Stroke::new(1.0, series_color),
+                                Stroke::new(1.0_f32, series_color),
                             ));
                         } else if line_points.len() == 1 {
                             // Single point - draw a small circle
@@ -810,7 +810,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         ui.painter().vline(
             timeline_start_x,
             available_rect.y_range(),
-            Stroke::new(1.0, scheme.border_primary),
+            Stroke::new(1.0_f32, scheme.border_primary),
         );
 
         // Check if pointer is over the timeline area (right of labels)

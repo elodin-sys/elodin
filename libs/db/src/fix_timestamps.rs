@@ -336,8 +336,8 @@ fn analyze_component(index_path: &Path) -> Result<ComponentInfo, std::io::Error>
 
     let mut min_ts = i64::MAX;
 
-    for chunk in data.chunks_exact(8) {
-        let ts = i64::from_le_bytes(chunk.try_into().unwrap());
+    for chunk in data.as_chunks::<8>().0 {
+        let ts = i64::from_le_bytes(*chunk);
         min_ts = min_ts.min(ts);
     }
 
@@ -365,10 +365,10 @@ fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std:
     file.read_exact(&mut data)?;
 
     // Apply offset to all timestamps
-    for chunk in data.chunks_exact_mut(8) {
-        let ts = i64::from_le_bytes(chunk.try_into().unwrap());
+    for chunk in data.as_chunks_mut::<8>().0 {
+        let ts = i64::from_le_bytes(*chunk);
         let new_ts = ts + offset;
-        chunk.copy_from_slice(&new_ts.to_le_bytes());
+        *chunk = new_ts.to_le_bytes();
     }
 
     // Write back

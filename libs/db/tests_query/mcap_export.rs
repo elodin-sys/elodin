@@ -134,7 +134,7 @@ fn build_fixture(path: PathBuf) -> DB {
         assets.join("schematics/main.kdl"),
         r#"tabs {
     hsplit name=Viewport {
-        viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at=drone.world_pos show_grid=#true active=#true
+        viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at=drone.world_pos near=0.1 far=6.0 show_grid=#true active=#true
         vsplit share=0.4 {
             graph drone.gyro name=Gyro
             graph "drone.world_pos.q0, drone.thrust"
@@ -368,6 +368,8 @@ fn mcap_export_roundtrip() {
     assert!((camera["phi"].as_f64().unwrap() - 54.7356).abs() < 1e-3);
     assert!((camera["thetaOffset"].as_f64().unwrap() - 45.0).abs() < 1e-6);
     assert_eq!(camera["fovy"], 45.0);
+    assert!((camera["near"].as_f64().unwrap() - 0.1).abs() < 1e-6);
+    assert_eq!(camera["far"].as_f64().unwrap(), 1.0e16);
 
     // Plot series resolved from EQL, including explicit element access.
     let plots: Vec<&serde_json::Value> = config_by_id

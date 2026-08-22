@@ -333,6 +333,7 @@ body_objects = "\n".join(
 
 w.schematic(
     """
+    timeline follow_latest=#true
     hsplit {{
         tabs share=0.2 {{
             hierarchy

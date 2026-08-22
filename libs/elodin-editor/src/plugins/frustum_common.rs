@@ -1,6 +1,6 @@
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::sensor_camera::SensorCameraFrustumSource;
-use crate::ui::tiles::ViewportConfig;
+use crate::ui::tiles::{DEFAULT_VIEWPORT_FAR, ViewportConfig};
 use bevy::prelude::*;
 
 pub type MainViewportQueryItem = (
@@ -18,6 +18,29 @@ pub type SensorCameraFrustumQueryItem = (
     &'static GlobalTransform,
     &'static SensorCameraFrustumSource,
 );
+
+pub fn presentation_far(near: f32, configured_far: Option<f32>) -> f32 {
+    match configured_far {
+        Some(far) if far > near => far,
+        _ => DEFAULT_VIEWPORT_FAR.max(near * 2.0),
+    }
+}
+
+pub fn presentation_perspective(
+    live: &PerspectiveProjection,
+    config: Option<&ViewportConfig>,
+) -> PerspectiveProjection {
+    let near = config
+        .and_then(|config| config.configured_near)
+        .unwrap_or(live.near);
+    let far = presentation_far(near, config.and_then(|config| config.configured_far));
+    PerspectiveProjection {
+        near,
+        far,
+        near_clip_plane: near_clip_plane(near),
+        ..live.clone()
+    }
+}
 
 pub fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3; 8]> {
     let near = perspective.near;
@@ -68,6 +91,59 @@ mod tests {
             far,
             near_clip_plane: near_clip_plane(near),
         }
+    }
+
+    fn viewport_config(near: Option<f32>, far: Option<f32>) -> ViewportConfig {
+        ViewportConfig {
+            aspect: None,
+            configured_near: near,
+            configured_far: far,
+            show_arrows: true,
+            create_frustum: true,
+            show_frustums: false,
+            show_coverage_in_viewport: false,
+            show_projection_2d: false,
+            frustums_color: default(),
+            projection_color: default(),
+            frustums_thickness: 0.006,
+            cinematic: false,
+            bloom: None,
+        }
+    }
+
+    #[test]
+    fn presentation_perspective_uses_configured_distances() {
+        let live = perspective(1.2, 16.0 / 9.0, 9.0, 1.0e16);
+        let config = viewport_config(Some(0.2), Some(500.0));
+        let presentation = presentation_perspective(&live, Some(&config));
+
+        assert_eq!(presentation.fov, live.fov);
+        assert_eq!(presentation.aspect_ratio, live.aspect_ratio);
+        assert_eq!(presentation.near, 0.2);
+        assert_eq!(presentation.far, 500.0);
+        assert_eq!(presentation.near_clip_plane, near_clip_plane(0.2));
+    }
+
+    #[test]
+    fn presentation_perspective_uses_live_near_when_unconfigured() {
+        let live = perspective(1.2, 16.0 / 9.0, 9.0, 1.0e16);
+        let presentation = presentation_perspective(&live, None);
+
+        assert_eq!(presentation.near, 9.0);
+        assert_eq!(presentation.far, 18.0);
+        assert_eq!(presentation.near_clip_plane, near_clip_plane(9.0));
+        assert!(frustum_local_points(&presentation).is_some());
+    }
+
+    #[test]
+    fn presentation_perspective_derives_far_beyond_large_near() {
+        let live = perspective(1.2, 16.0 / 9.0, 9.0, 1.0e16);
+        let config = viewport_config(Some(1_000_000.0), None);
+        let presentation = presentation_perspective(&live, Some(&config));
+
+        assert_eq!(presentation.near, 1_000_000.0);
+        assert_eq!(presentation.far, 2_000_000.0);
+        assert!(frustum_local_points(&presentation).is_some());
     }
 
     #[test]

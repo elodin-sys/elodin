@@ -106,7 +106,7 @@ fn render_no_sample_at_playhead(ui: &mut egui::Ui, metadata: &ComponentMetadata)
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
             ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
                 Frame::NONE
-                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
+                    .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
                     .outer_margin(egui::Margin::symmetric(8, 8))
                     .inner_margin(egui::Margin::symmetric(8, 0))
                     .show(ui, |ui| {
@@ -202,7 +202,7 @@ pub fn render_value_cards(ui: &mut egui::Ui, cards: &[(String, String)]) {
 
             ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
                 Frame::NONE
-                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
+                    .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
                     .outer_margin(egui::Margin::symmetric(8, 8))
                     .inner_margin(egui::Margin::symmetric(8, 0))
                     .show(ui, |ui| {

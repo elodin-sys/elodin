@@ -42,6 +42,7 @@ tracing-tracy = { version = "0.11", optional = true }
 
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
+elodin-db = { path = "../../libs/db", default-features = false, features = ["grpc"] }
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 
 # crypto
@@ -53,6 +54,9 @@ machine-uid = "0.5.1"
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 s10.path = "../../libs/s10"
 monte-carlo.path = "../../libs/monte-carlo"
+
+[dev-dependencies]
+tempfile = "3"
 
 [package.metadata.deb]
 maintainer = "info@elodin.systems"

@@ -323,10 +323,10 @@ fn apply_time_shift(index_path: &Path, offset: i64) -> Result<(), Error> {
     file.read_exact(&mut data)?;
 
     // Apply offset to all timestamps
-    for chunk in data.chunks_exact_mut(8) {
-        let ts = i64::from_le_bytes(chunk.try_into().unwrap());
+    for chunk in data.as_chunks_mut::<8>().0 {
+        let ts = i64::from_le_bytes(*chunk);
         let new_ts = ts.saturating_add(offset);
-        chunk.copy_from_slice(&new_ts.to_le_bytes());
+        *chunk = new_ts.to_le_bytes();
     }
 
     // Write back

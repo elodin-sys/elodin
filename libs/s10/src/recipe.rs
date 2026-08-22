@@ -29,7 +29,7 @@ use crate::{
     cgroup::CgroupScope,
     error::Error,
     probe::{ReadyProbe, expand_env, parse_duration},
-    watch::watch,
+    watch::{WatchExitPolicy, watch},
 };
 
 pub const DEFAULT_WATCH_TIMEOUT: Duration = Duration::from_millis(200);
@@ -469,6 +469,7 @@ impl ProcessRecipe {
             |token| self.clone().run(name.clone(), token, cgroup.clone()),
             cancel_token,
             dirs,
+            WatchExitPolicy::WaitForChange,
         )
         .await
     }
@@ -893,6 +894,7 @@ impl CargoRecipe {
             },
             cancel_token,
             dirs,
+            WatchExitPolicy::WaitForChange,
         )
         .await
     }

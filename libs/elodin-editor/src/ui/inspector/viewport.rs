@@ -31,7 +31,7 @@ use crate::ui::widgets::WidgetSystem;
 use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
-    plugins::scene_environment::SceneEnvironment,
+    plugins::{frustum_common::presentation_far, scene_environment::SceneEnvironment},
     ui::tiles::{ViewportConfig, bloom_from_config, cinematic_bloom_config},
     ui::{label::ELabel, theme, utils::MarginSides},
 };
@@ -750,7 +750,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
             ui.separator();
-            let mut configured_clip_planes = None;
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
@@ -774,8 +773,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     }
 
                     ui.add_space(8.0);
-                    let mut near = persp.near;
-                    let mut far = persp.far;
+                    let mut near = viewport_config.configured_near.unwrap_or(persp.near);
+                    let mut far = presentation_far(near, viewport_config.configured_far);
                     let mut near_changed = false;
                     let mut far_changed = false;
 
@@ -798,23 +797,23 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
                     if near_changed || far_changed {
                         near = near.max(0.0001);
-                        if far <= near + 0.0001 {
-                            far = near + 0.0001;
-                        }
-                        persp.near = near;
-                        persp.far = far;
-                        configured_clip_planes = Some((near, far));
 
-                        if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
-                            if near_changed {
+                        if near_changed {
+                            far = presentation_far(near, viewport_config.configured_far);
+                            if viewport_config.configured_far.is_some() {
+                                viewport_config.configured_far = Some(far);
+                            }
+                            persp.near = near;
+                            persp.near_clip_plane =
+                                crate::plugins::frustum_common::near_clip_plane(near);
+                            viewport_config.configured_near = Some(near);
+                            if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
                                 editor_cam.perspective.near_clip_limits = near..near;
                             }
-                            if far_changed {
-                                let (min_size_per_pixel, max_size_per_pixel) =
-                                    crate::ui::tiles::zoom_limits_for_far(far);
-                                editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
-                                editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
-                            }
+                        }
+                        if far_changed {
+                            far = presentation_far(near, Some(far));
+                            viewport_config.configured_far = Some(far);
                         }
                     }
 
@@ -874,10 +873,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     }
                 });
-            if let Some((near, far)) = configured_clip_planes {
-                viewport_config.configured_near = Some(near);
-                viewport_config.configured_far = Some(far);
-            }
         }
 
         if viewport_config.cinematic {
@@ -942,7 +937,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(frustums_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );
@@ -966,7 +961,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(projection_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );
