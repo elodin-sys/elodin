@@ -141,10 +141,7 @@ pub(crate) fn bloom_from_config(config: Option<&BloomConfig>, cinematic: bool) -
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(
-            Update,
-            (sync_editor_cam_zoom_limits, sync_viewport_grid_lod),
-        )
+        .add_systems(Update, sync_viewport_grid_lod)
         .add_systems(Startup, setup_primary_window_state);
     // Must run after the BigSpace root exists; otherwise grids stay parentless
     // and shimmer from float-origin precision loss.
@@ -225,32 +222,10 @@ fn viewport_grid_settings(
     settings
 }
 
-type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
-
-fn sync_editor_cam_zoom_limits(
-    mut cameras: Query<EditorCamZoomLimitsQuery<'_>, (With<MainCamera>, Changed<Projection>)>,
-) {
-    for (projection, mut editor_cam) in &mut cameras {
-        if let Projection::Perspective(persp) = projection {
-            let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(persp.far);
-            editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
-            editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
-        }
-    }
-}
-
-fn viewport_far(projection: &Projection) -> f32 {
-    match projection {
-        Projection::Perspective(persp) => persp.far,
-        Projection::Orthographic(ortho) => ortho.far,
-        Projection::Custom(_) => DEFAULT_VIEWPORT_FAR,
-    }
-}
-
 type ViewportGridLodQuery<'w> = (
     Entity,
     &'w EditorCam,
-    &'w Projection,
+    Option<&'w ViewportConfig>,
     Option<&'w crate::ui::inspector::viewport::Viewport>,
     Option<&'w mut bevy::dev_tools::infinite_grid::InfiniteGridSettings>,
 );
@@ -259,8 +234,14 @@ fn sync_viewport_grid_lod(
     mut cameras: Query<ViewportGridLodQuery<'_>, With<MainCamera>>,
     mut commands: Commands,
 ) {
-    for (entity, editor_cam, projection, viewport, settings) in &mut cameras {
-        let far = viewport_far(projection);
+    for (entity, editor_cam, config, viewport, settings) in &mut cameras {
+        let near = config
+            .and_then(|config| config.configured_near)
+            .unwrap_or(DEFAULT_VIEWPORT_NEAR);
+        let far = crate::plugins::frustum_common::presentation_far(
+            near,
+            config.and_then(|config| config.configured_far),
+        );
         let distance = (editor_cam.last_anchor_depth.abs() as f32).max(DEFAULT_VIEWPORT_NEAR);
         let frame = viewport
             .and_then(|viewport| viewport.frame)
@@ -1851,7 +1832,8 @@ impl ViewportPane {
             editor_cam.perspective.near_clip_limits = near..near;
         }
 
-        let viewport_far = perspective.far;
+        let viewport_far =
+            crate::plugins::frustum_common::presentation_far(perspective.near, viewport.far);
         let grid_frame = viewport.frame.unwrap_or(GeoFrame::ENU);
 
         let mut camera = commands.spawn((
