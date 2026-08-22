@@ -148,7 +148,10 @@ pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
         .add_systems(Startup, setup_primary_window_state)
-        .add_systems(Update, sync_editor_cam_zoom_limits);
+        .add_systems(
+            Update,
+            (sync_editor_cam_zoom_limits, sync_viewport_grid_lod),
+        );
     // Must run after the BigSpace root exists; otherwise grids stay parentless
     // and shimmer from float-origin precision loss.
     #[cfg(feature = "big_space")]
@@ -170,7 +173,7 @@ fn spawn_viewport_grids(
     for (frame, layer) in GRID_RENDER_LAYERS {
         let mut entity = commands.spawn((
             bevy::dev_tools::infinite_grid::InfiniteGrid,
-            viewport_grid_settings(frame),
+            viewport_grid_settings(frame, 10.0, DEFAULT_VIEWPORT_FAR),
             Visibility::Visible,
             RenderLayers::layer(layer),
             #[cfg(feature = "big_space")]
@@ -187,29 +190,45 @@ fn spawn_viewport_grids(
     }
 }
 
+fn viewport_grid_style(
+    _frame: bevy_geo_frames::GeoFrame,
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+    bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+        x_axis_color: crate::ui::colors::bevy::RED,
+        z_axis_color: crate::ui::colors::bevy::GREEN,
+        ..Default::default()
+    }
+}
+
+/// Cell size (~10 cells from camera to subject) quantized to a power of 10 so
+/// lines don't crawl while orbiting. Bevy `scale` is inverse spacing.
+pub(crate) fn grid_lod(distance: f32, far: f32) -> (f32, f32) {
+    let dist = if distance.is_finite() && distance > 0.0 {
+        distance
+    } else {
+        1.0
+    }
+    .max(1.0e-3);
+    let cell = 10f32
+        .powf((dist / 10.0).log10().round())
+        .clamp(1.0e-12, 1.0e12);
+    let scale = 1.0 / cell;
+    let fadeout = (dist * 20.0).max(far.max(0.0)).max(cell * 50.0);
+    (scale, fadeout)
+}
+
 fn viewport_grid_settings(
     frame: bevy_geo_frames::GeoFrame,
+    distance: f32,
+    far: f32,
 ) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
-    match frame {
-        GeoFrame::NED | GeoFrame::ENU => bevy::dev_tools::infinite_grid::InfiniteGridSettings {
-            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-            x_axis_color: crate::ui::colors::bevy::RED,
-            z_axis_color: crate::ui::colors::bevy::GREEN,
-            fadeout_distance: 50_000.0,
-            scale: 0.1,
-            ..Default::default()
-        },
-        GeoFrame::ECEF => bevy::dev_tools::infinite_grid::InfiniteGridSettings {
-            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-            x_axis_color: crate::ui::colors::bevy::RED,
-            z_axis_color: crate::ui::colors::bevy::GREEN,
-            fadeout_distance: 50_000_000.0,
-            scale: 0.000_000_1,
-            ..Default::default()
-        },
-    }
+    let mut settings = viewport_grid_style(frame);
+    let (scale, fadeout_distance) = grid_lod(distance, far);
+    settings.scale = scale;
+    settings.fadeout_distance = fadeout_distance;
+    settings
 }
 
 type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
@@ -222,6 +241,45 @@ fn sync_editor_cam_zoom_limits(
             let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(persp.far);
             editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
             editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
+        }
+    }
+}
+
+fn viewport_far(projection: &Projection) -> f32 {
+    match projection {
+        Projection::Perspective(persp) => persp.far,
+        Projection::Orthographic(ortho) => ortho.far,
+        Projection::Custom(_) => DEFAULT_VIEWPORT_FAR,
+    }
+}
+
+type ViewportGridLodQuery<'w> = (
+    Entity,
+    &'w EditorCam,
+    &'w Projection,
+    Option<&'w crate::ui::inspector::viewport::Viewport>,
+    Option<&'w mut bevy::dev_tools::infinite_grid::InfiniteGridSettings>,
+);
+
+fn sync_viewport_grid_lod(
+    mut cameras: Query<ViewportGridLodQuery<'_>, With<MainCamera>>,
+    mut commands: Commands,
+) {
+    for (entity, editor_cam, projection, viewport, settings) in &mut cameras {
+        let far = viewport_far(projection);
+        let distance = (editor_cam.last_anchor_depth.abs() as f32).max(DEFAULT_VIEWPORT_NEAR);
+        let frame = viewport
+            .and_then(|viewport| viewport.frame)
+            .unwrap_or(GeoFrame::ENU);
+        let next = viewport_grid_settings(frame, distance, far);
+        if let Some(mut settings) = settings {
+            if (settings.scale - next.scale).abs() > f32::EPSILON
+                || (settings.fadeout_distance - next.fadeout_distance).abs() > 1.0e-3
+            {
+                *settings = next;
+            }
+        } else {
+            commands.entity(entity).insert(next);
         }
     }
 }
@@ -1809,6 +1867,9 @@ impl ViewportPane {
             editor_cam.perspective.near_clip_limits = near..near;
         }
 
+        let viewport_far = perspective.far;
+        let grid_frame = viewport.frame.unwrap_or(GeoFrame::ENU);
+
         let mut camera = commands.spawn((
             Transform::default(),
             Camera3d::default(),
@@ -1864,6 +1925,7 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
+        camera.insert(viewport_grid_settings(grid_frame, 2.0, viewport_far));
         camera.insert(MeshPickingCamera);
         camera.insert(bloom_from_config(
             viewport.bloom.as_ref(),
@@ -3949,5 +4011,46 @@ pub fn shortcuts(
             return;
         };
         tabs.set_active(*new_active_id);
+    }
+}
+
+#[cfg(test)]
+mod grid_lod_tests {
+    use super::grid_lod;
+
+    fn cell_size(distance: f32, far: f32) -> f32 {
+        1.0 / grid_lod(distance, far).0
+    }
+
+    #[test]
+    fn n_body_au_camera_gets_unit_cells() {
+        let cell = cell_size(10.0, 5.0);
+        assert!(
+            (cell - 1.0).abs() < 1.0e-5,
+            "10 AU framing should LOD to 1 AU cells, got {cell}"
+        );
+        let (_, fadeout) = grid_lod(10.0, 5.0);
+        assert!(
+            fadeout >= 200.0,
+            "fadeout must cover the framed solar system, got {fadeout}"
+        );
+    }
+
+    #[test]
+    fn metre_chase_uses_sub_ten_metre_cells() {
+        let cell = cell_size(8.0, 5.0);
+        assert!(
+            cell <= 10.0,
+            "close chase must not inherit the planetary ECEF cell, got {cell}"
+        );
+    }
+
+    #[test]
+    fn earth_scale_view_keeps_thousand_kilometre_cells() {
+        let cell = cell_size(80_000_000.0, 150_000_000.0);
+        assert!(
+            (cell - 10_000_000.0).abs() / 10_000_000.0 < 1.0e-6,
+            "80,000 km ECEF view should stay ~10,000 km cells, got {cell}"
+        );
     }
 }
