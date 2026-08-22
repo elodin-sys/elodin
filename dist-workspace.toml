@@ -32,10 +32,10 @@ install-path = "CARGO_HOME"
 install-updater = false
 
 [dist.github-custom-runners]
-aarch64-unknown-linux-gnu = "ubuntu-22.04-arm-large"
-x86_64-unknown-linux-gnu = "ubuntu-22.04-xl"
-aarch64-unknown-linux-musl = "ubuntu-22.04-arm-large"
-x86_64-unknown-linux-musl = "ubuntu-22.04-xl"
+aarch64-unknown-linux-gnu = "ubuntu-24.04-arm-large"
+x86_64-unknown-linux-gnu = "ubuntu-24.04-xl"
+aarch64-unknown-linux-musl = "ubuntu-24.04-arm-large"
+x86_64-unknown-linux-musl = "ubuntu-24.04-xl"
 x86_64-pc-windows-msvc = "windows-xl"
 aarch64-apple-darwin = "macos-14-xlarge"
 
@@ -58,3 +58,4 @@ protobuf = '*'
 
 [dist.dependencies.chocolatey]
 cmake = '*'
+protoc = '*'
