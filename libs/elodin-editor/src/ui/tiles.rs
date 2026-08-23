@@ -64,9 +64,9 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         render_layer_alloc::{
-            CINEMATIC_EARTH_RENDER_LAYER, GRID_RENDER_LAYERS, RenderLayerAllocator,
-            RenderLayerLease, THRUSTER_PARTICLES_RENDER_LAYER, grid_render_layer,
-            view_cube_render_layer,
+            CINEMATIC_EARTH_RENDER_LAYER, GRID_RENDER_LAYERS, REGULAR_SKY_RENDER_LAYER,
+            RenderLayerAllocator, RenderLayerLease, THRUSTER_PARTICLES_RENDER_LAYER,
+            grid_render_layer, view_cube_render_layer,
         },
         scene_environment::CinematicViewport,
         view_cube::{
@@ -1728,6 +1728,8 @@ impl ViewportPane {
         }
         if viewport.cinematic {
             main_camera_layers = main_camera_layers.with(CINEMATIC_EARTH_RENDER_LAYER);
+        } else {
+            main_camera_layers = main_camera_layers.with(REGULAR_SKY_RENDER_LAYER);
         }
         let grid_layer = grid_render_layer(viewport.frame);
         if viewport.show_grid {

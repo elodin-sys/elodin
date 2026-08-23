@@ -2,8 +2,8 @@
 
 use bevy::camera::ClearColorConfig;
 use bevy::camera::visibility::RenderLayers;
-use bevy::light::SunDisk;
 use bevy::light::atmosphere::ScatteringMedium;
+use bevy::light::{NotShadowCaster, SunDisk};
 use bevy::math::DVec3;
 use bevy::pbr::{AtmosphereMode, AtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
@@ -38,6 +38,13 @@ pub(crate) struct SchematicSun;
 /// Atmosphere spawned from the schematic environment.
 #[derive(Component)]
 pub(crate) struct SchematicAtmosphere(AtmosphereConfig);
+
+/// Earth-mode `sky color` dome for regular viewports.
+#[derive(Component)]
+pub(crate) struct SchematicSkyDome(impeller2_wkt::Color);
+
+/// Just inside the cinematic atmosphere shell (outer radius 6,471 km).
+const SKY_DOME_RADIUS_M: f32 = 6.46e6;
 
 /// Returns the explicit atmosphere or cinematic Earth's derived atmosphere.
 fn effective_atmosphere(env: &EnvironmentConfig) -> Option<AtmosphereConfig> {
@@ -75,7 +82,16 @@ impl Plugin for SceneEnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SceneEnvironment>()
             .init_resource::<SpaceVisibility>()
-            .add_systems(Update, (sync_sun, sync_atmosphere, sync_camera_environment));
+            .add_systems(
+                Update,
+                (
+                    sync_sun,
+                    sync_atmosphere,
+                    sync_sky_dome,
+                    sync_camera_environment,
+                    sync_cinematic_shadow_casters,
+                ),
+            );
     }
 }
 
@@ -123,8 +139,11 @@ fn playhead_unix_micros(current: &CurrentTimestamp) -> i64 {
     }
 }
 
+/// Earth mode confines the sun to the cinematic view: Bevy lights every view
+/// whose layers intersect the light's, and a 100 klx sun blows out regular
+/// panes at their LDR default exposure.
 fn cinematic_sun_layers() -> RenderLayers {
-    RenderLayers::from_layers(&[0, CINEMATIC_EARTH_RENDER_LAYER])
+    RenderLayers::layer(CINEMATIC_EARTH_RENDER_LAYER)
 }
 
 fn sync_sun(
@@ -199,6 +218,96 @@ fn sync_sun(
     }
 }
 
+/// Shadow casters are gathered per light from meshes intersecting the light's
+/// layers, so the cinematic-only sun needs `object_3d` casters (vehicle,
+/// terrain) tagged with the cinematic layer to keep their shadows in that
+/// view. Only `object_3d` subtrees are tagged: editor-managed meshes (globe,
+/// grids, gizmos) assign their own layers, sometimes frames after spawn.
+fn sync_cinematic_shadow_casters(
+    mut commands: Commands,
+    environment: Res<SceneEnvironment>,
+    roots: Query<Entity, With<crate::object_3d::Object3DMeshChild>>,
+    children: Query<&Children>,
+    meshes: Query<(Entity, Option<&RenderLayers>), (With<Mesh3d>, Without<NotShadowCaster>)>,
+) {
+    if !environment
+        .0
+        .as_ref()
+        .is_some_and(|env| env.earth.is_some())
+    {
+        return;
+    }
+    let base = RenderLayers::layer(0);
+    let cinematic = RenderLayers::layer(CINEMATIC_EARTH_RENDER_LAYER);
+    for root in &roots {
+        for entity in [root].into_iter().chain(children.iter_descendants(root)) {
+            let Ok((entity, layers)) = meshes.get(entity) else {
+                continue;
+            };
+            let current = layers.cloned().unwrap_or_default();
+            if current.intersects(&base) && !current.intersects(&cinematic) {
+                commands
+                    .entity(entity)
+                    .insert(current.with(CINEMATIC_EARTH_RENDER_LAYER));
+            }
+        }
+    }
+}
+
+/// Earth-mode `sky color`: regular viewports cannot render the cinematic
+/// atmosphere, so they get an unlit dome concentric with the globe instead.
+/// A camera clear color cannot do this — the first camera pass clears the
+/// whole window, bleeding the color behind every egui-transparent pane
+/// (graphs, gauges).
+fn sync_sky_dome(
+    mut commands: Commands,
+    environment: Res<SceneEnvironment>,
+    earth: Option<Single<Entity, With<CinematicEarthRoot>>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    existing: Query<(Entity, &SchematicSkyDome)>,
+) {
+    let Some(earth) = earth.map(|x| *x) else {
+        return;
+    };
+    let config = environment
+        .0
+        .as_ref()
+        .filter(|env| env.earth.is_some())
+        .and_then(|env| env.sky_color);
+    let current = existing.iter().next();
+    match (config, current) {
+        (Some(color), Some((_, dome))) if dome.0 == color => {}
+        (Some(color), current) => {
+            if let Some((entity, _)) = current {
+                commands.entity(entity).despawn();
+            }
+            commands.spawn((
+                SchematicSkyDome(color),
+                Name::new("environment sky dome"),
+                Mesh3d(meshes.add(Sphere::new(SKY_DOME_RADIUS_M))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgba(color.r, color.g, color.b, color.a),
+                    unlit: true,
+                    // The dome is viewed from inside.
+                    cull_mode: None,
+                    ..default()
+                })),
+                NotShadowCaster,
+                Transform::default(),
+                #[cfg(feature = "big_space")]
+                crate::spatial::LowPrecisionRoot,
+                RenderLayers::layer(crate::plugins::render_layer_alloc::REGULAR_SKY_RENDER_LAYER),
+                ChildOf(earth),
+            ));
+        }
+        (None, Some((entity, _))) => {
+            commands.entity(entity).despawn();
+        }
+        (None, None) => {}
+    }
+}
+
 /// Synchronizes the schematic atmosphere entity.
 fn sync_atmosphere(
     mut commands: Commands,
@@ -257,6 +366,26 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
     }
 }
 
+/// Clear colors for the (cinematic, regular) cameras. Earth mode owns the
+/// cinematic sky (atmosphere + Milky Way over black space) and renders `sky
+/// color` as the regular-viewport dome, so both cameras keep fixed clears.
+fn clear_colors(
+    sky_color: Option<impeller2_wkt::Color>,
+    earth: bool,
+) -> (ClearColorConfig, ClearColorConfig) {
+    if earth {
+        (
+            ClearColorConfig::Custom(Color::BLACK),
+            ClearColorConfig::Default,
+        )
+    } else {
+        let sky = sky_color
+            .map(|c| ClearColorConfig::Custom(Color::srgba(c.r, c.g, c.b, c.a)))
+            .unwrap_or(ClearColorConfig::Default);
+        (sky, sky)
+    }
+}
+
 /// Synchronizes viewport IBL, clear color, and atmosphere settings.
 fn atmosphere_settings_for(config: AtmosphereConfig) -> AtmosphereSettings {
     if config.raymarched {
@@ -308,17 +437,7 @@ fn sync_camera_environment(
         None => (1.0, None, None, false),
     };
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
-    let environment_clear = match sky_color {
-        Some(color) => ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a)),
-        None if earth => ClearColorConfig::Custom(Color::BLACK),
-        None => ClearColorConfig::Default,
-    };
-    let regular_clear = match sky_color {
-        Some(color) if !earth => {
-            ClearColorConfig::Custom(Color::srgba(color.r, color.g, color.b, color.a))
-        }
-        _ => ClearColorConfig::Default,
-    };
+    let (environment_clear, regular_clear) = clear_colors(sky_color, earth);
     // Bevy 0.19 permits AtmosphereSettings on only one active view.
     let cinematic_cam = cinematic.iter().next();
     let chosen = if earth {
@@ -478,6 +597,158 @@ mod tests {
                 .get::<crate::spatial::LowPrecisionRoot>(atmosphere)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn earth_mode_sun_lights_only_the_cinematic_layer() {
+        let mut app = App::new();
+        app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+            earth: Some(impeller2_wkt::EarthConfig::default()),
+            ..default()
+        })))
+        .insert_resource(crate::Coordinate::default())
+        .insert_resource(GeoContext::default())
+        .insert_resource(CurrentTimestamp::default())
+        .add_systems(Update, sync_sun);
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&RenderLayers, With<SchematicSun>>();
+        let layers = query.single(app.world()).unwrap();
+        assert_eq!(*layers, RenderLayers::layer(CINEMATIC_EARTH_RENDER_LAYER));
+        assert!(!layers.intersects(&RenderLayers::layer(0)));
+    }
+
+    #[test]
+    fn earth_mode_tags_object_3d_casters_with_cinematic_layer() {
+        let mut app = App::new();
+        app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+            earth: Some(impeller2_wkt::EarthConfig::default()),
+            ..default()
+        })))
+        .add_systems(Update, sync_cinematic_shadow_casters);
+
+        let root = app
+            .world_mut()
+            .spawn(crate::object_3d::Object3DMeshChild)
+            .id();
+        let untagged = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), ChildOf(root)))
+            .id();
+        let off_layer = app
+            .world_mut()
+            .spawn((
+                Mesh3d(Handle::default()),
+                RenderLayers::layer(26),
+                ChildOf(root),
+            ))
+            .id();
+        let non_caster = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), NotShadowCaster, ChildOf(root)))
+            .id();
+        // Not under an object_3d root: editor-managed meshes (e.g. the globe
+        // GLB before its own layer tagging) must stay untouched.
+        let unowned = app.world_mut().spawn(Mesh3d(Handle::default())).id();
+
+        app.update();
+
+        assert_eq!(
+            *app.world().get::<RenderLayers>(untagged).unwrap(),
+            RenderLayers::from_layers(&[0, CINEMATIC_EARTH_RENDER_LAYER])
+        );
+        assert_eq!(
+            *app.world().get::<RenderLayers>(off_layer).unwrap(),
+            RenderLayers::layer(26)
+        );
+        assert!(app.world().get::<RenderLayers>(non_caster).is_none());
+        assert!(app.world().get::<RenderLayers>(unowned).is_none());
+    }
+
+    #[test]
+    fn no_caster_tagging_without_earth() {
+        let mut app = App::new();
+        app.init_resource::<SceneEnvironment>()
+            .add_systems(Update, sync_cinematic_shadow_casters);
+        let root = app
+            .world_mut()
+            .spawn(crate::object_3d::Object3DMeshChild)
+            .id();
+        let mesh = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), ChildOf(root)))
+            .id();
+        app.update();
+        assert!(app.world().get::<RenderLayers>(mesh).is_none());
+    }
+
+    #[test]
+    fn earth_mode_keeps_fixed_clears_and_flat_mode_honors_sky_color() {
+        let blue = impeller2_wkt::Color {
+            r: 0.3,
+            g: 0.6,
+            b: 0.9,
+            a: 1.0,
+        };
+        let blue_clear = ClearColorConfig::Custom(Color::srgba(0.3, 0.6, 0.9, 1.0));
+
+        // Earth mode: sky color goes to the dome, not the clears.
+        let (cinematic, regular) = clear_colors(Some(blue), true);
+        assert!(clear_color_matches(
+            &cinematic,
+            &ClearColorConfig::Custom(Color::BLACK)
+        ));
+        assert!(clear_color_matches(&regular, &ClearColorConfig::Default));
+
+        let (cinematic, regular) = clear_colors(Some(blue), false);
+        assert!(clear_color_matches(&cinematic, &blue_clear));
+        assert!(clear_color_matches(&regular, &blue_clear));
+    }
+
+    #[test]
+    fn earth_mode_sky_color_spawns_regular_sky_dome() {
+        let mut app = App::new();
+        app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+            earth: Some(impeller2_wkt::EarthConfig::default()),
+            sky_color: Some(impeller2_wkt::Color::rgb(0.5, 0.7, 0.9)),
+            ..default()
+        })))
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<StandardMaterial>>()
+        .add_systems(Update, sync_sky_dome);
+
+        let earth = app
+            .world_mut()
+            .spawn((CinematicEarthRoot, Transform::default()))
+            .id();
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(&RenderLayers, &ChildOf), With<SchematicSkyDome>>();
+        let (layers, parent) = query.single(app.world()).unwrap();
+        assert_eq!(parent.parent(), earth);
+        assert_eq!(
+            *layers,
+            RenderLayers::layer(crate::plugins::render_layer_alloc::REGULAR_SKY_RENDER_LAYER)
+        );
+
+        // Dropping the sky color despawns the dome.
+        app.world_mut()
+            .resource_mut::<SceneEnvironment>()
+            .0
+            .as_mut()
+            .unwrap()
+            .sky_color = None;
+        app.update();
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<SchematicSkyDome>>();
+        assert!(query.single(app.world()).is_err());
     }
 
     #[test]
