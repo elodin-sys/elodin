@@ -140,7 +140,8 @@ with pkgs; let
     # the surplus so Python can import the extension without ENOMEM.
     GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
 
-    # GStreamer plugin path for capture and elodinsink
+    # GStreamer + elodinsink for video-stream and capture. Example scripts
+    # inherit this; do not prepend cargo `target/` (see makeGstPluginPath).
     GST_PLUGIN_PATH = common.makeGstPluginPath {
       inherit pkgs;
       extra = [config.packages.elodinsink];

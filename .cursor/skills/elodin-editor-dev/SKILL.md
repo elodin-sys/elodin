@@ -227,7 +227,7 @@ Env overrides: `ELODIN_BIN`, `ELODIN_SCREENSHOT_DELAY` (script default 20), `SCR
 
 - **Port 2240** — live `elodin editor` / `elodin run` binds the sim DB; do not parallelize with monte-carlo or another editor. Group-kill leftovers before the next case.
 - **RAM gauge** — status-bar RSS is read via platform APIs in `ui/status_bar.rs` (not Bevy `SystemInformationDiagnosticsPlugin`). On macOS Bevy's sysinfo is built with `apple-app-store` and always reports 0 GiB for the current process.
-- **video-stream** — clear `./video-stream-db` if the editor hangs or video never appears; `GST_PLUGIN_PATH=target/release` can make `gst-plugin-scanner` warn about `libelodin.dylib` (benign).
+- **video-stream** — clear `./video-stream-db` if the editor hangs or video never appears. `elodinsink` / `x264enc` / `srtsrc` come from `nix develop` or `nix develop .#run` (`GST_PLUGIN_PATH`). Do not prepend cargo `target/release` (`libelodin` makes `gst-plugin-scanner` abort the scan on GStreamer 1.26).
 - **voyager** — needs SPICE kernels under `examples/voyager/nasa_spice_data/` and a clean DB dir after interrupted runs.
 - **nix develop** — prefer it for CI-parity builds; for a tight screenshot loop, a warm `cargo build -p elodin --release` outside a full env rebuild is fine once the toolchain is already installed.
 

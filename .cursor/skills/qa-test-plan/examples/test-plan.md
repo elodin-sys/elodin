@@ -683,17 +683,17 @@ nix develop --command bash .cursor/skills/qa-test-plan/examples/run_probe.sh exa
 #### - [ ] EX-021 — video-stream: H.264 GStreamer pipeline
 
 - **Priority:** P2 | **Mode:** manual | **Requires:** SDK-001
-- **Description:** Ingests H.264 video into the DB via the custom `elodinsink` GStreamer plugin (test-pattern, plus optional OBS SRT / RTSP) alongside a rolling-ball sim, shown in editor `video_stream` tiles (README: `elodin editor examples/video-stream/main.py`). The headline path needs the GStreamer plugin build + a real-time (non-terminating) sim + the editor to decode/display the video — not agent-verifiable headlessly, so `manual`. The plugin **build** is an agent-checkable prerequisite (below).
+- **Description:** Ingests H.264 video into the DB via the custom `elodinsink` GStreamer plugin (test-pattern, plus optional OBS SRT / RTSP) alongside a rolling-ball sim, shown in editor `video_stream` tiles (README: `elodin editor examples/video-stream/main.py`). The headline path needs the Nix-provided GStreamer plugin + a real-time (non-terminating) sim + the editor to decode/display the video — not agent-verifiable headlessly, so `manual`. Plugin availability is an agent-checkable prerequisite (below).
 - **Expected duration:** manual
 
 **Agent prerequisite check (validated):**
 
 ```bash
-nix develop --command cargo build --release --manifest-path fsw/gstreamer/Cargo.toml
-ls target/release/libgstelodin.so
+nix develop --command gst-inspect-1.0 elodinsink
+nix develop --command gst-inspect-1.0 x264enc
 ```
 
-- [ ] Builds `target/release/libgstelodin.so` (exit 0)
+- [ ] `gst-inspect-1.0` lists `elodinsink` and `x264enc` (exit 0)
 
 **Manual (full pipeline — human, needs display):**
 1. `nix develop --command elodin editor examples/video-stream/main.py` (s10 auto-runs `stream-video.sh`: `videotestsrc → x264enc → h264parse → elodinsink msg-name="test-video"`).
@@ -701,7 +701,7 @@ ls target/release/libgstelodin.so
 
 **Result:**
 **Evidence:**
-**Notes:** Prerequisite AUTHOR-VALIDATED 2026-07-10 @822eb89a9: `libgstelodin.so` built (cargo release, 1m01s). Live pipeline not agent-validated — the s10 group front-loads the plugin build and the pipeline is a non-terminating real-time stream whose payoff is the decoded video in the editor tile (needs display); left `manual`.
+**Notes:** Prerequisite AUTHOR-VALIDATED 2026-07-10 @822eb89a9: `libgstelodin.so` built (cargo release, 1m01s). Live pipeline not agent-validated — the s10 group front-loads the plugin build and the pipeline is a non-terminating real-time stream whose payoff is the decoded video in the editor tile (needs display); left `manual`. The cargo `target/release` plugin path was replaced by the Nix `elodinsink` package on `GST_PLUGIN_PATH` (`nix develop` / `nix develop .#run`).
 
 ---
 
