@@ -59,8 +59,7 @@ This example demonstrates streaming video into Elodin DB and displaying it in th
 
 ## Requirements
 
-- Nix development shell (`nix develop`) which provides GStreamer, SRT, and x264
-- Rust toolchain (for building the elodinsink plugin)
+- Nix shell (`nix develop` or `nix develop .#run`) — provides GStreamer, x264, SRT, and `elodinsink` on `GST_PLUGIN_PATH`
 - OBS Studio (optional, for the OBS Camera stream)
 
 ## Walkthrough
@@ -71,9 +70,10 @@ This walkthrough takes you through the full lifecycle: running the example, opti
 
 ```bash
 nix develop
+# or: nix develop .#run
 ```
 
-This provides GStreamer, x264, SRT, and all other dependencies needed by the example.
+Both shells put GStreamer, x264, SRT, and `elodinsink` on `GST_PLUGIN_PATH`. Do not override that path with cargo `target/`.
 
 ### Step 2: Build the Elodin Tools
 
@@ -94,7 +94,7 @@ The editor opens with a 3D viewport (showing a rolling ball) and three video str
 - **OBS Camera**: Shows "Initializing..." until OBS connects
 - **RTSP Camera**: Shows "No video at this time" until an RTSP source feeds the `rtsp-camera` message (see [RTSP Camera](#rtsp-camera))
 
-The GStreamer plugin (`elodinsink`) is built automatically on first run.
+The `elodinsink` GStreamer plugin comes from the Nix shell — no cargo plugin build.
 
 ### Step 4: Connect OBS Studio (Optional)
 
@@ -219,7 +219,7 @@ If you install the [obs-gstreamer](https://github.com/fzwoch/obs-gstreamer) plug
 ### Setup
 
 1. Install `obs-gstreamer` following its [installation instructions](https://github.com/fzwoch/obs-gstreamer#installation)
-2. Build `elodinsink` on the OBS machine (requires the Elodin repo and nix shell)
+2. On the OBS machine, use a Nix shell (`nix develop` or `nix develop .#run`) so `elodinsink` is on `GST_PLUGIN_PATH`
 3. In OBS, go to **Settings** -> **Output** -> **Output Mode: Advanced**
 4. Under the **Streaming** tab, set **Encoder** to **GStreamer**
 5. Set the pipeline to:
@@ -295,10 +295,11 @@ This is normal - the video stream tile defers connection for about 0.5 seconds d
 - Use hardware encoding (NVENC/QSV) instead of x264 for lower encoding latency
 - Reduce resolution and bitrate in OBS
 
-### Plugin build fails
+### `elodinsink` / `x264enc` / `srtsrc` not found
 
-- Make sure you're in a nix develop shell
-- Check that GStreamer development libraries are available: `pkg-config --libs gstreamer-1.0`
+- Re-enter `nix develop` or `nix develop .#run` — those shells set `GST_PLUGIN_PATH`
+- Confirm with `gst-inspect-1.0 elodinsink` (and `x264enc` / `srtsrc` as needed)
+- Do not set `GST_PLUGIN_PATH` to cargo `target/release` (it also contains `libelodin`, which breaks the GStreamer 1.26 plugin scanner)
 
 ### "Loss of Signal" overlay
 

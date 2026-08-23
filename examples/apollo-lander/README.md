@@ -106,6 +106,11 @@ For a single editor run:
 elodin editor examples/apollo-lander/main.py
 ```
 
+The editor stays interactive after `max_ticks`. Monte Carlo workers flip that
+off automatically via `ELODIN_MONTE_CARLO_CONTEXT`. Headless `elodin run` /
+QA should set `ELODIN_NON_INTERACTIVE=1` so the process exits and prints
+`elodin simulation summary`.
+
 Single editor/headless runs launch the Rust LGC controller in
 `examples/apollo-lander/controller` via an `s10` cargo recipe. Monte Carlo runs
 build the controller once using the campaign `[[build]]` step, then each run

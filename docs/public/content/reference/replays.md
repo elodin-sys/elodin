@@ -21,7 +21,7 @@ so replaying a recording does not require a separate `elodin-db` process.
 Set `ELODIN_DB_PATH` when running a simulation to keep its database:
 
 ```bash
-ELODIN_DB_PATH=dbs/apollo elodin run examples/apollo-lander/main.py
+ELODIN_DB_PATH=dbs/apollo ELODIN_NON_INTERACTIVE=1 elodin run examples/apollo-lander/main.py
 ```
 
 The recording includes a `db_state` file, component data, and an `assets/`
