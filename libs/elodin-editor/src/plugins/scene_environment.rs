@@ -4,12 +4,12 @@ use bevy::camera::ClearColorConfig;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::SunDisk;
 use bevy::light::atmosphere::ScatteringMedium;
-use bevy::math::{DQuat, DVec3};
+use bevy::math::DVec3;
 use bevy::pbr::{AtmosphereMode, AtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
 use bevy::prelude::*;
 use bevy_geo_frames::solar::sun_direction_ecef;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
+use bevy_geo_frames::{GeoContext, GeoFrame};
 use impeller2::types::Timestamp;
 use impeller2_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
@@ -65,9 +65,8 @@ fn effective_sun(env: &EnvironmentConfig) -> Option<SunConfig> {
         .or_else(|| env.earth.is_some().then(SunConfig::default))
 }
 
-fn atmosphere_geo_rotation(frame: GeoFrame, ctx: &GeoContext) -> GeoRotation {
-    // Cancel the frame basis so the spherical atmosphere stays unrotated in Bevy.
-    GeoRotation::from_bevy(frame, DQuat::IDENTITY, ctx)
+fn atmosphere_local_rotation(earth_transform: &GlobalTransform) -> Quat {
+    earth_transform.rotation().inverse()
 }
 
 pub struct SceneEnvironmentPlugin;
@@ -204,29 +203,34 @@ fn sync_sun(
 fn sync_atmosphere(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
-    coordinate: Res<crate::Coordinate>,
-    geo_ctx: Res<GeoContext>,
-    earth: Option<Single<Entity, With<CinematicEarthRoot>>>,
+    earth: Option<Single<(Entity, &GlobalTransform), With<CinematicEarthRoot>>>,
     mut media: ResMut<Assets<ScatteringMedium>>,
-    existing: Query<(Entity, &SchematicAtmosphere)>,
+    mut existing: Query<(Entity, &SchematicAtmosphere, &mut Transform)>,
 ) {
-    let Some(earth) = earth.map(|x| *x) else {
+    let Some((earth, earth_transform)) = earth.map(|x| *x) else {
         return;
     };
     let config = environment.0.as_ref().and_then(effective_atmosphere);
-    let current = existing.iter().next();
+    let current = existing.iter_mut().next();
     match (config, current) {
-        (Some(config), Some((entity, spawned))) if spawned.0 == config => {
+        (Some(config), Some((entity, spawned, mut transform))) if spawned.0 == config => {
             let _ = entity;
+            let rotation = atmosphere_local_rotation(earth_transform);
+            if transform.rotation.angle_between(rotation) > 1e-6 {
+                transform.rotation = rotation;
+            }
         }
         (Some(config), current) => {
-            if let Some((entity, _)) = current {
+            if let Some((entity, ..)) = current {
                 commands.entity(entity).despawn();
             }
-            let frame = coordinate.0.unwrap_or_default();
             let medium = media.add(ScatteringMedium::earth(256, 256));
             let (r, g, b) = config.ground_albedo;
             commands.spawn((
+                Transform::from_rotation(atmosphere_local_rotation(earth_transform)),
+                *earth_transform,
+                #[cfg(feature = "big_space")]
+                crate::spatial::LowPrecisionRoot,
                 SchematicAtmosphere(config),
                 Name::new("environment atmosphere"),
                 bevy::light::Atmosphere {
@@ -235,12 +239,10 @@ fn sync_atmosphere(
                     ground_albedo: Vec3::new(r, g, b),
                     medium,
                 },
-                Transform::default(),
-                atmosphere_geo_rotation(frame, &geo_ctx),
                 ChildOf(earth),
             ));
         }
-        (None, Some((entity, _))) => {
+        (None, Some((entity, ..))) => {
             commands.entity(entity).despawn();
         }
         (None, None) => {}
@@ -424,15 +426,58 @@ mod tests {
     }
 
     #[test]
-    fn atmosphere_rotation_is_bevy_identity_in_every_frame() {
-        let ctx = GeoContext::default();
-        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
-            let rendered = atmosphere_geo_rotation(frame, &ctx).to_bevy(&ctx);
+    fn atmosphere_local_rotation_cancels_earth_rotation() {
+        for rotation in [
+            Quat::IDENTITY,
+            Quat::from_rotation_x(std::f32::consts::PI),
+            Quat::from_euler(EulerRot::XYZ, 0.3, -0.8, 1.1),
+        ] {
+            let earth = GlobalTransform::from(Transform::from_rotation(rotation));
+            let rendered = earth.rotation() * atmosphere_local_rotation(&earth);
             assert!(
-                rendered.dot(DQuat::IDENTITY).abs() > 1.0 - 1e-9,
-                "{frame:?} rendered as {rendered:?}"
+                rendered.angle_between(Quat::IDENTITY) < 1e-6,
+                "{rotation:?} rendered as {rendered:?}"
             );
         }
+    }
+
+    #[test]
+    fn atmosphere_spawns_at_cinematic_earth_transform() {
+        let mut app = App::new();
+        app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+            earth: Some(impeller2_wkt::EarthConfig::default()),
+            ..default()
+        })))
+        .init_resource::<Assets<ScatteringMedium>>()
+        .add_systems(Update, sync_atmosphere);
+
+        let earth_transform = GlobalTransform::from(
+            Transform::from_translation(Vec3::new(4.0, -8.0, 15.0))
+                .with_rotation(Quat::from_euler(EulerRot::XYZ, 0.3, -0.8, 1.1)),
+        );
+        let earth = app
+            .world_mut()
+            .spawn((CinematicEarthRoot, Transform::default(), earth_transform))
+            .id();
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<
+                (Entity, &Transform, &GlobalTransform, &ChildOf),
+                With<SchematicAtmosphere>,
+            >();
+        let (atmosphere, local, transform, parent) = query.single(app.world()).unwrap();
+        assert_eq!(parent.parent(), earth);
+        assert_eq!(transform.translation(), earth_transform.translation());
+        assert!((earth_transform.rotation() * local.rotation).angle_between(Quat::IDENTITY) < 1e-6);
+        #[cfg(feature = "big_space")]
+        assert!(
+            app.world()
+                .get::<crate::spatial::LowPrecisionRoot>(atmosphere)
+                .is_some()
+        );
     }
 
     #[test]

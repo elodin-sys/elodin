@@ -79,7 +79,7 @@ order = 6
     - `airglow`: `density` (scale, default `0.55`; 520k green + 340k red at 100%), `size` (scale, default `1.05`), `brightness` (scale, default `1.45`).
     - `night_map`: `brightness` (scale on the globe's emissive night texture, default `0.05`, clamped `0…4`). This is the continuous sheet under the city-light particles — `0` leaves only particles.
   - Supersedes the `atmosphere` child — the built-in Earth owns its own atmosphere (raymarched, surface radius tracked from the camera's latitude). Remove `atmosphere` when enabling `earth` (it is ignored with a warning). Remove any `object_3d` Earth GLB and `world_mesh "globe"` too; the built-in globe replaces them.
-  - Implementation note: since #774, `GeoRotation::relative(frame, IDENTITY)` composes the frame-to-Bevy basis and is not Bevy identity. The spherical atmosphere uses `GeoRotation::from_bevy` to stay unrotated and concentric with the globe; other geo-placed spherical render entities should do the same.
+  - Implementation note: the atmosphere is parented to the rotated Earth root, so its local rotation cancels the parent's rotation. This keeps Bevy's atmosphere frame globally unrotated and its limb concentric with the globe.
   - Native editor builds only (the embedded Earth assets and GPU particles are excluded from wasm).
 - Example (lunar scene):
 
