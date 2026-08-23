@@ -280,7 +280,7 @@ grep -E "first frame seen|verification:" /tmp/qa-db/sc-gen.log
 ```bash
 rm -rf /tmp/qa-db/apollo
 nix develop --command sh -c '
-  ELODIN_DB_PATH=/tmp/qa-db/apollo ELODIN_APOLLO_MAX_TICKS=3600 timeout 240 \
+  ELODIN_DB_PATH=/tmp/qa-db/apollo ELODIN_APOLLO_MAX_TICKS=3600 ELODIN_NON_INTERACTIVE=1 timeout 240 \
     setsid elodin run examples/apollo-lander/main.py > /tmp/qa-db/apollo-gen.log 2>&1
   pkill -9 -f "apollo" 2>/dev/null
   for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -q ":2240 " || break; sleep 0.5; done; true'
