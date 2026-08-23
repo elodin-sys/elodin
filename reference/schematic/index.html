@@ -587,7 +587,7 @@
 </ul>
 </li>
 <li><code>ambient</code> child (optional): <code>scale</code> (required) multiplies the editor's baked image-based lighting intensity. <code>1.0</code> = unchanged; near-zero (e.g. <code>0.02</code>) keeps shadows black on airless bodies.</li>
-<li><code>sky</code> child (optional): <code>color</code> (named color or tuple string) sets the main viewport clear color — <code>"black"</code> for space scenes. Omit to keep the theme background. An active <code>skybox</code> draws over it.</li>
+<li><code>sky</code> child (optional): <code>color</code> (named color or tuple string) sets the main viewport clear color — <code>"black"</code> for space scenes. Omit to keep the theme background. An active <code>skybox</code> draws over it. With <code>earth</code>, <code>sky color</code> instead renders as an unlit dome that only regular viewports see (a flat daytime sky, e.g. <code>"(135,206,235)"</code>); the cinematic viewport keeps its atmosphere over black space, and pane backgrounds outside the 3D scene keep the theme.</li>
 <li><code>atmosphere</code> child (optional): Bevy's procedural planetary atmosphere (earth scattering medium) — physical blue sky, horizon haze, aerial perspective, altitude darkening, and the limb from space. Requires an active <code>sun</code> and an HDR viewport with a sunlit <code>ev100</code> (~13-15).
 <ul>
 <li><code>origin</code>: tuple string, planet center in the schematic coordinate frame [m]. Default <code>(0, 0, 0)</code> — the Earth's center in an ECEF scene. In local ENU/NED scenes leave it at the origin and the default radii place the surface <code>inner_radius</code> below.</li>
@@ -598,7 +598,8 @@
 </li>
 <li><code>earth</code> child (optional): the editor's built-in cinematic Earth for <strong>ECEF</strong> scenes. One word spawns everything from assets embedded in the editor binary: a true-scale WGS84 globe at the ECEF origin (8K day/night/cloud textures), a raymarched atmosphere, the Milky Way skybox, a GPU-particle star field, night city lights, and green/red airglow shells, plus earthshine on the craft. Haze density, star/skybox visibility, city-light intensity, and airglow follow the cinematic camera and sun, so one schematic works from the launch pad to LEO.
 <ul>
-<li>Requires <code>coordinate frame="ECEF"</code> and exactly one <code>viewport cinematic=#true</code>. That camera owns HDR, fixed exposure, atmosphere, the Milky Way skybox, and the Earth render layer (globe, stars, city lights, airglow, and earthshine). Regular viewports keep the editor's IBL and do not see Earth visuals, but share the schematic sun. A <code>sun</code> is implied when omitted (ephemeris, 100 klx, shadows).</li>
+<li>Requires <code>coordinate frame="ECEF"</code> and exactly one <code>viewport cinematic=#true</code>. That camera owns HDR, fixed exposure, atmosphere, the Milky Way skybox, the schematic sun, and the Earth render layer (globe, stars, city lights, airglow, and earthshine). Regular viewports keep the editor's IBL, clear color (or <code>sky color</code>), and do not see Earth visuals or the sun — at their LDR default exposure a 100 klx sun would blow every sunlit surface out to white. A <code>sun</code> is implied when omitted (ephemeris, 100 klx, shadows).</li>
+<li>Keep <code>show_view_cube=#true</code> (the default) on the cinematic viewport: the pane currently renders black without its view-cube overlay camera.</li>
 <li>Parse errors (not warnings): more than one <code>cinematic=#true</code> viewport; any <code>hdr=#true</code> viewport in the same schematic as a cinematic viewport; <code>earth</code> without a cinematic viewport; <code>cinematic=#true</code> without <code>earth</code>. Validation is per KDL document (multi-window schematics are not cross-checked).</li>
 <li>Exposure is fixed at the viewport's authored <code>ev100</code> (cinematic default <code>13.5</code>). The night look comes from range-limited earthshine and the house OLD SCHOOL bloom (intensity <code>0.365</code>) over a dim night map.</li>
 <li>Optional children tune the particle fields. Omit a child or property to keep the house look. Density is clamped to <code>0.05…2.0</code>. The cinematic viewport inspector edits the same knobs live (density/brightness apply on slider release; size and city height apply immediately).
@@ -610,7 +611,7 @@
 </ul>
 </li>
 <li>Supersedes the <code>atmosphere</code> child — the built-in Earth owns its own atmosphere (raymarched, surface radius tracked from the camera's latitude). Remove <code>atmosphere</code> when enabling <code>earth</code> (it is ignored with a warning). Remove any <code>object_3d</code> Earth GLB and <code>world_mesh "globe"</code> too; the built-in globe replaces them.</li>
-<li>Implementation note: since #774, <code>GeoRotation::relative(frame, IDENTITY)</code> composes the frame-to-Bevy basis and is not Bevy identity. The spherical atmosphere uses <code>GeoRotation::from_bevy</code> to stay unrotated and concentric with the globe; other geo-placed spherical render entities should do the same.</li>
+<li>Implementation note: the atmosphere is parented to the rotated Earth root, so its local rotation cancels the parent's rotation. This keeps Bevy's atmosphere frame globally unrotated and its limb concentric with the globe.</li>
 <li>Native editor builds only (the embedded Earth assets and GPU particles are excluded from wasm).</li>
 </ul>
 </li>
@@ -724,7 +725,7 @@ When <code>near</code> is omitted, the camera controller derives it from the cur
 <li><code>box</code>: <code>x</code>, <code>y</code>, <code>z</code> (all required); <code>color</code> (default white).</li>
 <li><code>cylinder</code>: <code>radius</code>, <code>height</code> (both required); <code>color</code> (default white).</li>
 <li><code>plane</code>: <code>width</code>/<code>depth</code> (default <code>size</code> if set, else 10.0); optional <code>size</code> shorthand; <code>color</code> (default white). Horizontal ground rectangle in the object frame (XY, normal +Z / up).</li>
-<li><code>ellipsoid</code>: <code>color</code> (default white), <code>show_grid</code> (default <code>#false</code>).
+<li><code>ellipsoid</code>: <code>color</code> (default white), <code>show_grid</code> (default <code>#false</code>). Renders in regular viewports only — the cinematic viewport hides ellipsoids (like sensor cameras without <code>show_ellipsoids</code>).
 <ul>
 <li>Physical measure
 <ul>
