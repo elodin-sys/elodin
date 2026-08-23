@@ -34,6 +34,8 @@ Usage (inside `nix develop`, from repo root):
 
 ## Execution Rules
 
+If this file is still the suite template (`examples/test-plan.md`), copy it to `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` and fill results **only on the copy**. Never write run metadata into this file.
+
 1. Run every command from the repository root, inside the Nix shell (`nix develop --command <cmd>`).
 2. Execute cases in Summary order, one at a time. Do not parallelize — every live-run case binds port 2240 exclusively.
 3. Check **Requires** first. If a required case did not PASS, mark this case BLOCKED and record which requirement failed.

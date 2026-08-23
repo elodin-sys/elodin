@@ -69,6 +69,8 @@ then runs the **whole `elodin-db` command surface** over them. Coverage map (eve
 
 ## Execution Rules
 
+If this file is still the suite template (`elodin-db/test-plan.md`), copy it to `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` and fill results **only on the copy**. Never write run metadata into this file.
+
 1. Run every command from the repository root, inside the Nix shell (`nix develop --command <cmd>`).
 2. Execute cases in Summary order, one at a time. Never parallelize live-server cases — they bind fixed ports (2240/2241 source + asset, 2242 follower, 2250 Lua case, 2360 HTTP API).
 3. Check **Requires** first. Generator DBs under `/tmp/qa-db/` are this plan's declared cross-case artifacts: generators create them, later cases consume them read-only (serving/surgery cases work on **copies**). If a required DB is missing, mark the case BLOCKED.

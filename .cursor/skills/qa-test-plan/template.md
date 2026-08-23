@@ -1,6 +1,6 @@
 # QA Test Plan: <release or milestone>
 
-> Copy this file to `.cursor/skills/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` before filling it out.
+> Copy this file to `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` before filling it out.
 > Evidence artifacts go in the same folder (see the curated [examples/](examples/) plan for the pattern).
 
 ## Plan Header
@@ -18,6 +18,8 @@
 ## Execution Rules
 
 These rules travel with the plan so any agent can execute it without extra context.
+
+If this file is still `template.md`, copy it to `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` and fill results **only on the copy**. Never write run metadata into the template.
 
 1. Run every command from the repository root, inside the Nix shell (`nix develop --command <cmd>` or an activated shell).
 2. Execute cases in the order listed, one at a time. Do not parallelize cases.
