@@ -277,7 +277,7 @@ world.run(
     max_ticks=max_ticks,
     db_path=params.db_path or os.environ.get("ELODIN_DB_PATH"),
     post_step=post_step,
-    interactive=False,
+    interactive=True,
     start_timestamp=START_TIMESTAMP_US,
     log_level="warn",
 )
