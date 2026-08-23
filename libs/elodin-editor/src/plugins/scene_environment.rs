@@ -218,17 +218,21 @@ fn sync_sun(
     }
 }
 
-/// Shadow casters are gathered per light from meshes intersecting the light's
-/// layers, so the cinematic-only sun needs `object_3d` casters (vehicle,
-/// terrain) tagged with the cinematic layer to keep their shadows in that
-/// view. Only `object_3d` subtrees are tagged: editor-managed meshes (globe,
-/// grids, gizmos) assign their own layers, sometimes frames after spawn.
+/// Tags layer-0 `object_3d` shadow casters; billboard-managed meshes compose
+/// lease and cinematic layers in `update_object_3d_billboard_system`.
+type ShadowCasterQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, Option<&'static RenderLayers>),
+    (With<Mesh3d>, Without<NotShadowCaster>),
+>;
+
 fn sync_cinematic_shadow_casters(
     mut commands: Commands,
     environment: Res<SceneEnvironment>,
     roots: Query<Entity, With<crate::object_3d::Object3DMeshChild>>,
     children: Query<&Children>,
-    meshes: Query<(Entity, Option<&RenderLayers>), (With<Mesh3d>, Without<NotShadowCaster>)>,
+    meshes: ShadowCasterQuery,
 ) {
     if !environment
         .0

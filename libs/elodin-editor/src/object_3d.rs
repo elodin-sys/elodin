@@ -17,7 +17,10 @@ use smallvec::smallvec;
 
 use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
-use crate::plugins::render_layer_alloc::RenderLayerLease;
+use crate::plugins::{
+    render_layer_alloc::{CINEMATIC_EARTH_RENDER_LAYER, RenderLayerLease},
+    scene_environment::CinematicViewport,
+};
 use crate::rim_glow_material::{RimGlowExt, RimGlowMaterial, RimGlowParams};
 use crate::ui::tiles::ViewportConfig;
 use crate::{
@@ -2228,6 +2231,23 @@ pub fn spawn_mesh(
     }
 }
 
+fn add_camera_mesh_layers(
+    mesh_layers: RenderLayers,
+    camera_layers: &RenderLayers,
+    shows_mesh: bool,
+    is_cinematic: bool,
+) -> RenderLayers {
+    if !shows_mesh {
+        return mesh_layers;
+    }
+    let layers = mesh_layers.union(camera_layers);
+    if is_cinematic {
+        layers.with(CINEMATIC_EARTH_RENDER_LAYER)
+    } else {
+        layers
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_object_3d_billboard_system(
     mut commands: Commands,
@@ -2239,6 +2259,7 @@ pub fn update_object_3d_billboard_system(
             &GlobalTransform,
             &Projection,
             &RenderLayerLease,
+            Has<CinematicViewport>,
         ),
         (With<MainCamera>, With<ViewportConfig>),
     >,
@@ -2268,7 +2289,9 @@ pub fn update_object_3d_billboard_system(
         let bb_mesh_handle = icon_state.billboard_mesh.clone();
         let bb_mat_source = icon_state.billboard_material.clone();
 
-        for (cam_entity, camera, cam_gt, projection, render_layer_lease) in cameras.iter() {
+        for (cam_entity, camera, cam_gt, projection, render_layer_lease, is_cinematic) in
+            cameras.iter()
+        {
             let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
                 continue;
@@ -2284,9 +2307,8 @@ pub fn update_object_3d_billboard_system(
             let shows_billboard = distance >= icon_min && distance <= icon_max;
             let shows_mesh = distance >= mesh_min && distance <= mesh_max;
 
-            if shows_mesh {
-                mesh_layers = mesh_layers.union(&render_layers);
-            }
+            mesh_layers =
+                add_camera_mesh_layers(mesh_layers, &render_layers, shows_mesh, is_cinematic);
 
             if shows_billboard {
                 let cam_rotation = cam_gt.to_scale_rotation_translation().1;
@@ -2515,6 +2537,31 @@ impl Plugin for Object3DPlugin {
                 apply_glb_material_overrides,
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod billboard_render_layer_tests {
+    use super::add_camera_mesh_layers;
+    use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
+    use bevy::camera::visibility::RenderLayers;
+
+    #[test]
+    fn cinematic_layer_tracks_cinematic_mesh_visibility() {
+        let regular_lease = RenderLayers::layer(4);
+        let cinematic_lease = RenderLayers::layer(5);
+
+        let layers = add_camera_mesh_layers(RenderLayers::none(), &regular_lease, true, false);
+        assert_eq!(layers, regular_lease);
+
+        let layers = add_camera_mesh_layers(layers, &cinematic_lease, true, true);
+        assert_eq!(
+            layers,
+            RenderLayers::from_layers(&[4, 5, CINEMATIC_EARTH_RENDER_LAYER])
+        );
+
+        let layers = add_camera_mesh_layers(RenderLayers::none(), &cinematic_lease, false, true);
+        assert_eq!(layers, RenderLayers::none());
     }
 }
 
