@@ -177,7 +177,7 @@ viewport hdr=#true {
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white). Horizontal ground rectangle in the object frame (XY, normal +Z / up).
-  - `ellipsoid`: `color` (default white), `show_grid` (default `#false`).
+  - `ellipsoid`: `color` (default white), `show_grid` (default `#false`). Renders in regular viewports only — the cinematic viewport hides ellipsoids (like sensor cameras without `show_ellipsoids`).
     - Physical measure
       - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components.
         - Examples:

@@ -1720,16 +1720,18 @@ impl ViewportPane {
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default()
-            .with(ELLIPSOID_RENDER_LAYER)
-            .with(GIZMO_RENDER_LAYER);
+        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         if viewport.effects {
             main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
         }
         if viewport.cinematic {
             main_camera_layers = main_camera_layers.with(CINEMATIC_EARTH_RENDER_LAYER);
         } else {
-            main_camera_layers = main_camera_layers.with(REGULAR_SKY_RENDER_LAYER);
+            // Uncertainty ellipsoids and the sky dome are regular-viewport
+            // overlays; the cinematic view keeps a clean scene.
+            main_camera_layers = main_camera_layers
+                .with(ELLIPSOID_RENDER_LAYER)
+                .with(REGULAR_SKY_RENDER_LAYER);
         }
         let grid_layer = grid_render_layer(viewport.frame);
         if viewport.show_grid {
