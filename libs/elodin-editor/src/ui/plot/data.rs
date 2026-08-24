@@ -1161,7 +1161,7 @@ impl XYLine {
     }
 
     pub fn has_samples(&self) -> bool {
-        self.x_values.iter().any(|c| c.cpu().len() > 0)
+        self.x_values.iter().any(|c| !c.cpu().is_empty())
     }
 
     pub fn queue_load(
@@ -3524,6 +3524,23 @@ mod tests {
         assert!(!plot_gpu_upload_blocked(2, 4, 2));
         assert!(!plot_gpu_upload_blocked(2, 0, 2));
     }
+
+    #[test]
+    fn resident_line_defers_when_index_pool_is_quarantined() {
+        assert!(
+            defer_new_plot_gpu_allocs(true, false, 0, 0, 0, 4),
+            "shared/resident values still need a recycled index buffer"
+        );
+        assert!(
+            !defer_new_plot_gpu_allocs(true, true, 0, 0, 0, 4),
+            "cached index must keep drawing while the pool cools down"
+        );
+        assert!(
+            !defer_new_plot_gpu_allocs(false, false, 0, 0, 0, 0),
+            "empty pools are a first load, not a tab-switch leak"
+        );
+        assert!(defer_new_plot_gpu_allocs(false, false, 0, 4, 0, 0));
+    }
 }
 
 fn try_append_u32(view: wgpu::WriteOnly<'_, [u8]>, val: u32) -> Option<wgpu::WriteOnly<'_, [u8]>> {
@@ -3605,6 +3622,21 @@ pub(crate) fn plot_gpu_upload_blocked(ready: usize, quarantined: usize, need: us
     ready < need && quarantined > 0
 }
 
+pub(crate) fn defer_new_plot_gpu_allocs(
+    value_resident: bool,
+    has_index_cache: bool,
+    value_ready: usize,
+    value_quarantined: usize,
+    index_ready: usize,
+    index_quarantined: usize,
+) -> bool {
+    let values_blocked =
+        !value_resident && plot_gpu_upload_blocked(value_ready, value_quarantined, 2);
+    let index_blocked =
+        !has_index_cache && plot_gpu_upload_blocked(index_ready, index_quarantined, 1);
+    values_blocked || index_blocked
+}
+
 /// Recycles plot value/index buffers across tab switches so hidden-graph
 /// unload does not immediately allocate a second full set (GPU OOM).
 #[derive(Resource, Default)]
@@ -3627,13 +3659,15 @@ impl PlotGpuBufferPool {
         self.index.release(buffer);
     }
 
-    pub fn ready_value_count(&self) -> usize {
-        self.value.ready_count()
-    }
-
-    pub fn defer_new_value_upload(&self, already_resident: bool) -> bool {
-        !already_resident
-            && plot_gpu_upload_blocked(self.ready_value_count(), self.value.quarantined_count(), 2)
+    pub fn defer_new_allocs(&self, value_resident: bool, has_index_cache: bool) -> bool {
+        defer_new_plot_gpu_allocs(
+            value_resident,
+            has_index_cache,
+            self.value.ready_count(),
+            self.value.quarantined_count(),
+            self.index.ready_count(),
+            self.index.quarantined_count(),
+        )
     }
 
     pub fn take_value(
@@ -3648,17 +3682,19 @@ impl PlotGpuBufferPool {
         }
     }
 
-    pub fn take_index(&mut self, render_device: &RenderDevice) -> Buffer {
+    pub fn take_index(&mut self, render_device: &RenderDevice) -> Option<Buffer> {
         if let Some(buffer) = self.index.try_acquire() {
-            buffer
-        } else {
-            render_device.create_buffer(&BufferDescriptor {
-                label: Some("Line index Buffer"),
-                size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
+            return Some(buffer);
         }
+        if self.index.quarantined_count() > 0 {
+            return None;
+        }
+        Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("Line index Buffer"),
+            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }))
     }
 }
 

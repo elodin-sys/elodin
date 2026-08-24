@@ -766,7 +766,8 @@ fn extract_lines(
                     }
                     continue;
                 }
-                if plot_gpu_pool.defer_new_value_upload(line.gpu_resident()) {
+                let has_index_cache = cache.as_ref().is_some_and(|c| c.0.is_some());
+                if plot_gpu_pool.defer_new_allocs(line.gpu_resident(), has_index_cache) {
                     continue;
                 }
                 // Camera / clip: continuous visible range for short windows (silky scrub);
@@ -806,7 +807,9 @@ fn extract_lines(
                         gpu_line.values_bind_group.clone(),
                     )
                 } else {
-                    let index_buffer = plot_gpu_pool.take_index(&render_device);
+                    let Some(index_buffer) = plot_gpu_pool.take_index(&render_device) else {
+                        continue;
+                    };
                     let size = Some(VALUE_BUFFER_SIZE);
                     let values_bind_group = render_device.create_bind_group(
                         "line values",
