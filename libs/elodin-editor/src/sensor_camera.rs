@@ -520,38 +520,75 @@ fn tick_effect_time(time: Res<Time>, mut query: Query<&mut SensorEffectSettings>
     }
 }
 
+/// Split an absolute translation across the floating-origin grid.
+///
+/// `Transform` alone is not the position. `big_space` moves a translation past
+/// `maximum_distance_from_origin` into `GridCell` in `PostUpdate`, so writing
+/// the absolute value back the next frame while leaving the cell where it
+/// landed makes the two add up, and the entity walks a further cell out on
+/// every frame after that.
+#[cfg(feature = "big_space")]
+fn place_on_grid(
+    settings: &crate::spatial::FloatingOriginSettings,
+    cell: &mut crate::spatial::GridCell,
+    transform: &mut Transform,
+) {
+    let (new_cell, translation) = settings.translation_to_grid(transform.translation.as_dvec3());
+    *cell = new_cell;
+    transform.translation = translation;
+}
+
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
-    mut sensor_cameras: Query<(&SensorCamera, &mut Transform)>,
+    mut sensor_cameras: Query<(Entity, &SensorCamera, &mut Transform)>,
+    #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
+    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller2_bevy::TelemetryCache>,
     current_ts: Res<impeller2_wkt::CurrentTimestamp>,
 ) {
     let ts = current_ts.0;
-    for (sensor_cam, mut transform) in &mut sensor_cameras {
+    for (_entity, sensor_cam, mut transform) in &mut sensor_cameras {
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
 
-        if let Some(new_transform) = sensor_camera_transform(config, &cache, ts) {
-            *transform = new_transform;
+        let Some(new_transform) = sensor_camera_transform(config, &cache, ts) else {
+            continue;
+        };
+        *transform = new_transform;
+
+        #[cfg(feature = "big_space")]
+        if let Ok(mut cell) = cells.get_mut(_entity) {
+            place_on_grid(&settings, &mut cell, &mut transform);
         }
     }
 }
 
 pub fn update_sensor_camera_frustum_source_transforms(
     configs: Res<SensorCameraConfigs>,
-    mut sources: Query<(&SensorCameraFrustumSource, &mut Transform, &mut Projection)>,
+    mut sources: Query<(
+        Entity,
+        &SensorCameraFrustumSource,
+        &mut Transform,
+        &mut Projection,
+    )>,
+    #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
+    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller2_bevy::TelemetryCache>,
     current_ts: Res<impeller2_wkt::CurrentTimestamp>,
 ) {
     let ts = current_ts.0;
-    for (source, mut transform, mut projection) in &mut sources {
+    for (_entity, source, mut transform, mut projection) in &mut sources {
         let Some(config) = configs.0.get(source.config_index) else {
             continue;
         };
 
         if let Some(new_transform) = sensor_camera_transform(config, &cache, ts) {
             *transform = new_transform;
+            #[cfg(feature = "big_space")]
+            if let Ok(mut cell) = cells.get_mut(_entity) {
+                place_on_grid(&settings, &mut cell, &mut transform);
+            }
         }
 
         if let Projection::Perspective(perspective) = projection.as_mut() {
