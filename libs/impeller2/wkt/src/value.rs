@@ -177,14 +177,14 @@ impl ComponentValue {
             (Self::F32(arr), ComponentView::F32(view)) => {
                 for (i, &val) in view.buf().iter().enumerate() {
                     if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
-                        *r += val;
+                        *r = r.algebraic_add(val);
                     }
                 }
             }
             (Self::F64(arr), ComponentView::F64(view)) => {
                 for (i, &val) in view.buf().iter().enumerate() {
                     if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
-                        *r += val;
+                        *r = r.algebraic_add(val);
                     }
                 }
             }
@@ -237,12 +237,12 @@ impl ComponentValue {
             Self::Bool(_) => panic!("Cannot divide boolean values"),
             Self::F32(a) => {
                 for r in a.buf.as_mut_buf().iter_mut() {
-                    *r /= count as f32;
+                    *r = r.algebraic_div(count as f32);
                 }
             }
             Self::F64(a) => {
                 for r in a.buf.as_mut_buf().iter_mut() {
-                    *r /= count;
+                    *r = r.algebraic_div(count);
                 }
             }
         }

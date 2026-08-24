@@ -4,34 +4,15 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import unittest
-from pathlib import PurePosixPath
+from pathlib import Path
 
-
-WINDOWS_INVALID_CHARS = frozenset('<>:"|?*')
-WINDOWS_RESERVED_NAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{i}" for i in range(1, 10)),
-    *(f"LPT{i}" for i in range(1, 10)),
-}
-
-
-def windows_path_error(path: str) -> str | None:
-    for part in PurePosixPath(path).parts:
-        if any(char in WINDOWS_INVALID_CHARS for char in part):
-            return f"contains a Windows-invalid character: {path}"
-
-        stem = part.rstrip(" .").split(".", 1)[0].upper()
-        if stem in WINDOWS_RESERVED_NAMES:
-            return f"uses a Windows-reserved path component: {path}"
-
-        if part.endswith((" ", ".")):
-            return f"ends a path component with a space or dot: {path}"
-
-    return None
+from windows_paths import (
+    sanitize_export_filenames,
+    windows_path_error,
+    windows_safe_name,
+)
 
 
 def tracked_paths() -> list[str]:
@@ -49,9 +30,36 @@ class WindowsPathTests(unittest.TestCase):
         self.assertIsNotNone(windows_path_error("scripts/file."))
         self.assertIsNone(windows_path_error("scripts/foo_to_bar.csv"))
 
+    def test_windows_safe_name_maps_edge_arrows_to_to(self) -> None:
+        self.assertEqual(windows_safe_name("css_0_>_sat.css_edge.csv"), "css_0_to_sat.css_edge.csv")
+        self.assertEqual(windows_safe_name("sat_>_rw_1.rw_edge.csv"), "sat_to_rw_1.rw_edge.csv")
+        self.assertEqual(windows_safe_name("ore_sat.world_pos.csv"), "ore_sat.world_pos.csv")
+
+    def test_sanitize_export_filenames_renames_arrow_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "css_0_>_sat.css_edge.csv").write_text("edge\n", encoding="utf-8")
+            (root / "ore_sat.world_pos.csv").write_text("pos\n", encoding="utf-8")
+            renamed = sanitize_export_filenames(root)
+            self.assertEqual(len(renamed), 1)
+            self.assertTrue((root / "css_0_to_sat.css_edge.csv").is_file())
+            self.assertFalse((root / "css_0_>_sat.css_edge.csv").exists())
+            self.assertTrue((root / "ore_sat.world_pos.csv").is_file())
+
     def test_tracked_paths_are_windows_checkout_safe(self) -> None:
         invalid_paths = [
             error for path in tracked_paths() if (error := windows_path_error(path)) is not None
+        ]
+        self.assertEqual([], invalid_paths)
+
+    def test_baseline_filenames_are_windows_checkout_safe(self) -> None:
+        repo = Path(__file__).resolve().parents[2]
+        root = repo / "scripts" / "ci" / "baseline"
+        invalid_paths = [
+            error
+            for path in root.rglob("*")
+            if path.is_file()
+            and (error := windows_path_error(path.relative_to(repo).as_posix())) is not None
         ]
         self.assertEqual([], invalid_paths)
 

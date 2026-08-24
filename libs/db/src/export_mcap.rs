@@ -40,6 +40,8 @@ use crate::{Component, DB, Error};
 
 /// 1 MiB output buffer, matching the other exporters.
 const FILE_BUF_CAP: usize = 1 << 20;
+/// Finite Foxglove clip plane beyond the solar system.
+const FOXGLOVE_CAMERA_FAR: f64 = 1.0e16;
 
 /// Options for the MCAP export.
 #[derive(Clone, Debug)]
@@ -737,6 +739,10 @@ fn camera_orbit_from_offset(offset: Option<[f64; 3]>) -> (f64, f64, f64) {
         // 3/4 view matching the drone example's (2,2,2) vantage.
         None => (6.0, 54.7356, 45.0),
     }
+}
+
+fn foxglove_camera_far(distance: f64) -> f64 {
+    FOXGLOVE_CAMERA_FAR.max(distance * 4.0)
 }
 
 /// Parse a literal tuple like `"(1, 0, 0)"` into a vector.
@@ -1661,12 +1667,7 @@ impl<'a> LayoutBuilder<'a> {
                 }
                 let (distance, phi, theta) = camera_orbit_from_offset(offset);
                 let near = viewport.near.unwrap_or(0.01) as f64;
-                // Clamp far so the orbit camera itself is never beyond the far
-                // plane (geo-frames sets far=1.5e7 with an 8e7 m camera offset).
-                let far = viewport
-                    .far
-                    .map(|f| (f as f64).max(distance * 4.0))
-                    .unwrap_or_else(|| (distance * 4.0).max(5000.0));
+                let far = foxglove_camera_far(distance);
                 let mut config = Map::new();
                 config.insert(
                     "cameraState".into(),
@@ -3129,17 +3130,16 @@ mod tests {
     fn camera_near_far_defaults() {
         let (distance, _, _) = camera_orbit_from_offset(Some([2.0, 2.0, 2.0]));
         let near: f64 = 0.01; // default when viewport.near is None
-        let far = (distance * 4.0).max(5000.0);
+        let far = foxglove_camera_far(distance);
         assert!((near - 0.01).abs() < 1e-9);
-        assert!(far >= 5000.0);
+        assert_eq!(far, FOXGLOVE_CAMERA_FAR);
     }
 
     #[test]
     fn camera_far_scales_with_distance() {
-        let (distance, _, _) = camera_orbit_from_offset(Some([5000.0, 0.0, 0.0]));
-        let far = (distance * 4.0).max(5000.0);
-        assert!(far >= distance * 4.0);
-        assert!(far >= 5000.0);
+        let distance = FOXGLOVE_CAMERA_FAR;
+        let far = foxglove_camera_far(distance);
+        assert_eq!(far, distance * 4.0);
     }
 
     // --- Gap 5: literal pose parsing ---

@@ -106,6 +106,11 @@ For a single editor run:
 elodin editor examples/apollo-lander/main.py
 ```
 
+The editor stays interactive after `max_ticks`. Monte Carlo workers flip that
+off automatically via `ELODIN_MONTE_CARLO_CONTEXT`. Headless `elodin run` /
+QA should set `ELODIN_NON_INTERACTIVE=1` so the process exits and prints
+`elodin simulation summary`.
+
 Single editor/headless runs launch the Rust LGC controller in
 `examples/apollo-lander/controller` via an `s10` cargo recipe. Monte Carlo runs
 build the controller once using the campaign `[[build]]` step, then each run
@@ -278,7 +283,7 @@ Use `--dry-run` to only write the narrowed specs.
   - ALSJ sun (`KDL az=268.81 el=10.65`) with shadows; true-scale Earth at
     ALSJ az/el/distance with raymarched atmosphere (blue limb + sun disk).
   - Trails: `line_width=2.0 perspective=#false` (falcon9-style).
-- Single viewport "Tranquility Base" (`far=1e9`, `ev100=13.2`); `timeline range="last_30s"`.
+- Single viewport "Tranquility Base" (`ev100=13.2`); `timeline range="last_30s"`.
 - **Editor preview (native only):** GPU exhaust particles fully declared in
 
   KDL and driven by EQL viz channels, rendering hanabi `.effect` files
@@ -302,8 +307,8 @@ Use `--dry-run` to only write the narrowed specs.
     intensity from `lander.dust_viz` (throttle × surface proximity) — the
     regolith sheet ramps in below ~12 m and dies at engine cutoff.
   Spawn rates come from the effect files and scale with intensity; nozzle
-  geometry lives in `apollo-lander.kdl` (RCS positions tuned to the visible
-  four-quad layout after the GLB mesh translate). The schematic
+  geometry lives in `apollo-lander.kdl` (schematic Z-up body offsets, tuned to
+  the four-quad layout after the Y-up GLB is lifted onto ENU). The schematic
   `environment` node (harsh sun + shadows, near-zero ambient, black sky) and
   the viewport's `hdr`/`ev100`/`bloom` reproduce the pyrotechnique lighting;
   effect assets are ingested into the DB and served like the GLBs. Reference

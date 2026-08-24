@@ -282,7 +282,7 @@ impl WorldBuilder {
                 let new_id = name
                     .without_boundaries(&convert_case::Boundary::digits())
                     .to_case(convert_case::Case::Snake);
-                eprintln!("convert name {:?} to ID {:?}", &name, &new_id);
+                eprintln!("convert name {:?} to ID {:?}", name, new_id);
                 info!("convert name {:?} to ID {:?}", &name, &new_id);
                 Some(new_id)
             }
@@ -1626,18 +1626,15 @@ impl WorldBuilder {
                     );
                 }
 
-                // Process entity IDs - using chunks_exact to ensure we only process complete IDs
-                for chunk in buffer.entity_ids.chunks_exact(8) {
-                    let entity_id = u64::from_le_bytes(chunk.try_into().unwrap());
+                let (chunks, remainder) = buffer.entity_ids.as_chunks::<8>();
+                for chunk in chunks {
+                    let entity_id = u64::from_le_bytes(*chunk);
                     let entity_id = impeller2::types::EntityId(entity_id);
                     entity_components
                         .entry(entity_id)
                         .or_default()
                         .insert(metadata.name.clone());
                 }
-
-                // Check if there's a remainder (incomplete ID) that was skipped
-                let remainder = buffer.entity_ids.chunks_exact(8).remainder();
                 if !remainder.is_empty() {
                     tracing::warn!(
                         "Component '{}' has {} bytes of incomplete entity ID data",

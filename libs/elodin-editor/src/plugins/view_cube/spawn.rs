@@ -24,6 +24,10 @@ pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<ViewCubeFrames>()
         .add_systems(Startup, spawn_frame_view_cubes)
         .add_systems(
+            Update,
+            (spawn_viewport_face_labels, despawn_orphaned_face_labels),
+        )
+        .add_systems(
             PreUpdate,
             // Reads keyboard state and is read back by the picking observers, so
             // it has to be pinned between the two.
@@ -127,16 +131,60 @@ fn spawn_frame_view_cube_mesh(
         Some(&render_layers),
     );
 
-    spawn_face_labels(
-        commands,
-        asset_server,
-        materials,
-        config,
-        Some(&render_layers),
-        cube_root,
-    );
+    // Face labels are not spawned here: they are per-viewport, see
+    // `spawn_viewport_face_labels`.
 
     cube_root
+}
+
+type LabellessOverlayCameras<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static ViewCubeFrameRef, &'static RenderLayerLease),
+    (With<ViewCubeCamera>, Without<ViewportFaceLabels>),
+>;
+
+/// Give every overlay camera its own copy of the face labels, on its own render
+/// layer, so two viewports on the same frame can orient them independently.
+fn spawn_viewport_face_labels(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    config: Res<ViewCubeConfig>,
+    frames: Res<ViewCubeFrames>,
+    cameras: LabellessOverlayCameras,
+) {
+    for (camera, frame_ref, ui_lease) in cameras.iter() {
+        let Some(cube_root) = frames.get(frame_ref.0) else {
+            continue;
+        };
+        let mut frame_config = config.clone();
+        frame_config.system = CoordinateSystem(frame_ref.0);
+        spawn_face_labels(
+            &mut commands,
+            &asset_server,
+            &mut materials,
+            &frame_config,
+            &ui_lease.render_layers(),
+            cube_root,
+            camera,
+        );
+        commands.entity(camera).insert(ViewportFaceLabels);
+    }
+}
+
+/// Viewports come and go with the tile layout, and their render layer is
+/// recycled, so a closed viewport's labels have to go with it.
+fn despawn_orphaned_face_labels(
+    mut commands: Commands,
+    labels: Query<(Entity, &FaceLabel)>,
+    cameras: Query<(), With<ViewCubeCamera>>,
+) {
+    for (entity, label) in labels.iter() {
+        if cameras.get(label.camera).is_err() {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 /// Spawn a per-viewport overlay camera that renders the shared frame cube.
@@ -424,8 +472,9 @@ fn spawn_face_labels(
     asset_server: &AssetServer,
     materials: &mut Assets<StandardMaterial>,
     config: &ViewCubeConfig,
-    render_layers: Option<&RenderLayers>,
+    render_layers: &RenderLayers,
     parent: Entity,
+    camera: Entity,
 ) {
     let font: Handle<Font> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
@@ -445,7 +494,7 @@ fn spawn_face_labels(
             ..default()
         });
 
-        let mut label_cmd = commands.spawn((
+        commands.spawn((
             TextMesh {
                 text: label.text.to_string(),
                 font: font.clone(),
@@ -460,12 +509,17 @@ fn spawn_face_labels(
                 .with_rotation(label.rotation)
                 .with_scale(Vec3::splat(label_scale)),
             Pickable::IGNORE,
+            FaceLabel {
+                base_rotation: label.rotation,
+                camera,
+                last_angle: 0.0,
+                last_view: None,
+            },
+            KeepsRenderLayers,
+            render_layers.clone(),
             ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
         ));
-        if let Some(layers) = render_layers {
-            label_cmd.insert(layers.clone());
-        }
     }
 }
 

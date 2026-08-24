@@ -133,7 +133,7 @@
     eval "$(${gpuDetectScript})"
   '';
 
-  linuxGstreamerPackages = with pkgs; [
+  gstreamerPackages = with pkgs; [
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
     gst_all_1.gst-plugins-good
@@ -141,12 +141,14 @@
     gst_all_1.gst-plugins-ugly
   ];
 
+  # Isolated `lib/gstreamer-1.0` dirs only. Never point GST_PLUGIN_PATH at
+  # cargo `target/` — gst-plugin-scanner dlopens every dylib there.
   makeGstPluginPath = {
     pkgs,
     extra ? [],
   }:
     lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
-      linuxGstreamerPackages
+      gstreamerPackages
       ++ lib.optionals pkgs.stdenv.isLinux [pkgs.pipewire]
       ++ extra
     );
@@ -179,7 +181,7 @@ in {
     asoundConf
     mesaVulkanIcdPath
     nvidiaHookScript
-    linuxGstreamerPackages
+    gstreamerPackages
     makeGstPluginPath
     linuxEditorShellHook
     ;

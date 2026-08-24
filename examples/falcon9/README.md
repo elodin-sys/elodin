@@ -230,8 +230,8 @@ recorded flight is reproduced within thresholds.
   the booster GLB renders as a full stack throughout; a visual split at MECO
   is future work)
 - Touchdown envelope thresholds (derive from truth-data uncertainty)
-- ~~Booster / pad / landing-zone GLB assets~~ booster GLB + tangent ground
-  discs landed with the cinematic port; a modeled pad/LZ remains open
+- ~~Booster / pad / landing-zone GLB assets~~ booster GLB + ASDS barge
+  landed with the cinematic port; a modeled LC-39A pad remains open
 
 ## Cinematic Visuals (pyrotechnique port)
 
@@ -246,8 +246,12 @@ telemetry (design record: `docs/design-thruster-effects-port.md` §10):
   contract (`spawn_origin`/`spawn_axis` on a world-fixed anchor).
 - **Pad + landing clouds** — world-fixed `pad_smoke` at LC-39A / LZ-1.
 - **RCS darts** — falcon9 `rcs_dart` (8 jets from `booster.rcs_levels`).
-- **Environment** — sun + Bevy atmosphere, single Chase viewport (multi-view
-  atmosphere is a Bevy 0.19 limit), ASDS barge GLB at LZ-1, pad disc at LC-39A.
+- **Environment** — sun + the editor's built-in cinematic Earth
+  (`environment { earth }` + Chase `cinematic=#true`: true-scale WGS84 globe,
+  camera-driven raymarched atmosphere, stars, night city lights, airglow —
+  all embedded in the editor binary). Regular viewports can sit beside Chase
+  without seeing Earth visuals. ASDS barge GLB at LZ-1. Launch is on the
+  cinematic Earth's Florida coast (LC-39A); no placeholder pad disc.
 
 Wall-clock pacing is on by default. Monte Carlo sets `ELODIN_MONTE_CARLO_CONTEXT`
 and runs flat out. Particle integration follows the editor playhead when
@@ -263,6 +267,16 @@ ELODIN_VIZCHECK_SCENARIO=plume-close ELODIN_SCREENSHOT_DELAY=10 \
 ELODIN_VIZCHECK_SCENARIO=rcs-flip ELODIN_SCREENSHOT_DELAY=8 \
   elodin editor examples/falcon9/visual_check.py
 ELODIN_VIZCHECK_SCENARIO=barge ELODIN_SCREENSHOT_DELAY=10 \
+  elodin editor examples/falcon9/visual_check.py
+ELODIN_VIZCHECK_SCENARIO=apogee ELODIN_SCREENSHOT_DELAY=10 \
+  elodin editor examples/falcon9/visual_check.py
+ELODIN_VIZCHECK_SCENARIO=night-sky ELODIN_SCREENSHOT_DELAY=12 \
+  elodin editor examples/falcon9/visual_check.py
+# Night-phase sweep at the same SoCal slot: twilight is sun-on-limb
+# (mid-transition); sunrise is clean day (stars gone). night-sky is max density.
+ELODIN_VIZCHECK_SCENARIO=night-sky-twilight ELODIN_SCREENSHOT_DELAY=12 \
+  elodin editor examples/falcon9/visual_check.py
+ELODIN_VIZCHECK_SCENARIO=night-sky-sunrise ELODIN_SCREENSHOT_DELAY=12 \
   elodin editor examples/falcon9/visual_check.py
 ```
 
@@ -283,8 +297,8 @@ examples/falcon9/
   reference.py       # truth profiles from data/ (stdlib only; sanity_check)
   sensors.py         # IMU/GPS/altimeter/pressure + webcast display model
   controller/        # flight software (Rust): estimator, phases, guidance
-  falcon9.kdl        # cinematic ECEF schematic (GLB booster, effects, atmosphere, graphs)
-  visual_check.py    # lean kinematic visual checks (plume / rcs / barge)
+  falcon9.kdl        # cinematic ECEF schematic (GLB booster, effects, built-in earth, graphs)
+  visual_check.py    # lean kinematic visual checks (plume / rcs / barge / apogee / night-sky)
   visual_check.kdl   # schematic for visual_check.py
   spec.toml          # calibration priors     campaign.toml   # campaign config
   spec.ci.toml       # CI single sample       campaign.ci.toml

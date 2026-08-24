@@ -92,6 +92,9 @@ pub struct EnvironmentConfig {
     /// no atmosphere.
     #[serde(default)]
     pub atmosphere: Option<AtmosphereConfig>,
+    /// Built-in camera-driven Earth for ECEF scenes.
+    #[serde(default)]
+    pub earth: Option<EarthConfig>,
 }
 
 impl Default for EnvironmentConfig {
@@ -101,6 +104,185 @@ impl Default for EnvironmentConfig {
             ambient_scale: Self::default_ambient_scale(),
             sky_color: None,
             atmosphere: None,
+            earth: None,
+        }
+    }
+}
+
+/// Built-in cinematic Earth configuration.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub struct EarthConfig {
+    #[serde(default)]
+    pub stars: EarthStarsConfig,
+    #[serde(default)]
+    pub city_lights: EarthCityLightsConfig,
+    #[serde(default)]
+    pub airglow: EarthAirglowConfig,
+    #[serde(default)]
+    pub night_map: EarthNightMapConfig,
+}
+
+/// Star-field tuning.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct EarthStarsConfig {
+    #[serde(default = "EarthStarsConfig::default_density")]
+    pub density: f32,
+    #[serde(default = "EarthStarsConfig::default_size")]
+    pub size: f32,
+    #[serde(default = "EarthStarsConfig::default_brightness")]
+    pub brightness: f32,
+}
+
+/// City-light tuning.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct EarthCityLightsConfig {
+    #[serde(default = "EarthCityLightsConfig::default_density")]
+    pub density: f32,
+    #[serde(default = "EarthCityLightsConfig::default_size")]
+    pub size: f32,
+    #[serde(default = "EarthCityLightsConfig::default_height")]
+    pub height: f32,
+    #[serde(default = "EarthCityLightsConfig::default_brightness")]
+    pub brightness: f32,
+}
+
+/// Emissive night-map tuning.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct EarthNightMapConfig {
+    #[serde(default = "EarthNightMapConfig::default_brightness")]
+    pub brightness: f32,
+}
+
+/// Airglow tuning.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct EarthAirglowConfig {
+    #[serde(default = "EarthAirglowConfig::default_density")]
+    pub density: f32,
+    #[serde(default = "EarthAirglowConfig::default_size")]
+    pub size: f32,
+    #[serde(default = "EarthAirglowConfig::default_brightness")]
+    pub brightness: f32,
+}
+
+impl Default for EarthStarsConfig {
+    fn default() -> Self {
+        Self {
+            density: Self::default_density(),
+            size: Self::default_size(),
+            brightness: Self::default_brightness(),
+        }
+    }
+}
+
+impl EarthStarsConfig {
+    pub fn default_density() -> f32 {
+        0.05
+    }
+
+    pub fn default_size() -> f32 {
+        0.40
+    }
+
+    pub fn default_brightness() -> f32 {
+        1.88
+    }
+}
+
+impl Default for EarthCityLightsConfig {
+    fn default() -> Self {
+        Self {
+            density: Self::default_density(),
+            size: Self::default_size(),
+            height: Self::default_height(),
+            brightness: Self::default_brightness(),
+        }
+    }
+}
+
+impl EarthCityLightsConfig {
+    pub fn default_density() -> f32 {
+        0.05
+    }
+
+    pub fn default_size() -> f32 {
+        1.0
+    }
+
+    pub fn default_height() -> f32 {
+        0.0
+    }
+
+    pub fn default_brightness() -> f32 {
+        0.05
+    }
+}
+
+impl Default for EarthNightMapConfig {
+    fn default() -> Self {
+        Self {
+            brightness: Self::default_brightness(),
+        }
+    }
+}
+
+impl EarthNightMapConfig {
+    pub fn default_brightness() -> f32 {
+        0.05
+    }
+}
+
+impl Default for EarthAirglowConfig {
+    fn default() -> Self {
+        Self {
+            density: Self::default_density(),
+            size: Self::default_size(),
+            brightness: Self::default_brightness(),
+        }
+    }
+}
+
+impl EarthAirglowConfig {
+    pub fn default_density() -> f32 {
+        0.55
+    }
+
+    pub fn default_size() -> f32 {
+        1.05
+    }
+
+    pub fn default_brightness() -> f32 {
+        1.45
+    }
+}
+
+impl EarthConfig {
+    pub const DENSITY_MIN: f32 = 0.05;
+    pub const DENSITY_MAX: f32 = 2.0;
+
+    pub fn clamp(&self) -> Self {
+        let clamp_density = |d: f32| d.clamp(Self::DENSITY_MIN, Self::DENSITY_MAX);
+        let clamp_scale = |s: f32| s.max(0.05);
+        Self {
+            stars: EarthStarsConfig {
+                density: clamp_density(self.stars.density),
+                size: clamp_scale(self.stars.size),
+                brightness: clamp_scale(self.stars.brightness),
+            },
+            city_lights: EarthCityLightsConfig {
+                density: clamp_density(self.city_lights.density),
+                size: self.city_lights.size.max(0.5),
+                height: self.city_lights.height.clamp(0.0, 100_000.0),
+                brightness: clamp_scale(self.city_lights.brightness),
+            },
+            airglow: EarthAirglowConfig {
+                density: clamp_density(self.airglow.density),
+                size: clamp_scale(self.airglow.size),
+                brightness: clamp_scale(self.airglow.brightness),
+            },
+            night_map: EarthNightMapConfig {
+                // Zero disables the emissive sheet.
+                brightness: self.night_map.brightness.clamp(0.0, 4.0),
+            },
         }
     }
 }
@@ -173,31 +355,44 @@ impl AtmosphereConfig {
 /// `sun` child of the `environment` node. Angles are degrees in the rendered
 /// (Bevy, Y-up) world frame; the same convention pyrotechnique scenes use, so
 /// values transcribe directly.
+///
+/// Placement is optional. With no `direction` and no `azimuth`/`elevation`
+/// the editor derives the real sun in ECEF from the playhead timestamp.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct SunConfig {
     #[serde(default)]
-    pub azimuth_deg: f32,
-    #[serde(default = "SunConfig::default_elevation_deg")]
-    pub elevation_deg: f32,
+    pub azimuth_deg: Option<f32>,
+    #[serde(default)]
+    pub elevation_deg: Option<f32>,
     /// Direct sunlight is ~100k lux.
     #[serde(default = "SunConfig::default_illuminance")]
     pub illuminance: f32,
     #[serde(default = "SunConfig::default_shadows")]
     pub shadows: bool,
+    /// Direction *toward* the sun in the schematic coordinate frame (e.g.
+    /// ECEF). When set it overrides `azimuth_deg`/`elevation_deg`, which are
+    /// awkward to author in Earth-centered scenes.
+    #[serde(default)]
+    pub direction: Option<(f32, f32, f32)>,
 }
 
 impl Default for SunConfig {
     fn default() -> Self {
         Self {
-            azimuth_deg: 0.0,
-            elevation_deg: Self::default_elevation_deg(),
+            azimuth_deg: None,
+            elevation_deg: None,
             illuminance: Self::default_illuminance(),
             shadows: Self::default_shadows(),
+            direction: None,
         }
     }
 }
 
 impl SunConfig {
+    pub fn default_azimuth_deg() -> f32 {
+        0.0
+    }
+
     pub fn default_elevation_deg() -> f32 {
         45.0
     }
@@ -208,6 +403,11 @@ impl SunConfig {
 
     pub fn default_shadows() -> bool {
         true
+    }
+
+    /// No authored placement: the editor tracks the real sun from the playhead.
+    pub fn tracks_ephemeris(&self) -> bool {
+        self.direction.is_none() && self.azimuth_deg.is_none() && self.elevation_deg.is_none()
     }
 }
 
@@ -480,6 +680,9 @@ pub struct Viewport {
     #[serde(default = "default_true")]
     pub effects: bool,
     pub hdr: bool,
+    /// Enables the cinematic Earth camera pipeline.
+    #[serde(default)]
+    pub cinematic: bool,
     #[serde(default)]
     pub bloom: Option<BloomConfig>,
     /// Camera exposure (EV100). Sunny-16 daylight is ~14-15. Absent = the
@@ -522,6 +725,7 @@ impl Default for Viewport {
             view_cube_frame: None,
             effects: true,
             hdr: false,
+            cinematic: false,
             bloom: None,
             ev100: None,
             name: None,

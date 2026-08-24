@@ -30,15 +30,15 @@ pub fn inspector_text_field(query: &mut String, hint_text: &str) -> impl egui::W
                 weak_bg_fill: scheme.bg_primary,
                 bg_stroke: egui::Stroke::NONE,
                 corner_radius: theme::corner_radius_xs(),
-                fg_stroke: egui::Stroke::new(1.0, scheme.text_primary),
+                fg_stroke: egui::Stroke::new(1.0_f32, scheme.text_primary),
                 expansion: 0.0,
             };
             ui.style_mut().visuals.widgets.active = egui::style::WidgetVisuals {
-                bg_stroke: egui::Stroke::new(1.0, scheme.highlight),
+                bg_stroke: egui::Stroke::new(1.0_f32, scheme.highlight),
                 ..ui.style_mut().visuals.widgets.inactive
             };
             ui.style_mut().visuals.widgets.hovered = egui::style::WidgetVisuals {
-                bg_stroke: egui::Stroke::new(1.0, scheme.highlight.opacity(0.5)),
+                bg_stroke: egui::Stroke::new(1.0_f32, scheme.highlight.opacity(0.5)),
                 ..ui.style_mut().visuals.widgets.inactive
             };
             let mut font_id = egui::TextStyle::Button.resolve(ui.style());

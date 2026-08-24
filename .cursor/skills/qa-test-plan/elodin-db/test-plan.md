@@ -69,6 +69,8 @@ then runs the **whole `elodin-db` command surface** over them. Coverage map (eve
 
 ## Execution Rules
 
+If this file is still the suite template (`elodin-db/test-plan.md`), copy it to `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` and fill results **only on the copy**. Never write run metadata into this file.
+
 1. Run every command from the repository root, inside the Nix shell (`nix develop --command <cmd>`).
 2. Execute cases in Summary order, one at a time. Never parallelize live-server cases — they bind fixed ports (2240/2241 source + asset, 2242 follower, 2250 Lua case, 2360 HTTP API).
 3. Check **Requires** first. Generator DBs under `/tmp/qa-db/` are this plan's declared cross-case artifacts: generators create them, later cases consume them read-only (serving/surgery cases work on **copies**). If a required DB is missing, mark the case BLOCKED.
@@ -278,7 +280,7 @@ grep -E "first frame seen|verification:" /tmp/qa-db/sc-gen.log
 ```bash
 rm -rf /tmp/qa-db/apollo
 nix develop --command sh -c '
-  ELODIN_DB_PATH=/tmp/qa-db/apollo ELODIN_APOLLO_MAX_TICKS=3600 timeout 240 \
+  ELODIN_DB_PATH=/tmp/qa-db/apollo ELODIN_APOLLO_MAX_TICKS=3600 ELODIN_NON_INTERACTIVE=1 timeout 240 \
     setsid elodin run examples/apollo-lander/main.py > /tmp/qa-db/apollo-gen.log 2>&1
   pkill -9 -f "apollo" 2>/dev/null
   for i in $(seq 1 40); do ss -ltn 2>/dev/null | grep -q ":2240 " || break; sleep 0.5; done; true'

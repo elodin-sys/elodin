@@ -1,4 +1,7 @@
+import os
 from dataclasses import dataclass, field
+from datetime import datetime
+from math import cos, sin, radians
 from typing import Annotated
 
 import elodin as el
@@ -18,6 +21,25 @@ earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
+# Start offshore SoCal at deep night; ELODIN_CUBESAT_T0 overrides the epoch.
+START_LAT_DEG = 34.05
+START_LON_DEG = -140.0
+START_TIMESTAMP_US = int(
+    datetime.fromisoformat(
+        os.environ.get("ELODIN_CUBESAT_T0", "2026-03-20T10:21:00+00:00")
+    ).timestamp()
+    * 1_000_000
+)
+_lat, _lon = radians(START_LAT_DEG), radians(START_LON_DEG)
+_cl, _sl = cos(_lat), sin(_lat)
+_co, _so = cos(_lon), sin(_lon)
+r0 = np.array([radius * _cl * _co, radius * _cl * _so, radius * _sl])
+east = np.array([-_so, _co, 0.0])
+up = np.array([_cl * _co, _cl * _so, _sl])
+v0 = east * velocity
+# Aft-west + up: look east at the coast/limb with the sat in the near field.
+cam = -east * 20.0 + up * 6.0
+look = east * 2.0
 SIM_TIME_STEP = 1.0 / 120.0
 
 cache_directory = el._get_cache_dir()
@@ -515,8 +537,8 @@ w = el.World()
 sat = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform(linear=np.array([1.0, 0.0, 0.0]) * radius),
-            world_vel=el.SpatialMotion(initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity),
+            world_pos=el.SpatialTransform(linear=r0),
+            world_vel=el.SpatialMotion(initial_angular_vel, v0),
             inertia=el.SpatialInertia(2825.2 / 1000.0, j),
             # Credit to the OreSat program https://www.oresat.org for the model above
         ),
@@ -633,26 +655,31 @@ w.spawn(CSSRel(el.Edge(css_4, sat)), name="CSS 4 -> Sat")
 w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
 w.schematic(
-    """
+    f"""
     coordinate frame=ECEF
-    vsplit {
-        hsplit share=0.6 {
-            tabs {
-                viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="ore_sat.world_pos" far=15000000.0 hdr=#true
-            }
+    // Globe is ECEF-fixed; the sim Earth body still spins, so continents lag.
+    environment {{
+        sun illuminance=100000.0 shadows=#true
+        ambient scale=0.05
+        earth
+    }}
+    vsplit {{
+        hsplit share=0.6 {{
+            tabs {{
+                viewport name=Viewport pos="ore_sat.world_pos.translate_world({float(cam[0]):.4f}, {float(cam[1]):.4f}, {float(cam[2]):.4f})" look_at="ore_sat.world_pos.translate_world({float(look[0]):.4f}, {float(look[1]):.4f}, {float(look[2]):.4f})" up="({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})" near=0.5 cinematic=#true
+            }}
             graph "css_0.css_value, css_1.css_value, css_2.css_value, css_3.css_value, css_4.css_value, css_5.css_value" Name=Sensor
-        }
+        }}
         graph "ore_sat.att_est" Name=Att
-    }
-    world_mesh "globe"
+    }}
 
-    object_3d ore_sat.world_pos {
+    object_3d ore_sat.world_pos {{
         glb path="oresat-low.glb"
-        icon builtin="satellite_alt" {
+        icon builtin="satellite_alt" {{
             visibility_range min=50.0 fade_distance=50.0
             color 76 175 80
-        }
-    }
+        }}
+    }}
 """,
     "cube-sat.kdl",
 )
@@ -684,7 +711,8 @@ exec = w.run(
     ),
     simulation_rate=1.0 / SIM_TIME_STEP,
     default_playback_speed=60.0,
-    max_ticks=60 * 20 * 60,
+    max_ticks=60 * 20 * 60 * 2,
+    start_timestamp=START_TIMESTAMP_US,
     optimize=True,
     backend="jax-cpu",
 )

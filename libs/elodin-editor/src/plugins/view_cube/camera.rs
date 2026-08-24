@@ -16,10 +16,11 @@ use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
+use std::f32::consts::PI;
 
 use super::components::{
-    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeFrame, ViewCubeFrameRef,
-    ViewCubeLink, ViewCubeRoot, ViewportActionButton,
+    AxisLabelBillboard, FaceLabel, KeepsRenderLayers, RotationArrow, ViewCubeCamera, ViewCubeFrame,
+    ViewCubeFrameRef, ViewCubeLink, ViewCubeRoot, ViewportActionButton,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
@@ -177,11 +178,16 @@ pub fn sync_view_cube_camera_orientation(
         };
 
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
-        // Mirror the camera's global rotation.
+        let translation = rotation * Vec3::new(0.0, 0.0, config.camera_distance);
+        if camera_transform.rotation.abs_diff_eq(rotation, 1.0e-6)
+            && camera_transform
+                .translation
+                .abs_diff_eq(translation, 1.0e-5)
+        {
+            continue;
+        }
         camera_transform.rotation = rotation;
-        // Keep it at its given distance.
-        camera_transform.translation =
-            camera_transform.rotation * Vec3::new(0.0, 0.0, config.camera_distance);
+        camera_transform.translation = translation;
     }
 }
 
@@ -230,12 +236,132 @@ pub fn orient_axis_labels_to_screen_plane(
     }
 }
 
+const FACE_LABEL_EPS: f32 = 1.0e-5;
+/// Angle change below which rewriting the label transform is not worth the
+/// change-detection and transform propagation it would trigger.
+const FACE_LABEL_ANGLE_EPS: f32 = 1.0e-4;
+
+/// Screen-space (x right, y up) baseline and glyph-up axes of a label spun by
+/// `angle` inside its face plane.
+#[cfg(test)]
+fn face_label_screen_axes(
+    base_rotation: Quat,
+    cube_rotation: Quat,
+    camera_rotation: Quat,
+    angle: f32,
+) -> (Vec2, Vec2) {
+    let to_camera = camera_rotation.inverse() * cube_rotation * base_rotation;
+    let (c1, c2) = (to_camera * Vec3::X, to_camera * Vec3::Y);
+    let (sin, cos) = angle.sin_cos();
+    let right = cos * c1 + sin * c2;
+    let up = cos * c2 - sin * c1;
+    (Vec2::new(right.x, right.y), Vec2::new(up.x, up.y))
+}
+
+/// In-plane spin (radians) that lays a face label's baseline flat on the screen
+/// horizontal.
+///
+/// Quantizing to 90° cannot do this: on an obliquely viewed face both in-plane
+/// axes can sit ~60° off horizontal, so every quarter turn reads sideways.
+/// Solving `cos·c1.y + sin·c2.y = 0` is exact for any pose instead, where `c1`
+/// and `c2` are the face plane axes in camera space.
+///
+/// Returns `None` for an edge-on face, whose whole plane projects to a line.
+pub(super) fn face_label_in_plane_angle(
+    base_rotation: Quat,
+    cube_rotation: Quat,
+    camera_rotation: Quat,
+) -> Option<f32> {
+    let to_camera = camera_rotation.inverse() * cube_rotation * base_rotation;
+    let c1 = to_camera * Vec3::X;
+    let c2 = to_camera * Vec3::Y;
+
+    // Both axes already project horizontally: nothing to solve.
+    let mut angle = if c1.y.abs() <= FACE_LABEL_EPS && c2.y.abs() <= FACE_LABEL_EPS {
+        0.0
+    } else {
+        (-c1.y).atan2(c2.y)
+    };
+
+    let (sin, cos) = angle.sin_cos();
+    let mut baseline = Vec2::new(cos * c1.x + sin * c2.x, cos * c1.y + sin * c2.y);
+    // Both halves of the solution are horizontal; take the one running left to
+    // right. Adding π only negates the baseline, so no need to solve again.
+    if baseline.x < 0.0 {
+        angle += PI;
+        baseline = -baseline;
+    }
+    (baseline.length_squared() > FACE_LABEL_EPS * FACE_LABEL_EPS).then_some(angle)
+}
+
+type FaceLabelOrientQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut FaceLabel,
+        &'static mut Transform,
+        &'static mut GlobalTransform,
+    ),
+    (Without<ViewCubeCamera>, Without<ViewCubeRoot>),
+>;
+
+type ViewCubeRootGlobalQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ViewCubeFrame, &'static GlobalTransform),
+    (With<ViewCubeRoot>, Without<FaceLabel>),
+>;
+
+type ViewCubeOverlayGlobalQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ViewCubeFrameRef, &'static GlobalTransform),
+    (With<ViewCubeCamera>, Without<FaceLabel>),
+>;
+
+/// Spins each face label so its word reads horizontally in the viewport
+/// that owns it.
+///
+/// Cube pose comes from the overlay camera's frame, not `ChildOf` — the
+/// GLB instance can reparent children. After propagation we also write
+/// `GlobalTransform`, otherwise extract still sees the baked pose.
+pub fn orient_face_labels_to_view(
+    mut labels: FaceLabelOrientQuery<'_, '_>,
+    cubes: ViewCubeRootGlobalQuery<'_, '_>,
+    cube_cameras: ViewCubeOverlayGlobalQuery<'_, '_>,
+) {
+    for (mut face_label, mut label_transform, mut label_global) in labels.iter_mut() {
+        let Ok((frame_ref, camera_global)) = cube_cameras.get(face_label.camera) else {
+            continue;
+        };
+        let Some((_, cube_global)) = cubes.iter().find(|(frame, _)| frame.0 == frame_ref.0) else {
+            continue;
+        };
+
+        let view = (cube_global.rotation(), camera_global.rotation());
+        if face_label.last_view == Some(view) {
+            continue;
+        }
+        face_label.last_view = Some(view);
+
+        let base_rotation = face_label.base_rotation;
+        let angle = face_label_in_plane_angle(base_rotation, view.0, view.1)
+            .unwrap_or(face_label.last_angle);
+        if (angle - face_label.last_angle).abs() > FACE_LABEL_ANGLE_EPS {
+            face_label.last_angle = angle;
+            label_transform.rotation = base_rotation * Quat::from_rotation_z(angle);
+        }
+        *label_global = cube_global.mul_transform(*label_transform);
+    }
+}
+
 pub fn apply_render_layers_to_scene(
     view_cube_query: Query<(Entity, &RenderLayers, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
     scene_instances: Query<&WorldInstance>,
     scene_spawner: Res<WorldInstanceSpawner>,
     view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
+    current_layers: Query<(&RenderLayers, Has<KeepsRenderLayers>)>,
     mut commands: Commands,
 ) {
     for (cube_root, render_layers, visibility) in view_cube_query.iter() {
@@ -243,6 +369,7 @@ pub fn apply_render_layers_to_scene(
             cube_root,
             &children_query,
             &view_cube_entities,
+            &current_layers,
             render_layers,
             &mut commands,
         );
@@ -260,12 +387,29 @@ fn apply_layers_recursive(
     entity: Entity,
     children_query: &Query<&Children>,
     view_cube_entities: &Query<Entity, Without<ViewCubeCamera>>,
+    current_layers: &Query<(&RenderLayers, Has<KeepsRenderLayers>)>,
     render_layers: &RenderLayers,
     commands: &mut Commands,
 ) {
-    if view_cube_entities.get(entity).is_ok() {
-        commands.entity(entity).insert(render_layers.clone());
-    }
+    // A per-viewport subtree keeps its own layer and hands it down, otherwise
+    // the shared cube's layer would leak in and every viewport would see every
+    // copy of the face labels. Rewriting an unchanged layer still trips Bevy
+    // change detection, so skip the insert when the mask is already right.
+    let render_layers = match current_layers.get(entity) {
+        Ok((own, true)) => own,
+        Ok((current, false)) => {
+            if view_cube_entities.get(entity).is_ok() && current != render_layers {
+                commands.entity(entity).insert(render_layers.clone());
+            }
+            render_layers
+        }
+        Err(_) => {
+            if view_cube_entities.get(entity).is_ok() {
+                commands.entity(entity).insert(render_layers.clone());
+            }
+            render_layers
+        }
+    };
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
@@ -273,6 +417,7 @@ fn apply_layers_recursive(
                 child,
                 children_query,
                 view_cube_entities,
+                current_layers,
                 render_layers,
                 commands,
             );
@@ -1192,6 +1337,7 @@ fn apply_orbit_look_at(
 mod tests {
     use super::*;
     use crate::plugins::render_layer_alloc::view_cube_render_layers;
+    use crate::plugins::view_cube::config::CoordinateSystem;
     use bevy::asset::AssetPlugin;
     use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldSerializationPlugin};
     use bevy_geo_frames::Present;
@@ -1600,6 +1746,152 @@ mod tests {
         );
     }
 
+    /// Per-viewport labels hang under the shared cube, so the cube's layer must
+    /// not be forced onto them — otherwise every viewport draws every copy.
+    #[test]
+    fn per_viewport_face_label_subtrees_keep_their_own_render_layers() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<WorldInstanceSpawner>();
+        app.add_systems(Update, apply_render_layers_to_scene);
+
+        let frame_layers = view_cube_render_layers(GeoFrame::ECEF);
+        let viewport_a = RenderLayers::layer(24);
+        let viewport_b = RenderLayers::layer(25);
+
+        let root = app
+            .world_mut()
+            .spawn((ViewCubeRoot, Visibility::Hidden, frame_layers.clone()))
+            .id();
+        let label_a = app
+            .world_mut()
+            .spawn((ChildOf(root), KeepsRenderLayers, viewport_a.clone()))
+            .id();
+        let glyph_a = app
+            .world_mut()
+            .spawn((ChildOf(label_a), RenderLayers::layer(0)))
+            .id();
+        let label_b = app
+            .world_mut()
+            .spawn((ChildOf(root), KeepsRenderLayers, viewport_b.clone()))
+            .id();
+        let glyph_b = app
+            .world_mut()
+            .spawn((ChildOf(label_b), RenderLayers::layer(0)))
+            .id();
+        let shared_axis = app
+            .world_mut()
+            .spawn((ChildOf(root), RenderLayers::layer(0)))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<RenderLayers>(label_a), Some(&viewport_a));
+        assert_eq!(app.world().get::<RenderLayers>(label_b), Some(&viewport_b));
+        assert_eq!(
+            app.world().get::<RenderLayers>(glyph_a),
+            Some(&viewport_a),
+            "glyphs follow their own label, not the shared cube",
+        );
+        assert_eq!(app.world().get::<RenderLayers>(glyph_b), Some(&viewport_b));
+        assert_eq!(
+            app.world().get::<RenderLayers>(shared_axis),
+            Some(&frame_layers),
+            "cube parts that are not per-viewport still take the frame layer",
+        );
+    }
+
+    /// Two viewports on the same frame share one cube, so each has to own its
+    /// copy of the labels and spin it for its own camera.
+    #[test]
+    fn two_viewports_sharing_a_cube_orient_their_own_labels() {
+        let geo = geo_frames_geo();
+        let cube = ecef_cube_rotation(&geo);
+        let label = ecef_face_label("+X");
+        let equator = camera_looking(Vec3::new(0.0, -8.0, 0.0), Vec3::Z);
+        let oblique = camera_looking(Vec3::new(4.6, -4.6, 4.6), Vec3::Z);
+
+        let mut app = App::new();
+        app.add_systems(Update, orient_face_labels_to_view);
+
+        let cube_root = app
+            .world_mut()
+            .spawn((
+                ViewCubeRoot,
+                ViewCubeFrame(GeoFrame::ECEF),
+                Transform::from_rotation(cube),
+                GlobalTransform::from(Transform::from_rotation(cube)),
+            ))
+            .id();
+
+        let mut spawn_viewport_copy = |camera_rotation: Quat| {
+            let camera = app
+                .world_mut()
+                .spawn((
+                    ViewCubeCamera,
+                    ViewCubeFrameRef(GeoFrame::ECEF),
+                    Transform::from_rotation(camera_rotation),
+                    GlobalTransform::from(Transform::from_rotation(camera_rotation)),
+                ))
+                .id();
+            app.world_mut()
+                .spawn((
+                    ChildOf(cube_root),
+                    FaceLabel {
+                        base_rotation: label.rotation,
+                        camera,
+                        last_angle: 0.0,
+                        last_view: None,
+                    },
+                    Transform::from_rotation(label.rotation),
+                    GlobalTransform::from(Transform::from_rotation(label.rotation)),
+                ))
+                .id()
+        };
+        let label_equator = spawn_viewport_copy(equator);
+        let label_oblique = spawn_viewport_copy(oblique);
+
+        app.update();
+
+        for (entity, camera, name) in [
+            (label_equator, equator, "equator"),
+            (label_oblique, oblique, "oblique"),
+        ] {
+            let expected = face_label_in_plane_angle(label.rotation, cube, camera)
+                .unwrap_or_else(|| panic!("+X should be visible from the {name} camera"));
+            let solved = app.world().get::<FaceLabel>(entity).expect("label");
+            assert!(
+                (solved.last_angle - expected).abs() <= FACE_LABEL_ANGLE_EPS,
+                "{name} copy should be solved for its own camera, \
+                 got {} expected {expected}",
+                solved.last_angle,
+            );
+            let applied = app.world().get::<Transform>(entity).expect("transform");
+            let wanted = label.rotation * Quat::from_rotation_z(expected);
+            assert!(
+                applied.rotation.abs_diff_eq(wanted, 1.0e-5),
+                "{name} copy should carry its spin: applied={:?} wanted={wanted:?}",
+                applied.rotation,
+            );
+        }
+
+        let angle_equator = app
+            .world()
+            .get::<FaceLabel>(label_equator)
+            .expect("label")
+            .last_angle;
+        let angle_oblique = app
+            .world()
+            .get::<FaceLabel>(label_oblique)
+            .expect("label")
+            .last_angle;
+        assert!(
+            (angle_equator - angle_oblique).abs() > 1.0e-3,
+            "the two viewports look from different angles, so their labels \
+             must not end up sharing one orientation",
+        );
+    }
+
     #[test]
     fn view_cube_scene_root_is_revealed_after_scene_instance_is_ready() {
         let mut app = App::new();
@@ -1731,5 +2023,187 @@ mod tests {
 
         assert!((transform.translation - start.translation).length() < 1.0e-5);
         assert!((editor_cam.last_anchor_depth + 4.0).abs() < 1.0e-5);
+    }
+
+    fn ecef_face_label(text: &str) -> crate::plugins::view_cube::config::FaceLabelConfig {
+        CoordinateSystem(GeoFrame::ECEF)
+            .get_face_labels(1.0)
+            .into_iter()
+            .find(|label| label.text == text)
+            .unwrap_or_else(|| panic!("missing ECEF face label {text}"))
+    }
+
+    fn camera_looking(from: Vec3, up: Vec3) -> Quat {
+        Transform::from_translation(from)
+            .looking_at(Vec3::ZERO, up)
+            .rotation
+    }
+
+    fn geo_frames_geo() -> GeoContext {
+        GeoContext::from(bevy_geo_frames::GeoOrigin::new_from_degrees(
+            34.72, -86.64, 180.5,
+        ))
+        .with_present(Present::Plane)
+    }
+
+    /// Real ECEF cube pose: the root carries `GeoRotation::absolute(ECEF, I)`.
+    /// Testing against `Quat::IDENTITY` instead hides the oblique faces entirely.
+    fn ecef_cube_rotation(geo: &GeoContext) -> Quat {
+        GeoRotation::absolute(GeoFrame::ECEF, bevy::math::DQuat::IDENTITY)
+            .to_bevy(geo)
+            .as_quat()
+    }
+
+    fn assert_reads_horizontally(text: &str, cube: Quat, camera: Quat) {
+        let label = ecef_face_label(text);
+        let angle = face_label_in_plane_angle(label.rotation, cube, camera)
+            .unwrap_or_else(|| panic!("{text} should not be edge-on for this pose"));
+        let (baseline, _) = face_label_screen_axes(label.rotation, cube, camera, angle);
+        assert!(
+            baseline.y.abs() <= 1.0e-4 * baseline.length().max(1.0e-6) + 1.0e-5,
+            "{text} should read horizontally, screen baseline={baseline:?}"
+        );
+        assert!(
+            baseline.x > 0.0,
+            "{text} should run left to right, screen baseline={baseline:?}"
+        );
+    }
+
+    /// The ECEF cube carries `bevy_R_ecef`, so its faces are viewed obliquely and
+    /// their in-plane axes never line up with the screen. Every visible face has
+    /// to read horizontally anyway.
+    #[test]
+    fn ecef_visible_face_labels_read_horizontally_over_a_camera_sweep() {
+        let geo = geo_frames_geo();
+        let cube = ecef_cube_rotation(&geo);
+        let labels = CoordinateSystem(GeoFrame::ECEF).get_face_labels(1.0);
+
+        for yaw_deg in (0..360).step_by(5) {
+            for pitch_deg in (-85..=85).step_by(5) {
+                let camera = Quat::from_euler(
+                    EulerRot::YXZ,
+                    (yaw_deg as f32).to_radians(),
+                    (pitch_deg as f32).to_radians(),
+                    0.0,
+                );
+                for label in &labels {
+                    let normal_cam = camera.inverse() * cube * label.position.normalize_or_zero();
+                    // Only faces actually turned toward the viewer must be readable.
+                    if normal_cam.z < 0.2 {
+                        continue;
+                    }
+                    let angle = face_label_in_plane_angle(label.rotation, cube, camera)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{} is visible (n.z={:.3}) at yaw={yaw_deg} pitch={pitch_deg} but was treated as edge-on",
+                                label.text, normal_cam.z
+                            )
+                        });
+                    let (baseline, _) = face_label_screen_axes(label.rotation, cube, camera, angle);
+                    assert!(
+                        baseline.y.abs() <= 1.0e-4 * baseline.length() + 1.0e-5,
+                        "{} reads sideways at yaw={yaw_deg} pitch={pitch_deg}: baseline={baseline:?}",
+                        label.text
+                    );
+                    assert!(
+                        baseline.x > 0.0,
+                        "{} runs right to left at yaw={yaw_deg} pitch={pitch_deg}: baseline={baseline:?}",
+                        label.text
+                    );
+                }
+            }
+        }
+    }
+
+    /// Regression: a 90°-quantized roll leaves this oblique `+X` face ~63° off
+    /// horizontal, because none of its four quarter turns is horizontal.
+    #[test]
+    fn ecef_oblique_side_face_is_horizontal_where_quantized_rolls_fail() {
+        let geo = geo_frames_geo();
+        let cube = ecef_cube_rotation(&geo);
+        let camera = Quat::from_euler(
+            EulerRot::YXZ,
+            150.0_f32.to_radians(),
+            30.0_f32.to_radians(),
+            0.0,
+        );
+        assert_reads_horizontally("+X", cube, camera);
+    }
+
+    #[test]
+    fn ecef_plus_z_label_is_untouched_when_face_on() {
+        let camera = camera_looking(Vec3::Z, Vec3::Y);
+        let label = ecef_face_label("+Z");
+        let angle = face_label_in_plane_angle(label.rotation, Quat::IDENTITY, camera)
+            .expect("+Z is face-on, not edge-on");
+        assert!(
+            angle.abs() < 1.0e-5,
+            "a face-on label is already horizontal and must not spin, got {angle}"
+        );
+    }
+
+    #[test]
+    fn ecef_plus_z_label_flips_when_camera_is_upside_down() {
+        let camera = camera_looking(Vec3::Z, Vec3::NEG_Y);
+        let label = ecef_face_label("+Z");
+        let angle = face_label_in_plane_angle(label.rotation, Quat::IDENTITY, camera)
+            .expect("+Z stays face-on when the camera rolls");
+        assert!(
+            (angle.abs() - PI).abs() < 1.0e-5,
+            "upside-down view should spin the label 180°, got {angle}"
+        );
+        assert_reads_horizontally("+Z", Quat::IDENTITY, camera);
+    }
+
+    #[test]
+    fn face_label_has_no_angle_when_face_is_edge_on() {
+        // Camera in the +X face plane, screen-up along the face: the whole face
+        // projects to a vertical line, so no angle can be horizontal.
+        let label = ecef_face_label("+X");
+        let camera = camera_looking(Vec3::Y, Vec3::Z);
+        assert!(
+            face_label_in_plane_angle(label.rotation, Quat::IDENTITY, camera).is_none(),
+            "an edge-on face has no meaningful in-plane angle"
+        );
+    }
+
+    /// geo-frames' two ECEF cameras: look-at in ECEF, converted the same way
+    /// the viewport does. +X on the oblique view must actually spin — baked
+    /// orientation leaves it vertical on screen.
+    #[test]
+    fn geo_frames_ecef_cameras_spin_plus_x_off_its_baked_pose() {
+        let geo = geo_frames_geo();
+        let cube = ecef_cube_rotation(&geo);
+        let label = ecef_face_label("+X");
+
+        let equator = GeoRotation::look_at(
+            GeoFrame::ECEF,
+            DVec3::new(-8_000_000.0, 80_000_000.0, 0.0),
+            Some(DVec3::Z),
+            &geo,
+        )
+        .to_bevy(&geo)
+        .as_quat();
+        let oblique = GeoRotation::look_at(
+            GeoFrame::ECEF,
+            DVec3::new(-46_000_000.0, 46_000_000.0, -46_000_000.0),
+            Some(DVec3::Z),
+            &geo,
+        )
+        .to_bevy(&geo)
+        .as_quat();
+
+        assert_reads_horizontally("+X", cube, equator);
+        assert_reads_horizontally("+X", cube, oblique);
+        assert_reads_horizontally("+Z", cube, oblique);
+        assert_reads_horizontally("-Y", cube, equator);
+
+        let baked = 0.0;
+        let spun = face_label_in_plane_angle(label.rotation, cube, oblique)
+            .expect("+X visible from the oblique ECEF camera");
+        assert!(
+            (spun - baked).abs() > 15.0_f32.to_radians(),
+            "oblique +X must leave its baked pose, got {spun} rad"
+        );
     }
 }

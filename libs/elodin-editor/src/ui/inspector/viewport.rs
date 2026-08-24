@@ -9,12 +9,16 @@ use bevy::{
     camera::Projection,
     camera::visibility::RenderLayers,
     ecs::{entity::Entity, system::Query},
+    post_process::bloom::Bloom,
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault};
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
+use impeller2_wkt::{
+    BloomPreset, ComponentValue, EarthAirglowConfig, EarthCityLightsConfig, EarthNightMapConfig,
+    EarthStarsConfig, QueryType, WorldPos,
+};
 use nox::ArrayBuf;
 
 use crate::EqlContext;
@@ -27,7 +31,8 @@ use crate::ui::widgets::WidgetSystem;
 use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
-    ui::tiles::ViewportConfig,
+    plugins::{frustum_common::presentation_far, scene_environment::SceneEnvironment},
+    ui::tiles::{ViewportConfig, bloom_from_config, cinematic_bloom_config},
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
@@ -421,6 +426,231 @@ fn smoothing_alpha(dt: f64, time_constant: f64) -> f64 {
 
 /// Clamp `smoothed` so it trails `target` by at most `max_lag` metres, holding
 /// the follow lag bounded even before the adaptive cutoff has caught up.
+fn labeled_float(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    speed: f32,
+    range: std::ops::RangeInclusive<f32>,
+) -> egui::Response {
+    let scheme = get_scheme();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(label).color(scheme.text_secondary));
+        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+            ui.add(egui::DragValue::new(value).speed(speed).range(range))
+        })
+        .inner
+    })
+    .inner
+}
+
+fn labeled_slider(
+    ui: &mut egui::Ui,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+) -> egui::Response {
+    let scheme = get_scheme();
+    ui.style_mut().spacing.slider_width = ui.available_size().x;
+    ui.style_mut().visuals.widgets.inactive.bg_fill = scheme.bg_secondary;
+    ui.add(egui::Slider::new(value, range).show_value(false))
+}
+
+fn labeled_float_slider(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    speed: f32,
+    range: std::ops::RangeInclusive<f32>,
+) -> bool {
+    let drag_changed = labeled_float(ui, label, value, speed, range.clone()).changed();
+    let slider_changed = labeled_slider(ui, value, range).changed();
+    drag_changed || slider_changed
+}
+
+fn cinematic_look_ui(
+    ui: &mut egui::Ui,
+    camera: Entity,
+    viewport_config: &mut ViewportConfig,
+    blooms: &mut Query<&mut Bloom>,
+    scene_environment: &mut SceneEnvironment,
+) {
+    let scheme = get_scheme();
+    ui.separator();
+    ui.label(egui::RichText::new("BLOOM").color(scheme.text_secondary));
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            let defaults = cinematic_bloom_config();
+            let mut config = viewport_config
+                .bloom
+                .clone()
+                .unwrap_or_else(|| defaults.clone());
+            let mut dirty = false;
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("PRESET").color(scheme.text_secondary));
+                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                    if ui
+                        .selectable_label(config.preset == BloomPreset::OldSchool, "OLD SCHOOL")
+                        .clicked()
+                    {
+                        config.preset = BloomPreset::OldSchool;
+                        dirty = true;
+                    }
+                    ui.add_space(8.0);
+                    if ui
+                        .selectable_label(config.preset == BloomPreset::Natural, "NATURAL")
+                        .clicked()
+                    {
+                        config.preset = BloomPreset::Natural;
+                        dirty = true;
+                    }
+                });
+            });
+
+            let mut intensity = config.intensity.or(defaults.intensity).unwrap_or_default();
+            if labeled_float_slider(ui, "INTENSITY", &mut intensity, 0.01, 0.0..=1.0) {
+                config.intensity = Some(intensity);
+                dirty = true;
+            }
+
+            let mut threshold = config.threshold.or(defaults.threshold).unwrap_or_default();
+            if labeled_float_slider(ui, "THRESHOLD", &mut threshold, 0.01, 0.0..=4.0) {
+                config.threshold = Some(threshold);
+                dirty = true;
+            }
+
+            let mut softness = config
+                .threshold_softness
+                .or(defaults.threshold_softness)
+                .unwrap_or_default();
+            if labeled_float_slider(ui, "SOFTNESS", &mut softness, 0.01, 0.0..=1.0) {
+                config.threshold_softness = Some(softness);
+                dirty = true;
+            }
+
+            if dirty {
+                viewport_config.bloom = Some(config.clone());
+                if let Ok(mut bloom) = blooms.get_mut(camera) {
+                    *bloom = bloom_from_config(Some(&config), true);
+                }
+            }
+        });
+
+    let Some(earth) = scene_environment
+        .0
+        .as_mut()
+        .and_then(|env| env.earth.as_mut())
+    else {
+        return;
+    };
+
+    ui.separator();
+    ui.label(egui::RichText::new("STARS").color(scheme.text_secondary));
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            earth_scale_knobs(ui, &mut earth.stars);
+        });
+
+    ui.separator();
+    ui.label(egui::RichText::new("CITY LIGHTS").color(scheme.text_secondary));
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            earth_city_knobs(ui, &mut earth.city_lights);
+        });
+
+    ui.separator();
+    ui.label(egui::RichText::new("AIRGLOW").color(scheme.text_secondary));
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            earth_airglow_knobs(ui, &mut earth.airglow);
+        });
+
+    ui.separator();
+    ui.label(egui::RichText::new("NIGHT MAP").color(scheme.text_secondary));
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            earth_night_map_knobs(ui, &mut earth.night_map);
+        });
+
+    *earth = earth.clamp();
+}
+
+fn scale_to_pct(scale: f32) -> f32 {
+    scale * 100.0
+}
+
+fn pct_to_scale(pct: f32) -> f32 {
+    pct / 100.0
+}
+
+fn earth_scale_knobs(ui: &mut egui::Ui, stars: &mut EarthStarsConfig) {
+    let mut density_pct = scale_to_pct(stars.density);
+    if labeled_float_slider(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0) {
+        stars.density = pct_to_scale(density_pct);
+    }
+
+    let mut size_pct = scale_to_pct(stars.size);
+    if labeled_float_slider(ui, "SIZE %", &mut size_pct, 1.0, 10.0..=400.0) {
+        stars.size = pct_to_scale(size_pct);
+    }
+
+    let mut brightness_pct = scale_to_pct(stars.brightness);
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0) {
+        stars.brightness = pct_to_scale(brightness_pct);
+    }
+}
+
+fn earth_city_knobs(ui: &mut egui::Ui, city: &mut EarthCityLightsConfig) {
+    let mut density_pct = scale_to_pct(city.density);
+    if labeled_float_slider(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0) {
+        city.density = pct_to_scale(density_pct);
+    }
+
+    let mut size = city.size;
+    if labeled_float_slider(ui, "SIZE PX", &mut size, 0.1, 1.0..=20.0) {
+        city.size = size;
+    }
+
+    let mut height = city.height;
+    if labeled_float_slider(ui, "HEIGHT M", &mut height, 10.0, 0.0..=50_000.0) {
+        city.height = height;
+    }
+
+    let mut brightness_pct = scale_to_pct(city.brightness);
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0) {
+        city.brightness = pct_to_scale(brightness_pct);
+    }
+}
+
+fn earth_airglow_knobs(ui: &mut egui::Ui, airglow: &mut EarthAirglowConfig) {
+    let mut density_pct = scale_to_pct(airglow.density);
+    if labeled_float_slider(ui, "DENSITY %", &mut density_pct, 1.0, 5.0..=200.0) {
+        airglow.density = pct_to_scale(density_pct);
+    }
+
+    let mut size_pct = scale_to_pct(airglow.size);
+    if labeled_float_slider(ui, "SIZE %", &mut size_pct, 1.0, 10.0..=400.0) {
+        airglow.size = pct_to_scale(size_pct);
+    }
+
+    let mut brightness_pct = scale_to_pct(airglow.brightness);
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 5.0..=400.0) {
+        airglow.brightness = pct_to_scale(brightness_pct);
+    }
+}
+
+fn earth_night_map_knobs(ui: &mut egui::Ui, night_map: &mut EarthNightMapConfig) {
+    let mut brightness_pct = scale_to_pct(night_map.brightness);
+    if labeled_float_slider(ui, "BRIGHTNESS %", &mut brightness_pct, 1.0, 0.0..=400.0) {
+        night_map.brightness = pct_to_scale(brightness_pct);
+    }
+}
+
 fn clamp_lag(smoothed: DVec3, target: DVec3, max_lag: f64) -> DVec3 {
     let delta = smoothed - target;
     let len = delta.length();
@@ -439,6 +669,8 @@ pub struct InspectorViewport<'w, 's> {
     viewport_rects: Query<'w, 's, &'static ViewportRect, With<MainCamera>>,
     editor_cams: Query<'w, 's, &'static mut EditorCam>,
     object_3d_states: Query<'w, 's, &'static Object3DState>,
+    blooms: Query<'w, 's, &'static mut Bloom>,
+    scene_environment: ResMut<'w, SceneEnvironment>,
     eql_ctx: ResMut<'w, EqlContext>,
     geo_context: Res<'w, GeoContext>,
 }
@@ -465,6 +697,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             viewport_rects,
             mut editor_cams,
             object_3d_states,
+            mut blooms,
+            mut scene_environment,
             eql_ctx,
             geo_context,
         } = state_mut;
@@ -516,7 +750,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
             ui.separator();
-            let mut configured_clip_planes = None;
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
@@ -540,8 +773,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     }
 
                     ui.add_space(8.0);
-                    let mut near = persp.near;
-                    let mut far = persp.far;
+                    let mut near = viewport_config.configured_near.unwrap_or(persp.near);
+                    let mut far = presentation_far(near, viewport_config.configured_far);
                     let mut near_changed = false;
                     let mut far_changed = false;
 
@@ -564,23 +797,23 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
                     if near_changed || far_changed {
                         near = near.max(0.0001);
-                        if far <= near + 0.0001 {
-                            far = near + 0.0001;
-                        }
-                        persp.near = near;
-                        persp.far = far;
-                        configured_clip_planes = Some((near, far));
 
-                        if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
-                            if near_changed {
+                        if near_changed {
+                            far = presentation_far(near, viewport_config.configured_far);
+                            if viewport_config.configured_far.is_some() {
+                                viewport_config.configured_far = Some(far);
+                            }
+                            persp.near = near;
+                            persp.near_clip_plane =
+                                crate::plugins::frustum_common::near_clip_plane(near);
+                            viewport_config.configured_near = Some(near);
+                            if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
                                 editor_cam.perspective.near_clip_limits = near..near;
                             }
-                            if far_changed {
-                                let (min_size_per_pixel, max_size_per_pixel) =
-                                    crate::ui::tiles::zoom_limits_for_far(far);
-                                editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
-                                editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
-                            }
+                        }
+                        if far_changed {
+                            far = presentation_far(near, Some(far));
+                            viewport_config.configured_far = Some(far);
                         }
                     }
 
@@ -640,10 +873,16 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     }
                 });
-            if let Some((near, far)) = configured_clip_planes {
-                viewport_config.configured_near = Some(near);
-                viewport_config.configured_far = Some(far);
-            }
+        }
+
+        if viewport_config.cinematic {
+            cinematic_look_ui(
+                ui,
+                camera,
+                &mut viewport_config,
+                &mut blooms,
+                &mut scene_environment,
+            );
         }
 
         if let Some(&GridHandle { layer }) = cam.grid_handle {
@@ -698,7 +937,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(frustums_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );
@@ -722,7 +961,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(projection_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );

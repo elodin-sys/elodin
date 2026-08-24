@@ -631,7 +631,7 @@ impl TimeseriesPlot {
                             egui::pos2(x_pos, self.inner_rect.max.y),
                             egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
 
                     if !hide_labels {
@@ -682,7 +682,7 @@ impl TimeseriesPlot {
                             egui::pos2(x_pos, self.inner_rect.max.y),
                             egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
 
                     if !hide_labels {
@@ -741,7 +741,7 @@ impl TimeseriesPlot {
                             egui::pos2(x_pos, self.inner_rect.max.y),
                             egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
 
                     if !hide_labels {
@@ -839,7 +839,7 @@ impl TimeseriesPlot {
             .frame(
                 Frame::default()
                     .inner_margin(Margin::same(8))
-                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
+                    .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
                     .corner_radius(corner_radius_sm())
                     .fill(get_scheme().bg_secondary)
                     .shadow(egui::epaint::Shadow {
@@ -1173,7 +1173,7 @@ impl TimeseriesPlot {
                             pos,
                             4.5,
                             get_scheme().bg_secondary,
-                            egui::Stroke::new(2.0, *color),
+                            egui::Stroke::new(2.0_f32, *color),
                         );
                     }
                 }
@@ -1196,7 +1196,7 @@ impl TimeseriesPlot {
                                 pos,
                                 4.5,
                                 get_scheme().bg_secondary,
-                                egui::Stroke::new(2.0, series.color),
+                                egui::Stroke::new(2.0_f32, series.color),
                             );
                         }
                     }
@@ -1297,7 +1297,7 @@ pub fn draw_y_axis(
     inner_rect: egui::Rect,
     telemetry_mode: bool,
 ) {
-    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let border_stroke = egui::Stroke::new(1.0_f32, get_scheme().border_primary);
     let scheme = get_scheme();
     let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
     font_id.size = 11.0;
@@ -1398,13 +1398,13 @@ pub fn draw_cursor(
     ui.painter().vline(
         x_offset + rect.min.x,
         0.0..=inner_rect.max.y,
-        egui::Stroke::new(1.0, get_scheme().border_primary),
+        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
     );
 
     ui.painter().hline(
         inner_rect.min.x..=inner_rect.max.x,
         pointer_pos.y,
-        egui::Stroke::new(1.0, get_scheme().border_primary),
+        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
     );
 }
 
@@ -1417,7 +1417,7 @@ pub fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect)
     ui.painter()
         .rect_filled(x_bg_rect, CornerRadius::ZERO, border_bg_color);
 
-    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let border_stroke = egui::Stroke::new(1.0_f32, get_scheme().border_primary);
     let left_border = [inner_rect.left_top(), inner_rect.left_bottom()];
     ui.painter().line_segment(left_border, border_stroke);
 

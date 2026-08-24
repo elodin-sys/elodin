@@ -88,7 +88,7 @@ impl Decomponentize for () {
 
 impl<F> Decomponentize for F
 where
-    F: for<'a> FnMut(ComponentId, ComponentView<'_>, Option<Timestamp>),
+    F: FnMut(ComponentId, ComponentView<'_>, Option<Timestamp>),
 {
     type Error = Infallible;
     fn apply_value(

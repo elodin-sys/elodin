@@ -706,7 +706,7 @@ impl ArrayTy {
 
     /// Pretty prints the array type to the given writer.
     fn pretty_print(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
-        write!(writer, "{:?}{:?}", self.element_type, &self.shape)
+        write!(writer, "{:?}{:?}", self.element_type, self.shape)
     }
 }
 
@@ -2581,7 +2581,7 @@ impl PrettyPrintTracer {
                 write!(
                     writer,
                     "scan(inputs = var_{:?}, xs = init_{}, fn = ",
-                    &inputs, init
+                    inputs, init
                 )?;
                 s.scan_fn.pretty_print(self, writer)?;
                 write!(writer, ")")?;

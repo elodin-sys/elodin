@@ -17,6 +17,8 @@ use bevy_geo_frames::GeoFrame;
 use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
+/// Cinematic Earth visuals and lighting.
+pub const CINEMATIC_EARTH_RENDER_LAYER: usize = 27;
 /// Thruster `ParticleEffect` entities. Viewport cameras include this layer when
 /// KDL `effects` is true (default); `effects=#false` hides plumes in that view.
 pub const THRUSTER_PARTICLES_RENDER_LAYER: usize = 28;
@@ -26,6 +28,9 @@ pub const ECEF_GRID_RENDER_LAYER: usize = 33;
 pub const ENU_VIEW_CUBE_RENDER_LAYER: usize = 34;
 pub const NED_VIEW_CUBE_RENDER_LAYER: usize = 35;
 pub const ECEF_VIEW_CUBE_RENDER_LAYER: usize = 36;
+/// Earth-mode `sky color` dome, seen by regular viewports only (the cinematic
+/// viewport has the procedural atmosphere).
+pub const REGULAR_SKY_RENDER_LAYER: usize = 37;
 pub const GRID_RENDER_LAYERS: [(GeoFrame, usize); 3] = [
     (GeoFrame::ENU, ENU_GRID_RENDER_LAYER),
     (GeoFrame::NED, NED_GRID_RENDER_LAYER),
@@ -175,6 +180,7 @@ impl RenderLayerAllocator {
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
         let reserved = RenderLayers::layer(0)
+            .with(CINEMATIC_EARTH_RENDER_LAYER)
             .with(THRUSTER_PARTICLES_RENDER_LAYER)
             .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
@@ -183,7 +189,8 @@ impl Default for RenderLayerAllocator {
             .with(ECEF_GRID_RENDER_LAYER)
             .with(ENU_VIEW_CUBE_RENDER_LAYER)
             .with(NED_VIEW_CUBE_RENDER_LAYER)
-            .with(ECEF_VIEW_CUBE_RENDER_LAYER);
+            .with(ECEF_VIEW_CUBE_RENDER_LAYER)
+            .with(REGULAR_SKY_RENDER_LAYER);
         Self {
             in_use: reserved.clone(),
             reserved,

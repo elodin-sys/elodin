@@ -183,7 +183,7 @@ impl ECheckboxButton {
         if ui.is_rect_visible(rect) {
             let style = ui.style_mut();
             style.visuals.widgets.inactive.bg_stroke =
-                egui::Stroke::new(1.0, self.border_color.unwrap_or(self.on_color));
+                egui::Stroke::new(1.0_f32, self.border_color.unwrap_or(self.on_color));
             let visuals = ui.style().interact(&response);
 
             let inner_rect = rect.shrink4(self.margin);
@@ -269,7 +269,7 @@ impl EColorButton {
         // Paint the UI
         if ui.is_rect_visible(rect) {
             let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, self.color);
+            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, self.color);
             let visuals = ui.style().interact(&response);
 
             let checkbox_rect = egui::Rect::from_min_size(rect.min, egui::Vec2::splat(16.0));
@@ -314,7 +314,7 @@ impl EButton {
             disabled: false,
             color: get_scheme().text_primary,
             bg_color: get_scheme().bg_secondary,
-            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             corner_radius: egui::CornerRadius::same(2),
             margin: egui::Margin::same(8),
             width: None,
@@ -326,28 +326,28 @@ impl EButton {
         EButton::new(label)
             .color(get_scheme().success)
             .bg_color(get_scheme().success.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().success.opacity(0.4)))
+            .stroke(Stroke::new(1.0_f32, get_scheme().success.opacity(0.4)))
     }
 
     pub fn highlight(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().highlight)
             .bg_color(get_scheme().highlight.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().highlight.opacity(0.4)))
+            .stroke(Stroke::new(1.0_f32, get_scheme().highlight.opacity(0.4)))
     }
 
     pub fn red(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().error)
             .bg_color(get_scheme().error.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().error))
+            .stroke(Stroke::new(1.0_f32, get_scheme().error))
     }
 
     pub fn gray(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().text_primary)
             .bg_color(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, get_scheme().border_primary))
+            .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -515,7 +515,7 @@ impl ETileButton {
                 rect,
                 egui::CornerRadius::same(1),
                 visuals.bg_fill,
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                 egui::StrokeKind::Middle,
             );
 

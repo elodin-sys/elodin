@@ -198,7 +198,7 @@
 
 ## 17. Video Streaming & Decoding
 
-- **`elodinsink` GStreamer element** — Streams Annex-B H.264 NAL units to the DB (`db-address`, `msg-name`/`msg-id`); keyframe guidance (~12-frame interval, SPS/PPS with every IDR via `h264parse config-interval=-1`); documented pipelines: `videotestsrc`, file playback, V4L2 webcams (JPEG/raw + `nvv4l2h264enc`), macOS `avfvideosrc ! vtenc_h264_hw`, GenICam via `aravissrc`; `GST_PLUGIN_PATH` for local testing.
+- **`elodinsink` GStreamer element** — Streams Annex-B H.264 NAL units to the DB (`db-address`, `msg-name`/`msg-id`); keyframe guidance (~12-frame interval, SPS/PPS with every IDR via `h264parse config-interval=-1`); documented pipelines: `videotestsrc`, file playback, V4L2 webcams (JPEG/raw + `nvv4l2h264enc`), macOS `avfvideosrc ! vtenc_h264_hw`, GenICam via `aravissrc`; `GST_PLUGIN_PATH` is set by `nix develop` / `nix develop .#run` (and the Aleph `elodinsink` module).
 - **OBS ingestion** — SRT listener pipeline (port 9000, OBS in caller mode; recommended H.264 CBR settings) or obs-gstreamer direct-to-elodinsink; H.264 only (no HEVC).
 - **RTSP ingestion** — `rtsp-streamer` standalone Rust producer (`RTSP_URL`, auto-reconnect, Nix-packaged).
 - **File streaming** — `video-streamer` FFmpeg utility re-encodes files to AV1 OBUs into the DB (bitrate/keyframe/speed-preset options); ffmpeg-based live-or-preserved timestamp modes.

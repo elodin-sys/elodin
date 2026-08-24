@@ -24,7 +24,6 @@
   linuxAttrs = lib.optionalAttrs pkgs.stdenv.isLinux (
     (common.linuxGraphicsEnv {inherit pkgs;})
     // {
-      GST_PLUGIN_PATH = common.makeGstPluginPath {inherit pkgs;};
       LD_LIBRARY_PATH = common.makeLinuxLibraryPath {inherit pkgs;};
     }
   );
@@ -36,13 +35,18 @@ in
         basePackages
         ++ common.commonNativeBuildInputs
         ++ common.commonBuildInputs
+        ++ common.gstreamerPackages
+        ++ [pkgs.elodin.elodinsink]
         ++ lib.optionals pkgs.stdenv.isLinux (
           common.linuxGraphicsAudioDeps
           ++ common.linuxCaptureTools
-          ++ common.linuxGstreamerPackages
           ++ [pkgs.ffmpeg-full]
         )
         ++ lib.optionals pkgs.stdenv.isDarwin common.darwinDeps;
+      GST_PLUGIN_PATH = common.makeGstPluginPath {
+        inherit pkgs;
+        extra = [pkgs.elodin.elodinsink];
+      };
       TOKTX = "${common.ktxTools}/bin/toktx";
       shellHook = lib.optionalString pkgs.stdenv.isLinux common.linuxEditorShellHook;
     })

@@ -116,13 +116,22 @@ fn serialize_environment(environment: &EnvironmentConfig) -> KdlNode {
     let mut children = KdlDocument::new();
     if let Some(sun) = &environment.sun {
         let mut sun_node = KdlNode::new("sun");
-        push_rounded_float_prop(&mut sun_node, "azimuth", f64::from(sun.azimuth_deg));
-        push_rounded_float_prop(&mut sun_node, "elevation", f64::from(sun.elevation_deg));
+        if let Some(azimuth) = sun.azimuth_deg {
+            push_rounded_float_prop(&mut sun_node, "azimuth", f64::from(azimuth));
+        }
+        if let Some(elevation) = sun.elevation_deg {
+            push_rounded_float_prop(&mut sun_node, "elevation", f64::from(elevation));
+        }
         push_rounded_float_prop(&mut sun_node, "illuminance", f64::from(sun.illuminance));
         if sun.shadows != SunConfig::default_shadows() {
             sun_node
                 .entries_mut()
                 .push(KdlEntry::new_prop("shadows", sun.shadows));
+        }
+        if let Some((x, y, z)) = sun.direction {
+            sun_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("direction", format!("({x}, {y}, {z})")));
         }
         children.nodes_mut().push(sun_node);
     }
@@ -179,8 +188,100 @@ fn serialize_environment(environment: &EnvironmentConfig) -> KdlNode {
         }
         children.nodes_mut().push(atmosphere_node);
     }
+    if let Some(earth) = &environment.earth {
+        children.nodes_mut().push(serialize_earth(earth));
+    }
     node.set_children(children);
     node
+}
+
+fn serialize_earth(earth: &EarthConfig) -> KdlNode {
+    let mut earth_node = KdlNode::new("earth");
+    let mut kids = KdlDocument::new();
+    if earth.stars != EarthStarsConfig::default() {
+        let mut node = KdlNode::new("stars");
+        for (name, value, default) in [
+            (
+                "density",
+                earth.stars.density,
+                EarthStarsConfig::default_density(),
+            ),
+            ("size", earth.stars.size, EarthStarsConfig::default_size()),
+            (
+                "brightness",
+                earth.stars.brightness,
+                EarthStarsConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
+        }
+        kids.nodes_mut().push(node);
+    }
+    if earth.city_lights != EarthCityLightsConfig::default() {
+        let mut node = KdlNode::new("city_lights");
+        for (name, value, default) in [
+            (
+                "density",
+                earth.city_lights.density,
+                EarthCityLightsConfig::default_density(),
+            ),
+            (
+                "size",
+                earth.city_lights.size,
+                EarthCityLightsConfig::default_size(),
+            ),
+            (
+                "height",
+                earth.city_lights.height,
+                EarthCityLightsConfig::default_height(),
+            ),
+            (
+                "brightness",
+                earth.city_lights.brightness,
+                EarthCityLightsConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
+        }
+        kids.nodes_mut().push(node);
+    }
+    if earth.airglow != EarthAirglowConfig::default() {
+        let mut node = KdlNode::new("airglow");
+        for (name, value, default) in [
+            (
+                "density",
+                earth.airglow.density,
+                EarthAirglowConfig::default_density(),
+            ),
+            (
+                "size",
+                earth.airglow.size,
+                EarthAirglowConfig::default_size(),
+            ),
+            (
+                "brightness",
+                earth.airglow.brightness,
+                EarthAirglowConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
+        }
+        kids.nodes_mut().push(node);
+    }
+    if earth.night_map != EarthNightMapConfig::default() {
+        let mut node = KdlNode::new("night_map");
+        push_float_prop_if_ne(
+            &mut node,
+            "brightness",
+            earth.night_map.brightness,
+            EarthNightMapConfig::default_brightness(),
+        );
+        kids.nodes_mut().push(node);
+    }
+    if !kids.nodes().is_empty() {
+        earth_node.set_children(kids);
+    }
+    earth_node
 }
 
 fn serialize_skybox(skybox: &SkyboxConfig) -> KdlNode {
@@ -259,6 +360,12 @@ fn push_rounded_float_prop(node: &mut KdlNode, name: &str, value: f64) {
         .push(KdlEntry::new_prop(name, round_float_default(value)));
 }
 
+fn push_float_prop_if_ne(node: &mut KdlNode, name: &str, value: f32, default: f32) {
+    if (value - default).abs() > f32::EPSILON {
+        push_rounded_float_prop(node, name, f64::from(value));
+    }
+}
+
 fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     if let Some(name) = name {
         push_name_prop(node, name);
@@ -333,7 +440,7 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
 
     push_optional_name_prop(&mut node, viewport.name.as_deref());
 
-    if viewport.fov != 45.0 {
+    if (viewport.fov - 45.0).abs() > f32::EPSILON {
         push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
     }
 
@@ -374,6 +481,11 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
 
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if viewport.cinematic {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("cinematic", true));
     }
 
     if let Some(ev100) = viewport.ev100 {
@@ -1382,10 +1494,11 @@ mod tests {
         let schematic = Schematic {
             environment: Some(EnvironmentConfig {
                 sun: Some(SunConfig {
-                    azimuth_deg: 320.0,
-                    elevation_deg: 32.0,
+                    azimuth_deg: Some(320.0),
+                    elevation_deg: Some(32.0),
                     illuminance: 130_000.0,
                     shadows: true,
+                    direction: None,
                 }),
                 ambient_scale: 0.02,
                 sky_color: Some(Color::BLACK),
@@ -1396,6 +1509,7 @@ mod tests {
                     ground_albedo: (0.2, 0.25, 0.3),
                     raymarched: false,
                 }),
+                earth: None,
             }),
             ..Default::default()
         };
@@ -1405,8 +1519,8 @@ mod tests {
 
         let environment = parsed.environment.expect("environment should roundtrip");
         let sun = environment.sun.expect("sun should roundtrip");
-        assert_eq!(sun.azimuth_deg, 320.0);
-        assert_eq!(sun.elevation_deg, 32.0);
+        assert_eq!(sun.azimuth_deg, Some(320.0));
+        assert_eq!(sun.elevation_deg, Some(32.0));
         assert_eq!(sun.illuminance, 130_000.0);
         assert!(sun.shadows);
         assert!((environment.ambient_scale - 0.02).abs() < 1e-6);
@@ -1473,6 +1587,160 @@ mod tests {
     }
 
     #[test]
+    fn test_environment_earth_roundtrip() {
+        // Earth requires a cinematic viewport.
+        let parsed =
+            parse_schematic("environment {\n    earth\n}\nviewport cinematic=#true").unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        assert_eq!(environment.earth, Some(EarthConfig::default()));
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected cinematic viewport");
+        };
+        assert!(viewport.cinematic);
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(environment.clone()),
+            elems: parsed.elems.clone(),
+            ..Default::default()
+        });
+        assert!(serialized.contains("earth"));
+        assert!(serialized.contains("cinematic"));
+        assert!(!serialized.contains("night_ev100"));
+        assert!(!serialized.contains("stars"));
+        assert!(!serialized.contains("city_lights"));
+        assert!(!serialized.contains("airglow"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().earth,
+            Some(EarthConfig::default())
+        );
+    }
+
+    #[test]
+    fn test_environment_earth_particles_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    earth {
+        stars density=0.5 size=1.25 brightness=0.8
+        city_lights density=0.75 size=4.0 height=6000 brightness=1.2
+        airglow density=1.5 size=0.9
+        night_map brightness=0.35
+    }
+}
+viewport cinematic=#true"#,
+        )
+        .unwrap();
+        let earth = parsed.environment.unwrap().earth.unwrap();
+        assert_eq!(earth.stars.density, 0.5);
+        assert_eq!(earth.stars.size, 1.25);
+        assert_eq!(earth.stars.brightness, 0.8);
+        assert_eq!(earth.city_lights.density, 0.75);
+        assert_eq!(earth.city_lights.size, 4.0);
+        assert_eq!(earth.city_lights.height, 6000.0);
+        assert_eq!(earth.city_lights.brightness, 1.2);
+        assert_eq!(earth.airglow.density, 1.5);
+        assert_eq!(earth.airglow.size, 0.9);
+        assert_eq!(
+            earth.airglow.brightness,
+            EarthAirglowConfig::default_brightness()
+        );
+        assert_eq!(earth.night_map.brightness, 0.35);
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                earth: Some(earth),
+                ..Default::default()
+            }),
+            elems: parsed.elems.clone(),
+            ..Default::default()
+        });
+        assert!(serialized.contains("stars"));
+        assert!(serialized.contains("city_lights"));
+        assert!(serialized.contains("airglow"));
+        assert!(serialized.contains("night_map"));
+        assert!(serialized.contains("density=0.5"));
+        assert!(serialized.contains("height=6000"));
+        assert!(!serialized.contains("brightness=1.0"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.environment.unwrap().earth.unwrap(), earth);
+    }
+
+    #[test]
+    fn test_environment_earth_rejects_unknown_child() {
+        let err = parse_schematic(
+            "environment {\n    earth {\n        clouds density=1.0\n    }\n}\nviewport cinematic=#true",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("earth.clouds") || format!("{err:?}").contains("clouds"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_environment_sun_direction_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    sun direction="(0.5, -0.7, 0.4)" illuminance=100000.0
+}"#,
+        )
+        .unwrap();
+        let sun = parsed.environment.unwrap().sun.unwrap();
+        assert_eq!(sun.direction, Some((0.5, -0.7, 0.4)));
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                sun: Some(sun),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().sun.unwrap().direction,
+            Some((0.5, -0.7, 0.4))
+        );
+    }
+
+    #[test]
+    fn test_environment_auto_sun_roundtrip() {
+        // Placement omitted: az/el stay None (ephemeris) and do not serialize.
+        let parsed = parse_schematic(
+            r#"environment {
+    sun illuminance=100000.0
+}"#,
+        )
+        .unwrap();
+        let sun = parsed.environment.unwrap().sun.unwrap();
+        assert!(sun.tracks_ephemeris());
+        assert_eq!(sun.azimuth_deg, None);
+        assert_eq!(sun.elevation_deg, None);
+        assert_eq!(sun.direction, None);
+        assert_eq!(sun.illuminance, 100_000.0);
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                sun: Some(sun),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(serialized.contains("sun"));
+        assert!(!serialized.contains("azimuth"));
+        assert!(!serialized.contains("elevation"));
+        assert!(!serialized.contains("direction"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert!(
+            reparsed
+                .environment
+                .unwrap()
+                .sun
+                .unwrap()
+                .tracks_ephemeris()
+        );
+    }
+
+    #[test]
     fn test_parse_environment_defaults_and_shadows_off() {
         let kdl = r#"
 environment {
@@ -1482,10 +1750,11 @@ environment {
         let parsed = parse_schematic(kdl).unwrap();
         let environment = parsed.environment.expect("environment parsed");
         let sun = environment.sun.expect("sun parsed");
-        assert_eq!(sun.azimuth_deg, 10.0);
-        assert_eq!(sun.elevation_deg, SunConfig::default_elevation_deg());
+        assert_eq!(sun.azimuth_deg, Some(10.0));
+        assert_eq!(sun.elevation_deg, None);
         assert_eq!(sun.illuminance, SunConfig::default_illuminance());
         assert!(!sun.shadows);
+        assert!(!sun.tracks_ephemeris());
         assert_eq!(
             environment.ambient_scale,
             EnvironmentConfig::default_ambient_scale()
@@ -1509,6 +1778,34 @@ environment {
             panic!("expected viewport");
         };
         assert_eq!(viewport.ev100, Some(13.2));
+    }
+
+    #[test]
+    fn test_viewport_cinematic_roundtrip() {
+        let kdl = r#"
+environment { earth }
+viewport name="main" cinematic=#true ev100=13.5
+"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!(viewport.cinematic);
+        assert!(!viewport.hdr);
+        assert_eq!(viewport.fov, 45.0);
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(serialized.contains("cinematic"));
+        assert!(!serialized.contains("hdr="));
+        assert!(
+            !serialized.contains("fov="),
+            "default FOV should be omitted: {serialized}"
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!(viewport.cinematic);
     }
 
     #[test]
@@ -1565,6 +1862,7 @@ environment {
                 view_cube_frame: None,
                 effects: true,
                 hdr: false,
+                cinematic: false,
                 bloom: None,
                 ev100: None,
                 pos: None,
@@ -1615,6 +1913,7 @@ environment {
                 view_cube_frame: None,
                 effects: true,
                 hdr: true,
+                cinematic: false,
                 bloom: None,
                 ev100: None,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
@@ -2358,6 +2657,7 @@ object_3d lander.world_pos {
                 view_cube_frame: None,
                 effects: true,
                 hdr: false,
+                cinematic: false,
                 bloom: None,
                 ev100: None,
                 pos: None,

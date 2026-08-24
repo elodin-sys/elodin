@@ -1212,9 +1212,7 @@ def upright_attitude() -> el.Quaternion:
 
 
 def surface_attitude(lat_deg: float, lon_deg: float) -> el.Quaternion:
-    """Body +Y along local geodetic up: the pose for surface-fixed scene
-    anchors (ground discs, pad-smoke emitters), matching the effects'
-    authored Y-up frame."""
+    """Point body +Y along local geodetic up."""
     up = ellipsoid_up(math.radians(lat_deg), math.radians(lon_deg))
     y = jnp.array([0.0, 1.0, 0.0])
     axis = jnp.cross(y, up)
@@ -1574,30 +1572,16 @@ def build_mission(
         StaticSceneObject(el.WorldPos(linear=jnp.zeros(3))),
         name="earth",
     )
-    # Surface-fixed scene anchors for the cinematic schematic: the launch pad
-    # (world-fixed pad-smoke emitter + pad cameras), Landing Zone 1 (landing
-    # dust), and local ground discs tangent at each site (the earth GLB's
-    # texture is far too coarse for pad-level shots). Disc anchors sit 2 m
-    # below their site so the 4 m cylinder mesh tops out at ground level.
+    # Spawn surface-fixed launch and landing anchors.
     pad_att = surface_attitude(PAD_LAT_DEG, PAD_LON_DEG)
-    pad_up = ellipsoid_up(math.radians(PAD_LAT_DEG), math.radians(PAD_LON_DEG))
     lz1_att = surface_attitude(LZ1_LAT_DEG, LZ1_LON_DEG)
-    lz1_up = ellipsoid_up(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG))
     world.spawn(
         StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad_ecef())),
         name="pad",
     )
     world.spawn(
-        StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad_ecef() - pad_up * 2.0)),
-        name="ground",
-    )
-    world.spawn(
         StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef())),
         name="lz1",
-    )
-    world.spawn(
-        StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef() - lz1_up * 2.0)),
-        name="lz1_ground",
     )
     schematic_path = Path(__file__).with_name("falcon9.kdl")
     world.schematic(schematic_path.read_text(), schematic_path.name)

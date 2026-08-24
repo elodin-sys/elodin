@@ -1,25 +1,11 @@
 #!/usr/bin/env uv run
-"""Lean kinematic visual checks for falcon9 cinematic effects (no FSW).
-
-  # Editor reads ELODIN_SCREENSHOT_* at process start — export delay with the launch:
-  ELODIN_VIZCHECK_SCENARIO=plume-close ELODIN_SCREENSHOT_DELAY=10 \\
-    elodin editor examples/falcon9/visual_check.py
-  ELODIN_VIZCHECK_SCENARIO=rcs-flip ELODIN_SCREENSHOT_DELAY=8 \\
-    elodin editor examples/falcon9/visual_check.py
-  ELODIN_VIZCHECK_SCENARIO=barge ELODIN_SCREENSHOT_DELAY=10 \\
-    elodin editor examples/falcon9/visual_check.py
-
-Screenshots default to /tmp/f9-<scenario>.png via the editor screenshot plugin.
-Each scenario starts at mission time t0 so the interesting frame is early.
-
-NOTE: no `from __future__ import annotations` — `@el.system` introspects real
-annotation objects (same constraint as sim.py).
-"""
+"""Lean kinematic visual checks for Falcon 9 effects."""
 
 import math
 import os
 import sys
 import typing as ty
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Allow `uv run python examples/falcon9/visual_check.py` from the repo root.
@@ -42,6 +28,16 @@ from frames import ellipsoid_up, geodetic_to_ecef, ned_basis
 from reference import build_reference
 from sim import StaticSceneObject, surface_attitude, upright_attitude
 
+# Match cube-sat/main.py: spherical 6378.1 km + 400 km over offshore SoCal.
+_CS_LAT_DEG = 34.05
+_CS_LON_DEG = -124.0
+_CS_RADIUS_M = 6378.1e3 + 400e3
+
+
+def _cs_timestamp_us(hh: int, mm: int) -> int:
+    return int(datetime(2026, 3, 20, hh, mm, tzinfo=timezone.utc).timestamp() * 1_000_000)
+
+
 SIM_HZ = 120.0
 SIM_DT = 1.0 / SIM_HZ
 SCENARIO = os.environ.get("ELODIN_VIZCHECK_SCENARIO", "plume-close")
@@ -52,6 +48,12 @@ SCENARIOS = {
     "plume-close": {"t0": 22.0, "t_s": 8.0, "delay": 10.0},
     "rcs-flip": {"t0": 36.0, "t_s": 4.0, "delay": 8.0},
     "barge": {"t0": 0.0, "t_s": 8.0, "delay": 10.0},
+    # Coast near apogee with the Earth limb behind the booster.
+    "apogee": {"t0": 225.0, "t_s": 8.0, "delay": 10.0},
+    # Night phases at the same SoCal LEO slot as cube-sat/main.py.
+    "night-sky": {"t0": 0.0, "t_s": 4.0, "delay": 12.0, "utc": (10, 21)},
+    "night-sky-twilight": {"t0": 0.0, "t_s": 4.0, "delay": 12.0, "utc": (12, 39)},
+    "night-sky-sunrise": {"t0": 0.0, "t_s": 4.0, "delay": 12.0, "utc": (14, 30)},
 }
 if SCENARIO not in SCENARIOS:
     raise SystemExit(f"unknown ELODIN_VIZCHECK_SCENARIO={SCENARIO!r}; choose {list(SCENARIOS)}")
@@ -65,8 +67,7 @@ os.environ.setdefault("ELODIN_SCREENSHOT_EXIT", "1")
 ThrustViz = ty.Annotated[
     jax.Array, el.Component("thrust_viz", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
-# Thrust-direction × intensity (editor flips to exhaust). Default +X with a
-# small yaw gimbal so TVC vector mode is exercised in plume-close.
+# Thrust direction × intensity, with a small yaw gimbal for plume-close.
 PlumeViz = ty.Annotated[
     jax.Array, el.Component("plume_viz", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
@@ -102,14 +103,25 @@ PAD_TRACK = (_PAD_NED[0] + _PAD_NED[1]) / jnp.linalg.norm(_PAD_NED[0] + _PAD_NED
 LZ1_UP = ellipsoid_up(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG))
 
 
-def engines_toward_deck_attitude() -> el.Quaternion:
-    """Nose (+X) along local-up so Merlin nozzles (−X) face the barge deck."""
-    target = jnp.asarray(LZ1_UP)
+def attitude_along(target) -> el.Quaternion:
+    """Body +X along `target` (unit-ish ECEF)."""
     x = jnp.array([1.0, 0.0, 0.0])
     axis = jnp.cross(x, target)
     axis = axis / jnp.maximum(jnp.linalg.norm(axis), 1e-12)
     angle = jnp.arccos(jnp.clip(jnp.dot(x, target), -1.0, 1.0))
     return el.Quaternion.from_axis_angle(axis, angle)
+
+
+def engines_toward_deck_attitude() -> el.Quaternion:
+    """Nose (+X) along local-up so Merlin nozzles (−X) face the barge deck."""
+    return attitude_along(jnp.asarray(LZ1_UP))
+
+
+def cs_leo_ecef() -> jnp.ndarray:
+    lat, lon = math.radians(_CS_LAT_DEG), math.radians(_CS_LON_DEG)
+    cl, sl = math.cos(lat), math.sin(lat)
+    co, so = math.cos(lon), math.sin(lon)
+    return jnp.array([_CS_RADIUS_M * cl * co, _CS_RADIUS_M * cl * so, _CS_RADIUS_M * sl])
 
 
 ref_t = jnp.asarray(REF.time_s)
@@ -140,6 +152,38 @@ def make_advance():
         LandingSmokeViz,
         RcsLevels,
     )
+
+    if SCENARIO.startswith("night-sky"):
+        r_cs = cs_leo_ecef()
+        att = attitude_along(r_cs / jnp.linalg.norm(r_cs))
+
+        @el.system
+        def advance_night_sky(
+            tick: el.Query[el.SimulationTick],
+            boosters: el.Query[BoosterMarker],
+        ) -> el.Query[
+            el.WorldPos,
+            ThrustViz,
+            PlumeViz,
+            SmokeViz,
+            PadSmokeViz,
+            LandingSmokeViz,
+            RcsLevels,
+        ]:
+            _ = tick[0]
+            pose = el.SpatialTransform(angular=att, linear=r_cs)
+            vals = (
+                pose,
+                jnp.array([0.0]),
+                jnp.zeros(3),
+                jnp.array([0.0]),
+                jnp.array([0.0]),
+                jnp.array([0.0]),
+                jnp.zeros(8),
+            )
+            return boosters.map(out_tys, lambda _m: vals)
+
+        return advance_night_sky
 
     if SCENARIO == "barge":
 
@@ -223,11 +267,13 @@ def make_advance():
 world = el.WorldBuilder()
 pad_att = surface_attitude(PAD_LAT_DEG, PAD_LON_DEG)
 lz1_att = surface_attitude(LZ1_LAT_DEG, LZ1_LON_DEG)
-pad_up = jnp.asarray(PAD_UP)
 lz1_up = jnp.asarray(LZ1_UP)
 
 init_att = landing_att if SCENARIO == "barge" else ascent_att
-if SCENARIO == "barge":
+if SCENARIO.startswith("night-sky"):
+    init_r = cs_leo_ecef()
+    init_att = attitude_along(init_r / jnp.linalg.norm(init_r))
+elif SCENARIO == "barge":
     init_r = lz1 + lz1_up * 35.0
 else:
     init_alt = float(jnp.interp(T0, ref_t, ref_alt))
@@ -248,22 +294,20 @@ world.spawn(
 )
 world.spawn(StaticSceneObject(el.WorldPos(linear=jnp.zeros(3))), name="earth")
 world.spawn(StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad)), name="pad")
-world.spawn(
-    StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad - pad_up * 2.0)),
-    name="ground",
-)
 world.spawn(StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1)), name="lz1")
-world.spawn(
-    StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1 - lz1_up * 2.0)),
-    name="lz1_ground",
-)
 
 kdl_path = Path(__file__).with_name("visual_check.kdl")
-chase_active = SCENARIO != "barge"
-kdl = (
-    kdl_path.read_text()
-    .replace("__CHASE_ACTIVE__", "active=#true" if chase_active else "")
-    .replace("__LANDING_ACTIVE__", "active=#true" if not chase_active else "")
+# One viewport per scenario so the cinematic camera is unique.
+if SCENARIO == "barge":
+    keep = "Landing"
+elif SCENARIO.startswith("night-sky"):
+    keep = "NightSky"
+else:
+    keep = "Chase"
+kdl = "\n".join(
+    line
+    for line in kdl_path.read_text().splitlines()
+    if 'viewport name="' not in line or f'name="{keep}"' in line
 )
 world.schematic(kdl, kdl_path.name)
 
@@ -276,6 +320,6 @@ world.run(
     max_ticks=int((_cfg["t_s"] + 5.0) * SIM_HZ),
     optimize=True,
     interactive=False,
-    start_timestamp=START_TIMESTAMP_US,
+    start_timestamp=(_cs_timestamp_us(*_cfg["utc"]) if "utc" in _cfg else START_TIMESTAMP_US),
     log_level="warn",
 )

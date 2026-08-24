@@ -58,6 +58,8 @@ Coverage map (feature-catalog §16–17 → cases):
 
 ## Execution Rules
 
+If this file is still the suite template (`elodin-editor/test-plan.md`), copy it to `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/test-plan.md` and fill results **only on the copy**. Never write run metadata into this file.
+
 1. Run every command from the repository root, inside the Nix shell when possible (`nix develop --command <cmd>`). A warm `./target/release/elodin` is acceptable for screenshot cases once EDITOR-100 has built it.
 2. Execute cases in Summary order, one at a time. Never parallelize live-editor cases.
 3. Check **Requires** first. If unmet, mark BLOCKED.

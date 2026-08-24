@@ -167,6 +167,18 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
         // Axes Cube 3D model
         embedded_lfs_asset!(app, "assets/axes-cube.glb");
+        // Keep cinematic Earth assets out of wasm bundles.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            embedded_lfs_asset!(app, "assets/earth/earth_v5.glb");
+            embedded_lfs_asset!(app, "assets/earth/milky_way.cubemap.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/color.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/night.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/clouds.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/normal.ktx2");
+            embedded_lfs_asset!(app, "assets/earth/metallic_roughness.ktx2");
+            embedded_asset!(app, "assets/earth/sun_flare.png");
+        }
     }
 }
 
@@ -302,6 +314,11 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
+        // Cinematic Earth follows the native Hanabi plugin registration.
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::cinematic_earth::CinematicEarthPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
         #[cfg(not(target_family = "wasm"))]
@@ -343,8 +360,6 @@ impl Plugin for EditorPlugin {
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
-                    #[cfg(feature = "big_space")]
-                    set_floating_origin,
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
@@ -353,6 +368,8 @@ impl Plugin for EditorPlugin {
                     bevy_geo_frames::apply_geo_rotation,
                     #[cfg(feature = "big_space")]
                     spatial::apply_big_translation,
+                    #[cfg(feature = "big_space")]
+                    set_floating_origin,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -709,7 +726,8 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 // }
 
 /// Keep the floating origin glued to the active main camera so big_space
-/// renders the rest of the scene at low precision relative to it.
+/// renders the rest of the scene at low precision relative to it. A visible
+/// cinematic camera wins because it alone renders the planetary atmosphere.
 ///
 /// Since the migration to big_space 0.12 the main camera no longer
 /// carries a `GridCell`: it is parented under the viewport entity, which
@@ -724,17 +742,47 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 ///    take. Cameras spawned without a parent (e.g. tests) fall back to
 ///    the default cell at the origin.
 #[cfg(feature = "big_space")]
+fn select_floating_origin_camera(
+    cameras: impl Iterator<Item = (Entity, bool, bool)>,
+) -> Option<Entity> {
+    cameras
+        .min_by_key(|(entity, is_active, is_cinematic)| {
+            let priority = match (*is_active, *is_cinematic) {
+                (true, true) => 0,
+                (true, false) => 1,
+                (false, true) => 2,
+                (false, false) => 3,
+            };
+            (priority, *entity)
+        })
+        .map(|(entity, ..)| entity)
+}
+
+#[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
     query: Query<
-        (&Transform, Option<&ChildOf>),
+        (
+            Entity,
+            &Transform,
+            Option<&ChildOf>,
+            Has<plugins::scene_environment::CinematicViewport>,
+            &Camera,
+        ),
         (With<MainCamera>, With<EditorCam>, Without<FloatingOrigin>),
     >,
     parent_query: Query<(&Transform, &GridCell), (Without<MainCamera>, Without<FloatingOrigin>)>,
     mut floating_origin: Query<(&mut Transform, &mut GridCell), With<FloatingOrigin>>,
     floating_origin_settings: Res<FloatingOriginSettings>,
 ) {
-    let Some((camera_transform, parent)) = query.iter().next() else {
+    let Some(camera_entity) = select_floating_origin_camera(
+        query
+            .iter()
+            .map(|(entity, _, _, is_cinematic, camera)| (entity, camera.is_active, is_cinematic)),
+    ) else {
+        return;
+    };
+    let Ok((_, camera_transform, parent, _, _)) = query.get(camera_entity) else {
         return;
     };
     let (base_transform, base_cell) = parent
@@ -1292,7 +1340,7 @@ pub fn sync_object_3d(
             _ => continue,
         };
 
-        let eql = format!("{}.world_pos", &parent.name);
+        let eql = format!("{}.world_pos", parent.name);
         let Ok(expr) = ctx.0.parse_str(&eql) else {
             continue;
         };
@@ -2477,6 +2525,34 @@ mod tests {
     use bevy::mesh::VertexAttributeValues;
     use impeller2::types::{ComponentId, Timestamp};
     use impeller2_wkt::ComponentValue;
+
+    #[cfg(feature = "big_space")]
+    #[test]
+    fn floating_origin_prefers_active_cinematic_camera() {
+        let mut world = World::new();
+        let regular = world.spawn_empty().id();
+        let cinematic = world.spawn_empty().id();
+
+        let selected = select_floating_origin_camera(
+            [(regular, true, false), (cinematic, true, true)].into_iter(),
+        );
+
+        assert_eq!(selected, Some(cinematic));
+    }
+
+    #[cfg(feature = "big_space")]
+    #[test]
+    fn floating_origin_prefers_visible_regular_camera_over_hidden_cinematic() {
+        let mut world = World::new();
+        let regular = world.spawn_empty().id();
+        let cinematic = world.spawn_empty().id();
+
+        let selected = select_floating_origin_camera(
+            [(cinematic, false, true), (regular, true, false)].into_iter(),
+        );
+
+        assert_eq!(selected, Some(regular));
+    }
 
     /// Inserting a bare `WorldPos` must pull in the `Geo*` components
     /// (required components) and map through composition (`bevy_R * att`).

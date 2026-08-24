@@ -610,7 +610,7 @@ impl TileAtlas {
             tiles: self.state.existing_tiles.iter().copied().collect_vec(),
         };
 
-        tc.save_file(asset_path_string(format!("{}/config.tc", &self.path)))
+        tc.save_file(asset_path_string(format!("{}/config.tc", self.path)))
             .unwrap();
     }
 

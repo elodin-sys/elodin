@@ -115,62 +115,65 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy::pbr::wireframe::WireframePlugin::default())
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
-            .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin)
-            .add_plugins(GeoFramePlugin {
-                apply_transforms: false,
-                ..default()
-            })
-            .add_plugins(SensorCameraPlugin)
-            .init_resource::<DiagnosticsStore>()
-            .init_resource::<HeadlessMode>()
-            .add_systems(
-                PreUpdate,
-                (
-                    impeller2_bevy::apply_cached_data,
-                    crate::object_3d::update_object_3d_system,
-                    crate::sync_object_3d,
-                    // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
-                    // the geo systems below propagate those into `Transform`. Running
-                    // them in this order keeps each tick's plane pose in lock-step
-                    // with the sensor camera's pose (which reads the TelemetryCache
-                    // directly), preventing one-frame jitter in `sensor_view`.
-                    sync_pos,
-                    #[cfg(not(feature = "big_space"))]
-                    bevy_geo_frames::apply_transforms,
-                    bevy_geo_frames::apply_geo_rotation,
-                    #[cfg(feature = "big_space")]
-                    crate::spatial::apply_big_translation,
-                )
-                    .chain()
-                    .after(impeller2_bevy::sink)
-                    .in_set(PositionSync),
+            .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(
+            crate::plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin,
+        );
+        app.add_plugins(GeoFramePlugin {
+            apply_transforms: false,
+            ..default()
+        })
+        .add_plugins(SensorCameraPlugin)
+        .init_resource::<DiagnosticsStore>()
+        .init_resource::<HeadlessMode>()
+        .add_systems(
+            PreUpdate,
+            (
+                impeller2_bevy::apply_cached_data,
+                crate::object_3d::update_object_3d_system,
+                crate::sync_object_3d,
+                // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
+                // the geo systems below propagate those into `Transform`. Running
+                // them in this order keeps each tick's plane pose in lock-step
+                // with the sensor camera's pose (which reads the TelemetryCache
+                // directly), preventing one-frame jitter in `sensor_view`.
+                sync_pos,
+                #[cfg(not(feature = "big_space"))]
+                bevy_geo_frames::apply_transforms,
+                bevy_geo_frames::apply_geo_rotation,
+                #[cfg(feature = "big_space")]
+                crate::spatial::apply_big_translation,
             )
-            .add_systems(Startup, setup_headless_lighting)
-            .init_resource::<crate::EqlContext>()
-            .init_resource::<crate::Coordinate>()
-            .init_resource::<crate::SyncedObject3d>()
-            .init_resource::<HeadlessSchematicSkybox>()
-            .init_resource::<HeadlessSkyboxRenderGate>()
-            .init_resource::<crate::skybox_db_assets::DbSkyboxAssetMirror>()
-            .init_resource::<crate::skybox_db_assets::DbSkyboxSyncInFlight>()
-            // Same SeriesStore subscription path as the interactive editor: empty
-            // allowlist means Option D admits no live/backfill samples, freezing
-            // sensor cameras and object_3d at spawn defaults.
-            .add_systems(Update, crate::ui::plot::update_series_fetch_priority)
-            .add_systems(
-                Update,
-                impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
-            )
-            .add_systems(Update, crate::update_eql_context)
-            .add_systems(Update, poll_headless_db_config)
-            .add_systems(
-                Update,
-                crate::skybox_db_assets::sync_db_skybox_assets_from_config
-                    .before(sync_headless_skybox),
-            )
-            .add_systems(Update, sync_headless_skybox)
-            .add_systems(Update, load_headless_scene)
-            .set_runner(render_server_runner);
+                .chain()
+                .after(impeller2_bevy::sink)
+                .in_set(PositionSync),
+        )
+        .add_systems(Startup, setup_headless_lighting)
+        .init_resource::<crate::EqlContext>()
+        .init_resource::<crate::Coordinate>()
+        .init_resource::<crate::SyncedObject3d>()
+        .init_resource::<HeadlessSchematicSkybox>()
+        .init_resource::<HeadlessSkyboxRenderGate>()
+        .init_resource::<crate::skybox_db_assets::DbSkyboxAssetMirror>()
+        .init_resource::<crate::skybox_db_assets::DbSkyboxSyncInFlight>()
+        // Same SeriesStore subscription path as the interactive editor: empty
+        // allowlist means Option D admits no live/backfill samples, freezing
+        // sensor cameras and object_3d at spawn defaults.
+        .add_systems(Update, crate::ui::plot::update_series_fetch_priority)
+        .add_systems(
+            Update,
+            impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
+        )
+        .add_systems(Update, crate::update_eql_context)
+        .add_systems(Update, poll_headless_db_config)
+        .add_systems(
+            Update,
+            crate::skybox_db_assets::sync_db_skybox_assets_from_config.before(sync_headless_skybox),
+        )
+        .add_systems(Update, sync_headless_skybox)
+        .add_systems(Update, load_headless_scene)
+        .set_runner(render_server_runner);
 
         app.add_systems(PreUpdate, crate::warn_missing_geo.before(PositionSync));
         #[cfg(feature = "big_space")]
@@ -348,6 +351,7 @@ fn load_headless_scene(
                     &mut materials,
                     &mut world_mesh_materials,
                     &world_mesh,
+                    &geo_context,
                 ));
             }
             _ => {}

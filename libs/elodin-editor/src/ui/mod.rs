@@ -544,7 +544,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     .frame(egui::Frame {
                         fill: colors::with_opacity(get_scheme().bg_secondary, 0.5),
                         stroke: egui::Stroke::new(
-                            1.0,
+                            1.0_f32,
                             colors::with_opacity(get_scheme().text_primary, 0.5),
                         ),
                         inner_margin: egui::Margin::symmetric(16, 8),
@@ -912,7 +912,11 @@ fn warn_camera_order_ambiguities(
 
 /// Main viewport cameras only: sensor cameras (Tonemapping::None) and the
 /// view-cube/nav-gizmo overlays must not be switched to HDR targets.
-type MainViewportCameraFilter = (With<Camera>, With<MainCamera>);
+type MainViewportCameraFilter = (
+    With<Camera>,
+    With<MainCamera>,
+    Without<crate::plugins::scene_environment::CinematicViewport>,
+);
 
 fn sync_hdr(
     hdr_enabled: Res<HdrEnabled>,
