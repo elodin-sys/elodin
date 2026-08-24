@@ -52,6 +52,13 @@ def initialize():
             "aux 0 0 0 1700 2100 0 0",
             "set gyro_hardware_lpf = NORMAL",
             "set pid_process_denom = 1",
+            # RC smoothing's auto cutoff relies on a valid RX frame-rate
+            # measurement, which requires frame intervals >= RX_INTERVAL_MIN_US
+            # (800us). At lockstep rates above ~1.25kHz the interval is always
+            # below that floor, so the filter gain is never initialized and the
+            # throttle channel is smoothed to zero. The SITL link is clean and
+            # step-wise, so smoothing is unnecessary - disable it.
+            "set rc_smoothing = off",
         ):
             command(cli, text)
         cli.sendall(b"save\n")
@@ -64,6 +71,7 @@ def verify():
     expected = (
         ("get gyro_hardware_lpf", "gyro_hardware_lpf = NORMAL"),
         ("get pid_process_denom", "pid_process_denom = 1"),
+        ("get rc_smoothing", "rc_smoothing = OFF"),
         ("aux", "aux 0 0 0 1700 2100 0 0"),
     )
 
