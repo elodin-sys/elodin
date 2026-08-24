@@ -55,20 +55,6 @@ The controller automatically:
 - Accepts input from both simultaneously (gamepad is primary)
 - Sends control commands at 60Hz to the simulation
 
-#### Idle Demo
-
-Until you touch a control, the controller flies itself: it rolls slowly right
-then left, one full cycle every 14 s, reaching about ±30° of bank, so the ADI and
-the attitude graphs have something to show on an untouched run. The aileron is a
-cosine, which is what makes the bank a sine — the wings pass through level twice
-a cycle and the average heading holds. The first elevator, aileron or rudder input
-— stick or arrow key
-— hands the aircraft over for good; it never takes control back. Handover wants a
-real input, a tenth of full throw, so a stick left a little off centre by trim or
-calibration is not mistaken for one. Throttle is not a handover at all: a
-ratcheted transmitter sits far off centre from the moment it is plugged in, and
-the demo would never fly.
-
 #### Control Mapping (Mode 2 - US Standard)
 
 | Gamepad | Keyboard | Control |
