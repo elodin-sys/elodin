@@ -1160,13 +1160,25 @@ impl XYLine {
         self.x_values.iter().map(|c| c.cpu().len()).sum()
     }
 
-    pub fn queue_load(&mut self, render_queue: &RenderQueue, render_device: &RenderDevice) {
-        let x_shard_alloc = self.x_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
-        let y_shard_alloc = self.y_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
+    pub fn has_samples(&self) -> bool {
+        self.x_values.iter().any(|c| c.cpu().len() > 0)
+    }
+
+    pub fn queue_load(
+        &mut self,
+        render_queue: &RenderQueue,
+        render_device: &RenderDevice,
+        pool: &mut PlotGpuBufferPool,
+    ) {
+        if !self.has_samples() {
+            return;
+        }
+        let x_shard_alloc = self
+            .x_shard_alloc
+            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
+        let y_shard_alloc = self
+            .y_shard_alloc
+            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
         for buf in &mut self.x_values {
             buf.queue_load(render_queue, x_shard_alloc);
         }
@@ -1179,7 +1191,7 @@ impl XYLine {
         self.x_shard_alloc.is_some() || self.y_shard_alloc.is_some()
     }
 
-    pub fn unload_gpu(&mut self) {
+    pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
         if !self.gpu_resident() {
             return;
         }
@@ -1189,8 +1201,12 @@ impl XYLine {
         for buf in &self.y_values {
             buf.release_gpu();
         }
-        self.x_shard_alloc = None;
-        self.y_shard_alloc = None;
+        if let Some(alloc) = self.x_shard_alloc.take() {
+            pool.release_value(alloc.into_buffer());
+        }
+        if let Some(alloc) = self.y_shard_alloc.take() {
+            pool.release_value(alloc.into_buffer());
+        }
     }
 
     #[cfg(test)]
@@ -1594,6 +1610,10 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.tree.iter().map(|(_, c)| c.summary.len).sum()
     }
 
+    pub fn has_samples(&self) -> bool {
+        self.tree.iter().any(|(_, c)| c.summary.len > 0)
+    }
+
     /// Identity for GPU index-cache invalidation when the view is rebuilt in place.
     pub fn content_gen(&self) -> u64 {
         self.content_gen
@@ -1808,13 +1828,17 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         range: Range<Timestamp>,
         render_queue: &RenderQueue,
         render_device: &RenderDevice,
+        pool: &mut PlotGpuBufferPool,
     ) {
-        let data_buffer_alloc = self.data_buffer_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
-        let timestamp_buffer_alloc = self.timestamp_buffer_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
+        if !self.has_samples() {
+            return;
+        }
+        let data_buffer_alloc = self
+            .data_buffer_shard_alloc
+            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
+        let timestamp_buffer_alloc = self
+            .timestamp_buffer_shard_alloc
+            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
         for (_, chunk) in self.tree.overlapping_mut(ii(range.start.0, range.end.0)) {
             chunk.queue_load(render_queue, data_buffer_alloc, timestamp_buffer_alloc);
         }
@@ -2141,7 +2165,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.data_buffer_shard_alloc.is_some() || self.timestamp_buffer_shard_alloc.is_some()
     }
 
-    pub fn unload_gpu(&mut self) {
+    pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
         if !self.gpu_resident() {
             return;
         }
@@ -2149,8 +2173,12 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             chunk.data.release_gpu();
             chunk.timestamps_float.release_gpu();
         }
-        self.data_buffer_shard_alloc = None;
-        self.timestamp_buffer_shard_alloc = None;
+        if let Some(alloc) = self.data_buffer_shard_alloc.take() {
+            pool.release_value(alloc.into_buffer());
+        }
+        if let Some(alloc) = self.timestamp_buffer_shard_alloc.take() {
+            pool.release_value(alloc.into_buffer());
+        }
     }
 
     #[cfg(test)]
@@ -3303,6 +3331,35 @@ mod tests {
     }
 
     #[test]
+    fn empty_line_has_no_samples() {
+        assert!(!LineTree::<f32>::default().has_samples());
+        assert!(!XYLine::default().has_samples());
+    }
+
+    #[test]
+    fn line_reports_samples_after_insert() {
+        let mut tree = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        tree.insert(chunk);
+        assert!(tree.has_samples());
+        assert_eq!(tree.total_points(), 2);
+    }
+
+    #[test]
+    fn xy_line_reports_samples_after_push() {
+        let mut xy = XYLine::default();
+        xy.push_x_value(1.0);
+        xy.push_y_value(2.0);
+        assert!(xy.has_samples());
+        assert_eq!(xy.point_count(), 1);
+    }
+
+    #[test]
     fn unload_gpu_is_noop_when_already_cleared() {
         let mut tree = LineTree::<f32>::default();
         let chunk = Chunk::from_iter(
@@ -3316,7 +3373,7 @@ mod tests {
         assert!(!tree.all_gpu_dirty());
         assert!(!tree.gpu_resident());
 
-        tree.unload_gpu();
+        tree.unload_gpu(&mut PlotGpuBufferPool::default());
         assert!(!tree.all_gpu_dirty());
         assert!(!tree.gpu_resident());
     }
@@ -3330,7 +3387,7 @@ mod tests {
         assert!(!xy.all_gpu_dirty());
         assert!(!xy.gpu_resident());
 
-        xy.unload_gpu();
+        xy.unload_gpu(&mut PlotGpuBufferPool::default());
         assert!(!xy.all_gpu_dirty());
         assert!(!xy.gpu_resident());
     }
@@ -3372,7 +3429,13 @@ mod tests {
                 expect_visible,
                 "a_on={a_on} b_on={b_on} expect_visible={expect_visible}"
             );
-            unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &visible_ts, &visible_xy);
+            unload_plot_gpu_not_on_screen(
+                &mut lines,
+                &mut xy_lines,
+                &visible_ts,
+                &visible_xy,
+                &mut PlotGpuBufferPool::default(),
+            );
             // No shard allocs ⇒ already cleared; must not walk/lock or dirty shards.
             assert!(!lines.get(&handle).expect("line").data.all_gpu_dirty());
             assert!(!lines.get(&handle).expect("line").data.gpu_resident());
@@ -3405,9 +3468,61 @@ mod tests {
             xy_line.mark_gpu_clean();
         }
 
-        unload_plot_gpu_not_on_screen(&mut lines, &mut xy_lines, &HashSet::new(), &HashSet::new());
+        unload_plot_gpu_not_on_screen(
+            &mut lines,
+            &mut xy_lines,
+            &HashSet::new(),
+            &HashSet::new(),
+            &mut PlotGpuBufferPool::default(),
+        );
         assert!(!lines.get(&ts).expect("line").data.all_gpu_dirty());
         assert!(!xy_lines.get(&xy).expect("xy").all_gpu_dirty());
+    }
+
+    #[test]
+    fn quarantine_pool_is_unusable_until_ticks_elapse() {
+        let mut pool = QuarantinePool::default();
+        pool.release(1u32);
+        pool.release(2u32);
+        assert_eq!(pool.ready_count(), 0);
+        assert_eq!(pool.quarantined_count(), 2);
+        assert!(plot_gpu_upload_blocked(
+            pool.ready_count(),
+            pool.quarantined_count(),
+            2
+        ));
+
+        pool.tick();
+        assert_eq!(pool.ready_count(), 0);
+        assert!(plot_gpu_upload_blocked(
+            pool.ready_count(),
+            pool.quarantined_count(),
+            2
+        ));
+
+        pool.tick();
+        assert_eq!(pool.ready_count(), 0);
+
+        pool.tick();
+        assert_eq!(pool.ready_count(), 2);
+        assert_eq!(pool.quarantined_count(), 0);
+        assert!(!plot_gpu_upload_blocked(
+            pool.ready_count(),
+            pool.quarantined_count(),
+            2
+        ));
+        assert_eq!(pool.try_acquire(), Some(1));
+        assert_eq!(pool.try_acquire(), Some(2));
+        assert_eq!(pool.try_acquire(), None);
+    }
+
+    #[test]
+    fn new_plot_gpu_upload_is_blocked_only_while_value_buffers_are_quarantined() {
+        assert!(!plot_gpu_upload_blocked(0, 0, 2));
+        assert!(plot_gpu_upload_blocked(0, 4, 2));
+        assert!(plot_gpu_upload_blocked(1, 4, 2));
+        assert!(!plot_gpu_upload_blocked(2, 4, 2));
+        assert!(!plot_gpu_upload_blocked(2, 0, 2));
     }
 }
 
@@ -3447,6 +3562,106 @@ impl BoundOrd for f32 {
     }
 }
 
+/// wgpu/Bevy keep 1–3 frames in flight. Value buffers released on a tab
+/// switch must not be rewritten until those bind groups are gone.
+pub(crate) const PLOT_GPU_QUARANTINE_FRAMES: u8 = 3;
+
+pub(crate) struct QuarantinePool<T> {
+    items: Vec<(T, u8)>,
+}
+
+impl<T> Default for QuarantinePool<T> {
+    fn default() -> Self {
+        Self { items: Vec::new() }
+    }
+}
+
+impl<T> QuarantinePool<T> {
+    fn tick(&mut self) {
+        for (_, frames) in &mut self.items {
+            *frames = frames.saturating_sub(1);
+        }
+    }
+
+    fn release(&mut self, item: T) {
+        self.items.push((item, PLOT_GPU_QUARANTINE_FRAMES));
+    }
+
+    fn try_acquire(&mut self) -> Option<T> {
+        let idx = self.items.iter().position(|(_, frames)| *frames == 0)?;
+        Some(self.items.swap_remove(idx).0)
+    }
+
+    fn ready_count(&self) -> usize {
+        self.items.iter().filter(|(_, frames)| *frames == 0).count()
+    }
+
+    fn quarantined_count(&self) -> usize {
+        self.items.iter().filter(|(_, frames)| *frames > 0).count()
+    }
+}
+
+pub(crate) fn plot_gpu_upload_blocked(ready: usize, quarantined: usize, need: usize) -> bool {
+    ready < need && quarantined > 0
+}
+
+/// Recycles plot value/index buffers across tab switches so hidden-graph
+/// unload does not immediately allocate a second full set (GPU OOM).
+#[derive(Resource, Default)]
+pub struct PlotGpuBufferPool {
+    value: QuarantinePool<Buffer>,
+    index: QuarantinePool<Buffer>,
+}
+
+impl PlotGpuBufferPool {
+    pub fn tick(&mut self) {
+        self.value.tick();
+        self.index.tick();
+    }
+
+    pub fn release_value(&mut self, buffer: Buffer) {
+        self.value.release(buffer);
+    }
+
+    pub fn release_index(&mut self, buffer: Buffer) {
+        self.index.release(buffer);
+    }
+
+    pub fn ready_value_count(&self) -> usize {
+        self.value.ready_count()
+    }
+
+    pub fn defer_new_value_upload(&self, already_resident: bool) -> bool {
+        !already_resident
+            && plot_gpu_upload_blocked(self.ready_value_count(), self.value.quarantined_count(), 2)
+    }
+
+    pub fn take_value(
+        &mut self,
+        render_device: &RenderDevice,
+        render_queue: &RenderQueue,
+    ) -> BufferShardAlloc {
+        if let Some(buffer) = self.value.try_acquire() {
+            BufferShardAlloc::from_pooled_value(buffer, CHUNK_COUNT, CHUNK_LEN, render_queue)
+        } else {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        }
+    }
+
+    pub fn take_index(&mut self, render_device: &RenderDevice) -> Buffer {
+        if let Some(buffer) = self.index.try_acquire() {
+            buffer
+        } else {
+            render_device.create_buffer(&BufferDescriptor {
+                label: Some("Line index Buffer"),
+                size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        }
+    }
+}
+
 pub struct BufferShardAlloc {
     buffer: Buffer,
     chunk_size: usize,
@@ -3464,6 +3679,31 @@ impl BufferShardAlloc {
         let shard = this.alloc().expect("couldn't alloc nan");
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
+    }
+
+    fn from_pooled_value(
+        buffer: Buffer,
+        chunks: usize,
+        chunk_len: usize,
+        render_queue: &RenderQueue,
+    ) -> Self {
+        let chunk_size = size_of::<f32>() * chunk_len;
+        let mut free_map = RoaringBitmap::new();
+        for i in 0..=chunks as u32 {
+            free_map.insert(i);
+        }
+        let mut this = Self {
+            buffer,
+            free_map,
+            chunk_size,
+        };
+        let shard = this.alloc().expect("couldn't alloc nan");
+        render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
+        this
+    }
+
+    fn into_buffer(self) -> Buffer {
+        self.buffer
     }
 
     pub fn new<T: Sized>(chunks: usize, chunk_len: usize, render_device: &RenderDevice) -> Self {

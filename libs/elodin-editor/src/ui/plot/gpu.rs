@@ -53,7 +53,7 @@ use std::ops::Range;
 use crate::ui::ViewportRect;
 use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
 
-use super::BufferShardAlloc;
+use super::{BufferShardAlloc, PlotGpuBufferPool};
 use crate::ui::widgets::SystemStateExt;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
@@ -78,6 +78,7 @@ impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<ExtractLinesState>()
+            .init_resource::<PlotGpuBufferPool>()
             .init_asset::<Line>()
             .init_asset::<XYLine>();
 
@@ -167,15 +168,37 @@ impl LineMut<'_> {
         range: Range<Timestamp>,
         render_queue: &RenderQueue,
         render_device: &RenderDevice,
+        pool: &mut PlotGpuBufferPool,
     ) {
         match self {
             LineMut::Timeseries(line) => {
                 line.data
-                    .queue_load_range(range, render_queue, render_device)
+                    .queue_load_range(range, render_queue, render_device, pool)
             }
             LineMut::XY(xy_line) => {
-                xy_line.queue_load(render_queue, render_device);
+                xy_line.queue_load(render_queue, render_device, pool);
             }
+        }
+    }
+
+    pub fn gpu_resident(&self) -> bool {
+        match self {
+            LineMut::Timeseries(line) => line.data.gpu_resident(),
+            LineMut::XY(xy_line) => xy_line.gpu_resident(),
+        }
+    }
+
+    pub fn has_samples(&self) -> bool {
+        match self {
+            LineMut::Timeseries(line) => line.data.has_samples(),
+            LineMut::XY(xy_line) => xy_line.has_samples(),
+        }
+    }
+
+    pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
+        match self {
+            LineMut::Timeseries(line) => line.data.unload_gpu(pool),
+            LineMut::XY(xy_line) => xy_line.unload_gpu(pool),
         }
     }
 
@@ -572,6 +595,7 @@ type ExtractLinesParams = (
     ResMut<'static, Assets<Line>>,
     ResMut<'static, Assets<XYLine>>,
     Res<'static, crate::SelectedTimeRange>,
+    ResMut<'static, PlotGpuBufferPool>,
     Commands<'static, 'static>,
 );
 
@@ -630,6 +654,7 @@ pub(crate) fn unload_plot_gpu_not_on_screen(
     xy_assets: &mut Assets<XYLine>,
     visible_ts: &HashSet<AssetId<Line>>,
     visible_xy: &HashSet<AssetId<XYLine>>,
+    pool: &mut PlotGpuBufferPool,
 ) {
     let ts_unload: Vec<AssetId<Line>> = line_assets
         .iter()
@@ -643,7 +668,7 @@ pub(crate) fn unload_plot_gpu_not_on_screen(
         .collect();
     for id in ts_unload {
         if let Some(mut line) = line_assets.get_mut(id) {
-            line.data.unload_gpu();
+            line.data.unload_gpu(pool);
         }
     }
 
@@ -659,7 +684,7 @@ pub(crate) fn unload_plot_gpu_not_on_screen(
         .collect();
     for id in xy_unload {
         if let Some(mut xy_line) = xy_assets.get_mut(id) {
-            xy_line.unload_gpu();
+            xy_line.unload_gpu(pool);
         }
     }
 }
@@ -679,17 +704,23 @@ fn extract_lines(
                 mut line_assets,
                 mut xy_lines,
                 selected_range,
+                mut plot_gpu_pool,
                 mut main_commands,
             ) = cached_state.state.params_mut(world);
             let selected = selected_range.0.clone();
             let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
             let short_window = crate::is_short_accuracy_window(&selected);
 
+            plot_gpu_pool.tick();
+
             let mut on_screen_entries = Vec::new();
             for (entity, line_handle, child_of, _, _, _, _, _, mut cache) in lines.iter_mut() {
                 let on_screen = line_gpu_pane_on_screen(child_of, &viewport_rects);
-                if !on_screen && let Some(ref mut cache) = cache {
-                    cache.0 = None;
+                if !on_screen
+                    && let Some(ref mut cache) = cache
+                    && let Some(gpu) = cache.0.take()
+                {
+                    plot_gpu_pool.release_index(gpu.index_buffer);
                 }
                 on_screen_entries.push((entity, line_handle.clone(), on_screen));
             }
@@ -703,6 +734,7 @@ fn extract_lines(
                 &mut xy_lines,
                 &visible_ts,
                 &visible_xy,
+                &mut plot_gpu_pool,
             );
 
             for (
@@ -723,6 +755,20 @@ fn extract_lines(
                 let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
                     continue;
                 };
+                if !line.has_samples() {
+                    if line.gpu_resident() {
+                        line.unload_gpu(&mut plot_gpu_pool);
+                    }
+                    if let Some(ref mut cache) = cache
+                        && let Some(gpu) = cache.0.take()
+                    {
+                        plot_gpu_pool.release_index(gpu.index_buffer);
+                    }
+                    continue;
+                }
+                if plot_gpu_pool.defer_new_value_upload(line.gpu_resident()) {
+                    continue;
+                }
                 // Camera / clip: continuous visible range for short windows (silky scrub);
                 // long windows keep 100 ms quantum to limit index rewrite churn.
                 let visible = line_visible_range.0.clone();
@@ -735,17 +781,18 @@ fn extract_lines(
                     )
                 };
                 // Short windows: step = 1 on clip (truth). Long windows: pixel stride on clip.
-                line.queue_load_range(clip_range.clone(), &render_queue, &render_device);
-                let x_buffer = line
-                    .x_buffer_shard_alloc()
-                    .expect("no x buf")
-                    .buffer()
-                    .clone();
-                let y_buffer = line
-                    .y_buffer_shard_alloc()
-                    .expect("no y buf")
-                    .buffer()
-                    .clone();
+                line.queue_load_range(
+                    clip_range.clone(),
+                    &render_queue,
+                    &render_device,
+                    &mut plot_gpu_pool,
+                );
+                let Some(x_buffer) = line.x_buffer_shard_alloc().map(|a| a.buffer().clone()) else {
+                    continue;
+                };
+                let Some(y_buffer) = line.y_buffer_shard_alloc().map(|a| a.buffer().clone()) else {
+                    continue;
+                };
                 let value_buffer_ids = (x_buffer.id(), y_buffer.id());
                 // Reuse the cached buffers/bind group unless the value buffers were
                 // reallocated (new `BufferShardAlloc`).
@@ -759,14 +806,7 @@ fn extract_lines(
                         gpu_line.values_bind_group.clone(),
                     )
                 } else {
-                    let index_buffer = render_device.create_buffer(
-                        &(BufferDescriptor {
-                            label: Some("Line index Buffer"),
-                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                            mapped_at_creation: false,
-                        }),
-                    );
+                    let index_buffer = plot_gpu_pool.take_index(&render_device);
                     let size = Some(VALUE_BUFFER_SIZE);
                     let values_bind_group = render_device.create_bind_group(
                         "line values",
