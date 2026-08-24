@@ -14,7 +14,16 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BETAFLIGHT_DIR="$SCRIPT_DIR/betaflight"
-BETAFLIGHT_OPTIONS="SIMULATOR_GYROPID_SYNC"
+# Betaflight 2026.6.1 renamed the sync option to an ENABLE_* boolean macro;
+# OPTIONS entries become -D flags, so this yields -DENABLE_SIMULATOR_GYROPID_SYNC=1
+#
+# VIRTUAL_GYRO_SAMPLE_RATE_HZ (new in 2026.6.1) is Betaflight's compile-time
+# assumption about the virtual gyro/acc rate; it drives filter Nyquist/notch/
+# LPF setup and PID dt. The actual loop rate is set at runtime by the FDM
+# packet rate from the Python side (config.py simulation_rate) via lockstep.
+# The two MUST match, so keep SITL_RATE_HZ in sync with simulation_rate.
+SITL_RATE_HZ="${SITL_RATE_HZ:-1000}"
+BETAFLIGHT_OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=$SITL_RATE_HZ"
 
 # Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)
 if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
@@ -62,6 +71,7 @@ case "${1:-build}" in
     build|"")
         echo "Building Betaflight SITL..."
         echo "  Target: SITL"
+        echo "  Gyro/PID rate: ${SITL_RATE_HZ} Hz (must match config.py simulation_rate)"
         echo "  Output: $BETAFLIGHT_DIR/obj/main/betaflight_SITL.elf"
         echo ""
         
@@ -78,8 +88,8 @@ case "${1:-build}" in
             make configs
         fi
         
-        # Build SITL target with SIMULATOR_GYROPID_SYNC enabled through OPTIONS.
-        # This makes Betaflight block on FDM packets without modifying the submodule.
+        # Build SITL target with ENABLE_SIMULATOR_GYROPID_SYNC enabled through OPTIONS.
+        # This makes Betaflight pace its gyro/PID loop to incoming FDM packets.
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
         
         # On macOS, we need to create stubs for missing SITL symbols and do a two-pass build

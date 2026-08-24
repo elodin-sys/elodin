@@ -182,8 +182,8 @@ examples/betaflight-sitl/
 
 **FDM Packet (Port 9003)**: Flight Dynamics Model data
 - Timestamp (seconds)
-- IMU angular velocity (rad/s, body frame)
-- IMU linear acceleration (m/s², NED body frame)
+- IMU angular velocity (rad/s, FRD body frame)
+- IMU linear acceleration (m/s², FRD body frame)
 - Orientation quaternion (w, x, y, z)
 - Velocity (m/s, ENU world frame)
 - Position (m, ENU world frame)
@@ -230,17 +230,34 @@ The simulation handles complex coordinate frame conversions:
 
 ### Body Frame Conversion (FLU → FRD)
 
-Betaflight's SITL (sitl.c) applies internal sign conversions to incoming sensor data:
-- **Accelerometer**: Negates all axes (-X, -Y, -Z)
-- **Gyroscope**: Keeps X, negates Y and Z (X, -Y, -Z)
+The simulation sends IMU data in the FRD sensor frame, mirroring the Gazebo
+BetaflightPlugin whose IMU sensor frame is FRD (Rx(π) relative to the FLU body
+link). Both quantities use the same FLU → FRD conversion (negate Y and Z):
 
-The simulation pre-compensates for these conversions so that the correct FRD values
-result after Betaflight's processing. Additionally, Elodin's pitch axis convention
-is inverted relative to Betaflight's expectation, requiring explicit negation.
+- **Accelerometer**: specific force in FRD, e.g. `[0, 0, -1g]` at rest
+- **Gyroscope**: body rates in FRD
 
-### Motor Mapping (Betaflight Quad-X with SITL Gazebo Remapping)
+Betaflight's SITL (sitl.c) then maps these onto its internal axes:
+- **Accelerometer**: Negates all axes, so at rest the attitude estimator sees
+  acc_z = +1g (up) and the Mahony filter converges to a level attitude
+- **Gyroscope** (2026.6.1+, default `ENABLE_GAZEBO_BRIDGE=1`): Keeps X and Z,
+  negates Y (X, -Y, +Z) — see `sitlGyroBodyFromSim()` in `sitl_gyro.h` —
+  yielding Betaflight's (roll right, pitch nose-down, yaw CW) sign convention
 
-Betaflight SITL remaps motor indices for Gazebo ArduCopterPlugin compatibility:
+The attitude quaternion is sent in the Gazebo BetaflightPlugin convention
+(conjugated by Rx(π), i.e. qy/qz negated). SITL undoes the conjugation and rotates
+the world frame from ENU to NWU internally; the result drives the virtual
+magnetometer feed and the attitude estimator's heading reference.
+
+Note: 2026.6.1+ SITL runs the real Mahony attitude estimator fusing the virtual
+gyro/accel/mag feeds. (The legacy behavior of setting attitude directly from the
+FDM quaternion is still available by building with `-DSITL_ATTITUDE_DIRECT`.)
+
+### Motor Mapping (Betaflight Quad-X, Native Order)
+
+Betaflight 2026.6.1+ SITL sends motor outputs in native Betaflight order
+(the old Gazebo ArduCopterPlugin remapping was removed from
+`pwmCompleteMotorUpdate()`):
 
 ```
 Standard Betaflight Quad-X Layout (looking down):
@@ -255,11 +272,11 @@ Standard Betaflight Quad-X Layout (looking down):
     3 (BL, CCW)    1 (BR, CW)
          BACK
 
-SITL Gazebo Remapping (what we receive):
-  motor[0] = FR (Front Right, CCW)  - originally BF Motor 1
-  motor[1] = BL (Back Left, CCW)    - originally BF Motor 2
-  motor[2] = FL (Front Left, CW)    - originally BF Motor 3
-  motor[3] = BR (Back Right, CW)    - originally BF Motor 0
+What we receive (native Betaflight motor indices):
+  motor[0] = BF Motor 0 = BR (Back Right, CW)
+  motor[1] = BF Motor 1 = FR (Front Right, CCW)
+  motor[2] = BF Motor 2 = BL (Back Left, CCW)
+  motor[3] = BF Motor 3 = FL (Front Left, CW)
 ```
 
 See `config.py` for motor positions and spin directions matching this mapping.
@@ -314,7 +331,7 @@ The ground constraint includes angular damping to simulate landing gear friction
 
 ### Architecture Overview
 
-The wrapper leverages Betaflight's native `SIMULATOR_GYROPID_SYNC` mechanism.
+The wrapper leverages Betaflight's native `ENABLE_SIMULATOR_GYROPID_SYNC` mechanism.
 
 ```mermaid
 sequenceDiagram
@@ -348,13 +365,19 @@ sequenceDiagram
 #### 1. Betaflight Build with GYROPID_SYNC
 
 [build.sh](build.sh) enables lockstep mode through Betaflight's `OPTIONS`
-make variable without modifying the submodule:
+make variable:
 
 ```bash
-make TARGET=SITL OPTIONS=SIMULATOR_GYROPID_SYNC
+make TARGET=SITL OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=1000"
 ```
 
-When enabled, Betaflight's main loop blocks on a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
+(2026.6.1 renamed the option to an `ENABLE_*` boolean macro; `OPTIONS` entries
+become `-D` flags, so this yields `-DENABLE_SIMULATOR_GYROPID_SYNC=1`.
+`VIRTUAL_GYRO_SAMPLE_RATE_HZ` is Betaflight's compile-time assumption about the
+virtual gyro/acc rate — it drives filter/Nyquist setup and PID dt, so it must
+match `simulation_rate` in `config.py`.)
+
+When enabled, Betaflight's gyro/PID loop is gated by a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
 
 #### 2. External Control Component for Motor Commands
 
@@ -393,7 +416,7 @@ class BetaflightSyncBridge:
         2. Wait for motor response (blocking)
         3. Return motor values
         
-        This works because SIMULATOR_GYROPID_SYNC makes Betaflight
+        This works because ENABLE_SIMULATOR_GYROPID_SYNC makes Betaflight
         block until FDM arrives, then immediately send motor output.
         """
 ```
