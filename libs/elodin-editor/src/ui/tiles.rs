@@ -64,9 +64,9 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         render_layer_alloc::{
-            CINEMATIC_EARTH_RENDER_LAYER, GRID_RENDER_LAYERS, RenderLayerAllocator,
-            RenderLayerLease, THRUSTER_PARTICLES_RENDER_LAYER, grid_render_layer,
-            view_cube_render_layer,
+            CINEMATIC_EARTH_RENDER_LAYER, GRID_RENDER_LAYERS, REGULAR_SKY_RENDER_LAYER,
+            RenderLayerAllocator, RenderLayerLease, THRUSTER_PARTICLES_RENDER_LAYER,
+            grid_render_layer, view_cube_render_layer,
         },
         scene_environment::CinematicViewport,
         view_cube::{
@@ -85,11 +85,13 @@ use sidebar::tab_add_visible;
 
 pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
 pub(crate) const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+/// Finite only because Bevy's CPU frustum representation cannot use infinity.
+pub(crate) const VIEWPORT_PROJECTION_FAR: f32 = 1.0e16;
 
 fn default_viewport_perspective() -> PerspectiveProjection {
     PerspectiveProjection {
         near: DEFAULT_VIEWPORT_NEAR,
-        far: DEFAULT_VIEWPORT_FAR,
+        far: VIEWPORT_PROJECTION_FAR,
         near_clip_plane: crate::plugins::frustum_common::near_clip_plane(DEFAULT_VIEWPORT_NEAR),
         ..PerspectiveProjection::default()
     }
@@ -98,14 +100,6 @@ fn default_viewport_perspective() -> PerspectiveProjection {
 fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
     perspective.near = near;
     perspective.near_clip_plane = crate::plugins::frustum_common::near_clip_plane(near);
-}
-
-/// Derive zoom bounds from the viewport far plane.
-pub(crate) fn zoom_limits_for_far(far: f32) -> (f64, f64) {
-    let far = (far as f64).max(DEFAULT_VIEWPORT_FAR as f64);
-    let min_size_per_pixel = (far * 1.0e-6).max(1.0e-3);
-    let max_size_per_pixel = (far * 2.0).max(10.0);
-    (min_size_per_pixel, max_size_per_pixel)
 }
 
 pub(crate) fn cinematic_bloom_config() -> BloomConfig {
@@ -147,8 +141,8 @@ pub(crate) fn bloom_from_config(config: Option<&BloomConfig>, cinematic: bool) -
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(Startup, setup_primary_window_state)
-        .add_systems(Update, sync_editor_cam_zoom_limits);
+        .add_systems(Update, sync_viewport_grid_lod)
+        .add_systems(Startup, setup_primary_window_state);
     // Must run after the BigSpace root exists; otherwise grids stay parentless
     // and shimmer from float-origin precision loss.
     #[cfg(feature = "big_space")]
@@ -170,7 +164,7 @@ fn spawn_viewport_grids(
     for (frame, layer) in GRID_RENDER_LAYERS {
         let mut entity = commands.spawn((
             bevy::dev_tools::infinite_grid::InfiniteGrid,
-            viewport_grid_settings(frame),
+            viewport_grid_settings(frame, 10.0, DEFAULT_VIEWPORT_FAR),
             Visibility::Visible,
             RenderLayers::layer(layer),
             #[cfg(feature = "big_space")]
@@ -187,41 +181,80 @@ fn spawn_viewport_grids(
     }
 }
 
-fn viewport_grid_settings(
-    frame: bevy_geo_frames::GeoFrame,
+fn viewport_grid_style(
+    _frame: bevy_geo_frames::GeoFrame,
 ) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
-    match frame {
-        GeoFrame::NED | GeoFrame::ENU => bevy::dev_tools::infinite_grid::InfiniteGridSettings {
-            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-            x_axis_color: crate::ui::colors::bevy::RED,
-            z_axis_color: crate::ui::colors::bevy::GREEN,
-            fadeout_distance: 50_000.0,
-            scale: 0.1,
-            ..Default::default()
-        },
-        GeoFrame::ECEF => bevy::dev_tools::infinite_grid::InfiniteGridSettings {
-            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-            x_axis_color: crate::ui::colors::bevy::RED,
-            z_axis_color: crate::ui::colors::bevy::GREEN,
-            fadeout_distance: 50_000_000.0,
-            scale: 0.000_000_1,
-            ..Default::default()
-        },
+    bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+        x_axis_color: crate::ui::colors::bevy::RED,
+        z_axis_color: crate::ui::colors::bevy::GREEN,
+        ..Default::default()
     }
 }
 
-type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
+/// Cell size (~10 cells from camera to subject) quantized to a power of 10 so
+/// lines don't crawl while orbiting. Bevy `scale` is inverse spacing.
+pub(crate) fn grid_lod(distance: f32, far: f32) -> (f32, f32) {
+    let dist = if distance.is_finite() && distance > 0.0 {
+        distance
+    } else {
+        1.0
+    }
+    .max(1.0e-3);
+    let cell = 10f32
+        .powf((dist / 10.0).log10().round())
+        .clamp(1.0e-12, 1.0e12);
+    let scale = 1.0 / cell;
+    let fadeout = (dist * 20.0).max(far.max(0.0)).max(cell * 50.0);
+    (scale, fadeout)
+}
 
-fn sync_editor_cam_zoom_limits(
-    mut cameras: Query<EditorCamZoomLimitsQuery<'_>, (With<MainCamera>, Changed<Projection>)>,
+fn viewport_grid_settings(
+    frame: bevy_geo_frames::GeoFrame,
+    distance: f32,
+    far: f32,
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+    let mut settings = viewport_grid_style(frame);
+    let (scale, fadeout_distance) = grid_lod(distance, far);
+    settings.scale = scale;
+    settings.fadeout_distance = fadeout_distance;
+    settings
+}
+
+type ViewportGridLodQuery<'w> = (
+    Entity,
+    &'w EditorCam,
+    Option<&'w ViewportConfig>,
+    Option<&'w crate::ui::inspector::viewport::Viewport>,
+    Option<&'w mut bevy::dev_tools::infinite_grid::InfiniteGridSettings>,
+);
+
+fn sync_viewport_grid_lod(
+    mut cameras: Query<ViewportGridLodQuery<'_>, With<MainCamera>>,
+    mut commands: Commands,
 ) {
-    for (projection, mut editor_cam) in &mut cameras {
-        if let Projection::Perspective(persp) = projection {
-            let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(persp.far);
-            editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
-            editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
+    for (entity, editor_cam, config, viewport, settings) in &mut cameras {
+        let near = config
+            .and_then(|config| config.configured_near)
+            .unwrap_or(DEFAULT_VIEWPORT_NEAR);
+        let far = crate::plugins::frustum_common::presentation_far(
+            near,
+            config.and_then(|config| config.configured_far),
+        );
+        let distance = (editor_cam.last_anchor_depth.abs() as f32).max(DEFAULT_VIEWPORT_NEAR);
+        let frame = viewport
+            .and_then(|viewport| viewport.frame)
+            .unwrap_or(GeoFrame::ENU);
+        let next = viewport_grid_settings(frame, distance, far);
+        if let Some(mut settings) = settings {
+            if (settings.scale - next.scale).abs() > f32::EPSILON
+                || (settings.fadeout_distance - next.fadeout_distance).abs() > 1.0e-3
+            {
+                *settings = next;
+            }
+        } else {
+            commands.entity(entity).insert(next);
         }
     }
 }
@@ -248,9 +281,9 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
-    /// Schematic near clip; omitted on save when unset. Not the runtime EditorCam value.
+    /// Frustum near distance; also pins the runtime camera near clip when set.
     pub configured_near: Option<f32>,
-    /// Schematic far clip; omitted on save when unset. Not the runtime EditorCam value.
+    /// Frustum far distance; never limits rendering or camera zoom.
     pub configured_far: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
@@ -1292,7 +1325,7 @@ impl Pane {
                                 .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
                             ui.painter().line_segment(
                                 [monitor_rect.left_top(), monitor_rect.right_top()],
-                                egui::Stroke::new(1.0, scheme.border_primary),
+                                egui::Stroke::new(1.0_f32, scheme.border_primary),
                             );
 
                             if relevant.is_empty() {
@@ -1687,14 +1720,18 @@ impl ViewportPane {
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default()
-            .with(ELLIPSOID_RENDER_LAYER)
-            .with(GIZMO_RENDER_LAYER);
+        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         if viewport.effects {
             main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
         }
         if viewport.cinematic {
             main_camera_layers = main_camera_layers.with(CINEMATIC_EARTH_RENDER_LAYER);
+        } else {
+            // Uncertainty ellipsoids and the sky dome are regular-viewport
+            // overlays; the cinematic view keeps a clean scene.
+            main_camera_layers = main_camera_layers
+                .with(ELLIPSOID_RENDER_LAYER)
+                .with(REGULAR_SKY_RENDER_LAYER);
         }
         let grid_layer = grid_render_layer(viewport.frame);
         if viewport.show_grid {
@@ -1766,33 +1803,23 @@ impl ViewportPane {
         if let Some(near) = viewport.near {
             set_perspective_near(&mut perspective, near);
         }
-        if let Some(far) = viewport.far {
-            perspective.far = far;
-        }
         if let Some(aspect) = viewport.aspect {
             perspective.aspect_ratio = aspect;
         }
-        if !(perspective.near > 0.0 && perspective.far > perspective.near) {
+        if !perspective.near.is_finite() || perspective.near <= 0.0 {
             warn!(
-                "Invalid viewport near/far (near={}, far={}), restoring defaults",
-                perspective.near, perspective.far
+                "Invalid viewport near (near={}), restoring default",
+                perspective.near
             );
-            perspective.near = DEFAULT_VIEWPORT_NEAR;
-            perspective.far = DEFAULT_VIEWPORT_FAR;
+            set_perspective_near(&mut perspective, DEFAULT_VIEWPORT_NEAR);
         }
-
-        let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(perspective.far);
 
         let mut editor_cam = EditorCam {
             orbit_constraint: OrbitConstraint::Fixed {
                 up: bevy::math::DVec3::Y,
                 can_pass_tdc: false,
             },
-            zoom_limits: ZoomLimits {
-                min_size_per_pixel,
-                max_size_per_pixel,
-                zoom_through_objects: false,
-            },
+            zoom_limits: ZoomLimits::default(),
             sensitivity: Sensitivity {
                 zoom: 0.2,
                 ..default()
@@ -1808,6 +1835,10 @@ impl ViewportPane {
             // clips its own near-field subject mesh.
             editor_cam.perspective.near_clip_limits = near..near;
         }
+
+        let viewport_far =
+            crate::plugins::frustum_common::presentation_far(perspective.near, viewport.far);
+        let grid_frame = viewport.frame.unwrap_or(GeoFrame::ENU);
 
         let mut camera = commands.spawn((
             Transform::default(),
@@ -1864,6 +1895,7 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
+        camera.insert(viewport_grid_settings(grid_frame, 2.0, viewport_far));
         camera.insert(MeshPickingCamera);
         camera.insert(bloom_from_config(
             viewport.bloom.as_ref(),
@@ -2170,7 +2202,7 @@ impl TreeBehavior<'_> {
             ui.painter().circle_stroke(
                 dot_center,
                 dot_radius,
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             );
         }
     }
@@ -2422,24 +2454,24 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().hline(
                 rect.x_range(),
                 rect.top(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
 
             // Draw separator lines on both sides of each tab
             ui.painter().vline(
                 rect.left(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
         }
 
@@ -2450,10 +2482,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
             ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
             ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                egui::Stroke::new(1.0, scheme.text_primary);
+                egui::Stroke::new(1.0_f32, scheme.text_primary);
             ui.style_mut().visuals.widgets.inactive.bg_fill = colors::TRANSPARENT;
             ui.style_mut().visuals.widgets.inactive.fg_stroke =
-                egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
+                egui::Stroke::new(1.0_f32, scheme.text_primary.opacity(0.5));
 
             egui::Frame::NONE
                 .inner_margin(egui::Margin::same(10))
@@ -2529,7 +2561,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn drag_preview_stroke(&self, _visuals: &Visuals) -> Stroke {
-        Stroke::new(1.0, get_scheme().text_primary)
+        Stroke::new(1.0_f32, get_scheme().text_primary)
     }
 
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
@@ -2589,7 +2621,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.painter().hline(
             top_bar_rect.x_range(),
             top_bar_rect.bottom(),
-            egui::Stroke::new(1.0, get_scheme().border_primary),
+            egui::Stroke::new(1.0_f32, get_scheme().border_primary),
         );
 
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -3832,7 +3864,7 @@ fn render_sidebar_toolbar(
         .exact_size(32.0)
         .frame(Frame {
             fill: get_scheme().bg_secondary,
-            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             inner_margin: egui::Margin::symmetric(8, 0),
             ..Default::default()
         })
@@ -3949,5 +3981,46 @@ pub fn shortcuts(
             return;
         };
         tabs.set_active(*new_active_id);
+    }
+}
+
+#[cfg(test)]
+mod grid_lod_tests {
+    use super::grid_lod;
+
+    fn cell_size(distance: f32, far: f32) -> f32 {
+        1.0 / grid_lod(distance, far).0
+    }
+
+    #[test]
+    fn n_body_au_camera_gets_unit_cells() {
+        let cell = cell_size(10.0, 5.0);
+        assert!(
+            (cell - 1.0).abs() < 1.0e-5,
+            "10 AU framing should LOD to 1 AU cells, got {cell}"
+        );
+        let (_, fadeout) = grid_lod(10.0, 5.0);
+        assert!(
+            fadeout >= 200.0,
+            "fadeout must cover the framed solar system, got {fadeout}"
+        );
+    }
+
+    #[test]
+    fn metre_chase_uses_sub_ten_metre_cells() {
+        let cell = cell_size(8.0, 5.0);
+        assert!(
+            cell <= 10.0,
+            "close chase must not inherit the planetary ECEF cell, got {cell}"
+        );
+    }
+
+    #[test]
+    fn earth_scale_view_keeps_thousand_kilometre_cells() {
+        let cell = cell_size(80_000_000.0, 150_000_000.0);
+        assert!(
+            (cell - 10_000_000.0).abs() / 10_000_000.0 < 1.0e-6,
+            "80,000 km ECEF view should stay ~10,000 km cells, got {cell}"
+        );
     }
 }

@@ -261,7 +261,7 @@ impl Timeline<'_> {
                     CornerRadius::ZERO,
                     get_scheme().success.opacity(0.12),
                 );
-                let edge_stroke = egui::Stroke::new(1.0, get_scheme().success.opacity(0.5));
+                let edge_stroke = egui::Stroke::new(1.0_f32, get_scheme().success.opacity(0.5));
                 ui.painter().line_segment(
                     [overlay_rect.left_top(), overlay_rect.left_bottom()],
                     edge_stroke,
@@ -356,7 +356,7 @@ impl Timeline<'_> {
 
                     ui.painter().line_segment(
                         [col_center_btm, top_point],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
                 }
             })

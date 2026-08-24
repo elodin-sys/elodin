@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
+mod db;
 mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
@@ -67,7 +68,9 @@ impl Cli {
 
         let filter = EnvFilter::try_from_default_env()
             .or_else(|_| {
-                EnvFilter::try_new("s10=info,elodin=info,impeller=info,impeller::bevy=error,error")
+                EnvFilter::try_new(
+                    "s10=info,elodin=info,elodin_db=info,impeller=info,impeller::bevy=error,error",
+                )
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
 

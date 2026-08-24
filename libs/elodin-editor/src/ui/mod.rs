@@ -544,7 +544,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     .frame(egui::Frame {
                         fill: colors::with_opacity(get_scheme().bg_secondary, 0.5),
                         stroke: egui::Stroke::new(
-                            1.0,
+                            1.0_f32,
                             colors::with_opacity(get_scheme().text_primary, 0.5),
                         ),
                         inner_margin: egui::Margin::symmetric(16, 8),

@@ -20,7 +20,7 @@ pub fn line3d_controls(
     let mut changed = false;
 
     // Sober gray piping for the box-like inputs (drag value, checkbox).
-    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::new(1.0, scheme.border_primary);
+    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, scheme.border_primary);
 
     ui.label(RichText::new("Line Width").color(scheme.text_secondary));
     changed |= ui
@@ -72,7 +72,7 @@ fn color_square(ui: &mut egui::Ui, label: &str, color: &mut Color) -> bool {
             rect,
             egui::CornerRadius::same(3),
             egui_color,
-            egui::Stroke::new(1.0, scheme.border_primary),
+            egui::Stroke::new(1.0_f32, scheme.border_primary),
             egui::StrokeKind::Inside,
         );
     }

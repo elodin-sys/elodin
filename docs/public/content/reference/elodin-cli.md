@@ -61,17 +61,35 @@ This document contains the help content for the Elodin command-line programs.
 
 Launch the Elodin editor (default)
 
-**Usage:** `elodin editor [--kdl KDL-PATH] [addr/path]`
+**Usage:** `elodin editor [OPTIONS] [addr/path]`
 
 ###### **Arguments**
 
-* `<addr/path>` — Optional connection target or simulation to run. Can be:
+* `<addr/path>` — Optional connection target, simulation, or recording. Can be:
   - A socket address (e.g., `127.0.0.1:2240`) to connect to a running Elodin DB
   - A Python file (e.g., `main.py`) to run a simulation
   - A TOML file (e.g., `s10.toml`) to run from a plan
-  - A directory containing `main.py` or `s10.toml`
-* `--kdl <PATH>` — Optional parameter that will load a specific schematic KDL
-  after connecting to a database.
+  - A simulation directory containing `main.py` or `s10.toml`
+  - An Elodin DB directory containing `db_state`; the editor serves it and
+    connects automatically
+
+###### **Options**
+
+* `--addr <ADDR>` — Address to use when launching a Python simulation or
+  serving a database directory. Assets use its port + 1. Existing `s10.toml`
+  plans control their own addresses.
+
+  Default value: `[::]:2240`
+
+* `--kdl <KDL>` — Open this KDL schematic after connecting to the database.
+
+* `--replay` — Reveal recorded data progressively as the playback marker
+  advances, simulating a live session.
+
+```bash
+elodin editor dbs/apollo --replay
+elodin editor dbs/apollo --kdl schematics/review.kdl
+```
 
 ###### **Environment**
 
@@ -85,14 +103,20 @@ Launch the Elodin editor (default)
 
 Run an Elodin simulation in headless mode (not available on Windows)
 
-**Usage:** `elodin run [addr/path]`
+**Usage:** `elodin run [OPTIONS] [addr/path]`
 
 ###### **Arguments**
 
-* `<addr/path>` — Simulation to run. Can be:
+* `<addr/path>` — Simulation or database to run. Can be:
   - A Python file (e.g., `main.py`)
   - A TOML file (e.g., `s10.toml`)
   - A directory containing `main.py` or `s10.toml`
+  - An Elodin DB directory containing `db_state`, served until interrupted
+
+###### **Options**
+
+* `--addr <ADDR>` — Address to use when launching a Python simulation or
+  serving a database directory. Default: `[::]:2240`.
 
 For campaigns, use `elodin monte-carlo run` (below).
 
@@ -372,8 +396,6 @@ and reflection share the endpoint. See `libs/db/proto/elodin/db/v1` and
 
 * `--grpc-auth-token <TOKEN>` — Require `authorization: Bearer TOKEN` metadata
   on the gRPC endpoint; omitted means unauthenticated.
-
-* `--replay` — Replay recorded data as live telemetry. The database advances `last_updated` with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.
 
 * `--follows <ADDR>` — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.
 

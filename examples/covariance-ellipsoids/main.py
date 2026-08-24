@@ -95,8 +95,8 @@ def world() -> el.World:
         """
         coordinate frame=ENU
         hsplit {
-            viewport name="Cholesky: P = LL^T" pos="(0,0,0,1, 0,-6,4)" look_at="cholesky.world_pos" far=30.0 show_grid=#true active=#true
-            viewport frame=ENU name="Direct covariance: P" pos="(0,0,0,1, 8,-6,4)" look_at="covariance.world_pos" far=30.0 show_grid=#true active=#true
+            viewport name="Cholesky: P = LL^T" pos="(0,0,0,1, 0,-6,4)" look_at="cholesky.world_pos" show_grid=#true active=#true
+            viewport frame=ENU name="Direct covariance: P" pos="(0,0,0,1, 8,-6,4)" look_at="covariance.world_pos" show_grid=#true active=#true
         }
 
         object_3d cholesky.world_pos {

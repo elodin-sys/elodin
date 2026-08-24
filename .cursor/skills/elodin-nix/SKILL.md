@@ -65,6 +65,7 @@ This is configured in `flake.nix` and used automatically by `nix develop` and `n
 
 Provides:
 - **Dev shell**: `nix develop` — unified development environment
+- **Run shell**: `nix develop .#run` — packaged CLI/DB/Python plus GStreamer + `elodinsink`
 - **Packages**: `elodin-py`, `elodin-cli`, `elodin-db`, `elodinsink`
 - **Overlay**: `elodinOverlay` with all Elodin packages
 - **NixOS configs**: NixOS 25.11 based

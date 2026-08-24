@@ -13,17 +13,19 @@ Everything for this skill lives in this directory (`.cursor/skills/qa-test-plan/
 - **Ready-to-run plan — examples smoke/feature test:** [examples/test-plan.md](examples/test-plan.md) (24 cases: `SDK-001` build + one per `examples/` project). Shared helpers live alongside it in [examples/](examples/) (`run_probe.sh`, `probe.py`).
 - **Ready-to-run plan — Elodin-DB deep suite:** [elodin-db/test-plan.md](elodin-db/test-plan.md) (23 cases: generate realistic DBs from the examples — drone, logstream, video-stream, sensor-camera, apollo-lander, rc-jet — then exercise every `elodin-db` subcommand, serving mode, replication, exports, and clients on them). Helper: [elodin-db/serve_probe.py](elodin-db/serve_probe.py); reuses the examples probes.
 - **Ready-to-run plan — Elodin Editor deep suite:** [elodin-editor/test-plan.md](elodin-editor/test-plan.md) (19 cases: release build, live/recorded DB connect, screenshot gallery across examples covering feature-catalog §16–17, `--kdl` preload, inspector feature check; helpers [elodin-editor/capture.sh](elodin-editor/capture.sh)). Visual cases use `ELODIN_SCREENSHOT*` (see [elodin-editor-dev](../elodin-editor-dev/SKILL.md)).
-- New instantiated plans use the same focused-folder pattern: `<yyyy-mm-dd>-<release>/test-plan.md` plus evidence artifacts in that folder.
+- Dated run reports and instantiated plans live under gitignored `ai-context/qa-test-plan/<yyyy-mm-dd>-<release>/` (not in this skill folder).
+
+**Source files are never the report.** Do not write Results, Evidence, Notes, Summary ticks, or Plan Header run metadata into `template.md`, `examples/test-plan.md`, `elodin-db/test-plan.md`, or `elodin-editor/test-plan.md`. Those keep AUTHOR-VALIDATED baselines and blank Results. Every execution (and every new custom plan) works on a **dated copy** under `ai-context/`.
 
 ## Agent entry point
 
-- **"Run/execute the examples QA plan" (or "smoke-test the examples for a release")** → open [examples/test-plan.md](examples/test-plan.md), set the Plan Header (commit, branch, date, environment, executor), then execute cases top-to-bottom following that document's own **Execution Rules**. It is self-contained and every `agent` case has an `AUTHOR-VALIDATED` baseline. Run from the repo root inside `nix develop`. Note the two hard-won prerequisites baked into [examples/run_probe.sh](examples/run_probe.sh): live-run cases bind port `2240` exclusively (never parallelize them), and tearing a run down requires a **process-group kill** (the s10 child restarts on a plain kill).
-- **"Run/execute the Elodin-DB QA plan" (or "put elodin-db through its paces")** → open [elodin-db/test-plan.md](elodin-db/test-plan.md) and execute the same way. It first generates a stable of realistic DBs under `/tmp/qa-db/` from the examples, then runs the full `elodin-db` command surface over them; its **Hard-won operational rules** section (group-kill teardown, the `tcp+1` asset-server port collision) is required reading before touching live servers.
-- **"Run/execute the Elodin Editor QA plan" (or "screenshot / visual-regression the editor")** → open [elodin-editor/test-plan.md](elodin-editor/test-plan.md) and execute the same way. Prefer a warm `target/release/elodin` (EDITOR-100). Never parallelize live-editor cases (port 2240). For `agent+visual` criteria, **Read the PNG** — file existence alone is insufficient. Stale `video-stream-db` / voyager DB dirs must be deleted before those captures (handled by [elodin-editor/capture.sh](elodin-editor/capture.sh)).
-- **"Create/author a new plan for `<release>`"** → follow *Instantiating a Plan for a Release* below (copy `template.md` into this folder).
-- **"Add/edit a test case"** → follow *Authoring Test Cases* below and the case anatomy rules.
+- **"Run/execute the examples QA plan" (or "smoke-test the examples for a release")** → copy [examples/test-plan.md](examples/test-plan.md) into a dated folder (see *Executing a Plan*), then fill the **copy's** header and run cases top-to-bottom using that document's **Execution Rules**. It is self-contained and every `agent` case has an `AUTHOR-VALIDATED` baseline. Run from the repo root inside `nix develop`. Note the two hard-won prerequisites baked into [examples/run_probe.sh](examples/run_probe.sh): live-run cases bind port `2240` exclusively (never parallelize them), and tearing a run down requires a **process-group kill** (the s10 child restarts on a plain kill).
+- **"Run/execute the Elodin-DB QA plan" (or "put elodin-db through its paces")** → copy [elodin-db/test-plan.md](elodin-db/test-plan.md) the same way, then execute the copy. It first generates a stable of realistic DBs under `/tmp/qa-db/` from the examples, then runs the full `elodin-db` command surface over them; its **Hard-won operational rules** section (group-kill teardown, the `tcp+1` asset-server port collision) is required reading before touching live servers.
+- **"Run/execute the Elodin Editor QA plan" (or "screenshot / visual-regression the editor")** → copy [elodin-editor/test-plan.md](elodin-editor/test-plan.md) the same way, then execute the copy. Prefer a warm `target/release/elodin` (EDITOR-100). Never parallelize live-editor cases (port 2240). For `agent+visual` criteria, **Read the PNG** — file existence alone is insufficient. Stale `video-stream-db` / voyager DB dirs must be deleted before those captures (handled by [elodin-editor/capture.sh](elodin-editor/capture.sh)).
+- **"Create/author a new plan for `<release>`"** → follow *Instantiating a Plan for a Release* below (copy `template.md` into `ai-context/qa-test-plan/`).
+- **"Add/edit a test case"** → follow *Authoring Test Cases* below and the case anatomy rules. Persist new cases on the **source** ready-to-run plan and/or `template.md`, not on a dated run report.
 
-There are three workflows: **authoring** test cases, **instantiating** a plan for a release, and **executing** a plan. The execution rules themselves live inside the template (and every copied plan) so a plan is self-contained.
+There are three workflows: **authoring** test cases (edit sources), **instantiating** a custom plan from `template.md` (dated copy), and **executing** a ready-to-run suite (dated copy of that suite). The execution rules themselves live inside the plan so a copy is self-contained.
 
 ## Authoring Test Cases
 
@@ -79,27 +81,39 @@ Add new areas as needed; record them in this table so IDs stay consistent.
 
 ## Instantiating a Plan for a Release
 
-1. Copy the template:
+Use this when the user wants a **new custom plan** (not one of the ready-to-run suites). Copy `template.md` into gitignored `ai-context/`, never edit it in place:
 
 ```bash
-PLAN_DIR=".cursor/skills/qa-test-plan/$(date +%F)-<release>"
+PLAN_DIR="ai-context/qa-test-plan/$(date +%F)-<release>"
 mkdir -p "$PLAN_DIR"
 cp .cursor/skills/qa-test-plan/template.md "$PLAN_DIR/test-plan.md"
 ```
 
-2. Fill the Plan Header: release name, `git rev-parse --short HEAD`, `git branch --show-current`, date, environment (note whether a display is available), executor.
-3. Scope the plan: delete cases irrelevant to this release, add release-specific cases following the authoring rules. Keep the Summary table in sync with the case blocks — same IDs, same order.
-4. If new cases were added that future releases should keep, also add them to [template.md](template.md) so the template stays the source of truth.
+1. Fill the **copy's** Plan Header: release name, `git rev-parse --short HEAD`, `git branch --show-current`, date, environment (note whether a display is available), executor.
+2. Scope the copy: delete cases irrelevant to this release, add release-specific cases following the authoring rules. Keep the Summary table in sync with the case blocks — same IDs, same order.
+3. If new cases were added that future releases should keep, also add them to [template.md](template.md) (and the relevant ready-to-run suite) so the sources stay the source of truth.
 
 ## Executing a Plan
 
-The binding rules are in the plan document itself ("Execution Rules" section) — read them first; they travel with every copy. Operationally:
+**First action: dated copy. Do not skip this.** Ready-to-run suites (`examples/`, `elodin-db/`, `elodin-editor/`) and `template.md` are templates. Filling Results into them is a bug.
 
-1. Set the header Status to IN PROGRESS.
+```bash
+# <suite> is examples | elodin-db | elodin-editor
+# <release> is a short slug the user named, or the suite name if they did not
+PLAN_DIR="ai-context/qa-test-plan/$(date +%F)-<release>"
+mkdir -p "$PLAN_DIR"
+cp ".cursor/skills/qa-test-plan/<suite>/test-plan.md" "$PLAN_DIR/test-plan.md"
+```
+
+Work **only** on `$PLAN_DIR/test-plan.md`. Leave the source plan's Status, Summary Results, and case Result/Evidence blank (AUTHOR-VALIDATED notes stay on the source).
+
+The binding rules are in the copied plan itself ("Execution Rules" section) — read them first. Operationally:
+
+1. On the **copy**, set the header Status to IN PROGRESS (commit, branch, date, environment, executor).
 2. Work through cases strictly in Summary-table order, one at a time. For each case: check Requires, run the steps, verify every pass criterion, write Evidence (exit codes, matching output lines, artifact paths), then set Result in the case block and mirror it in the Summary row.
 3. Long builds are normal (SDK-001 up to 30 min, RUST-001 up to 40 min) — use the case's Expected duration to size timeouts instead of assuming a hang.
 4. On FAIL, save output to `<artifacts>/<case-id>-fail.log`, diagnose briefly in Notes, and move on. Never fix code mid-run; a QA run measures the release as it is.
-5. When all cases have a result: fill the Run Summary counts, list notable issues and follow-ups, set Status to COMPLETE, and report to the user — lead with FAIL/BLOCKED cases and anything a human must do (`manual` cases marked SKIPPED).
+5. When all cases have a result: fill the Run Summary counts, list notable issues and follow-ups, set Status to COMPLETE, and report to the user — lead with FAIL/BLOCKED cases and anything a human must do (`manual` cases marked SKIPPED). Point them at the dated copy path, not the source suite.
 
 ## Example: well-formed vs poor case
 

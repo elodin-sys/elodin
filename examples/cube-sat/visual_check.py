@@ -99,7 +99,7 @@ w.schematic(
         earth
     }}
     tabs {{
-        viewport name=Viewport pos="ore_sat.world_pos.translate_world({float(cam[0]):.4f}, {float(cam[1]):.4f}, {float(cam[2]):.4f})" look_at="ore_sat.world_pos.translate_world({float(look[0]):.4f}, {float(look[1]):.4f}, {float(look[2]):.4f})" up="({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})" near=0.5 far=120000000.0 cinematic=#true show_grid=#false active=#true
+        viewport name=Viewport pos="ore_sat.world_pos.translate_world({float(cam[0]):.4f}, {float(cam[1]):.4f}, {float(cam[2]):.4f})" look_at="ore_sat.world_pos.translate_world({float(look[0]):.4f}, {float(look[1]):.4f}, {float(look[2]):.4f})" up="({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})" near=0.5 cinematic=#true show_grid=#false active=#true
     }}
     object_3d ore_sat.world_pos {{
         glb path="oresat-low.glb"

@@ -2630,6 +2630,71 @@ mod tests {
     }
 
     #[test]
+    fn viewport_far_configures_presentation_without_limiting_camera_or_zoom() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"viewport name="Frustum Source" show_view_cube=#false far=500.0"#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<(
+            &Projection,
+            &tiles::ViewportConfig,
+            &bevy_editor_cam::prelude::EditorCam,
+        ), With<crate::MainCamera>>();
+        let (projection, config, editor_cam) = query.iter(world).next().expect("viewport camera");
+        let Projection::Perspective(perspective) = projection else {
+            panic!("expected perspective projection");
+        };
+        let default_zoom = bevy_editor_cam::controller::zoom::ZoomLimits::default();
+
+        assert_eq!(default_zoom.min_size_per_pixel, 1.0e-6);
+        assert_eq!(default_zoom.max_size_per_pixel, 1.0e27);
+        assert_eq!(perspective.far, tiles::VIEWPORT_PROJECTION_FAR);
+        assert_eq!(config.configured_far, Some(500.0));
+        assert_eq!(
+            editor_cam.zoom_limits.min_size_per_pixel,
+            default_zoom.min_size_per_pixel
+        );
+        assert_eq!(
+            editor_cam.zoom_limits.max_size_per_pixel,
+            default_zoom.max_size_per_pixel
+        );
+    }
+
+    #[test]
+    fn viewport_near_without_far_remains_authoritative() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(r#"viewport show_view_cube=#false near=1000000.0"#)
+            .expect("parse voyager-scale viewport");
+
+        load_schematic(&mut app, &schematic);
+
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<(
+            &Projection,
+            &tiles::ViewportConfig,
+            &bevy_editor_cam::prelude::EditorCam,
+        ), With<crate::MainCamera>>();
+        let (projection, config, editor_cam) = query.iter(world).next().expect("viewport camera");
+        let Projection::Perspective(perspective) = projection else {
+            panic!("expected perspective projection");
+        };
+
+        assert_eq!(perspective.near, 1_000_000.0);
+        assert_eq!(perspective.far, tiles::VIEWPORT_PROJECTION_FAR);
+        assert_eq!(config.configured_near, Some(1_000_000.0));
+        assert_eq!(config.configured_far, None);
+        assert_eq!(
+            editor_cam.perspective.near_clip_limits,
+            1_000_000.0..1_000_000.0
+        );
+    }
+
+    #[test]
     fn mixed_schematic_clears_cleanly() {
         let mut app = test_app();
         let baseline = entity_count(&mut app);

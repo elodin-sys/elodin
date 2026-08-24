@@ -28,8 +28,8 @@ pub struct Args {
     #[clap(name = "addr/path", default_value_t = DEFAULT_SIM)]
     sim: Simulator,
 
-    /// Address to use when launching a Python simulation file. Assets use its port + 1.
-    /// Existing s10.toml plans control their own addresses.
+    /// Address to use when launching a Python simulation or serving a database directory.
+    /// Assets use its port + 1. Existing s10.toml plans control their own addresses.
     #[clap(long, default_value = "[::]:2240")]
     addr: SocketAddr,
 
@@ -51,12 +51,12 @@ pub struct RenderServerArgs {
     pub addr: SocketAddr,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum Simulator {
     None,
     Addr(SocketAddr),
     File(PathBuf),
-    ReplayDir(PathBuf),
+    Db(PathBuf),
 }
 
 #[derive(Resource)]
@@ -116,7 +116,7 @@ impl fmt::Display for Simulator {
             Self::None => write!(f, ""),
             Self::Addr(addr) => write!(f, "{}", addr),
             Self::File(path) => write!(f, "{}", path.display()),
-            Self::ReplayDir(path) => write!(f, "{}", path.display()),
+            Self::Db(path) => write!(f, "{}", path.display()),
         }
     }
 }
@@ -132,7 +132,19 @@ impl std::str::FromStr for Simulator {
         } else {
             let path = PathBuf::from(s);
             if path.is_dir() {
-                Ok(Self::ReplayDir(path))
+                if path.join("db_state").exists() {
+                    Ok(Self::Db(path))
+                } else if path.join("s10.toml").is_file() {
+                    Ok(Self::File(path.join("s10.toml")))
+                } else if path.join("main.py").is_file() {
+                    Ok(Self::File(path.join("main.py")))
+                } else {
+                    Err(miette!(
+                        "directory {} is not an Elodin database or simulation; \
+                         expected db_state, s10.toml, or main.py",
+                        path.display()
+                    ))
+                }
             } else {
                 Ok(Self::File(path))
             }
@@ -213,10 +225,7 @@ impl Cli {
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         Ok(std::thread::spawn(move || {
             rt.block_on(async move {
-                tokio::spawn(async move {
-                    let _drop = cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
-                    tokio::signal::ctrl_c().await
-                });
+                wait_for_shutdown(cancel_token, tokio::signal::ctrl_c()).await;
                 Ok(())
             })
         }))
@@ -227,6 +236,14 @@ impl Cli {
         use_plan_addr(&mut args)?;
 
         let cancel_token = CancelToken::new();
+        let db_server = match &args.sim {
+            Simulator::Db(path) => Some(super::db::serve(
+                path.clone(),
+                args.addr,
+                cancel_token.clone(),
+            )?),
+            _ => None,
+        };
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let mut app = self.editor_app()?;
         match args.sim {
@@ -236,11 +253,8 @@ impl Cli {
             Simulator::Addr(addr) => {
                 app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(addr)));
             }
-            Simulator::File(_) => {
+            Simulator::File(_) | Simulator::Db(_) => {
                 app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
-            }
-            Simulator::ReplayDir(_) => {
-                // TODO
             }
         };
         app.insert_resource(BevyCancelToken(cancel_token.clone()))
@@ -255,7 +269,16 @@ impl Cli {
         }
         app.run();
         cancel_token.cancel();
-        thread.join().map_err(|_| miette!("join error"))?
+        let sim_result = thread
+            .join()
+            .map_err(|_| miette!("simulation thread panicked"))
+            .and_then(|result| result);
+        let db_result = match db_server {
+            Some(server) => server.join(),
+            None => Ok(()),
+        };
+        sim_result?;
+        db_result
     }
 
     /// Run a simulation in headless mode. The render-server (if sensor cameras
@@ -266,10 +289,26 @@ impl Cli {
         use_plan_addr(&mut args)?;
 
         let cancel_token = CancelToken::new();
+        let db_server = match &args.sim {
+            Simulator::Db(path) => Some(super::db::serve(
+                path.clone(),
+                args.addr,
+                cancel_token.clone(),
+            )?),
+            _ => None,
+        };
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
-        let result = thread.join().map_err(|_| miette!("join error"));
+        let result = thread
+            .join()
+            .map_err(|_| miette!("simulation thread panicked"))
+            .and_then(|result| result);
         cancel_token.cancel();
-        result?
+        let db_result = match db_server {
+            Some(server) => server.join(),
+            None => Ok(()),
+        };
+        result?;
+        db_result
     }
 
     /// Start the headless sensor camera render server. This is spawned as an
@@ -327,6 +366,27 @@ impl Cli {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
+async fn wait_for_shutdown(
+    cancel_token: CancelToken,
+    ctrl_c: impl std::future::Future<Output = std::io::Result<()>>,
+) {
+    tokio::select! {
+        result = ctrl_c => {
+            match result {
+                Ok(()) => {
+                    info!("Received Ctrl-C, shutting down");
+                    cancel_token.cancel();
+                }
+                Err(err) => {
+                    warn!(?err, "failed to listen for Ctrl-C");
+                }
+            }
+        }
+        _ = cancel_token.wait() => {}
+    }
+}
+
 #[derive(Resource)]
 struct BevyCancelToken(CancelToken);
 
@@ -353,5 +413,94 @@ fn on_window_resize(
         if let Err(err) = window_state_file.0.write_all(window_state.as_bytes()) {
             warn!(?err, "failed to write window state");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn parses_socket_address() {
+        let addr = "127.0.0.1:2240".parse().unwrap();
+        assert_eq!(
+            Simulator::from_str("127.0.0.1:2240").unwrap(),
+            Simulator::Addr(addr)
+        );
+    }
+
+    #[test]
+    fn parses_file_path() {
+        assert_eq!(
+            Simulator::from_str("examples/drone/main.py").unwrap(),
+            Simulator::File(PathBuf::from("examples/drone/main.py"))
+        );
+    }
+
+    #[test]
+    fn recognizes_database_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("db_state"), []).unwrap();
+        assert_eq!(
+            Simulator::from_str(dir.path().to_str().unwrap()).unwrap(),
+            Simulator::Db(dir.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn resolves_plan_from_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("s10.toml"), []).unwrap();
+        assert_eq!(
+            Simulator::from_str(dir.path().to_str().unwrap()).unwrap(),
+            Simulator::File(dir.path().join("s10.toml"))
+        );
+    }
+
+    #[test]
+    fn resolves_python_entrypoint_from_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.py"), []).unwrap();
+        assert_eq!(
+            Simulator::from_str(dir.path().to_str().unwrap()).unwrap(),
+            Simulator::File(dir.path().join("main.py"))
+        );
+    }
+
+    #[test]
+    fn rejects_unrecognized_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = Simulator::from_str(dir.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("expected db_state, s10.toml, or main.py")
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_cancellation() {
+        let cancel = CancelToken::new();
+        let handle = tokio::spawn(wait_for_shutdown(
+            cancel.clone(),
+            std::future::pending::<std::io::Result<()>>(),
+        ));
+        tokio::task::yield_now().await;
+        assert!(!handle.is_finished());
+        assert!(!cancel.is_cancelled());
+
+        cancel.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("shutdown waiter did not observe cancellation")
+            .expect("shutdown waiter panicked");
+    }
+
+    #[tokio::test]
+    async fn shutdown_signal_cancels_token() {
+        let cancel = CancelToken::new();
+        wait_for_shutdown(cancel.clone(), std::future::ready(Ok(()))).await;
+        assert!(cancel.is_cancelled());
     }
 }

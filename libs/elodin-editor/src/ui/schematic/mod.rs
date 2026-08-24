@@ -818,7 +818,7 @@ impl Default for ElementAffine {
 
 impl ElementAffine {
     pub fn apply(self, value: f64) -> f64 {
-        value * self.scale + self.offset
+        value.mul_add(self.scale, self.offset)
     }
 
     pub fn is_identity(self) -> bool {

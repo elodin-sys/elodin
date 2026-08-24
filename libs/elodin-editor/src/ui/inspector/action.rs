@@ -33,12 +33,12 @@ impl WidgetSystem for InspectorAction<'_, '_> {
         style.visuals.widgets.hovered.corner_radius = CornerRadius::ZERO;
         style.visuals.widgets.open.corner_radius = CornerRadius::ZERO;
 
-        style.visuals.widgets.active.fg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-        style.visuals.widgets.active.bg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-        style.visuals.widgets.hovered.fg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-        style.visuals.widgets.hovered.bg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-        style.visuals.widgets.open.fg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-        style.visuals.widgets.open.bg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
+        style.visuals.widgets.active.fg_stroke = Stroke::new(0.0_f32, Color32::TRANSPARENT);
+        style.visuals.widgets.active.bg_stroke = Stroke::new(0.0_f32, Color32::TRANSPARENT);
+        style.visuals.widgets.hovered.fg_stroke = Stroke::new(0.0_f32, Color32::TRANSPARENT);
+        style.visuals.widgets.hovered.bg_stroke = Stroke::new(0.0_f32, Color32::TRANSPARENT);
+        style.visuals.widgets.open.fg_stroke = Stroke::new(0.0_f32, Color32::TRANSPARENT);
+        style.visuals.widgets.open.bg_stroke = Stroke::new(0.0_f32, Color32::TRANSPARENT);
 
         style.spacing.button_padding = [16.0, 16.0].into();
 

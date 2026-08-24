@@ -19,43 +19,55 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
     match prim_type {
         PrimType::F64 => {
             let data: Vec<f64> = buf
-                .chunks_exact(8)
-                .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| f64::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::F32 => {
             let data: Vec<f32> = buf
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| f32::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::I64 => {
             let data: Vec<i64> = buf
-                .chunks_exact(8)
-                .map(|chunk| i64::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| i64::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::I32 => {
             let data: Vec<i32> = buf
-                .chunks_exact(4)
-                .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| i32::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::U64 => {
             let data: Vec<u64> = buf
-                .chunks_exact(8)
-                .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| u64::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::U32 => {
             let data: Vec<u32> = buf
-                .chunks_exact(4)
-                .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| u32::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
@@ -69,8 +81,10 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
         }
         PrimType::U16 => {
             let data: Vec<u16> = buf
-                .chunks_exact(2)
-                .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| u16::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
@@ -80,8 +94,10 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
         }
         PrimType::I16 => {
             let data: Vec<i16> = buf
-                .chunks_exact(2)
-                .map(|chunk| i16::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| i16::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }

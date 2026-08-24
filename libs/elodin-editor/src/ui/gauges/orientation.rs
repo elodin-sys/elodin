@@ -487,7 +487,7 @@ fn paint_frame_sphere(
         painter.circle_stroke(
             center,
             radius,
-            Stroke::new(1.5, scheme.border_primary.gamma_multiply(0.5)),
+            Stroke::new(1.5_f32, scheme.border_primary.gamma_multiply(0.5)),
         );
         painter.text(
             center,
@@ -557,15 +557,15 @@ fn paint_frame_sphere(
                 let back: Vec<Pos2> = back_c.iter().map(|&p| to_screen(p)).collect();
                 painter.add(Shape::line(
                     back,
-                    Stroke::new(1.0, curve.gamma_multiply(0.4)),
+                    Stroke::new(1.0_f32, curve.gamma_multiply(0.4)),
                 ));
                 let front: Vec<Pos2> = front_c.iter().map(|&p| to_screen(p)).collect();
-                painter.add(Shape::line(front, Stroke::new(1.0, curve)));
+                painter.add(Shape::line(front, Stroke::new(1.0_f32, curve)));
             }
             // Plane parallel to the screen: the circle coincides with the rim.
             // Stroke it there instead of blinking out for a frame.
             None => {
-                painter.circle_stroke(center, radius, Stroke::new(1.0, curve));
+                painter.circle_stroke(center, radius, Stroke::new(1.0_f32, curve));
             }
         }
     }
@@ -575,14 +575,14 @@ fn paint_frame_sphere(
         let back: Vec<Pos2> = back_arc.iter().map(|&p| to_screen(p)).collect();
         painter.add(Shape::line(
             back,
-            Stroke::new(1.0, horizon.gamma_multiply(0.35)),
+            Stroke::new(1.0_f32, horizon.gamma_multiply(0.35)),
         ));
         let front: Vec<Pos2> = front_arc.iter().map(|&p| to_screen(p)).collect();
-        painter.add(Shape::line(front, Stroke::new(1.5, horizon)));
+        painter.add(Shape::line(front, Stroke::new(1.5_f32, horizon)));
     }
 
     // Outer rim, over the fills so the disc has a crisp edge.
-    painter.circle_stroke(center, radius, Stroke::new(1.5, scheme.border_primary));
+    painter.circle_stroke(center, radius, Stroke::new(1.5_f32, scheme.border_primary));
 
     // Fixed centre reticle (wings + dot): a screen-fixed reference the
     // co-rotating markings move against. Amber so it reads on both tones.
@@ -592,16 +592,16 @@ fn paint_frame_sphere(
             Pos2::new(center.x - radius * 0.22, center.y),
             Pos2::new(center.x - radius * 0.06, center.y),
         ],
-        Stroke::new(2.0, wing),
+        Stroke::new(2.0_f32, wing),
     );
     painter.line_segment(
         [
             Pos2::new(center.x + radius * 0.06, center.y),
             Pos2::new(center.x + radius * 0.22, center.y),
         ],
-        Stroke::new(2.0, wing),
+        Stroke::new(2.0_f32, wing),
     );
-    painter.circle_stroke(center, 3.5, Stroke::new(1.5, wing));
+    painter.circle_stroke(center, 3.5, Stroke::new(1.5_f32, wing));
 
     // Display-triad axes rotated by the body attitude (source identity ⇒
     // physical directions). Drawn last so back-facing tips remain visible
@@ -619,7 +619,10 @@ fn paint_frame_sphere(
     tips.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
     for &(_depth, label, pos, alpha) in &tips {
-        painter.line_segment([center, pos], Stroke::new(1.0, curve.gamma_multiply(alpha)));
+        painter.line_segment(
+            [center, pos],
+            Stroke::new(1.0_f32, curve.gamma_multiply(alpha)),
+        );
         painter.circle_filled(pos, 3.0, Color32::from_gray(160).gamma_multiply(alpha));
         // Axis toward the camera projects onto the centre: keep the label
         // offset finite instead of normalizing a zero vector.

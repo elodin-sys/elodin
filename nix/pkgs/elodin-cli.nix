@@ -34,6 +34,7 @@
       [
         (rustToolchain pkgs)
         makeWrapper # Required for wrapProgram in postInstall
+        protobuf
       ]
       ++ common.commonNativeBuildInputs;
 
