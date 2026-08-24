@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
-"""
-BDX RC Jet Turbine Simulation
+"""BDX RC jet — provisional parametric 6-DOF model in a rotating ECEF world.
 
-Main entry point for the Elite Aerosports BDX simulation.
-Implements a 6-DOF fixed-wing jet aircraft with aerodynamics,
-turbine propulsion, control surface dynamics, and a Death Valley terrain backdrop.
+Aircraft data comes from the vendored open-air package (analysis-correlated;
+see model/elodin_package/provenance.md) plus a logged class-D fallback set.
+The world is WGS84 ECEF anchored over Death Valley: the cinematic Earth
+provides the horizon and atmosphere while the death_valley world_mesh
+provides close-up terrain.
 
 Usage:
-    elodin editor main.py       # Run with 3D visualization
+    elodin editor examples/rc-jet/main.py     # 3D visualization + RC control
 
-The RC controller starts automatically with the simulation.
-WASD / Arrow keys for keyboard control.
+The RC controller starts automatically (gamepad or WASD/Q/E/arrow keys).
+Scenario selection: ELODIN_RC_JET_SCENARIO=demo|validation (default demo).
 """
 
+import math
 import os
 from dataclasses import field
 from pathlib import Path
 
 import elodin as el
 import jax.numpy as jnp
+import numpy as np
 
-from config import BDXConfig
-from sim import BDXJet, system
+import bdx_model
+from class_d_fallbacks import FALLBACKS
+from frames import enu_basis
+from scenario import Numerics, Scenario, load_scenario
+from sim import build_system, make_jet
 
 
 @el.dataclass
@@ -31,57 +37,49 @@ class StaticMarker(el.Archetype):
     world_pos: el.WorldPos = field(default_factory=el.SpatialTransform)
 
 
-# Create configuration
-config = BDXConfig()
-config.set_as_global()
-
-
-def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
-    """
-    Create and configure the simulation world with a BDX jet and target drone.
-
-    Returns:
-        tuple: (world, jet_entity_id, target_entity_id)
-    """
+def setup_world(
+    scenario: Scenario, numerics: Numerics
+) -> tuple[el.World, el.EntityId, el.EntityId]:
     world = el.World()
+    init = scenario.initial
 
-    # Calculate initial position and velocity
-    initial_pos = jnp.array([0.0, 0.0, config.initial_altitude])
+    site = scenario.site
+    lat = math.radians(site.lat_deg)
+    lon = math.radians(site.lon_deg)
+    basis = np.asarray(enu_basis(lat, lon))
+    heading = math.radians(scenario.heading_deg)
+    forward = math.sin(heading) * basis[0] + math.cos(heading) * basis[1]
 
-    # Initial velocity: forward flight at cruise speed
-    # Transform body velocity to world frame using initial attitude
-    v_body = config.initial_velocity_body
-    v_world = config.initial_attitude @ v_body
-
-    # Spawn the BDX jet
     jet = world.spawn(
         [
             el.Body(
                 world_pos=el.SpatialTransform(
-                    angular=config.initial_attitude,
-                    linear=initial_pos,
+                    angular=el.Quaternion(jnp.asarray(init.quat_xyzw)),
+                    linear=jnp.asarray(init.pos_ecef),
                 ),
-                world_vel=el.SpatialMotion(
-                    linear=v_world,
-                    angular=jnp.zeros(3),
+                world_vel=el.SpatialMotion(linear=jnp.asarray(init.vel_ecef), angular=jnp.zeros(3)),
+                inertia=el.SpatialInertia(
+                    mass=MODEL.mass.operating_empty_mass_kg + init.fuel_kg,
+                    inertia=np.array(
+                        [
+                            FALLBACKS.inertia.ixx_kg_m2,
+                            FALLBACKS.inertia.iyy_kg_m2,
+                            FALLBACKS.inertia.izz_kg_m2,
+                        ]
+                    ),
                 ),
-                inertia=config.spatial_inertia,
             ),
-            BDXJet(),
+            make_jet(scenario),
         ],
         name="bdx",
     )
 
-    # Spawn target drone (static visual marker) - positioned along initial flight path.
-    # Jet starts at [0,0,initial_altitude] with heading 35° and speed 70 m/s.
-    # World velocity ≈ [57.3, 40.2, 0] m/s, so target at ~6 seconds ahead.
-    # Using StaticMarker (no Inertia/Force) makes it immune to physics systems.
-    target_position = jnp.array([350.0, 245.0, config.initial_altitude + 5.0])
+    # Target drone ~9 s ahead on the initial flight path.
+    target_pos = init.pos_ecef + 350.0 * forward + 5.0 * basis[2]
     target = world.spawn(
         StaticMarker(
             world_pos=el.SpatialTransform(
-                angular=el.Quaternion.identity(),
-                linear=target_position,
+                angular=el.Quaternion.identity(), linear=jnp.asarray(target_pos)
             ),
         ),
         name="target",
@@ -95,142 +93,54 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         fov=90.0,
         fps=30.0,
         near=0.1,
-        # Keep the FPV render range large enough for the Death Valley terrain.
-        # Frustum visualization uses this same far plane, so don't publish this
-        # sensor as a debug frustum or it will dominate the chase viewport.
+        # Far plane must cover the terrain and horizon at altitude. Frustum
+        # visualization shares this far plane, so keep create_frustum off.
         far=100_000.0,
         pos_offset=[-1.0, 0.0, 0.0],
         rot_offset=[0.0, 0.0, 0.0],
         create_frustum=False,
     )
 
-    # Create schematic for visualization
-    world.schematic(
-        """
-        world_mesh "death_valley" translate="(0.0, 0.0, 0.0)"
-
-        // Denser "what's happening now" layout: combined line graphs instead of
-        // component_monitor widgets, plus an Intercept tab for engagement views.
-        timeline follow_latest=#true range="last_30s"
-        telemetry_mode #true
-
-        tabs {
-            // Instruments left, camera views right, chase view between them: the
-            // shares are weights against the viewport's default 1.0, so 0.4 each
-            // side leaves the chase view a bit over half the width.
-            hsplit name="Main View" {
-                vsplit share=0.4 {
-                    // With no `coordinate` node the source frame is ENU, matching this
-                    // jet's X-fwd/Y-left/Z-up body frame; NED would invert the horizon.
-                    // The face is square and the column is narrow, so the pane's
-                    // height is what sets its size. Three shares against the
-                    // graphs' one apiece makes the instrument about twice the
-                    // size it is on an even split.
-                    horizon_gauge "bdx.world_pos" name="ADI" share=3.0
-                    graph "bdx.alpha" name="Angle of Attack (rad)"
-                    graph "bdx.thrust" name="Thrust (N)"
-                }
-                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#false show_frustums=#true active=#true
-                vsplit share=0.4 {
-                    viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#false
-                    viewport name=FPVViewport pos="bdx.world_pos.translate(1,0,0.1)" look_at="bdx.world_pos.translate(2,0,0.1)" up="bdx.world_pos.direction(0,0,1)" show_grid=#false
-                    sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
-                }
-            }
-            vsplit name="Flight Data" {
-                hsplit {
-                    graph "bdx.velocity_body" name="Body Velocity (m/s)"
-                    graph "bdx.world_pos.q0, bdx.world_pos.q1, bdx.world_pos.q2, bdx.world_pos.q3" name="Attitude (quat)"
-                }
-                hsplit {
-                    graph "bdx.control_surfaces" name="Control Surfaces (rad)"
-                    graph "bdx.dynamic_pressure, bdx.mach" name="Dynamic Pressure / Mach"
-                }
-            }
-            vsplit name="Propulsion" {
-                graph "bdx.thrust" name="Thrust (N)"
-                graph "bdx.spool_speed" name="Spool Speed (normalized)"
-                graph "bdx.throttle_command" name="Throttle Command"
-            }
-            vsplit name="Control Input" {
-                graph "bdx.control_commands" name="Control Commands (rad/normalized)"
-                graph "bdx.control_surfaces" name="Control Surfaces (rad)"
-            }
-            vsplit name="Aerodynamics" {
-                hsplit {
-                    graph "bdx.alpha" name="Angle of Attack (rad)"
-                    graph "bdx.beta" name="Sideslip (rad)"
-                }
-                hsplit {
-                    graph "bdx.aero_coefs.CL, bdx.aero_coefs.CD" name="CL, CD"
-                    graph "bdx.aero_coefs.Cm" name="Pitch Moment Cm"
-                }
-            }
-            hsplit name="Navigation" {
-                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#false
-                query_plot name="Ground Track (XY)" query="SELECT bdx_world_pos.bdx_world_pos[5], bdx_world_pos.bdx_world_pos[6] FROM bdx_world_pos" type="sql" mode="xy" x_label="X Position (m)" y_label="Y Position (m)" auto_refresh=#true refresh_interval=500 {
-                    color cyan
-                }
-            }
-        }
-
-        object_3d bdx.world_pos {
-            glb path="f22.glb" scale=0.01 translate="(0.0, 0.0, 0.0)" rotate="(0.0, 0.0, 0.0)"
-            icon builtin="flight_takeoff" {
-                visibility_range min=50.0 fade_distance=50.0
-                color 76 175 80
-            }
-        }
-
-        object_3d target.world_pos {
-            glb path="edu-450-v2-drone.glb"
-            icon builtin="adjust" {
-                visibility_range min=50.0 fade_distance=50.0
-                color 244 67 54
-            }
-        }
-        
-        vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" show_name=#true body_frame=#true {
-           color red 150
-        }
-        vector_arrow "(0, 1, 0)" origin="bdx.world_pos" scale=1.0 name="Left (Y)" show_name=#true body_frame=#true {
-           color green 150
-        }
-        vector_arrow "(0, 0, 1)" origin="bdx.world_pos" scale=1.0 name="Up (Z)" show_name=#true body_frame=#true {
-           color blue 150
-        }
-        
-        line_3d bdx.world_pos line_width=3.0 perspective=#false {
-            color yolk
-        }
-        """,
-        "bdx.kdl",
-    )
-
+    schematic_path = Path(__file__).with_name("bdx.kdl")
+    world.schematic(schematic_path.read_text(), schematic_path.name)
     return world, jet, target
 
 
-# Setup world
-world, jet, target = setup_world(config)
+MODEL = bdx_model.load()
+NUMERICS = Numerics()
+SCENARIO = load_scenario(MODEL, FALLBACKS)
 
-# Build system
-sim_system = system()
+world, jet, target = setup_world(SCENARIO, NUMERICS)
+sim_system = build_system(MODEL, FALLBACKS, SCENARIO, NUMERICS)
 
 print("BDX RC Jet Simulation")
 print("=====================")
-print(f"Initial altitude: {config.initial_altitude:.1f} m")
-print(f"Initial speed: {config.initial_speed:.1f} m/s")
-print(f"Initial heading: {config.initial_yaw_deg:.1f}° (0°=East, 90°=North)")
-print(f"Mass: {config.mass:.1f} kg")
-print(f"Max thrust: {config.propulsion.max_thrust:.1f} N")
-target_altitude = config.initial_altitude + 5.0
-print(f"Target position: (350.0, 245.0, {target_altitude:.1f}) m - along flight path at ~6s")
-print(f"Simulation time: {config.simulation_time:.1f} s")
-print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
-print(f"Total ticks: {config.total_ticks}")
+print(
+    f"Model: {MODEL.model_id} ({MODEL.credibility}), pipeline run "
+    f"{MODEL.provenance['pipeline_run_id']}"
+)
+print(f"Scenario: {SCENARIO.name} at {SCENARIO.site.name}")
+print(
+    f"  location: {SCENARIO.site.lat_deg:.4f} N, {SCENARIO.site.lon_deg:.4f} E, "
+    f"field elevation {SCENARIO.site.field_elevation_m:.0f} m"
+)
+print(
+    f"  altitude: {SCENARIO.altitude_m:.0f} m MSL, TAS {SCENARIO.tas_mps:.1f} m/s, "
+    f"heading {SCENARIO.heading_deg:.0f} deg"
+)
+print(
+    f"  trim: alpha {math.degrees(SCENARIO.initial.alpha_rad):.2f} deg, "
+    f"elevator {math.degrees(SCENARIO.initial.elevator_rad):.2f} deg, "
+    f"throttle {SCENARIO.initial.throttle:.3f}"
+)
+print(
+    f"  mass: {MODEL.mass.operating_empty_mass_kg + SCENARIO.initial.fuel_kg:.2f} kg "
+    f"({SCENARIO.initial.fuel_kg:.2f} kg fuel)"
+)
+print(f"Time step: {NUMERICS.dt:.6f} s ({1 / NUMERICS.dt:.0f} Hz)")
 print()
 
-# Register the RC controller to run alongside the simulation
+# RC controller runs alongside the simulation (gamepad or keyboard).
 controller_path = Path(__file__).parent / "controller"
 controller_host = os.environ.get("ELODIN_RC_JET_CONTROLLER_HOST")
 controller_args = ["--host", controller_host] if controller_host else None
@@ -256,12 +166,11 @@ else:
     )
 world.recipe(controller)
 
-# Run simulation in real-time mode for responsive RC control
 world.run(
     sim_system,
-    simulation_rate=1.0 / config.dt,
+    simulation_rate=1.0 / NUMERICS.dt,
     generate_real_time=True,
-    max_ticks=int(os.environ.get("ELODIN_MAX_TICKS", config.total_ticks)),
+    max_ticks=int(os.environ.get("ELODIN_MAX_TICKS", NUMERICS.total_ticks)),
     db_path=os.environ.get("ELODIN_DB_PATH"),
     interactive=os.environ.get("ELODIN_NON_INTERACTIVE") != "1",
 )

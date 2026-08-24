@@ -13,10 +13,13 @@ use itertools::iproduct;
 use ndarray::{Array2, Array4};
 use std::iter;
 
-/// Absolute terrain-space view position used for tile selection.
+/// Terrain-model-space view position used for tile selection.
 ///
-/// Host apps with their own floating-origin integration can attach this to a
-/// camera to override the local [`Transform`] position used by [`TileTree`].
+/// Host apps with their own floating-origin integration can supply this per
+/// `(terrain, view)` pair through `TerrainViewComponents<TerrainViewPosition>`
+/// (preferred: it stays correct when the terrain itself is translated or
+/// rotated away from the world origin), or attach it to a camera entity to
+/// override the local [`Transform`] position used by [`TileTree`].
 #[derive(Component, Clone, Copy, Debug)]
 pub struct TerrainViewPosition(pub DVec3);
 
@@ -344,6 +347,7 @@ impl TileTree {
     pub(crate) fn compute_requests(
         mut tile_trees: ResMut<TerrainViewComponents<TileTree>>,
         tile_atlases: Query<&TileAtlas>,
+        view_positions: Res<TerrainViewComponents<TerrainViewPosition>>,
         #[cfg(feature = "high_precision")] frames: big_space::prelude::Grids,
         #[cfg(feature = "high_precision")] view_transforms: Query<(
             &Transform,
@@ -364,6 +368,13 @@ impl TileTree {
             let Ok(tile_atlas) = tile_atlases.get(terrain) else {
                 continue;
             };
+            // A keyed (terrain, view) position wins: it is expressed in the
+            // terrain's own model space, so it stays correct for terrains
+            // anchored away from the world origin.
+            let keyed_position = view_positions
+                .get(&(terrain, view))
+                .map(|position| position.0);
+
             #[cfg(feature = "high_precision")]
             let Some(frame) = frames.parent_grid(terrain) else {
                 continue;
@@ -375,8 +386,8 @@ impl TileTree {
                 continue;
             };
             #[cfg(feature = "high_precision")]
-            let view_position = view_position_override
-                .map(|position| position.0)
+            let view_position = keyed_position
+                .or(view_position_override.map(|position| position.0))
                 .or_else(|| {
                     view_cell.map(|view_cell| frame.grid_position_double(view_cell, view_transform))
                 })
@@ -394,8 +405,8 @@ impl TileTree {
                 continue;
             };
             #[cfg(not(feature = "high_precision"))]
-            let view_position = view_position_override
-                .map(|position| position.0)
+            let view_position = keyed_position
+                .or(view_position_override.map(|position| position.0))
                 .unwrap_or_else(|| view_transform.translation.as_dvec3());
 
             tile_tree.update(view_position, tile_atlas);

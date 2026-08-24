@@ -10,13 +10,14 @@ use std::time::Instant;
 
 /// One full right-then-left roll.
 const PERIOD_S: f64 = 14.0;
-/// Peak aileron, in radians (~0.85°).
+/// Peak aileron, in radians (~1.6°).
 ///
 /// Roll rate at cruise is roughly `(C_lda / -C_lp) * (2V/b) * delta_a`, about
-/// [`ROLL_RATE_PER_RAD`] for this airframe, and roll damping settles in tens of
-/// milliseconds, so the bank is essentially the integral of this. That puts the
-/// peak near 30° of bank — a fingertip input against the 25° of full throw.
-const PEAK_AILERON_RAD: f64 = 0.0148;
+/// [`ROLL_RATE_PER_RAD`] for this airframe at the package's 37.8 m/s cruise,
+/// and roll damping settles in tens of milliseconds, so the bank is
+/// essentially the integral of this. That puts the peak near 30° of bank — a
+/// fingertip input against the 25° of full throw.
+const PEAK_AILERON_RAD: f64 = 0.0275;
 
 /// Flies [`roll_aileron`] until a human takes over.
 pub struct IdlePilot {
@@ -57,9 +58,10 @@ fn roll_aileron(t: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// Roll rate per radian of aileron at cruise, from the airframe's
-    /// `C_lda = 0.15`, `C_lp = -0.5`, `b = 2.65 m` at 70 m/s.
-    const ROLL_RATE_PER_RAD: f64 = 15.85;
+    /// Roll rate per radian of aileron at cruise, from the class-D
+    /// `C_lda = 0.15`, `C_lp = -0.5`, `b = 2.65 m` at the package's
+    /// 37.8 m/s trim speed.
+    const ROLL_RATE_PER_RAD: f64 = 8.56;
 
     /// Bank angle over one period, integrating `p = ROLL_RATE_PER_RAD * aileron`
     /// from level. Roll damping settles far faster than the 14 s drive, so the

@@ -20,6 +20,8 @@ use bevy_world_mesh::terrain::{
 use crate::{MainCamera, sensor_camera::SensorCamera};
 
 type WorldMeshViewFilter = Or<(With<MainCamera>, With<SensorCamera>)>;
+type WorldMeshTerrainQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static ChildOf), (With<WorldMeshTerrain>, With<TileAtlas>)>;
 #[cfg(feature = "big_space")]
 type WorldMeshViewPositionQuery<'w, 's> = Query<
     'w,
@@ -90,12 +92,6 @@ pub(crate) fn spawn_world_mesh_terrain(
 
     match config {
         WorldMeshConfig::Terrain(config) => {
-            if has_nonzero_translation(world_mesh.translate) {
-                bevy::log::warn!(
-                    "schematic world_mesh region={region:?} has a non-zero translation; the translation is rendered via the geo anchor, but terrain tile LOD selection remains origin-relative, so detail selection may be incorrect"
-                );
-            }
-
             let tile_atlas = TileAtlas::new(&config);
             let mut terrain_bundle = TerrainBundle::new(tile_atlas);
             terrain_bundle.visibility = world_mesh_visibility(world_mesh);
@@ -164,10 +160,6 @@ fn spawn_world_mesh_terrain_bundle(
     insert_geo_components(commands, anchor, world_mesh, y_up_surface, geo_context);
     insert_big_space_cell(commands, anchor);
     anchor
-}
-
-fn has_nonzero_translation(translate: Option<(f64, f64, f64)>) -> bool {
-    matches!(translate, Some((x, y, z)) if x != 0.0 || y != 0.0 || z != 0.0)
 }
 
 fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
@@ -527,14 +519,32 @@ fn sync_terrain_view_components(
     }
 }
 
+/// A world-absolute position expressed in a terrain's model space.
+///
+/// The terrain renderer's model coordinates live under its anchor entity, so
+/// tile LOD selection needs the camera position pulled back through the
+/// anchor's global pose. With the anchor at the origin this is the identity,
+/// which is all the pre-geo-anchor code supported.
+fn terrain_model_view_position(
+    anchor_translation: DVec3,
+    anchor_rotation: DQuat,
+    view_absolute: DVec3,
+) -> DVec3 {
+    anchor_rotation.inverse() * (view_absolute - anchor_translation)
+}
+
 #[cfg(feature = "big_space")]
 fn sync_terrain_view_positions(
-    mut commands: Commands,
+    terrains: WorldMeshTerrainQuery,
+    anchors: Query<(&Transform, Option<&crate::spatial::GridCell>), With<WorldMeshTerrainAnchor>>,
     cameras: WorldMeshViewPositionQuery,
     parents: Query<(&Transform, &crate::spatial::GridCell)>,
     floating_origin: Res<crate::spatial::FloatingOriginSettings>,
+    mut view_positions: ResMut<TerrainViewComponents<TerrainViewPosition>>,
 ) {
-    for (entity, transform, cell, parent) in &cameras {
+    view_positions
+        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
+    for (camera, transform, cell, parent) in &cameras {
         let absolute = cell
             .map(|cell| floating_origin.grid_position_double(cell, transform))
             .or_else(|| {
@@ -545,21 +555,45 @@ fn sync_terrain_view_positions(
             })
             .unwrap_or_else(|| transform.translation.as_dvec3());
 
-        commands
-            .entity(entity)
-            .try_insert(TerrainViewPosition(absolute));
+        for (terrain, anchor) in &terrains {
+            let Ok((anchor_transform, anchor_cell)) = anchors.get(anchor.parent()) else {
+                continue;
+            };
+            let anchor_translation = anchor_cell
+                .map(|cell| floating_origin.grid_position_double(cell, anchor_transform))
+                .unwrap_or_else(|| anchor_transform.translation.as_dvec3());
+            let local = terrain_model_view_position(
+                anchor_translation,
+                anchor_transform.rotation.as_dquat(),
+                absolute,
+            );
+            view_positions.insert((terrain, camera), TerrainViewPosition(local));
+        }
     }
 }
 
 #[cfg(not(feature = "big_space"))]
 fn sync_terrain_view_positions(
-    mut commands: Commands,
+    terrains: WorldMeshTerrainQuery,
+    anchors: Query<&Transform, With<WorldMeshTerrainAnchor>>,
     cameras: Query<(Entity, &Transform), WorldMeshViewFilter>,
+    mut view_positions: ResMut<TerrainViewComponents<TerrainViewPosition>>,
 ) {
-    for (entity, transform) in &cameras {
-        commands
-            .entity(entity)
-            .try_insert(TerrainViewPosition(transform.translation.as_dvec3()));
+    view_positions
+        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
+    for (camera, transform) in &cameras {
+        let absolute = transform.translation.as_dvec3();
+        for (terrain, anchor) in &terrains {
+            let Ok(anchor_transform) = anchors.get(anchor.parent()) else {
+                continue;
+            };
+            let local = terrain_model_view_position(
+                anchor_transform.translation.as_dvec3(),
+                anchor_transform.rotation.as_dquat(),
+                absolute,
+            );
+            view_positions.insert((terrain, camera), TerrainViewPosition(local));
+        }
     }
 }
 
@@ -571,10 +605,82 @@ mod tests {
     use impeller2_wkt::{NodeId, WorldMesh};
 
     #[test]
-    fn translation_warning_requires_a_nonzero_component() {
-        assert!(!has_nonzero_translation(None));
-        assert!(!has_nonzero_translation(Some((0.0, 0.0, 0.0))));
-        assert!(has_nonzero_translation(Some((0.0, -1.0, 0.0))));
+    fn terrain_model_view_position_is_identity_at_origin() {
+        let view = DVec3::new(10.0, 20.0, 30.0);
+        let local = terrain_model_view_position(DVec3::ZERO, DQuat::IDENTITY, view);
+        assert!((local - view).length() < 1e-12);
+    }
+
+    #[test]
+    fn terrain_model_view_position_pulls_back_through_the_anchor_pose() {
+        // A terrain anchored far from the origin (the ECEF case): a camera
+        // sitting exactly at the anchor must select tiles as if it were at
+        // the terrain model origin, not 6,371 km away.
+        let anchor = DVec3::new(-2.0e6, -4.5e6, 3.8e6);
+        let rotation = DQuat::from_rotation_z(0.7) * DQuat::from_rotation_x(-0.3);
+        let local = terrain_model_view_position(anchor, rotation, anchor);
+        assert!(
+            local.length() < 1e-6,
+            "camera at anchor => model origin, got {local:?}"
+        );
+
+        // A point offset from the anchor along a rotated axis lands on that
+        // axis in model space with the offset preserved.
+        let offset = rotation * DVec3::new(0.0, 123.0, 0.0);
+        let local = terrain_model_view_position(anchor, rotation, anchor + offset);
+        assert!(
+            (local - DVec3::new(0.0, 123.0, 0.0)).length() < 1e-6,
+            "got {local:?}"
+        );
+    }
+
+    #[test]
+    fn sync_writes_terrain_relative_view_positions() {
+        let translate = (1_000.0, 2_000.0, 50.0);
+        let (mut app, anchor, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), Some(translate)),
+        );
+        apply_geo_transforms(&mut app);
+
+        app.init_resource::<TerrainViewComponents<TerrainViewPosition>>();
+        #[cfg(feature = "big_space")]
+        app.insert_resource(crate::spatial::FloatingOriginSettings::new(10_000.0, 100.0));
+
+        let anchor_transform = *app.world().get::<Transform>(anchor).unwrap();
+        let camera_pos = anchor_transform.translation + Vec3::new(3.0, 4.0, 5.0);
+        let camera = app
+            .world_mut()
+            .spawn((Transform::from_translation(camera_pos), MainCamera))
+            .id();
+        #[cfg(feature = "big_space")]
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(crate::spatial::GridCell::default());
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_positions)
+            .unwrap();
+
+        let view_positions = app
+            .world()
+            .resource::<TerrainViewComponents<TerrainViewPosition>>();
+        let local = view_positions
+            .get(&(renderer, camera))
+            .expect("keyed view position for the (terrain, camera) pair")
+            .0;
+        let expected = terrain_model_view_position(
+            anchor_transform.translation.as_dvec3(),
+            anchor_transform.rotation.as_dquat(),
+            camera_pos.as_dvec3(),
+        );
+        assert!(
+            (local - expected).length() < 1e-4,
+            "keyed position {local:?} != expected {expected:?}"
+        );
+        // The pulled-back position must be near the model origin, not out at
+        // the anchor's world offset.
+        assert!(local.length() < 10.0, "not terrain-relative: {local:?}");
     }
 
     #[test]

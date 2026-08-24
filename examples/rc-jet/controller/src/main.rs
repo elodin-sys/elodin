@@ -101,7 +101,7 @@ fn print_banner(stick_mode: StickMode) {
     println!();
     println!("  {}", "Keyboard Controls:".bold());
     println!("    {} Throttle up/down", "W/S".green());
-    println!("    {} Rudder left/right", "A/D".green());
+    println!("    {} Rudder left/right (yaw)", "Q/E or A/D".green());
     println!("    {} Elevator up/down (pitch)", "↑/↓".green());
     println!("    {} Aileron left/right (roll)", "←/→".green());
     println!();

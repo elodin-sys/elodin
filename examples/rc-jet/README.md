@@ -1,374 +1,184 @@
-# BDX RC Jet Turbine Simulation
+# BDX RC Jet Simulation
 
-A high-fidelity 6-DOF simulation of the Elite Aerosports BDX RC jet turbine aircraft, implementing polynomial aerodynamic models, turbine propulsion dynamics, control surface servos, and a Death Valley terrain backdrop.
+A **provisional parametric 6-DOF demonstration model** of the Elite
+Aerosports BDX RC sport jet, flying in a rotating WGS84 ECEF world over
+Death Valley. Geometry- and analysis-correlated; **not validated against a
+physical aircraft.**
 
-## Overview
+## Where the numbers come from
 
-This simulation implements the complete flight dynamics of a BDX RC jet following the methodology described in `BDX_Simulation_Whitepaper.md`. The model includes:
+Aircraft data has exactly two sources, and every constant belongs to one of
+them:
 
-- **Aerodynamics**: Polynomial stability derivative model with 20+ coefficients
-- **Propulsion**: First-order turbine spool dynamics with thrust mapping
-- **Actuators**: Rate-limited servo dynamics for control surfaces
-- **6-DOF Dynamics**: RK4 integration for accurate trajectory prediction
-- **Terrain**: Death Valley `world_mesh` backdrop loaded from the Elodin asset root
+1. **The generated aero package** at `model/elodin_package/` — produced by
+   the [open-air](https://github.com/elodin-sys/open-air) aero-design
+   pipeline from a traced reconstruction of the 2.65 m BDX (OpenVSP geometry,
+   OpenAeroStruct VLM + wingbox analysis, VSPAERO cross-check).
+   `elodin_model.json` is the schema-versioned entry point and SHA-256
+   manifest; `bdx_model.py` validates all of it before the world is created
+   and refuses to run on any mismatch. Reference geometry (S 1.332 m²,
+   MAC 0.518 m), mass and fuel state, the longitudinal linearization and
+   drag polar, the propulsion map, trim rows, and the render mesh all come
+   from here. Evidence classes and allowances: `model/elodin_package/provenance.md`.
+2. **Class-D fallbacks** at `class_d_fallbacks.py` — whitepaper-estimate
+   placeholders for what the package deliberately publishes as null: the
+   lateral-directional/rate/control derivatives, the inertia tensor, servo
+   limits, and the spool time constant. Scenarios opt in explicitly and every
+   selected fallback is logged at startup. These are **not** BDX truth; they
+   are replaced by regenerating the package once measured data exists
+   (see `model/elodin_package/integration_guide.md` §6).
 
-## Quick Start
+Do not restate aircraft constants in Python — the loader is the single
+source (guide §9.1).
 
-### Prerequisites
+## The world
 
-Follow the [main README](../../README.md) for Elodin installation.
+The simulation runs in a **rotating ECEF frame** (WGS84): gravity is
+point-mass gravitation plus centrifugal and Coriolis terms, the atmosphere
+and ground contact key off geodetic altitude, and the aircraft spawns at a
+real location — the Death Valley floor (36.2300 N, 116.9700 W, field
+elevation −60 m), inside the `death_valley` terrain region.
 
-This example expects a single Elodin asset root (`ELODIN_ASSETS`, defaulting to `./assets`) containing both the normal model assets and the Death Valley terrain atlas:
+The schematic (`bdx.kdl`) composites two Earth systems:
 
-```text
-assets/
-  f22.glb
-  edu-450-v2-drone.glb
-  terrains/planar/death_valley/
-    config.tc
-    region.toml                (optional)
-    data/
-      height/<tile>.bin
-      albedo/<tile>.bin
+- the editor's **cinematic Earth** (`environment { earth }`) for the horizon,
+  atmosphere, ephemeris sun, and star field; and
+- the **`death_valley` planar `world_mesh`** (geo-anchored via
+  `frame="ENU"`), for close-up terrain.
+
+The package GLB is already Elodin body (X forward, Y left, Z up). The editor
+lifts every glTF as Y-up (`Rx(+90°)`); `bdx.kdl` applies `rotate="(-90, 0, 0)"`
+to cancel that so the mesh is not rolled onto its side. The hashed package
+GLB is not rewritten.
+
+To fetch and preprocess the terrain atlas (writes
+`assets/terrains/planar/death_valley/`):
+
+```bash
+./scripts/prepare_editor_terrain_region.sh death_valley
 ```
 
-If the Death Valley atlas is missing, the terrain renderer will have no tiles to draw.
+Without the atlas the terrain falls back to a grid; the cinematic Earth
+needs no assets (embedded in the editor).
 
-### Running the Simulation
+This example ships binary geometry under `model/elodin_package/` via
+Git LFS — run `git lfs pull` if the loader reports manifest hash mismatches.
 
-**With 3D visualization (recommended):**
+## Quick start
+
 ```bash
 elodin editor examples/rc-jet/main.py
 ```
 
-### RC Controller Input
+The RC controller starts automatically (FrSky-style gamepad or keyboard) and
+sends `bdx.control_commands` at 60 Hz. Until you touch a stick, an idle
+pilot flies gentle banks so the instruments have something to show; the
+first elevator/aileron/rudder input hands the aircraft over for good.
 
-The simulation supports real-time control input from an RC controller (like FrSky X20 R5) or keyboard. The controller starts automatically with the simulation - no separate terminal needed!
-
-```bash
-elodin editor examples/rc-jet/main.py
-```
-
-The controller automatically:
-- Detects connected gamepads (FrSky X20 appears as USB HID joystick)
-- Falls back to keyboard input if no gamepad detected
-- Accepts input from both simultaneously (gamepad is primary)
-- Sends control commands at 60Hz to the simulation
-
-#### Idle Demo
-
-Until you touch a control, the controller flies itself: it rolls slowly right
-then left, one full cycle every 14 s, reaching about ±30° of bank, so the ADI and
-the attitude graphs have something to show on an untouched run. The aileron is a
-cosine, which is what makes the bank a sine — the wings pass through level twice
-a cycle and the average heading holds. The first elevator, aileron or rudder input
-— stick or arrow key
-— hands the aircraft over for good; it never takes control back. Handover wants a
-real input, a tenth of full throw, so a stick left a little off centre by trim or
-calibration is not mistaken for one. Throttle is not a handover at all: a
-ratcheted transmitter sits far off centre from the moment it is plugged in, and
-the demo would never fly.
-
-#### Control Mapping (Mode 2 - US Standard)
+### Control mapping (Mode 2)
 
 | Gamepad | Keyboard | Control |
 |---------|----------|---------|
-| Left Stick Y | W/S | Throttle (0-100%) |
-| Left Stick X | A/D | Rudder (±30°) |
-| Right Stick Y | ↑/↓ | Elevator (±25°) |
-| Right Stick X | ←/→ | Aileron (±25°) |
+| Left Stick Y | W/S | Throttle (idles at the engine's 18% floor) |
+| Left Stick X | Q/E or A/D | Rudder (Q/A = yaw left, E/D = yaw right) |
+| Right Stick Y | Up/Down | Elevator (up = nose up) |
+| Right Stick X | Left/Right | Aileron (right = roll right) |
 
-For Mode 1 (EU/Asia) stick layout, run:
-```bash
-cargo run -p rc-jet-controller -- --mode1
-```
+Mode 1: `cargo run -p rc-jet-controller -- --mode1`.
 
-#### Building the Controller
+### Scenarios
 
-```bash
-cargo build -p rc-jet-controller --release
-./target/release/rc-jet-controller
-```
+Selected via `ELODIN_RC_JET_SCENARIO` (default `demo`):
 
-## Flight Plan
+| | `validation` | `demo` |
+|---|---|---|
+| Purpose | Regression anchors; CI | Interactive flying |
+| Condition | Package cruise trim row verbatim: 300 m MSL, 37.83 m/s, α 2.67°, throttle 0.2125 | Same by default; `ELODIN_RC_JET_ALTITUDE_M` / `ELODIN_RC_JET_SPEED_MPS` re-solve the equilibrium |
 
-The default flight plan (`control.py`) demonstrates various maneuvers:
+Both scenarios start from a **solved trim** — there is no hand-tuned
+"trimmed" coefficient anywhere, and a scenario refuses to spawn if no valid
+equilibrium exists at its condition. `ELODIN_RC_JET_HEADING_DEG` sets the
+initial heading (default 350°, up the valley).
 
-| Time (s) | Maneuver | Description |
-|----------|----------|-------------|
-| 0-5 | Steady cruise | Level flight at 70% throttle |
-| 5-10 | Pitch up | 5° elevator deflection |
-| 10-15 | Roll maneuver | 10° aileron deflection |
-| 15-20 | Coordinated turn | Combined aileron + rudder |
-| 20-25 | Return to level | Recovery to wings-level |
-| 25+ | Steady cruise | Continue level flight |
+## Expected behavior (package anchors, not marketing)
 
-## Validation
+From `elodin_model.json .performance_anchors` — the test suite reads these
+from the package rather than repeating them:
 
-### Expected Behavior
+- **Cruise:** ~37.8 m/s at ~21% throttle, α ≈ 2.7° (300 m).
+- **Dash:** ~85 m/s level at full throttle (100 m) — note this is *below*
+  the manufacturer's ">200 mph" (89.4 m/s) claim with the provisional 200 N
+  engine model; treat max speed as unvalidated.
+- **Stall:** ~15 m/s under the documented section-CLmax assumption
+  (class C — a consequence of stated assumptions, not a validated figure).
+- Validity envelope: attached flow |α| ≤ 12°, M ≤ 0.3. Outside it the
+  physics keeps integrating unclamped and the `bdx.aero_valid` telemetry
+  flag drops to 0 (`flag_invalid_do_not_clamp`).
 
-The simulation has been designed to match these physical characteristics:
+Fuel burns per the package propulsion map (2.21 kg aboard at spawn), total
+mass updates as it burns, and an empty tank is a flameout. Thrust acts
+0.044 m above the CG, so full throttle pitches the nose down slightly.
 
-#### Trim Conditions (Section 9.1 of whitepaper)
-- **Cruise speed**: ~40 m/s (78 kt) at 70% throttle
-- **Stall speed**: ~25 m/s (49 kt) at 19 kg
-- **Climb rate**: 15-20 m/s at full power
-
-#### Stability Characteristics
-- **Static stability**: Positive C_mα (nose-down moment with positive α)
-- **Phugoid mode**: Period ~10-15 seconds, lightly damped
-- **Dutch roll**: Period ~2-3 seconds, adequately damped
-- **Roll response**: Time to 60° bank < 1 second at full aileron
-
-### Validation Tests
-
-Run these checks to verify simulation fidelity:
-
-#### 1. Trim Verification
-```bash
-python main.py --time 30
-```
-Observe in telemetry:
-- Altitude should remain approximately constant near the configured start altitude (~4500m ±5m)
-- Angle of attack should stabilize near 0-3°
-- Throttle at ~0.7 maintains level flight
-
-#### 2. Stall Behavior
-Modify `initial_speed` in `config.py` to 20 m/s and observe:
-- Increased angle of attack
-- Loss of altitude
-- Reduced control effectiveness
-
-#### 3. Roll Response Test
-Watch the 10-15s time window:
-- Aircraft should roll right with positive aileron
-- Roll rate should be responsive
-- Recovery should be stable
-
-#### 4. Coordinated Turn
-Watch the 15-20s time window:
-- Bank angle increases with aileron
-- Yaw rate coordinates with rudder
-- Altitude may decrease slightly (normal in turns)
-
-### Telemetry Analysis
-
-For detailed analysis, run with `--build --save`:
-
-```bash
-python main.py --build --save --time 120
-```
-
-This generates `bdx_telemetry.arrow` which can be analyzed with:
-
-```python
-import polars as pl
-
-# Load telemetry
-df = pl.read_ipc("bdx_telemetry.arrow")
-
-# Analyze altitude stability
-print(df.select(["bdx.world_pos", "bdx.alpha", "bdx.thrust"]).describe())
-
-# Plot lift coefficient vs angle of attack
-import matplotlib.pyplot as plt
-plt.plot(df["bdx.alpha"], df["bdx.aero_coefs"].arr.get(0))
-plt.xlabel("Angle of Attack (rad)")
-plt.ylabel("Lift Coefficient (CL)")
-plt.show()
-```
-
-## Configuration
-
-All aircraft parameters are in `config.py`:
-
-### Aircraft Geometry
-```python
-wingspan = 2.65          # m
-wing_area = 0.75         # m²
-mean_chord = 0.30        # m
-```
-
-### Mass Properties
-```python
-mass = 19.0              # kg
-Ixx = 0.8                # kg·m² (roll inertia)
-Iyy = 2.5                # kg·m² (pitch inertia)
-Izz = 3.0                # kg·m² (yaw inertia)
-```
-
-### Aerodynamic Coefficients
-All stability derivatives are in `AeroCoefficients` dataclass:
-```python
-C_Lalpha = 5.5           # Lift curve slope (/rad)
-C_malpha = -1.2          # Pitch stability (/rad)
-C_lp = -0.5              # Roll damping (/rad)
-# ... and 17 more coefficients
-```
-
-### Tuning
-
-To adjust flight characteristics:
-
-1. **Increase stability**: Increase magnitude of `C_malpha` (more negative)
-2. **Faster roll**: Increase magnitude of `C_lda` and `C_lp`
-3. **More thrust**: Increase `max_thrust` in `PropulsionParams`
-4. **Slower servos**: Increase `servo_tau` in `ActuatorParams`
-
-## Module Architecture
+## Module architecture
 
 ```
 examples/rc-jet/
-├── main.py              # Entry point, world setup, visualization
-├── sim.py               # System composition, BDXJet archetype
-├── config.py            # Aircraft parameters and configuration
-├── aero.py              # Aerodynamic force/moment computation
-├── propulsion.py        # Turbine dynamics and thrust
-├── actuators.py         # Control surface servo dynamics
-├── flight_plan.py       # Autopilot flight plans
-├── ground.py            # Ground contact model
-├── controller/          # RC controller input (Rust)
-│   ├── Cargo.toml       # Rust crate configuration
-│   └── src/
-│       ├── main.rs      # Entry point, CLI, connection loop
-│       ├── input.rs     # Gamepad (gilrs) + keyboard input
-│       └── control.rs   # VTable setup and packet sending
-├── README.md            # This file
-└── BDX_Simulation_Whitepaper.md  # Technical design document
+├── main.py              # scenario select, ECEF world, loads bdx.kdl
+├── bdx.kdl              # cinematic schematic (Earth + death_valley + GLB)
+├── bdx_model.py         # package loader: schema/identity/frames/SHA-256 validation
+├── class_d_fallbacks.py # labeled class-D placeholder set (opt-in, logged)
+├── scenario.py          # site + scenario + numerics (no aircraft data)
+├── trim.py              # level-flight equilibrium solver
+├── frames.py            # WGS84 geodesy + rotating-frame helpers
+├── atmosphere.py        # ISA troposphere (geodetic altitude)
+├── aero.py              # package aero evaluation + the one frame adapter
+├── propulsion.py        # map interpolation, spool, fuel, thrust line
+├── actuators.py         # rate-limited servo dynamics
+├── ground.py            # geodetic ground contact
+├── telemetry.py         # lat/lon/alt + local-ENU derived components
+├── sim.py               # archetype + system composition (SemiImplicit, 300 Hz)
+├── model/elodin_package/  # vendored open-air package (hash-verified unit)
+├── tests/               # loader, sign-battery, trim, and closed-loop tests
+└── controller/          # Rust RC controller (gamepad/keyboard → control_commands)
 ```
 
-### Data Flow
+Integration uses the semi-implicit integrator at 300 Hz (documented as such;
+the earlier README claimed RK4 in error).
 
-```
-Control Commands → Actuator Dynamics → Control Surfaces
-                                              ↓
-Throttle Command → Spool Dynamics → Thrust → Forces
-                                              ↓
-Body Velocity → Aero Angles → Aero Coefs → Aero Forces
-                                              ↓
-                                     6-DOF Integration
-                                              ↓
-                                  World Position/Velocity
-```
+### Frame conventions (the one adapter)
 
-## Advanced Usage
+Coefficients are evaluated in the **standard aerospace frame** (X fwd,
+Y right, Z down; +δe TE-down, +δa roll-right, +δr TE-left) and converted to
+Elodin body axes (X fwd, Y left, Z up) in exactly one place
+(`aero.adapter_body_wrench`): β, q̂, r̂ negate on the way in; F_y, τ_y, τ_z
+negate on the way out. The sign battery in `tests/test_physics.py` pins
+every direction so the conversion can never silently rot.
 
-### Custom Flight Plans
+## Tests
 
-Modify `control.py` to create custom maneuvers:
-
-```python
-@el.system
-def custom_flight_plan(
-    tick: el.Query[el.SimulationTick],
-    dt: el.Query[el.SimulationTimeStep],
-    commands: el.Query[ControlCommands],
-) -> el.Query[ControlCommands]:
-    time = tick[0] * dt[0]
-    
-    # Your custom control logic
-    elevator = jnp.sin(time * 0.1) * jnp.deg2rad(5.0)
-    aileron = 0.0
-    rudder = 0.0
-    throttle = 0.75
-    
-    new_cmd = jnp.array([elevator, aileron, rudder, throttle])
-    return commands.map(ControlCommands, lambda _: new_cmd)
+```bash
+pytest examples/rc-jet/tests -o 'pythonpath='   # inside `nix develop .#run`
 ```
 
-Then integrate it in `sim.py`:
+Covers: loader rejection rules (schema/identity/frames/hash/path/symlink),
+GLB contract, the sign battery, no-clamp/no-floor guards, wind invariance,
+trim and dash reproduction against package anchors, propulsion monotonicity,
+fuel-flow integration, thrust-line moment sign, validity flagging, ECEF
+altitude hold, and ground rest.
 
-```python
-from control import custom_flight_plan
+## Fidelity roadmap
 
-def system() -> el.System:
-    non_effectors = (
-        custom_flight_plan  # Add your control system here
-        | compute_velocity_body
-        | compute_aero_angles
-        # ... rest of systems
-    )
-```
-
-### Hardware-in-the-Loop
-
-The simulation supports external control via the Impeller2 protocol. The `ControlCommands` component is already configured with `external_control: "true"` metadata, which means:
-
-1. The simulation does **not** write back to this component
-2. External clients have exclusive write access
-3. Real-time updates are synchronized with the simulation loop
-
-The included `controller/` Rust crate demonstrates this:
-
-```rust
-// Send control commands to simulation
-let values = [elevator, aileron, rudder, throttle];
-let mut packet = LenPacket::table(vtable_id, 40);
-packet.extend_aligned(&timestamp.to_le_bytes());
-for value in values {
-    packet.extend_aligned(&value.to_le_bytes());
-}
-client.send(packet).await?;
-```
-
-To create your own controller, follow the pattern in `controller/src/control.rs`.
-
-### XFLR5 Integration
-
-To improve aerodynamic fidelity using XFLR5:
-
-1. Create BDX geometry in XFLR5 (wing, tail surfaces)
-2. Run VLM analysis at cruise speed (40 m/s)
-3. Extract stability derivatives from analysis results
-4. Update coefficients in `config.py`:
-
-```python
-C_Lalpha = <value from XFLR5>  # dCL/dα
-C_malpha = <value from XFLR5>  # dCm/dα
-# etc.
-```
-
-See Appendix B of the whitepaper for detailed XFLR5 workflow.
-
-## Troubleshooting
-
-### Simulation diverges (aircraft tumbles)
-- Check initial trim: aircraft may need different throttle setting
-- Verify inertia values are reasonable
-- Ensure angle of attack stays below stall angle initially
-
-### Aircraft doesn't maintain altitude
-- Increase `C_Lalpha` (lift curve slope)
-- Increase throttle or `max_thrust`
-- Check that weight and lift balance at cruise speed
-
-### Controls are sluggish
-- Decrease `servo_tau` for faster servos
-- Increase control derivatives (`C_mde`, `C_lda`, `C_ndr`)
-- Check rate limits aren't too restrictive
-
-### Unrealistic behavior
-- Compare coefficients to similar aircraft (Rascal 110, Mentor)
-- Verify sign conventions match aerospace standards
-- Check that all units are SI (meters, kg, radians)
+The package format is stable while evidence improves (handoff §17): measured
+weight/CG, bifilar inertia, hinge geometry + throws (enables the open-air
+`flight_dynamics` stage to publish measured lateral/control derivatives),
+and an identified engine deck each land as *regenerate package → re-vendor*,
+with no loader changes. Until then this example is **analysis-correlated**,
+not flight-correlated, and describes itself accordingly.
 
 ## References
 
-- `BDX_Simulation_Whitepaper.md` - Complete technical design
-- `references.md` - Source material and related work
-- [Elodin Documentation](https://docs.elodin.systems) - Platform documentation
-
-## Contributing
-
-To improve the model:
-
-1. Add wind/turbulence models in `aero.py`
-2. Implement post-stall aerodynamics for aerobatics
-3. Add landing gear ground contact model
-4. Integrate XFLR5-derived coefficients
-5. Implement full autopilot with navigation
-
-## License
-
-See repository LICENSE file.
-
+- `BDX_Simulation_Whitepaper.md` — original model-structure design document
+  (numeric sections superseded by the generated package; see banner within)
+- `model/elodin_package/integration_guide.md` — the package's own contract
+- `ai-context/bdx/Elodin_RC_Jet_Improvement_Guide.md` — the campaign guide
+- [Elodin Documentation](https://docs.elodin.systems)

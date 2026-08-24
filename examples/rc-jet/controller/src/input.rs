@@ -2,7 +2,7 @@
 //!
 //! Supports:
 //! - Gamepad: FrSky X20 R5 (appears as USB HID joystick)
-//! - Keyboard: WASD (left stick) + Arrow keys (right stick)
+//! - Keyboard: W/S throttle, Q/E or A/D yaw, arrow keys pitch/roll
 //!
 //! Stick modes:
 //! - Mode 2 (US standard): Left stick = Throttle/Yaw, Right stick = Pitch/Roll
@@ -14,8 +14,9 @@ use std::f64::consts::PI;
 
 use crate::demo::IdlePilot;
 
-/// Throttle held when no one is on the sticks: enough for level flight.
-const IDLE_THROTTLE: f64 = 0.3;
+/// Throttle held when no one is on the sticks: the package cruise trim
+/// (results/bdx/baseline trim_map cruise row, effective throttle 0.2125).
+const IDLE_THROTTLE: f64 = 0.21;
 
 /// Stick travel around centre that reads as neutral.
 const DEADZONE: f64 = 0.1;
@@ -23,6 +24,10 @@ const DEADZONE: f64 = 0.1;
 const MAX_DEFLECTION_RAD: f64 = 25.0 * PI / 180.0;
 /// Full rudder throw, in radians (30°).
 const MAX_RUDDER_RAD: f64 = 30.0 * PI / 180.0;
+// Stick / key senses as flown: stick up and up-arrow pitch the nose up,
+// stick right and right-arrow roll right, Q/A yaw left and E/D yaw right.
+// Rudder still uses the plant's TE-left = nose-left convention, so E
+// (yaw right) is a negative rudder command.
 
 /// Fraction of full throw a surface must move before someone counts as flying.
 ///
@@ -258,17 +263,17 @@ impl InputReader {
             StickMode::Mode2 => {
                 // Mode 2: Left = Throttle(Y)/Rudder(X), Right = Elevator(Y)/Aileron(X)
                 ControlInput {
-                    throttle: (left_y + 1.0) / 2.0, // Convert -1..1 to 0..1
-                    rudder: left_x * MAX_RUDDER_RAD,
-                    elevator: -right_y * MAX_DEFLECTION_RAD, // Inverted: stick up = nose up = negative
+                    throttle: (left_y + 1.0) / 2.0,          // Convert -1..1 to 0..1
+                    rudder: -left_x * MAX_RUDDER_RAD,       // Stick right = yaw right = -rudder
+                    elevator: right_y * MAX_DEFLECTION_RAD, // Stick up = nose up
                     aileron: right_x * MAX_DEFLECTION_RAD,
                 }
             }
             StickMode::Mode1 => {
                 // Mode 1: Left = Elevator(Y)/Rudder(X), Right = Throttle(Y)/Aileron(X)
                 ControlInput {
-                    elevator: -left_y * MAX_DEFLECTION_RAD, // Inverted
-                    rudder: left_x * MAX_RUDDER_RAD,
+                    elevator: left_y * MAX_DEFLECTION_RAD, // Stick up = nose up
+                    rudder: -left_x * MAX_RUDDER_RAD,      // Stick right = yaw right = -rudder
                     throttle: (right_y + 1.0) / 2.0,
                     aileron: right_x * MAX_DEFLECTION_RAD,
                 }
@@ -294,20 +299,20 @@ impl InputReader {
             self.keyboard_throttle = (self.keyboard_throttle - 0.01).max(0.0);
         }
 
-        // Rudder (A/D)
-        let rudder = if keys.contains(&Keycode::A) {
-            -MAX_RUDDER_RAD * 0.5 // Half max deflection
-        } else if keys.contains(&Keycode::D) {
+        // Rudder (Q/E or A/D): Q/A = yaw left = +rudder (TE-left), E/D = yaw right.
+        let rudder = if keys.contains(&Keycode::Q) || keys.contains(&Keycode::A) {
             MAX_RUDDER_RAD * 0.5
+        } else if keys.contains(&Keycode::E) || keys.contains(&Keycode::D) {
+            -MAX_RUDDER_RAD * 0.5
         } else {
             0.0
         };
 
-        // Elevator (Up/Down arrows)
+        // Elevator (Up/Down arrows): up arrow = nose up.
         let elevator = if keys.contains(&Keycode::Up) {
-            -MAX_DEFLECTION_RAD * 0.5 // Up arrow = nose up = negative elevator
-        } else if keys.contains(&Keycode::Down) {
             MAX_DEFLECTION_RAD * 0.5
+        } else if keys.contains(&Keycode::Down) {
+            -MAX_DEFLECTION_RAD * 0.5
         } else {
             0.0
         };
@@ -520,7 +525,7 @@ mod tests {
     }
 
     /// The smallest input a pilot can actually make, from either device, has to
-    /// hand over: arrow keys and A/D are half throw.
+    /// hand over: arrow keys and Q/E or A/D are half throw.
     #[test]
     fn the_smallest_keyboard_input_flies() {
         for keyboard in [
