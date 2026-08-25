@@ -1925,24 +1925,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         if !self.has_samples() {
             return;
         }
-        let mut visible_shards = 0;
-        let mut missing_data_shards = 0;
-        let mut missing_timestamp_shards = 0;
-        for (_, chunk) in self.tree.overlapping(ii(range.start.0, range.end.0)) {
-            visible_shards += 1;
-            missing_data_shards += usize::from(!chunk.data.gpu_resident());
-            missing_timestamp_shards += usize::from(!chunk.timestamps_float.gpu_resident());
-        }
-        let value_class = value_shard_class(visible_shards);
-        let needs_resize = self.data_buffer_shard_alloc.as_ref().is_some_and(|alloc| {
-            alloc.capacity_shards() < value_class || alloc.free_shards() < missing_data_shards
-        }) || self
-            .timestamp_buffer_shard_alloc
-            .as_ref()
-            .is_some_and(|alloc| {
-                alloc.capacity_shards() < value_class
-                    || alloc.free_shards() < missing_timestamp_shards
-            });
+        let (value_class, needs_resize) = self.value_buffer_plan(&range);
         if needs_resize {
             for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
                 chunk.data.release_gpu();
@@ -1976,7 +1959,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.range_iter(range).count().max(1)
     }
 
-    pub fn value_buffers_needing_allocation(&self, range: Range<Timestamp>) -> usize {
+    /// The shard class `range` needs, and whether the current buffers have to be
+    /// rebuilt to host it.
+    fn value_buffer_plan(&self, range: &Range<Timestamp>) -> (usize, bool) {
         let mut visible_shards = 0;
         let mut missing_data_shards = 0;
         let mut missing_timestamp_shards = 0;
@@ -1986,20 +1971,33 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             missing_timestamp_shards += usize::from(!chunk.timestamps_float.gpu_resident());
         }
         let class = value_shard_class(visible_shards);
-        let data_needed = self.data_buffer_shard_alloc.as_ref().is_none_or(|alloc| {
-            alloc.capacity_shards() < class || alloc.free_shards() < missing_data_shards
-        });
-        let timestamps_needed = self
-            .timestamp_buffer_shard_alloc
+        let outgrown = |alloc: &BufferShardAlloc, missing: usize| {
+            alloc.capacity_shards() < class || alloc.free_shards() < missing
+        };
+        let needs_resize = self
+            .data_buffer_shard_alloc
             .as_ref()
-            .is_none_or(|alloc| {
-                alloc.capacity_shards() < class || alloc.free_shards() < missing_timestamp_shards
-            });
-        if data_needed || timestamps_needed {
-            2
-        } else {
-            0
-        }
+            .is_some_and(|alloc| outgrown(alloc, missing_data_shards))
+            || self
+                .timestamp_buffer_shard_alloc
+                .as_ref()
+                .is_some_and(|alloc| outgrown(alloc, missing_timestamp_shards));
+        (class, needs_resize)
+    }
+
+    pub fn value_buffers_needing_allocation(&self, range: Range<Timestamp>) -> usize {
+        let (class, needs_resize) = self.value_buffer_plan(&range);
+        let capacity =
+            |slot: &Option<BufferShardAlloc>| slot.as_ref().map(BufferShardAlloc::capacity_shards);
+        usize::from(takes_from_pool(
+            capacity(&self.data_buffer_shard_alloc),
+            class,
+            needs_resize,
+        )) + usize::from(takes_from_pool(
+            capacity(&self.timestamp_buffer_shard_alloc),
+            class,
+            needs_resize,
+        ))
     }
 
     pub fn draw_index_count(&self, range: Range<Timestamp>) -> (usize, usize) {
@@ -3673,6 +3671,30 @@ mod tests {
     }
 
     #[test]
+    fn shard_exhaustion_at_the_same_class_needs_no_pool_buffer() {
+        assert!(
+            takes_from_pool(None, 16, false),
+            "a line without a buffer must take one"
+        );
+        assert!(
+            !takes_from_pool(Some(16), 16, true),
+            "exhausted shards at the same class are reclaimed in place"
+        );
+        assert!(
+            takes_from_pool(Some(4), 16, true),
+            "outgrowing the class needs a bigger buffer from the pool"
+        );
+        assert!(
+            takes_from_pool(Some(64), 16, true),
+            "shrinking the class returns the oversized buffer to the pool"
+        );
+        assert!(
+            !takes_from_pool(Some(64), 16, false),
+            "an oversized buffer with free shards is left alone"
+        );
+    }
+
+    #[test]
     fn new_plot_gpu_upload_is_blocked_only_while_value_buffers_are_quarantined() {
         assert!(!plot_gpu_upload_blocked(0, 0, 2));
         assert!(plot_gpu_upload_blocked(0, 4, 2));
@@ -3969,6 +3991,16 @@ pub fn value_shard_class(required: usize) -> usize {
         .into_iter()
         .find(|class| *class >= required.max(1))
         .unwrap_or(CHUNK_COUNT)
+}
+
+/// Whether `queue_load_range` will draw this slot's buffer from the pool. An
+/// empty slot always does; a resized one only when its class changes, since
+/// `reclaim_or_release` resets an unchanged class in place.
+fn takes_from_pool(capacity_shards: Option<usize>, value_class: usize, needs_resize: bool) -> bool {
+    match capacity_shards {
+        None => true,
+        Some(capacity) => needs_resize && capacity != value_class,
+    }
 }
 
 /// Hand a value buffer whose shards were all just released back to its owner or
