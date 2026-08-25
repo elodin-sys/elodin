@@ -2,8 +2,8 @@
 
 A **provisional parametric 6-DOF demonstration model** of the Elite
 Aerosports BDX RC sport jet, flying in a rotating WGS84 ECEF world over
-Death Valley. Geometry- and analysis-correlated; **not validated against a
-physical aircraft.**
+the Mojave Desert. Geometry- and analysis-correlated; **not validated
+against a physical aircraft.**
 
 ## Where the numbers come from
 
@@ -36,14 +36,14 @@ source (guide §9.1).
 The simulation runs in a **rotating ECEF frame** (WGS84): gravity is
 point-mass gravitation plus centrifugal and Coriolis terms, the atmosphere
 and ground contact key off geodetic altitude, and the aircraft spawns at a
-real location — the Death Valley floor (36.2300 N, 116.9700 W, field
-elevation −60 m), inside the `death_valley` terrain region.
+real location — the Mojave RC field (35.350664 N, 117.809027 W, field
+elevation 589.274 m), the center of the `mojave_rc_field` terrain region.
 
 The schematic (`bdx.kdl`) composites two Earth systems:
 
 - the editor's **cinematic Earth** (`environment { earth }`) for the horizon,
   atmosphere, ephemeris sun, and star field; and
-- the **`death_valley` planar `world_mesh`** (geo-anchored via
+- the **`mojave_rc_field` planar `world_mesh`** (geo-anchored via
   `frame="ENU"`), for close-up terrain.
 
 The package GLB is already Elodin body (X forward, Y left, Z up). The editor
@@ -52,14 +52,16 @@ to cancel that so the mesh is not rolled onto its side. The hashed package
 GLB is not rewritten.
 
 To fetch and preprocess the terrain atlas (writes
-`assets/terrains/planar/death_valley/`):
+`assets/terrains/planar/mojave_rc_field/`):
 
 ```bash
-./scripts/prepare_editor_terrain_region.sh death_valley
+./scripts/prepare_editor_terrain_region.sh mojave_rc_field
 ```
 
 Without the atlas the terrain falls back to a grid; the cinematic Earth
-needs no assets (embedded in the editor).
+needs no assets (embedded in the editor). Physics uses the pad's ellipsoid
+height (589.274 m); the mesh is shifted so its DEM surface (621.5 m
+orthometric at the centre) meets that pad.
 
 This example ships binary geometry under `model/elodin_package/` via
 Git LFS — run `git lfs pull` if the loader reports manifest hash mismatches.
@@ -93,12 +95,15 @@ Selected via `ELODIN_RC_JET_SCENARIO` (default `demo`):
 | | `validation` | `demo` |
 |---|---|---|
 | Purpose | Regression anchors; CI | Interactive flying |
-| Condition | Package cruise trim row verbatim: 300 m MSL, 37.83 m/s, α 2.67°, throttle 0.2125 | Same by default; `ELODIN_RC_JET_ALTITUDE_M` / `ELODIN_RC_JET_SPEED_MPS` re-solve the equilibrium |
+| Site | Death Valley floor (−60 m) so the package cruise row stays above ground | Mojave RC field (589.274 m), the `mojave_rc_field` mesh center |
+| Condition | Package cruise trim row verbatim: 300 m MSL, 37.83 m/s, α 2.67°, throttle 0.2125 | ~300 m AGL over the pad (889 m MSL) at the same TAS; `ELODIN_RC_JET_ALTITUDE_M` / `ELODIN_RC_JET_SPEED_MPS` re-solve the equilibrium |
 
 Both scenarios start from a **solved trim** — there is no hand-tuned
 "trimmed" coefficient anywhere, and a scenario refuses to spawn if no valid
 equilibrium exists at its condition. `ELODIN_RC_JET_HEADING_DEG` sets the
-initial heading (default 350°, up the valley).
+initial heading (default 350°). `validation` stays on the Death Valley pad
+because the package cruise altitude is 300 m MSL — underground at the
+Mojave field.
 
 ## Expected behavior (package anchors, not marketing)
 
@@ -124,7 +129,7 @@ mass updates as it burns, and an empty tank is a flameout. Thrust acts
 ```
 examples/rc-jet/
 ├── main.py              # scenario select, ECEF world, loads bdx.kdl
-├── bdx.kdl              # cinematic schematic (Earth + death_valley + GLB)
+├── bdx.kdl              # cinematic schematic (Earth + mojave_rc_field + GLB)
 ├── bdx_model.py         # package loader: schema/identity/frames/SHA-256 validation
 ├── class_d_fallbacks.py # labeled class-D placeholder set (opt-in, logged)
 ├── scenario.py          # site + scenario + numerics (no aircraft data)

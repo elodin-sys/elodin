@@ -13,7 +13,7 @@ import pytest
 
 import bdx_model
 from class_d_fallbacks import FALLBACKS
-from scenario import DEATH_VALLEY_FLOOR, Numerics, Scenario, _initial_state, load_scenario
+from scenario import MOJAVE_RC_FIELD, Numerics, Scenario, _initial_state, load_scenario
 from sim import build_system, make_jet
 
 MODEL = bdx_model.load()
@@ -130,7 +130,7 @@ def test_fuel_integrates_map_flow():
 def test_ground_rest():
     """T13: a dead-stick aircraft settles on the field surface without
     bouncing or sinking (contact normal along the geodetic up)."""
-    site = DEATH_VALLEY_FLOOR
+    site = MOJAVE_RC_FIELD
     from ground import GEAR_HEIGHT_M
 
     init = _initial_state(
@@ -158,7 +158,7 @@ def test_ground_rest():
         trim=None,
     )
     exec = build_exec(scenario)
-    exec.run(600, show_progress=False)
+    exec.run(1500, show_progress=False)
     df = exec.history(["bdx.geodetic", "bdx.velocity_body", "bdx.thrust"])
     altitude = column(df, "bdx.geodetic")[1:, 2]
     assert np.all(np.isfinite(altitude))

@@ -3,9 +3,9 @@
 
 Aircraft data comes from the vendored open-air package (analysis-correlated;
 see model/elodin_package/provenance.md) plus a logged class-D fallback set.
-The world is WGS84 ECEF anchored over Death Valley: the cinematic Earth
-provides the horizon and atmosphere while the death_valley world_mesh
-provides close-up terrain.
+The world is WGS84 ECEF anchored over the Mojave RC field: the cinematic
+Earth provides the horizon and atmosphere while the mojave_rc_field
+world_mesh provides close-up terrain.
 
 Usage:
     elodin editor examples/rc-jet/main.py     # 3D visualization + RC control

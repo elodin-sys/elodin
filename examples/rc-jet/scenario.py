@@ -10,13 +10,14 @@ Scenario selection (env, keeping the CI invocation contract stable):
     ELODIN_RC_JET_SCENARIO      "demo" (default) | "validation"
     ELODIN_RC_JET_ALTITUDE_M    demo-only override; triggers the trim solver
     ELODIN_RC_JET_SPEED_MPS     demo-only override; triggers the trim solver
-    ELODIN_RC_JET_HEADING_DEG   initial heading (default 350, up-valley)
+    ELODIN_RC_JET_HEADING_DEG   initial heading (default 350)
 
-Both scenarios fly from the same real-world site inside the death_valley
-terrain region: the valley floor at 36.2300 N, 116.9700 W (field elevation
--60 m, verified against the fetched DEM). `validation` initializes from the
-package trim row verbatim (guide §9.5) and exists for regression anchors;
-`demo` solves its own equilibrium and is the interactive default.
+`demo` flies from the Mojave RC field (35.350664 N, 117.809027 W, field
+elevation 589.274 m) inside the `mojave_rc_field` terrain region, defaulting
+to 300 m AGL. `validation` stays on the Death Valley floor at the package
+cruise row (300 m MSL) so the CI trim-hold does not spawn underground at
+the higher Mojave pad (guide §9.5). `demo` solves its own equilibrium and
+is the interactive default.
 """
 
 from __future__ import annotations
@@ -47,6 +48,14 @@ DEATH_VALLEY_FLOOR = Site(
     lat_deg=36.2300,
     lon_deg=-116.9700,
     field_elevation_m=-60.0,
+)
+
+# Pilot's ground position; region center of the mojave_rc_field world_mesh.
+MOJAVE_RC_FIELD = Site(
+    name="Mojave RC field (CA)",
+    lat_deg=35.350664,
+    lon_deg=-117.809027,
+    field_elevation_m=589.274,
 )
 
 
@@ -139,7 +148,12 @@ def load_scenario(
     model.require_credibility("analysis-correlated")
     fallbacks.log_selection(name)
 
-    site = DEATH_VALLEY_FLOOR
+    # validation keeps the Death Valley pad so the package cruise row
+    # (300 m MSL) is above ground; demo flies the Mojave RC field.
+    if name == "validation":
+        site = DEATH_VALLEY_FLOOR
+    else:
+        site = MOJAVE_RC_FIELD
     heading_deg = float(os.environ.get("ELODIN_RC_JET_HEADING_DEG", "350.0"))
     wind_enu = wind_enu if wind_enu is not None else (0.0, 0.0, 0.0)
     cruise = model.trim_rows["cruise"]
@@ -147,7 +161,8 @@ def load_scenario(
     if name == "validation":
         altitude_m, tas_mps = cruise.altitude_m, cruise.tas_mps
     else:
-        altitude_m = float(os.environ.get("ELODIN_RC_JET_ALTITUDE_M", cruise.altitude_m))
+        default_alt = site.field_elevation_m + 300.0
+        altitude_m = float(os.environ.get("ELODIN_RC_JET_ALTITUDE_M", default_alt))
         tas_mps = float(os.environ.get("ELODIN_RC_JET_SPEED_MPS", cruise.tas_mps))
 
     solution = solve_level_trim(model, fallbacks, site.lat_deg, site.lon_deg, altitude_m, tas_mps)

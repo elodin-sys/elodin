@@ -1,26 +1,28 @@
-// BDX RC jet cinematic ECEF scene over Death Valley.
+// BDX RC jet cinematic ECEF scene over the Mojave RC field.
 //
-// Site (baked): valley floor 36.2300 N, 116.9700 W, field elevation -60 m.
-// Chase / TGT / top-down ECEF offsets assume the default heading 350°
-// (up-valley). Terrain ENU translate is the death_valley region center
-// relative to that site, with vertical = region_min_height - field_elevation
-// (-86 - -60 = -26 m). Pinned SW 40° sun for a deterministic golden-hour
-// scene; drop `direction` to track the playhead ephemeris.
+// Site (baked): pilot pad 35.350664 N, 117.809027 W, ellipsoid height
+// 589.274 m — also the mojave_rc_field region center, so ENU east/north
+// are zero. Physics uses that ellipsoid height; the mesh vertical is
+// region_min (450 m) minus the DEM centre (621.542 m orthometric) so
+// the rendered pad meets the physics ground. Chase / TGT / top-down
+// ECEF offsets keep the same local-ENU geometry as the Death Valley
+// scene at heading 350°. Pinned SW 40° sun for a deterministic
+// golden-hour scene; drop `direction` to track the playhead ephemeris.
 
-coordinate frame="ECEF" lat=36.23 lon=-116.97 alt=-60.0
+coordinate frame="ECEF" lat=35.350664 lon=-117.809027 alt=589.274
 
 timeline follow_latest=#true range="last_30s"
 telemetry_mode #true
 
 // Cinematic Earth: horizon, atmosphere, star field. Close-up terrain is
-// the geo-anchored death_valley world_mesh below.
+// the geo-anchored mojave_rc_field world_mesh below.
 environment {
-    sun illuminance=100000.0 shadows=#true direction="(-0.863, -0.502, -0.057)"
+    sun illuminance=100000.0 shadows=#true direction="(-0.870, -0.488, -0.070)"
     ambient scale=0.05
     earth
 }
 
-world_mesh "death_valley" frame="ENU" translate="(-10338.528, 6.132, -26.000)"
+world_mesh "mojave_rc_field" frame="ENU" translate="(0.000, 0.000, -171.542)"
 
 tabs {
     hsplit name="Main View" {
@@ -31,9 +33,9 @@ tabs {
             graph "bdx.alpha" name="Angle of Attack (rad)"
             graph "bdx.aero_valid" name="Aero Validity Flag"
         }
-        viewport name=Chase cinematic=#true near=1.0 pos="bdx.world_pos.translate_world(-3.028, -12.076, -10.642)" look_at="bdx.world_pos.translate_world(-0.076, 2.147, 5.948)" up="(-0.366, -0.719, 0.591)" show_grid=#false active=#true
+        viewport name=Chase cinematic=#true near=1.0 pos="bdx.world_pos.translate_world(-3.128, -11.885, -10.827)" look_at="bdx.world_pos.translate_world(-0.087, 2.067, 5.976)" up="(-0.381, -0.721, 0.578)" show_grid=#false active=#true
         vsplit share=0.4 {
-            viewport name=TGTViewport pos="target.world_pos.translate_world(1.086, -0.071, 0.925)" look_at="bdx.world_pos" show_grid=#false
+            viewport name=TGTViewport pos="target.world_pos.translate_world(1.078, -0.099, 0.931)" look_at="bdx.world_pos" show_grid=#false
             viewport name=FPVViewport pos="bdx.world_pos.translate(1,0,0.1)" look_at="bdx.world_pos.translate(2,0,0.1)" up="bdx.world_pos.direction(0,0,1)" show_grid=#false
             sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
         }
@@ -73,7 +75,7 @@ tabs {
         }
     }
     hsplit name="Navigation" {
-        viewport name="Top-Down View" pos="bdx.world_pos.translate_world(-54.875, -107.838, 88.654)" look_at="bdx.world_pos" up="(0.268, 0.527, 0.807)" fov=60.0 show_grid=#false
+        viewport name="Top-Down View" pos="bdx.world_pos.translate_world(-57.076, -108.214, 86.787)" look_at="bdx.world_pos" up="(0.270, 0.512, 0.816)" fov=60.0 show_grid=#false
         query_plot name="Ground Track (ENU)" query="SELECT bdx_pos_enu.bdx_pos_enu[1], bdx_pos_enu.bdx_pos_enu[2] FROM bdx_pos_enu" type="sql" mode="xy" x_label="East (m)" y_label="North (m)" auto_refresh=#true refresh_interval=500 {
             color cyan
         }
