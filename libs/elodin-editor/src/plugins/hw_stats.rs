@@ -313,25 +313,30 @@ fn log_render_error(
     let plot_snapshot = main_world
         .get_resource::<PlotGpuBufferPool>()
         .map(|pool| pool.snapshot());
-    if recoverable && let Some(render_device) = main_world.get_resource::<RenderDevice>() {
-        let reason = match error.ty {
-            ErrorType::DeviceLost => "device-lost",
-            _ => "oom",
-        };
-        match dump_gpu_allocations(render_device, reason, plot_snapshot) {
-            Ok(dump) => {
-                tracing::error!(
-                    path = %dump.path.display(),
-                    total_allocated_bytes = dump.total_allocated_bytes,
-                    total_reserved_bytes = dump.total_reserved_bytes,
-                    block_count = dump.block_count,
-                    allocation_count = dump.allocation_count,
-                    largest_groups = %dump.largest_groups,
-                    "GPU allocator report"
-                );
-                dump_path = Some(dump.path);
+    if recoverable {
+        match render_world.get_resource::<RenderDevice>() {
+            Some(render_device) => {
+                let reason = match error.ty {
+                    ErrorType::DeviceLost => "device-lost",
+                    _ => "oom",
+                };
+                match dump_gpu_allocations(render_device, reason, plot_snapshot) {
+                    Ok(dump) => {
+                        tracing::error!(
+                            path = %dump.path.display(),
+                            total_allocated_bytes = dump.total_allocated_bytes,
+                            total_reserved_bytes = dump.total_reserved_bytes,
+                            block_count = dump.block_count,
+                            allocation_count = dump.allocation_count,
+                            largest_groups = %dump.largest_groups,
+                            "GPU allocator report"
+                        );
+                        dump_path = Some(dump.path);
+                    }
+                    Err(error) => tracing::error!(%error, "GPU allocator report unavailable"),
+                }
             }
-            Err(error) => tracing::error!(%error, "GPU allocator report unavailable"),
+            None => tracing::error!("GPU allocator report unavailable: RenderDevice not found"),
         }
     }
     let dump_path_label = dump_path
