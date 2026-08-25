@@ -418,8 +418,8 @@ if __name__ == "__main__":
     system = create_physics_system(config)
     exec = world.build(system)
 
-    # Run 200 ticks (200ms at 1kHz)
-    exec.run(200)
+    # Run for the configured 200ms duration at the configured simulation rate
+    exec.run(config.total_sim_ticks)
 
     # Get history data
     df = exec.history(["drone.world_pos", "drone.world_vel", "drone.sim_time"])

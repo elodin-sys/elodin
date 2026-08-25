@@ -22,14 +22,14 @@ BETAFLIGHT_DIR="$SCRIPT_DIR/betaflight"
 # LPF setup and PID dt. The actual loop rate is set at runtime by the FDM
 # packet rate from the Python side (config.py simulation_rate) via lockstep.
 # The two MUST match, so keep SITL_RATE_HZ in sync with simulation_rate.
-SITL_RATE_HZ="${SITL_RATE_HZ:-4000}"
+SITL_RATE_HZ="${SITL_RATE_HZ:-8000}"
 #
 # RUN_LOOP_DELAY_US (new in 2026.6.1) inserts a real-time nanosleep into
-# Betaflight's main loop to cap its spin rate. In lockstep mode that sleep adds
-# directly to packet->motor latency on every tick. Default 5us: drops the SITL
-# from a pegged core (~100% CPU) to ~20% while costing only a few percent of
-# real-time at 8kHz (and nothing at <=4kHz). Set to 0 for busy-wait best latency.
-RUN_LOOP_DELAY_US="${RUN_LOOP_DELAY_US:-5}"
+# Betaflight's main loop to cap its spin rate. In lockstep mode host scheduler
+# wakeup latency is paid directly on every packet->motor round trip, so the 8kHz
+# default busy-waits for minimum latency. Set this above 0 to trade loop rate for
+# lower CPU usage; 0 consumes approximately one CPU core.
+RUN_LOOP_DELAY_US="${RUN_LOOP_DELAY_US:-0}"
 BETAFLIGHT_OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=$SITL_RATE_HZ RUN_LOOP_DELAY_US=$RUN_LOOP_DELAY_US"
 
 # Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)

@@ -12,7 +12,7 @@ The simulation provides:
 - **6-DOF Physics**: Rigid body dynamics with motor thrust, drag, and gravity
 - **Betaflight Integration**: Real Betaflight flight controller running as SITL
 - **UDP Communication**: Bidirectional sensor/motor data exchange
-- **4kHz Lockstep Loop**: Real-time physics and Betaflight PID updates by default
+- **8kHz Lockstep Loop**: Real-time physics and Betaflight PID updates by default
 - **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
 
 ```
@@ -101,7 +101,7 @@ and verifies the persisted settings. To do the same setup manually:
    ```
    
    This configures ARM on AUX1 and processes every lockstep update. The actual
-   lockstep rate is set by `simulation_rate` (4kHz by default).
+   lockstep rate is set by `simulation_rate` (8kHz by default).
 
 4. **Exit screen**: Press `Ctrl+A` then `K` then `Y`
 
@@ -291,11 +291,11 @@ DroneConfig(
     arm_length=0.12,             # meters
     motor_max_thrust=15.0,       # Newtons per motor
     motor_time_constant=0.02,    # seconds
-    simulation_rate=4000.0,      # 4kHz physics/PID lockstep
+    simulation_rate=8000.0,      # 8kHz physics/PID lockstep
     sensor_noise=True,           # Enable realistic sensor noise
     # Requested sensor rates (capped by the simulation rate)
-    gyro_rate=8000.0,            # Effective rate is 4kHz by default
-    accel_rate=4800.0,           # Effective rate is 4kHz by default
+    gyro_rate=8000.0,            # Effective rate is 8kHz by default
+    accel_rate=4800.0,           # Effective rate is 4kHz after tick rounding
     baro_rate=480.0,             # 480Hz (BMP581)
     mag_rate=200.0,              # 200Hz (BMM350)
 )
@@ -368,7 +368,7 @@ sequenceDiagram
 make variable:
 
 ```bash
-make TARGET=SITL OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=4000 RUN_LOOP_DELAY_US=5"
+make TARGET=SITL OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=8000 RUN_LOOP_DELAY_US=0"
 ```
 
 (2026.6.1 renamed the option to an `ENABLE_*` boolean macro; `OPTIONS` entries
@@ -391,12 +391,12 @@ iteration, one motor response out:
   task, which slows the loop further — the rate never recovers.
 - **core.c**: the now-redundant per-task PID mutex gate is dropped; the whole
   realtime group is gated at the boundary.
-- **platform.h**: `RUN_LOOP_DELAY_US` becomes overridable; the build sets it to
-  `5` µs. The stock 50 µs real-time sleep in the main loop adds directly to
-  packet→motor latency on every tick, while `0` (busy-wait) pegs a core at ~100%
-  CPU. A 5 µs sleep recovers most of that CPU (down to ~20%) for only a few
-  percent of real-time at 8 kHz — and nothing at ≤4 kHz. Set `RUN_LOOP_DELAY_US=0`
-  for the absolute best lockstep latency.
+- **platform.h**: `RUN_LOOP_DELAY_US` becomes overridable. The 8 kHz default
+  build sets it to `0`, making the main loop busy-wait for the lowest possible
+  packet→motor latency. This consumes approximately one CPU core. Set a nonzero
+  value to trade lockstep performance for lower CPU usage; host scheduler wakeup
+  latency is paid on every iteration and may prevent the loop from sustaining
+  8 kHz.
 
 Asynchronous SITL (lockstep disabled) is unchanged.
 
@@ -572,11 +572,13 @@ lsof -i :5761
 
 ### Performance
 
-**Simulation too slow**: The default `simulation_rate = 4000.0` gives the
-Python/UDP lockstep bridge a 1ms budget per tick and is intended to run in real
-time on typical hosts. Higher rates remain available but may run slower than
-real time because every tick includes DB access and a synchronous Betaflight
-UDP round trip. The default 15-second run produces 60,000 simulation ticks.
+**Simulation too slow**: The default `simulation_rate = 8000.0` gives the
+Python/UDP lockstep bridge a 125µs budget per tick and requires Betaflight's
+busy-waiting `RUN_LOOP_DELAY_US=0` build to hold real time. This consumes
+approximately one CPU core on the Betaflight side. Lower rates or a nonzero
+run-loop delay reduce CPU usage, but a sleeping Betaflight loop may not sustain
+8kHz because every tick includes DB access and a synchronous UDP round trip.
+The default 15-second run produces 120,000 simulation ticks.
 
 ## Development
 
@@ -612,21 +614,21 @@ high-rate physics/PID loop.
 ### Configured and Effective Rates
 
 Configured sensor rates represent hardware targets. A sensor cannot update more
-than once per physics tick, so its effective rate is capped by the 4kHz default
+than once per physics tick, so its effective rate is capped by the 8kHz default
 simulation rate and rounded to a whole number of ticks.
 
 | Sensor | Hardware | Configured rate | Effective default rate | Datasheet |
 |--------|----------|-----------------|------------------------|-----------|
-| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | 4 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | 8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
 | Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | 4 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
-| Barometer | BMP581 | 480 Hz | 500 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
+| Barometer | BMP581 | 480 Hz | ~471 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
 | Magnetometer | BMM350 | 200 Hz | 200 Hz | [bst-bmm350-ds001.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmm350-ds001.pdf) |
 
 ### Why Multi-Rate?
 
 Real sensors don't all sample at the same frequency. The physics/PID lockstep
-runs at 4kHz by default. Gyroscope and accelerometer targets above that rate are
-therefore capped at 4kHz, while slower sensors update less frequently:
+runs at 8kHz by default. The gyroscope updates every physics tick, while slower
+sensors update less frequently:
 
 - **Gyroscope (8 kHz)**: Drives the PID loop. The BMI270 supports up to 6.4 kHz per
   sensor; with 3 IMUs running with timing offsets, effective rate exceeds 8 kHz.
@@ -653,8 +655,8 @@ sensor_out = jax.lax.cond(
 )
 ```
 
-For example, with the default 4kHz PID rate and a 200Hz magnetometer,
-`tick_interval = 20` (the magnetometer updates every twentieth physics tick).
+For example, with the default 8kHz PID rate and a 200Hz magnetometer,
+`tick_interval = 40` (the magnetometer updates every fortieth physics tick).
 
 ### Customizing for Different Hardware
 
