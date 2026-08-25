@@ -1013,6 +1013,11 @@ fn extract_lines(
                 let y_size = Some(y_alloc.binding_size());
                 let y_buffer = y_alloc.buffer().clone();
                 let value_buffer_ids = (x_buffer.id(), y_buffer.id());
+                // The bind group must be rebuilt when the value buffers move, but the
+                // index buffer does not reference them and is rewritten below. Carry it
+                // over instead of releasing it: quarantining it here would make
+                // `take_index` refuse a replacement for the whole quarantine window.
+                let mut salvaged_index = None;
                 if let Some(ref mut cache) = cache
                     && cache
                         .0
@@ -1020,7 +1025,7 @@ fn extract_lines(
                         .is_some_and(|gpu| gpu.value_buffer_ids != value_buffer_ids)
                     && let Some(stale) = cache.0.take()
                 {
-                    plot_gpu_pool.release_index(stale.index_buffer);
+                    salvaged_index = Some(stale.index_buffer);
                 }
                 // Reuse the cached buffers/bind group unless the value buffers were
                 // reallocated (new `BufferShardAlloc`).
@@ -1034,7 +1039,9 @@ fn extract_lines(
                         gpu_line.values_bind_group.clone(),
                     )
                 } else {
-                    let Some(index_buffer) = plot_gpu_pool.take_index(&render_device) else {
+                    let Some(index_buffer) =
+                        salvaged_index.or_else(|| plot_gpu_pool.take_index(&render_device))
+                    else {
                         continue;
                     };
                     let values_bind_group = render_device.create_bind_group(
