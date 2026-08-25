@@ -39,12 +39,15 @@ and ground contact key off geodetic altitude, and the aircraft spawns at a
 real location — the Mojave RC field (35.350664 N, 117.809027 W, field
 elevation 589.274 m), the center of the `mojave_rc_field` terrain region.
 
-The schematic (`bdx.kdl`) composites two Earth systems:
+The schematic (`bdx.kdl`) keeps editor 3D panes as normal viewports
+(aircraft + Mojave mesh, drone-like lighting). Cinematic Earth — globe,
+atmosphere, and the 100 klx sun — is owned by `world.sensor_camera(...,
+cinematic=True)` and rendered only in the sibling render-server. The
+`sensor_view` tile displays those DB frames; it does not load Earth in
+the editor.
 
-- the editor's **cinematic Earth** (`environment { earth }`) for the horizon,
-  atmosphere, ephemeris sun, and star field; and
-- the **`mojave_rc_field` planar `world_mesh`** (geo-anchored via
-  `frame="ENU"`), for close-up terrain.
+Close-up terrain is the geo-anchored `mojave_rc_field` planar
+`world_mesh` (`frame="ENU"`).
 
 The package GLB is already Elodin body (X forward, Y left, Z up). The editor
 lifts every glTF as Y-up (`Rx(+90°)`); `bdx.kdl` applies `rotate="(-90, 0, 0)"`
@@ -58,10 +61,10 @@ To fetch and preprocess the terrain atlas (writes
 ./scripts/prepare_editor_terrain_region.sh mojave_rc_field
 ```
 
-Without the atlas the terrain falls back to a grid; the cinematic Earth
-needs no assets (embedded in the editor). Physics uses the pad's ellipsoid
-height (589.274 m); the mesh is shifted so its DEM surface (621.5 m
-orthometric at the centre) meets that pad.
+Without the atlas the terrain falls back to a grid. Cinematic Earth for
+FPV is embedded in the render-server (not the editor). Physics uses the
+pad's ellipsoid height (589.274 m); the mesh is shifted so its DEM
+surface (621.5 m orthometric at the centre) meets that pad.
 
 This example ships binary geometry under `model/elodin_package/` via
 Git LFS — run `git lfs pull` if the loader reports manifest hash mismatches.

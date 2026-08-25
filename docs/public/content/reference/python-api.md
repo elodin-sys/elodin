@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0)` -> None
+- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0, cinematic=False, ev100=None, bloom=None, environment=None)` -> None
 
     Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every `1 / fps` µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with `ctx.read_msg("entity.name", timestamp=...)`.
 
@@ -70,6 +70,12 @@ The Elodin simulation world.
     - `effect_params` : `dict`, effect-specific parameters (e.g., `{"contrast": 1.5, "noise_sigma": 0.02}` for thermal).
     - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
     - `fps` : `float`, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to `30.0`.
+    - `cinematic` : `bool`, same meaning as KDL `viewport cinematic=#true`. When true, the sibling render-server loads the cinematic Earth stack for this camera. Defaults to `False`.
+    - `ev100` : `float | None`, camera exposure. With `cinematic=True` the default is `13.5`. Requires `cinematic=True`.
+    - `bloom` : `dict | None`, viewport bloom settings (`preset`, `intensity`, `threshold`, `threshold_softness`). `None` with `cinematic=True` uses the cinematic preset. Requires `cinematic=True`.
+    - `environment` : `dict | None`, schematic `environment { }` (`sun`, `ambient_scale`, `sky_color`, `atmosphere`, `earth`). `earth` may be `True` for the house look. Omitted with `cinematic=True` implies Earth, a 100 klx sun, and ambient `0.05`. Requires `cinematic=True`.
+
+    At most one cinematic environment owner is allowed: a KDL `viewport cinematic=#true` **or** `sensor_camera(cinematic=True)`, never both, never two of either. Mixing them raises `ValueError` before the GPU starts.
 
     The camera transform follows the entity as a rigid body: as the entity moves and rotates, the camera mount position and orientation rotate with it in body frame.
 

@@ -2892,6 +2892,42 @@ hsplit {
     }
 
     #[test]
+    fn falcon9_style_cinematic_viewport_is_a_single_owner() {
+        let schematic = parse_schematic(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true ev100=13.5
+"#,
+        )
+        .unwrap();
+        impeller2_wkt::validate_single_cinematic_environment(Some(&schematic), &[]).unwrap();
+    }
+
+    #[test]
+    fn cinematic_viewport_plus_cinematic_sensor_is_rejected() {
+        let schematic = parse_schematic(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true
+"#,
+        )
+        .unwrap();
+        let err = impeller2_wkt::validate_single_cinematic_environment(
+            Some(&schematic),
+            &[impeller2_wkt::SensorCameraConfig {
+                camera_name: "bdx.fpv_cam".into(),
+                cinematic: true,
+                ..Default::default()
+            }],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Chase"), "{msg}");
+        assert!(msg.contains("bdx.fpv_cam"), "{msg}");
+        assert!(msg.contains("Bevy 0.19"), "{msg}");
+    }
+
+    #[test]
     fn test_parse_viewport_show_frustums() {
         let kdl = r#"viewport show_frustums=#true"#;
         let schematic = parse_schematic(kdl).unwrap();

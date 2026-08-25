@@ -14,7 +14,8 @@ use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller2_kdl::FromKdl;
+use impeller2_wkt::{BloomConfig, ComponentMetadata, EntityMetadata, EnvironmentConfig, Schematic};
 use miette::miette;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::exceptions::PyValueError;
@@ -125,7 +126,53 @@ pub struct WorldBuilder {
     pub recipes: HashMap<String, ::s10::Recipe>,
 }
 
+fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
+    let json = obj.py().import("json")?;
+    let dumped: String = json.call_method1("dumps", (obj,))?.extract()?;
+    Ok(serde_json::from_str(&dumped)?)
+}
+
+fn parse_sensor_camera_environment(obj: &Bound<'_, PyAny>) -> Result<EnvironmentConfig, Error> {
+    let value = py_json_value(obj)?;
+    serde_json::from_value(value).map_err(|err| {
+        Error::PyO3(PyValueError::new_err(format!(
+            "sensor_camera environment is invalid: {err}"
+        )))
+    })
+}
+
+fn parse_sensor_camera_bloom(obj: &Bound<'_, PyAny>) -> Result<BloomConfig, Error> {
+    let value = py_json_value(obj)?;
+    serde_json::from_value(value).map_err(|err| {
+        Error::PyO3(PyValueError::new_err(format!(
+            "sensor_camera bloom is invalid: {err}"
+        )))
+    })
+}
+
+fn cinematic_look_requires_cinematic(
+    cinematic: bool,
+    has_environment: bool,
+    has_ev100: bool,
+    has_bloom: bool,
+) -> bool {
+    cinematic || !(has_environment || has_ev100 || has_bloom)
+}
+
 impl WorldBuilder {
+    fn parsed_schematic(&self) -> Option<Schematic> {
+        let content = self.world.metadata.schematic.as_deref()?;
+        Schematic::from_kdl(content).ok()
+    }
+
+    fn validate_cinematic_owners(&self) -> Result<(), Error> {
+        impeller2_wkt::validate_single_cinematic_environment(
+            self.parsed_schematic().as_ref(),
+            &self.world.metadata.sensor_cameras,
+        )
+        .map_err(|err| Error::PyO3(PyValueError::new_err(err.to_string())))
+    }
+
     fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
         let mut depends_on = self
             .recipes
@@ -374,7 +421,12 @@ impl WorldBuilder {
         projection_color = None,
         frustums_thickness = 0.006,
         fps = 30.0,
+        cinematic = false,
+        ev100 = None,
+        bloom = None,
+        environment = None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
         &mut self,
         entity: crate::entity::EntityId,
@@ -395,6 +447,10 @@ impl WorldBuilder {
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
         fps: f32,
+        cinematic: bool,
+        ev100: Option<f32>,
+        bloom: Option<&Bound<'_, PyAny>>,
+        environment: Option<&Bound<'_, PyAny>>,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -470,6 +526,20 @@ impl WorldBuilder {
                 )),
             ));
         }
+        if !cinematic_look_requires_cinematic(
+            cinematic,
+            environment.is_some(),
+            ev100.is_some(),
+            bloom.is_some(),
+        ) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "ev100, bloom, and environment require cinematic=True",
+            )));
+        }
+        let bloom = bloom.map(parse_sensor_camera_bloom).transpose()?;
+        let environment = environment
+            .map(parse_sensor_camera_environment)
+            .transpose()?;
 
         let color_from_vec = |value: Option<Vec<f32>>,
                               default_color: impeller2_wkt::Color,
@@ -523,7 +593,15 @@ impl WorldBuilder {
                 )?,
                 frustums_thickness,
                 fps,
+                cinematic,
+                ev100,
+                bloom,
+                environment,
             });
+        if let Err(err) = self.validate_cinematic_owners() {
+            self.world.metadata.sensor_cameras.pop();
+            return Err(err);
+        }
 
         Ok(())
     }
@@ -592,6 +670,7 @@ impl WorldBuilder {
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
         let path = PathBuf::from(path);
         let args = Args::parse_from(args);
+        self.validate_cinematic_owners()?;
         match args {
             Args::Run {
                 addr,
@@ -1569,7 +1648,11 @@ impl WorldBuilder {
     /// the user may make changes and save the schematic to the given path, but
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
-    pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
+    pub fn schematic(
+        &mut self,
+        default_content: Option<String>,
+        path: Option<String>,
+    ) -> Result<(), Error> {
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
             .as_ref()
@@ -1600,7 +1683,13 @@ impl WorldBuilder {
                     None
                 }
             });
+        let previous = self.world.metadata.schematic.clone();
         self.world.metadata.schematic = file_contents.or(default_content);
+        if let Err(err) = self.validate_cinematic_owners() {
+            self.world.metadata.schematic = previous;
+            return Err(err);
+        }
+        Ok(())
     }
 
     pub fn discover_components(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
@@ -2025,5 +2114,68 @@ mod test {
         assert!(is_snake_case("e1"));
         assert!(is_snake_case("e_1"));
         assert!(!is_snake_case("E1"));
+    }
+
+    #[test]
+    fn cinematic_false_rejects_look_kwargs() {
+        assert!(!cinematic_look_requires_cinematic(
+            false, true, false, false
+        ));
+        assert!(!cinematic_look_requires_cinematic(
+            false, false, true, false
+        ));
+        assert!(!cinematic_look_requires_cinematic(
+            false, false, false, true
+        ));
+        assert!(cinematic_look_requires_cinematic(true, true, true, true));
+        assert!(cinematic_look_requires_cinematic(
+            false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn two_cinematic_sensor_cameras_are_rejected() {
+        let err = impeller2_wkt::validate_single_cinematic_environment(
+            None,
+            &[
+                impeller2_wkt::SensorCameraConfig {
+                    camera_name: "a.cam".into(),
+                    cinematic: true,
+                    ..Default::default()
+                },
+                impeller2_wkt::SensorCameraConfig {
+                    camera_name: "b.cam".into(),
+                    cinematic: true,
+                    ..Default::default()
+                },
+            ],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("a.cam"), "{msg}");
+        assert!(msg.contains("b.cam"), "{msg}");
+    }
+
+    #[test]
+    fn cinematic_viewport_and_sensor_camera_are_rejected() {
+        let schematic = impeller2_wkt::Schematic::from_kdl(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true
+"#,
+        )
+        .unwrap();
+        let err = impeller2_wkt::validate_single_cinematic_environment(
+            Some(&schematic),
+            &[impeller2_wkt::SensorCameraConfig {
+                camera_name: "bdx.fpv_cam".into(),
+                cinematic: true,
+                ..Default::default()
+            }],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Chase"), "{msg}");
+        assert!(msg.contains("bdx.fpv_cam"), "{msg}");
     }
 }

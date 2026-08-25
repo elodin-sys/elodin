@@ -3,9 +3,9 @@
 
 Aircraft data comes from the vendored open-air package (analysis-correlated;
 see model/elodin_package/provenance.md) plus a logged class-D fallback set.
-The world is WGS84 ECEF anchored over the Mojave RC field: the cinematic
-Earth provides the horizon and atmosphere while the mojave_rc_field
-world_mesh provides close-up terrain.
+The world is WGS84 ECEF anchored over the Mojave RC field: editor
+viewports are drone-like (aircraft + Mojave mesh) while FPV cinematic
+Earth is rendered by the sibling render-server.
 
 Usage:
     elodin editor examples/rc-jet/main.py     # 3D visualization + RC control
@@ -95,10 +95,21 @@ def setup_world(
         near=0.1,
         # Far plane must cover the terrain and horizon at altitude. Frustum
         # visualization shares this far plane, so keep create_frustum off.
-        far=100_000_000_000_000.0,
+        far=100_000.0,
         pos_offset=[1.2, 0.0, 0.1],
         rot_offset=[0.0, 0.0, 0.0],
         create_frustum=False,
+        cinematic=True,
+        ev100=13.5,
+        environment={
+            "sun": {
+                "illuminance": 100000.0,
+                "shadows": True,
+                "direction": (-0.870, -0.488, -0.070),
+            },
+            "ambient_scale": 0.05,
+            "earth": True,
+        },
     )
 
     schematic_path = Path(__file__).with_name("bdx.kdl")

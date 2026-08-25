@@ -678,6 +678,10 @@ impl Plugin for SchematicPlugin {
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,
+                load::reject_mixed_cinematic_environment.after(tiles_to_schematic),
+            )
+            .add_systems(
+                PostUpdate,
                 apply_initial_kdl_path
                     .pipe(sync_document_from_config)
                     .before(tiles_to_schematic),

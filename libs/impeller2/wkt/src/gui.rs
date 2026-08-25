@@ -93,7 +93,10 @@ pub struct EnvironmentConfig {
     #[serde(default)]
     pub atmosphere: Option<AtmosphereConfig>,
     /// Built-in camera-driven Earth for ECEF scenes.
-    #[serde(default)]
+    ///
+    /// JSON/`world.sensor_camera(environment=…)` may pass `true` for the house
+    /// look (`EarthConfig::default()`).
+    #[serde(default, deserialize_with = "deserialize_earth")]
     pub earth: Option<EarthConfig>,
 }
 
@@ -287,11 +290,42 @@ impl EarthConfig {
     }
 }
 
+fn deserialize_earth<'de, D>(deserializer: D) -> Result<Option<EarthConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum EarthField {
+        Flag(bool),
+        Config(EarthConfig),
+    }
+    Ok(match Option::<EarthField>::deserialize(deserializer)? {
+        None | Some(EarthField::Flag(false)) => None,
+        Some(EarthField::Flag(true)) => Some(EarthConfig::default()),
+        Some(EarthField::Config(config)) => Some(config),
+    })
+}
+
 impl EnvironmentConfig {
     pub fn default_ambient_scale() -> f32 {
         1.0
     }
 }
+
+/// House look matching `viewport cinematic=#true` + `environment { earth }`.
+pub fn cinematic_house_environment() -> EnvironmentConfig {
+    EnvironmentConfig {
+        sun: Some(SunConfig::default()),
+        ambient_scale: 0.05,
+        sky_color: None,
+        atmosphere: None,
+        earth: Some(EarthConfig::default()),
+    }
+}
+
+/// Cinematic viewport / sensor-camera default EV100 (daylight).
+pub const CINEMATIC_DEFAULT_EV100: f32 = 13.5;
 
 /// `atmosphere` child of the `environment` node: Bevy's procedural
 /// atmosphere (earth scattering medium) centered on a planet.
@@ -642,6 +676,109 @@ pub struct Split {
     pub active: bool,
     #[serde(default)]
     pub name: Option<String>,
+}
+
+impl Schematic {
+    pub fn viewports(&self) -> Vec<&Viewport> {
+        let mut out = Vec::new();
+        for elem in &self.elems {
+            if let SchematicElem::Panel(panel) = elem {
+                collect_viewports(panel, &mut out);
+            }
+        }
+        out
+    }
+
+    pub fn cinematic_viewports(&self) -> Vec<&Viewport> {
+        self.viewports()
+            .into_iter()
+            .filter(|viewport| viewport.cinematic)
+            .collect()
+    }
+}
+
+fn collect_viewports<'a>(panel: &'a Panel, out: &mut Vec<&'a Viewport>) {
+    match panel {
+        Panel::Viewport(viewport) => out.push(viewport),
+        Panel::VSplit(split) | Panel::HSplit(split) => {
+            for child in &split.panels {
+                collect_viewports(child, out);
+            }
+        }
+        Panel::Tabs(tabs) => {
+            for child in tabs {
+                collect_viewports(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// More than one cinematic atmosphere owner (KDL viewport and/or sensor camera).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CinematicOwnerError {
+    pub owners: Vec<String>,
+}
+
+impl fmt::Display for CinematicOwnerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Only one cinematic environment is supported.")?;
+        writeln!(f)?;
+        writeln!(
+            f,
+            "Bevy 0.19 can attach AtmosphereSettings to a single active view."
+        )?;
+        writeln!(
+            f,
+            "A second owner — a KDL viewport with cinematic=#true, or"
+        )?;
+        writeln!(
+            f,
+            "world.sensor_camera(cinematic=True) — trips wgpu bind-group"
+        )?;
+        writeln!(f, "validation and exits the process.")?;
+        writeln!(f)?;
+        writeln!(f, "Configured:")?;
+        for owner in &self.owners {
+            writeln!(f, "  - {owner}")?;
+        }
+        writeln!(f)?;
+        write!(
+            f,
+            "Fix: prototype look on a cinematic viewport, then move those\n\
+             environment / ev100 / bloom values onto exactly one sensor camera\n\
+             and remove cinematic=#true and environment {{ earth }} from the\n\
+             schematic."
+        )
+    }
+}
+
+impl std::error::Error for CinematicOwnerError {}
+
+/// At most one cinematic owner: a `viewport cinematic=#true` or a
+/// `sensor_camera(cinematic=True)`, never both, never two of either.
+pub fn validate_single_cinematic_environment(
+    schematic: Option<&Schematic>,
+    cameras: &[SensorCameraConfig],
+) -> Result<(), CinematicOwnerError> {
+    let mut owners = Vec::new();
+    if let Some(schematic) = schematic {
+        for viewport in schematic.cinematic_viewports() {
+            let name = viewport.name.as_deref().unwrap_or("unnamed");
+            owners.push(format!("viewport \"{name}\" (cinematic=#true)"));
+        }
+    }
+    for camera in cameras.iter().filter(|camera| camera.cinematic) {
+        owners.push(format!(
+            "sensor camera \"{}\" (world.sensor_camera(cinematic=True))",
+            camera.camera_name
+        ));
+    }
+    if owners.len() > 1 {
+        Err(CinematicOwnerError { owners })
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1672,6 +1809,65 @@ pub struct SensorCameraConfig {
     /// render server emits one frame per camera every `1 / fps` µs of sim time.
     #[serde(default = "default_fps")]
     pub fps: f32,
+    /// Same meaning as KDL `viewport cinematic=#true`.
+    #[serde(default)]
+    pub cinematic: bool,
+    /// Viewport `ev100`. Absent + `cinematic` uses [`CINEMATIC_DEFAULT_EV100`].
+    #[serde(default)]
+    pub ev100: Option<f32>,
+    /// Viewport `bloom { … }`. Absent + `cinematic` uses the cinematic preset.
+    #[serde(default)]
+    pub bloom: Option<BloomConfig>,
+    /// Schematic `environment { … }`. Absent + `cinematic` uses
+    /// [`cinematic_house_environment`].
+    #[serde(default)]
+    pub environment: Option<EnvironmentConfig>,
+}
+
+impl Default for SensorCameraConfig {
+    fn default() -> Self {
+        Self {
+            entity_name: String::new(),
+            camera_name: String::new(),
+            width: 0,
+            height: 0,
+            fov_degrees: 90.0,
+            near: 0.01,
+            far: 1000.0,
+            pos_offset: [0.0; 3],
+            rot_offset: [0.0; 3],
+            format: default_format(),
+            effect: String::new(),
+            effect_params: HashMap::new(),
+            create_frustum: false,
+            show_ellipsoids: false,
+            frustums_color: default_viewport_frustums_color(),
+            projection_color: default_viewport_projection_color(),
+            frustums_thickness: default_viewport_frustums_thickness(),
+            fps: default_fps(),
+            cinematic: false,
+            ev100: None,
+            bloom: None,
+            environment: None,
+        }
+    }
+}
+
+impl SensorCameraConfig {
+    pub fn resolved_environment(&self) -> Option<EnvironmentConfig> {
+        if !self.cinematic {
+            return None;
+        }
+        Some(
+            self.environment
+                .clone()
+                .unwrap_or_else(cinematic_house_environment),
+        )
+    }
+
+    pub fn cinematic_ev100(&self) -> f32 {
+        self.ev100.unwrap_or(CINEMATIC_DEFAULT_EV100)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -1726,4 +1922,101 @@ pub enum PlotMode {
     TimeSeries,
     /// XY mode: X-axis represents arbitrary numeric values, labels formatted as numbers
     XY,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cinematic_viewport(name: &str) -> Viewport {
+        Viewport {
+            name: Some(name.to_string()),
+            cinematic: true,
+            ..Default::default()
+        }
+    }
+
+    fn cinematic_camera(name: &str) -> SensorCameraConfig {
+        SensorCameraConfig {
+            camera_name: name.to_string(),
+            cinematic: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn earth_true_deserializes_to_default_config() {
+        let env: EnvironmentConfig =
+            serde_json::from_str(r#"{"earth":true,"ambient_scale":0.05}"#).unwrap();
+        assert!(env.earth.is_some());
+        assert!((env.ambient_scale - 0.05).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn one_cinematic_viewport_ok() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Panel(Panel::Viewport(cinematic_viewport(
+                "Chase",
+            )))],
+            ..Default::default()
+        };
+        validate_single_cinematic_environment(Some(&schematic), &[]).unwrap();
+    }
+
+    #[test]
+    fn one_cinematic_sensor_camera_ok() {
+        validate_single_cinematic_environment(None, &[cinematic_camera("bdx.fpv_cam")]).unwrap();
+    }
+
+    #[test]
+    fn two_cinematic_sensor_cameras_err() {
+        let err = validate_single_cinematic_environment(
+            None,
+            &[cinematic_camera("a.cam"), cinematic_camera("b.cam")],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("a.cam"), "{msg}");
+        assert!(msg.contains("b.cam"), "{msg}");
+        assert!(msg.contains("Bevy 0.19"), "{msg}");
+    }
+
+    #[test]
+    fn viewport_and_sensor_camera_err() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Panel(Panel::Viewport(cinematic_viewport(
+                "Chase",
+            )))],
+            ..Default::default()
+        };
+        let err = validate_single_cinematic_environment(
+            Some(&schematic),
+            &[cinematic_camera("bdx.fpv_cam")],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Chase"), "{msg}");
+        assert!(msg.contains("bdx.fpv_cam"), "{msg}");
+    }
+
+    #[test]
+    fn cinematic_false_has_no_resolved_environment() {
+        let camera = SensorCameraConfig {
+            environment: Some(cinematic_house_environment()),
+            ..Default::default()
+        };
+        assert!(camera.resolved_environment().is_none());
+    }
+
+    #[test]
+    fn cinematic_true_omitted_environment_uses_house_look() {
+        let camera = SensorCameraConfig {
+            cinematic: true,
+            ..Default::default()
+        };
+        let env = camera.resolved_environment().expect("house look");
+        assert!(env.earth.is_some());
+        assert!((env.ambient_scale - 0.05).abs() < f32::EPSILON);
+        assert_eq!(camera.cinematic_ev100(), CINEMATIC_DEFAULT_EV100);
+    }
 }

@@ -510,6 +510,7 @@ mod tests {
             projection_color: color(0.0, 1.0, 0.4, 0.1),
             frustums_thickness: 0.008,
             fps,
+            ..Default::default()
         }
     }
 

@@ -213,6 +213,10 @@ class WorldBuilder:
         projection_color: Optional[Sequence[float]] = None,
         frustums_thickness: float = 0.006,
         fps: float = 30.0,
+        cinematic: bool = False,
+        ev100: Optional[float] = None,
+        bloom: Optional[dict[str, object]] = None,
+        environment: Optional[dict[str, object]] = None,
     ) -> None:
         """Register a virtual sensor camera on an entity.
 
@@ -229,13 +233,22 @@ class WorldBuilder:
         ``(0, -15, 0)``, 30 degrees right bank ``(30, 0, 0)``, 90 degrees left
         yaw ``(0, 0, 90)``.
 
+        ``cinematic=True`` enables the cinematic Earth stack in the render
+        server (same meaning as KDL ``viewport cinematic=#true``). ``ev100``,
+        ``bloom``, and ``environment`` match the schematic and require
+        ``cinematic=True``. Omitted ``environment`` uses the house look
+        (Earth, 100 klx sun, ambient 0.05). At most one cinematic owner is
+        allowed: a cinematic viewport or a cinematic sensor camera, never both.
+
         The simulation never blocks on rendering. Pick the apparent camera
         latency at read time by reading with a timestamp offset:
 
             frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)
 
         Raises ``ValueError`` if ``rot_offset`` is not a finite 3-element
-        sequence or if ``fps`` is not a positive finite number.
+        sequence, if ``fps`` is not a positive finite number, if look settings
+        are passed without ``cinematic=True``, or if more than one cinematic
+        environment owner is configured.
         """
         ...
     def run(

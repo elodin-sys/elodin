@@ -167,19 +167,26 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
         // Axes Cube 3D model
         embedded_lfs_asset!(app, "assets/axes-cube.glb");
-        // Keep cinematic Earth assets out of wasm bundles.
         #[cfg(not(target_family = "wasm"))]
-        {
-            embedded_lfs_asset!(app, "assets/earth/earth_v5.glb");
-            embedded_lfs_asset!(app, "assets/earth/milky_way.cubemap.ktx2");
-            embedded_lfs_asset!(app, "assets/earth/color.ktx2");
-            embedded_lfs_asset!(app, "assets/earth/night.ktx2");
-            embedded_lfs_asset!(app, "assets/earth/clouds.ktx2");
-            embedded_lfs_asset!(app, "assets/earth/normal.ktx2");
-            embedded_lfs_asset!(app, "assets/earth/metallic_roughness.ktx2");
-            embedded_asset!(app, "assets/earth/sun_flare.png");
-        }
+        register_earth_embedded_assets(app);
     }
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn register_earth_embedded_assets(app: &mut App) {
+    embedded_lfs_asset!(app, "assets/earth/earth_v5.glb");
+    embedded_lfs_asset!(app, "assets/earth/milky_way.cubemap.ktx2");
+    embedded_lfs_asset!(app, "assets/earth/color.ktx2");
+    embedded_lfs_asset!(app, "assets/earth/night.ktx2");
+    embedded_lfs_asset!(app, "assets/earth/clouds.ktx2");
+    embedded_lfs_asset!(app, "assets/earth/normal.ktx2");
+    embedded_lfs_asset!(app, "assets/earth/metallic_roughness.ktx2");
+    embedded_asset!(app, "assets/earth/sun_flare.png");
+}
+
+pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
+    embedded_asset!(app, "./assets/diffuse.ktx2");
+    embedded_asset!(app, "./assets/specular.ktx2");
 }
 
 #[derive(Default)]
@@ -481,8 +488,7 @@ impl Plugin for EditorPlugin {
         }
 
         // For adding features incompatible with wasm:
-        embedded_asset!(app, "./assets/diffuse.ktx2");
-        embedded_asset!(app, "./assets/specular.ktx2");
+        register_ibl_embedded_assets(app);
         if cfg!(not(target_arch = "wasm32")) {
             // Bevy allocates this Depth32Float texture even before a shadow-casting
             // directional light exists. At 8192 this costs 256 MiB per array layer

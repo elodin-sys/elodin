@@ -2744,6 +2744,7 @@ mod tests {
             projection_color: Default::default(),
             frustums_thickness: 0.01,
             fps: 30.0,
+            ..Default::default()
         }]);
         let ids = sensor_camera_world_pos_ids(&configs);
         assert!(ids.contains(&ComponentId::new("cam_ball_a.world_pos")));

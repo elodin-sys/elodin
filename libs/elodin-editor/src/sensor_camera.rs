@@ -3,12 +3,13 @@ use std::time::Instant;
 use bevy::{
     app::{App, Plugin},
     asset::{Assets, embedded_asset},
-    camera::{RenderTarget, visibility::RenderLayers},
+    camera::{Exposure, Hdr, RenderTarget, visibility::RenderLayers},
     core_pipeline::{
         Core3d, Core3dSystems, FullscreenShader,
         tonemapping::{Tonemapping, tonemapping},
     },
     image::Image,
+    light::AmbientLight,
     math::{DVec3, Vec3},
     prelude::*,
     render::{
@@ -35,6 +36,9 @@ use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
 
 use crate::object_3d::{ComponentArrayExt, ELLIPSOID_RENDER_LAYER};
+use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
+use crate::plugins::scene_environment::CinematicViewport;
+use crate::ui::tiles::bloom_from_config;
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
@@ -62,6 +66,12 @@ pub struct SensorEffectSettings {
     pub param_a: f32,
     pub param_b: f32,
     pub time: f32,
+}
+
+#[derive(Component, Clone, ExtractComponent)]
+struct CinematicLdrBlit {
+    ldr_image: Handle<Image>,
+    effect_image: Option<Handle<Image>>,
 }
 
 /// Double-buffered GPU readback state for a single sensor camera.
@@ -144,6 +154,9 @@ fn sensor_post_process_pass(
     mut render_context: RenderContext,
 ) {
     let (view_target, _settings, settings_index) = view.into_inner();
+    if view_target.main_texture_format() != TextureFormat::Rgba8UnormSrgb {
+        return;
+    }
 
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
         return;
@@ -243,6 +256,155 @@ fn init_sensor_post_process_pipeline(
     });
 }
 
+#[derive(Resource)]
+struct CinematicLdrBlitPipeline {
+    bind_group_layout: BindGroupLayout,
+    sampler: Sampler,
+    pipeline_id: CachedRenderPipelineId,
+}
+
+fn init_cinematic_ldr_blit_pipeline(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    pipeline_cache: Res<PipelineCache>,
+    asset_server: Res<AssetServer>,
+    fullscreen_shader: Res<FullscreenShader>,
+) {
+    let layout_entries = BindGroupLayoutEntries::sequential(
+        ShaderStages::FRAGMENT,
+        (
+            texture_2d(TextureSampleType::Float { filterable: true }),
+            sampler(SamplerBindingType::Filtering),
+        ),
+    );
+    let layout_descriptor =
+        BindGroupLayoutDescriptor::new("cinematic_ldr_blit_bind_group_layout", &layout_entries);
+    let bind_group_layout = render_device
+        .create_bind_group_layout("cinematic_ldr_blit_bind_group_layout", &layout_entries);
+    let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+    let shader =
+        asset_server.load("embedded://elodin_editor/assets/shaders/cinematic_ldr_blit.wgsl");
+    let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
+        label: Some("cinematic_ldr_blit_pipeline".into()),
+        layout: vec![layout_descriptor.clone()],
+        vertex: fullscreen_shader.to_vertex_state(),
+        fragment: Some(FragmentState {
+            shader,
+            targets: vec![Some(ColorTargetState {
+                format: TextureFormat::Rgba8UnormSrgb,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            })],
+            ..default()
+        }),
+        ..default()
+    });
+    commands.insert_resource(CinematicLdrBlitPipeline {
+        bind_group_layout,
+        sampler,
+        pipeline_id,
+    });
+}
+
+fn cinematic_ldr_blit_pass(
+    view: ViewQuery<(&'static ViewTarget, &'static CinematicLdrBlit)>,
+    pipeline_res: Res<CinematicLdrBlitPipeline>,
+    pipeline_cache: Res<PipelineCache>,
+    gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
+    mut render_context: RenderContext,
+) {
+    let (view_target, blit) = view.into_inner();
+    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
+        return;
+    };
+    let Some(ldr) = gpu_images.get(&blit.ldr_image) else {
+        return;
+    };
+
+    let bind_group = render_context.render_device().create_bind_group(
+        "cinematic_ldr_blit_bind_group",
+        &pipeline_res.bind_group_layout,
+        &BindGroupEntries::sequential((view_target.main_texture_view(), &pipeline_res.sampler)),
+    );
+
+    let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+        label: Some("cinematic_ldr_blit_pass"),
+        color_attachments: &[Some(RenderPassColorAttachment {
+            view: &ldr.texture_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: Operations::default(),
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        ..default()
+    });
+    render_pass.set_render_pipeline(pipeline);
+    render_pass.set_bind_group(0, &bind_group, &[]);
+    render_pass.draw(0..3, 0..1);
+}
+
+fn cinematic_ldr_effect_pass(
+    view: ViewQuery<(
+        &'static CinematicLdrBlit,
+        &'static SensorEffectSettings,
+        &'static DynamicUniformIndex<SensorEffectSettings>,
+    )>,
+    pipeline_res: Res<SensorPostProcessPipeline>,
+    pipeline_cache: Res<PipelineCache>,
+    settings_uniforms: Res<ComponentUniforms<SensorEffectSettings>>,
+    gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
+    mut render_context: RenderContext,
+) {
+    let (blit, settings, settings_index) = view.into_inner();
+    if settings.effect_type == 0 {
+        return;
+    }
+    let Some(effect_image) = &blit.effect_image else {
+        return;
+    };
+    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
+        return;
+    };
+    let Some(src) = gpu_images.get(&blit.ldr_image) else {
+        return;
+    };
+    let Some(dst) = gpu_images.get(effect_image) else {
+        return;
+    };
+    let Some(settings_binding) = settings_uniforms.uniforms().binding() else {
+        return;
+    };
+
+    let bind_group = render_context.render_device().create_bind_group(
+        "cinematic_ldr_effect_bind_group",
+        &pipeline_res.bind_group_layout,
+        &BindGroupEntries::sequential((
+            &src.texture_view,
+            &pipeline_res.sampler,
+            settings_binding.clone(),
+        )),
+    );
+
+    let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+        label: Some("cinematic_ldr_effect_pass"),
+        color_attachments: &[Some(RenderPassColorAttachment {
+            view: &dst.texture_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: Operations::default(),
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        ..default()
+    });
+    render_pass.set_render_pipeline(pipeline);
+    render_pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
+    render_pass.draw(0..3, 0..1);
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -254,6 +416,7 @@ impl Plugin for SensorCameraPlugin {
         let (tx, rx) = flume::unbounded();
 
         embedded_asset!(app, "assets/shaders/sensor_post_process.wgsl");
+        embedded_asset!(app, "assets/shaders/cinematic_ldr_blit.wgsl");
 
         app.init_resource::<SensorCameraConfigs>()
             .init_resource::<SensorCamerasSpawned>()
@@ -261,6 +424,7 @@ impl Plugin for SensorCameraPlugin {
             .add_plugins((
                 ExtractComponentPlugin::<SensorEffectSettings>::default(),
                 UniformComponentPlugin::<SensorEffectSettings>::default(),
+                ExtractComponentPlugin::<CinematicLdrBlit>::default(),
             ))
             // Headless path only; editor registers load_sensor_configs_from_db in lib.rs.
             .add_systems(PreUpdate, load_sensor_configs_from_db)
@@ -289,11 +453,25 @@ impl Plugin for SensorCameraPlugin {
                         .after(RenderSystems::Render),
                 )
                 .add_systems(RenderStartup, init_sensor_post_process_pipeline)
+                .add_systems(RenderStartup, init_cinematic_ldr_blit_pipeline)
                 .add_systems(
                     Core3d,
                     sensor_post_process_pass
                         .in_set(Core3dSystems::PostProcess)
                         .after(tonemapping),
+                )
+                .add_systems(
+                    Core3d,
+                    cinematic_ldr_blit_pass
+                        .in_set(Core3dSystems::PostProcess)
+                        .after(tonemapping)
+                        .after(sensor_post_process_pass),
+                )
+                .add_systems(
+                    Core3d,
+                    cinematic_ldr_effect_pass
+                        .in_set(Core3dSystems::PostProcess)
+                        .after(cinematic_ldr_blit_pass),
                 );
         }
     }
@@ -382,6 +560,7 @@ fn spawn_sensor_cameras(
     configs: Res<SensorCameraConfigs>,
     mut images: ResMut<Assets<Image>>,
     render_device: Res<RenderDevice>,
+    asset_server: Res<AssetServer>,
     mut spawned: ResMut<SensorCamerasSpawned>,
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
@@ -392,10 +571,64 @@ fn spawn_sensor_cameras(
             depth_or_array_layers: 1,
         };
 
-        let mut render_target_image =
-            Image::new_target_texture(size.width, size.height, TextureFormat::Rgba8UnormSrgb, None);
-        render_target_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
-        let render_target_handle = images.add(render_target_image);
+        let mut cinematic_blit = None;
+        let render_target_handle = if config.cinematic {
+            let mut hdr_image = Image::new_target_texture(
+                size.width,
+                size.height,
+                TextureFormat::Rgba16Float,
+                None,
+            );
+            hdr_image.texture_descriptor.usage |= TextureUsages::TEXTURE_BINDING;
+            let hdr = images.add(hdr_image);
+
+            let mut ldr_image = Image::new_target_texture(
+                size.width,
+                size.height,
+                TextureFormat::Rgba8UnormSrgb,
+                None,
+            );
+            ldr_image.texture_descriptor.usage |=
+                TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING;
+            let ldr = images.add(ldr_image);
+
+            let effect_image = if config.effect != "normal" && !config.effect.is_empty() {
+                let mut effect = Image::new_target_texture(
+                    size.width,
+                    size.height,
+                    TextureFormat::Rgba8UnormSrgb,
+                    None,
+                );
+                effect.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+                Some(images.add(effect))
+            } else {
+                None
+            };
+
+            cinematic_blit = Some(CinematicLdrBlit {
+                ldr_image: ldr,
+                effect_image,
+            });
+            hdr
+        } else {
+            let mut render_target_image = Image::new_target_texture(
+                size.width,
+                size.height,
+                TextureFormat::Rgba8UnormSrgb,
+                None,
+            );
+            render_target_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+            images.add(render_target_image)
+        };
+
+        let copier_src = cinematic_blit.as_ref().map_or_else(
+            || render_target_handle.clone(),
+            |blit| {
+                blit.effect_image
+                    .clone()
+                    .unwrap_or_else(|| blit.ldr_image.clone())
+            },
+        );
 
         let padded_bytes_per_row =
             RenderDevice::align_copy_bytes_per_row((size.width as usize) * 4);
@@ -415,7 +648,7 @@ fn spawn_sensor_cameras(
 
         let copier = ImageCopier {
             buffers: [cpu_buffer_0, cpu_buffer_1],
-            src_image: render_target_handle.clone(),
+            src_image: copier_src,
             camera_name: config.camera_name.clone(),
             width: config.width,
             height: config.height,
@@ -455,14 +688,17 @@ fn spawn_sensor_cameras(
                 },
                 RenderTarget::Image(render_target_handle.into()),
                 Projection::Perspective(perspective),
-                Tonemapping::None,
+                if config.cinematic {
+                    Tonemapping::TonyMcMapface
+                } else {
+                    Tonemapping::None
+                },
                 bevy::render::view::Msaa::Off,
             ),
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
-            PrimarySkybox,
             SensorCamera { config_index: i },
             SensorEffectSettings {
                 effect_type,
@@ -478,12 +714,43 @@ fn spawn_sensor_cameras(
         #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
 
+        // Earth owns the cinematic cubemap (`CinematicSkybox`). Tagging this
+        // camera as `PrimarySkybox` makes the render-server wait forever for
+        // that cubemap to disappear before emitting frames.
+        if !config.cinematic {
+            entity.insert(PrimarySkybox);
+        }
+
+        if config.cinematic {
+            entity.insert((
+                Hdr,
+                CinematicViewport,
+                Exposure {
+                    ev100: config.cinematic_ev100(),
+                },
+                bloom_from_config(config.bloom.as_ref(), true),
+                AmbientLight {
+                    brightness: 0.0,
+                    ..default()
+                },
+                EnvironmentMapLight {
+                    diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
+                    specular_map: asset_server
+                        .load("embedded://elodin_editor/assets/specular.ktx2"),
+                    intensity: 2000.0,
+                    ..Default::default()
+                },
+                cinematic_blit.expect("cinematic blit target"),
+            ));
+        }
+
         bevy::log::debug!(
-            "Spawned sensor camera '{}' ({}x{}, effect={})",
+            "Spawned sensor camera '{}' ({}x{}, effect={}, cinematic={})",
             config.camera_name,
             config.width,
             config.height,
             config.effect,
+            config.cinematic,
         );
     }
 
@@ -491,12 +758,14 @@ fn spawn_sensor_cameras(
 }
 
 fn sensor_camera_render_layers(config: &SensorCameraConfig) -> RenderLayers {
-    let layers = RenderLayers::default();
-    if config.show_ellipsoids {
-        layers.with(ELLIPSOID_RENDER_LAYER)
-    } else {
-        layers
+    let mut layers = RenderLayers::default();
+    if config.cinematic {
+        layers = layers.with(CINEMATIC_EARTH_RENDER_LAYER);
     }
+    if config.show_ellipsoids {
+        layers = layers.with(ELLIPSOID_RENDER_LAYER);
+    }
+    layers
 }
 
 pub(crate) fn update_sensor_camera_render_layers(
@@ -988,6 +1257,7 @@ mod tests {
             projection_color: Default::default(),
             frustums_thickness: 0.006,
             fps: 30.0,
+            ..Default::default()
         }
     }
 

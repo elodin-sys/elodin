@@ -2,12 +2,15 @@
 
 use bevy::camera::ClearColorConfig;
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::query::Or;
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::light::{NotShadowCaster, SunDisk};
 use bevy::math::DVec3;
-use bevy::pbr::{AtmosphereMode, AtmosphereSettings};
+use bevy::pbr::{AtmosphereMode, AtmosphereSettings, ExtractedAtmosphere, GpuAtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
 use bevy::prelude::*;
+use bevy::render::sync_world::RenderEntity;
+use bevy::render::{Extract, ExtractSchedule, RenderApp};
 use bevy_geo_frames::solar::sun_direction_ecef;
 use bevy_geo_frames::{GeoContext, GeoFrame};
 use impeller2::types::Timestamp;
@@ -92,6 +95,38 @@ impl Plugin for SceneEnvironmentPlugin {
                     sync_cinematic_shadow_casters,
                 ),
             );
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.add_systems(ExtractSchedule, clear_inactive_extracted_atmosphere);
+        }
+    }
+}
+
+type InactiveAtmosphereCameras<'w, 's> = Query<
+    'w,
+    's,
+    (
+        RenderEntity,
+        &'static Camera,
+        Option<&'static AtmosphereSettings>,
+    ),
+    With<Camera3d>,
+>;
+
+/// Bevy 0.19 extracts `AtmosphereSettings` even on inactive cameras, then
+/// `prepare_atmosphere_bind_groups` panics: `ExtractedView` (and therefore
+/// `AtmosphereTransforms`) is gone, but leftover depth/atmosphere state remains.
+fn clear_inactive_extracted_atmosphere(
+    mut commands: Commands,
+    cameras: Extract<InactiveAtmosphereCameras>,
+) {
+    for (render_entity, camera, settings) in &cameras {
+        if camera.is_active && settings.is_some() {
+            continue;
+        }
+        commands
+            .entity(render_entity)
+            .remove::<ExtractedAtmosphere>()
+            .remove::<GpuAtmosphereSettings>();
     }
 }
 
@@ -362,6 +397,26 @@ fn sync_atmosphere(
     }
 }
 
+fn atmosphere_settings_owner(
+    earth: bool,
+    cinematic: Option<Entity>,
+    cameras: &[(Entity, bool)],
+) -> Option<Entity> {
+    if earth {
+        cinematic.filter(|&entity| {
+            cameras
+                .iter()
+                .any(|&(candidate, is_active)| candidate == entity && is_active)
+        })
+    } else {
+        cameras
+            .iter()
+            .filter(|(_, is_active)| *is_active)
+            .map(|(entity, _)| *entity)
+            .min()
+    }
+}
+
 fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -> bool {
     match (current, desired) {
         (ClearColorConfig::Default, ClearColorConfig::Default) => true,
@@ -421,10 +476,16 @@ type EnvironmentCameraQuery<'w, 's> = Query<
         Option<&'static AtmosphereSettings>,
         Has<CinematicViewport>,
     ),
-    (
-        With<MainCamera>,
-        Without<crate::sensor_camera::SensorCamera>,
-    ),
+    Or<(
+        (
+            With<MainCamera>,
+            Without<crate::sensor_camera::SensorCamera>,
+        ),
+        (
+            With<CinematicViewport>,
+            With<crate::sensor_camera::SensorCamera>,
+        ),
+    )>,
 >;
 
 fn sync_camera_environment(
@@ -445,30 +506,26 @@ fn sync_camera_environment(
     };
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
     let (environment_clear, regular_clear) = clear_colors(sky_color, earth);
-    // Bevy 0.19 permits AtmosphereSettings on only one active view.
+    // Bevy 0.19 permits AtmosphereSettings on only one active view, and
+    // extracting it onto an inactive camera panics in bind-group prep.
     let cinematic_cam = cinematic.iter().next();
-    let chosen = if earth {
-        atmosphere.and(cinematic_cam)
-    } else {
-        let active_count = cameras
-            .iter()
-            .filter(|(_, camera, ..)| camera.is_active)
-            .count();
-        let active = cameras
-            .iter()
-            .filter(|(_, camera, ..)| camera.is_active)
-            .map(|(entity, ..)| entity)
-            .min();
-        if atmosphere.is_some() && active_count > 1 {
-            warn_once!(
-                "schematic atmosphere renders on only one active main viewport \
-                 (Bevy 0.19: several cameras with AtmosphereSettings trip wgpu \
-                 bind-group validation and quit the editor). Other viewports keep \
-                 clear-color/IBL; switch tabs to move the sky to another pane."
-            );
-        }
-        atmosphere.and(active)
-    };
+    let camera_activity: Vec<(Entity, bool)> = cameras
+        .iter()
+        .map(|(entity, camera, ..)| (entity, camera.is_active))
+        .collect();
+    if atmosphere.is_some()
+        && !earth
+        && camera_activity.iter().filter(|(_, active)| *active).count() > 1
+    {
+        warn_once!(
+            "schematic atmosphere renders on only one active main viewport \
+             (Bevy 0.19: several cameras with AtmosphereSettings trip wgpu \
+             bind-group validation and quit the editor). Other viewports keep \
+             clear-color/IBL; switch tabs to move the sky to another pane."
+        );
+    }
+    let chosen =
+        atmosphere.and_then(|_| atmosphere_settings_owner(earth, cinematic_cam, &camera_activity));
     // Fade studio IBL out in space.
     let space_ibl_fade = 1.0 - space_visibility.0;
     for (entity, mut camera, mut light, current_settings, is_cinematic) in &mut cameras {
@@ -511,6 +568,20 @@ fn sync_camera_environment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn earth_atmosphere_settings_skip_inactive_cinematic_camera() {
+        let cinematic = Entity::from_bits(1);
+        let other = Entity::from_bits(2);
+        assert_eq!(
+            atmosphere_settings_owner(true, Some(cinematic), &[(cinematic, false), (other, true)]),
+            None
+        );
+        assert_eq!(
+            atmosphere_settings_owner(true, Some(cinematic), &[(cinematic, true)]),
+            Some(cinematic)
+        );
+    }
 
     #[test]
     fn sun_rotation_points_light_downward_at_positive_elevation() {

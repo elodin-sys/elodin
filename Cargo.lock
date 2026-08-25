@@ -8093,6 +8093,7 @@ dependencies = [
  "postcard",
  "postcard-schema",
  "serde",
+ "serde_json",
  "smallvec",
  "zerocopy",
 ]
