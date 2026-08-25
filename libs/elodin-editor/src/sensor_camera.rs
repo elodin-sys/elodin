@@ -29,6 +29,7 @@ use bevy::{
     },
 };
 use bevy_ai_skybox::prelude::PrimarySkybox;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
@@ -498,7 +499,7 @@ fn sensor_camera_render_layers(config: &SensorCameraConfig) -> RenderLayers {
     }
 }
 
-fn update_sensor_camera_render_layers(
+pub(crate) fn update_sensor_camera_render_layers(
     configs: Res<SensorCameraConfigs>,
     mut sensor_cameras: Query<(&SensorCamera, &mut RenderLayers)>,
 ) {
@@ -532,12 +533,14 @@ fn place_on_grid(
     settings: &crate::spatial::FloatingOriginSettings,
     cell: &mut crate::spatial::GridCell,
     transform: &mut Transform,
+    translation: DVec3,
 ) {
-    let (new_cell, translation) = settings.translation_to_grid(transform.translation.as_dvec3());
+    let (new_cell, local_translation) = settings.translation_to_grid(translation);
     *cell = new_cell;
-    transform.translation = translation;
+    transform.translation = local_translation;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
     mut sensor_cameras: Query<(Entity, &SensorCamera, &mut Transform)>,
@@ -545,25 +548,33 @@ fn update_sensor_camera_transforms(
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller2_bevy::TelemetryCache>,
     current_ts: Res<impeller2_wkt::CurrentTimestamp>,
+    coordinate: Res<crate::Coordinate>,
+    geo_context: Res<GeoContext>,
 ) {
     let ts = current_ts.0;
+    let frame = coordinate.0.unwrap_or_default();
     for (_entity, sensor_cam, mut transform) in &mut sensor_cameras {
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
 
-        let Some(new_transform) = sensor_camera_transform(config, &cache, ts) else {
+        let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) else {
             continue;
         };
-        *transform = new_transform;
+        transform.rotation = pose.rotation;
 
         #[cfg(feature = "big_space")]
         if let Ok(mut cell) = cells.get_mut(_entity) {
-            place_on_grid(&settings, &mut cell, &mut transform);
+            place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
+        }
+        #[cfg(not(feature = "big_space"))]
+        {
+            transform.translation = pose.translation.as_vec3();
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_sensor_camera_frustum_source_transforms(
     configs: Res<SensorCameraConfigs>,
     mut sources: Query<(
@@ -576,18 +587,25 @@ pub fn update_sensor_camera_frustum_source_transforms(
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller2_bevy::TelemetryCache>,
     current_ts: Res<impeller2_wkt::CurrentTimestamp>,
+    coordinate: Res<crate::Coordinate>,
+    geo_context: Res<GeoContext>,
 ) {
     let ts = current_ts.0;
+    let frame = coordinate.0.unwrap_or_default();
     for (_entity, source, mut transform, mut projection) in &mut sources {
         let Some(config) = configs.0.get(source.config_index) else {
             continue;
         };
 
-        if let Some(new_transform) = sensor_camera_transform(config, &cache, ts) {
-            *transform = new_transform;
+        if let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) {
+            transform.rotation = pose.rotation;
             #[cfg(feature = "big_space")]
             if let Ok(mut cell) = cells.get_mut(_entity) {
-                place_on_grid(&settings, &mut cell, &mut transform);
+                place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
+            }
+            #[cfg(not(feature = "big_space"))]
+            {
+                transform.translation = pose.translation.as_vec3();
             }
         }
 
@@ -602,15 +620,31 @@ pub fn update_sensor_camera_frustum_source_transforms(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SensorCameraPose {
+    translation: DVec3,
+    rotation: Quat,
+}
+
 fn sensor_camera_transform(
     config: &SensorCameraConfig,
     cache: &impeller2_bevy::TelemetryCache,
     ts: impeller2::types::Timestamp,
-) -> Option<Transform> {
+    frame: GeoFrame,
+    geo_context: &GeoContext,
+) -> Option<SensorCameraPose> {
     let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
     let value = cache.get_at_or_before(&world_pos_id, ts)?;
     let world_pos = value.as_world_pos()?;
+    sensor_camera_pose(config, world_pos, frame, geo_context)
+}
 
+fn sensor_camera_pose(
+    config: &SensorCameraConfig,
+    world_pos: impeller2_wkt::WorldPos,
+    frame: GeoFrame,
+    geo_context: &GeoContext,
+) -> Option<SensorCameraPose> {
     let entity_pos: DVec3 = {
         let [x, y, z] = world_pos.pos.parts().map(nox::Tensor::into_buf);
         DVec3::new(x, y, z)
@@ -633,23 +667,23 @@ fn sensor_camera_transform(
     let cam_forward_body = rot_offset_body * DVec3::X;
     let cam_up_body = rot_offset_body * DVec3::Z;
     let cam_pos = entity_pos + entity_att * pos_offset_body;
-    let look_at_pos = cam_pos + entity_att * cam_forward_body;
+    let cam_forward = entity_att * cam_forward_body;
     let cam_up = entity_att * cam_up_body;
 
-    // Z-up (sim) to Y-up (Bevy) coordinate conversion.
-    let cam_pos_bevy = Vec3::new(cam_pos.x as f32, cam_pos.z as f32, -cam_pos.y as f32);
-    let look_at_bevy = Vec3::new(
-        look_at_pos.x as f32,
-        look_at_pos.z as f32,
-        -look_at_pos.y as f32,
-    );
-    let up_bevy = Vec3::new(cam_up.x as f32, cam_up.z as f32, -cam_up.y as f32);
-
-    if cam_pos_bevy.distance(look_at_bevy) <= 1e-6 {
+    if !cam_pos.is_finite()
+        || !cam_forward.is_finite()
+        || !cam_up.is_finite()
+        || cam_forward.length_squared() <= 1e-12
+    {
         return None;
     }
 
-    Some(Transform::from_translation(cam_pos_bevy).looking_at(look_at_bevy, up_bevy))
+    Some(SensorCameraPose {
+        translation: GeoPosition(frame, cam_pos).to_bevy(geo_context),
+        rotation: GeoRotation::look_at(frame, cam_forward, Some(cam_up), geo_context)
+            .to_bevy(geo_context)
+            .as_quat(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -926,5 +960,111 @@ pub fn set_cameras_active(world: &mut World, camera_names: &[String], active: bo
         if target_indices.contains(&sensor.config_index) {
             camera.is_active = active;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_geo_frames::GeoOrigin;
+
+    fn camera_config(pos_offset: [f64; 3]) -> SensorCameraConfig {
+        SensorCameraConfig {
+            entity_name: "vehicle".into(),
+            camera_name: "camera".into(),
+            width: 640,
+            height: 480,
+            fov_degrees: 90.0,
+            near: 0.1,
+            far: 100_000.0,
+            pos_offset,
+            rot_offset: [0.0; 3],
+            format: "rgba8".into(),
+            effect: String::new(),
+            effect_params: Default::default(),
+            create_frustum: false,
+            show_ellipsoids: false,
+            frustums_color: Default::default(),
+            projection_color: Default::default(),
+            frustums_thickness: 0.006,
+            fps: 30.0,
+        }
+    }
+
+    fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller2_wkt::WorldPos {
+        impeller2_wkt::WorldPos {
+            att: nox::Quaternion::new(att.w, att.x, att.y, att.z),
+            pos: nox::Vector3::new(pos.x, pos.y, pos.z),
+        }
+    }
+
+    #[test]
+    fn enu_sensor_camera_preserves_legacy_plane_mapping() {
+        let context = GeoContext::default();
+        let config = camera_config([1.0, 2.0, 3.0]);
+        let pose = sensor_camera_pose(
+            &config,
+            world_pos(DVec3::new(10.0, 20.0, 30.0), bevy::math::DQuat::IDENTITY),
+            GeoFrame::ENU,
+            &context,
+        )
+        .expect("valid sensor camera pose");
+
+        let expected_translation = DVec3::new(11.0, 33.0, -22.0);
+        assert!(
+            pose.translation.abs_diff_eq(expected_translation, 1e-12),
+            "got {:?}, expected {expected_translation:?}",
+            pose.translation
+        );
+        let expected_rotation = Transform::from_translation(expected_translation.as_vec3())
+            .looking_at((expected_translation + DVec3::X).as_vec3(), Vec3::Y)
+            .rotation;
+        assert!(
+            pose.rotation.dot(expected_rotation).abs() > 1.0 - 1e-6,
+            "got {:?}, expected {expected_rotation:?}",
+            pose.rotation
+        );
+    }
+
+    #[test]
+    fn ecef_sensor_camera_uses_schematic_origin_rebase() {
+        let context =
+            GeoContext::from(GeoOrigin::new_from_degrees(35.350664, -117.809027, 589.274));
+        let ecef_r_enu = GeoFrame::ecef_R_(&GeoFrame::ENU, &context.origin);
+        let entity_att = bevy::math::DQuat::from_mat3(&ecef_r_enu);
+        let entity_pos = GeoFrame::ecef_M_(&GeoFrame::ENU, &context)
+            .transform_point3(DVec3::new(100.0, 200.0, 300.0));
+        let offset = DVec3::new(1.2, 0.0, 0.1);
+        let config = camera_config(offset.to_array());
+
+        let pose = sensor_camera_pose(
+            &config,
+            world_pos(entity_pos, entity_att),
+            GeoFrame::ECEF,
+            &context,
+        )
+        .expect("valid ECEF sensor camera pose");
+
+        let camera_ecef = entity_pos + entity_att * offset;
+        let expected_translation = GeoPosition(GeoFrame::ECEF, camera_ecef).to_bevy(&context);
+        assert!(
+            pose.translation.abs_diff_eq(expected_translation, 1e-8),
+            "got {:?}, expected {expected_translation:?}",
+            pose.translation
+        );
+
+        let expected_forward =
+            GeoFrame::bevy_R_(&GeoFrame::ECEF, &context) * (entity_att * DVec3::X);
+        let expected_up = GeoFrame::bevy_R_(&GeoFrame::ECEF, &context) * (entity_att * DVec3::Z);
+        let actual_forward = pose.rotation.as_dquat() * DVec3::NEG_Z;
+        let actual_up = pose.rotation.as_dquat() * DVec3::Y;
+        assert!(actual_forward.abs_diff_eq(expected_forward, 1e-6));
+        assert!(actual_up.abs_diff_eq(expected_up, 1e-6));
+
+        let legacy_unrebased = DVec3::new(camera_ecef.x, camera_ecef.z, -camera_ecef.y);
+        assert!(
+            pose.translation.distance(legacy_unrebased) > 1.0e6,
+            "ECEF pose still looks like an unrebased flat swizzle"
+        );
     }
 }

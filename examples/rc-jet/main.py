@@ -95,8 +95,8 @@ def setup_world(
         near=0.1,
         # Far plane must cover the terrain and horizon at altitude. Frustum
         # visualization shares this far plane, so keep create_frustum off.
-        far=100_000.0,
-        pos_offset=[-1.0, 0.0, 0.0],
+        far=100_000_000_000_000.0,
+        pos_offset=[1.2, 0.0, 0.1],
         rot_offset=[0.0, 0.0, 0.0],
         create_frustum=False,
     )

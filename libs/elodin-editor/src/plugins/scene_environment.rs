@@ -421,7 +421,10 @@ type EnvironmentCameraQuery<'w, 's> = Query<
         Option<&'static AtmosphereSettings>,
         Has<CinematicViewport>,
     ),
-    With<MainCamera>,
+    (
+        With<MainCamera>,
+        Without<crate::sensor_camera::SensorCamera>,
+    ),
 >;
 
 fn sync_camera_environment(

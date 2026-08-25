@@ -116,6 +116,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(
             crate::plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin,
@@ -224,6 +225,7 @@ fn load_headless_scene(
     connection_addr: Option<Res<ConnectionAddr>>,
     mut geo_context: ResMut<GeoContext>,
     mut coordinate: ResMut<crate::Coordinate>,
+    mut scene_environment: ResMut<crate::plugins::scene_environment::SceneEnvironment>,
 ) {
     // Poll an in-flight fetch. The blocking HTTP request runs on the IO pool
     // (RFD #724): a slow/unreachable DB Asset Server never freezes the app.
@@ -256,6 +258,7 @@ fn load_headless_scene(
         let Some(key) = config.schematic_active().map(str::to_owned) else {
             // The active pointer was cleared: tear down the loaded scene so the
             // renderer doesn't keep a schematic the DB no longer designates.
+            scene_environment.0 = None;
             if let Some(previous) = pending.loaded.take() {
                 despawn_headless_scene(&mut commands, &previous);
                 schematic_skybox.0 = None;
@@ -307,6 +310,7 @@ fn load_headless_scene(
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
+    scene_environment.0 = schematic.environment.clone();
 
     geo_context.origin = crate::ui::schematic::schematic_geo_origin(&schematic);
 
