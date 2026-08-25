@@ -1948,12 +1948,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                 chunk.data.release_gpu();
                 chunk.timestamps_float.release_gpu();
             }
-            if let Some(alloc) = self.data_buffer_shard_alloc.take() {
-                pool.release_value(alloc);
-            }
-            if let Some(alloc) = self.timestamp_buffer_shard_alloc.take() {
-                pool.release_value(alloc);
-            }
+            reclaim_or_release(
+                &mut self.data_buffer_shard_alloc,
+                value_class,
+                pool,
+                render_queue,
+            );
+            reclaim_or_release(
+                &mut self.timestamp_buffer_shard_alloc,
+                value_class,
+                pool,
+                render_queue,
+            );
         }
         let data_buffer_alloc = self
             .data_buffer_shard_alloc
@@ -3965,6 +3971,26 @@ pub fn value_shard_class(required: usize) -> usize {
         .unwrap_or(CHUNK_COUNT)
 }
 
+/// Hand a value buffer whose shards were all just released back to its owner or
+/// to the pool. An unchanged class means the buffer only ran out of free shards,
+/// so reclaim it in place: the pool would keep it quarantined and hand out a
+/// second buffer of the same size in its place.
+fn reclaim_or_release(
+    slot: &mut Option<BufferShardAlloc>,
+    value_class: usize,
+    pool: &mut PlotGpuBufferPool,
+    render_queue: &RenderQueue,
+) {
+    match slot.take() {
+        Some(mut alloc) if alloc.capacity_shards() == value_class => {
+            alloc.reset_shards(render_queue);
+            *slot = Some(alloc);
+        }
+        Some(alloc) => pool.release_value(alloc),
+        None => {}
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlotGpuPoolSnapshot {
     pub value_live: usize,
@@ -4305,6 +4331,17 @@ impl BufferShardAlloc {
     pub fn used_shards(&self) -> usize {
         self.data_capacity
             .saturating_sub(self.free_map.len() as usize)
+    }
+
+    /// Free every shard at once. Callers must have released the GPU copies that
+    /// referenced them, since `release_gpu` drops a shard without deallocating it.
+    pub fn reset_shards(&mut self, render_queue: &RenderQueue) {
+        self.free_map = RoaringBitmap::new();
+        for i in 0..=self.data_capacity as u32 {
+            self.free_map.insert(i);
+        }
+        let shard = self.alloc().expect("couldn't alloc nan");
+        render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
     }
 
     pub fn dealloc(&mut self, shard: BufferShard) {
