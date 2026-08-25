@@ -159,9 +159,6 @@ An external flight-software process driven over UDP, alongside the sim.
 
 ## By Elodin object
 
-Same idea as Bevy's "2D Rendering / ECS / Shaders" pages: pick the primitive
-you want to learn, then open the example that uses it.
-
 ### World, Body, six_dof
 
 `el.World`, `el.Body` (`WorldPos` / `WorldVel` / `Inertia` / `Force`), and
