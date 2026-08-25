@@ -139,11 +139,10 @@ class DroneConfig:
 
     # --- Simulation Settings ---
 
-    # Physics/PID lockstep rate in Hz. 4kHz is the default and holds real-time;
-    # higher rates (e.g. 8kHz) run slightly slower than real time because each
-    # tick includes a UDP round trip.
-    simulation_rate: float = 4000.0  # 250µs
-    # simulation_rate: float = 8000.0  # 125µs
+    # Physics/PID lockstep rate in Hz. The default 8kHz loop uses a busy-waiting
+    # Betaflight SITL build to avoid host scheduler wakeup latency.
+    simulation_rate: float = 8000.0  # 125µs
+    # simulation_rate: float = 4000.0  # 250µs
     # simulation_rate: float = 2000.0  # 500µs
     # simulation_rate: float = 1500.0  # 667µs
     # simulation_rate: float = 1000.0  # 1000µs

@@ -5,16 +5,16 @@ This module simulates the IMU (Inertial Measurement Unit) and other sensors
 that provide data to Betaflight's flight controller algorithms.
 
 Sensor Models (configured targets; effective rates are capped by the physics rate):
-- Gyroscope: Measures angular velocity in body frame (8 kHz target, 1 kHz default)
-- Accelerometer: Measures linear acceleration in body frame (4.8 kHz target, 1 kHz default)
-- Barometer: Measures altitude via pressure (480 Hz target, 500 Hz default)
-- Magnetometer: Measures heading reference (200 Hz target and default)
+- Gyroscope: Measures angular velocity in body frame (8 kHz target and default)
+- Accelerometer: Measures linear acceleration in body frame (4.8 kHz target, 4 kHz effective)
+- Barometer: Measures altitude via pressure (480 Hz target, ~471 Hz effective)
+- Magnetometer: Measures heading reference (200 Hz target and effective)
 
 Multi-Rate Simulation:
 Sensors request rates based on the Elodin Aleph flight controller hardware
 (BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The physics/PID lockstep
-runs at 1kHz by default, so faster sensor targets are capped at 1kHz and slower
-sensors use tick decimation.
+runs at 8kHz by default. Slower sensors use whole-tick decimation, so their
+actual rates are the closest rates representable at 8kHz.
 
 Noise Model (from proven drone example):
 - Gaussian measurement noise on each sample
@@ -427,7 +427,7 @@ def create_baro_system(config: DroneConfig):
         """
         Compute barometer reading with multi-rate decimation.
 
-        Updates at baro_tick_interval (every 2 ticks at the default 1kHz rate).
+        Updates at baro_tick_interval (every 17 ticks at the default 8kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_baro_reading(tick, pos)
@@ -482,7 +482,7 @@ def create_mag_system(config: DroneConfig):
         """
         Compute magnetometer reading with multi-rate decimation.
 
-        Updates at mag_tick_interval (every 5 ticks at the default 1kHz rate).
+        Updates at mag_tick_interval (every 40 ticks at the default 8kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_mag_reading(tick, pos)
@@ -534,9 +534,9 @@ def create_sensor_system(config: DroneConfig) -> el.System:
     Create the complete sensor system with multi-rate simulation.
 
     Combines sensors at their configured target rates, capped by the physics rate:
-    - Gyroscope: 8 kHz target (1 kHz at the default physics rate)
-    - Accelerometer: 4.8 kHz target (1 kHz at the default physics rate)
-    - Barometer: 480 Hz target (500 Hz after whole-tick rounding at 1 kHz)
+    - Gyroscope: 8 kHz target and effective default rate
+    - Accelerometer: 4.8 kHz target (4 kHz after whole-tick rounding at 8 kHz)
+    - Barometer: 480 Hz target (~471 Hz after whole-tick rounding at 8 kHz)
     - Magnetometer: 200 Hz target and effective rate
 
     Args:
