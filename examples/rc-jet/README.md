@@ -73,9 +73,7 @@ elodin editor examples/rc-jet/main.py
 ```
 
 The RC controller starts automatically (FrSky-style gamepad or keyboard) and
-sends `bdx.control_commands` at 60 Hz. Until you touch a stick, an idle
-pilot flies gentle banks so the instruments have something to show; the
-first elevator/aileron/rudder input hands the aircraft over for good.
+sends `bdx.control_commands` at 60 Hz.
 
 ### Control mapping (Mode 2)
 

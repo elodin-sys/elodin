@@ -12,8 +12,6 @@ use device_query::{DeviceQuery, DeviceState, Keycode};
 use gilrs::{Axis, Gilrs};
 use std::f64::consts::PI;
 
-use crate::demo::IdlePilot;
-
 /// Throttle held when no one is on the sticks: the package cruise trim
 /// (results/bdx/baseline trim_map cruise row, effective throttle 0.2125).
 const IDLE_THROTTLE: f64 = 0.21;
@@ -28,17 +26,6 @@ const MAX_RUDDER_RAD: f64 = 30.0 * PI / 180.0;
 // stick right and right-arrow roll right, Q/A yaw left and E/D yaw right.
 // Rudder still uses the plant's TE-left = nose-left convention, so E
 // (yaw right) is a negative rudder command.
-
-/// Fraction of full throw a surface must move before someone counts as flying.
-///
-/// A tenth of throw sits between the two cases that matter. Below it: a gamepad
-/// axis that trim or a sloppy calibration parks a little past the deadzone,
-/// which the `(axis - deadzone) / (1 - deadzone)` rescale then multiplies by the
-/// throw — a raw 0.15 is only 1.4° of elevator, and a raw 0.1021 is the 0.057°
-/// that a bare `1e-3` rad test would have read as a pilot on the sticks. Above
-/// it: every input a pilot can actually make, the smallest being the half-throw
-/// of an arrow key.
-const PILOT_INPUT_FRACTION: f64 = 0.1;
 
 /// Stick mode configuration
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -70,20 +57,6 @@ impl ControlInput {
     }
 }
 
-/// Whether a human is on the sticks: any control surface deliberately moved,
-/// i.e. past [`PILOT_INPUT_FRACTION`] of its throw. Merely off neutral is not
-/// enough — a resting gamepad axis is rarely exactly centred.
-///
-/// The throttle is deliberately no evidence at all. A ratcheted transmitter
-/// reports a throttle stick far off centre from the moment it is plugged in,
-/// so reading that as "someone is flying" would retire the idle pilot before
-/// it ever flew a bank.
-fn is_flying(input: &ControlInput) -> bool {
-    input.elevator.abs() > PILOT_INPUT_FRACTION * MAX_DEFLECTION_RAD
-        || input.aileron.abs() > PILOT_INPUT_FRACTION * MAX_DEFLECTION_RAD
-        || input.rudder.abs() > PILOT_INPUT_FRACTION * MAX_RUDDER_RAD
-}
-
 /// Merge the two input sources. Each surface takes whichever device asks for
 /// more of it, so the gamepad stays primary wherever it is actually deflected;
 /// the throttle is the gamepad's only once its stick has been moved, since a
@@ -106,8 +79,7 @@ fn combine(gamepad: ControlInput, keyboard: ControlInput, gamepad_throttle: bool
 /// Comparing deflections rather than testing the gamepad against a small
 /// threshold is what keeps a stick left off centre by trim from swallowing a
 /// held key: such an axis is a thousandth of a radian of surface, which used to
-/// out-vote an arrow key's half throw and leave [`is_flying`] reading the trim
-/// instead of the pilot.
+/// out-vote an arrow key's half throw.
 fn dominant(gamepad: f64, keyboard: f64) -> f64 {
     if gamepad.abs() >= keyboard.abs() {
         gamepad
@@ -132,8 +104,6 @@ pub struct InputReader {
     /// an untouched pad would otherwise out-vote the keyboard. A transmitter's
     /// ratcheted throttle sits off centre, so it latches on the first read.
     gamepad_throttle_engaged: bool,
-    /// Flies gentle banks until the human takes over
-    idle_pilot: IdlePilot,
 }
 
 impl InputReader {
@@ -173,7 +143,7 @@ impl InputReader {
         // DISPLAY set?" is not enough — probe the X11 socket first.
         let device_state = try_device_state();
         if device_state.is_none() {
-            tracing::info!("No X display; keyboard input disabled, idle pilot flies");
+            tracing::info!("No X display; keyboard input disabled");
         }
 
         Self {
@@ -186,7 +156,6 @@ impl InputReader {
                 ..Default::default()
             },
             gamepad_throttle_engaged: false,
-            idle_pilot: IdlePilot::default(),
         }
     }
 
@@ -206,13 +175,7 @@ impl InputReader {
         // Read keyboard input
         let keyboard_input = self.read_keyboard();
 
-        let mut combined = combine(gamepad_input, keyboard_input, self.gamepad_throttle_engaged);
-
-        // Hand the ailerons to the idle pilot until the human flies. Done
-        // before smoothing so the handover blends like any other input.
-        if let Some(aileron) = self.idle_pilot.aileron(is_flying(&combined)) {
-            combined.aileron = aileron;
-        }
+        let combined = combine(gamepad_input, keyboard_input, self.gamepad_throttle_engaged);
 
         // Apply some smoothing
         let smoothing = 0.3;
@@ -404,9 +367,10 @@ mod tests {
 
     #[test]
     fn untouched_gamepad_keeps_the_idle_throttle() {
-        let combined = combine(IDLE_GAMEPAD, IDLE_KEYBOARD, false);
-        assert_eq!(combined.throttle, IDLE_THROTTLE);
-        assert!(!is_flying(&combined));
+        assert_eq!(
+            combine(IDLE_GAMEPAD, IDLE_KEYBOARD, false).throttle,
+            IDLE_THROTTLE
+        );
     }
 
     #[test]
@@ -419,49 +383,20 @@ mod tests {
     }
 
     /// A ratcheted transmitter (FrSky and friends) reports its throttle stick
-    /// far off centre the moment it is plugged in. It rightly wins the throttle,
-    /// but it must not pass for a pilot on the sticks, or the idle banks the
-    /// README promises would never fly with the very hardware it highlights.
+    /// far off centre the moment it is plugged in, so once latched it rightly
+    /// wins the throttle merge.
     #[test]
-    fn a_ratcheted_transmitter_still_lets_the_idle_pilot_fly() {
+    fn a_ratcheted_transmitter_wins_the_throttle() {
         let transmitter = ControlInput {
             throttle: 0.75,
             ..IDLE_GAMEPAD
         };
-        let combined = combine(transmitter, IDLE_KEYBOARD, true);
-        assert_eq!(combined.throttle, 0.75);
-        assert!(!is_flying(&combined));
-        assert!(
-            IdlePilot::default().aileron(is_flying(&combined)).is_some(),
-            "a connected transmitter must not retire the idle pilot"
-        );
+        assert_eq!(combine(transmitter, IDLE_KEYBOARD, true).throttle, 0.75);
     }
 
-    /// A gamepad axis that trim or calibration parks a little past the
-    /// deadzone. The rescale makes such an axis map to a fraction of a degree
-    /// of surface, which is nobody flying — the idle banks must still run, on
-    /// the very FrSky-style hardware the README highlights.
-    #[test]
-    fn a_trimmed_gamepad_axis_still_lets_the_idle_pilot_fly() {
-        for raw in [0.1021, 0.11, 0.15, -0.15, 0.17] {
-            let gamepad = ControlInput {
-                elevator: apply_deadzone(raw) * MAX_DEFLECTION_RAD,
-                aileron: apply_deadzone(raw) * MAX_DEFLECTION_RAD,
-                rudder: apply_deadzone(raw) * MAX_RUDDER_RAD,
-                ..IDLE_GAMEPAD
-            };
-            let combined = combine(gamepad, IDLE_KEYBOARD, false);
-            assert!(!is_flying(&combined), "raw axis {raw} read as flying");
-            assert!(
-                IdlePilot::default().aileron(is_flying(&combined)).is_some(),
-                "raw axis {raw} retired the idle pilot"
-            );
-        }
-    }
-
-    /// A trimmed axis is nobody flying, but it must not silence the pilot who
-    /// is: the keys have to reach the surfaces and hand the aircraft over, even
-    /// on the axis the trim sits on.
+    /// A gamepad axis that trim or calibration parks a little past the deadzone
+    /// must not silence the pilot who is flying: the keys have to reach the
+    /// surfaces, even on the axis the trim sits on.
     #[test]
     fn a_trimmed_gamepad_axis_does_not_swallow_a_held_key() {
         for raw in [0.1021, 0.11, 0.15, -0.15, 0.17] {
@@ -481,11 +416,6 @@ mod tests {
             assert_eq!(combined.elevator, keyboard.elevator, "raw axis {raw}");
             assert_eq!(combined.aileron, keyboard.aileron, "raw axis {raw}");
             assert_eq!(combined.rudder, keyboard.rudder, "raw axis {raw}");
-            assert!(is_flying(&combined), "raw axis {raw} hid the pilot");
-            assert!(
-                IdlePilot::default().aileron(is_flying(&combined)).is_none(),
-                "raw axis {raw} kept the idle pilot flying under a held key"
-            );
         }
     }
 
@@ -506,28 +436,10 @@ mod tests {
         }
     }
 
-    /// The idle pilot's own fingertip aileron is not a pilot input either, or
-    /// the demo would retire itself on the tick after it started.
+    /// The smallest input a pilot can actually make reaches the surfaces
+    /// untouched: arrow keys and A/D are half throw.
     #[test]
-    fn the_idle_pilot_does_not_retire_itself() {
-        let aileron = IdlePilot::default()
-            .aileron(false)
-            .expect("idle pilot flies");
-        let combined = combine(
-            ControlInput {
-                aileron,
-                ..IDLE_GAMEPAD
-            },
-            IDLE_KEYBOARD,
-            false,
-        );
-        assert!(!is_flying(&combined));
-    }
-
-    /// The smallest input a pilot can actually make, from either device, has to
-    /// hand over: arrow keys and Q/E or A/D are half throw.
-    #[test]
-    fn the_smallest_keyboard_input_flies() {
+    fn the_smallest_keyboard_input_reaches_the_surfaces() {
         for keyboard in [
             ControlInput {
                 elevator: MAX_DEFLECTION_RAD * 0.5,
@@ -542,30 +454,23 @@ mod tests {
                 ..IDLE_KEYBOARD
             },
         ] {
-            assert!(is_flying(&combine(IDLE_GAMEPAD, keyboard, false)));
+            let combined = combine(IDLE_GAMEPAD, keyboard, false);
+            assert_eq!(combined.elevator, keyboard.elevator);
+            assert_eq!(combined.aileron, keyboard.aileron);
+            assert_eq!(combined.rudder, keyboard.rudder);
         }
     }
 
-    /// A stick moved well clear of the deadzone: a quarter of throw is already
-    /// a deliberate input.
     #[test]
-    fn a_deflected_stick_flies() {
+    fn a_deflected_stick_reaches_the_surfaces() {
         let gamepad = ControlInput {
             aileron: apply_deadzone(0.35) * MAX_DEFLECTION_RAD,
             ..IDLE_GAMEPAD
         };
-        assert!(is_flying(&combine(gamepad, IDLE_KEYBOARD, false)));
-    }
-
-    #[test]
-    fn stick_deflection_flies() {
-        let gamepad = ControlInput {
-            aileron: 0.1,
-            ..IDLE_GAMEPAD
-        };
-        let combined = combine(gamepad, IDLE_KEYBOARD, false);
-        assert_eq!(combined.aileron, 0.1);
-        assert!(is_flying(&combined));
+        assert_eq!(
+            combine(gamepad, IDLE_KEYBOARD, false).aileron,
+            gamepad.aileron
+        );
     }
 
     /// A pad that goes away contributes a zeroed input with its throttle latch
@@ -581,17 +486,6 @@ mod tests {
         let combined = combine(ControlInput::default(), keyboard, false);
         assert_eq!(combined.throttle, 0.9);
         assert_eq!(combined.elevator, 0.2);
-    }
-
-    /// Throttling up with W is not flying either: the demo keeps the wings
-    /// working until a surface moves, which is what the ADI is there to show.
-    #[test]
-    fn throttle_alone_is_not_flying() {
-        let keyboard = ControlInput {
-            throttle: IDLE_THROTTLE + 0.05,
-            ..IDLE_KEYBOARD
-        };
-        assert!(!is_flying(&combine(IDLE_GAMEPAD, keyboard, false)));
     }
 
     #[test]
