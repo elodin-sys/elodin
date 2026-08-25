@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-820/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-820/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-820/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-820/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-820/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-820/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>gRPC Client | Elodin</title>
+<meta name="description" content="Use Elodin DB from C++, Python, and other gRPC clients">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-820/logo.png">
+  
+  <meta name="twitter:title" content="gRPC Client">
+  <meta name="twitter:description" content="Use Elodin DB from C++, Python, and other gRPC clients">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="gRPC Client">
+  <meta property="og:description" content="Use Elodin DB from C++, Python, and other gRPC clients">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-820/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="gRPC Client">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-820/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-820/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Db",
+            "item": "https://docs.elodin.systems/preview/pr-820/home/db/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Grpc Client",
+            "item": "https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.19.0" selected>
+                        v0.19.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-820/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-820/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-820/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-820/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-820/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-820/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-820/home/apollo-lander/"
+                    >Apollo Lander</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/db/python-client/"
+                    >Python Client</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-820/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#generate-a-client">Generate a client</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#python">Python</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#c">C++</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#quick-start-acknowledged-telemetry">Quick start: acknowledged telemetry</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#ingest-contracts">Ingest contracts</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#schemas-and-row-encodings">Schemas and row encodings</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#resume-and-acknowledgements">Resume and acknowledgements</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#discovery-and-historical-reads">Discovery and historical reads</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#live-streams-and-playback">Live streams and playback</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#message-logs">Message logs</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#configuration-metadata-and-assets">Configuration, metadata, and assets</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#authentication-errors-and-limits">Authentication, errors, and limits</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-820/home/db/grpc-client/#runnable-references">Runnable references</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>gRPC Client</h1>
+                  
+                  <p class="lead">Use the versioned protobuf API to ingest, query, and stream Elodin DB data from any gRPC-supported language.</p>
+                   <p>Elodin DB exposes a first-class gRPC API for applications that cannot use its
+native Rust and Impeller interfaces. The same <code>elodin.db.v1</code> contract generates
+typed clients for C++, Python, and every other language supported by gRPC. See
+the <a href="/reference/grpc-client">gRPC API reference</a> for every RPC and message.</p>
+<p>Use gRPC when you need a stable cross-language contract, acknowledged and
+resumable writes, historical queries, playback streams, message logs, or
+administrative access. Python-only applications that prefer a higher-level API
+can use the <a href="/home/db/python-client">Python Client</a>. Native Elodin processes
+should continue to use Impeller and VTables.</p>
+<p>The endpoint starts automatically two ports above the native listener:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2240</span><span style="color: light-dark(#2AA198, #2AA198);"> ./db</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Native: 2240, asset HTTP: 2241, gRPC: 2242</span></span></code></pre>
+<p>The endpoint serves the application services, standard gRPC health checking,
+and server reflection. The source contracts live in
+<code>libs/db/proto/elodin/db/v1</code>.</p>
+<h2 id="generate-a-client">Generate a client</h2>
+<h3 id="python">Python</h3>
+<p>Install the gRPC runtime and compiler, then generate modules from the checked-in
+contracts:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">python</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">m</span><span style="color: light-dark(#2AA198, #2AA198);"> pip</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#2AA198, #2AA198);"> grpcio</span><span style="color: light-dark(#2AA198, #2AA198);"> grpcio-tools</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">mkdir</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">p</span><span style="color: light-dark(#2AA198, #2AA198);"> generated</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">python</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">m</span><span style="color: light-dark(#2AA198, #2AA198);"> grpc_tools.protoc</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">I</span><span style="color: light-dark(#2AA198, #2AA198);"> libs/db/proto</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-python_out=generated</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-grpc_python_out=generated</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">  libs/db/proto/elodin/db/v1/</span><span style="color: light-dark(#268BD2, #268BD2);">*</span><span style="color: light-dark(#2AA198, #2AA198);">.proto</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> PYTHONPATH</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">PWD</span><span style="color: light-dark(#2AA198, #2AA198);">/generated</span><span style="color: light-dark(#859900, #859900);">$</span><span style="color: light-dark(#859900, #859900);">{</span><span style="color: light-dark(#268BD2, #268BD2);">PYTHONPATH</span><span style="color: light-dark(#859900, #859900);">:</span><span style="color: light-dark(#2AA198, #2AA198);">+</span><span style="color: light-dark(#859900, #859900);">:</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">PYTHONPATH</span><span style="color: light-dark(#859900, #859900);">}</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre>
+<p>Install <code>pyarrow</code> as well when decoding SQL results.</p>
+<h3 id="c">C++</h3>
+<p>Elodin packages the generated protobuf and gRPC sources as
+<code>elodin-db-protos</code>:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="cmake"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">find_package</span><span>(elodin-db-protos REQUIRED CONFIG)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">target_link_libraries</span><span>(my_client </span><span>PRIVATE</span><span> elodin-db-protos::elodin-db-protos)</span></span></code></pre>
+<p>Headers use paths such as <code>elodin/db/v1/ingest.grpc.pb.h</code>. The complete
+reference client is <code>libs/db/examples/grpc-client-batched.cpp</code>.</p>
+<h2 id="quick-start-acknowledged-telemetry">Quick start: acknowledged telemetry</h2>
+<p>An ingest stream starts with exactly one <code>SessionOpen</code>. The server validates
+the schema and returns session-scoped handles before accepting rows:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> hashlib</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> os</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> queue</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> struct</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> time</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> grpc</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> elodin</span><span>.</span><span>db</span><span>.</span><span>v1</span><span style="color: light-dark(#859900, #859900);"> import</span><span> common_pb2</span><span>,</span><span> ingest_pb2</span><span>,</span><span> ingest_pb2_grpc</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>channel</span><span style="color: light-dark(#859900, #859900);"> =</span><span> grpc</span><span>.</span><span>insecure_channel</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:2242</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>grpc</span><span>.</span><span>channel_ready_future</span><span>(</span><span>channel</span><span>)</span><span>.</span><span>result</span><span>(</span><span>timeout</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">10</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>schema</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ingest_pb2</span><span>.</span><span>SchemaSet</span><span>(</span><span>messages</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span></span>
+<span class="giallo-l"><span>    ingest_pb2</span><span>.</span><span>MessageSchema</span><span>(</span></span>
+<span class="giallo-l"><span>        name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sensor.row</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        encoding</span><span style="color: light-dark(#859900, #859900);">=</span><span>ingest_pb2</span><span>.</span><span style="color: light-dark(#CB4B16, #CB4B16);">ROW_ENCODING_PACKED</span><span>,</span></span>
+<span class="giallo-l"><span>        packed_size</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">8</span><span>,</span></span>
+<span class="giallo-l"><span>        components</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span></span>
+<span class="giallo-l"><span>            ingest_pb2</span><span>.</span><span>ComponentSchema</span><span>(</span></span>
+<span class="giallo-l"><span>                name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sensor.pressure</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>                prim_type</span><span style="color: light-dark(#859900, #859900);">=</span><span>common_pb2</span><span>.</span><span style="color: light-dark(#CB4B16, #CB4B16);">PRIM_TYPE_F64</span><span>,</span></span>
+<span class="giallo-l"><span>                packed_offset</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>,</span></span>
+<span class="giallo-l"><span>            )</span></span>
+<span class="giallo-l"><span>        ]</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"><span>]</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>outgoing</span><span style="color: light-dark(#859900, #859900);"> =</span><span> queue</span><span>.</span><span>Queue</span><span>(</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> requests</span><span>(</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    while</span><span> (</span><span>request</span><span style="color: light-dark(#859900, #859900);"> :=</span><span> outgoing</span><span>.</span><span>get</span><span>(</span><span>)</span><span>)</span><span style="color: light-dark(#859900, #859900);"> is</span><span style="color: light-dark(#859900, #859900);"> not</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        yield</span><span> request</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>responses</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ingest_pb2_grpc</span><span>.</span><span>IngestServiceStub</span><span>(</span><span>channel</span><span>)</span><span>.</span><span>Ingest</span><span>(</span><span>requests</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>outgoing</span><span>.</span><span>put</span><span>(</span><span>ingest_pb2</span><span>.</span><span>IngestRequest</span><span>(</span><span>open</span><span style="color: light-dark(#859900, #859900);">=</span><span>ingest_pb2</span><span>.</span><span>SessionOpen</span><span>(</span></span>
+<span class="giallo-l"><span>    client_name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sensor-bridge</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    client_instance_id</span><span style="color: light-dark(#859900, #859900);">=</span><span>os</span><span>.</span><span>urandom</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">16</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    schema</span><span style="color: light-dark(#859900, #859900);">=</span><span>schema</span><span>,</span></span>
+<span class="giallo-l"><span>    schema_fingerprint</span><span style="color: light-dark(#859900, #859900);">=</span><span>hashlib</span><span>.</span><span>sha256</span><span>(</span></span>
+<span class="giallo-l"><span>        schema</span><span>.</span><span>SerializeToString</span><span>(</span><span>deterministic</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">True</span><span>)</span></span>
+<span class="giallo-l"><span>    )</span><span>.</span><span>digest</span><span>(</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ack_policy</span><span style="color: light-dark(#859900, #859900);">=</span><span>common_pb2</span><span>.</span><span>AckPolicy</span><span>(</span><span>max_unacked_rows</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">32</span><span>,</span><span> max_ack_delay_ms</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">20</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>accepted</span><span style="color: light-dark(#859900, #859900);"> =</span><span style="color: light-dark(#268BD2, #268BD2);"> next</span><span>(</span><span>responses</span><span>)</span><span>.</span><span>accept</span></span>
+<span class="giallo-l"><span>handle</span><span style="color: light-dark(#859900, #859900);"> =</span><span> accepted</span><span>.</span><span>message_handles</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sensor.row</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span></span>
+<span class="giallo-l"><span>sequence</span><span style="color: light-dark(#859900, #859900);"> =</span><span> accepted</span><span>.</span><span>resume_from_seq</span><span style="color: light-dark(#859900, #859900);"> +</span><span style="color: light-dark(#D33682, #D33682);"> 1</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>outgoing</span><span>.</span><span>put</span><span>(</span><span>ingest_pb2</span><span>.</span><span>IngestRequest</span><span>(</span><span>batch</span><span style="color: light-dark(#859900, #859900);">=</span><span>ingest_pb2</span><span>.</span><span>TelemetryBatch</span><span>(</span></span>
+<span class="giallo-l"><span>    first_seq</span><span style="color: light-dark(#859900, #859900);">=</span><span>sequence</span><span>,</span></span>
+<span class="giallo-l"><span>    rows</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span>ingest_pb2</span><span>.</span><span>Row</span><span>(</span></span>
+<span class="giallo-l"><span>        message_handle</span><span style="color: light-dark(#859900, #859900);">=</span><span>handle</span><span>,</span></span>
+<span class="giallo-l"><span>        time_monotonic_ns</span><span style="color: light-dark(#859900, #859900);">=</span><span>time</span><span>.</span><span>monotonic_ns</span><span>(</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        packed</span><span style="color: light-dark(#859900, #859900);">=</span><span>struct</span><span>.</span><span>pack</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">&lt;d</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 101_325.0</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>outgoing</span><span>.</span><span>put</span><span>(</span><span style="color: light-dark(#B58900, #B58900);">None</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">for</span><span> response</span><span style="color: light-dark(#859900, #859900);"> in</span><span> responses</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    if</span><span> response</span><span>.</span><span>HasField</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">error</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        raise</span><span style="color: light-dark(#CB4B16, #CB4B16);"> RuntimeError</span><span>(</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">f</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">row </span><span style="color: light-dark(#CB4B16, #CB4B16);">{</span><span>response</span><span>.</span><span>error</span><span>.</span><span>seq</span><span style="color: light-dark(#CB4B16, #CB4B16);">}</span><span style="color: light-dark(#2AA198, #2AA198);">: </span><span style="color: light-dark(#CB4B16, #CB4B16);">{</span><span>response</span><span>.</span><span>error</span><span>.</span><span>detail</span><span style="color: light-dark(#CB4B16, #CB4B16);">}</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    if</span><span> response</span><span>.</span><span>HasField</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ack</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#859900, #859900);"> and</span><span> response</span><span>.</span><span>ack</span><span>.</span><span>through_seq</span><span style="color: light-dark(#859900, #859900);"> &gt;=</span><span> sequence</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        break</span></span></code></pre>
+<p>Reuse one channel and stream for sustained writers. The C++ reference uses one
+reader thread and one writer thread so batches can remain in flight while
+cumulative acknowledgements arrive.</p>
+<h2 id="ingest-contracts">Ingest contracts</h2>
+<h3 id="schemas-and-row-encodings">Schemas and row encodings</h3>
+<p>A <code>SchemaSet</code> groups messages by rate and layout. Each <code>MessageSchema</code> contains
+one or more fixed-shape components:</p>
+<ul>
+<li><code>prim_type</code> supports all integer widths, <code>f32</code>, <code>f64</code>, and <code>bool</code>;</li>
+<li>an empty <code>dims</code> list is a scalar; non-empty dimensions describe a dense
+tensor;</li>
+<li><code>element_names</code> label tensor elements for plotting;</li>
+<li><code>timestamp_source</code> marks an <code>i64</code> or <code>u64</code> component whose nanosecond value
+supplies record time.</li>
+</ul>
+<p><code>ROW_ENCODING_PACKED</code> is the efficient path for fixed-layout producers. Every
+component declares a byte offset, and each row carries one little-endian byte
+buffer of exactly <code>packed_size</code>. <code>ROW_ENCODING_TYPED</code> carries a
+<code>ComponentValue</code> per component and is convenient for dynamic clients.</p>
+<p>All <code>*_ns</code> fields are nanoseconds on the wire. Elodin DB floors record time to
+its microsecond storage grid while preserving a timestamp-source component's
+original nanosecond value as data.</p>
+<h3 id="resume-and-acknowledgements">Resume and acknowledgements</h3>
+<p>Rows are numbered from 1. Keep <code>client_name</code> and <code>client_instance_id</code> stable
+while reconnecting the same logical writer. After <code>SessionAccept</code>, resend every
+row above <code>resume_from_seq</code>.</p>
+<p>Delivery is at least once. <code>WriteAck.through_seq</code> means every covered row was
+processed: it is visible to readers, or a preceding <code>RowError</code> reported its
+rejection. Resume positions persist periodically, so a server crash may resume
+slightly before the last ack. Rows covered by the persisted sequence are
+skipped, but recent complete rows above it may appear twice after a crash.</p>
+<p><code>RowError</code> is non-terminal and always arrives before the ack that covers its
+sequence. Schema conflicts reject the session before any row is applied.</p>
+<h2 id="discovery-and-historical-reads">Discovery and historical reads</h2>
+<p><code>QueryService</code> provides typed operations for common reads:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> elodin</span><span>.</span><span>db</span><span>.</span><span>v1</span><span style="color: light-dark(#859900, #859900);"> import</span><span> query_pb2</span><span>,</span><span> query_pb2_grpc</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>query</span><span style="color: light-dark(#859900, #859900);"> =</span><span> query_pb2_grpc</span><span>.</span><span>QueryServiceStub</span><span>(</span><span>channel</span><span>)</span></span>
+<span class="giallo-l"><span>info</span><span style="color: light-dark(#859900, #859900);"> =</span><span> query</span><span>.</span><span>GetServerInfo</span><span>(</span><span>query_pb2</span><span>.</span><span>GetServerInfoRequest</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">print</span><span>(</span><span>info</span><span>.</span><span>build_version</span><span>,</span><span> info</span><span>.</span><span>max_message_size_bytes</span><span>,</span><span> info</span><span>.</span><span>features</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>metadata</span><span style="color: light-dark(#859900, #859900);"> =</span><span> query</span><span>.</span><span>DumpMetadata</span><span>(</span><span>query_pb2</span><span>.</span><span>DumpMetadataRequest</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>schemas</span><span style="color: light-dark(#859900, #859900);"> =</span><span> query</span><span>.</span><span>DumpSchema</span><span>(</span><span>query_pb2</span><span>.</span><span>DumpSchemaRequest</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>responses</span><span style="color: light-dark(#859900, #859900);"> =</span><span> query</span><span>.</span><span>GetTimeSeries</span><span>(</span><span>query_pb2</span><span>.</span><span>GetTimeSeriesRequest</span><span>(</span></span>
+<span class="giallo-l"><span>    component</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sensor.pressure</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    start_ns</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">1_000_000</span><span>,</span></span>
+<span class="giallo-l"><span>    end_ns</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">2_000_000</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">for</span><span> response</span><span style="color: light-dark(#859900, #859900);"> in</span><span> responses</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    if</span><span> response</span><span>.</span><span>HasField</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">header</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">        print</span><span>(</span><span>response</span><span>.</span><span>header</span><span>.</span><span>prim_type</span><span>,</span><span> response</span><span>.</span><span>header</span><span>.</span><span>dims</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    else</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">        print</span><span>(</span><span>response</span><span>.</span><span>data</span><span>.</span><span>timestamps_ns</span><span>,</span><span> response</span><span>.</span><span>data</span><span>.</span><span>packed_values</span><span>)</span></span></code></pre>
+<p>Time ranges are half-open <code>[start_ns, end_ns)</code> and are evaluated on the
+microsecond storage grid. Omit either bound for earliest or open-ended reads.
+Omit <code>limit</code> for all matching rows. <code>GetTimeSeries</code> sends one header followed
+by bounded data chunks; chunk boundaries are not part of the contract.</p>
+<p>Set <code>max_points &gt;= 3</code> to apply LTTB downsampling. For tensors,
+<code>element_index</code> selects the element used as the downsampling signal while each
+selected row still contains the complete tensor.</p>
+<p><code>Sql</code> streams one self-contained Arrow IPC stream (schema plus one record
+batch) in each response:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> pyarrow</span><span style="color: light-dark(#859900, #859900);"> as</span><span> pa</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>batches</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span>]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">for</span><span> response</span><span style="color: light-dark(#859900, #859900);"> in</span><span> query</span><span>.</span><span>Sql</span><span>(</span><span>query_pb2</span><span>.</span><span>SqlRequest</span><span>(</span></span>
+<span class="giallo-l"><span>    sql</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">SELECT * FROM sensor_pressure</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span>)</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span>    batches</span><span>.</span><span>extend</span><span>(</span><span>pa</span><span>.</span><span>ipc</span><span>.</span><span>open_stream</span><span>(</span><span>response</span><span>.</span><span>ipc</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>table</span><span style="color: light-dark(#859900, #859900);"> =</span><span> pa</span><span>.</span><span>Table</span><span>.</span><span>from_batches</span><span>(</span><span>batches</span><span>)</span></span></code></pre><h2 id="live-streams-and-playback">Live streams and playback</h2>
+<p><code>StreamService.StreamComponents</code> is a latest-value stream, not a lossless
+recording feed. Real-time mode may coalesce intermediate rows under load;
+<code>immediate=true</code> reduces batching but retains the same latest-value contract.
+Use <code>GetTimeSeries</code> when every historical row matters.</p>
+<p>Fixed-rate mode samples each component at or before a shared playback cursor.
+The server returns a <code>stream_id</code> and emits <code>StreamTimestamp</code> frames with the
+sampled component updates. Subsequent request frames may pause, resume, seek,
+or change the timestep and frequency:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> elodin</span><span>.</span><span>db</span><span>.</span><span>v1</span><span style="color: light-dark(#859900, #859900);"> import</span><span> stream_pb2</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>open_request</span><span style="color: light-dark(#859900, #859900);"> =</span><span> stream_pb2</span><span>.</span><span>StreamComponentsRequest</span><span>(</span></span>
+<span class="giallo-l"><span>    open</span><span style="color: light-dark(#859900, #859900);">=</span><span>stream_pb2</span><span>.</span><span>StreamOpen</span><span>(</span></span>
+<span class="giallo-l"><span>        components</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sensor.pressure</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>        fixed_rate</span><span style="color: light-dark(#859900, #859900);">=</span><span>stream_pb2</span><span>.</span><span>FixedRate</span><span>(</span></span>
+<span class="giallo-l"><span>            initial</span><span style="color: light-dark(#859900, #859900);">=</span><span>stream_pb2</span><span>.</span><span style="color: light-dark(#CB4B16, #CB4B16);">INITIAL_TIMESTAMP_EARLIEST</span><span>,</span></span>
+<span class="giallo-l"><span>            timestep_ns</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">20_000_000</span><span>,</span></span>
+<span class="giallo-l"><span>            frequency</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">50</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>pause</span><span style="color: light-dark(#859900, #859900);"> =</span><span> stream_pb2</span><span>.</span><span>StreamComponentsRequest</span><span>(</span></span>
+<span class="giallo-l"><span>    control</span><span style="color: light-dark(#859900, #859900);">=</span><span>stream_pb2</span><span>.</span><span>StreamControl</span><span>(</span><span>playing</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">False</span><span>)</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>The first request must be <code>StreamOpen</code>; controls are valid only for a stream
+that owns a fixed-rate clock. Timestep must be at least 1,000 ns and frequency
+must be 1–1,000 Hz. An invalid control terminates the stream with
+<code>INVALID_ARGUMENT</code>.</p>
+<p><code>StreamMessages</code> can own an independent playback clock or attach to a component
+stream via <code>playback_stream_id</code>. An attached stream mirrors pauses, seeks, and
+rate changes, ends with the owner, and is controlled through the component
+stream. <code>WatchDb</code> emits the current timestamp/config followed by changes.</p>
+<h2 id="message-logs">Message logs</h2>
+<p>Variable-length events, logs, and media use <code>MessageService</code>:</p>
+<ol>
+<li><code>Register</code> a name as opaque bytes, structured log, or postcard schema;</li>
+<li>open <code>Publish</code> with a stable client identity;</li>
+<li>send sequenced <code>PublishBatch</code> frames and process <code>MessageError</code>/<code>WriteAck</code>;</li>
+<li>read a lossless historical range with <code>GetMessages</code>.</li>
+</ol>
+<p>Message publish resumes across server restarts. As with telemetry, clients must
+replay above <code>PublishAccept.resume_from_seq</code> and tolerate duplicates from an
+ambiguous failure. <code>GetMessages</code> uses half-open nanosecond ranges and streams
+payloads without buffering the full log.</p>
+<p>Live message delivery is exposed through <code>StreamService.StreamMessages</code>.
+Real-time mode first primes each selected log with its latest stored message,
+then delivers every append while connected. Reconnecting primes again, so
+consumers must tolerate that duplicate.</p>
+<h2 id="configuration-metadata-and-assets">Configuration, metadata, and assets</h2>
+<p><code>AdminService</code> exposes online-safe administration:</p>
+<ul>
+<li><code>GetDbConfig</code> and <code>SetDbConfig</code> read or change recording and metadata;</li>
+<li><code>SetComponentMetadata</code> updates component metadata;</li>
+<li><code>PutAsset</code> accepts a header frame followed by byte chunks;</li>
+<li><code>GetAsset</code> streams chunks back;</li>
+<li><code>ListAssets</code> lists keys by prefix.</li>
+</ul>
+<p>Send the <code>PutAssetHeader</code> first. Asset chunk boundaries are transport details,
+not file boundaries.</p>
+<h2 id="authentication-errors-and-limits">Authentication, errors, and limits</h2>
+<p>The server is unauthenticated by default. Add a static bearer token:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2240</span><span style="color: light-dark(#2AA198, #2AA198);"> ./db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-grpc-auth-token</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">TOKEN</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre>
+<p>Pass <code>authorization: Bearer TOKEN</code> in call metadata. Authentication covers
+application RPCs and reflection; standard health checks stay unauthenticated
+for load balancers.</p>
+<p>The current transport is plaintext. Bind only to loopback or a trusted network,
+or terminate TLS in deployment infrastructure. The server limits encoded and
+decoded messages to 16 MiB; <code>GetServerInfo.max_message_size_bytes</code> reports the
+active contract.</p>
+<p>Terminal failures use canonical gRPC status codes. Common failures also carry
+<code>google.rpc.ErrorInfo</code> details under domain <code>db.elodin.systems</code>, with stable
+reasons such as <code>COMPONENT_NOT_FOUND</code>, <code>MESSAGE_NOT_FOUND</code>, and
+<code>TIME_RANGE_EMPTY</code>. Branch on status and structured reasons, not human-readable
+error text.</p>
+<h2 id="runnable-references">Runnable references</h2>
+<ul>
+<li><code>libs/db/examples/grpc-client-batched.cpp</code>: packed C++ ingest with concurrent
+writes and acknowledgements;</li>
+<li><code>libs/db/examples/grpc_gse_client.py</code>: typed ingest, structured logs, and
+restart/resume;</li>
+<li><code>libs/db/examples/grpc_full_api_demo.py</code>: all services, health, reflection,
+auth, playback synchronization, SQL, downsampling, and chunked assets.</li>
+</ul>
+<p>Run the complete integration demo from the repository root:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">nix</span><span style="color: light-dark(#2AA198, #2AA198);"> develop</span><span style="color: light-dark(#2AA198, #2AA198);"> .#run</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-command</span><span style="color: light-dark(#2AA198, #2AA198);"> scripts/ci/db_grpc_full_api_demo.sh</span></span></code></pre>
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                    
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-820&#x2F;home&#x2F;aleph&#x2F;betaflight&#x2F;">
+        <div>
+            <div class="footer-card">&larr; Betaflight Install</div>
+        </div>
+    </a>
+                     
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+                             
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-820/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-820/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-820/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-820/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-820/js/search.js"></script>
+
+
+</body>
+
+</html>
