@@ -3960,6 +3960,7 @@ mod close_tests {
     use crate::ui::plot::{
         CollectedGraphData, GraphBundle, GraphState, Line, LineHandle, PlotDataComponent,
         PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
+        gpu::{PendingUnusedPlotLines, apply_pending_unused_plot_lines},
     };
     use bevy::asset::Assets;
     use bevy::ecs::hierarchy::ChildOf;
@@ -3973,6 +3974,7 @@ mod close_tests {
     fn plot_world() -> World {
         let mut world = World::new();
         world.init_resource::<PlotLineUsers>();
+        world.init_resource::<PendingUnusedPlotLines>();
         world.init_resource::<CollectedGraphData>();
         world.init_resource::<PlotGpuBufferPool>();
         world.insert_resource(Assets::<Line>::default());
@@ -4026,6 +4028,7 @@ mod close_tests {
         tile_state.tree.remove_recursively(tile_id);
         system_state.apply(world);
         world.flush();
+        apply_pending_unused_plot_lines(world);
     }
 
     #[test]

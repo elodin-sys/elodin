@@ -238,6 +238,10 @@ impl PlotLineUsers {
         remaining
     }
 
+    pub fn is_used(&self, key: PlotLineKey) -> bool {
+        self.counts.contains_key(&key)
+    }
+
     #[cfg(test)]
     pub fn count(&self, key: PlotLineKey) -> usize {
         self.counts.get(&key).copied().unwrap_or(0)

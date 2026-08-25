@@ -9,7 +9,7 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
-use bevy::ecs::system::{Command, Commands, Query, Res, ResMut, SystemState};
+use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::ecs::world::DeferredWorld;
 use bevy::log::warn_once;
 use bevy::math::{FloatOrd, Vec4};
@@ -28,7 +28,7 @@ use bevy::render::{ExtractSchedule, MainWorld, Render, RenderStartup, RenderSyst
 use bevy::shader::Shader;
 use bevy::sprite_render::{Mesh2dPipeline, SetMesh2dViewBindGroup, init_mesh_2d_pipeline};
 use bevy::{
-    app::Plugin,
+    app::{Last, Plugin},
     asset::load_internal_asset,
     core_pipeline::core_2d::Transparent2d,
     ecs::{
@@ -93,8 +93,10 @@ impl Plugin for PlotGpuPlugin {
             .init_resource::<PlotGpuAllocationPause>()
             .init_resource::<PlotGpuBufferPool>()
             .init_resource::<PlotLineUsers>()
+            .init_resource::<PendingUnusedPlotLines>()
             .init_asset::<Line>()
-            .init_asset::<XYLine>();
+            .init_asset::<XYLine>()
+            .add_systems(Last, apply_pending_unused_plot_lines);
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER_HANDLE, "./points.wgsl", Shader::from_wgsl);
@@ -189,6 +191,9 @@ fn on_line_handle_add(mut world: DeferredWorld, ctx: HookContext) {
     if let Some(mut users) = world.get_resource_mut::<PlotLineUsers>() {
         users.retain(key);
     }
+    if let Some(mut pending) = world.get_resource_mut::<PendingUnusedPlotLines>() {
+        pending.cancel(key);
+    }
 }
 
 fn on_line_handle_remove(mut world: DeferredWorld, ctx: HookContext) {
@@ -206,22 +211,50 @@ fn on_line_handle_remove(mut world: DeferredWorld, ctx: HookContext) {
         .get_resource_mut::<PlotLineUsers>()
         .map(|mut users| users.release(key))
         .unwrap_or(0);
-    if remaining == 0 {
-        world.commands().queue(ReleaseUnusedPlotLine(key));
+    if remaining == 0
+        && let Some(mut pending) = world.get_resource_mut::<PendingUnusedPlotLines>()
+    {
+        pending.insert(key);
     }
 }
 
-struct ReleaseUnusedPlotLine(PlotLineKey);
+#[derive(Resource, Default)]
+pub(crate) struct PendingUnusedPlotLines {
+    keys: HashSet<PlotLineKey>,
+}
 
-impl Command for ReleaseUnusedPlotLine {
-    type Out = ();
+impl PendingUnusedPlotLines {
+    fn insert(&mut self, key: PlotLineKey) {
+        self.keys.insert(key);
+    }
 
-    fn apply(self, world: &mut World) {
-        release_unused_plot_line(world, self.0);
+    fn cancel(&mut self, key: PlotLineKey) {
+        self.keys.remove(&key);
+    }
+
+    fn drain(&mut self) -> Vec<PlotLineKey> {
+        self.keys.drain().collect()
+    }
+}
+
+/// After the current command flush, so a same-batch retain can cancel first.
+pub(crate) fn apply_pending_unused_plot_lines(world: &mut World) {
+    let keys = world
+        .get_resource_mut::<PendingUnusedPlotLines>()
+        .map(|mut pending| pending.drain())
+        .unwrap_or_default();
+    for key in keys {
+        release_unused_plot_line(world, key);
     }
 }
 
 fn release_unused_plot_line(world: &mut World, key: PlotLineKey) {
+    if world
+        .get_resource::<PlotLineUsers>()
+        .is_some_and(|users| users.is_used(key))
+    {
+        return;
+    }
     if world.get_resource::<PlotGpuBufferPool>().is_none() {
         world.init_resource::<PlotGpuBufferPool>();
     }
@@ -1179,5 +1212,112 @@ fn queue_line(
                 indexed: true,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LineHandle, PendingUnusedPlotLines, apply_pending_unused_plot_lines,
+        release_unused_plot_line,
+    };
+    use crate::ui::plot::{
+        CollectedGraphData, Line, PlotDataComponent, PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
+    };
+    use bevy::asset::Assets;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{Commands, World};
+    use impeller2::types::ComponentId;
+
+    fn plot_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<PlotLineUsers>();
+        world.init_resource::<PendingUnusedPlotLines>();
+        world.init_resource::<CollectedGraphData>();
+        world.init_resource::<PlotGpuBufferPool>();
+        world.insert_resource(Assets::<Line>::default());
+        world
+    }
+
+    fn insert_collected_line(world: &mut World, handle: bevy::asset::Handle<Line>) -> ComponentId {
+        let component_id = ComponentId::new("rocket.mach");
+        let mut collected = world.resource_mut::<CollectedGraphData>();
+        let mut component = PlotDataComponent::new("rocket.mach", vec!["x".into()]);
+        component.lines.insert(0, handle);
+        collected.components.insert(component_id, component);
+        component_id
+    }
+
+    #[test]
+    fn release_is_noop_while_line_still_has_users() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = insert_collected_line(&mut world, handle.clone());
+        world.spawn(LineHandle::Timeseries(handle.clone()));
+        let key = PlotLineKey::Timeseries(handle.id());
+
+        release_unused_plot_line(&mut world, key);
+
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_some(),
+            "in-use line must not be removed from collected data"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+    }
+
+    #[test]
+    fn deferred_release_skips_line_reacquired_before_apply() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = insert_collected_line(&mut world, handle.clone());
+        let entity = world.spawn(LineHandle::Timeseries(handle.clone())).id();
+        let key = PlotLineKey::Timeseries(handle.id());
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+
+        // Same command batch: last user drops, then a new handle retains the key.
+        // A hook-queued Command would flush after despawn and unload the live line.
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        {
+            let mut commands = system_state.get_mut(&mut world).expect("commands");
+            commands.entity(entity).despawn();
+            commands.spawn(LineHandle::Timeseries(handle));
+        }
+        system_state.apply(&mut world);
+        world.flush();
+        apply_pending_unused_plot_lines(&mut world);
+
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_some(),
+            "reacquired line must stay collected after deferred release"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+        assert_eq!(world.query::<&LineHandle>().iter(&world).count(), 1);
+    }
+
+    #[test]
+    fn deferred_release_drops_line_that_stays_unused() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = insert_collected_line(&mut world, handle.clone());
+        let entity = world.spawn(LineHandle::Timeseries(handle.clone())).id();
+        let key = PlotLineKey::Timeseries(handle.id());
+
+        world.despawn(entity);
+        apply_pending_unused_plot_lines(&mut world);
+
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_none(),
+            "unused line must still be dropped"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 0);
     }
 }
