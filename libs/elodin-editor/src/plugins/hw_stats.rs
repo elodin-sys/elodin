@@ -48,7 +48,7 @@ impl HardwareStats {
 enum NvmlState {
     #[default]
     Uninitialized,
-    Ready(Nvml),
+    Ready(Box<Nvml>),
     Unavailable,
 }
 
@@ -149,7 +149,7 @@ impl NvmlSampler {
         if matches!(self.state, NvmlState::Uninitialized) {
             self.state = if vendor_id == NVIDIA_VENDOR_ID {
                 match Nvml::init() {
-                    Ok(nvml) => NvmlState::Ready(nvml),
+                    Ok(nvml) => NvmlState::Ready(Box::new(nvml)),
                     Err(error) => {
                         tracing::debug!(%error, "NVML GPU metrics unavailable");
                         NvmlState::Unavailable
