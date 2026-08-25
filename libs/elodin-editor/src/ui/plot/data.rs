@@ -3772,18 +3772,34 @@ mod tests {
     #[test]
     fn resident_line_defers_when_index_pool_is_quarantined() {
         assert!(
-            defer_new_plot_gpu_allocs(true, false, 0, 0, 0, 4),
+            defer_new_plot_gpu_allocs(0, false, 0, 0, 0, 4),
             "shared/resident values still need a recycled index buffer"
         );
         assert!(
-            !defer_new_plot_gpu_allocs(true, true, 0, 0, 0, 4),
+            !defer_new_plot_gpu_allocs(0, true, 0, 0, 0, 4),
             "cached index must keep drawing while the pool cools down"
         );
         assert!(
-            !defer_new_plot_gpu_allocs(false, false, 0, 0, 0, 0),
+            !defer_new_plot_gpu_allocs(2, false, 0, 0, 0, 0),
             "empty pools are a first load, not a tab-switch leak"
         );
-        assert!(defer_new_plot_gpu_allocs(false, false, 0, 4, 0, 0));
+        assert!(defer_new_plot_gpu_allocs(2, false, 0, 4, 0, 0));
+    }
+
+    #[test]
+    fn xy_line_uses_actual_value_buffer_need_when_deferring() {
+        assert!(
+            !defer_new_plot_gpu_allocs(1, true, 1, 4, 1, 0),
+            "one ready value buffer is enough when only one is needed"
+        );
+        assert!(
+            defer_new_plot_gpu_allocs(2, true, 1, 4, 1, 0),
+            "two-buffer uploads still wait for a second ready value buffer"
+        );
+        assert!(
+            defer_new_plot_gpu_allocs(1, true, 0, 4, 1, 0),
+            "a single needed buffer still waits while candidates are quarantined"
+        );
     }
 }
 
@@ -3920,15 +3936,15 @@ pub(crate) fn plot_gpu_upload_blocked(ready: usize, quarantined: usize, need: us
 }
 
 pub(crate) fn defer_new_plot_gpu_allocs(
-    value_resident: bool,
+    value_buffers_needed: usize,
     has_index_cache: bool,
     value_ready: usize,
     value_quarantined: usize,
     index_ready: usize,
     index_quarantined: usize,
 ) -> bool {
-    let values_blocked =
-        !value_resident && plot_gpu_upload_blocked(value_ready, value_quarantined, 2);
+    let values_blocked = value_buffers_needed > 0
+        && plot_gpu_upload_blocked(value_ready, value_quarantined, value_buffers_needed);
     let index_blocked =
         !has_index_cache && plot_gpu_upload_blocked(index_ready, index_quarantined, 1);
     values_blocked || index_blocked
@@ -4091,13 +4107,13 @@ impl PlotGpuBufferPool {
 
     pub fn defer_new_allocs(
         &self,
-        value_resident: bool,
+        value_buffers_needed: usize,
         has_index_cache: bool,
         min_value_shards: usize,
     ) -> bool {
         let class = value_shard_class(min_value_shards);
         defer_new_plot_gpu_allocs(
-            value_resident,
+            value_buffers_needed,
             has_index_cache,
             self.value_count(class, true),
             self.value_count(class, false),

@@ -983,7 +983,7 @@ fn extract_lines(
                 let value_buffers_needed =
                     line.value_buffers_needing_allocation(clip_range.clone());
                 if plot_gpu_pool.defer_new_allocs(
-                    value_buffers_needed == 0,
+                    value_buffers_needed,
                     has_index_cache,
                     required_value_shards,
                 ) {
