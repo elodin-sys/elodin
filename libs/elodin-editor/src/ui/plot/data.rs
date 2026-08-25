@@ -3526,6 +3526,27 @@ mod tests {
     }
 
     #[test]
+    fn plot_gpu_snapshot_accounts_for_resident_and_pooled_buffers() {
+        let snapshot = PlotGpuPoolSnapshot {
+            value_live: 2,
+            value_ready: 1,
+            value_quarantined: 2,
+            index_live: 3,
+            index_ready: 2,
+            index_quarantined: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            snapshot.resident_bytes(),
+            2 * PLOT_VALUE_BUFFER_BYTES + 3 * PLOT_INDEX_BUFFER_BYTES
+        );
+        assert_eq!(
+            snapshot.pooled_bytes(),
+            3 * PLOT_VALUE_BUFFER_BYTES + 3 * PLOT_INDEX_BUFFER_BYTES
+        );
+    }
+
+    #[test]
     fn resident_line_defers_when_index_pool_is_quarantined() {
         assert!(
             defer_new_plot_gpu_allocs(true, false, 0, 0, 0, 4),
@@ -3637,12 +3658,52 @@ pub(crate) fn defer_new_plot_gpu_allocs(
     values_blocked || index_blocked
 }
 
+pub const PLOT_VALUE_BUFFER_BYTES: u64 = ((CHUNK_COUNT + 1) * CHUNK_LEN * size_of::<f32>()) as u64;
+pub const PLOT_INDEX_BUFFER_BYTES: u64 = (INDEX_BUFFER_LEN * size_of::<u32>()) as u64;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlotGpuPoolSnapshot {
+    pub value_live: usize,
+    pub value_ready: usize,
+    pub value_quarantined: usize,
+    pub value_allocations: u64,
+    pub value_reuses: u64,
+    pub index_live: usize,
+    pub index_ready: usize,
+    pub index_quarantined: usize,
+    pub index_allocations: u64,
+    pub index_reuses: u64,
+}
+
+impl PlotGpuPoolSnapshot {
+    pub fn resident_bytes(self) -> u64 {
+        (self.value_live as u64)
+            .saturating_mul(PLOT_VALUE_BUFFER_BYTES)
+            .saturating_add((self.index_live as u64).saturating_mul(PLOT_INDEX_BUFFER_BYTES))
+    }
+
+    pub fn pooled_bytes(self) -> u64 {
+        ((self.value_ready + self.value_quarantined) as u64)
+            .saturating_mul(PLOT_VALUE_BUFFER_BYTES)
+            .saturating_add(
+                ((self.index_ready + self.index_quarantined) as u64)
+                    .saturating_mul(PLOT_INDEX_BUFFER_BYTES),
+            )
+    }
+}
+
 /// Recycles plot value/index buffers across tab switches so hidden-graph
 /// unload does not immediately allocate a second full set (GPU OOM).
 #[derive(Resource, Default)]
 pub struct PlotGpuBufferPool {
     value: QuarantinePool<Buffer>,
     index: QuarantinePool<Buffer>,
+    value_live: usize,
+    value_allocations: u64,
+    value_reuses: u64,
+    index_live: usize,
+    index_allocations: u64,
+    index_reuses: u64,
 }
 
 impl PlotGpuBufferPool {
@@ -3652,11 +3713,30 @@ impl PlotGpuBufferPool {
     }
 
     pub fn release_value(&mut self, buffer: Buffer) {
+        debug_assert!(self.value_live > 0);
+        self.value_live = self.value_live.saturating_sub(1);
         self.value.release(buffer);
     }
 
     pub fn release_index(&mut self, buffer: Buffer) {
+        debug_assert!(self.index_live > 0);
+        self.index_live = self.index_live.saturating_sub(1);
         self.index.release(buffer);
+    }
+
+    pub fn snapshot(&self) -> PlotGpuPoolSnapshot {
+        PlotGpuPoolSnapshot {
+            value_live: self.value_live,
+            value_ready: self.value.ready_count(),
+            value_quarantined: self.value.quarantined_count(),
+            value_allocations: self.value_allocations,
+            value_reuses: self.value_reuses,
+            index_live: self.index_live,
+            index_ready: self.index.ready_count(),
+            index_quarantined: self.index.quarantined_count(),
+            index_allocations: self.index_allocations,
+            index_reuses: self.index_reuses,
+        }
     }
 
     pub fn defer_new_allocs(&self, value_resident: bool, has_index_cache: bool) -> bool {
@@ -3675,20 +3755,27 @@ impl PlotGpuBufferPool {
         render_device: &RenderDevice,
         render_queue: &RenderQueue,
     ) -> BufferShardAlloc {
+        self.value_live += 1;
         if let Some(buffer) = self.value.try_acquire() {
+            self.value_reuses += 1;
             BufferShardAlloc::from_pooled_value(buffer, CHUNK_COUNT, CHUNK_LEN, render_queue)
         } else {
+            self.value_allocations += 1;
             BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
         }
     }
 
     pub fn take_index(&mut self, render_device: &RenderDevice) -> Option<Buffer> {
         if let Some(buffer) = self.index.try_acquire() {
+            self.index_live += 1;
+            self.index_reuses += 1;
             return Some(buffer);
         }
         if self.index.quarantined_count() > 0 {
             return None;
         }
+        self.index_live += 1;
+        self.index_allocations += 1;
         Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("Line index Buffer"),
             size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
