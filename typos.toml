@@ -31,6 +31,9 @@
 "FO" = "FO"
 "Iz" = "Iz"
 "Trak" = "Trak"
+"Parm" = "Parm"
+"Parms" = "Parms"
+"Shepperd" = "Shepperd"
 
 [files]
 extend-exclude = [

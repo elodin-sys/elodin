@@ -226,7 +226,7 @@ impl InputReader {
             StickMode::Mode2 => {
                 // Mode 2: Left = Throttle(Y)/Rudder(X), Right = Elevator(Y)/Aileron(X)
                 ControlInput {
-                    throttle: (left_y + 1.0) / 2.0,          // Convert -1..1 to 0..1
+                    throttle: (left_y + 1.0) / 2.0,         // Convert -1..1 to 0..1
                     rudder: -left_x * MAX_RUDDER_RAD,       // Stick right = yaw right = -rudder
                     elevator: right_y * MAX_DEFLECTION_RAD, // Stick up = nose up
                     aileron: right_x * MAX_DEFLECTION_RAD,
