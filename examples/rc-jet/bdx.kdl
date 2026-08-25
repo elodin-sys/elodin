@@ -2,9 +2,8 @@
 //
 // Site (baked): pilot pad 35.350664 N, 117.809027 W, ellipsoid height
 // 589.274 m — also the mojave_rc_field region center, so ENU east/north
-// are zero. Physics uses that ellipsoid height; the mesh vertical is
-// region_min (450 m) minus the DEM centre (621.542 m orthometric) so
-// the rendered pad meets the physics ground. Chase / TGT / top-down
+// are zero. Physics uses that ellipsoid height; world_mesh +Z (below)
+// lifts the planar DEM onto that pad. Chase / TGT / top-down
 // ECEF offsets keep the same local-ENU geometry as the Death Valley
 // scene at heading 350°.
 //
@@ -16,7 +15,11 @@ coordinate frame="ECEF" lat=35.350664 lon=-117.809027 alt=589.274
 timeline follow_latest=#true range="last_30s"
 telemetry_mode #true
 
-world_mesh "mojave_rc_field" frame="ENU" translate="(0.000, 0.000, -171.542)"
+// Planar TerrainModel: y=0 at region min (450 m), then Y -= 0.4*(max-min)
+// = 700 m. Pad DEM ≈ 621.5 m orthometric, so
+// tz = 700 - (621.5 - 450) ≈ 528 puts the mesh on the ENU origin
+// (physics ellipsoid 589.274 m). Align surfaces; do not add the ~32 m geoid.
+world_mesh "mojave_rc_field" frame="ENU" translate="(0.000, 0.000, 528.000)"
 
 tabs {
     hsplit name="Main View" {
