@@ -1,9 +1,30 @@
-# BDX RC Jet Simulation
+# BDX RC Jet
 
-A **provisional parametric 6-DOF demonstration model** of the Elite
-Aerosports BDX RC sport jet, flying in a rotating WGS84 ECEF world over
-the Mojave Desert. Geometry- and analysis-correlated; **not validated
-against a physical aircraft.**
+The Elite Aerosports BDX is a real 2.65 m sport jet — same airframe people
+trailer to the desert, fuel, and fly. This example is a 6-DOF Elodin
+simulation of **that** airplane, sitting on **that** kind of field, so
+the next session can be a comparison instead of a cold start.
+
+The aero is not a hand-tuned coefficient card. It is a hashed package from
+the [open-air](https://github.com/elodin-sys/open-air) pipeline: a traced
+reconstruction of the BDX through OpenVSP, OpenAeroStruct (VLM + wingbox),
+and a VSPAERO cross-check. Reference geometry, mass and fuel, the
+longitudinal linearization and drag polar, the propulsion map, and the
+render mesh all come from that package. A few things the pipeline will not
+invent — inertia, lateral/directional derivatives, servo limits — are
+labeled class-D fallbacks, logged at startup, and meant to be replaced the
+first time we weigh, swing, and identify the real jet.
+
+You fly it now, from a radio (or the keyboard), in a rotating WGS84 world
+anchored on the Mojave RC field (35.350664 N, 117.809027 W). Chase and the
+onboard views sit on the real DEM; the sibling render-server draws
+cinematic FPV (globe, atmosphere, daylight) as `sensor_view` frames. The
+physics pad and the mesh meet at the same dirt.
+
+Today the model is **analysis-correlated**, not flight-validated. That is
+the invitation: take the BDX out, log the same channels we already plot
+(attitude, airspeed, throttle, GPS / geodetic altitude), and hang truth
+data on this sim.
 
 ## Where the numbers come from
 
