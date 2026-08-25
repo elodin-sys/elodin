@@ -1173,12 +1173,38 @@ impl XYLine {
         if !self.has_samples() {
             return;
         }
+        let x_class = value_shard_class(self.x_values.len());
+        let y_class = value_shard_class(self.y_values.len());
+        if self
+            .x_shard_alloc
+            .as_ref()
+            .is_some_and(|alloc| alloc.capacity_shards() < x_class)
+        {
+            for buffer in &self.x_values {
+                buffer.release_gpu();
+            }
+            if let Some(alloc) = self.x_shard_alloc.take() {
+                pool.release_value(alloc);
+            }
+        }
+        if self
+            .y_shard_alloc
+            .as_ref()
+            .is_some_and(|alloc| alloc.capacity_shards() < y_class)
+        {
+            for buffer in &self.y_values {
+                buffer.release_gpu();
+            }
+            if let Some(alloc) = self.y_shard_alloc.take() {
+                pool.release_value(alloc);
+            }
+        }
         let x_shard_alloc = self
             .x_shard_alloc
-            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
+            .get_or_insert_with(|| pool.take_value(x_class, render_device, render_queue));
         let y_shard_alloc = self
             .y_shard_alloc
-            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
+            .get_or_insert_with(|| pool.take_value(y_class, render_device, render_queue));
         for buf in &mut self.x_values {
             buf.queue_load(render_queue, x_shard_alloc);
         }
@@ -1189,6 +1215,24 @@ impl XYLine {
 
     pub fn gpu_resident(&self) -> bool {
         self.x_shard_alloc.is_some() || self.y_shard_alloc.is_some()
+    }
+
+    pub fn required_value_shards(&self) -> usize {
+        self.x_values.len().max(self.y_values.len()).max(1)
+    }
+
+    pub fn value_buffers_needing_allocation(&self) -> usize {
+        let x_class = value_shard_class(self.x_values.len());
+        let y_class = value_shard_class(self.y_values.len());
+        usize::from(
+            self.x_shard_alloc
+                .as_ref()
+                .is_none_or(|alloc| alloc.capacity_shards() < x_class),
+        ) + usize::from(
+            self.y_shard_alloc
+                .as_ref()
+                .is_none_or(|alloc| alloc.capacity_shards() < y_class),
+        )
     }
 
     pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
@@ -1202,10 +1246,10 @@ impl XYLine {
             buf.release_gpu();
         }
         if let Some(alloc) = self.x_shard_alloc.take() {
-            pool.release_value(alloc.into_buffer());
+            pool.release_value(alloc);
         }
         if let Some(alloc) = self.y_shard_alloc.take() {
-            pool.release_value(alloc.into_buffer());
+            pool.release_value(alloc);
         }
     }
 
@@ -1229,36 +1273,34 @@ impl XYLine {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         pixel_width: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         // Decimate to respect the fixed index buffer size (same pattern as timeseries)
         let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
         let total_points: usize = self.x_values.iter().map(|c| c.cpu().len()).sum();
         if total_points == 0 {
-            return 0;
+            return Some(0);
         }
         let step = total_points.div_ceil(desired_index_len.max(1)).max(1);
 
-        let mut view = render_queue
-            .write_buffer_with(
-                index_buffer,
-                0,
-                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
-            )
-            .expect("no write buf");
+        let mut view = render_queue.write_buffer_with(
+            index_buffer,
+            0,
+            NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+        )?;
         let mut view = view.slice(..);
         let mut written_u32s: u32 = 0;
         let mut global_index = 0usize;
         for buf in &mut self.x_values {
             let gpu = buf.gpu.lock();
             let Some(gpu) = gpu.as_ref() else {
-                return 0;
+                return Some(0);
             };
             let chunk = gpu.as_index_chunk::<f32>(buf.cpu().len());
             for (i, index) in chunk.into_index_iter().enumerate() {
                 let absolute = global_index + i;
                 if absolute.is_multiple_of(step) || absolute + 1 == total_points {
                     let Some(v) = try_append_u32(view, index) else {
-                        return written_u32s;
+                        return Some(written_u32s);
                     };
                     view = v;
                     written_u32s += 1;
@@ -1267,7 +1309,7 @@ impl XYLine {
             global_index += buf.cpu().len();
         }
 
-        written_u32s
+        Some(written_u32s)
     }
 
     pub fn plot_bounds(&self) -> PlotBounds {
@@ -1359,6 +1401,10 @@ impl<T, const N: usize> SharedBuffer<T, N> {
     fn release_gpu(&self) {
         let _ = self.gpu.lock().take();
         self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+    }
+
+    fn gpu_resident(&self) -> bool {
+        self.gpu.lock().is_some()
     }
 
     #[cfg(test)]
@@ -1833,14 +1879,74 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         if !self.has_samples() {
             return;
         }
+        let mut visible_shards = 0;
+        let mut missing_data_shards = 0;
+        let mut missing_timestamp_shards = 0;
+        for (_, chunk) in self.tree.overlapping(ii(range.start.0, range.end.0)) {
+            visible_shards += 1;
+            missing_data_shards += usize::from(!chunk.data.gpu_resident());
+            missing_timestamp_shards += usize::from(!chunk.timestamps_float.gpu_resident());
+        }
+        let value_class = value_shard_class(visible_shards);
+        let needs_resize = self.data_buffer_shard_alloc.as_ref().is_some_and(|alloc| {
+            alloc.capacity_shards() < value_class || alloc.free_shards() < missing_data_shards
+        }) || self
+            .timestamp_buffer_shard_alloc
+            .as_ref()
+            .is_some_and(|alloc| {
+                alloc.capacity_shards() < value_class
+                    || alloc.free_shards() < missing_timestamp_shards
+            });
+        if needs_resize {
+            for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+                chunk.data.release_gpu();
+                chunk.timestamps_float.release_gpu();
+            }
+            if let Some(alloc) = self.data_buffer_shard_alloc.take() {
+                pool.release_value(alloc);
+            }
+            if let Some(alloc) = self.timestamp_buffer_shard_alloc.take() {
+                pool.release_value(alloc);
+            }
+        }
         let data_buffer_alloc = self
             .data_buffer_shard_alloc
-            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
+            .get_or_insert_with(|| pool.take_value(value_class, render_device, render_queue));
         let timestamp_buffer_alloc = self
             .timestamp_buffer_shard_alloc
-            .get_or_insert_with(|| pool.take_value(render_device, render_queue));
+            .get_or_insert_with(|| pool.take_value(value_class, render_device, render_queue));
         for (_, chunk) in self.tree.overlapping_mut(ii(range.start.0, range.end.0)) {
             chunk.queue_load(render_queue, data_buffer_alloc, timestamp_buffer_alloc);
+        }
+    }
+
+    pub fn required_value_shards(&self, range: Range<Timestamp>) -> usize {
+        self.range_iter(range).count().max(1)
+    }
+
+    pub fn value_buffers_needing_allocation(&self, range: Range<Timestamp>) -> usize {
+        let mut visible_shards = 0;
+        let mut missing_data_shards = 0;
+        let mut missing_timestamp_shards = 0;
+        for (_, chunk) in self.tree.overlapping(ii(range.start.0, range.end.0)) {
+            visible_shards += 1;
+            missing_data_shards += usize::from(!chunk.data.gpu_resident());
+            missing_timestamp_shards += usize::from(!chunk.timestamps_float.gpu_resident());
+        }
+        let class = value_shard_class(visible_shards);
+        let data_needed = self.data_buffer_shard_alloc.as_ref().is_none_or(|alloc| {
+            alloc.capacity_shards() < class || alloc.free_shards() < missing_data_shards
+        });
+        let timestamps_needed = self
+            .timestamp_buffer_shard_alloc
+            .as_ref()
+            .is_none_or(|alloc| {
+                alloc.capacity_shards() < class || alloc.free_shards() < missing_timestamp_shards
+            });
+        if data_needed || timestamps_needed {
+            2
+        } else {
+            0
         }
     }
 
@@ -1901,7 +2007,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         // No selected-span context: treat as a long window (pixel-faithful on clip).
         self.write_to_index_buffer_with_sampling_range(
             index_buffer,
@@ -1919,7 +2025,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         line_visible_range: Range<Timestamp>,
         selected_span_micros: i64,
         pixel_width: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         let (chunk_count, index_count) = self.range_index_stats(line_visible_range.clone());
         let step = index_sampling_step_for_selection(
             selected_span_micros,
@@ -1982,14 +2088,12 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         step: usize,
-    ) -> u32 {
-        let mut view = render_queue
-            .write_buffer_with(
-                index_buffer,
-                0,
-                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
-            )
-            .expect("no write buf");
+    ) -> Option<u32> {
+        let mut view = render_queue.write_buffer_with(
+            index_buffer,
+            0,
+            NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+        )?;
         let mut view = view.slice(..);
         let mut written_u32s: u32 = 0;
         'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
@@ -2032,7 +2136,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             view = v;
             written_u32s += 1;
         }
-        written_u32s
+        Some(written_u32s)
     }
 
     /// Visit `(chunk, offset)` for every sample in the visible strip that
@@ -2174,10 +2278,10 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             chunk.timestamps_float.release_gpu();
         }
         if let Some(alloc) = self.data_buffer_shard_alloc.take() {
-            pool.release_value(alloc.into_buffer());
+            pool.release_value(alloc);
         }
         if let Some(alloc) = self.timestamp_buffer_shard_alloc.take() {
-            pool.release_value(alloc.into_buffer());
+            pool.release_value(alloc);
         }
     }
 
@@ -3563,6 +3667,19 @@ mod tests {
     }
 
     #[test]
+    fn value_shard_classes_choose_smallest_fit() {
+        assert_eq!(value_shard_class(1), 4);
+        assert_eq!(value_shard_class(4), 4);
+        assert_eq!(value_shard_class(5), 16);
+        assert_eq!(value_shard_class(17), 64);
+        assert_eq!(value_shard_class(257), CHUNK_COUNT);
+        assert_eq!(
+            value_buffer_bytes(4),
+            (5 * CHUNK_LEN * size_of::<f32>()) as u64
+        );
+    }
+
+    #[test]
     fn plot_gpu_snapshot_accounts_for_resident_and_pooled_buffers() {
         let snapshot = PlotGpuPoolSnapshot {
             value_live: 2,
@@ -3570,11 +3687,15 @@ mod tests {
             value_quarantined: 2,
             value_allocations: 8,
             value_destroyed: 3,
+            value_live_bytes: 2 * PLOT_VALUE_BUFFER_BYTES,
+            value_pooled_bytes: 3 * PLOT_VALUE_BUFFER_BYTES,
             index_live: 3,
             index_ready: 2,
             index_quarantined: 1,
             index_allocations: 10,
             index_destroyed: 4,
+            value_shards_used: 12,
+            value_shards_capacity: 48,
             ..Default::default()
         };
         assert_eq!(
@@ -3599,6 +3720,7 @@ mod tests {
                 + snapshot.index_quarantined as u64
                 + snapshot.index_destroyed
         );
+        assert_eq!(snapshot.shard_occupancy_percent(), Some(25.0));
     }
 
     #[test]
@@ -3659,6 +3781,7 @@ impl BoundOrd for f32 {
 /// switch must not be rewritten until those bind groups are gone.
 pub(crate) const PLOT_GPU_QUARANTINE_FRAMES: u8 = 3;
 pub(crate) const PLOT_GPU_POOL_IDLE_EVICT_FRAMES: u16 = 300;
+pub(crate) const PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME: usize = 16;
 const PLOT_GPU_RECOVERY_PAUSE: Duration = Duration::from_secs(2);
 
 #[derive(Resource, Default)]
@@ -3765,8 +3888,20 @@ pub(crate) fn defer_new_plot_gpu_allocs(
     values_blocked || index_blocked
 }
 
-pub const PLOT_VALUE_BUFFER_BYTES: u64 = ((CHUNK_COUNT + 1) * CHUNK_LEN * size_of::<f32>()) as u64;
+pub const PLOT_VALUE_SHARD_CLASSES: [usize; 5] = [4, 16, 64, 256, CHUNK_COUNT];
+pub const PLOT_VALUE_BUFFER_BYTES: u64 = value_buffer_bytes(CHUNK_COUNT);
 pub const PLOT_INDEX_BUFFER_BYTES: u64 = (INDEX_BUFFER_LEN * size_of::<u32>()) as u64;
+
+pub const fn value_buffer_bytes(data_shards: usize) -> u64 {
+    ((data_shards + 1) * CHUNK_LEN * size_of::<f32>()) as u64
+}
+
+pub fn value_shard_class(required: usize) -> usize {
+    PLOT_VALUE_SHARD_CLASSES
+        .into_iter()
+        .find(|class| *class >= required.max(1))
+        .unwrap_or(CHUNK_COUNT)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlotGpuPoolSnapshot {
@@ -3776,36 +3911,53 @@ pub struct PlotGpuPoolSnapshot {
     pub value_allocations: u64,
     pub value_reuses: u64,
     pub value_destroyed: u64,
+    pub value_live_bytes: u64,
+    pub value_pooled_bytes: u64,
     pub index_live: usize,
     pub index_ready: usize,
     pub index_quarantined: usize,
     pub index_allocations: u64,
     pub index_reuses: u64,
     pub index_destroyed: u64,
+    pub value_shards_used: usize,
+    pub value_shards_capacity: usize,
 }
 
 impl PlotGpuPoolSnapshot {
     pub fn resident_bytes(self) -> u64 {
-        (self.value_live as u64)
-            .saturating_mul(PLOT_VALUE_BUFFER_BYTES)
+        self.value_live_bytes
             .saturating_add((self.index_live as u64).saturating_mul(PLOT_INDEX_BUFFER_BYTES))
     }
 
     pub fn pooled_bytes(self) -> u64 {
-        ((self.value_ready + self.value_quarantined) as u64)
-            .saturating_mul(PLOT_VALUE_BUFFER_BYTES)
-            .saturating_add(
-                ((self.index_ready + self.index_quarantined) as u64)
-                    .saturating_mul(PLOT_INDEX_BUFFER_BYTES),
-            )
+        self.value_pooled_bytes.saturating_add(
+            ((self.index_ready + self.index_quarantined) as u64)
+                .saturating_mul(PLOT_INDEX_BUFFER_BYTES),
+        )
+    }
+
+    pub fn shard_occupancy_percent(self) -> Option<f64> {
+        (self.value_shards_capacity > 0)
+            .then_some(self.value_shards_used as f64 / self.value_shards_capacity as f64 * 100.0)
     }
 }
 
 /// Recycles plot value/index buffers across tab switches so hidden-graph
 /// unload does not immediately allocate a second full set (GPU OOM).
+struct PooledValueBuffer {
+    buffer: Buffer,
+    data_capacity: usize,
+}
+
+impl PooledValueBuffer {
+    fn bytes(&self) -> u64 {
+        value_buffer_bytes(self.data_capacity)
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct PlotGpuBufferPool {
-    value: QuarantinePool<Buffer>,
+    value: QuarantinePool<PooledValueBuffer>,
     index: QuarantinePool<Buffer>,
     value_live: usize,
     value_allocations: u64,
@@ -3815,6 +3967,9 @@ pub struct PlotGpuBufferPool {
     index_reuses: u64,
     value_destroyed: u64,
     index_destroyed: u64,
+    value_live_bytes: u64,
+    value_shards_used: usize,
+    value_shards_capacity: usize,
 }
 
 impl PlotGpuBufferPool {
@@ -3823,10 +3978,12 @@ impl PlotGpuBufferPool {
         self.index_destroyed += self.index.tick() as u64;
     }
 
-    pub fn release_value(&mut self, buffer: Buffer) {
+    pub fn release_value(&mut self, alloc: BufferShardAlloc) {
         debug_assert!(self.value_live > 0);
         self.value_live = self.value_live.saturating_sub(1);
-        self.value.release(buffer);
+        let pooled = alloc.into_pooled_value();
+        self.value_live_bytes = self.value_live_bytes.saturating_sub(pooled.bytes());
+        self.value.release(pooled);
     }
 
     pub fn release_index(&mut self, buffer: Buffer) {
@@ -3843,13 +4000,27 @@ impl PlotGpuBufferPool {
             value_allocations: self.value_allocations,
             value_reuses: self.value_reuses,
             value_destroyed: self.value_destroyed,
+            value_live_bytes: self.value_live_bytes,
+            value_pooled_bytes: self
+                .value
+                .items
+                .iter()
+                .map(|(buffer, _, _)| buffer.bytes())
+                .sum(),
             index_live: self.index_live,
             index_ready: self.index.ready_count(),
             index_quarantined: self.index.quarantined_count(),
             index_allocations: self.index_allocations,
             index_reuses: self.index_reuses,
             index_destroyed: self.index_destroyed,
+            value_shards_used: self.value_shards_used,
+            value_shards_capacity: self.value_shards_capacity,
         }
+    }
+
+    pub fn set_live_shard_occupancy(&mut self, used: usize, capacity: usize) {
+        self.value_shards_used = used;
+        self.value_shards_capacity = capacity;
     }
 
     pub fn trim_ready(&mut self) -> PlotGpuPoolTrim {
@@ -3872,30 +4043,77 @@ impl PlotGpuBufferPool {
         trim
     }
 
-    pub fn defer_new_allocs(&self, value_resident: bool, has_index_cache: bool) -> bool {
+    pub fn defer_new_allocs(
+        &self,
+        value_resident: bool,
+        has_index_cache: bool,
+        min_value_shards: usize,
+    ) -> bool {
+        let class = value_shard_class(min_value_shards);
         defer_new_plot_gpu_allocs(
             value_resident,
             has_index_cache,
-            self.value.ready_count(),
-            self.value.quarantined_count(),
+            self.value_count(class, true),
+            self.value_count(class, false),
             self.index.ready_count(),
             self.index.quarantined_count(),
         )
     }
 
+    pub fn new_value_allocations_needed(
+        &self,
+        buffers_needed: usize,
+        min_value_shards: usize,
+    ) -> usize {
+        buffers_needed.saturating_sub(self.value_count(value_shard_class(min_value_shards), true))
+    }
+
     pub fn take_value(
         &mut self,
+        min_shards: usize,
         render_device: &RenderDevice,
         render_queue: &RenderQueue,
     ) -> BufferShardAlloc {
+        let class = value_shard_class(min_shards);
         self.value_live += 1;
-        if let Some(buffer) = self.value.try_acquire() {
+        if let Some(pooled) = self.take_ready_value(class) {
             self.value_reuses += 1;
-            BufferShardAlloc::from_pooled_value(buffer, CHUNK_COUNT, CHUNK_LEN, render_queue)
+            self.value_live_bytes += pooled.bytes();
+            BufferShardAlloc::from_pooled_value(
+                pooled.buffer,
+                pooled.data_capacity,
+                CHUNK_LEN,
+                render_queue,
+            )
         } else {
             self.value_allocations += 1;
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+            self.value_live_bytes += value_buffer_bytes(class);
+            BufferShardAlloc::with_nan_chunk(class, CHUNK_LEN, render_device, render_queue)
         }
+    }
+
+    fn value_count(&self, min_shards: usize, ready: bool) -> usize {
+        self.value
+            .items
+            .iter()
+            .filter(|(buffer, quarantine_frames, _)| {
+                buffer.data_capacity >= min_shards && (*quarantine_frames == 0) == ready
+            })
+            .count()
+    }
+
+    fn take_ready_value(&mut self, min_shards: usize) -> Option<PooledValueBuffer> {
+        let index = self
+            .value
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, (buffer, quarantine_frames, _))| {
+                *quarantine_frames == 0 && buffer.data_capacity >= min_shards
+            })
+            .min_by_key(|(_, (buffer, _, _))| buffer.data_capacity)
+            .map(|(index, _)| index)?;
+        Some(self.value.items.swap_remove(index).0)
     }
 
     pub fn take_index(&mut self, render_device: &RenderDevice) -> Option<Buffer> {
@@ -3927,6 +4145,7 @@ pub struct PlotGpuPoolTrim {
 pub struct BufferShardAlloc {
     buffer: Buffer,
     chunk_size: usize,
+    data_capacity: usize,
     free_map: RoaringBitmap,
 }
 
@@ -3938,6 +4157,7 @@ impl BufferShardAlloc {
         render_queue: &RenderQueue,
     ) -> Self {
         let mut this = Self::new::<f32>(chunks + 1, chunk_len, render_device);
+        this.data_capacity = chunks;
         let shard = this.alloc().expect("couldn't alloc nan");
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
@@ -3958,14 +4178,18 @@ impl BufferShardAlloc {
             buffer,
             free_map,
             chunk_size,
+            data_capacity: chunks,
         };
         let shard = this.alloc().expect("couldn't alloc nan");
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
     }
 
-    fn into_buffer(self) -> Buffer {
-        self.buffer
+    fn into_pooled_value(self) -> PooledValueBuffer {
+        PooledValueBuffer {
+            buffer: self.buffer,
+            data_capacity: self.data_capacity,
+        }
     }
 
     pub fn new<T: Sized>(chunks: usize, chunk_len: usize, render_device: &RenderDevice) -> Self {
@@ -3984,6 +4208,7 @@ impl BufferShardAlloc {
             buffer,
             free_map,
             chunk_size,
+            data_capacity: chunks,
         }
     }
 
@@ -4001,6 +4226,23 @@ impl BufferShardAlloc {
 
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    pub fn binding_size(&self) -> NonZeroU64 {
+        NonZeroU64::new(value_buffer_bytes(self.data_capacity)).unwrap()
+    }
+
+    pub fn capacity_shards(&self) -> usize {
+        self.data_capacity
+    }
+
+    pub fn free_shards(&self) -> usize {
+        self.free_map.len() as usize
+    }
+
+    pub fn used_shards(&self) -> usize {
+        self.data_capacity
+            .saturating_sub(self.free_map.len() as usize)
     }
 
     pub fn dealloc(&mut self, shard: BufferShard) {

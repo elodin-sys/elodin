@@ -16,7 +16,7 @@ use bevy::{
 };
 use nvml_wrapper::Nvml;
 
-use crate::ui::plot::{PlotGpuBufferPool, gpu::evict_all_plot_gpu};
+use crate::ui::plot::{PlotGpuBufferPool, data::PlotGpuPoolSnapshot, gpu::evict_all_plot_gpu};
 
 const NVIDIA_VENDOR_ID: u32 = 0x10de;
 const GPU_MEMORY_PRESSURE_TRIM_PERCENT: u64 = 90;
@@ -171,6 +171,10 @@ fn counter_u64(value: isize) -> u64 {
     value.max(0) as u64
 }
 
+fn requires_renderer_recovery(error_type: ErrorType) -> bool {
+    matches!(error_type, ErrorType::OutOfMemory | ErrorType::DeviceLost)
+}
+
 fn supported_counter(value: isize, attributed_bytes: u64) -> Option<u64> {
     let value = counter_u64(value);
     (value > 0 || attributed_bytes == 0).then_some(value)
@@ -188,6 +192,7 @@ pub(crate) struct GpuAllocatorDump {
 pub(crate) fn dump_gpu_allocations(
     render_device: &RenderDevice,
     reason: &str,
+    plot_snapshot: Option<PlotGpuPoolSnapshot>,
 ) -> Result<GpuAllocatorDump, String> {
     let report = render_device
         .wgpu_device()
@@ -241,6 +246,16 @@ pub(crate) fn dump_gpu_allocations(
     );
     let _ = writeln!(full, "blocks: {}", report.blocks.len());
     let _ = writeln!(full, "allocations: {}", report.allocations.len());
+    if let Some(snapshot) = plot_snapshot {
+        let _ = writeln!(full, "plot pool: {snapshot:?}");
+        let _ = writeln!(
+            full,
+            "plot shard occupancy: {} / {} ({:.1}%)",
+            snapshot.value_shards_used,
+            snapshot.value_shards_capacity,
+            snapshot.shard_occupancy_percent().unwrap_or(0.0)
+        );
+    }
     let _ = writeln!(full, "\naggregated by label and size:\n{largest_groups}");
     let _ = writeln!(full, "memory blocks:");
     for (index, block) in report.blocks.iter().enumerate() {
@@ -293,10 +308,17 @@ fn log_render_error(
     main_world: &mut bevy::prelude::World,
     render_world: &mut bevy::prelude::World,
 ) -> RenderErrorPolicy {
-    if error.ty == ErrorType::OutOfMemory
-        && let Some(render_device) = main_world.get_resource::<RenderDevice>()
-    {
-        match dump_gpu_allocations(render_device, "oom") {
+    let recoverable = requires_renderer_recovery(error.ty);
+    let mut dump_path = None;
+    let plot_snapshot = main_world
+        .get_resource::<PlotGpuBufferPool>()
+        .map(|pool| pool.snapshot());
+    if recoverable && let Some(render_device) = main_world.get_resource::<RenderDevice>() {
+        let reason = match error.ty {
+            ErrorType::DeviceLost => "device-lost",
+            _ => "oom",
+        };
+        match dump_gpu_allocations(render_device, reason, plot_snapshot) {
             Ok(dump) => {
                 tracing::error!(
                     path = %dump.path.display(),
@@ -307,10 +329,15 @@ fn log_render_error(
                     largest_groups = %dump.largest_groups,
                     "GPU allocator report"
                 );
+                dump_path = Some(dump.path);
             }
             Err(error) => tracing::error!(%error, "GPU allocator report unavailable"),
         }
     }
+    let dump_path_label = dump_path
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unavailable".to_string());
     if let Some(pool) = main_world.get_resource::<PlotGpuBufferPool>() {
         tracing::error!(
             error_type = ?error.ty,
@@ -331,7 +358,7 @@ fn log_render_error(
         );
     }
 
-    if error.ty == ErrorType::OutOfMemory {
+    if recoverable {
         let now = Instant::now();
         let repeated = main_world
             .get_resource_mut::<OomRecoveryState>()
@@ -345,21 +372,31 @@ fn log_render_error(
             tracing::error!(
                 value_buffers = trim.values,
                 index_buffers = trim.indices,
-                "Evicted plot GPU caches and recreating renderer after OutOfMemory"
+                error_type = ?error.ty,
+                "Evicted plot GPU caches and recreating renderer; GPU allocation report: {}",
+                dump_path_label
             );
             return RenderErrorPolicy::Recover(crate::editor_wgpu_settings().into());
         }
-        tracing::error!("Repeated OutOfMemory during recovery window");
+        tracing::error!(error_type = ?error.ty, "Repeated GPU failure during recovery window");
     }
 
-    tracing::error!("Quitting the application due to {:?} RenderError", error.ty);
+    tracing::error!(
+        "Quitting the application due to {:?} RenderError; GPU allocation report: {}",
+        error.ty,
+        dump_path_label
+    );
     main_world.write_message(AppExit::error());
     RenderErrorPolicy::StopRendering
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{OomRecoveryState, allow_oom_recovery, counter_u64, supported_counter};
+    use super::{
+        OomRecoveryState, allow_oom_recovery, counter_u64, requires_renderer_recovery,
+        supported_counter,
+    };
+    use bevy::render::error_handler::ErrorType;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -368,6 +405,13 @@ mod tests {
         assert_eq!(counter_u64(42), 42);
         assert_eq!(supported_counter(0, 1024), None);
         assert_eq!(supported_counter(3, 1024), Some(3));
+    }
+
+    #[test]
+    fn oom_and_device_loss_require_renderer_recovery() {
+        assert!(requires_renderer_recovery(ErrorType::OutOfMemory));
+        assert!(requires_renderer_recovery(ErrorType::DeviceLost));
+        assert!(!requires_renderer_recovery(ErrorType::Validation));
     }
 
     #[test]

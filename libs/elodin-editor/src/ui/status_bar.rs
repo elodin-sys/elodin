@@ -141,7 +141,12 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     ));
 
                     let pool = plot_gpu_pool.snapshot();
-                    let plot_gib = bytes_to_gib(pool.resident_bytes());
+                    let plot_label = match pool.shard_occupancy_percent() {
+                        Some(percent) => {
+                            format!("{} · {percent:.0}% shards", format_plot_bytes(pool.resident_bytes()))
+                        }
+                        None => format_plot_bytes(pool.resident_bytes()),
+                    };
                     let (gpu_label, gpu_pressure) =
                         if let Some(memory) = hardware_stats.device_memory {
                             let pressure = if memory.total_bytes > 0 {
@@ -151,7 +156,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             };
                             (
                                 format!(
-                                    "GPU {:.1}/{:.1} GB · {} · PLOT {plot_gib:.1} GB",
+                                    "GPU {:.1}/{:.1} GB · {} · {plot_label}",
                                     bytes_to_gib(memory.used_bytes),
                                     bytes_to_gib(memory.total_bytes),
                                     format_percent(
@@ -163,7 +168,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                         } else {
                             (
                                 format!(
-                                    "GPU app {:.1} GB · PLOT {plot_gib:.1} GB",
+                                    "GPU app {:.1} GB · {plot_label}",
                                     bytes_to_gib(hardware_stats.app_gpu_bytes()),
                                 ),
                                 None,
@@ -175,7 +180,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(pressure_color(gpu_pressure)),
                     ))
                     .on_hover_text(format!(
-                        "App GPU allocations\nBuffers: {:.2} GiB ({} objects)\nTextures: {:.2} GiB ({} objects)\n\nPlot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nReady: {} value, {} index\nQuarantined: {} value, {} index\nCumulative: {} value alloc / {} reuse / {} destroyed, {} index alloc / {} reuse / {} destroyed",
+                        "App GPU allocations\nBuffers: {:.2} GiB ({} objects)\nTextures: {:.2} GiB ({} objects)\n\nPlot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nShard occupancy: {} / {} ({})\nReady: {} value, {} index\nQuarantined: {} value, {} index\nCumulative: {} value alloc / {} reuse / {} destroyed, {} index alloc / {} reuse / {} destroyed",
                         bytes_to_gib(hardware_stats.app_buffer_bytes),
                         format_object_count(hardware_stats.app_buffer_count),
                         bytes_to_gib(hardware_stats.app_texture_bytes),
@@ -184,6 +189,9 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                         pool.value_live,
                         pool.index_live,
                         bytes_to_gib(pool.pooled_bytes()),
+                        pool.value_shards_used,
+                        pool.value_shards_capacity,
+                        format_percent(pool.shard_occupancy_percent()),
                         pool.value_ready,
                         pool.index_ready,
                         pool.value_quarantined,
@@ -332,6 +340,14 @@ fn process_resident_memory_bytes() -> Option<u64> {
 
 fn bytes_to_gib(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+}
+
+fn format_plot_bytes(bytes: u64) -> String {
+    if bytes < 1024 * 1024 * 1024 {
+        format!("PLOT {:.0} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("PLOT {:.1} GB", bytes_to_gib(bytes))
+    }
 }
 
 fn format_percent(value: Option<f64>) -> String {

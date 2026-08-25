@@ -48,6 +48,8 @@ use nox::ArrayBuf;
 #[cfg(not(target_family = "wasm"))]
 use crate::plugins::hw_stats::dump_gpu_allocations;
 #[cfg(not(target_family = "wasm"))]
+use crate::ui::plot::PlotGpuBufferPool;
+#[cfg(not(target_family = "wasm"))]
 use bevy::render::renderer::RenderDevice;
 
 use crate::{
@@ -361,23 +363,22 @@ fn dump_gpu_allocations_item() -> PaletteItem {
     PaletteItem::new(
         "Dump GPU Allocations",
         DIAGNOSTICS_LABEL,
-        |_: In<String>, render_device: Res<RenderDevice>| match dump_gpu_allocations(
-            &render_device,
-            "manual",
-        ) {
-            Ok(dump) => {
-                tracing::info!(
-                    path = %dump.path.display(),
-                    total_allocated_bytes = dump.total_allocated_bytes,
-                    total_reserved_bytes = dump.total_reserved_bytes,
-                    block_count = dump.block_count,
-                    allocation_count = dump.allocation_count,
-                    largest_groups = %dump.largest_groups,
-                    "GPU allocator report"
-                );
-                PaletteEvent::Exit
+        |_: In<String>, render_device: Res<RenderDevice>, plot_pool: Res<PlotGpuBufferPool>| {
+            match dump_gpu_allocations(&render_device, "manual", Some(plot_pool.snapshot())) {
+                Ok(dump) => {
+                    tracing::info!(
+                        path = %dump.path.display(),
+                        total_allocated_bytes = dump.total_allocated_bytes,
+                        total_reserved_bytes = dump.total_reserved_bytes,
+                        block_count = dump.block_count,
+                        allocation_count = dump.allocation_count,
+                        largest_groups = %dump.largest_groups,
+                        "GPU allocator report"
+                    );
+                    PaletteEvent::Exit
+                }
+                Err(error) => PaletteEvent::Error(error),
             }
-            Err(error) => PaletteEvent::Error(error),
         },
     )
 }

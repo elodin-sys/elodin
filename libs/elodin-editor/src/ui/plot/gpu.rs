@@ -9,6 +9,7 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
+use bevy::log::warn_once;
 use bevy::math::{FloatOrd, Vec4};
 use bevy::prelude::Deref;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
@@ -50,9 +51,14 @@ use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
+#[cfg(not(target_family = "wasm"))]
+use crate::plugins::hw_stats::HardwareStats;
 use crate::ui::ViewportRect;
-use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
+use crate::ui::plot::{CHUNK_COUNT, Line, XYLine};
 
+use super::data::{
+    PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
+};
 use super::{BufferShardAlloc, PlotGpuAllocationPause, PlotGpuBufferPool, PlotGpuPoolTrim};
 use crate::ui::widgets::SystemStateExt;
 
@@ -60,8 +66,9 @@ const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8
 const POINT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
 const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-EDD5EE51F1B1");
 
-pub const VALUE_BUFFER_SIZE: NonZeroU64 =
-    NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
+pub const VALUE_BUFFER_SIZE: NonZeroU64 = NonZeroU64::new(value_buffer_bytes(CHUNK_COUNT)).unwrap();
+pub const MIN_VALUE_BUFFER_SIZE: NonZeroU64 =
+    NonZeroU64::new(value_buffer_bytes(PLOT_VALUE_SHARD_CLASSES[0])).unwrap();
 /// Sized for ≤30 s @ ~4 kHz truth strips (plus per-chunk sentinel overhead).
 pub const INDEX_BUFFER_LEN: usize = 1024 * 128;
 pub const INDEX_BUFFER_SIZE: NonZeroU64 =
@@ -130,8 +137,8 @@ impl Plugin for PlotGpuPlugin {
         let layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
             (
-                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
                 storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
             ),
         );
@@ -189,6 +196,20 @@ impl LineMut<'_> {
         }
     }
 
+    pub fn value_buffers_needing_allocation(&self, range: Range<Timestamp>) -> usize {
+        match self {
+            LineMut::Timeseries(line) => line.data.value_buffers_needing_allocation(range),
+            LineMut::XY(line) => line.value_buffers_needing_allocation(),
+        }
+    }
+
+    pub fn required_value_shards(&self, range: Range<Timestamp>) -> usize {
+        match self {
+            LineMut::Timeseries(line) => line.data.required_value_shards(range),
+            LineMut::XY(line) => line.required_value_shards(),
+        }
+    }
+
     pub fn has_samples(&self) -> bool {
         match self {
             LineMut::Timeseries(line) => line.data.has_samples(),
@@ -209,7 +230,7 @@ impl LineMut<'_> {
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         self.write_to_index_buffer_sampled(
             index_buffer,
             render_queue,
@@ -226,7 +247,7 @@ impl LineMut<'_> {
         line_visible_range: Range<Timestamp>,
         selected_span_micros: i64,
         pixel_width: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         match self {
             LineMut::Timeseries(line) => line.data.write_to_index_buffer_with_sampling_range(
                 index_buffer,
@@ -712,6 +733,7 @@ pub(crate) fn evict_all_plot_gpu(
                     pool.release_index(gpu.index_buffer);
                 }
             }
+            pool.set_live_shard_occupancy(0, 0);
             pool.drain()
         });
     if let Some(mut pause) = main_world.get_resource_mut::<PlotGpuAllocationPause>() {
@@ -741,6 +763,22 @@ fn extract_lines(
             {
                 return;
             }
+            #[cfg(not(target_family = "wasm"))]
+            let gpu_pressure_high = world
+                .get_resource::<HardwareStats>()
+                .and_then(|stats| stats.device_memory)
+                .is_some_and(|memory| {
+                    memory.total_bytes > 0
+                        && memory.used_bytes.saturating_mul(100)
+                            >= memory.total_bytes.saturating_mul(92)
+                });
+            #[cfg(target_family = "wasm")]
+            let gpu_pressure_high = false;
+            let mut new_value_budget = if gpu_pressure_high {
+                0
+            } else {
+                PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME
+            };
             let (
                 mut lines,
                 viewport_rects,
@@ -810,9 +848,6 @@ fn extract_lines(
                     continue;
                 }
                 let has_index_cache = cache.as_ref().is_some_and(|c| c.0.is_some());
-                if plot_gpu_pool.defer_new_allocs(line.gpu_resident(), has_index_cache) {
-                    continue;
-                }
                 // Camera / clip: continuous visible range for short windows (silky scrub);
                 // long windows keep 100 ms quantum to limit index rewrite churn.
                 let visible = line_visible_range.0.clone();
@@ -824,6 +859,22 @@ fn extract_lines(
                         crate::TRAILING_RANGE_QUANTUM_MICROS,
                     )
                 };
+                let required_value_shards = line.required_value_shards(clip_range.clone());
+                let value_buffers_needed =
+                    line.value_buffers_needing_allocation(clip_range.clone());
+                if plot_gpu_pool.defer_new_allocs(
+                    value_buffers_needed == 0,
+                    has_index_cache,
+                    required_value_shards,
+                ) {
+                    continue;
+                }
+                let new_values = plot_gpu_pool
+                    .new_value_allocations_needed(value_buffers_needed, required_value_shards);
+                if new_values > new_value_budget {
+                    continue;
+                }
+                new_value_budget -= new_values;
                 // Short windows: step = 1 on clip (truth). Long windows: pixel stride on clip.
                 line.queue_load_range(
                     clip_range.clone(),
@@ -831,13 +882,26 @@ fn extract_lines(
                     &render_device,
                     &mut plot_gpu_pool,
                 );
-                let Some(x_buffer) = line.x_buffer_shard_alloc().map(|a| a.buffer().clone()) else {
+                let Some(x_alloc) = line.x_buffer_shard_alloc() else {
                     continue;
                 };
-                let Some(y_buffer) = line.y_buffer_shard_alloc().map(|a| a.buffer().clone()) else {
+                let x_size = Some(x_alloc.binding_size());
+                let x_buffer = x_alloc.buffer().clone();
+                let Some(y_alloc) = line.y_buffer_shard_alloc() else {
                     continue;
                 };
+                let y_size = Some(y_alloc.binding_size());
+                let y_buffer = y_alloc.buffer().clone();
                 let value_buffer_ids = (x_buffer.id(), y_buffer.id());
+                if let Some(ref mut cache) = cache
+                    && cache
+                        .0
+                        .as_ref()
+                        .is_some_and(|gpu| gpu.value_buffer_ids != value_buffer_ids)
+                    && let Some(stale) = cache.0.take()
+                {
+                    plot_gpu_pool.release_index(stale.index_buffer);
+                }
                 // Reuse the cached buffers/bind group unless the value buffers were
                 // reallocated (new `BufferShardAlloc`).
                 let cached = cache
@@ -853,7 +917,6 @@ fn extract_lines(
                     let Some(index_buffer) = plot_gpu_pool.take_index(&render_device) else {
                         continue;
                     };
-                    let size = Some(VALUE_BUFFER_SIZE);
                     let values_bind_group = render_device.create_bind_group(
                         "line values",
                         &values_layout.layout,
@@ -863,7 +926,7 @@ fn extract_lines(
                                 resource: BindingResource::Buffer(BufferBinding {
                                     buffer: &x_buffer,
                                     offset: 0,
-                                    size,
+                                    size: x_size,
                                 }),
                             },
                             BindGroupEntry {
@@ -871,7 +934,7 @@ fn extract_lines(
                                 resource: BindingResource::Buffer(BufferBinding {
                                     buffer: &y_buffer,
                                     offset: 0,
-                                    size,
+                                    size: y_size,
                                 }),
                             },
                             BindGroupEntry {
@@ -906,7 +969,7 @@ fn extract_lines(
                         range_key.3,
                         content_gen,
                     )) {
-                    cached.map(|g| g.count).unwrap_or(0)
+                    Some(cached.map(|g| g.count).unwrap_or(0))
                 } else {
                     line.write_to_index_buffer_sampled(
                         &index_buffer,
@@ -915,6 +978,13 @@ fn extract_lines(
                         selected_span_micros,
                         width.0,
                     )
+                };
+                let Some(count) = count else {
+                    if cached.is_none() {
+                        plot_gpu_pool.release_index(index_buffer);
+                    }
+                    warn_once!("Plot index upload failed; waiting for renderer recovery");
+                    continue;
                 };
                 let gpu_line = GpuLine {
                     values_bind_group,
@@ -948,6 +1018,30 @@ fn extract_lines(
                     TemporaryRenderEntity,
                 ));
             }
+            let mut shards_used = 0;
+            let mut shards_capacity = 0;
+            for (_, line) in line_assets.iter() {
+                for alloc in [
+                    line.data.data_buffer_shard_alloc(),
+                    line.data.timestamp_buffer_shard_alloc(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    shards_used += alloc.used_shards();
+                    shards_capacity += alloc.capacity_shards();
+                }
+            }
+            for (_, line) in xy_lines.iter() {
+                for alloc in [line.x_shard_alloc.as_ref(), line.y_shard_alloc.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    shards_used += alloc.used_shards();
+                    shards_capacity += alloc.capacity_shards();
+                }
+            }
+            plot_gpu_pool.set_live_shard_occupancy(shards_used, shards_capacity);
             cached_state.state.apply(world);
         },
     );
