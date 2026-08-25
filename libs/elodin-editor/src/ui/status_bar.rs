@@ -175,10 +175,11 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(pressure_color(gpu_pressure)),
                     ))
                     .on_hover_text(format!(
-                        "App GPU allocations\nBuffers: {:.2} GiB\nTextures: {:.2} GiB\nAllocations: {}\n\nPlot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nReady: {} value, {} index\nQuarantined: {} value, {} index\nCumulative: {} value alloc / {} reuse, {} index alloc / {} reuse",
+                        "App GPU allocations\nBuffers: {:.2} GiB ({} objects)\nTextures: {:.2} GiB ({} objects)\n\nPlot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nReady: {} value, {} index\nQuarantined: {} value, {} index\nCumulative: {} value alloc / {} reuse / {} destroyed, {} index alloc / {} reuse / {} destroyed",
                         bytes_to_gib(hardware_stats.app_buffer_bytes),
+                        format_object_count(hardware_stats.app_buffer_count),
                         bytes_to_gib(hardware_stats.app_texture_bytes),
-                        hardware_stats.app_memory_allocations,
+                        format_object_count(hardware_stats.app_texture_count),
                         bytes_to_gib(pool.resident_bytes()),
                         pool.value_live,
                         pool.index_live,
@@ -189,8 +190,10 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                         pool.index_quarantined,
                         pool.value_allocations,
                         pool.value_reuses,
+                        pool.value_destroyed,
                         pool.index_allocations,
                         pool.index_reuses,
+                        pool.index_destroyed,
                     ));
 
                     super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
@@ -334,6 +337,12 @@ fn bytes_to_gib(bytes: u64) -> f64 {
 fn format_percent(value: Option<f64>) -> String {
     value
         .map(|percent| format!("{percent:.0}%"))
+        .unwrap_or_else(|| "N/A".to_string())
+}
+
+fn format_object_count(value: Option<u64>) -> String {
+    value
+        .map(|count| count.to_string())
         .unwrap_or_else(|| "N/A".to_string())
 }
 

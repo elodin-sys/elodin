@@ -20,6 +20,7 @@ use bevy::{
     math::{DQuat, DVec3},
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
+    render::{RenderPlugin, settings::WgpuSettings},
     window::{PrimaryWindow, WindowRef, WindowResolution},
     winit::{WINIT_WINDOWS, WinitSettings},
 };
@@ -65,6 +66,17 @@ use ui::{
 #[derive(Resource, Default, Clone, Copy, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct Coordinate(pub Option<GeoFrame>);
+
+pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
+    WgpuSettings {
+        instance_memory_budget_thresholds: wgpu::MemoryBudgetThresholds {
+            for_resource_creation: Some(99),
+            for_device_loss: None,
+        },
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        ..default()
+    }
+}
 
 mod embedded_lfs;
 pub mod icon_rasterizer;
@@ -240,6 +252,10 @@ impl Plugin for EditorPlugin {
             .add_plugins(plugins::kdl_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
+                    .set(RenderPlugin {
+                        render_creation: editor_wgpu_settings().into(),
+                        ..default()
+                    })
                     .set(WindowPlugin {
                         primary_window: Some(Window {
                             title: "Elodin".into(),

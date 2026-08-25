@@ -53,7 +53,7 @@ use std::ops::Range;
 use crate::ui::ViewportRect;
 use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
 
-use super::{BufferShardAlloc, PlotGpuBufferPool};
+use super::{BufferShardAlloc, PlotGpuAllocationPause, PlotGpuBufferPool, PlotGpuPoolTrim};
 use crate::ui::widgets::SystemStateExt;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
@@ -78,6 +78,7 @@ impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<ExtractLinesState>()
+            .init_resource::<PlotGpuAllocationPause>()
             .init_resource::<PlotGpuBufferPool>()
             .init_asset::<Line>()
             .init_asset::<XYLine>();
@@ -689,6 +690,42 @@ pub(crate) fn unload_plot_gpu_not_on_screen(
     }
 }
 
+pub(crate) fn evict_all_plot_gpu(
+    main_world: &mut bevy::prelude::World,
+    render_world: &mut bevy::prelude::World,
+) -> PlotGpuPoolTrim {
+    let trim =
+        main_world.resource_scope(|world, mut pool: bevy::prelude::Mut<PlotGpuBufferPool>| {
+            if let Some(mut lines) = world.get_resource_mut::<Assets<Line>>() {
+                for (_, line) in lines.iter_mut() {
+                    line.data.unload_gpu(&mut pool);
+                }
+            }
+            if let Some(mut xy_lines) = world.get_resource_mut::<Assets<XYLine>>() {
+                for (_, line) in xy_lines.iter_mut() {
+                    line.unload_gpu(&mut pool);
+                }
+            }
+            let mut caches = world.query::<&mut GpuLineCache>();
+            for mut cache in caches.iter_mut(world) {
+                if let Some(gpu) = cache.0.take() {
+                    pool.release_index(gpu.index_buffer);
+                }
+            }
+            pool.drain()
+        });
+    if let Some(mut pause) = main_world.get_resource_mut::<PlotGpuAllocationPause>() {
+        pause.pause_for_recovery();
+    }
+
+    let mut gpu_lines = render_world.query_filtered::<Entity, bevy::prelude::With<GpuLine>>();
+    let entities: Vec<_> = gpu_lines.iter(render_world).collect();
+    for entity in entities {
+        render_world.despawn(entity);
+    }
+    trim
+}
+
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
@@ -698,6 +735,12 @@ fn extract_lines(
 ) {
     main_world.resource_scope(
         |world, mut cached_state: bevy::prelude::Mut<ExtractLinesState>| {
+            if world
+                .get_resource_mut::<PlotGpuAllocationPause>()
+                .is_some_and(|mut pause| pause.is_active())
+            {
+                return;
+            }
             let (
                 mut lines,
                 viewport_rects,

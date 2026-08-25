@@ -3526,14 +3526,55 @@ mod tests {
     }
 
     #[test]
+    fn ready_pool_items_are_evicted_after_idle_limit() {
+        let mut pool = QuarantinePool::default();
+        pool.release(1u32);
+        for _ in 0..PLOT_GPU_QUARANTINE_FRAMES {
+            assert_eq!(pool.tick(), 0);
+        }
+        assert_eq!(pool.ready_count(), 1);
+        for _ in 1..PLOT_GPU_POOL_IDLE_EVICT_FRAMES {
+            assert_eq!(pool.tick(), 0);
+        }
+        assert_eq!(pool.ready_count(), 1);
+        assert_eq!(pool.tick(), 1);
+        assert_eq!(pool.ready_count(), 0);
+    }
+
+    #[test]
+    fn pressure_trim_keeps_quarantined_items() {
+        let mut pool = QuarantinePool::default();
+        pool.release(1u32);
+        assert_eq!(pool.trim_ready(), 0);
+        assert_eq!(pool.quarantined_count(), 1);
+        for _ in 0..PLOT_GPU_QUARANTINE_FRAMES {
+            pool.tick();
+        }
+        assert_eq!(pool.trim_ready(), 1);
+        assert_eq!(pool.ready_count(), 0);
+    }
+
+    #[test]
+    fn recovery_pause_blocks_immediate_plot_reallocation() {
+        let mut pause = PlotGpuAllocationPause::default();
+        assert!(!pause.is_active());
+        pause.pause_for_recovery();
+        assert!(pause.is_active());
+    }
+
+    #[test]
     fn plot_gpu_snapshot_accounts_for_resident_and_pooled_buffers() {
         let snapshot = PlotGpuPoolSnapshot {
             value_live: 2,
             value_ready: 1,
             value_quarantined: 2,
+            value_allocations: 8,
+            value_destroyed: 3,
             index_live: 3,
             index_ready: 2,
             index_quarantined: 1,
+            index_allocations: 10,
+            index_destroyed: 4,
             ..Default::default()
         };
         assert_eq!(
@@ -3543,6 +3584,20 @@ mod tests {
         assert_eq!(
             snapshot.pooled_bytes(),
             3 * PLOT_VALUE_BUFFER_BYTES + 3 * PLOT_INDEX_BUFFER_BYTES
+        );
+        assert_eq!(
+            snapshot.value_allocations,
+            snapshot.value_live as u64
+                + snapshot.value_ready as u64
+                + snapshot.value_quarantined as u64
+                + snapshot.value_destroyed
+        );
+        assert_eq!(
+            snapshot.index_allocations,
+            snapshot.index_live as u64
+                + snapshot.index_ready as u64
+                + snapshot.index_quarantined as u64
+                + snapshot.index_destroyed
         );
     }
 
@@ -3603,9 +3658,30 @@ impl BoundOrd for f32 {
 /// wgpu/Bevy keep 1–3 frames in flight. Value buffers released on a tab
 /// switch must not be rewritten until those bind groups are gone.
 pub(crate) const PLOT_GPU_QUARANTINE_FRAMES: u8 = 3;
+pub(crate) const PLOT_GPU_POOL_IDLE_EVICT_FRAMES: u16 = 300;
+const PLOT_GPU_RECOVERY_PAUSE: Duration = Duration::from_secs(2);
+
+#[derive(Resource, Default)]
+pub struct PlotGpuAllocationPause {
+    until: Option<Instant>,
+}
+
+impl PlotGpuAllocationPause {
+    pub fn pause_for_recovery(&mut self) {
+        self.until = Some(Instant::now() + PLOT_GPU_RECOVERY_PAUSE);
+    }
+
+    pub fn is_active(&mut self) -> bool {
+        let active = self.until.is_some_and(|until| Instant::now() < until);
+        if !active {
+            self.until = None;
+        }
+        active
+    }
+}
 
 pub(crate) struct QuarantinePool<T> {
-    items: Vec<(T, u8)>,
+    items: Vec<(T, u8, u16)>,
 }
 
 impl<T> Default for QuarantinePool<T> {
@@ -3615,27 +3691,58 @@ impl<T> Default for QuarantinePool<T> {
 }
 
 impl<T> QuarantinePool<T> {
-    fn tick(&mut self) {
-        for (_, frames) in &mut self.items {
-            *frames = frames.saturating_sub(1);
+    fn tick(&mut self) -> usize {
+        for (_, quarantine_frames, idle_frames) in &mut self.items {
+            if *quarantine_frames > 0 {
+                *quarantine_frames -= 1;
+            } else {
+                *idle_frames = idle_frames.saturating_add(1);
+            }
         }
+        let before = self.items.len();
+        self.items.retain(|(_, quarantine_frames, idle_frames)| {
+            *quarantine_frames > 0 || *idle_frames < PLOT_GPU_POOL_IDLE_EVICT_FRAMES
+        });
+        before - self.items.len()
     }
 
     fn release(&mut self, item: T) {
-        self.items.push((item, PLOT_GPU_QUARANTINE_FRAMES));
+        self.items.push((item, PLOT_GPU_QUARANTINE_FRAMES, 0));
     }
 
     fn try_acquire(&mut self) -> Option<T> {
-        let idx = self.items.iter().position(|(_, frames)| *frames == 0)?;
+        let idx = self
+            .items
+            .iter()
+            .position(|(_, quarantine_frames, _)| *quarantine_frames == 0)?;
         Some(self.items.swap_remove(idx).0)
     }
 
     fn ready_count(&self) -> usize {
-        self.items.iter().filter(|(_, frames)| *frames == 0).count()
+        self.items
+            .iter()
+            .filter(|(_, quarantine_frames, _)| *quarantine_frames == 0)
+            .count()
     }
 
     fn quarantined_count(&self) -> usize {
-        self.items.iter().filter(|(_, frames)| *frames > 0).count()
+        self.items
+            .iter()
+            .filter(|(_, quarantine_frames, _)| *quarantine_frames > 0)
+            .count()
+    }
+
+    fn trim_ready(&mut self) -> usize {
+        let before = self.items.len();
+        self.items
+            .retain(|(_, quarantine_frames, _)| *quarantine_frames > 0);
+        before - self.items.len()
+    }
+
+    fn clear(&mut self) -> usize {
+        let count = self.items.len();
+        self.items.clear();
+        count
     }
 }
 
@@ -3668,11 +3775,13 @@ pub struct PlotGpuPoolSnapshot {
     pub value_quarantined: usize,
     pub value_allocations: u64,
     pub value_reuses: u64,
+    pub value_destroyed: u64,
     pub index_live: usize,
     pub index_ready: usize,
     pub index_quarantined: usize,
     pub index_allocations: u64,
     pub index_reuses: u64,
+    pub index_destroyed: u64,
 }
 
 impl PlotGpuPoolSnapshot {
@@ -3704,12 +3813,14 @@ pub struct PlotGpuBufferPool {
     index_live: usize,
     index_allocations: u64,
     index_reuses: u64,
+    value_destroyed: u64,
+    index_destroyed: u64,
 }
 
 impl PlotGpuBufferPool {
     pub fn tick(&mut self) {
-        self.value.tick();
-        self.index.tick();
+        self.value_destroyed += self.value.tick() as u64;
+        self.index_destroyed += self.index.tick() as u64;
     }
 
     pub fn release_value(&mut self, buffer: Buffer) {
@@ -3731,12 +3842,34 @@ impl PlotGpuBufferPool {
             value_quarantined: self.value.quarantined_count(),
             value_allocations: self.value_allocations,
             value_reuses: self.value_reuses,
+            value_destroyed: self.value_destroyed,
             index_live: self.index_live,
             index_ready: self.index.ready_count(),
             index_quarantined: self.index.quarantined_count(),
             index_allocations: self.index_allocations,
             index_reuses: self.index_reuses,
+            index_destroyed: self.index_destroyed,
         }
+    }
+
+    pub fn trim_ready(&mut self) -> PlotGpuPoolTrim {
+        let trim = PlotGpuPoolTrim {
+            values: self.value.trim_ready(),
+            indices: self.index.trim_ready(),
+        };
+        self.value_destroyed += trim.values as u64;
+        self.index_destroyed += trim.indices as u64;
+        trim
+    }
+
+    pub fn drain(&mut self) -> PlotGpuPoolTrim {
+        let trim = PlotGpuPoolTrim {
+            values: self.value.clear(),
+            indices: self.index.clear(),
+        };
+        self.value_destroyed += trim.values as u64;
+        self.index_destroyed += trim.indices as u64;
+        trim
     }
 
     pub fn defer_new_allocs(&self, value_resident: bool, has_index_cache: bool) -> bool {
@@ -3783,6 +3916,12 @@ impl PlotGpuBufferPool {
             mapped_at_creation: false,
         }))
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlotGpuPoolTrim {
+    pub values: usize,
+    pub indices: usize,
 }
 
 pub struct BufferShardAlloc {

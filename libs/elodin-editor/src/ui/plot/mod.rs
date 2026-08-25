@@ -7,9 +7,9 @@ pub use hamann_chen_line::{
 
 pub use data::{
     BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, CurveCompressSettings, Line,
-    OVERVIEW_MAX_POINTS, PlotDataComponent, PlotGpuBufferPool, PlotSyncState, XYLine,
-    maybe_compress_all_graph_lines, queue_timestamp_read, setup_pkt_handler,
-    update_series_fetch_priority,
+    OVERVIEW_MAX_POINTS, PlotDataComponent, PlotGpuAllocationPause, PlotGpuBufferPool,
+    PlotGpuPoolTrim, PlotSyncState, XYLine, maybe_compress_all_graph_lines, queue_timestamp_read,
+    setup_pkt_handler, update_series_fetch_priority,
 };
 
 pub mod gpu;
