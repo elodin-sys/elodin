@@ -7,8 +7,10 @@ use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
 use bevy::ecs::bundle::Bundle;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::hierarchy::ChildOf;
+use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
-use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
+use bevy::ecs::system::{Command, Commands, Query, Res, ResMut, SystemState};
+use bevy::ecs::world::DeferredWorld;
 use bevy::log::warn_once;
 use bevy::math::{FloatOrd, Vec4};
 use bevy::prelude::Deref;
@@ -33,7 +35,7 @@ use bevy::{
         component::Component,
         system::lifetimeless::{Read, SRes},
     },
-    prelude::{Color, Resource},
+    prelude::{Color, Mut, Resource, World},
     render::{
         RenderApp,
         extract_component::UniformComponentPlugin,
@@ -59,7 +61,10 @@ use crate::ui::plot::{CHUNK_COUNT, Line, XYLine};
 use super::data::{
     PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
 };
-use super::{BufferShardAlloc, PlotGpuAllocationPause, PlotGpuBufferPool, PlotGpuPoolTrim};
+use super::{
+    BufferShardAlloc, CollectedGraphData, PlotGpuAllocationPause, PlotGpuBufferPool,
+    PlotGpuPoolTrim, PlotLineKey, PlotLineUsers,
+};
 use crate::ui::widgets::SystemStateExt;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
@@ -87,6 +92,7 @@ impl Plugin for PlotGpuPlugin {
             .init_resource::<ExtractLinesState>()
             .init_resource::<PlotGpuAllocationPause>()
             .init_resource::<PlotGpuBufferPool>()
+            .init_resource::<PlotLineUsers>()
             .init_asset::<Line>()
             .init_asset::<XYLine>();
 
@@ -160,9 +166,84 @@ impl Plugin for PlotGpuPlugin {
 
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
+#[component(on_add = on_line_handle_add, on_remove = on_line_handle_remove)]
 pub enum LineHandle {
     Timeseries(Handle<Line>),
     XY(Handle<XYLine>),
+}
+
+impl LineHandle {
+    fn plot_line_key(&self) -> PlotLineKey {
+        match self {
+            Self::Timeseries(handle) => PlotLineKey::Timeseries(handle.id()),
+            Self::XY(handle) => PlotLineKey::XY(handle.id()),
+        }
+    }
+}
+
+fn on_line_handle_add(mut world: DeferredWorld, ctx: HookContext) {
+    let Some(handle) = world.get::<LineHandle>(ctx.entity) else {
+        return;
+    };
+    let key = handle.plot_line_key();
+    if let Some(mut users) = world.get_resource_mut::<PlotLineUsers>() {
+        users.retain(key);
+    }
+}
+
+fn on_line_handle_remove(mut world: DeferredWorld, ctx: HookContext) {
+    if let Some(mut cache) = world.get_mut::<GpuLineCache>(ctx.entity)
+        && let Some(index_buffer) = cache.take_index_buffer()
+        && let Some(mut pool) = world.get_resource_mut::<PlotGpuBufferPool>()
+    {
+        pool.release_index(index_buffer);
+    }
+    let Some(handle) = world.get::<LineHandle>(ctx.entity) else {
+        return;
+    };
+    let key = handle.plot_line_key();
+    let remaining = world
+        .get_resource_mut::<PlotLineUsers>()
+        .map(|mut users| users.release(key))
+        .unwrap_or(0);
+    if remaining == 0 {
+        world.commands().queue(ReleaseUnusedPlotLine(key));
+    }
+}
+
+struct ReleaseUnusedPlotLine(PlotLineKey);
+
+impl Command for ReleaseUnusedPlotLine {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        release_unused_plot_line(world, self.0);
+    }
+}
+
+fn release_unused_plot_line(world: &mut World, key: PlotLineKey) {
+    if world.get_resource::<PlotGpuBufferPool>().is_none() {
+        world.init_resource::<PlotGpuBufferPool>();
+    }
+    world.resource_scope(|world, mut pool: Mut<PlotGpuBufferPool>| match key {
+        PlotLineKey::Timeseries(id) => {
+            if let Some(mut lines) = world.get_resource_mut::<Assets<Line>>()
+                && let Some(mut line) = lines.get_mut(id)
+            {
+                line.data.unload_gpu(&mut pool);
+            }
+            if let Some(mut collected) = world.get_resource_mut::<CollectedGraphData>() {
+                collected.remove_line_handle(id);
+            }
+        }
+        PlotLineKey::XY(id) => {
+            if let Some(mut xy_lines) = world.get_resource_mut::<Assets<XYLine>>()
+                && let Some(mut xy) = xy_lines.get_mut(id)
+            {
+                xy.unload_gpu(&mut pool);
+            }
+        }
+    });
 }
 
 pub enum LineMut<'a> {
@@ -539,6 +620,12 @@ pub struct GpuLine {
 /// dominates frame time on graph-heavy schematics.
 #[derive(Component, Default)]
 pub struct GpuLineCache(Option<GpuLine>);
+
+impl GpuLineCache {
+    fn take_index_buffer(&mut self) -> Option<Buffer> {
+        self.0.take().map(|gpu| gpu.index_buffer)
+    }
+}
 
 pub struct SetLineBindGroup;
 

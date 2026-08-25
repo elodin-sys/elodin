@@ -3,7 +3,7 @@ use bevy::log::warn_once;
 use bevy::prelude::{InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
-    asset::{Assets, Handle},
+    asset::{AssetId, Assets, Handle},
     ecs::system::{Commands, Query},
     prelude::Resource,
 };
@@ -24,7 +24,7 @@ use roaring::bitmap::RoaringBitmap;
 use zerocopy::{Immutable, IntoBytes};
 
 use std::any::type_name;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -199,6 +199,48 @@ impl CollectedGraphData {
         self.components
             .get(component_id)
             .and_then(|component| component.lines.get(&index))
+    }
+
+    pub fn remove_line_handle(&mut self, id: AssetId<Line>) {
+        for component in self.components.values_mut() {
+            component.lines.retain(|_, handle| handle.id() != id);
+        }
+    }
+}
+
+/// Live `LineHandle` entities per plot asset. Last user unloads GPU and
+/// drops the `CollectedGraphData` handle so unused `Assets<Line>` can go.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PlotLineKey {
+    Timeseries(AssetId<Line>),
+    XY(AssetId<XYLine>),
+}
+
+#[derive(Resource, Default)]
+pub struct PlotLineUsers {
+    counts: HashMap<PlotLineKey, usize>,
+}
+
+impl PlotLineUsers {
+    pub fn retain(&mut self, key: PlotLineKey) {
+        *self.counts.entry(key).or_insert(0) += 1;
+    }
+
+    pub fn release(&mut self, key: PlotLineKey) -> usize {
+        let Some(count) = self.counts.get_mut(&key) else {
+            return 0;
+        };
+        *count = count.saturating_sub(1);
+        let remaining = *count;
+        if remaining == 0 {
+            self.counts.remove(&key);
+        }
+        remaining
+    }
+
+    #[cfg(test)]
+    pub fn count(&self, key: PlotLineKey) -> usize {
+        self.counts.get(&key).copied().unwrap_or(0)
     }
 }
 
