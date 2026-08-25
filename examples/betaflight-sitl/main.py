@@ -299,7 +299,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
 
     try:
         # Synchronous lockstep: send FDM+RC, wait for motor response
-        # Motor order matches Betaflight Quad-X: FR(0), BR(1), BL(2), FL(3)
+        # Motor order is native Betaflight Quad-X: BR(0), FR(1), BL(2), FL(3)
         # The physics simulation (config.py) uses the same motor layout
         s.motors = b.step(fdm, rc)
         s.max_motor = max(s.max_motor, np.max(s.motors))
