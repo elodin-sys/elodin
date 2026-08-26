@@ -5,16 +5,16 @@ This module simulates the IMU (Inertial Measurement Unit) and other sensors
 that provide data to Betaflight's flight controller algorithms.
 
 Sensor Models (configured targets; effective rates are capped by the physics rate):
-- Gyroscope: Measures angular velocity in body frame (8 kHz target, 1 kHz default)
-- Accelerometer: Measures linear acceleration in body frame (4.8 kHz target, 1 kHz default)
-- Barometer: Measures altitude via pressure (480 Hz target, 500 Hz default)
-- Magnetometer: Measures heading reference (200 Hz target and default)
+- Gyroscope: Measures angular velocity in body frame (8 kHz target and default)
+- Accelerometer: Measures linear acceleration in body frame (4.8 kHz target, 4 kHz effective)
+- Barometer: Measures altitude via pressure (480 Hz target, ~471 Hz effective)
+- Magnetometer: Measures heading reference (200 Hz target and effective)
 
 Multi-Rate Simulation:
 Sensors request rates based on the Elodin Aleph flight controller hardware
 (BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The physics/PID lockstep
-runs at 1kHz by default, so faster sensor targets are capped at 1kHz and slower
-sensors use tick decimation.
+runs at 8kHz by default. Slower sensors use whole-tick decimation, so their
+actual rates are the closest rates representable at 8kHz.
 
 Noise Model (from proven drone example):
 - Gaussian measurement noise on each sample
@@ -25,9 +25,9 @@ filtering. This is a Software-In-The-Loop test, so we want to send realistic
 noisy sensor data and let Betaflight process it.
 
 Coordinate Systems:
-- Elodin: ENU (East-North-Up) with X=forward, Y=left, Z=up
-- Betaflight: NED (North-East-Down) for sensor data
-- Conversion handled in comms.py send_state method
+- Elodin: ENU (East-North-Up) world frame with FLU (Forward-Left-Up) body frame
+- Betaflight SITL (2026.6.1+, Gazebo bridge): FRD (Forward-Right-Down) sensor frame
+- Conversion handled in build_fdm_from_components below
 """
 
 import typing as ty
@@ -427,7 +427,7 @@ def create_baro_system(config: DroneConfig):
         """
         Compute barometer reading with multi-rate decimation.
 
-        Updates at baro_tick_interval (every 2 ticks at the default 1kHz rate).
+        Updates at baro_tick_interval (every 17 ticks at the default 8kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_baro_reading(tick, pos)
@@ -482,7 +482,7 @@ def create_mag_system(config: DroneConfig):
         """
         Compute magnetometer reading with multi-rate decimation.
 
-        Updates at mag_tick_interval (every 5 ticks at the default 1kHz rate).
+        Updates at mag_tick_interval (every 40 ticks at the default 8kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_mag_reading(tick, pos)
@@ -534,9 +534,9 @@ def create_sensor_system(config: DroneConfig) -> el.System:
     Create the complete sensor system with multi-rate simulation.
 
     Combines sensors at their configured target rates, capped by the physics rate:
-    - Gyroscope: 8 kHz target (1 kHz at the default physics rate)
-    - Accelerometer: 4.8 kHz target (1 kHz at the default physics rate)
-    - Barometer: 480 Hz target (500 Hz after whole-tick rounding at 1 kHz)
+    - Gyroscope: 8 kHz target and effective default rate
+    - Accelerometer: 4.8 kHz target (4 kHz after whole-tick rounding at 8 kHz)
+    - Barometer: 480 Hz target (~471 Hz after whole-tick rounding at 8 kHz)
     - Magnetometer: 200 Hz target and effective rate
 
     Args:
@@ -616,14 +616,14 @@ def build_fdm_from_components(
     and packaging it for Betaflight. It handles:
     - Quaternion extraction from world_pos (Elodin scalar-last to Betaflight scalar-first)
     - Velocity extraction from world_vel
-    - ENU to NED coordinate conversion for gyro/accel
+    - FLU to FRD body frame conversion for gyro/accel
     - Pressure calculation from altitude
 
     Args:
         world_pos: Position array [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
         world_vel: Velocity array [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
-        accel: Accelerometer [ax, ay, az] in body frame (ENU)
-        gyro: Gyroscope [wx, wy, wz] in body frame (ENU)
+        accel: Accelerometer specific force [ax, ay, az] in body frame (FLU)
+        gyro: Gyroscope [wx, wy, wz] in body frame (FLU)
         timestamp: Simulation time in seconds
         gravity: Gravity constant (for reference)
 
@@ -635,7 +635,16 @@ def build_fdm_from_components(
 
     # Extract quaternion from Elodin format [qx, qy, qz, qw] and convert to [qw, qx, qy, qz]
     quat_xyzw = np.array(world_pos[:4])
-    quat = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
+    quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
+
+    # Betaflight 2026.6.1+ SITL defaults to the Gazebo bridge
+    # (ENABLE_GAZEBO_BRIDGE=1), which expects the attitude quaternion in the
+    # Gazebo BetaflightPlugin convention: q_plugin = Rx(pi) * M * Rx(pi), where
+    # M is the FLU-body to ENU-world attitude. Conjugation by Rx(pi) negates
+    # qy/qz, so send [w, x, -y, -z]; SITL undoes the conjugation and rotates
+    # the world frame ENU -> NWU internally. The result drives the virtual mag
+    # feed (and the attitude directly when built with SITL_ATTITUDE_DIRECT).
+    quat = np.array([quat_wxyz[0], quat_wxyz[1], -quat_wxyz[2], -quat_wxyz[3]])
 
     # Extract position [x, y, z] (ENU)
     position = np.array(world_pos[4:7])
@@ -647,38 +656,32 @@ def build_fdm_from_components(
     accel_enu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
     gyro_enu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
 
-    # Convert from Elodin FLU body frame to Betaflight FRD body frame
+    # Convert from Elodin FLU body frame to the FRD sensor frame that
+    # Betaflight 2026.6.1+ SITL expects (default ENABLE_GAZEBO_BRIDGE=1).
     #
-    # Betaflight SITL (sitl.c) applies internal sign conversions to incoming data:
-    #   accel: negates all axes (-X, -Y, -Z)
-    #   gyro:  keeps X, negates Y and Z (X, -Y, -Z)
+    # This mirrors the Gazebo BetaflightPlugin, whose IMU sensor frame is FRD
+    # (Rx(pi) relative to the FLU body link):
+    #   accel: send specific force in FRD = [FLU_x, -FLU_y, -FLU_z]
+    #   gyro:  send body rates in FRD   = [FLU_x, -FLU_y, -FLU_z]
     #
-    # We pre-compensate so that AFTER BF's conversion, correct FRD values result.
-    #
-    # FLU→FRD conversion (conceptually):
-    #   FRD_x = FLU_x   (forward stays forward)
-    #   FRD_y = -FLU_y  (right = -left)
-    #   FRD_z = -FLU_z  (down = -up)
-    #
-    # Accelerometer: We want [FLU_x, -FLU_y, -FLU_z] after BF negates all.
-    #   Send [-FLU_x, FLU_y, FLU_z] → BF gets [FLU_x, -FLU_y, -FLU_z] ✓
+    # sitl.c then maps these onto Betaflight's internal axes:
+    #   accel: negates all axes, so at rest the estimator sees acc_z = +1g
+    #          (up) and the Mahony filter converges to a level attitude
+    #   gyro:  (X, -Y, +Z) via sitlGyroBodyFromSim(), yielding Betaflight's
+    #          (roll right, pitch nose-down, yaw CW) sign convention
     accel_ned = np.array(
         [
-            -accel_enu[0],  # BF: -(-X) = X
-            accel_enu[1],  # BF: -Y
-            accel_enu[2],  # BF: -Z
+            accel_enu[0],  # FRD_x = FLU_x
+            -accel_enu[1],  # FRD_y = -FLU_y
+            -accel_enu[2],  # FRD_z = -FLU_z (at rest: -1g; BF negates to +1g)
         ]
     )
 
-    # Gyroscope: We want [FLU_x, -FLU_y, -FLU_z] after BF's (X, -Y, -Z).
-    #   Note: Elodin pitch sign is inverted, so we negate Y before conversion.
-    #   Send [FLU_x, -FLU_y, FLU_z] → BF gets [FLU_x, FLU_y, -FLU_z]
-    #   But with pitch already negated: [FLU_x, FLU_y, -FLU_z] (correct FRD)
     gyro_ned = np.array(
         [
-            gyro_enu[0],  # Roll: correct sign
-            -gyro_enu[1],  # Pitch: negate (Elodin pitch is inverted)
-            gyro_enu[2],  # Yaw: BF negates to get -Z
+            gyro_enu[0],  # FRD_x = FLU_x
+            -gyro_enu[1],  # FRD_y = -FLU_y
+            -gyro_enu[2],  # FRD_z = -FLU_z
         ]
     )
 

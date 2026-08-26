@@ -16,6 +16,8 @@ use super::gpu::LineVisibleRange;
 use crate::MainCamera;
 use crate::plugins::render_layer_alloc::{RenderLayerAllocator, RenderLayerLease};
 use crate::ui::{ViewportRect, colors};
+use bevy::ecs::lifecycle::HookContext;
+use bevy::ecs::world::DeferredWorld;
 
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;
 pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
@@ -34,6 +36,7 @@ pub struct GraphBundle {
 }
 
 #[derive(Clone, Debug, Component)]
+#[component(on_remove = on_graph_state_remove)]
 pub struct GraphState {
     pub components: BTreeMap<ComponentPath, GraphStateComponent>,
     pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,
@@ -58,6 +61,24 @@ pub struct GraphState {
     // peer-ready metadata (not used until widget.rs switches to peers)
     pub x_rev: u64,
     pub x_dirty: bool,
+}
+
+fn on_graph_state_remove(mut world: DeferredWorld, ctx: HookContext) {
+    let lines: Vec<Entity> = world
+        .get::<GraphState>(ctx.entity)
+        .map(|state| {
+            state
+                .enabled_lines
+                .values()
+                .map(|(entity, _)| *entity)
+                .collect()
+        })
+        .unwrap_or_default();
+    for entity in lines {
+        if world.get_entity(entity).is_ok() {
+            world.commands().entity(entity).despawn();
+        }
+    }
 }
 
 impl GraphBundle {

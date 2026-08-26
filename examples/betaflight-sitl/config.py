@@ -22,18 +22,15 @@ Elodin Coordinate System (ENU/FLU body frame):
     Y = Left
     Z = Up
 
-IMPORTANT: Betaflight SITL remaps motor indices for Gazebo ArduCopterPlugin
-compatibility in sitl.c pwmCompleteMotorUpdate():
-    pwmPkt.motor_speed[3] = motorsPwm[0]  (REAR_R -> output 3)
-    pwmPkt.motor_speed[0] = motorsPwm[1]  (FRONT_R -> output 0)
-    pwmPkt.motor_speed[1] = motorsPwm[2]  (REAR_L -> output 1)
-    pwmPkt.motor_speed[2] = motorsPwm[3]  (FRONT_L -> output 2)
+IMPORTANT: Betaflight 2026.6.1+ SITL sends motor outputs in native Betaflight
+order (sitl.c pwmCompleteMotorUpdate() copies motorsPwm[] directly; the old
+Gazebo ArduCopterPlugin remapping was removed):
 
-Motor Index Mapping (what we RECEIVE from SITL, after Gazebo remapping):
-    motor[0] = Front Right (FR, CCW, spin +1) - originally BF motor 1
-    motor[1] = Back Left (BL, CCW, spin +1)   - originally BF motor 2
-    motor[2] = Front Left (FL, CW, spin -1)   - originally BF motor 3
-    motor[3] = Back Right (BR, CW, spin -1)   - originally BF motor 0
+Motor Index Mapping (what we RECEIVE from SITL):
+    motor[0] = BF motor 0 = Back Right (BR, CW, spin -1)
+    motor[1] = BF motor 1 = Front Right (FR, CCW, spin +1)
+    motor[2] = BF motor 2 = Back Left (BL, CCW, spin +1)
+    motor[3] = BF motor 3 = Front Left (FL, CW, spin -1)
 """
 
 from dataclasses import dataclass, field
@@ -142,13 +139,13 @@ class DroneConfig:
 
     # --- Simulation Settings ---
 
-    # Physics/PID lockstep rate in Hz. 1kHz is the real-time default; higher
-    # rates may run slower than real time because each tick includes a UDP round trip.
-    # simulation_rate: float = 8000.0  # 125µs
+    # Physics/PID lockstep rate in Hz. The default 8kHz loop uses a busy-waiting
+    # Betaflight SITL build to avoid host scheduler wakeup latency.
+    simulation_rate: float = 8000.0  # 125µs
     # simulation_rate: float = 4000.0  # 250µs
     # simulation_rate: float = 2000.0  # 500µs
     # simulation_rate: float = 1500.0  # 667µs
-    simulation_rate: float = 1000.0  # 1000µs
+    # simulation_rate: float = 1000.0  # 1000µs
 
     # Total simulation time in seconds
     simulation_time: float = 15.0
@@ -237,11 +234,11 @@ class DroneConfig:
             3(BL)      1(BR)
                   BACK
 
-        SITL applies Gazebo remapping, so we receive:
-            motor[0] = FR (Front Right)
-            motor[1] = BL (Back Left)
-            motor[2] = FL (Front Left)
-            motor[3] = BR (Back Right)
+        SITL (2026.6.1+) sends motors in native Betaflight order, so we receive:
+            motor[0] = BF0 = BR (Back Right)
+            motor[1] = BF1 = FR (Front Right)
+            motor[2] = BF2 = BL (Back Left)
+            motor[3] = BF3 = FL (Front Left)
 
         Returns:
             Array of shape (4, 3) with motor positions [x, y, z] in body FLU
@@ -250,13 +247,13 @@ class DroneConfig:
         d = self.arm_length * np.sqrt(2) / 2  # distance in each axis
 
         # Motor positions: [Forward, Left, Up] in body FLU frame
-        # Ordered according to SITL's Gazebo remapping
+        # Ordered by native Betaflight motor index (BR, FR, BL, FL)
         return np.array(
             [
-                [d, -d, 0.0],  # motor[0] = Front Right (FR)
-                [-d, d, 0.0],  # motor[1] = Back Left (BL)
-                [d, d, 0.0],  # motor[2] = Front Left (FL)
-                [-d, -d, 0.0],  # motor[3] = Back Right (BR)
+                [-d, -d, 0.0],  # motor[0] = Back Right (BR)
+                [d, -d, 0.0],  # motor[1] = Front Right (FR)
+                [-d, d, 0.0],  # motor[2] = Back Left (BL)
+                [d, d, 0.0],  # motor[3] = Front Left (FL)
             ]
         )
 
@@ -281,13 +278,13 @@ class DroneConfig:
             +1 = CCW rotation (produces +Z torque when spinning)
             -1 = CW rotation (produces -Z torque when spinning)
 
-        After SITL's Gazebo remapping, we receive:
-            motor[0] = FR: CCW = +1
-            motor[1] = BL: CCW = +1
-            motor[2] = FL: CW  = -1
-            motor[3] = BR: CW  = -1
+        Native Betaflight motor order ("props out"):
+            motor[0] = BR: CW  = -1
+            motor[1] = FR: CCW = +1
+            motor[2] = BL: CCW = +1
+            motor[3] = FL: CW  = -1
         """
-        return np.array([1.0, 1.0, -1.0, -1.0])
+        return np.array([-1.0, 1.0, 1.0, -1.0])
 
     @property
     def motor_torque_axes(self) -> NDArray[np.float64]:

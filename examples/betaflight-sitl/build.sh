@@ -14,7 +14,23 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BETAFLIGHT_DIR="$SCRIPT_DIR/betaflight"
-BETAFLIGHT_OPTIONS="SIMULATOR_GYROPID_SYNC"
+# Betaflight 2026.6.1 renamed the sync option to an ENABLE_* boolean macro;
+# OPTIONS entries become -D flags, so this yields -DENABLE_SIMULATOR_GYROPID_SYNC=1
+#
+# VIRTUAL_GYRO_SAMPLE_RATE_HZ (new in 2026.6.1) is Betaflight's compile-time
+# assumption about the virtual gyro/acc rate; it drives filter Nyquist/notch/
+# LPF setup and PID dt. The actual loop rate is set at runtime by the FDM
+# packet rate from the Python side (config.py simulation_rate) via lockstep.
+# The two MUST match, so keep SITL_RATE_HZ in sync with simulation_rate.
+SITL_RATE_HZ="${SITL_RATE_HZ:-8000}"
+#
+# RUN_LOOP_DELAY_US (new in 2026.6.1) inserts a real-time nanosleep into
+# Betaflight's main loop to cap its spin rate. In lockstep mode host scheduler
+# wakeup latency is paid directly on every packet->motor round trip, so the 8kHz
+# default busy-waits for minimum latency. Set this above 0 to trade loop rate for
+# lower CPU usage; 0 consumes approximately one CPU core.
+RUN_LOOP_DELAY_US="${RUN_LOOP_DELAY_US:-0}"
+BETAFLIGHT_OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=$SITL_RATE_HZ RUN_LOOP_DELAY_US=$RUN_LOOP_DELAY_US"
 
 # Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)
 if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
@@ -24,6 +40,32 @@ if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
 fi
 
 cd "$BETAFLIGHT_DIR"
+
+# Apply the SITL lockstep event patch to the submodule (idempotent). In
+# ENABLE_SIMULATOR_GYROPID_SYNC mode it makes a fully published FDM packet the
+# trigger for one gyro/filter/PID/mixer iteration, instead of the virtual-clock
+# schedule:
+#   - scheduler.c: run the realtime gyro/filter/PID group once per FDM packet by
+#     gating it on lockMainPID() (the stock mainLoopLock token the UDP thread
+#     releases at the end of updateState()), not on the simulated-clock boundary.
+#     Stock SITL paces that boundary by a free-running simRate estimate, so a
+#     slow patch (warmup, CPU contention) lowers simRate, which delays the gyro
+#     task, which slows the loop further - the rate never recovers.
+#   - core.c: drop the now-redundant per-task PID mutex gate (the whole group is
+#     gated at the boundary now).
+#   - platform.h: RUN_LOOP_DELAY_US becomes overridable so it can be set to 0.
+# Asynchronous SITL (lockstep disabled) is unchanged.
+LOCKSTEP_PATCH="$SCRIPT_DIR/patches/sitl-lockstep-event.patch"
+if git apply --check "$LOCKSTEP_PATCH" 2>/dev/null; then
+    git apply "$LOCKSTEP_PATCH"
+    echo "Applied SITL lockstep event patch to betaflight submodule"
+elif git apply -R --check "$LOCKSTEP_PATCH" 2>/dev/null; then
+    echo "SITL lockstep event patch already applied"
+else
+    echo "Error: $LOCKSTEP_PATCH does not apply cleanly."
+    echo "The betaflight submodule may have changed - the patch needs updating."
+    exit 1
+fi
 
 # macOS compatibility: clang doesn't support -fuse-linker-plugin (GCC-specific LTO flag)
 # and some warnings need to be disabled due to compiler differences
@@ -62,6 +104,8 @@ case "${1:-build}" in
     build|"")
         echo "Building Betaflight SITL..."
         echo "  Target: SITL"
+        echo "  Gyro/PID rate: ${SITL_RATE_HZ} Hz (must match config.py simulation_rate)"
+        echo "  Run-loop delay: ${RUN_LOOP_DELAY_US} us (0 = busy-wait, best lockstep latency)"
         echo "  Output: $BETAFLIGHT_DIR/obj/main/betaflight_SITL.elf"
         echo ""
         
@@ -78,8 +122,8 @@ case "${1:-build}" in
             make configs
         fi
         
-        # Build SITL target with SIMULATOR_GYROPID_SYNC enabled through OPTIONS.
-        # This makes Betaflight block on FDM packets without modifying the submodule.
+        # Build SITL target with ENABLE_SIMULATOR_GYROPID_SYNC enabled through OPTIONS.
+        # This makes Betaflight pace its gyro/PID loop to incoming FDM packets.
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
         
         # On macOS, we need to create stubs for missing SITL symbols and do a two-pass build

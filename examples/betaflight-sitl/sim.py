@@ -33,11 +33,12 @@ from config import DroneConfig
 # Motor commands from Betaflight (normalized 0-1)
 # Marked as external_control so Betaflight can write to it via Elodin-DB
 #
-# Motor order after SITL's Gazebo remapping (see sitl.c pwmCompleteMotorUpdate):
-#   Index 0: Front Right (FR) - CCW  (originally BF Motor 1)
-#   Index 1: Back Left (BL) - CCW    (originally BF Motor 2)
-#   Index 2: Front Left (FL) - CW    (originally BF Motor 3)
-#   Index 3: Back Right (BR) - CW    (originally BF Motor 0)
+# Motor order in native Betaflight order (2026.6.1+ SITL sends motorsPwm[]
+# directly; see sitl.c pwmCompleteMotorUpdate):
+#   Index 0: Back Right (BR) - CW    (BF Motor 0)
+#   Index 1: Front Right (FR) - CCW  (BF Motor 1)
+#   Index 2: Back Left (BL) - CCW    (BF Motor 2)
+#   Index 3: Front Left (FL) - CW    (BF Motor 3)
 #
 # See config.py for motor positions and spin directions.
 MotorCommand = ty.Annotated[
@@ -46,7 +47,7 @@ MotorCommand = ty.Annotated[
         "motor_command",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
         metadata={
-            "element_names": "FR,BL,FL,BR",  # After SITL Gazebo remapping
+            "element_names": "BR,FR,BL,FL",  # Native Betaflight motor order
             "priority": 100,
             "external_control": "true",  # Allows external writes from Betaflight bridge
         },
@@ -54,13 +55,13 @@ MotorCommand = ty.Annotated[
 ]
 
 # Current motor thrust state (for dynamics)
-# Same motor order as MotorCommand: FR(0), BL(1), FL(2), BR(3)
+# Same motor order as MotorCommand: BR(0), FR(1), BL(2), FL(3)
 MotorThrust = ty.Annotated[
     jax.Array,
     el.Component(
         "motor_thrust",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "FR,BL,FL,BR", "priority": 99},
+        metadata={"element_names": "BR,FR,BL,FL", "priority": 99},
     ),
 ]
 
@@ -417,8 +418,8 @@ if __name__ == "__main__":
     system = create_physics_system(config)
     exec = world.build(system)
 
-    # Run 200 ticks (200ms at 1kHz)
-    exec.run(200)
+    # Run for the configured 200ms duration at the configured simulation rate
+    exec.run(config.total_sim_ticks)
 
     # Get history data
     df = exec.history(["drone.world_pos", "drone.world_vel", "drone.sim_time"])

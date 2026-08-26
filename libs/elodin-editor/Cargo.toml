@@ -34,7 +34,7 @@ bevy = { workspace = true, features = [
 bevy_render.version = "0.19"
 # Same wgpu major as bevy_render 0.19; needed for `WriteOnly` staging-buffer
 # views which bevy_render does not re-export.
-wgpu = { version = "29", default-features = false }
+wgpu = { version = "29", default-features = false, features = ["counters"] }
 bevy_color.version = "0.19"
 bevy_egui.version = "0.40.1"
 bevy_picking = "0.19"
@@ -157,6 +157,7 @@ impeller2-bevy.default-features = false
 
 # 3D text for ViewCube labels
 bevy_fontmesh = "0.6"
+nvml-wrapper = "0.12.1"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]
