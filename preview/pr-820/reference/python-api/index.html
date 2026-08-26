@@ -861,23 +861,25 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0, cinematic=False, ev100=None, bloom=None, environment=None)</code> -&gt; None</p>
+<p><code>sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)</code> -&gt; None</p>
 <p>Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every <code>1 / fps</code> µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with <code>ctx.read_msg("entity.name", timestamp=...)</code>.</p>
 <ul>
 <li><code>entity</code> : <a href="https://docs.elodin.systems/preview/pr-820/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity the camera is attached to.</li>
 <li><code>name</code> : <code>string</code>, the camera name. Combined with the entity name to form the full identifier (e.g., entity <code>"drone"</code> + name <code>"scene_cam"</code> → <code>"drone.scene_cam"</code>).</li>
-<li><code>width</code> : <code>int</code>, frame width in pixels.</li>
-<li><code>height</code> : <code>int</code>, frame height in pixels.</li>
-<li><code>fov</code> : <code>float</code>, vertical field of view in degrees, defaults to <code>90.0</code>.</li>
+<li><code>width</code> : <code>int | None</code>, frame width in pixels. Required unless supplied by <code>camera_model</code>.</li>
+<li><code>height</code> : <code>int | None</code>, frame height in pixels. Required unless supplied by <code>camera_model</code>.</li>
+<li><code>fov</code> : <code>float | None</code>, vertical field of view in degrees. Defaults to <code>90.0</code> without a model. Mutually exclusive with <code>lens_hfov</code>.</li>
 <li><code>near</code> : <code>float</code>, near clipping plane, defaults to <code>0.01</code>.</li>
 <li><code>far</code> : <code>float</code>, far clipping plane, defaults to <code>1000.0</code>.</li>
 <li><code>pos_offset</code> : <code>list[float]</code>, body-frame translation from the entity origin in metres, defaults to <code>[0, 0, 0]</code>. Applied first.</li>
 <li><code>rot_offset</code> : <code>list[float]</code>, body-frame rotation as <code>[roll, pitch, yaw]</code> in <strong>degrees</strong> (intrinsic X/Y/Z, aerospace convention), defaults to <code>[0, 0, 0]</code> (camera looks along body +X with body +Z as up). Applied around the camera's own axes after <code>pos_offset</code> and inherits the entity's attitude — when the host banks, the camera image banks with it.</li>
-<li><code>format</code> : <code>string</code>, pixel format, defaults to <code>"rgba"</code>.</li>
-<li><code>effect</code> : <code>string</code>, GPU post-process effect: <code>"normal"</code>, <code>"thermal"</code>, <code>"night_vision"</code>, or <code>"depth"</code>. Defaults to <code>"normal"</code>.</li>
-<li><code>effect_params</code> : <code>dict</code>, effect-specific parameters (e.g., <code>{"contrast": 1.5, "noise_sigma": 0.02}</code> for thermal).</li>
+<li><code>format</code> : <code>string</code>, output pixel format. Currently <code>"rgba"</code> (RGBA8) only.</li>
+<li><code>effect</code> : <code>string</code>, final GPU sensor-output effect: <code>"normal"</code>, <code>"thermal"</code>, <code>"night_vision"</code>, <code>"depth"</code>, or <code>"lwir"</code>. Defaults to <code>"normal"</code>. <code>"depth"</code> uses real linearized camera depth.</li>
+<li><code>effect_params</code> : <code>dict</code>, effect-specific nested parameters. LWIR supports <code>palette</code>, <code>agc</code>, <code>dde</code>, <code>mtf_blur_px</code>, detector noise, scene temperatures, and atmospheric transmission.</li>
+<li><code>camera_model</code> : <code>string | None</code>, calibrated camera preset. <code>"boson640p"</code> supplies 640×512, 60 Hz, the Boson+ detector defaults, and an 18° horizontal lens.</li>
+<li><code>lens_hfov</code> : <code>float | None</code>, physical horizontal field of view in degrees. Converted to vertical <code>fov</code> using the resolved image aspect ratio. Mutually exclusive with <code>fov</code>.</li>
 <li><code>show_ellipsoids</code> : <code>bool</code>, render ellipsoid debug objects in this sensor camera. Defaults to <code>False</code>.</li>
-<li><code>fps</code> : <code>float</code>, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to <code>30.0</code>.</li>
+<li><code>fps</code> : <code>float | None</code>, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to the camera-model rate, or <code>30.0</code> without a model.</li>
 <li><code>cinematic</code> : <code>bool</code>, same meaning as KDL <code>viewport cinematic=#true</code>. When true, the sibling render-server loads the cinematic Earth stack for this camera. Defaults to <code>False</code>.</li>
 <li><code>ev100</code> : <code>float | None</code>, camera exposure. With <code>cinematic=True</code> the default is <code>13.5</code>. Requires <code>cinematic=True</code>.</li>
 <li><code>bloom</code> : <code>dict | None</code>, viewport bloom settings (<code>preset</code>, <code>intensity</code>, <code>threshold</code>, <code>threshold_softness</code>). <code>None</code> with <code>cinematic=True</code> uses the cinematic preset. Requires <code>cinematic=True</code>.</li>
@@ -895,6 +897,26 @@ and running the simulation. The <code>World</code> object also provides helper m
     </div>
 </div>
 </li>
+<li>
+<p><code>thermal_tag(entity, temperature_c, emissivity=1.0)</code> -&gt; None</p>
+<p>Assign an apparent LWIR surface temperature to an entity's rendered mesh. LWIR sensor cameras render tagged entities through a temperature mask, allowing an object's thermal polarity to differ from its visible color.</p>
+<ul>
+<li><code>entity</code> : <a href="https://docs.elodin.systems/preview/pr-820/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity whose <code>object_3d</code> visual is tagged.</li>
+<li><code>temperature_c</code> : <code>float</code>, apparent surface temperature in degrees Celsius.</li>
+<li><code>emissivity</code> : <code>float</code>, value from <code>0.0</code> to <code>1.0</code>. Defaults to <code>1.0</code>.</li>
+</ul>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>world</span><span>.</span><span>thermal_tag</span><span>(</span><span>target_drone</span><span>,</span><span> temperature_c</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">18.0</span><span>,</span><span> emissivity</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">0.92</span><span>)</span></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>sensor_camera</span><span>(</span></span>
+<span class="giallo-l"><span>    entity</span><span style="color: light-dark(#859900, #859900);">=</span><span>aircraft</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ir_cam</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    camera_model</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">boson640p</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    lens_hfov</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">18.0</span><span>,</span></span>
+<span class="giallo-l"><span>    effect</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">lwir</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    effect_params</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">palette</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">white_hot</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">agc</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">mode</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">auto</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">low</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#D33682, #D33682);"> 0.01</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">high</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#D33682, #D33682);"> 0.99</span><span>}</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre></li>
 <li>
 <p><code>run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend)</code> -&gt; None</p>
 <p>Run the simulation.</p>
