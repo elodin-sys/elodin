@@ -32,7 +32,7 @@ import bdx_model
 from bdx_model import BdxModel
 from class_d_fallbacks import FALLBACKS, ClassDFallbacks
 from frames import enu_basis, geodetic_to_ecef, level_attitude_ecef, quaternion_xyzw_from_matrix
-from trim import TrimSolution, solve_level_trim
+from trim import TrimSolution, elevator_for_pitch_balance, solve_level_trim
 
 
 @dataclass(frozen=True)
@@ -95,7 +95,7 @@ class Scenario:
     heading_deg: float
     wind_enu: tuple[float, float, float]
     initial: InitialState
-    trim: TrimSolution
+    trim: TrimSolution | None
 
 
 def _pitch_up(alpha_rad: float) -> np.ndarray:
@@ -180,13 +180,18 @@ def load_scenario(
         )
 
     if name == "validation":
-        # Package trim row verbatim (guide §9.5); the solver supplies only the
-        # elevator that balances the thrust-line moment our plant adds.
+        # Package trim row verbatim (guide §9.5). Elevator is the one-shot
+        # pitch balance at that alpha/throttle — not the coupled-solve
+        # elevator, which would cancel the solver's own (alpha, thrust).
         alpha_rad = math.radians(cruise.alpha_deg)
         throttle = cruise.throttle
+        elevator_rad = elevator_for_pitch_balance(
+            model, fallbacks, altitude_m, tas_mps, alpha_rad, throttle
+        )
     else:
         alpha_rad = solution.alpha_rad
         throttle = solution.effective_throttle
+        elevator_rad = solution.elevator_rad
 
     initial = _initial_state(
         model,
@@ -195,7 +200,7 @@ def load_scenario(
         tas_mps,
         heading_deg,
         alpha_rad,
-        solution.elevator_rad,
+        elevator_rad,
         throttle,
         wind_enu,
     )

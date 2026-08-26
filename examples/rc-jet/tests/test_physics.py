@@ -16,6 +16,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+import atmosphere
 import bdx_model
 import trim as trim_mod
 from aero import (
@@ -34,6 +35,7 @@ from frames import (
     level_attitude_ecef,
     quaternion_xyzw_from_matrix,
 )
+from propulsion import trilinear
 
 MODEL = bdx_model.load()
 Q_BAR = 900.0  # representative cruise dynamic pressure (Pa)
@@ -138,6 +140,47 @@ def test_thrust_line_pitch_moment_sign():
     torque = np.asarray(jnp.cross(offset, force))
     assert offset[2] > 0.0
     assert torque[1] > 0.0
+
+
+def test_pitch_balance_elevator_zeros_moment_at_package_cruise():
+    """One-shot elevator at the package cruise pair must zero pitch; the
+    coupled-solve elevator is for a different (alpha, thrust) and does not."""
+    cruise = MODEL.trim_rows["cruise"]
+    alpha = math.radians(cruise.alpha_deg)
+    de = trim_mod.elevator_for_pitch_balance(
+        MODEL, FALLBACKS, cruise.altitude_m, cruise.tas_mps, alpha, cruise.throttle
+    )
+    lin = MODEL.aero.linearization
+    s = MODEL.reference.area_m2
+    c = MODEL.reference.mac_m
+    rho = float(atmosphere.density(cruise.altitude_m))
+    mach = cruise.tas_mps / float(atmosphere.speed_of_sound(cruise.altitude_m))
+    q_bar = 0.5 * rho * cruise.tas_mps**2
+    grid = MODEL.propulsion_map
+    axes = (
+        jnp.asarray(grid.altitudes_m),
+        jnp.asarray(grid.machs),
+        jnp.asarray(grid.throttles),
+    )
+    thrust = float(
+        trilinear(axes, jnp.asarray(grid.thrust_n), (cruise.altitude_m, mach, cruise.throttle))
+    )
+    z_std = -MODEL.propulsion.thrust_application_body_m[2]
+
+    def pitch_nm(elevator):
+        cm = (
+            lin.cm0
+            + lin.cm_alpha_per_rad * alpha
+            + FALLBACKS.aero.C_mde * elevator
+            + z_std * thrust / (q_bar * s * c)
+        )
+        return cm * q_bar * s * c
+
+    assert abs(pitch_nm(de)) < 1e-6
+    coupled = trim_mod.solve_level_trim(
+        MODEL, FALLBACKS, 36.23, -116.97, cruise.altitude_m, cruise.tas_mps
+    )
+    assert abs(pitch_nm(coupled.elevator_rad)) > abs(pitch_nm(de))
 
 
 def test_cruise_trim_matches_package_anchor():

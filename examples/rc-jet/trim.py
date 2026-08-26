@@ -47,20 +47,67 @@ class TrimSolution:
     valid: bool
 
 
-def _thrust_to_throttle(model: BdxModel, altitude_m: float, mach: float, thrust_n: float):
-    """Invert the (monotone-in-throttle) propulsion map at a flight condition."""
+def _map_axes(model: BdxModel):
     grid = model.propulsion_map
-    axes = (
+    return (
         jnp.asarray(grid.altitudes_m),
         jnp.asarray(grid.machs),
         jnp.asarray(grid.throttles),
     )
-    table = jnp.asarray(grid.thrust_n)
-    throttles = np.asarray(grid.throttles)
+
+
+def _map_thrust(model: BdxModel, altitude_m: float, mach: float, throttle: float) -> float:
+    axes = _map_axes(model)
+    table = jnp.asarray(model.propulsion_map.thrust_n)
+    return float(trilinear(axes, table, (altitude_m, mach, throttle)))
+
+
+def _thrust_to_throttle(model: BdxModel, altitude_m: float, mach: float, thrust_n: float):
+    """Invert the (monotone-in-throttle) propulsion map at a flight condition."""
+    axes = _map_axes(model)
+    table = jnp.asarray(model.propulsion_map.thrust_n)
+    throttles = np.asarray(model.propulsion_map.throttles)
     curve = np.array([float(trilinear(axes, table, (altitude_m, mach, t))) for t in throttles])
     throttle = float(np.interp(thrust_n, curve, throttles))
     achievable = curve[0] - 1e-9 <= thrust_n <= curve[-1] + 1e-9
     return throttle, achievable
+
+
+def _pitch_elevator(
+    model: BdxModel,
+    fallbacks: ClassDFallbacks,
+    q_bar: float,
+    alpha_rad: float,
+    thrust_n: float,
+) -> float:
+    """Elevator that zeros Cm(alpha, de) + Cm_thrust at a pinned alpha and thrust."""
+    lin = model.aero.linearization
+    s = model.reference.area_m2
+    c = model.reference.mac_m
+    z_std = -model.propulsion.thrust_application_body_m[2]
+    cm_thrust = z_std * thrust_n / (q_bar * s * c)
+    return -(lin.cm0 + lin.cm_alpha_per_rad * alpha_rad + cm_thrust) / fallbacks.aero.C_mde
+
+
+def elevator_for_pitch_balance(
+    model: BdxModel,
+    fallbacks: ClassDFallbacks,
+    altitude_m: float,
+    tas_mps: float,
+    alpha_rad: float,
+    throttle: float,
+) -> float:
+    """Elevator that zeros the static pitch moment at a pinned (alpha, throttle).
+
+    The package cruise row trims with tail incidence, not elevator. Our plant
+    adds a thrust-line moment, so validation keeps the row's alpha and throttle
+    and solves only this residual (guide §9.5).
+    """
+    rho = float(atmosphere.density(altitude_m))
+    mach = tas_mps / float(atmosphere.speed_of_sound(altitude_m))
+    q_bar = 0.5 * rho * tas_mps**2
+    thrust = _map_thrust(model, altitude_m, mach, throttle)
+    return _pitch_elevator(model, fallbacks, q_bar, alpha_rad, thrust)
 
 
 def solve_level_trim(
@@ -95,8 +142,7 @@ def solve_level_trim(
     for _ in range(_ITERATIONS):
         cl_required = (weight - thrust * np.sin(alpha)) / (q_bar * s)
         alpha = (cl_required - lin.cl0 - fb.C_Lde * delta_e) / lin.cl_alpha_per_rad
-        cm_thrust = z_std * thrust / (q_bar * s * c)
-        delta_e = -(lin.cm0 + lin.cm_alpha_per_rad * alpha + cm_thrust) / fb.C_mde
+        delta_e = _pitch_elevator(model, fallbacks, q_bar, alpha, thrust)
         cl = lin.cl0 + lin.cl_alpha_per_rad * alpha + fb.C_Lde * delta_e
         cd = polar.cd0 + polar.k * cl**2 + fb.C_Dde * abs(delta_e)
         thrust = q_bar * s * cd / np.cos(alpha)

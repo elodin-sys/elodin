@@ -23,6 +23,7 @@ from scenario import (
     load_scenario,
 )
 from sim import build_system, make_jet
+from trim import elevator_for_pitch_balance
 
 MODEL = bdx_model.load()
 NUMERICS = Numerics()
@@ -65,6 +66,25 @@ def column(df, name) -> np.ndarray:
 
 def scalar_column(df, name) -> np.ndarray:
     return np.asarray(df[name].to_numpy(), dtype=np.float64)
+
+
+def test_validation_spawn_uses_package_cruise_pitch_elevator():
+    """Guide §9.5: validation pins the cruise row; elevator balances that pair."""
+    scenario = load_scenario(MODEL, FALLBACKS, name="validation")
+    cruise = MODEL.trim_rows["cruise"]
+    assert scenario.initial.alpha_rad == pytest.approx(math.radians(cruise.alpha_deg))
+    assert scenario.initial.throttle == pytest.approx(cruise.throttle)
+    expected = elevator_for_pitch_balance(
+        MODEL,
+        FALLBACKS,
+        scenario.altitude_m,
+        scenario.tas_mps,
+        scenario.initial.alpha_rad,
+        scenario.initial.throttle,
+    )
+    assert scenario.initial.elevator_rad == pytest.approx(expected)
+    assert scenario.trim is not None
+    assert scenario.initial.elevator_rad != pytest.approx(scenario.trim.elevator_rad)
 
 
 def test_validation_scenario_holds_trim():
@@ -141,10 +161,11 @@ def test_ground_rest():
     site = MOJAVE_RC_FIELD
     from ground import GEAR_HEIGHT_M
 
+    altitude_m = site.field_elevation_m + GEAR_HEIGHT_M + 0.3
     init = _initial_state(
         MODEL,
         site,
-        altitude_m=site.field_elevation_m + GEAR_HEIGHT_M + 0.3,
+        altitude_m=altitude_m,
         tas_mps=0.0,
         heading_deg=350.0,
         alpha_rad=0.0,
@@ -158,7 +179,7 @@ def test_ground_rest():
     scenario = Scenario(
         name="ground-rest",
         site=site,
-        altitude_m=init.pos_ecef[2],
+        altitude_m=altitude_m,
         tas_mps=0.0,
         heading_deg=350.0,
         wind_enu=(0.0, 0.0, 0.0),
@@ -181,6 +202,7 @@ def test_demo_scenario_solves_equilibrium():
     """The demo scenario refuses to spawn off-equilibrium and its solved trim
     stays inside the validity envelope."""
     scenario = load_scenario(MODEL, FALLBACKS, name="demo")
+    assert scenario.trim is not None
     assert scenario.trim.valid
     assert math.degrees(scenario.trim.alpha_rad) < MODEL.validity.attached_flow_alpha_deg[1]
 
