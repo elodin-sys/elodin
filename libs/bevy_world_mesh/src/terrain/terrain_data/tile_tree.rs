@@ -1,7 +1,7 @@
 use crate::terrain::{
     math::{Coordinate, TerrainModel, TileCoordinate},
     terrain_data::{sample_height, tile_atlas::TileAtlas, INVALID_ATLAS_INDEX, INVALID_LOD},
-    terrain_view::{TerrainViewComponents, TerrainViewConfig},
+    terrain_view::{geometry_tile_capacity, TerrainViewComponents, TerrainViewConfig},
     util::inverse_mix,
 };
 use bevy::{
@@ -149,7 +149,11 @@ impl TileTree {
         Self {
             lod_count: tile_atlas.lod_count,
             tree_size: view_config.tree_size,
-            geometry_tile_count: view_config.geometry_tile_count,
+            geometry_tile_count: geometry_tile_capacity(
+                view_config.tree_size,
+                tile_atlas.lod_count,
+                tile_atlas.model.side_count(),
+            ),
             refinement_count: view_config.refinement_count,
             grid_size: view_config.grid_size,
             morph_distance: view_config.morph_distance * scale,
