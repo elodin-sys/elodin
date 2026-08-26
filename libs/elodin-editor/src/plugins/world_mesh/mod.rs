@@ -17,9 +17,11 @@ use bevy_world_mesh::terrain::{
     terrain_view::{TerrainViewComponents, TerrainViewConfig},
 };
 
-use crate::{MainCamera, sensor_camera::SensorCamera};
+use crate::{MainCamera, sensor_camera::SensorCamera, ui::tiles::ViewportConfig};
 
-type WorldMeshViewFilter = Or<(With<MainCamera>, With<SensorCamera>)>;
+/// 3D viewports and sensor feeds — not 2D graph cameras, which also carry
+/// [`MainCamera`] and would each allocate a full terrain view (~30 MiB).
+type WorldMeshViewFilter = Or<((With<MainCamera>, With<ViewportConfig>), With<SensorCamera>)>;
 type WorldMeshTerrainQuery<'w, 's> =
     Query<'w, 's, (Entity, &'static ChildOf), (With<WorldMeshTerrain>, With<TileAtlas>)>;
 #[cfg(feature = "big_space")]
@@ -499,8 +501,8 @@ fn spawn_globe_fallback(
 }
 
 /// The terrain renderer needs one [`TileTree`] per `(terrain, camera)` pair.
-/// Editor viewports are spawned dynamically from KDL, so wire the pairs after
-/// both the terrain entity and viewport cameras exist.
+/// Only schematic viewports and sensor cameras participate — graph
+/// `MainCamera`s are excluded by [`WorldMeshViewFilter`].
 fn sync_terrain_view_components(
     terrains: Query<(Entity, &TileAtlas), With<WorldMeshTerrain>>,
     cameras: Query<Entity, WorldMeshViewFilter>,
@@ -651,7 +653,11 @@ mod tests {
         let camera_pos = anchor_transform.translation + Vec3::new(3.0, 4.0, 5.0);
         let camera = app
             .world_mut()
-            .spawn((Transform::from_translation(camera_pos), MainCamera))
+            .spawn((
+                Transform::from_translation(camera_pos),
+                MainCamera,
+                test_viewport_config(),
+            ))
             .id();
         #[cfg(feature = "big_space")]
         app.world_mut()
@@ -681,6 +687,51 @@ mod tests {
         // The pulled-back position must be near the model origin, not out at
         // the anchor's world offset.
         assert!(local.length() < 10.0, "not terrain-relative: {local:?}");
+    }
+
+    #[test]
+    fn sync_skips_graph_cameras_that_only_have_main_camera() {
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        app.init_resource::<TerrainViewComponents<TileTree>>();
+        let graph_cam = app.world_mut().spawn(MainCamera).id();
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+
+        let trees = app.world().resource::<TerrainViewComponents<TileTree>>();
+        assert!(
+            trees.get(&(renderer, graph_cam)).is_none(),
+            "2D graph cameras must not allocate a terrain view"
+        );
+    }
+
+    #[test]
+    fn sync_creates_views_for_viewports_and_sensor_cameras() {
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        app.init_resource::<TerrainViewComponents<TileTree>>();
+        let viewport = app
+            .world_mut()
+            .spawn((MainCamera, test_viewport_config()))
+            .id();
+        let sensor = app.world_mut().spawn(SensorCamera { config_index: 0 }).id();
+        let graph_cam = app.world_mut().spawn(MainCamera).id();
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+
+        let trees = app.world().resource::<TerrainViewComponents<TileTree>>();
+        assert!(trees.get(&(renderer, viewport)).is_some());
+        assert!(trees.get(&(renderer, sensor)).is_some());
+        assert!(trees.get(&(renderer, graph_cam)).is_none());
+        assert_eq!(trees.len(), 2);
     }
 
     #[test]
@@ -848,6 +899,24 @@ mod tests {
         app.world_mut()
             .run_system_once(bevy_geo_frames::apply_geo_rotation)
             .unwrap();
+    }
+
+    fn test_viewport_config() -> ViewportConfig {
+        ViewportConfig {
+            aspect: None,
+            configured_near: None,
+            configured_far: None,
+            show_arrows: false,
+            create_frustum: false,
+            show_frustums: false,
+            show_coverage_in_viewport: false,
+            show_projection_2d: false,
+            frustums_color: default(),
+            projection_color: default(),
+            frustums_thickness: 0.006,
+            cinematic: false,
+            bloom: None,
+        }
     }
 
     fn world_mesh(frame: Option<GeoFrame>, translate: Option<(f64, f64, f64)>) -> WorldMesh {

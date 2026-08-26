@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Bind world-mesh terrain views to schematic viewports and sensor cameras, not 2D graph cameras.
 - **(fix)** Draw 2D plot windows longer than 30 s at full resolution instead of a few points per pixel.
 - **(fix)** Slide trailing 2D plot windows over existing samples instead of rebuilding every 100 ms.
 - **(fix)** Rebuild 2D plot lines when backfill fills holes inside an already-covered window.
