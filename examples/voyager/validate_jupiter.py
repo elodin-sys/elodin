@@ -1,11 +1,13 @@
-"""Run the single reconstructed Voyager 1 Jupiter validation case.
+"""Run the single reconstructed Voyager 1 Jupiter diagnostic case.
 
-This intentionally stays small: one encounter SPK, one initialization epoch,
-one hourly RK4 integration, and the fixed checkpoints from ``validation_case``.
-It prints Chapter 1 and Chapter 2 residuals against the same SPICE reference;
-it does not write campaign/result artifacts into the repository.
+The propagation matches the Voyager example's source-body timing: each planet is
+refreshed from SPICE once at the start of an hourly tick, then its sampled
+velocity carries it through the RK4 substeps. The output is diagnostic only;
+the selected arc contains modeled historical thruster events that are not
+included in this gravity-only propagation.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,8 +16,10 @@ import spiceypy as spice
 
 from validation_case import (
     ENCOUNTER_KERNEL,
+    ENCOUNTER_KERNEL_SHA256,
     FRAME,
     INITIALIZATION_UTC,
+    MODELED_THRUSTER_EVENTS_UTC,
     OBSERVER,
     PROBE,
     checkpoints,
@@ -26,7 +30,7 @@ SUN_MASS = 1.9885e30
 STEP_SECONDS = 3600.0
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 
-# Keep the same source names and masses as the Voyager example.
+# Keep the same source names and rounded masses as the Voyager example.
 PLANETS = (
     ("MERCURY BARYCENTER", 3.3011e23),
     ("VENUS BARYCENTER", 4.8675e24),
@@ -37,6 +41,14 @@ PLANETS = (
     ("URANUS BARYCENTER", 8.6813e25),
     ("NEPTUNE BARYCENTER", 1.02413e26),
 )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _direct_acceleration(
@@ -62,13 +74,29 @@ def _heliocentric_relative_acceleration(
     return direct - mu * source_position_m / source_distance**3
 
 
-def _acceleration(chapter: int, epoch_et: float, position_m: np.ndarray) -> np.ndarray:
-    sun_position = np.zeros(3, dtype=np.float64)
-    acceleration = _direct_acceleration(position_m, sun_position, G * SUN_MASS)
-
-    for spice_name, mass in PLANETS:
+def _planet_states(epoch_et: float) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+    states = []
+    for spice_name, _ in PLANETS:
         state_km, _ = spice.spkezr(spice_name, epoch_et, FRAME, "NONE", OBSERVER)
-        source_position_m = np.asarray(state_km[:3], dtype=np.float64) * 1000.0
+        states.append(
+            (
+                np.asarray(state_km[:3], dtype=np.float64) * 1000.0,
+                np.asarray(state_km[3:], dtype=np.float64) * 1000.0,
+            )
+        )
+    return tuple(states)
+
+
+def _acceleration(
+    chapter: int,
+    position_m: np.ndarray,
+    source_positions_m: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    acceleration = _direct_acceleration(
+        position_m, np.zeros(3, dtype=np.float64), G * SUN_MASS
+    )
+
+    for (_, mass), source_position_m in zip(PLANETS, source_positions_m, strict=True):
         mu = G * mass
         if chapter == 1:
             acceleration += _direct_acceleration(position_m, source_position_m, mu)
@@ -82,18 +110,34 @@ def _acceleration(chapter: int, epoch_et: float, position_m: np.ndarray) -> np.n
     return acceleration
 
 
-def _derivative(chapter: int, epoch_et: float, state: np.ndarray) -> np.ndarray:
-    return np.concatenate(
-        (state[3:], _acceleration(chapter, epoch_et, state[:3]))
-    )
+def _rk4_step(
+    chapter: int,
+    state: np.ndarray,
+    source_states: tuple[tuple[np.ndarray, np.ndarray], ...],
+) -> np.ndarray:
+    """Advance one tick using the same source-body timing as the Elodin example."""
 
+    def source_positions(offset_seconds: float) -> tuple[np.ndarray, ...]:
+        return tuple(
+            position_m + offset_seconds * velocity_mps
+            for position_m, velocity_mps in source_states
+        )
 
-def _rk4_step(chapter: int, epoch_et: float, state: np.ndarray) -> np.ndarray:
+    def derivative(candidate: np.ndarray, offset_seconds: float) -> np.ndarray:
+        return np.concatenate(
+            (
+                candidate[3:],
+                _acceleration(
+                    chapter, candidate[:3], source_positions(offset_seconds)
+                ),
+            )
+        )
+
     half = STEP_SECONDS / 2.0
-    k1 = _derivative(chapter, epoch_et, state)
-    k2 = _derivative(chapter, epoch_et + half, state + half * k1)
-    k3 = _derivative(chapter, epoch_et + half, state + half * k2)
-    k4 = _derivative(chapter, epoch_et + STEP_SECONDS, state + STEP_SECONDS * k3)
+    k1 = derivative(state, 0.0)
+    k2 = derivative(state + half * k1, half)
+    k3 = derivative(state + half * k2, half)
+    k4 = derivative(state + STEP_SECONDS * k3, STEP_SECONDS)
     return state + STEP_SECONDS * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
 
 
@@ -103,15 +147,24 @@ def _truth_state(epoch_et: float) -> np.ndarray:
     return np.concatenate((state[:3] * 1000.0, state[3:] * 1000.0))
 
 
-def _record(checkpoint: dict[str, int | str], state: np.ndarray, truth: np.ndarray) -> dict:
+def _record(
+    checkpoint: dict[str, int | str], state: np.ndarray, truth: np.ndarray
+) -> dict:
     position_residual_m = state[:3] - truth[:3]
     velocity_residual_mps = state[3:] - truth[3:]
     return {
         "checkpoint": checkpoint["name"],
+        "role": checkpoint["role"],
         "utc": checkpoint["utc"],
         "elapsed_seconds": checkpoint["elapsed_seconds"],
         "position_error_km": float(np.linalg.norm(position_residual_m) / 1000.0),
         "velocity_error_mps": float(np.linalg.norm(velocity_residual_mps)),
+        "position_residual_km": [
+            float(component / 1000.0) for component in position_residual_m
+        ],
+        "velocity_residual_mps": [
+            float(component) for component in velocity_residual_mps
+        ],
     }
 
 
@@ -128,8 +181,11 @@ def run_chapter(chapter: int) -> list[dict]:
     state = _truth_state(start_et)
     records = [_record(checkpoint_list[0], state, state)]
 
-    for elapsed in range(int(STEP_SECONDS), final_elapsed + int(STEP_SECONDS), int(STEP_SECONDS)):
-        state = _rk4_step(chapter, start_et + elapsed - STEP_SECONDS, state)
+    for elapsed in range(
+        int(STEP_SECONDS), final_elapsed + int(STEP_SECONDS), int(STEP_SECONDS)
+    ):
+        step_start_et = start_et + elapsed - STEP_SECONDS
+        state = _rk4_step(chapter, state, _planet_states(step_start_et))
         checkpoint = checkpoint_by_elapsed.get(elapsed)
         if checkpoint is not None:
             truth = _truth_state(start_et + elapsed)
@@ -153,6 +209,13 @@ def main() -> None:
             + ", ".join(missing)
         )
 
+    actual_hash = _sha256(SPICE_DIR / ENCOUNTER_KERNEL)
+    if actual_hash != ENCOUNTER_KERNEL_SHA256:
+        raise ValueError(
+            f"unexpected {ENCOUNTER_KERNEL} SHA-256: {actual_hash}; "
+            f"expected {ENCOUNTER_KERNEL_SHA256}"
+        )
+
     spice.kclear()
     for kernel in kernels:
         spice.furnsh(str(kernel))
@@ -161,10 +224,13 @@ def main() -> None:
         result = {
             "case": "voyager1_jupiter_1979",
             "encounter_kernel": ENCOUNTER_KERNEL,
+            "encounter_kernel_sha256": actual_hash,
             "frame": FRAME,
             "observer": OBSERVER,
             "initialization_utc": INITIALIZATION_UTC,
             "step_seconds": STEP_SECONDS,
+            "source_sampling": "SPICE once per tick + linear source drift through RK4 stages",
+            "known_unmodeled_thruster_events_utc": MODELED_THRUSTER_EVENTS_UTC,
             "chapters": {
                 "1": run_chapter(1),
                 "2": run_chapter(2),
