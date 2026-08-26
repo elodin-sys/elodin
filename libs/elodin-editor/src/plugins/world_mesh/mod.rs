@@ -246,6 +246,12 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfi
         "fetch_real_terrain and preprocess",
     );
 
+    let dataset_tiles = bevy_world_mesh::terrain::formats::TC::load_file(
+        bevy_world_mesh::terrain::util::asset_path(format!("{terrain_path}/config.tc")),
+    )
+    .map(|tc| tc.tiles.len() as u32)
+    .unwrap_or(0);
+
     let config = TerrainConfig {
         lod_count: planar_lod_count(lod_count),
         model: TerrainModel::planar(
@@ -255,6 +261,7 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfi
             height,
         ),
         path: terrain_path,
+        atlas_size: bevy_world_mesh::terrain::terrain::planar_atlas_size(dataset_tiles),
         ..default()
     }
     .add_attachment(AttachmentConfig {
