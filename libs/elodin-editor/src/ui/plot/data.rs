@@ -2978,8 +2978,9 @@ mod tests {
         assert_eq!(index_sampling_step(1, 100), 1);
         assert_eq!(index_sampling_step(1, 1_000), 1);
         assert_eq!(index_sampling_step(40, INDEX_BUFFER_LEN), 1);
-        // Twice the budget takes every other sample.
-        assert_eq!(index_sampling_step(1, 2 * INDEX_BUFFER_LEN), 2);
+        // Overhead comes off both sides, so 2× the buffer is just over two
+        // budgets and needs step 3.
+        assert_eq!(index_sampling_step(1, 2 * INDEX_BUFFER_LEN), 3);
     }
 
     #[test]
