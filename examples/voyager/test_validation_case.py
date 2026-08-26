@@ -5,10 +5,12 @@ import numpy as np
 from dynamics import heliocentric_relative_acceleration
 from validate_jupiter import _heliocentric_relative_acceleration
 from validation_case import (
+    CHECKPOINT_ROLES,
     CHECKPOINT_UTCS,
     ENCOUNTER_KERNEL,
     ENCOUNTER_KERNEL_SHA256,
     INITIALIZATION_UTC,
+    MODELED_THRUSTER_EVENTS_UTC,
     PDS_COVERAGE_UTC,
     checkpoints,
     parse_utc,
@@ -23,6 +25,7 @@ def test_v1_jupiter_case_is_fixed_and_inside_encounter_coverage():
     assert len(ENCOUNTER_KERNEL_SHA256) == 64
     int(ENCOUNTER_KERNEL_SHA256, 16)
     assert CHECKPOINT_UTCS[0] == INITIALIZATION_UTC
+    assert len(CHECKPOINT_ROLES) == len(CHECKPOINT_UTCS)
     assert [record["elapsed_seconds"] for record in records] == [
         0,
         3 * 86400,
@@ -35,6 +38,15 @@ def test_v1_jupiter_case_is_fixed_and_inside_encounter_coverage():
         coverage_start <= parse_utc(str(record["utc"])) <= coverage_end
         for record in records
     )
+
+
+def test_selected_arc_is_not_mislabeled_as_maneuver_free():
+    start = parse_utc(INITIALIZATION_UTC)
+    end = parse_utc(CHECKPOINT_UTCS[-1])
+    events = tuple(map(parse_utc, MODELED_THRUSTER_EVENTS_UTC))
+
+    assert any(start < event <= end for event in events)
+    assert events[0] == parse_utc("1979-02-21T03:58:00Z")
 
 
 def test_validation_chapter_two_term_matches_shared_dynamics_helper():
