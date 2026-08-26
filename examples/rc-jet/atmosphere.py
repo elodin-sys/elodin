@@ -15,6 +15,8 @@ SEA_LEVEL_PRESSURE_PA = 101325.0
 GAS_CONSTANT_AIR = 287.05
 GAMMA_AIR = 1.4
 TROPOPAUSE_TEMPERATURE_K = 216.65
+SUTHERLAND_C1 = 1.458e-6
+SUTHERLAND_S_K = 110.4
 
 
 def temperature(altitude_m):
@@ -33,3 +35,9 @@ def density(altitude_m):
 
 def speed_of_sound(altitude_m):
     return jnp.sqrt(GAMMA_AIR * GAS_CONSTANT_AIR * temperature(altitude_m))
+
+
+def dynamic_viscosity(altitude_m):
+    """Sutherland's law, SI units (Pa·s)."""
+    t = temperature(altitude_m)
+    return SUTHERLAND_C1 * t**1.5 / (t + SUTHERLAND_S_K)

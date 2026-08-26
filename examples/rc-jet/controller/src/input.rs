@@ -22,10 +22,11 @@ const DEADZONE: f64 = 0.1;
 const MAX_DEFLECTION_RAD: f64 = 25.0 * PI / 180.0;
 /// Full rudder throw, in radians (30°).
 const MAX_RUDDER_RAD: f64 = 30.0 * PI / 180.0;
-// Stick / key senses as flown: stick up and up-arrow pitch the nose up,
-// stick right and right-arrow roll right, Q/A yaw left and E/D yaw right.
-// Rudder still uses the plant's TE-left = nose-left convention, so E
-// (yaw right) is a negative rudder command.
+// Stick / key senses as flown: pulling the stick back (stick toward you,
+// down-arrow) pitches the nose up; stick right and right-arrow roll right;
+// Q/A yaw left and E/D yaw right. The plant uses +elevator = TE-down /
+// nose-down, so a pull-back is a negative elevator command. Rudder uses
+// TE-left = nose-left, so E (yaw right) is a negative rudder command.
 
 /// Stick mode configuration
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -226,17 +227,17 @@ impl InputReader {
             StickMode::Mode2 => {
                 // Mode 2: Left = Throttle(Y)/Rudder(X), Right = Elevator(Y)/Aileron(X)
                 ControlInput {
-                    throttle: (left_y + 1.0) / 2.0,         // Convert -1..1 to 0..1
-                    rudder: -left_x * MAX_RUDDER_RAD,       // Stick right = yaw right = -rudder
-                    elevator: right_y * MAX_DEFLECTION_RAD, // Stick up = nose up
+                    throttle: (left_y + 1.0) / 2.0,           // Convert -1..1 to 0..1
+                    rudder: -left_x * MAX_RUDDER_RAD,         // Stick right = yaw right = -rudder
+                    elevator: elevator_from_stick_y(right_y), // Pull back = nose up = -δe
                     aileron: right_x * MAX_DEFLECTION_RAD,
                 }
             }
             StickMode::Mode1 => {
                 // Mode 1: Left = Elevator(Y)/Rudder(X), Right = Throttle(Y)/Aileron(X)
                 ControlInput {
-                    elevator: left_y * MAX_DEFLECTION_RAD, // Stick up = nose up
-                    rudder: -left_x * MAX_RUDDER_RAD,      // Stick right = yaw right = -rudder
+                    elevator: elevator_from_stick_y(left_y), // Pull back = nose up = -δe
+                    rudder: -left_x * MAX_RUDDER_RAD,        // Stick right = yaw right = -rudder
                     throttle: (right_y + 1.0) / 2.0,
                     aileron: right_x * MAX_DEFLECTION_RAD,
                 }
@@ -271,11 +272,11 @@ impl InputReader {
             0.0
         };
 
-        // Elevator (Up/Down arrows): up arrow = nose up.
+        // Elevator (Up/Down arrows): down arrow = pull back = nose up.
         let elevator = if keys.contains(&Keycode::Up) {
-            MAX_DEFLECTION_RAD * 0.5
+            elevator_from_stick_y(0.5)
         } else if keys.contains(&Keycode::Down) {
-            -MAX_DEFLECTION_RAD * 0.5
+            elevator_from_stick_y(-0.5)
         } else {
             0.0
         };
@@ -332,6 +333,13 @@ fn x11_unix_socket_path(display: &str) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(format!("/tmp/.X11-unix/X{n}")))
 }
 
+/// Stick-up / away-from-you is +Y on this HID stack (same sense as
+/// throttle's `(axis+1)/2`). Pulling back is −Y: the plant takes +elevator
+/// as TE-down / nose-down, so a pull-back (nose-up) is a negative command.
+fn elevator_from_stick_y(stick_y: f64) -> f64 {
+    stick_y * MAX_DEFLECTION_RAD
+}
+
 /// Apply deadzone to axis value
 fn apply_deadzone(value: f64) -> f64 {
     if value.abs() < DEADZONE {
@@ -364,6 +372,14 @@ mod tests {
         rudder: 0.0,
         throttle: IDLE_THROTTLE,
     };
+
+    #[test]
+    fn pulling_the_stick_back_commands_negative_elevator() {
+        assert!(elevator_from_stick_y(-1.0) < 0.0);
+        assert_eq!(elevator_from_stick_y(-1.0), -MAX_DEFLECTION_RAD);
+        assert_eq!(elevator_from_stick_y(1.0), MAX_DEFLECTION_RAD);
+        assert_eq!(elevator_from_stick_y(-0.5), -MAX_DEFLECTION_RAD * 0.5);
+    }
 
     #[test]
     fn untouched_gamepad_keeps_the_idle_throttle() {

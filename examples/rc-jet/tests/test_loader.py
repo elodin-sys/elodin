@@ -47,6 +47,7 @@ def test_load_happy_path():
     assert model.aero.derivatives is None
     assert model.mass.inertia_diagonal_kg_m2 is None
     assert model.trim_rows["cruise"].altitude_m == 300.0
+    assert model.validity.reynolds_per_m == tuple(raw["validity"]["reynolds_per_m"])
     assert model.glb_path.is_file()
     # Static stability and drag polar sanity, asserted on the loaded config itself.
     assert model.aero.linearization.cm_alpha_per_rad < 0

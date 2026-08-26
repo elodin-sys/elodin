@@ -105,7 +105,7 @@ sends `bdx.control_commands` at 60 Hz.
 |---------|----------|---------|
 | Left Stick Y | W/S | Throttle (idles at the engine's 18% floor) |
 | Left Stick X | Q/E or A/D | Rudder (Q/A = yaw left, E/D = yaw right) |
-| Right Stick Y | Up/Down | Elevator (up = nose up) |
+| Right Stick Y | Up/Down | Elevator (pull back / down-arrow = nose up) |
 | Right Stick X | Left/Right | Aileron (right = roll right) |
 
 Mode 1: `cargo run -p rc-jet-controller -- --mode1`.
@@ -138,9 +138,11 @@ from the package rather than repeating them:
   engine model; treat max speed as unvalidated.
 - **Stall:** ~15 m/s under the documented section-CLmax assumption
   (class C — a consequence of stated assumptions, not a validated figure).
-- Validity envelope: attached flow |α| ≤ 12°, M ≤ 0.3. Outside it the
-  physics keeps integrating unclamped and the `bdx.aero_valid` telemetry
-  flag drops to 0 (`flag_invalid_do_not_clamp`).
+- Validity envelope (guide §5): attached flow |α| ≤ 12°, tabulated α
+  −2° to 8°, M ≤ 0.3, and Re/m near the single tabulated condition
+  (2.53×10⁶). Outside any bound the physics keeps integrating unclamped
+  and the `bdx.aero_valid` telemetry flag drops to 0
+  (`flag_invalid_do_not_clamp`).
 
 Fuel burns per the package propulsion map (2.21 kg aboard at spawn), total
 mass updates as it burns, and an empty tank is a flameout. Thrust acts

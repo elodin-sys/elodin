@@ -268,6 +268,7 @@ class Validity:
     mach: tuple[float, float]
     attached_flow_alpha_deg: tuple[float, float]
     polar_table_alpha_deg: tuple[float, float]
+    reynolds_per_m: tuple[float, float]
     extrapolation_policy: str
 
 
@@ -604,6 +605,7 @@ def load(package_dir: str | Path | None = None) -> BdxModel:
         mach=tuple(float(v) for v in validity_raw["mach"]),
         attached_flow_alpha_deg=tuple(float(v) for v in validity_raw["attached_flow_alpha_deg"]),
         polar_table_alpha_deg=tuple(float(v) for v in validity_raw["polar_table_alpha_deg"]),
+        reynolds_per_m=tuple(float(v) for v in validity_raw["reynolds_per_m"]),
         extrapolation_policy=str(validity_raw["extrapolation_policy"]),
     )
     if validity.extrapolation_policy != "flag_invalid_do_not_clamp":

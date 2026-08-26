@@ -240,22 +240,48 @@ def build_aero_coefs(model: BdxModel, fallbacks: ClassDFallbacks):
     return compute_aero_coefs
 
 
-def validity_flag(model: BdxModel, alpha, mach):
+# A singleton Re/m bound is the analysis condition, not an operational band.
+# ±10% is enough for hold-trim TAS wobble without inventing a flight envelope.
+_SINGLETON_RE_REL = 0.10
+
+
+def reynolds_per_m(altitude_m, airspeed):
+    """Unit Reynolds number ρ V / μ from the shared ISA + Sutherland atmosphere."""
+    mu = atmosphere.dynamic_viscosity(altitude_m)
+    return atmosphere.density(altitude_m) * airspeed / mu
+
+
+def _reynolds_envelope(model: BdxModel) -> tuple[float, float]:
+    lo, hi = model.validity.reynolds_per_m
+    if lo == hi:
+        return lo * (1.0 - _SINGLETON_RE_REL), hi * (1.0 + _SINGLETON_RE_REL)
+    return lo, hi
+
+
+def validity_flag(model: BdxModel, alpha, mach, re_per_m):
     """1.0 inside the package validity envelope, else 0.0 (pure function).
 
-    Policy flag_invalid_do_not_clamp: the flag never alters the forces.
+    ANDs every numeric bound in guide §5 (attached-flow α, tabulated α, Mach,
+    Re/m). Policy flag_invalid_do_not_clamp: the flag never alters the forces.
     """
-    alpha_lo, alpha_hi = (jnp.deg2rad(v) for v in model.validity.attached_flow_alpha_deg)
+    flow_lo, flow_hi = (jnp.deg2rad(v) for v in model.validity.attached_flow_alpha_deg)
+    table_lo, table_hi = (jnp.deg2rad(v) for v in model.validity.polar_table_alpha_deg)
     mach_lo, mach_hi = model.validity.mach
-    alpha_ok = (alpha >= alpha_lo) & (alpha <= alpha_hi)
+    re_lo, re_hi = _reynolds_envelope(model)
+    alpha_ok = (alpha >= flow_lo) & (alpha <= flow_hi) & (alpha >= table_lo) & (alpha <= table_hi)
     mach_ok = (mach >= mach_lo) & (mach <= mach_hi)
-    return jnp.where(alpha_ok & mach_ok, 1.0, 0.0)
+    re_ok = (re_per_m >= re_lo) & (re_per_m <= re_hi)
+    return jnp.where(alpha_ok & mach_ok & re_ok, 1.0, 0.0)
 
 
 def build_aero_validity(model: BdxModel):
     @el.map
-    def aero_validity(alpha: AngleOfAttack, mach: Mach) -> AeroValid:
-        return validity_flag(model, alpha, mach)
+    def aero_validity(
+        alpha: AngleOfAttack, mach: Mach, pos: el.WorldPos, v_body: VelocityBody
+    ) -> AeroValid:
+        altitude = geodetic_altitude(pos.linear())
+        airspeed = jnp.linalg.norm(v_body)
+        return validity_flag(model, alpha, mach, reynolds_per_m(altitude, airspeed))
 
     return aero_validity
 

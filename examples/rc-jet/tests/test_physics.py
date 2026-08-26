@@ -18,7 +18,13 @@ import pytest
 
 import bdx_model
 import trim as trim_mod
-from aero import adapter_body_wrench, coefficient_set, standard_rate_hats, validity_flag
+from aero import (
+    adapter_body_wrench,
+    coefficient_set,
+    reynolds_per_m,
+    standard_rate_hats,
+    validity_flag,
+)
 from class_d_fallbacks import FALLBACKS
 from frames import (
     apparent_gravity,
@@ -31,6 +37,7 @@ from frames import (
 
 MODEL = bdx_model.load()
 Q_BAR = 900.0  # representative cruise dynamic pressure (Pa)
+CRUISE_RE = MODEL.validity.reynolds_per_m[0]
 
 
 def wrench(alpha=0.0, beta=0.0, p=0.0, q=0.0, r=0.0, de=0.0, da=0.0, dr=0.0, airspeed=37.8):
@@ -70,9 +77,19 @@ def test_no_alpha_clamp():
     alpha = math.radians(20.0)
     coefs = coefficient_set(MODEL, FALLBACKS, alpha, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     assert float(coefs[0]) == pytest.approx(lin.cl0 + lin.cl_alpha_per_rad * alpha)
-    assert float(validity_flag(MODEL, alpha, 0.15)) == 0.0
-    assert float(validity_flag(MODEL, math.radians(5.0), 0.15)) == 1.0
-    assert float(validity_flag(MODEL, math.radians(5.0), 0.35)) == 0.0
+    assert float(validity_flag(MODEL, alpha, 0.15, CRUISE_RE)) == 0.0
+    assert float(validity_flag(MODEL, math.radians(5.0), 0.15, CRUISE_RE)) == 1.0
+    assert float(validity_flag(MODEL, math.radians(5.0), 0.35, CRUISE_RE)) == 0.0
+
+
+def test_validity_uses_all_package_bounds():
+    """Guide §5: aero_valid is false outside any declared bound."""
+    assert float(validity_flag(MODEL, math.radians(10.0), 0.15, CRUISE_RE)) == 0.0
+    assert float(validity_flag(MODEL, math.radians(5.0), 0.15, CRUISE_RE)) == 1.0
+    assert float(validity_flag(MODEL, math.radians(5.0), 0.15, CRUISE_RE * 2.0)) == 0.0
+    lin = MODEL.aero.linearization
+    re = float(reynolds_per_m(lin.reference_altitude_m, lin.reference_airspeed_mps))
+    assert re == pytest.approx(CRUISE_RE, rel=0.01)
 
 
 def test_beta_gives_restoring_yaw():
