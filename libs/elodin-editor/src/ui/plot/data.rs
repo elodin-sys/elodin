@@ -749,7 +749,9 @@ fn apply_visible_prefetch_page(
 
 /// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
 /// Playback is never blocked: whatever samples are already in the store are shown;
-/// as backfill / visible prefetch streams in, subsequent syncs fill gaps.
+/// as backfill / visible prefetch streams in, subsequent syncs fill gaps (a
+/// covered first/last span is not treated as complete if the store later has
+/// more samples inside it).
 #[allow(clippy::too_many_arguments)]
 pub fn sync_plot_lines_from_series_store(
     range_key: (i64, i64),
@@ -789,6 +791,8 @@ pub fn sync_plot_lines_from_series_store(
     } else {
         None
     };
+    // Overview stride depends on the full window count — always rebuild.
+    let force_full = enabled_changed || max_points.is_some();
 
     for (&component_id, component) in graph_data.components.iter_mut() {
         if !fetch_ids.contains(&component_id) {
@@ -813,27 +817,214 @@ pub fn sync_plot_lines_from_series_store(
                 continue;
             };
             if !has_samples_in_window {
-                // Don't wipe live tip / prior draw when the store hasn't caught
-                // up to this window yet — unless the camera moved (show empty).
-                if range_changed {
+                if should_clear_line_on_empty_store(
+                    line.data.stored_exclusive_span(),
+                    sync_range,
+                    range_changed,
+                    series_store.is_covered(&component_id, sync_range),
+                    force_full,
+                ) {
                     line.data.clear();
                 }
                 continue;
             }
-            line.data.clear();
+            apply_plot_sync_plan(
+                series_store,
+                component_id,
+                element_index,
+                sync_range,
+                earliest,
+                max_points,
+                force_full,
+                &mut line.data,
+            );
+            line.last_queried = Some(Instant::now());
+        }
+        component.last_query_attempt = Some(Instant::now());
+    }
+}
+
+/// How to update a LineTree when the trailing window moves or new samples arrive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlotSyncPlan {
+    FullRebuild,
+    Keep,
+    Extend {
+        prefix: Option<Range<Timestamp>>,
+        suffix: Option<Range<Timestamp>>,
+    },
+}
+
+/// Decide whether a slide can reuse the existing tree.
+///
+/// A trailing `last_*` window only needs the newly exposed edges. Clearing and
+/// re-inserting every 100 ms drops GPU shards and rewrites every vertex, which
+/// reads as a horizontal hitch once per quantum (about every two frames at
+/// ~20 FPS on a dense schematic).
+///
+/// Endpoint span alone is not enough: a partial first project (visible prefetch
+/// plus the live tip, or two sparse endpoints) can already cover `need` while
+/// leaving holes. Callers must pass `force_full` when the store has samples
+/// inside that span that the tree does not — otherwise `Keep` / `Extend` never
+/// refresh those interiors.
+pub(crate) fn plot_sync_plan(
+    stored: Option<Range<Timestamp>>,
+    need: &Range<Timestamp>,
+    force_full: bool,
+) -> PlotSyncPlan {
+    if force_full {
+        return PlotSyncPlan::FullRebuild;
+    }
+    let Some(stored) = stored else {
+        return PlotSyncPlan::FullRebuild;
+    };
+    if range_overlap_ratio(&stored, need) < 0.25 {
+        return PlotSyncPlan::FullRebuild;
+    }
+    // A missing left edge is a seek or a punched hole — rebuild rather than
+    // insert a prefix that `insert_overwrite` can eat the next chunk with.
+    if stored.start > need.start {
+        return PlotSyncPlan::FullRebuild;
+    }
+    let suffix = (stored.end < need.end).then_some(stored.end..need.end);
+    if suffix.is_none() {
+        PlotSyncPlan::Keep
+    } else {
+        PlotSyncPlan::Extend {
+            prefix: None,
+            suffix,
+        }
+    }
+}
+
+/// Whether to drop a LineTree when the store has no samples in `need`.
+///
+/// A covered empty window is an authoritative gap — keep/extend would leave
+/// leftover samples in the clip. An uncovered window with only a small camera
+/// move keeps the last draw; the store may still be catching up.
+fn should_clear_line_on_empty_store(
+    stored: Option<Range<Timestamp>>,
+    need: &Range<Timestamp>,
+    range_changed: bool,
+    covered: bool,
+    force_full: bool,
+) -> bool {
+    if covered {
+        return true;
+    }
+    if !range_changed {
+        return false;
+    }
+    matches!(
+        plot_sync_plan(stored, need, force_full),
+        PlotSyncPlan::FullRebuild
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_plot_sync_plan(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    sync_range: &Range<Timestamp>,
+    earliest: Timestamp,
+    max_points: Option<usize>,
+    force_full: bool,
+    tree: &mut LineTree<f32>,
+) {
+    let rebuild = force_full
+        || !plot_line_matches_store_interior(
+            series_store,
+            component_id,
+            element_index,
+            sync_range,
+            tree,
+        );
+    match plot_sync_plan(tree.stored_exclusive_span(), sync_range, rebuild) {
+        PlotSyncPlan::FullRebuild => {
+            tree.clear();
             project_series_element_to_line(
                 series_store,
                 component_id,
                 element_index,
                 sync_range,
                 earliest,
-                &mut line.data,
+                tree,
                 max_points,
             );
-            line.last_queried = Some(Instant::now());
         }
-        component.last_query_attempt = Some(Instant::now());
+        PlotSyncPlan::Keep => {
+            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
+        }
+        PlotSyncPlan::Extend { suffix, .. } => {
+            if let Some(range) = suffix {
+                append_series_element_to_line(
+                    series_store,
+                    component_id,
+                    element_index,
+                    &range,
+                    earliest,
+                    tree,
+                );
+            }
+            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
+        }
     }
+}
+
+/// True when every in-store sample inside the tree's already-covered span is
+/// also in the tree.
+///
+/// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
+/// through `Extend` instead of a full rebuild. Samples the store later
+/// backfills *inside* that span fail this check and force a rebuild — the
+/// append path cannot insert earlier than the tip.
+fn plot_line_matches_store_interior(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    need: &Range<Timestamp>,
+    tree: &LineTree<f32>,
+) -> bool {
+    let Some(stored) = tree.stored_exclusive_span() else {
+        return true;
+    };
+    let start = stored.start.max(need.start);
+    let end = stored.end.min(need.end);
+    if end.0 <= start.0 {
+        return true;
+    }
+    let inspect = start..end;
+    let store_count =
+        store_element_count_in_range(series_store, component_id, element_index, &inspect);
+    let tree_count = tree.sample_count_in_range(&inspect);
+    // `0 <= tree_count` would treat leftover tree samples as a match and leave
+    // a phantom trace after a seek into a gap or a sparse element hole.
+    if store_count == 0 {
+        return tree_count == 0;
+    }
+    store_count <= tree_count
+}
+
+fn store_element_count_in_range(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+) -> usize {
+    let Some(series) = series_store.series(&component_id) else {
+        return 0;
+    };
+    series
+        .range(range.start..range.end)
+        .filter(|(_, val)| val.get(element_index).is_some())
+        .count()
+}
+
+fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
+    let pad = REQUEST_KEY_QUANTUM_MICROS.saturating_mul(4);
+    Timestamp(sync_range.start.0.saturating_sub(pad))
+        ..Timestamp(sync_range.end.0.saturating_add(pad))
 }
 
 /// Tracks when plot LineTrees were last rebuilt from SeriesStore.
@@ -1094,8 +1285,50 @@ pub(crate) fn project_series_element_to_line(
     total
 }
 
+/// Append samples onto the last chunk, same path as live `push_value`.
+///
+/// Inserting a fresh `Chunk` every 100 ms (the trailing quantum) grows the
+/// shard count until `value_buffer_plan` resizes. That releases every GPU
+/// shard (#817); `draw_index_chunk_iter` then skips anything not resident
+/// and the strip shows holes, then goes blank.
+fn append_series_element_to_line(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+    earliest: Timestamp,
+    line: &mut LineTree<f32>,
+) -> usize {
+    let Some(series) = cache.series(&component_id) else {
+        return 0;
+    };
+    let mut total = 0usize;
+    for (ts, val) in series.range(range.start..range.end) {
+        let Some(elem) = val.get(element_index) else {
+            continue;
+        };
+        let new_value = elem.as_f32();
+        let mut accepted = false;
+        if let Some(last) = line.last() {
+            if *ts <= last.summary.end_timestamp {
+                continue;
+            }
+            if last.timestamps.len() < CHUNK_LEN {
+                line.update_last(|c| {
+                    c.push(*ts, earliest, new_value);
+                });
+                accepted = true;
+            }
+        }
+        if !accepted {
+            line.insert(Chunk::from_initial_value(*ts, earliest, new_value));
+        }
+        total += 1;
+    }
+    total
+}
+
 /// Fraction of `a`'s duration that overlaps `b` (0.0–1.0).
-#[cfg(test)]
 pub(crate) fn range_overlap_ratio(a: &Range<Timestamp>, b: &Range<Timestamp>) -> f64 {
     let overlap_start = a.start.0.max(b.start.0);
     let overlap_end = a.end.0.min(b.end.0);
@@ -1702,6 +1935,20 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.tree.iter().map(|(_, c)| c.summary.len).sum()
     }
 
+    /// Samples with timestamps in `[range.start, range.end)`.
+    pub fn sample_count_in_range(&self, range: &Range<Timestamp>) -> usize {
+        if range.end.0 <= range.start.0 {
+            return 0;
+        }
+        self.range_iter(range.clone())
+            .map(|chunk| {
+                let start = chunk.timestamps.partition_point(|&t| t < range.start);
+                let end = chunk.timestamps.partition_point(|&t| t < range.end);
+                end.saturating_sub(start)
+            })
+            .sum()
+    }
+
     pub fn has_samples(&self) -> bool {
         self.tree.iter().any(|(_, c)| c.summary.len > 0)
     }
@@ -1907,6 +2154,56 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             .map(|(_, c)| c.summary.end_timestamp)
     }
 
+    /// Inclusive-start, exclusive-end span of samples in the tree.
+    pub fn stored_exclusive_span(&self) -> Option<Range<Timestamp>> {
+        let start = self.first_timestamp()?;
+        let end = self.latest_sample_timestamp()?;
+        Some(start..Timestamp(end.0.saturating_add(1)))
+    }
+
+    /// Drop chunks that lie entirely outside `keep`. Overlapping chunks stay so
+    /// a slide cannot punch a hole in the still-visible strip.
+    pub fn evict_chunks_outside(&mut self, keep: Range<Timestamp>) {
+        let doomed: Vec<(i64, i64)> = self
+            .tree
+            .iter()
+            .filter(|(_, chunk)| {
+                chunk.summary.end_timestamp < keep.start || chunk.summary.start_timestamp > keep.end
+            })
+            .map(|(_, chunk)| {
+                (
+                    chunk.summary.start_timestamp.0,
+                    chunk.summary.end_timestamp.0,
+                )
+            })
+            .collect();
+        if doomed.is_empty() {
+            return;
+        }
+        for (start, end) in doomed {
+            // Inclusive intervals share a bound with the next chunk. Cutting
+            // `end` back by 1 removes this chunk without eating its neighbor.
+            let cut = if end > start {
+                ii(start, end - 1)
+            } else {
+                ii(start, end)
+            };
+            for (_range, chunk) in self.tree.remove_overlapping(cut) {
+                if let Some(alloc) = &mut self.data_buffer_shard_alloc
+                    && let Some(gpu) = chunk.data.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
+                if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc
+                    && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
+            }
+        }
+        self.content_gen = self.content_gen.wrapping_add(1);
+    }
+
     pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
         self.data_buffer_shard_alloc.as_ref()
     }
@@ -2056,34 +2353,33 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
-        pixel_width: usize,
     ) -> Option<u32> {
-        // No selected-span context: treat as a long window (pixel-faithful on clip).
-        self.write_to_index_buffer_with_sampling_range(
-            index_buffer,
-            render_queue,
-            line_visible_range,
-            i64::MAX,
-            pixel_width,
-        )
+        let step = self.fitted_index_step(line_visible_range.clone());
+        self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
     }
 
-    pub fn write_to_index_buffer_with_sampling_range(
-        &self,
-        index_buffer: &Buffer,
-        render_queue: &RenderQueue,
-        line_visible_range: Range<Timestamp>,
-        selected_span_micros: i64,
-        pixel_width: usize,
-    ) -> Option<u32> {
-        let (chunk_count, index_count) = self.range_index_stats(line_visible_range.clone());
-        let step = index_sampling_step_for_selection(
-            selected_span_micros,
-            chunk_count,
-            index_count,
-            pixel_width,
-        );
-        self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
+    /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
+    /// guaranteed to write in full.
+    ///
+    /// [`index_sampling_step`] budgets from a per-chunk overhead estimate, so a
+    /// dense range can still overshoot; the write loop would then stop mid-strip
+    /// and drop the *newest* samples, since chunks are visited oldest first.
+    /// Double until the exact count fits, as `plot_3d` does.
+    fn fitted_index_step(&self, range: Range<Timestamp>) -> usize {
+        let (chunk_count, index_count) = self.range_index_stats(range.clone());
+        let mut step = index_sampling_step(chunk_count, index_count);
+        // `index_count` bounds the strip from above, so only an over-budget range
+        // has to pay for the exact count.
+        if index_count <= INDEX_BUFFER_LEN {
+            return step;
+        }
+        for _ in 0..MAX_INDEX_STEP_DOUBLINGS {
+            if self.count_strip_index_u32s(range.clone(), step) <= INDEX_BUFFER_LEN as u32 {
+                break;
+            }
+            step = step.saturating_mul(2).max(2);
+        }
+        step
     }
 
     /// Count of `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this range
@@ -2547,34 +2843,33 @@ fn value_is_finite<D: Copy>(v: &D) -> bool {
     }
 }
 
-pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: usize) -> usize {
-    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
+/// Stride that fits a visible strip of `index_count` indices, spread over
+/// `chunk_count` chunks, into [`INDEX_BUFFER_LEN`].
+///
+/// Decimation exists only to respect that buffer; it is not a pixel-density
+/// heuristic. Budgeting on the widget width instead capped every window at a few
+/// indices per pixel — roughly 2% of the buffer — while windows within the
+/// short-accuracy threshold bypassed striding entirely, so fidelity fell off a
+/// cliff as soon as a graph was widened past it. `plot_3d` has always budgeted
+/// from the buffer.
+pub fn index_sampling_step(chunk_count: usize, index_count: usize) -> usize {
     // Per-chunk index overhead: leading sentinel, first point, strided interior, last point,
-    // trailing sentinel (see `write_to_index_buffer_with_step`).
+    // trailing sentinel (see `write_to_index_buffer_with_step`). `range_index_stats` folds it
+    // into `index_count`, so take it back out to get the samples the stride applies to.
     const PER_CHUNK_OVERHEAD: usize = 6;
     let overhead = PER_CHUNK_OVERHEAD.saturating_mul(chunk_count.max(1));
-    let divisor = desired_index_len.saturating_sub(overhead);
+    let samples = index_count.saturating_sub(overhead);
+    let divisor = INDEX_BUFFER_LEN.saturating_sub(overhead);
     if divisor > 0 {
-        return index_count.div_ceil(divisor).max(1);
+        return samples.div_ceil(divisor).max(1);
     }
-    // Many chunks: `2 * chunk_count` alone can exceed the index budget — never fall back to step 1.
-    index_count.div_ceil(desired_index_len.max(1)).max(1)
+    // Overhead alone exceeds the budget — never fall back to step 1.
+    index_count.div_ceil(INDEX_BUFFER_LEN).max(1)
 }
 
-/// For short accuracy windows (≤30 s), always draw every sample (`step = 1`).
-/// Longer windows use a pixel-faithful stride on the visible clip.
-pub fn index_sampling_step_for_selection(
-    selected_span_micros: i64,
-    zoomed_chunk_count: usize,
-    zoomed_index_count: usize,
-    pixel_width: usize,
-) -> usize {
-    if selected_span_micros <= crate::SHORT_WINDOW_ACCURACY_MICROS {
-        1
-    } else {
-        index_sampling_step(zoomed_chunk_count, zoomed_index_count, pixel_width)
-    }
-}
+/// Doublings allowed while fitting a strip into the index buffer. Enough to take
+/// any reachable sample count down to a handful of points.
+pub const MAX_INDEX_STEP_DOUBLINGS: usize = 26;
 
 #[cfg(test)]
 mod tests {
@@ -2698,9 +2993,15 @@ mod tests {
     }
 
     #[test]
-    fn index_sampling_step_matches_index_budget() {
-        assert_eq!(index_sampling_step(1, 100, 100), 1);
-        assert_eq!(index_sampling_step(1, 1_000, 100), 3);
+    fn index_sampling_step_only_strides_over_budget() {
+        // Whatever fits the index buffer is drawn in full; widget width no longer
+        // enters into it.
+        assert_eq!(index_sampling_step(1, 100), 1);
+        assert_eq!(index_sampling_step(1, 1_000), 1);
+        assert_eq!(index_sampling_step(40, INDEX_BUFFER_LEN), 1);
+        // Overhead comes off both sides, so 2× the buffer is just over two
+        // budgets and needs step 3.
+        assert_eq!(index_sampling_step(1, 2 * INDEX_BUFFER_LEN), 3);
     }
 
     #[test]
@@ -2876,6 +3177,305 @@ mod tests {
     }
 
     #[test]
+    fn plot_sync_plan_keeps_a_covered_trailing_window() {
+        let stored = Timestamp(1_000_000)..Timestamp(16_000_000);
+        let need = Timestamp(1_100_000)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::Keep
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_extends_only_the_new_suffix() {
+        let stored = Timestamp(0)..Timestamp(15_000_000);
+        let need = Timestamp(100_000)..Timestamp(15_100_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::Extend {
+                prefix: None,
+                suffix: Some(Timestamp(15_000_000)..Timestamp(15_100_000)),
+            }
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_on_a_seek() {
+        let stored = Timestamp(0)..Timestamp(15_000_000);
+        let need = Timestamp(60_000_000)..Timestamp(75_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_when_the_left_edge_is_missing() {
+        let stored = Timestamp(2_000_000)..Timestamp(16_000_000);
+        let need = Timestamp(1_000_000)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_when_interior_is_incomplete() {
+        let stored = Timestamp(0)..Timestamp(16_000_000);
+        let need = Timestamp(0)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, true),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    fn insert_f64(cache: &mut TelemetryCache, id: ComponentId, ts: i64, value: f64) {
+        cache.insert(
+            id,
+            Timestamp(ts),
+            ComponentValue::F64(nox::array![value].to_dyn()),
+        );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
+        // Partial first project: only the endpoints. The exclusive span already
+        // covers the window, so endpoint-only planning would Keep forever.
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.holes");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 15_000_000, 15.0);
+        let need = Timestamp(0)..Timestamp(15_000_001);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 2);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+
+        insert_f64(&mut cache, id, 7_500_000, 7.5);
+        assert!(!plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 3);
+        assert_eq!(
+            tree.sample_count_in_range(&need),
+            cache.sample_count_in_range(&id, &need)
+        );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_rebuilds_the_gap_between_prefetch_and_tip() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.prefetch.tip");
+        for i in 0..10 {
+            insert_f64(&mut cache, id, i * 1_000, i as f64);
+        }
+        for i in 0..10 {
+            insert_f64(&mut cache, id, 14_000_000 + i * 1_000, 100.0 + i as f64);
+        }
+        let need = Timestamp(0)..Timestamp(15_000_000);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 20);
+
+        insert_f64(&mut cache, id, 7_000_000, 50.0);
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 21);
+        assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_extends_a_complete_window_without_dropping_the_left() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.slide");
+        for i in 0..=15 {
+            insert_f64(&mut cache, id, i * 1_000_000, i as f64);
+        }
+        let first = Timestamp(0)..Timestamp(15_000_001);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &first, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 16);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+
+        insert_f64(&mut cache, id, 15_100_000, 15.1);
+        let slid = Timestamp(100_000)..Timestamp(15_100_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &slid, false),
+            PlotSyncPlan::Extend {
+                prefix: None,
+                suffix: Some(Timestamp(15_000_001)..Timestamp(15_100_001)),
+            }
+        );
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &slid, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &slid, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
+        assert_eq!(tree.total_points(), 17);
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_keep_evicts_chunks_left_of_the_padded_window() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.keep.evict");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 1_000, 1.0);
+        insert_f64(&mut cache, id, 10_000_000, 10.0);
+        insert_f64(&mut cache, id, 16_000_000, 16.0);
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(1_000)],
+                Timestamp(0),
+                [0.0f32, 1.0].into_iter(),
+            )
+            .expect("early"),
+        );
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(10_000_000), Timestamp(16_000_000)],
+                Timestamp(0),
+                [10.0f32, 16.0].into_iter(),
+            )
+            .expect("tip"),
+        );
+        let need = Timestamp(10_000_000)..Timestamp(16_000_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000_000)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(16_000_000)));
+        assert_eq!(tree.total_points(), 2);
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_clears_ghosts_when_the_window_is_empty() {
+        // Slide into a gap that still overlaps the tree by ≥25%. Endpoint
+        // planning would Keep; leftover samples would stay in the clip.
+        let cache = TelemetryCache::default();
+        let id = ComponentId::new("test.empty.gap");
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(15_000_000)],
+                Timestamp(0),
+                [0.0f32, 15.0].into_iter(),
+            )
+            .expect("prior"),
+        );
+        let need = Timestamp(10_000_000)..Timestamp(15_000_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(!plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 0);
+    }
+
+    #[test]
+    fn should_clear_empty_store_on_covered_gap_even_when_overlap_would_keep() {
+        let stored = Timestamp(0)..Timestamp(15_000_001);
+        let need = Timestamp(10_000_000)..Timestamp(15_000_001);
+        assert_eq!(
+            plot_sync_plan(Some(stored.clone()), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(should_clear_line_on_empty_store(
+            Some(stored.clone()),
+            &need,
+            true,
+            true,
+            false
+        ));
+        assert!(!should_clear_line_on_empty_store(
+            Some(stored.clone()),
+            &need,
+            true,
+            false,
+            false
+        ));
+        assert!(!should_clear_line_on_empty_store(
+            Some(stored),
+            &need,
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn should_clear_empty_store_on_seek_even_when_uncovered() {
+        let stored = Timestamp(0)..Timestamp(15_000_001);
+        let need = Timestamp(60_000_000)..Timestamp(75_000_001);
+        assert!(should_clear_line_on_empty_store(
+            Some(stored),
+            &need,
+            true,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn evict_chunks_outside_keeps_overlapping() {
+        let mut tree = LineTree::<f32>::default();
+        let early = Chunk::from_iter(
+            &[Timestamp(0), Timestamp(1_000)],
+            Timestamp(0),
+            [0.0f32, 1.0].into_iter(),
+        )
+        .expect("early");
+        let mid = Chunk::from_iter(
+            &[Timestamp(10_000), Timestamp(11_000)],
+            Timestamp(0),
+            [2.0f32, 3.0].into_iter(),
+        )
+        .expect("mid");
+        tree.insert(early);
+        tree.insert(mid);
+        tree.evict_chunks_outside(Timestamp(9_000)..Timestamp(20_000));
+        assert_eq!(tree.chunk_count(), 1);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000)));
+    }
+
+    #[test]
+    fn evict_chunks_outside_keeps_neighbor_that_shares_a_bound() {
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(1_000)],
+                Timestamp(0),
+                [0.0f32, 1.0].into_iter(),
+            )
+            .expect("early"),
+        );
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(1_001), Timestamp(2_000)],
+                Timestamp(0),
+                [2.0f32, 3.0].into_iter(),
+            )
+            .expect("mid"),
+        );
+        tree.evict_chunks_outside(Timestamp(1_500)..Timestamp(3_000));
+        assert_eq!(tree.chunk_count(), 1);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(1_001)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(2_000)));
+    }
+
+    #[test]
     fn percentile_bounds_filters_sparse_outliers_on_large_series() {
         let mut tree = LineTree::<f32>::default();
         let n = MAX_PERCENTILE_SAMPLES * 4;
@@ -2941,33 +3541,28 @@ mod tests {
     }
 
     #[test]
-    fn short_window_sampling_step_is_always_one() {
-        // Truth mode: ≤30 s never strides, even with many points / narrow widgets.
-        assert_eq!(
-            index_sampling_step_for_selection(5_000_000, 2, 8_000, 400),
-            1
-        );
-        assert_eq!(
-            index_sampling_step_for_selection(30_000_000, 10, 30_000, 200),
-            1
-        );
-        // Zoomed sub-range still step 1 under a short selection.
-        assert_eq!(index_sampling_step_for_selection(5_000_000, 1, 200, 400), 1);
-    }
-
-    #[test]
-    fn short_window_step_one_despite_full_recording_extent() {
-        // Replay: line_3d derives chunk/index stats from the full recording, but
-        // step selection must follow the selected trailing window (last_5s).
-        let full_hour_index_count = 3_600_000;
-        assert_eq!(
-            index_sampling_step_for_selection(
-                5_000_000,
-                500,
-                full_hour_index_count,
-                crate::ui::plot::gpu::INDEX_BUFFER_LEN,
-            ),
-            1
+    fn sampling_step_has_no_cliff_at_the_old_short_window_boundary() {
+        // A 1 kHz series either side of the former 30 s threshold must be drawn
+        // at the same resolution: widening a graph past it used to drop ~90% of
+        // the samples in one step.
+        let stats = |secs: usize| {
+            let samples = 1_000 * secs;
+            let chunks = samples.div_ceil(CHUNK_LEN);
+            (chunks, samples + 6 * chunks)
+        };
+        let (chunks_30, indices_30) = stats(30);
+        let (chunks_31, indices_31) = stats(31);
+        assert_eq!(index_sampling_step(chunks_30, indices_30), 1);
+        assert_eq!(index_sampling_step(chunks_31, indices_31), 1);
+        // Still true two orders of magnitude further out, at 4 kHz over 5 min.
+        let samples: usize = 4_000 * 300;
+        let chunks = samples.div_ceil(CHUNK_LEN);
+        let step = index_sampling_step(chunks, samples + 6 * chunks);
+        assert!(step > 1, "over-budget range must stride, got {step}");
+        assert!(
+            samples / step >= INDEX_BUFFER_LEN / 2,
+            "stride must keep using the buffer: {} drawn",
+            samples / step
         );
     }
 
@@ -3014,12 +3609,13 @@ mod tests {
     }
 
     #[test]
-    fn long_window_sampling_step_uses_visible_clip() {
-        let zoomed_step = index_sampling_step(1, 200, 400);
-        let long = index_sampling_step_for_selection(60_000_000, 1, 200, 400);
-        assert_eq!(long, zoomed_step);
-        let dense = index_sampling_step_for_selection(60_000_000, 2, 8_000, 400);
-        assert!(dense > 1, "dense={dense}");
+    fn sampling_step_follows_the_clip_not_the_window_length() {
+        // Zooming into a sub-range of a long window lowers the index count, so the
+        // stride relaxes back to 1 even though the selection is still minutes wide.
+        assert_eq!(index_sampling_step(1, 200), 1);
+        assert_eq!(index_sampling_step(2, 8_000), 1);
+        let over = 4 * INDEX_BUFFER_LEN;
+        assert!(index_sampling_step(over.div_ceil(CHUNK_LEN), over) > 1);
     }
 
     #[test]
@@ -3051,18 +3647,15 @@ mod tests {
             "full_count={full_count} INDEX_BUFFER_LEN={INDEX_BUFFER_LEN}"
         );
         assert!(zoom_count < full_count);
-        assert_eq!(index_sampling_step_for_selection(5_000_000, 2, n, 400), 1);
-        assert_eq!(
-            index_sampling_step_for_selection(5_000_000, 1, 1_000, 400),
-            1
-        );
+        assert_eq!(tree.fitted_index_step(full), 1);
+        assert_eq!(tree.fitted_index_step(zoomed), 1);
     }
 
     #[test]
-    fn short_window_over_budget_step_doubles_to_fit() {
-        // Short-window selection still starts at step 1, but when sample count
-        // exceeds INDEX_BUFFER_LEN the extract path must double the step rather
-        // than silently truncating the newest tip (line_3d FO-local path).
+    fn over_budget_range_raises_the_step_instead_of_truncating() {
+        // `write_to_index_buffer_with_step` stops mid-strip once the buffer is
+        // full, and chunks are visited oldest first — so an over-budget range
+        // must raise the step rather than silently dropping the newest samples.
         let mut tree = LineTree::<f32>::default();
         // INDEX_BUFFER_LEN + 1 samples so step-1 strip indices exceed the budget.
         let n = INDEX_BUFFER_LEN + 1;
@@ -3081,25 +3674,14 @@ mod tests {
             offset = end;
         }
         let range = Timestamp(0)..Timestamp(n as i64);
-        assert_eq!(
-            index_sampling_step_for_selection(5_000_000, 1, n, INDEX_BUFFER_LEN),
-            1,
-            "short selection must still request step 1"
+        assert!(
+            tree.count_strip_index_u32s(range.clone(), 1) > INDEX_BUFFER_LEN as u32,
+            "fixture must be over budget at step 1"
         );
-        let mut step = 1usize;
-        let mut fitted = false;
-        for _ in 0..26 {
-            let needed = tree.count_strip_index_u32s(range.clone(), step);
-            if needed <= INDEX_BUFFER_LEN as u32 {
-                fitted = true;
-                break;
-            }
-            step = step.saturating_mul(2).max(2);
-        }
-        assert!(fitted, "step doubling must fit within INDEX_BUFFER_LEN");
+        let step = tree.fitted_index_step(range.clone());
         assert!(
             step > 1,
-            "over-budget short window must raise step, got {step}"
+            "over-budget range must raise the step, got {step}"
         );
         assert!(tree.count_strip_index_u32s(range, step) <= INDEX_BUFFER_LEN as u32);
     }
@@ -3232,7 +3814,7 @@ mod tests {
 
     #[test]
     fn index_sampling_step_many_chunks_never_returns_one() {
-        let step = index_sampling_step(5000, 1_000_000, 1920);
+        let step = index_sampling_step(5000, 1_000_000);
         assert!(step > 1, "step={step}");
     }
 

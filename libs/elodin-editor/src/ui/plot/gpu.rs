@@ -338,6 +338,8 @@ impl LineMut<'_> {
         }
     }
 
+    /// `pixel_width` only sizes the XY stride; timeseries strips are budgeted
+    /// from the index buffer alone (see [`super::data::index_sampling_step`]).
     pub fn write_to_index_buffer(
         &mut self,
         index_buffer: &Buffer,
@@ -345,31 +347,11 @@ impl LineMut<'_> {
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
     ) -> Option<u32> {
-        self.write_to_index_buffer_sampled(
-            index_buffer,
-            render_queue,
-            line_visible_range,
-            i64::MAX,
-            pixel_width,
-        )
-    }
-
-    pub fn write_to_index_buffer_sampled(
-        &mut self,
-        index_buffer: &Buffer,
-        render_queue: &RenderQueue,
-        line_visible_range: Range<Timestamp>,
-        selected_span_micros: i64,
-        pixel_width: usize,
-    ) -> Option<u32> {
         match self {
-            LineMut::Timeseries(line) => line.data.write_to_index_buffer_with_sampling_range(
-                index_buffer,
-                render_queue,
-                line_visible_range,
-                selected_span_micros,
-                pixel_width,
-            ),
+            LineMut::Timeseries(line) => {
+                line.data
+                    .write_to_index_buffer(index_buffer, render_queue, line_visible_range)
+            }
             LineMut::XY(xy_line) => {
                 xy_line.write_to_index_buffer(index_buffer, render_queue, pixel_width)
             }
@@ -1098,11 +1080,10 @@ fn extract_lines(
                     )) {
                     Some(cached.map(|g| g.count).unwrap_or(0))
                 } else {
-                    line.write_to_index_buffer_sampled(
+                    line.write_to_index_buffer(
                         &index_buffer,
                         &render_queue,
                         clip_range.clone(),
-                        selected_span_micros,
                         width.0,
                     )
                 };
