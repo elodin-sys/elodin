@@ -960,86 +960,40 @@ impl TileState {
         !self.has_content()
     }
 
-    pub fn clear(&mut self, commands: &mut Commands) {
-        for (tile_id, tile) in self.tree.tiles.iter() {
+    /// Despawn every pane entity under `tile_id`, including nested containers.
+    /// Named schematic tabs are containers; closing them must release graphs,
+    /// cameras, and other pane entities, not only the egui tile.
+    pub(crate) fn despawn_tile(&mut self, tile_id: TileId, commands: &mut Commands) {
+        fn visit(
+            tree: &egui_tiles::Tree<Pane>,
+            graphs: &mut HashMap<TileId, Entity>,
+            tile_id: TileId,
+            commands: &mut Commands,
+        ) {
+            let Some(tile) = tree.tiles.get(tile_id) else {
+                return;
+            };
             match tile {
-                Tile::Pane(Pane::Viewport(viewport)) => {
-                    if let Some(camera) = viewport.camera
-                        && let Ok(mut e) = commands.get_entity(camera)
-                    {
-                        e.despawn();
-                    }
-                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera
-                        && let Ok(mut e) = commands.get_entity(nav_gizmo_camera)
-                    {
-                        e.despawn();
+                Tile::Pane(pane) => {
+                    pane.despawn_entities(commands);
+                    if let Some(graph_id) = graphs.remove(&tile_id) {
+                        try_despawn(commands, graph_id);
                     }
                 }
-                Tile::Pane(Pane::Graph(graph)) => {
-                    if let Ok(mut e) = commands.get_entity(graph.id) {
-                        e.despawn();
-                    }
-                    if let Some(graph_id) = self.graphs.get(tile_id) {
-                        if let Ok(mut e) = commands.get_entity(*graph_id) {
-                            e.despawn();
-                        }
-                        self.graphs.remove(tile_id);
+                Tile::Container(container) => {
+                    for child in container.children().copied().collect::<Vec<_>>() {
+                        visit(tree, graphs, child, commands);
                     }
                 }
-
-                Tile::Pane(Pane::VideoStream(pane) | Pane::SensorView(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::LogStream(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::ActionTile(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::QueryTable(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::QueryPlot(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::SchematicTree(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::Monitor(monitor)) => {
-                    if let Ok(mut e) = commands.get_entity(monitor.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(
-                    Pane::GeoPositionGauge(gauge)
-                    | Pane::OrientationGauge(gauge)
-                    | Pane::HorizonGauge(gauge),
-                ) => {
-                    if let Ok(mut e) = commands.get_entity(gauge.entity) {
-                        e.despawn();
-                    }
-                }
-                _ => {}
             }
         }
+        visit(&self.tree, &mut self.graphs, tile_id, commands);
+    }
 
-        if let Some(root_id) = self.tree.root()
-            && let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id)
-        {
-            root.retain(|_| false);
-        };
+    pub fn clear(&mut self, commands: &mut Commands) {
+        if let Some(root_id) = self.tree.root() {
+            self.despawn_tile(root_id, commands);
+        }
         self.graphs.clear();
         self.container_titles.clear();
         self.reset_tree();
@@ -1108,6 +1062,12 @@ pub enum Pane {
     DataOverview(DataOverviewPane),
 }
 
+fn try_despawn(commands: &mut Commands, entity: Entity) {
+    if let Ok(mut e) = commands.get_entity(entity) {
+        e.despawn();
+    }
+}
+
 impl Pane {
     fn collect_render_targets(&self, out: &mut PaneRenderTargets) {
         match self {
@@ -1132,6 +1092,31 @@ impl Pane {
             | Pane::LogStream(_)
             | Pane::SchematicTree(_)
             | Pane::DataOverview(_) => {}
+        }
+    }
+
+    fn despawn_entities(&self, commands: &mut Commands) {
+        match self {
+            Pane::Viewport(viewport) => {
+                if let Some(camera) = viewport.camera {
+                    try_despawn(commands, camera);
+                }
+                if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
+                    try_despawn(commands, nav_gizmo_camera);
+                }
+            }
+            Pane::Graph(graph) => try_despawn(commands, graph.id),
+            Pane::Monitor(pane) => try_despawn(commands, pane.entity),
+            Pane::GeoPositionGauge(pane)
+            | Pane::OrientationGauge(pane)
+            | Pane::HorizonGauge(pane) => try_despawn(commands, pane.entity),
+            Pane::QueryTable(pane) => try_despawn(commands, pane.entity),
+            Pane::QueryPlot(pane) => try_despawn(commands, pane.entity),
+            Pane::ActionTile(pane) => try_despawn(commands, pane.entity),
+            Pane::VideoStream(pane) | Pane::SensorView(pane) => try_despawn(commands, pane.entity),
+            Pane::LogStream(pane) => try_despawn(commands, pane.entity),
+            Pane::SchematicTree(pane) => try_despawn(commands, pane.entity),
+            Pane::DataOverview(_) => {}
         }
     }
 
@@ -3218,62 +3203,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let Some(tile) = tile_state.tree.tiles.get(tile_id) else {
+                        if tile_state.tree.tiles.get(tile_id).is_none() {
                             continue;
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
-                            if let Some(camera) = viewport.camera {
-                                state_mut.commands.entity(camera).despawn();
-                            }
-                            if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
-                                state_mut.commands.entity(nav_gizmo_camera).despawn();
-                            }
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::Graph(graph)) = tile {
-                            state_mut.commands.entity(graph.id).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::ActionTile(action)) = tile {
-                            state_mut.commands.entity(action.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::Monitor(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(
-                            Pane::GeoPositionGauge(pane)
-                            | Pane::OrientationGauge(pane)
-                            | Pane::HorizonGauge(pane),
-                        ) = tile
-                        {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(
-                            Pane::VideoStream(pane) | Pane::SensorView(pane),
-                        ) = tile
-                        {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::LogStream(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::QueryPlot(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::QueryTable(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::SchematicTree(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
+                        }
 
                         // Find a sibling to select if the deleted tile was active
                         let sibling_to_select =
@@ -3294,6 +3226,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                             });
 
+                        tile_state.despawn_tile(tile_id, &mut state_mut.commands);
                         tile_state.tree.remove_recursively(tile_id);
 
                         // Select the sibling if we found one
@@ -3302,11 +3235,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 tile_state.tree.tiles.get_mut(parent_id)
                         {
                             tabs.set_active(sibling_id);
-                        }
-
-                        if let Some(graph_id) = tile_state.graphs.get(&tile_id) {
-                            state_mut.commands.entity(*graph_id).despawn();
-                            tile_state.graphs.remove(&tile_id);
                         }
 
                         if tile_state.has_content() {
@@ -4022,5 +3950,165 @@ mod grid_lod_tests {
             (cell - 10_000_000.0).abs() / 10_000_000.0 < 1.0e-6,
             "80,000 km ECEF view should stay ~10,000 km cells, got {cell}"
         );
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::{Container, GraphPane, Pane, Tile, TileId, TileState};
+    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use crate::ui::plot::{
+        CollectedGraphData, GraphBundle, GraphState, Line, LineHandle, PlotDataComponent,
+        PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
+        gpu::{PendingUnusedPlotLines, apply_pending_unused_plot_lines},
+    };
+    use bevy::asset::Assets;
+    use bevy::ecs::hierarchy::ChildOf;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{Commands, Entity, World};
+    use bevy_egui::egui::Color32;
+    use impeller2::types::ComponentId;
+    use impeller2_bevy::ComponentPath;
+    use std::collections::BTreeMap;
+
+    fn plot_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<PlotLineUsers>();
+        world.init_resource::<PendingUnusedPlotLines>();
+        world.init_resource::<CollectedGraphData>();
+        world.init_resource::<PlotGpuBufferPool>();
+        world.insert_resource(Assets::<Line>::default());
+        world
+    }
+
+    fn spawn_graph_with_line(
+        world: &mut World,
+        handle: bevy::asset::Handle<Line>,
+        path: &str,
+    ) -> (Entity, Entity) {
+        let mut alloc = RenderLayerAllocator::default();
+        let bundle = GraphBundle::try_new(&mut alloc, BTreeMap::new(), path.to_string())
+            .expect("a free render layer");
+        let graph_id = world.spawn(bundle).id();
+        let line_id = world
+            .spawn((LineHandle::Timeseries(handle), ChildOf(graph_id)))
+            .id();
+        world
+            .get_mut::<GraphState>(graph_id)
+            .expect("graph state")
+            .enabled_lines
+            .insert((ComponentPath::from_name(path), 0), (line_id, Color32::RED));
+        (graph_id, line_id)
+    }
+
+    fn named_tab_with_graph(tile_state: &mut TileState, graph_id: Entity) -> TileId {
+        let pane_id = tile_state
+            .tree
+            .tiles
+            .insert_new(Tile::Pane(Pane::Graph(GraphPane::new(
+                graph_id,
+                "graph".into(),
+            ))));
+        let named_id = tile_state
+            .tree
+            .tiles
+            .insert_new(Tile::Container(Container::new_tabs(vec![pane_id])));
+        let root = tile_state.tree.root().expect("root tabs");
+        if let Some(Tile::Container(Container::Tabs(tabs))) = tile_state.tree.tiles.get_mut(root) {
+            tabs.add_child(named_id);
+        }
+        tile_state.graphs.insert(pane_id, graph_id);
+        named_id
+    }
+
+    fn close_tile(world: &mut World, tile_state: &mut TileState, tile_id: TileId) {
+        let mut system_state: SystemState<Commands> = SystemState::new(world);
+        let mut commands = system_state.get_mut(world).expect("commands");
+        tile_state.despawn_tile(tile_id, &mut commands);
+        tile_state.tree.remove_recursively(tile_id);
+        system_state.apply(world);
+        world.flush();
+        apply_pending_unused_plot_lines(world);
+    }
+
+    #[test]
+    fn closing_container_tab_despawns_graphs_and_unused_line_assets() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = ComponentId::new("rocket.mach");
+        {
+            let mut collected = world.resource_mut::<CollectedGraphData>();
+            let mut component = PlotDataComponent::new("rocket.mach", vec!["x".into()]);
+            component.lines.insert(0, handle.clone());
+            collected.components.insert(component_id, component);
+        }
+        let (graph_id, line_id) = spawn_graph_with_line(&mut world, handle.clone(), "rocket.mach");
+        let key = PlotLineKey::Timeseries(handle.id());
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+
+        let mut tile_state = TileState::default();
+        let tab_id = named_tab_with_graph(&mut tile_state, graph_id);
+        close_tile(&mut world, &mut tile_state, tab_id);
+
+        assert!(
+            world.get_entity(graph_id).is_err(),
+            "graph pane entity must be despawned"
+        );
+        assert!(
+            world.get_entity(line_id).is_err(),
+            "line entity must be despawned with the graph"
+        );
+        assert!(
+            world.query::<&GraphState>().iter(&world).next().is_none(),
+            "no GraphState remains"
+        );
+        assert!(
+            world.query::<&LineHandle>().iter(&world).next().is_none(),
+            "no LineHandle remains"
+        );
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_none(),
+            "unused CollectedGraphData line handle must be dropped"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 0);
+        assert!(tile_state.graphs.is_empty());
+    }
+
+    #[test]
+    fn closing_one_tab_keeps_shared_line_used_by_another_graph() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = ComponentId::new("rocket.mach");
+        {
+            let mut collected = world.resource_mut::<CollectedGraphData>();
+            let mut component = PlotDataComponent::new("rocket.mach", vec!["x".into()]);
+            component.lines.insert(0, handle.clone());
+            collected.components.insert(component_id, component);
+        }
+        let (graph_a, line_a) = spawn_graph_with_line(&mut world, handle.clone(), "rocket.mach");
+        let (graph_b, line_b) = spawn_graph_with_line(&mut world, handle.clone(), "rocket.mach");
+        let key = PlotLineKey::Timeseries(handle.id());
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 2);
+
+        let mut tile_state = TileState::default();
+        let tab_a = named_tab_with_graph(&mut tile_state, graph_a);
+        let _tab_b = named_tab_with_graph(&mut tile_state, graph_b);
+        close_tile(&mut world, &mut tile_state, tab_a);
+
+        assert!(world.get_entity(graph_a).is_err());
+        assert!(world.get_entity(line_a).is_err());
+        assert!(world.get_entity(graph_b).is_ok());
+        assert!(world.get_entity(line_b).is_ok());
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_some(),
+            "shared line asset must stay while another graph uses it"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
     }
 }

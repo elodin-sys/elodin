@@ -12,6 +12,8 @@ pub(crate) mod frustum_common;
 pub mod frustum_intersection;
 pub mod gizmos;
 pub(crate) mod gpu_info;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod hw_stats;
 pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
 mod logical_key;

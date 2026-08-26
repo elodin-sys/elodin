@@ -10,7 +10,9 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
-    diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    diagnostic::{
+        DiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
+    },
     ecs::observer::Observer,
     ecs::system::{NonSendMarker, SystemParam},
     light::DirectionalLightShadowMap,
@@ -18,6 +20,7 @@ use bevy::{
     math::{DQuat, DVec3},
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
+    render::{RenderPlugin, settings::WgpuSettings},
     window::{PrimaryWindow, WindowRef, WindowResolution},
     winit::{WINIT_WINDOWS, WinitSettings},
 };
@@ -63,6 +66,17 @@ use ui::{
 #[derive(Resource, Default, Clone, Copy, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct Coordinate(pub Option<GeoFrame>);
+
+pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
+    WgpuSettings {
+        instance_memory_budget_thresholds: wgpu::MemoryBudgetThresholds {
+            for_resource_creation: Some(99),
+            for_device_loss: None,
+        },
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        ..default()
+    }
+}
 
 mod embedded_lfs;
 pub mod icon_rasterizer;
@@ -238,6 +252,10 @@ impl Plugin for EditorPlugin {
             .add_plugins(plugins::kdl_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
+                    .set(RenderPlugin {
+                        render_creation: editor_wgpu_settings().into(),
+                        ..default()
+                    })
                     .set(WindowPlugin {
                         primary_window: Some(Window {
                             title: "Elodin".into(),
@@ -273,8 +291,10 @@ impl Plugin for EditorPlugin {
                     .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
                     .build(),
             )
-            .add_plugins(plugins::gpu_info::GpuInfoPlugin)
-            .add_plugins(plugins::kdl_document::plugin)
+            .add_plugins(plugins::gpu_info::GpuInfoPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);
+        app.add_plugins(plugins::kdl_document::plugin)
             .add_plugins(skybox_asset_plugin())
             .add_plugins(skybox_generation_plugin())
             .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
@@ -325,6 +345,7 @@ impl Plugin for EditorPlugin {
         app.add_plugins(plugins::fps_log::EnvFpsLogPlugin);
         app.add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
+            .add_plugins(SystemInformationDiagnosticsPlugin)
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::plot::PlotPlugin)
