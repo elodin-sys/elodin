@@ -14,3 +14,6 @@ curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_2.m05016
     -o ./nasa_spice_data/Voyager_2.m05016u.merged.bsp
 curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/vgr1_jup230.bsp \
     -o ./nasa_spice_data/vgr1_jup230.bsp
+
+echo "e1ea3f72f19b15508bc45979771a36a97d02f33056b76867d444304cb82205c9  ./nasa_spice_data/vgr1_jup230.bsp" \
+    | sha256sum -c -
