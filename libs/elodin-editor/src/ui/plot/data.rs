@@ -939,7 +939,9 @@ fn apply_plot_sync_plan(
                 max_points,
             );
         }
-        PlotSyncPlan::Keep => {}
+        PlotSyncPlan::Keep => {
+            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
+        }
         PlotSyncPlan::Extend { suffix, .. } => {
             if let Some(range) = suffix {
                 append_series_element_to_line(
@@ -3295,6 +3297,42 @@ mod tests {
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
         assert_eq!(tree.total_points(), 17);
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_keep_evicts_chunks_left_of_the_padded_window() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.keep.evict");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 1_000, 1.0);
+        insert_f64(&mut cache, id, 10_000_000, 10.0);
+        insert_f64(&mut cache, id, 16_000_000, 16.0);
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(1_000)],
+                Timestamp(0),
+                [0.0f32, 1.0].into_iter(),
+            )
+            .expect("early"),
+        );
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(10_000_000), Timestamp(16_000_000)],
+                Timestamp(0),
+                [10.0f32, 16.0].into_iter(),
+            )
+            .expect("tip"),
+        );
+        let need = Timestamp(10_000_000)..Timestamp(16_000_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000_000)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(16_000_000)));
+        assert_eq!(tree.total_points(), 2);
     }
 
     #[test]
