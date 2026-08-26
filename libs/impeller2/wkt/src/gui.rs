@@ -1819,6 +1819,7 @@ pub fn sensor_camera_model_effect_params(name: &str) -> Option<serde_json::Value
             "temporal_noise_sigma_dn": 2.526,
             "column_fpn_sigma_dn": 0.25,
             "vignette": 0.1,
+            "sky_offset_dn": 2.0,
             "t_air_c": 30.0,
             "t_sky_zenith_c": -50.0,
             "t_base_c": 45.0,

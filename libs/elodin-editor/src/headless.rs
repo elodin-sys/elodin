@@ -41,7 +41,8 @@ use impeller2_wkt::{CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schem
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, set_cameras_active, set_readback_armed, update_auto_agc,
+    SensorCamerasSpawned, TEMP_MAP_SUFFIX, set_cameras_active, set_readback_armed,
+    temp_map_msg_name, update_auto_agc,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
@@ -883,6 +884,19 @@ fn render_server_runner(mut app: App) -> AppExit {
 fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
 
+    // Due DB frames plus the AGC temperature maps of due LWIR cameras.
+    let mut expected_names = due_names.to_vec();
+    {
+        let configs = app.world().resource::<SensorCameraConfigs>();
+        expected_names.extend(
+            configs
+                .0
+                .iter()
+                .filter(|config| config.effect == "lwir" && due_names.contains(&config.camera_name))
+                .map(|config| temp_map_msg_name(&config.camera_name)),
+        );
+    }
+
     // Drain any stale frames from the previous pass before arming.
     drain_stale_frames(app);
     set_cameras_active(app.world_mut(), due_names, true);
@@ -891,14 +905,14 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     // The render-graph + GPU readback runs inside `app.update()`.
     run_headless_update(app);
 
-    let mut frames = collect_frames(app, due_names);
+    let mut frames = collect_frames(app, &expected_names);
     // The readback ping-pong may need one more update before all frames are
     // mapped on slow GPUs / first runs after a warm reload. We deliberately
     // leave the cameras active for this retry — a rare second render is
     // cheaper than wiring up readback-only updates.
-    if frames.len() < due_names.len() {
+    if frames.len() < expected_names.len() {
         run_headless_update(app);
-        let more = collect_frames(app, due_names);
+        let more = collect_frames(app, &expected_names);
         for (name, data) in more {
             if !frames.iter().any(|(n, _)| n == &name) {
                 frames.push((name, data));
@@ -906,8 +920,11 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
         }
     }
 
-    update_auto_agc(app.world_mut(), &frames);
-    push_frames_to_db(app, sim_ts, &frames);
+    let (temp_frames, db_frames): (Vec<_>, Vec<_>) = frames
+        .into_iter()
+        .partition(|(name, _)| name.ends_with(TEMP_MAP_SUFFIX));
+    update_auto_agc(app.world_mut(), &temp_frames);
+    push_frames_to_db(app, sim_ts, &db_frames);
     set_readback_armed(app.world_mut(), due_names, false);
     set_cameras_active(app.world_mut(), due_names, false);
 }

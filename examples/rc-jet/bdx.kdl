@@ -94,7 +94,7 @@ object_3d bdx.world_pos {
 }
 
 object_3d target.world_pos {
-    glb path="edu-450-v2-drone.glb"
+    glb path="edu-450-v2-drone.glb" scale=10.0 
     icon builtin="adjust" {
         visibility_range min=50.0 fade_distance=50.0
         color 244 67 54

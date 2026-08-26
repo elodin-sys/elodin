@@ -9,7 +9,11 @@ struct SensorOutputSettings {
     mode: vec4<u32>,
     // width, height, near, far
     viewport: vec4<f32>,
-    // legacy effect param_a, param_b, reserved, reserved
+    // Bevy camera rotation quaternion, xyzw
+    view_rotation: vec4<f32>,
+    // vertical FOV radians, aspect ratio, reserved, reserved
+    lens: vec4<f32>,
+    // legacy effect param_a, param_b, gamma, reserved
     legacy: vec4<f32>,
     // air °C, sky zenith °C, terrain base °C, solar/luminance gain °C
     thermal: vec4<f32>,
@@ -31,6 +35,10 @@ const EFFECT_DEPTH: u32 = 3u;
 const EFFECT_LWIR: u32 = 4u;
 const FLAG_THERMAL_MASK: u32 = 1u;
 const PI: f32 = 3.141592653589793;
+// Fixed physical range of the AGC temperature-map attachment. Must match
+// TEMP_MAP_MIN_C / TEMP_MAP_MAX_C in sensor_camera.rs.
+const TEMP_MAP_MIN_C: f32 = -60.0;
+const TEMP_MAP_MAX_C: f32 = 140.0;
 
 fn hash(value: vec2<f32>) -> f32 {
     var p3 = fract(vec3<f32>(value.xyx) * 0.1031);
@@ -67,6 +75,32 @@ fn view_distance(raw_depth: f32) -> f32 {
 
 fn luminance(color: vec3<f32>) -> f32 {
     return dot(color, vec3<f32>(0.299, 0.587, 0.114));
+}
+
+fn rotate_by_quaternion(vector: vec3<f32>, quaternion: vec4<f32>) -> vec3<f32> {
+    let twice_cross = 2.0 * cross(quaternion.xyz, vector);
+    return vector + quaternion.w * twice_cross + cross(quaternion.xyz, twice_cross);
+}
+
+fn world_view_ray(uv: vec2<f32>) -> vec3<f32> {
+    let ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    let tan_half_vertical_fov = tan(settings.lens.x * 0.5);
+    let camera_ray = normalize(vec3(
+        ndc.x * settings.lens.y * tan_half_vertical_fov,
+        ndc.y * tan_half_vertical_fov,
+        -1.0,
+    ));
+    return normalize(rotate_by_quaternion(camera_ray, settings.view_rotation));
+}
+
+fn sky_temperature(uv: vec2<f32>) -> f32 {
+    // Bevy local +Y is geodetic up at the scene origin. Warm the sky only in
+    // a ~10-degree wedge above the physical horizon (long atmospheric path);
+    // the rest of the dome stays at the cold zenith temperature regardless of
+    // camera pitch or roll.
+    let sin_elevation = clamp(world_view_ray(uv).y, 0.0, 1.0);
+    let cold_sky = smoothstep(0.0, 0.17364818, sin_elevation);
+    return mix(settings.thermal.x, settings.thermal.y, cold_sky);
 }
 
 fn palette(value: f32) -> vec3<f32> {
@@ -123,8 +157,7 @@ fn mask_temperature(uv: vec2<f32>) -> f32 {
 fn pseudo_temperature(uv: vec2<f32>) -> f32 {
     let raw_depth = raw_depth_at(uv);
     if raw_depth <= 1e-7 {
-        let zenith = clamp(abs(uv.y - 0.5) * 2.0, 0.0, 1.0);
-        return mix(settings.thermal.x, settings.thermal.y, zenith);
+        return sky_temperature(uv);
     }
 
     if (settings.mode.z & FLAG_THERMAL_MASK) != 0u {
@@ -145,6 +178,7 @@ fn pseudo_temperature(uv: vec2<f32>) -> f32 {
 }
 
 fn apply_lwir(uv: vec2<f32>) -> vec4<f32> {
+    let is_sky = raw_depth_at(uv) <= 1e-7;
     let pixel = 1.0 / settings.viewport.xy;
     let center = pseudo_temperature(uv);
     let left = pseudo_temperature(clamp(uv - vec2(pixel.x, 0.0), vec2(0.0), vec2(1.0)));
@@ -158,6 +192,11 @@ fn apply_lwir(uv: vec2<f32>) -> vec4<f32> {
     let span = max(settings.agc.y - settings.agc.x, 1e-3);
     var signal = clamp((detailed - settings.agc.x) / span, 0.0, 1.0);
     signal = pow(signal, max(settings.legacy.z, 0.1));
+    if is_sky {
+        // Cosmetic video black level: keeps detector noise visible against a
+        // clamped-cold sky. Post-AGC, so it cannot influence AGC statistics.
+        signal = max(signal, settings.legacy.w);
+    }
 
     let pixel_coord = uv * settings.viewport.xy;
     let temporal = frame_noise(pixel_coord) * settings.sensor.y / 255.0;
@@ -179,27 +218,45 @@ fn apply_lwir(uv: vec2<f32>) -> vec4<f32> {
     return vec4(palette(signal), 1.0);
 }
 
+struct SensorFragmentOutput {
+    @location(0) color: vec4<f32>,
+    // AGC statistics side channel, read back on the CPU (never sent to the
+    // DB): R = temperature over [TEMP_MAP_MIN_C, TEMP_MAP_MAX_C], G = sky.
+    @location(1) temp: vec4<f32>,
+}
+
 @fragment
-fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+fn fragment(in: FullscreenVertexOutput) -> SensorFragmentOutput {
     let color = textureSample(screen_texture, texture_sampler, in.uv);
+    var out: SensorFragmentOutput;
+    out.temp = vec4(0.0, 0.0, 0.0, 1.0);
     switch settings.mode.x {
         case EFFECT_NORMAL: {
-            return color;
+            out.color = color;
         }
         case EFFECT_THERMAL: {
-            return apply_legacy_thermal(color, in.uv);
+            out.color = apply_legacy_thermal(color, in.uv);
         }
         case EFFECT_NIGHT_VISION: {
-            return apply_night_vision(color, in.uv);
+            out.color = apply_night_vision(color, in.uv);
         }
         case EFFECT_DEPTH: {
-            return apply_depth(in.uv);
+            out.color = apply_depth(in.uv);
         }
         case EFFECT_LWIR: {
-            return apply_lwir(in.uv);
+            out.color = apply_lwir(in.uv);
+            let is_sky = raw_depth_at(in.uv) <= 1e-7;
+            let temp_norm = clamp(
+                (pseudo_temperature(in.uv) - TEMP_MAP_MIN_C)
+                    / (TEMP_MAP_MAX_C - TEMP_MAP_MIN_C),
+                0.0,
+                1.0,
+            );
+            out.temp = vec4(temp_norm, select(0.0, 1.0, is_sky), 0.0, 1.0);
         }
         default: {
-            return color;
+            out.color = color;
         }
     }
+    return out;
 }

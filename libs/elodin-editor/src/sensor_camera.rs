@@ -77,6 +77,8 @@ pub struct SensorCameraFrustumSource {
 pub struct SensorOutputSettings {
     pub mode: UVec4,
     pub viewport: Vec4,
+    pub view_rotation: Vec4,
+    pub lens: Vec4,
     pub legacy: Vec4,
     pub thermal: Vec4,
     pub agc: Vec4,
@@ -89,6 +91,9 @@ struct SensorOutputTarget {
     output_image: Handle<Image>,
     palette_lut: Handle<Image>,
     thermal_mask: Handle<Image>,
+    /// AGC statistics side channel (R = temperature, G = sky flag), written
+    /// by the second MRT attachment of the sensor output pass.
+    temp_map: Handle<Image>,
 }
 
 /// Double-buffered GPU readback state for a single sensor camera.
@@ -103,6 +108,20 @@ struct ImageCopier {
     width: u32,
     height: u32,
     is_active: bool,
+}
+
+/// Readback of the AGC temperature map for LWIR cameras. Same double-buffered
+/// machinery as [`ImageCopier`]; its frames are consumed by `update_auto_agc`
+/// and never pushed to the DB.
+#[derive(Clone, Component)]
+struct TempMapCopier(ImageCopier);
+
+/// Suffix distinguishing temperature-map readbacks from DB camera frames in
+/// the shared frame channel.
+pub const TEMP_MAP_SUFFIX: &str = "#temp";
+
+pub fn temp_map_msg_name(camera_name: &str) -> String {
+    format!("{camera_name}{TEMP_MAP_SUFFIX}")
 }
 
 #[derive(Clone, Default, Resource)]
@@ -179,6 +198,9 @@ fn sensor_output_pass(
     let Some(thermal_mask) = gpu_images.get(&target.thermal_mask) else {
         return;
     };
+    let Some(temp_map) = gpu_images.get(&target.temp_map) else {
+        return;
+    };
 
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
         return;
@@ -203,12 +225,20 @@ fn sensor_output_pass(
 
     let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
         label: Some("sensor_output_pass"),
-        color_attachments: &[Some(RenderPassColorAttachment {
-            view: &output.texture_view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: Operations::default(),
-        })],
+        color_attachments: &[
+            Some(RenderPassColorAttachment {
+                view: &output.texture_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            }),
+            Some(RenderPassColorAttachment {
+                view: &temp_map.texture_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            }),
+        ],
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,
@@ -261,11 +291,20 @@ fn init_sensor_output_pipeline(
         vertex: vertex_state,
         fragment: Some(FragmentState {
             shader,
-            targets: vec![Some(ColorTargetState {
-                format: TextureFormat::Rgba8UnormSrgb,
-                blend: None,
-                write_mask: ColorWrites::ALL,
-            })],
+            targets: vec![
+                Some(ColorTargetState {
+                    format: TextureFormat::Rgba8UnormSrgb,
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                }),
+                // Linear (not sRGB) so the temperature normalization written
+                // by the shader survives readback unchanged.
+                Some(ColorTargetState {
+                    format: TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                }),
+            ],
             ..default()
         }),
         ..default()
@@ -538,7 +577,19 @@ fn sensor_output_settings(config: &SensorCameraConfig) -> SensorOutputSettings {
             config.near.max(1.0e-6),
             config.far.max(config.near + 1.0e-6),
         ),
-        legacy: Vec4::new(param_a, param_b, 1.0, 0.0),
+        view_rotation: Vec4::new(0.0, 0.0, 0.0, 1.0),
+        lens: Vec4::new(
+            config.fov_degrees.to_radians(),
+            config.width as f32 / config.height.max(1) as f32,
+            0.0,
+            0.0,
+        ),
+        legacy: Vec4::new(
+            param_a,
+            param_b,
+            1.0,
+            value(&["sky_offset_dn"], "sky_offset_dn", 2.0).clamp(0.0, 32.0) / 255.0,
+        ),
         thermal: Vec4::new(
             value(&["t_air_c"], "t_air_c", 30.0),
             value(&["t_sky_zenith_c"], "t_sky_zenith_c", -50.0),
@@ -625,36 +676,53 @@ fn spawn_sensor_cameras(
             images.add(empty_thermal_mask_image())
         };
         let thermal_mask_target = thermal_mask.clone();
+        let mut temp_map_image =
+            Image::new_target_texture(size.width, size.height, TextureFormat::Rgba8Unorm, None);
+        temp_map_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+        let temp_map = images.add(temp_map_image);
         let output_target = SensorOutputTarget {
             output_image: output_image.clone(),
             palette_lut,
             thermal_mask,
+            temp_map: temp_map.clone(),
         };
 
         let padded_bytes_per_row =
             RenderDevice::align_copy_bytes_per_row((size.width as usize) * 4);
         let buffer_size = padded_bytes_per_row as u64 * size.height as u64;
-        let cpu_buffer_0 = render_device.create_buffer(&BufferDescriptor {
-            label: Some("sensor_camera_readback_0"),
-            size: buffer_size,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let cpu_buffer_1 = render_device.create_buffer(&BufferDescriptor {
-            label: Some("sensor_camera_readback_1"),
-            size: buffer_size,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let readback_buffer = |label: &str| {
+            render_device.create_buffer(&BufferDescriptor {
+                label: Some(label),
+                size: buffer_size,
+                usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
 
         let copier = ImageCopier {
-            buffers: [cpu_buffer_0, cpu_buffer_1],
+            buffers: [
+                readback_buffer("sensor_camera_readback_0"),
+                readback_buffer("sensor_camera_readback_1"),
+            ],
             src_image: output_image,
             camera_name: config.camera_name.clone(),
             width: config.width,
             height: config.height,
             is_active: false,
         };
+        let temp_map_copier = (config.effect == "lwir").then(|| {
+            TempMapCopier(ImageCopier {
+                buffers: [
+                    readback_buffer("sensor_camera_temp_readback_0"),
+                    readback_buffer("sensor_camera_temp_readback_1"),
+                ],
+                src_image: temp_map,
+                camera_name: temp_map_msg_name(&config.camera_name),
+                width: config.width,
+                height: config.height,
+                is_active: false,
+            })
+        });
 
         let perspective = PerspectiveProjection {
             fov: config.fov_degrees.to_radians(),
@@ -704,6 +772,9 @@ fn spawn_sensor_cameras(
         ));
         #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
+        if let Some(temp_map_copier) = temp_map_copier {
+            entity.insert(temp_map_copier);
+        }
 
         // Earth owns the cinematic cubemap (`CinematicSkybox`). Tagging this
         // camera as `PrimarySkybox` makes the render-server wait forever for
@@ -898,7 +969,12 @@ fn place_on_grid(
 #[allow(clippy::too_many_arguments)]
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
-    mut sensor_cameras: Query<(Entity, &SensorCamera, &mut Transform)>,
+    mut sensor_cameras: Query<(
+        Entity,
+        &SensorCamera,
+        &mut Transform,
+        &mut SensorOutputSettings,
+    )>,
     #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller2_bevy::TelemetryCache>,
@@ -908,7 +984,7 @@ fn update_sensor_camera_transforms(
 ) {
     let ts = current_ts.0;
     let frame = coordinate.0.unwrap_or_default();
-    for (_entity, sensor_cam, mut transform) in &mut sensor_cameras {
+    for (_entity, sensor_cam, mut transform, mut output) in &mut sensor_cameras {
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
@@ -917,6 +993,7 @@ fn update_sensor_camera_transforms(
             continue;
         };
         transform.rotation = pose.rotation;
+        output.view_rotation = Vec4::from_array(pose.rotation.to_array());
 
         #[cfg(feature = "big_space")]
         if let Ok(mut cell) = cells.get_mut(_entity) {
@@ -1045,24 +1122,39 @@ fn sensor_camera_pose(
 // Render-world systems (GPU readback)
 // ---------------------------------------------------------------------------
 
+type ImageCopierQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ImageCopier,
+        Option<&'static TempMapCopier>,
+        &'static ReadbackArmed,
+        &'static Camera,
+    ),
+>;
+
 fn image_copy_extract(
     mut commands: Commands,
     headless_mode: Option<Res<HeadlessMode>>,
-    image_copiers: Extract<Query<(&ImageCopier, &ReadbackArmed, &Camera)>>,
+    image_copiers: Extract<ImageCopierQuery>,
 ) {
     let headless = headless_mode.is_some();
-    let copiers: Vec<ImageCopier> = image_copiers
-        .iter()
-        .map(|(copier, readback_armed, camera)| {
-            let mut c = copier.clone();
-            c.is_active = if headless {
-                readback_armed.0
-            } else {
-                readback_armed.0 || camera.is_active
-            };
-            c
-        })
-        .collect();
+    let mut copiers = Vec::new();
+    for (copier, temp_map_copier, readback_armed, camera) in image_copiers.iter() {
+        let is_active = if headless {
+            readback_armed.0
+        } else {
+            readback_armed.0 || camera.is_active
+        };
+        let mut main = copier.clone();
+        main.is_active = is_active;
+        copiers.push(main);
+        if let Some(TempMapCopier(temp)) = temp_map_copier {
+            let mut temp = temp.clone();
+            temp.is_active = is_active;
+            copiers.push(temp);
+        }
+    }
     commands.insert_resource(ImageCopiers(copiers));
 }
 
@@ -1339,16 +1431,46 @@ fn percentile_bin(histogram: &[u32; 256], fraction: f32) -> u8 {
     255
 }
 
-/// Feed post-AGC output percentiles back into the next LWIR frame's level/span.
-pub fn update_auto_agc(world: &mut World, frames: &[(String, Vec<u8>)]) {
+/// Fixed physical range of the temperature-map attachment. Must match the
+/// `TEMP_MAP_MIN_C` / `TEMP_MAP_MAX_C` constants in `sensor_output.wgsl`.
+const TEMP_MAP_MIN_C: f32 = -60.0;
+const TEMP_MAP_MAX_C: f32 = 140.0;
+/// Below this fraction of non-sky pixels the AGC freezes instead of adapting
+/// (Boson-like plateau behavior); it recovers as soon as ground returns.
+const AGC_MIN_GROUND_FRACTION: f32 = 0.02;
+const AGC_MIN_SPAN_C: f32 = 2.0;
+const AGC_MAX_SPAN_C: f32 = 120.0;
+const AGC_GAMMA_RANGE: (f32, f32) = (0.25, 4.0);
+
+fn temp_map_bin_to_c(bin: u8) -> f32 {
+    TEMP_MAP_MIN_C + f32::from(bin) / 255.0 * (TEMP_MAP_MAX_C - TEMP_MAP_MIN_C)
+}
+
+struct AgcUpdate {
+    config_index: usize,
+    camera_name: String,
+    low_c: f32,
+    high_c: f32,
+    median_c: f32,
+    target_median: f32,
+    ground_fraction: f32,
+}
+
+/// Adapt LWIR level/span/gamma from the pre-AGC temperature-map readback.
+///
+/// Statistics come from the scene temperature field with sky masked out, so
+/// they are independent of the current AGC state: a maneuver through
+/// sky-only views can freeze adaptation but can never latch it.
+pub fn update_auto_agc(world: &mut World, temp_frames: &[(String, Vec<u8>)]) {
     let configs = world.resource::<SensorCameraConfigs>();
-    let updates: Vec<_> = frames
+    let updates: Vec<AgcUpdate> = temp_frames
         .iter()
         .filter_map(|(name, bytes)| {
+            let camera_name = name.strip_suffix(TEMP_MAP_SUFFIX)?;
             let config_index = configs
                 .0
                 .iter()
-                .position(|config| &config.camera_name == name)?;
+                .position(|config| config.camera_name == camera_name)?;
             let config = &configs.0[config_index];
             if config.effect != "lwir"
                 || config.effect_param_str(&["agc", "mode"], "manual") != "auto"
@@ -1357,22 +1479,35 @@ pub fn update_auto_agc(world: &mut World, frames: &[(String, Vec<u8>)]) {
                 return None;
             }
             let mut histogram = [0u32; 256];
-            let black_hot = config.effect_param_str(&["palette"], "white_hot") == "black_hot";
+            let mut sky = 0u32;
             for pixel in bytes.as_chunks::<4>().0 {
-                let value = if black_hot { 255 - pixel[0] } else { pixel[0] };
-                if value >= 2 {
-                    histogram[value as usize] += 1;
+                if pixel[1] >= 128 {
+                    sky += 1;
+                } else {
+                    histogram[pixel[0] as usize] += 1;
                 }
+            }
+            let ground: u32 = histogram.iter().sum();
+            let ground_fraction = ground as f32 / (ground + sky).max(1) as f32;
+            if ground_fraction < AGC_MIN_GROUND_FRACTION {
+                tracing::debug!(
+                    camera = camera_name,
+                    ground_fraction,
+                    "lwir agc frozen: sky-dominant frame"
+                );
+                return None;
             }
             let low_fraction = config.effect_param_f32(&["agc", "low"], 0.01);
             let high_fraction = config.effect_param_f32(&["agc", "high"], 0.99);
-            Some((
+            Some(AgcUpdate {
                 config_index,
-                percentile_bin(&histogram, low_fraction),
-                percentile_bin(&histogram, high_fraction),
-                percentile_bin(&histogram, 0.5),
-                config.effect_param_f32(&["agc", "target_median"], 0.35),
-            ))
+                camera_name: camera_name.to_owned(),
+                low_c: temp_map_bin_to_c(percentile_bin(&histogram, low_fraction)),
+                high_c: temp_map_bin_to_c(percentile_bin(&histogram, high_fraction)),
+                median_c: temp_map_bin_to_c(percentile_bin(&histogram, 0.5)),
+                target_median: config.effect_param_f32(&["agc", "target_median"], 0.35),
+                ground_fraction,
+            })
         })
         .collect();
     if updates.is_empty() {
@@ -1381,43 +1516,37 @@ pub fn update_auto_agc(world: &mut World, frames: &[(String, Vec<u8>)]) {
 
     let mut cameras = world.query::<(&SensorCamera, &mut SensorOutputSettings)>();
     for (camera, mut settings) in cameras.iter_mut(world) {
-        let Some((_, low, high, median, target_median)) = updates
+        let Some(update) = updates
             .iter()
-            .find(|(config_index, ..)| *config_index == camera.config_index)
+            .find(|update| update.config_index == camera.config_index)
         else {
             continue;
         };
-        let saturated_highlights = *high >= 254;
-        if high.saturating_sub(*low) < 4 && !saturated_highlights {
-            continue;
-        }
-        let old_min = settings.agc.x;
-        let old_max = settings.agc.y;
-        let span = (old_max - old_min).max(1.0e-3);
-        let candidate_min = if saturated_highlights {
-            old_min
-        } else {
-            old_min + f32::from(*low) / 255.0 * span
-        };
-        let candidate_max = if saturated_highlights {
-            old_max + span * 0.1
-        } else {
-            old_min + f32::from(*high) / 255.0 * span
-        };
-        if candidate_max - candidate_min < 0.5 {
-            continue;
-        }
+        let candidate_min = update.low_c;
+        let candidate_max = update
+            .high_c
+            .max(candidate_min + AGC_MIN_SPAN_C)
+            .min(candidate_min + AGC_MAX_SPAN_C);
         let history = settings.agc.z.clamp(0.0, 0.999);
-        settings.agc.x = old_min * history + candidate_min * (1.0 - history);
-        settings.agc.y = old_max * history + candidate_max * (1.0 - history);
-        let observed_median = f32::from(*median) / 255.0;
-        if (0.01..0.99).contains(&observed_median) {
-            let old_gamma = settings.legacy.z.max(0.1);
-            let candidate_gamma = (old_gamma * (*target_median).clamp(0.05, 0.95).ln()
-                / observed_median.ln())
-            .clamp(0.1, 64.0);
-            settings.legacy.z = old_gamma * history + candidate_gamma * (1.0 - history);
+        settings.agc.x = settings.agc.x * history + candidate_min * (1.0 - history);
+        settings.agc.y = settings.agc.y * history + candidate_max * (1.0 - history);
+
+        let span = (settings.agc.y - settings.agc.x).max(1.0e-3);
+        let median_signal = (update.median_c - settings.agc.x) / span;
+        if (0.02..=0.98).contains(&median_signal) {
+            let candidate_gamma = (update.target_median.clamp(0.05, 0.95).ln()
+                / median_signal.ln())
+            .clamp(AGC_GAMMA_RANGE.0, AGC_GAMMA_RANGE.1);
+            settings.legacy.z = settings.legacy.z * history + candidate_gamma * (1.0 - history);
         }
+        tracing::debug!(
+            camera = update.camera_name,
+            min_c = settings.agc.x,
+            max_c = settings.agc.y,
+            gamma = settings.legacy.z,
+            ground_fraction = update.ground_fraction,
+            "lwir agc update"
+        );
     }
 }
 
@@ -1534,15 +1663,17 @@ mod tests {
         let settings = sensor_output_settings(&config);
         assert_eq!(settings.mode.x, 3);
         assert_eq!(settings.viewport, Vec4::new(640.0, 480.0, 0.1, 100_000.0));
+        assert_eq!(settings.view_rotation, Vec4::new(0.0, 0.0, 0.0, 1.0));
+        assert!((settings.lens.x - 90.0_f32.to_radians()).abs() < f32::EPSILON);
+        assert!((settings.lens.y - 640.0 / 480.0).abs() < f32::EPSILON);
     }
 
-    #[test]
-    fn auto_agc_converges_toward_observed_span() {
+    fn lwir_agc_world(smoothing: f64) -> (World, Entity) {
         let mut config = camera_config([0.0; 3]);
         config.effect = "lwir".into();
         config.camera_name = "vehicle.ir".into();
         config.effect_params = serde_json::json!({
-            "agc": {"mode": "auto", "low": 0.01, "high": 0.99, "smoothing": 0.0}
+            "agc": {"mode": "auto", "low": 0.01, "high": 0.99, "smoothing": smoothing}
         });
         let settings = sensor_output_settings(&config);
         let mut world = World::new();
@@ -1550,34 +1681,68 @@ mod tests {
         let camera = world
             .spawn((SensorCamera { config_index: 0 }, settings))
             .id();
-        let frame: Vec<u8> = (0..256)
-            .flat_map(|value| [value as u8, value as u8, value as u8, 255])
-            .collect();
-        update_auto_agc(&mut world, &[("vehicle.ir".into(), frame)]);
+        (world, camera)
+    }
+
+    /// RGBA temperature-map pixels: R = temperature bin, G = sky flag.
+    fn temp_map_frame(ground_bins: &[u8], sky_pixels: usize) -> (String, Vec<u8>) {
+        let mut bytes = Vec::with_capacity((ground_bins.len() + sky_pixels) * 4);
+        for bin in ground_bins {
+            bytes.extend_from_slice(&[*bin, 0, 0, 255]);
+        }
+        for _ in 0..sky_pixels {
+            bytes.extend_from_slice(&[0, 255, 0, 255]);
+        }
+        (temp_map_msg_name("vehicle.ir"), bytes)
+    }
+
+    #[test]
+    fn auto_agc_converges_toward_ground_percentiles() {
+        let (mut world, camera) = lwir_agc_world(0.0);
+        // Uniform ground temperatures across bins 100..=200.
+        let bins: Vec<u8> = (100..=200).collect();
+        update_auto_agc(&mut world, &[temp_map_frame(&bins, 0)]);
         let settings = world.get::<SensorOutputSettings>(camera).unwrap();
-        assert!(settings.agc.x > 20.0);
-        assert!(settings.agc.y < 60.0);
+        assert!((settings.agc.x - temp_map_bin_to_c(101)).abs() < 1.0);
+        assert!((settings.agc.y - temp_map_bin_to_c(199)).abs() < 1.0);
         assert!(settings.agc.y > settings.agc.x);
     }
 
     #[test]
-    fn auto_agc_recovers_from_saturated_highlights() {
-        let mut config = camera_config([0.0; 3]);
-        config.effect = "lwir".into();
-        config.camera_name = "vehicle.ir".into();
-        config.effect_params = serde_json::json!({
-            "agc": {"mode": "auto", "low": 0.01, "high": 0.99, "smoothing": 0.0}
-        });
-        let settings = sensor_output_settings(&config);
-        let mut world = World::new();
-        world.insert_resource(SensorCameraConfigs(vec![config]));
-        let camera = world
-            .spawn((SensorCamera { config_index: 0 }, settings))
-            .id();
-        let frame = [255, 255, 255, 255].repeat(256);
-        update_auto_agc(&mut world, &[("vehicle.ir".into(), frame)]);
+    fn auto_agc_freezes_on_sky_dominant_frames() {
+        let (mut world, camera) = lwir_agc_world(0.0);
+        let before = *world.get::<SensorOutputSettings>(camera).unwrap();
+        update_auto_agc(&mut world, &[temp_map_frame(&[150; 4], 996)]);
+        let after = world.get::<SensorOutputSettings>(camera).unwrap();
+        assert_eq!(after.agc, before.agc);
+        assert_eq!(after.legacy, before.legacy);
+    }
+
+    #[test]
+    fn auto_agc_recovers_after_sky_exposure() {
+        // The latch regression: sky-only frames must freeze (not corrupt) the
+        // state, and ground statistics must then re-converge through the EMA.
+        let (mut world, camera) = lwir_agc_world(0.9);
+        for _ in 0..30 {
+            update_auto_agc(&mut world, &[temp_map_frame(&[], 1000)]);
+        }
+        let frozen = *world.get::<SensorOutputSettings>(camera).unwrap();
+        assert_eq!(frozen.agc.x, 20.0);
+        assert_eq!(frozen.agc.y, 60.0);
+        let bins: Vec<u8> = (100..=200).collect();
+        for _ in 0..80 {
+            update_auto_agc(&mut world, &[temp_map_frame(&bins, 0)]);
+        }
         let settings = world.get::<SensorOutputSettings>(camera).unwrap();
-        assert_eq!(settings.agc.x, 20.0);
-        assert!(settings.agc.y > 60.0);
+        assert!((settings.agc.x - temp_map_bin_to_c(101)).abs() < 1.0);
+        assert!((settings.agc.y - temp_map_bin_to_c(199)).abs() < 1.0);
+    }
+
+    #[test]
+    fn auto_agc_enforces_minimum_span() {
+        let (mut world, camera) = lwir_agc_world(0.0);
+        update_auto_agc(&mut world, &[temp_map_frame(&[150; 1000], 0)]);
+        let settings = world.get::<SensorOutputSettings>(camera).unwrap();
+        assert!(settings.agc.y - settings.agc.x >= AGC_MIN_SPAN_C - 1.0e-3);
     }
 }

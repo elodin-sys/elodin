@@ -14,7 +14,10 @@ except ImportError:
 
 REFERENCE_THRESHOLDS: dict[str, tuple[float, float]] = {
     "p01_dn": (0.0, 25.0),
-    "p50_dn": (45.0, 170.0),
+    # Reference flight frames are steep no-sky views (p50 86-91); rendered
+    # validation frames keep the horizon in view, so cold sky drags the
+    # whole-frame median lower. Latched/broken frames measure ~4 or ~250.
+    "p50_dn": (40.0, 170.0),
     "p99_dn": (200.0, 255.0),
     "mean_gradient_dn": (6.0, 30.0),
     "edge_fraction": (0.03, 0.25),

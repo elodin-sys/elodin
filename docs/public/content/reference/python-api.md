@@ -67,7 +67,7 @@ The Elodin simulation world.
     - `rot_offset` : `list[float]`, body-frame rotation as `[roll, pitch, yaw]` in **degrees** (intrinsic X/Y/Z, aerospace convention), defaults to `[0, 0, 0]` (camera looks along body +X with body +Z as up). Applied around the camera's own axes after `pos_offset` and inherits the entity's attitude — when the host banks, the camera image banks with it.
     - `format` : `string`, output pixel format. Currently `"rgba"` (RGBA8) only.
     - `effect` : `string`, final GPU sensor-output effect: `"normal"`, `"thermal"`, `"night_vision"`, `"depth"`, or `"lwir"`. Defaults to `"normal"`. `"depth"` uses real linearized camera depth.
-    - `effect_params` : `dict`, effect-specific nested parameters. LWIR supports `palette`, `agc`, `dde`, `mtf_blur_px`, detector noise, scene temperatures, and atmospheric transmission.
+    - `effect_params` : `dict`, effect-specific nested parameters. LWIR supports `palette`, `agc`, `dde`, `mtf_blur_px`, detector noise, scene temperatures, atmospheric transmission, and `sky_offset_dn` (cosmetic sky black level). Auto AGC adapts from the scene temperature statistics with sky masked out and freezes on sky-only views.
     - `camera_model` : `string | None`, calibrated camera preset. `"boson640p"` supplies 640×512, 60 Hz, the Boson+ detector defaults, and an 18° horizontal lens.
     - `lens_hfov` : `float | None`, physical horizontal field of view in degrees. Converted to vertical `fov` using the resolved image aspect ratio. Mutually exclusive with `fov`.
     - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
