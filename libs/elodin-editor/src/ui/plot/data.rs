@@ -749,7 +749,9 @@ fn apply_visible_prefetch_page(
 
 /// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
 /// Playback is never blocked: whatever samples are already in the store are shown;
-/// as backfill / visible prefetch streams in, subsequent syncs fill gaps.
+/// as backfill / visible prefetch streams in, subsequent syncs fill gaps (a
+/// covered first/last span is not treated as complete if the store later has
+/// more samples inside it).
 #[allow(clippy::too_many_arguments)]
 pub fn sync_plot_lines_from_series_store(
     range_key: (i64, i64),
@@ -818,8 +820,18 @@ pub fn sync_plot_lines_from_series_store(
                 // Don't wipe live tip / prior draw when the store hasn't caught
                 // up to this window yet — unless the camera jumped away.
                 if range_changed {
-                    match plot_sync_plan(line.data.stored_exclusive_span(), sync_range, force_full)
-                    {
+                    match plot_sync_plan(
+                        line.data.stored_exclusive_span(),
+                        sync_range,
+                        force_full
+                            || !plot_line_matches_store_interior(
+                                series_store,
+                                component_id,
+                                element_index,
+                                sync_range,
+                                &line.data,
+                            ),
+                    ) {
                         PlotSyncPlan::FullRebuild => line.data.clear(),
                         PlotSyncPlan::Keep | PlotSyncPlan::Extend { .. } => {}
                     }
@@ -859,6 +871,12 @@ pub(crate) enum PlotSyncPlan {
 /// re-inserting every 100 ms drops GPU shards and rewrites every vertex, which
 /// reads as a horizontal hitch once per quantum (about every two frames at
 /// ~20 FPS on a dense schematic).
+///
+/// Endpoint span alone is not enough: a partial first project (visible prefetch
+/// plus the live tip, or two sparse endpoints) can already cover `need` while
+/// leaving holes. Callers must pass `force_full` when the store has samples
+/// inside that span that the tree does not — otherwise `Keep` / `Extend` never
+/// refresh those interiors.
 pub(crate) fn plot_sync_plan(
     stored: Option<Range<Timestamp>>,
     need: &Range<Timestamp>,
@@ -889,6 +907,7 @@ pub(crate) fn plot_sync_plan(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_plot_sync_plan(
     series_store: &TelemetryCache,
     component_id: ComponentId,
@@ -899,7 +918,15 @@ fn apply_plot_sync_plan(
     force_full: bool,
     tree: &mut LineTree<f32>,
 ) {
-    match plot_sync_plan(tree.stored_exclusive_span(), sync_range, force_full) {
+    let rebuild = force_full
+        || !plot_line_matches_store_interior(
+            series_store,
+            component_id,
+            element_index,
+            sync_range,
+            tree,
+        );
+    match plot_sync_plan(tree.stored_exclusive_span(), sync_range, rebuild) {
         PlotSyncPlan::FullRebuild => {
             tree.clear();
             project_series_element_to_line(
@@ -927,6 +954,48 @@ fn apply_plot_sync_plan(
             tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
         }
     }
+}
+
+/// True when every in-store sample inside the tree's already-covered span is
+/// also in the tree.
+///
+/// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
+/// through `Extend` instead of a full rebuild. Samples the store later
+/// backfills *inside* that span fail this check and force a rebuild — the
+/// append path cannot insert earlier than the tip.
+fn plot_line_matches_store_interior(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    need: &Range<Timestamp>,
+    tree: &LineTree<f32>,
+) -> bool {
+    let Some(stored) = tree.stored_exclusive_span() else {
+        return true;
+    };
+    let start = stored.start.max(need.start);
+    let end = stored.end.min(need.end);
+    if end.0 <= start.0 {
+        return true;
+    }
+    let inspect = start..end;
+    store_element_count_in_range(series_store, component_id, element_index, &inspect)
+        <= tree.sample_count_in_range(&inspect)
+}
+
+fn store_element_count_in_range(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+) -> usize {
+    let Some(series) = series_store.series(&component_id) else {
+        return 0;
+    };
+    series
+        .range(range.start..range.end)
+        .filter(|(_, val)| val.get(element_index).is_some())
+        .count()
 }
 
 fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
@@ -1841,6 +1910,20 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     pub fn total_points(&self) -> usize {
         self.tree.iter().map(|(_, c)| c.summary.len).sum()
+    }
+
+    /// Samples with timestamps in `[range.start, range.end)`.
+    pub fn sample_count_in_range(&self, range: &Range<Timestamp>) -> usize {
+        if range.end.0 <= range.start.0 {
+            return 0;
+        }
+        self.range_iter(range.clone())
+            .map(|chunk| {
+                let start = chunk.timestamps.partition_point(|&t| t < range.start);
+                let end = chunk.timestamps.partition_point(|&t| t < range.end);
+                end.saturating_sub(start)
+            })
+            .sum()
     }
 
     pub fn has_samples(&self) -> bool {
@@ -3110,6 +3193,108 @@ mod tests {
             plot_sync_plan(Some(stored), &need, false),
             PlotSyncPlan::FullRebuild
         );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_when_interior_is_incomplete() {
+        let stored = Timestamp(0)..Timestamp(16_000_000);
+        let need = Timestamp(0)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, true),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    fn insert_f64(cache: &mut TelemetryCache, id: ComponentId, ts: i64, value: f64) {
+        cache.insert(
+            id,
+            Timestamp(ts),
+            ComponentValue::F64(nox::array![value].to_dyn()),
+        );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
+        // Partial first project: only the endpoints. The exclusive span already
+        // covers the window, so endpoint-only planning would Keep forever.
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.holes");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 15_000_000, 15.0);
+        let need = Timestamp(0)..Timestamp(15_000_001);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 2);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+
+        insert_f64(&mut cache, id, 7_500_000, 7.5);
+        assert!(!plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 3);
+        assert_eq!(
+            tree.sample_count_in_range(&need),
+            cache.sample_count_in_range(&id, &need)
+        );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_rebuilds_the_gap_between_prefetch_and_tip() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.prefetch.tip");
+        for i in 0..10 {
+            insert_f64(&mut cache, id, i * 1_000, i as f64);
+        }
+        for i in 0..10 {
+            insert_f64(&mut cache, id, 14_000_000 + i * 1_000, 100.0 + i as f64);
+        }
+        let need = Timestamp(0)..Timestamp(15_000_000);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 20);
+
+        insert_f64(&mut cache, id, 7_000_000, 50.0);
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 21);
+        assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_extends_a_complete_window_without_dropping_the_left() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.slide");
+        for i in 0..=15 {
+            insert_f64(&mut cache, id, i * 1_000_000, i as f64);
+        }
+        let first = Timestamp(0)..Timestamp(15_000_001);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &first, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 16);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+
+        insert_f64(&mut cache, id, 15_100_000, 15.1);
+        let slid = Timestamp(100_000)..Timestamp(15_100_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &slid, false),
+            PlotSyncPlan::Extend {
+                prefix: None,
+                suffix: Some(Timestamp(15_000_001)..Timestamp(15_100_001)),
+            }
+        );
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &slid, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &slid, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
+        assert_eq!(tree.total_points(), 17);
     }
 
     #[test]
