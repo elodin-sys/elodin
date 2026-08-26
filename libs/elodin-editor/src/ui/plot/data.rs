@@ -817,24 +817,14 @@ pub fn sync_plot_lines_from_series_store(
                 continue;
             };
             if !has_samples_in_window {
-                // Don't wipe live tip / prior draw when the store hasn't caught
-                // up to this window yet — unless the camera jumped away.
-                if range_changed {
-                    match plot_sync_plan(
-                        line.data.stored_exclusive_span(),
-                        sync_range,
-                        force_full
-                            || !plot_line_matches_store_interior(
-                                series_store,
-                                component_id,
-                                element_index,
-                                sync_range,
-                                &line.data,
-                            ),
-                    ) {
-                        PlotSyncPlan::FullRebuild => line.data.clear(),
-                        PlotSyncPlan::Keep | PlotSyncPlan::Extend { .. } => {}
-                    }
+                if should_clear_line_on_empty_store(
+                    line.data.stored_exclusive_span(),
+                    sync_range,
+                    range_changed,
+                    series_store.is_covered(&component_id, sync_range),
+                    force_full,
+                ) {
+                    line.data.clear();
                 }
                 continue;
             }
@@ -905,6 +895,30 @@ pub(crate) fn plot_sync_plan(
             suffix,
         }
     }
+}
+
+/// Whether to drop a LineTree when the store has no samples in `need`.
+///
+/// A covered empty window is an authoritative gap — keep/extend would leave
+/// leftover samples in the clip. An uncovered window with only a small camera
+/// move keeps the last draw; the store may still be catching up.
+fn should_clear_line_on_empty_store(
+    stored: Option<Range<Timestamp>>,
+    need: &Range<Timestamp>,
+    range_changed: bool,
+    covered: bool,
+    force_full: bool,
+) -> bool {
+    if covered {
+        return true;
+    }
+    if !range_changed {
+        return false;
+    }
+    matches!(
+        plot_sync_plan(stored, need, force_full),
+        PlotSyncPlan::FullRebuild
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -981,8 +995,15 @@ fn plot_line_matches_store_interior(
         return true;
     }
     let inspect = start..end;
-    store_element_count_in_range(series_store, component_id, element_index, &inspect)
-        <= tree.sample_count_in_range(&inspect)
+    let store_count =
+        store_element_count_in_range(series_store, component_id, element_index, &inspect);
+    let tree_count = tree.sample_count_in_range(&inspect);
+    // `0 <= tree_count` would treat leftover tree samples as a match and leave
+    // a phantom trace after a seek into a gap or a sparse element hole.
+    if store_count == 0 {
+        return tree_count == 0;
+    }
+    store_count <= tree_count
 }
 
 fn store_element_count_in_range(
@@ -3334,6 +3355,77 @@ mod tests {
         assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000_000)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(16_000_000)));
         assert_eq!(tree.total_points(), 2);
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_clears_ghosts_when_the_window_is_empty() {
+        // Slide into a gap that still overlaps the tree by ≥25%. Endpoint
+        // planning would Keep; leftover samples would stay in the clip.
+        let cache = TelemetryCache::default();
+        let id = ComponentId::new("test.empty.gap");
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(15_000_000)],
+                Timestamp(0),
+                [0.0f32, 15.0].into_iter(),
+            )
+            .expect("prior"),
+        );
+        let need = Timestamp(10_000_000)..Timestamp(15_000_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(!plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 0);
+    }
+
+    #[test]
+    fn should_clear_empty_store_on_covered_gap_even_when_overlap_would_keep() {
+        let stored = Timestamp(0)..Timestamp(15_000_001);
+        let need = Timestamp(10_000_000)..Timestamp(15_000_001);
+        assert_eq!(
+            plot_sync_plan(Some(stored.clone()), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(should_clear_line_on_empty_store(
+            Some(stored.clone()),
+            &need,
+            true,
+            true,
+            false
+        ));
+        assert!(!should_clear_line_on_empty_store(
+            Some(stored.clone()),
+            &need,
+            true,
+            false,
+            false
+        ));
+        assert!(!should_clear_line_on_empty_store(
+            Some(stored),
+            &need,
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn should_clear_empty_store_on_seek_even_when_uncovered() {
+        let stored = Timestamp(0)..Timestamp(15_000_001);
+        let need = Timestamp(60_000_000)..Timestamp(75_000_001);
+        assert!(should_clear_line_on_empty_store(
+            Some(stored),
+            &need,
+            true,
+            false,
+            false
+        ));
     }
 
     #[test]
