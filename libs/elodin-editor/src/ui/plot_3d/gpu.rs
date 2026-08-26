@@ -734,14 +734,13 @@ fn extract_lines(
     index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let replay_mode = world.contains_resource::<crate::ReplayMode>();
         let (
             mut lines,
             line_assets,
             mut _main_commands,
             selected_time_range,
-            earliest_timestamp,
-            latest_timestamp,
+            _earliest_timestamp,
+            _latest_timestamp,
             current_timestamp,
             timeline_settings,
             latest_follow,
@@ -754,12 +753,6 @@ fn extract_lines(
                 selected_time_range.0.clone(),
                 crate::TRAILING_RANGE_QUANTUM_MICROS,
             )
-        };
-        let selected_span_micros = selected_range.end.0.saturating_sub(selected_range.start.0);
-        let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
-            earliest_timestamp.0..latest_timestamp.0
-        } else {
-            selected_range.clone()
         };
         let future_trail_alpha = DEFAULT_FUTURE_TRAIL_ALPHA;
         // Fallback colors for lines without explicit KDL colors. Kept unfaded
@@ -831,33 +824,6 @@ fn extract_lines(
             };
             let anchor_key = anchor_cache_key(frame, line_anchor);
 
-            // Replay grows the revealed prefix every frame. If the decimation
-            // step is derived from only that prefix, the full trail gets
-            // resampled whenever it crosses a threshold, which shows up as
-            // flicker. Keep the reveal clipped by CurrentTimestamp, but derive
-            // the stride from the fixed recording extent.
-            let line_stats = [0, 1, 2].map(|i| {
-                let line = &line_handles.0[i];
-                let line = line_assets.get(line).expect("line missing");
-                line.data.range_index_stats(sampling_range.clone())
-            });
-            let sampling_chunk_count = line_stats
-                .iter()
-                .map(|(chunks, _)| *chunks)
-                .max()
-                .unwrap_or(0);
-            let sampling_index_count = line_stats
-                .iter()
-                .map(|(_, count)| *count)
-                .max()
-                .unwrap_or(0);
-            let sampling_step = crate::ui::plot::data::index_sampling_step_for_selection(
-                selected_span_micros,
-                sampling_chunk_count,
-                sampling_index_count,
-                INDEX_BUFFER_LEN,
-            );
-
             let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>,
                                   cached: Option<&GpuLine>| {
                 if range.start >= range.end {
@@ -882,13 +848,13 @@ fn extract_lines(
                 {
                     return Some(prev.clone());
                 }
-                // Always start from the selection-derived step (1 for short
-                // windows). Double until the strip fits the index budget so we
-                // never silently truncate the newest tip when a short window
-                // somehow exceeds LOCAL_VALUE_BUFFER_LEN (~4.4 kHz x 30 s).
-                let mut step = sampling_step.max(1);
+                // Fit this draw range, not the full recording. Seeding from the
+                // whole-file stride (replay) left short trailing trails on a
+                // long DB at a coarse step even when step 1 still fit the
+                // index buffer. Double only if this range itself overshoots.
+                let mut step = 1;
                 const MAX_INDEX_U32: u32 = INDEX_BUFFER_LEN as u32;
-                for _ in 0..26 {
+                for _ in 0..crate::ui::plot::data::MAX_INDEX_STEP_DOUBLINGS {
                     let mut max_needed = 0u32;
                     for i in 0..3 {
                         let line = &line_handles.0[i];
