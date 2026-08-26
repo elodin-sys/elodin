@@ -755,7 +755,6 @@ fn extract_lines(
                 crate::TRAILING_RANGE_QUANTUM_MICROS,
             )
         };
-        let selected_span_micros = selected_range.end.0.saturating_sub(selected_range.start.0);
         let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
             earliest_timestamp.0..latest_timestamp.0
         } else {
@@ -851,11 +850,9 @@ fn extract_lines(
                 .map(|(_, count)| *count)
                 .max()
                 .unwrap_or(0);
-            let sampling_step = crate::ui::plot::data::index_sampling_step_for_selection(
-                selected_span_micros,
+            let sampling_step = crate::ui::plot::data::index_sampling_step(
                 sampling_chunk_count,
                 sampling_index_count,
-                INDEX_BUFFER_LEN,
             );
 
             let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>,
@@ -882,13 +879,12 @@ fn extract_lines(
                 {
                     return Some(prev.clone());
                 }
-                // Always start from the selection-derived step (1 for short
-                // windows). Double until the strip fits the index budget so we
-                // never silently truncate the newest tip when a short window
-                // somehow exceeds LOCAL_VALUE_BUFFER_LEN (~4.4 kHz x 30 s).
+                // Double until the strip fits the index budget so we never
+                // silently truncate the newest tip: the step above is derived
+                // from the fixed recording extent, not from this sub-range.
                 let mut step = sampling_step.max(1);
                 const MAX_INDEX_U32: u32 = INDEX_BUFFER_LEN as u32;
-                for _ in 0..26 {
+                for _ in 0..crate::ui::plot::data::MAX_INDEX_STEP_DOUBLINGS {
                     let mut max_needed = 0u32;
                     for i in 0..3 {
                         let line = &line_handles.0[i];
