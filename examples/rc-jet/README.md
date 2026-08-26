@@ -18,8 +18,9 @@ first time we weigh, swing, and identify the real jet.
 You fly it now, from a radio (or the keyboard), in a rotating WGS84 world
 anchored on the Mojave RC field (35.350664 N, 117.809027 W). Chase and the
 onboard views sit on the real DEM; the sibling render-server draws
-cinematic FPV (globe, atmosphere, daylight) as `sensor_view` frames. The
-physics pad and the mesh meet at the same dirt.
+cinematic FPV (globe, atmosphere, daylight) and a Boson+ 640-style LWIR
+camera as `sensor_view` frames. The physics pad and the mesh meet at the
+same dirt.
 
 Today the model is **analysis-correlated**, not flight-validated. That is
 the invitation: take the BDX out, log the same channels we already plot
@@ -67,6 +68,14 @@ cinematic=True)` and rendered only in the sibling render-server. The
 `sensor_view` tile displays those DB frames; it does not load Earth in
 the editor.
 
+`bdx.ir_cam` emulates the customer's Boson+ 640 `22640A018-6IARX`: 640×512
+at 60 Hz with an 18° horizontal f/1.0 lens, white-hot AGC, DDE, optical
+softening, and detector noise. It uses a final render-server sensor-output
+pass over the normal terrain camera. The target drone is tagged at 18 °C,
+so its mask renders as the cold dark silhouette seen in the reference
+flight recording. `bdx.fpv_cam` remains the independent cinematic RGB
+camera.
+
 Close-up terrain is the geo-anchored `mojave_rc_field` planar
 `world_mesh` (`frame="ENU"`).
 
@@ -98,6 +107,20 @@ elodin editor examples/rc-jet/main.py
 
 The RC controller starts automatically (FrSky-style gamepad or keyboard) and
 sends `bdx.control_commands` at 60 Hz.
+
+### LWIR reference validation
+
+The customer Boson recording can be reduced to reproducible reference frames
+and metrics without extra Python packages:
+
+```bash
+uv run python scripts/boson_ref/extract_frames.py ai-context/bdx/mnt/cvapp/data
+uv run python scripts/boson_ref/compare_rgba.py /tmp/bdx.ir_cam.rgba
+```
+
+The second command expects one raw 640×512 RGBA frame exported from
+`bdx.ir_cam`. The same acceptance ranges run in pytest when
+`ELODIN_LWIR_FRAME` points to that file.
 
 ### Control mapping (Mode 2)
 
@@ -153,7 +176,7 @@ mass updates as it burns, and an empty tank is a flameout. Thrust acts
 ```
 examples/rc-jet/
 ├── main.py              # scenario select, ECEF world, loads bdx.kdl
-├── bdx.kdl              # cinematic schematic (Earth + mojave_rc_field + GLB)
+├── bdx.kdl              # editor layout (mojave_rc_field + GLB + sensor views)
 ├── bdx_model.py         # package loader: schema/identity/frames/SHA-256 validation
 ├── class_d_fallbacks.py # labeled class-D placeholder set (opt-in, logged)
 ├── scenario.py          # site + scenario + numerics (no aircraft data)

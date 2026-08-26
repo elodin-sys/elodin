@@ -503,7 +503,7 @@ mod tests {
             rot_offset: [0.0; 3],
             format: "rgba".to_string(),
             effect: "normal".to_string(),
-            effect_params: HashMap::new(),
+            effect_params: serde_json::json!({}),
             create_frustum: false,
             show_ellipsoids: false,
             frustums_color: color(0.0, 1.0, 0.4, 0.4),

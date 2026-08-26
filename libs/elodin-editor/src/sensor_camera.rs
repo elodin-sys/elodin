@@ -1,9 +1,12 @@
-use std::time::Instant;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use bevy::{
     app::{App, Plugin},
-    asset::{Assets, embedded_asset},
-    camera::{Exposure, Hdr, RenderTarget, visibility::RenderLayers},
+    asset::{Assets, RenderAssetUsages, embedded_asset},
+    camera::{ClearColorConfig, Exposure, Hdr, RenderTarget, visibility::RenderLayers},
     core_pipeline::{
         Core3d, Core3dSystems, FullscreenShader,
         tonemapping::{Tonemapping, tonemapping},
@@ -21,27 +24,31 @@ use bevy::{
         render_asset::RenderAssets,
         render_resource::{
             Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, MapMode,
-            PollType, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureFormat, TextureUsages,
+            PollType, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureDimension, TextureFormat,
+            TextureUsages,
             binding_types::{sampler, texture_2d, uniform_buffer},
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
-        view::ViewTarget,
+        view::{ViewDepthTexture, ViewTarget},
     },
 };
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use impeller2::types::ComponentId;
-use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
+use impeller2_wkt::{CurrentTimestamp, DbConfig, ThermalTagConfig};
 
-use crate::object_3d::{ComponentArrayExt, ELLIPSOID_RENDER_LAYER};
-use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
+use crate::object_3d::{ComponentArrayExt, ELLIPSOID_RENDER_LAYER, Object3DState};
+use crate::plugins::render_layer_alloc::{CINEMATIC_EARTH_RENDER_LAYER, THERMAL_MASK_RENDER_LAYER};
 use crate::plugins::scene_environment::CinematicViewport;
 use crate::ui::tiles::bloom_from_config;
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct ThermalTagConfigs(pub Vec<ThermalTagConfig>);
 
 // ---------------------------------------------------------------------------
 // ECS components
@@ -53,25 +60,35 @@ pub struct SensorCamera {
 }
 
 #[derive(Component)]
+struct ThermalMaskCamera {
+    config_index: usize,
+}
+
+#[derive(Component)]
+struct ThermalMaskProxy;
+
+#[derive(Component)]
 pub struct SensorCameraFrustumSource {
     pub config_index: usize,
 }
 
-/// GPU post-process settings extracted to the render world.
-/// The `effect_type` field selects the shader pipeline:
-///   0 = normal (no post-process), 1 = thermal, 2 = night vision, 3 = depth
-#[derive(Component, Default, Clone, Copy, ExtractComponent, ShaderType)]
-pub struct SensorEffectSettings {
-    pub effect_type: u32,
-    pub param_a: f32,
-    pub param_b: f32,
-    pub time: f32,
+/// Complete sensor output model, extracted as one dynamic uniform per camera.
+#[derive(Component, Clone, Copy, ExtractComponent, ShaderType)]
+pub struct SensorOutputSettings {
+    pub mode: UVec4,
+    pub viewport: Vec4,
+    pub legacy: Vec4,
+    pub thermal: Vec4,
+    pub agc: Vec4,
+    pub sensor: Vec4,
+    pub range: Vec4,
 }
 
 #[derive(Component, Clone, ExtractComponent)]
-struct CinematicLdrBlit {
-    ldr_image: Handle<Image>,
-    effect_image: Option<Handle<Image>>,
+struct SensorOutputTarget {
+    output_image: Handle<Image>,
+    palette_lut: Handle<Image>,
+    thermal_mask: Handle<Image>,
 }
 
 /// Double-buffered GPU readback state for a single sensor camera.
@@ -137,26 +154,31 @@ pub struct SensorCameraRenderMetrics {
 // Post-process render pass
 // ---------------------------------------------------------------------------
 
-/// Fullscreen post-process pass for sensor cameras. Runs in the `Core3d`
-/// schedule after `tonemapping` (previously a `ViewNode` wired between
-/// `Node3d::Tonemapping` and `Node3d::EndMainPassPostProcessing`). The
-/// `ViewQuery` param skips the system for views without
-/// `SensorEffectSettings`, matching the old `ViewNodeRunner` behavior.
-fn sensor_post_process_pass(
+/// Final sensor-output pass shared by normal and cinematic cameras.
+fn sensor_output_pass(
     view: ViewQuery<(
         &'static ViewTarget,
-        &'static SensorEffectSettings,
-        &'static DynamicUniformIndex<SensorEffectSettings>,
+        &'static ViewDepthTexture,
+        &'static SensorOutputTarget,
+        &'static SensorOutputSettings,
+        &'static DynamicUniformIndex<SensorOutputSettings>,
     )>,
-    pipeline_res: Res<SensorPostProcessPipeline>,
+    pipeline_res: Res<SensorOutputPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    settings_uniforms: Res<ComponentUniforms<SensorEffectSettings>>,
+    settings_uniforms: Res<ComponentUniforms<SensorOutputSettings>>,
+    gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
     mut render_context: RenderContext,
 ) {
-    let (view_target, _settings, settings_index) = view.into_inner();
-    if view_target.main_texture_format() != TextureFormat::Rgba8UnormSrgb {
+    let (view_target, depth, target, _settings, settings_index) = view.into_inner();
+    let Some(output) = gpu_images.get(&target.output_image) else {
         return;
-    }
+    };
+    let Some(palette_lut) = gpu_images.get(&target.palette_lut) else {
+        return;
+    };
+    let Some(thermal_mask) = gpu_images.get(&target.thermal_mask) else {
+        return;
+    };
 
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
         return;
@@ -166,22 +188,23 @@ fn sensor_post_process_pass(
         return;
     };
 
-    let post_process = view_target.post_process_write();
-
     let bind_group = render_context.render_device().create_bind_group(
-        "sensor_post_process_bind_group",
+        "sensor_output_bind_group",
         &pipeline_res.bind_group_layout,
         &BindGroupEntries::sequential((
-            post_process.source,
+            view_target.main_texture_view(),
+            depth.view(),
             &pipeline_res.sampler,
             settings_binding.clone(),
+            &palette_lut.texture_view,
+            &thermal_mask.texture_view,
         )),
     );
 
     let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-        label: Some("sensor_post_process_pass"),
+        label: Some("sensor_output_pass"),
         color_attachments: &[Some(RenderPassColorAttachment {
-            view: post_process.destination,
+            view: &output.texture_view,
             depth_slice: None,
             resolve_target: None,
             ops: Operations::default(),
@@ -198,13 +221,13 @@ fn sensor_post_process_pass(
 }
 
 #[derive(Resource)]
-struct SensorPostProcessPipeline {
+struct SensorOutputPipeline {
     bind_group_layout: BindGroupLayout,
     sampler: Sampler,
     pipeline_id: CachedRenderPipelineId,
 }
 
-fn init_sensor_post_process_pipeline(
+fn init_sensor_output_pipeline(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline_cache: Res<PipelineCache>,
@@ -215,31 +238,30 @@ fn init_sensor_post_process_pipeline(
         ShaderStages::FRAGMENT,
         (
             texture_2d(TextureSampleType::Float { filterable: true }),
+            texture_2d(TextureSampleType::Depth),
             sampler(SamplerBindingType::Filtering),
-            uniform_buffer::<SensorEffectSettings>(true),
+            uniform_buffer::<SensorOutputSettings>(true),
+            texture_2d(TextureSampleType::Float { filterable: true }),
+            texture_2d(TextureSampleType::Float { filterable: false }),
         ),
     );
     let layout_descriptor =
-        BindGroupLayoutDescriptor::new("sensor_post_process_bind_group_layout", &layout_entries);
-    let bind_group_layout = render_device
-        .create_bind_group_layout("sensor_post_process_bind_group_layout", &layout_entries);
+        BindGroupLayoutDescriptor::new("sensor_output_bind_group_layout", &layout_entries);
+    let bind_group_layout =
+        render_device.create_bind_group_layout("sensor_output_bind_group_layout", &layout_entries);
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
-    let shader =
-        asset_server.load("embedded://elodin_editor/assets/shaders/sensor_post_process.wgsl");
+    let shader = asset_server.load("embedded://elodin_editor/assets/shaders/sensor_output.wgsl");
     let vertex_state = fullscreen_shader.to_vertex_state();
 
     let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
-        label: Some("sensor_post_process_pipeline".into()),
+        label: Some("sensor_output_pipeline".into()),
         layout: vec![layout_descriptor.clone()],
         vertex: vertex_state,
         fragment: Some(FragmentState {
             shader,
             targets: vec![Some(ColorTargetState {
-                // Sensor cameras render to LDR `Rgba8UnormSrgb` image targets
-                // (see `Image::new_target_texture` below); 0.19 deprecated
-                // `TextureFormat::bevy_default()`.
                 format: TextureFormat::Rgba8UnormSrgb,
                 blend: None,
                 write_mask: ColorWrites::ALL,
@@ -249,160 +271,11 @@ fn init_sensor_post_process_pipeline(
         ..default()
     });
 
-    commands.insert_resource(SensorPostProcessPipeline {
+    commands.insert_resource(SensorOutputPipeline {
         bind_group_layout,
         sampler,
         pipeline_id,
     });
-}
-
-#[derive(Resource)]
-struct CinematicLdrBlitPipeline {
-    bind_group_layout: BindGroupLayout,
-    sampler: Sampler,
-    pipeline_id: CachedRenderPipelineId,
-}
-
-fn init_cinematic_ldr_blit_pipeline(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    pipeline_cache: Res<PipelineCache>,
-    asset_server: Res<AssetServer>,
-    fullscreen_shader: Res<FullscreenShader>,
-) {
-    let layout_entries = BindGroupLayoutEntries::sequential(
-        ShaderStages::FRAGMENT,
-        (
-            texture_2d(TextureSampleType::Float { filterable: true }),
-            sampler(SamplerBindingType::Filtering),
-        ),
-    );
-    let layout_descriptor =
-        BindGroupLayoutDescriptor::new("cinematic_ldr_blit_bind_group_layout", &layout_entries);
-    let bind_group_layout = render_device
-        .create_bind_group_layout("cinematic_ldr_blit_bind_group_layout", &layout_entries);
-    let sampler = render_device.create_sampler(&SamplerDescriptor::default());
-    let shader =
-        asset_server.load("embedded://elodin_editor/assets/shaders/cinematic_ldr_blit.wgsl");
-    let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
-        label: Some("cinematic_ldr_blit_pipeline".into()),
-        layout: vec![layout_descriptor.clone()],
-        vertex: fullscreen_shader.to_vertex_state(),
-        fragment: Some(FragmentState {
-            shader,
-            targets: vec![Some(ColorTargetState {
-                format: TextureFormat::Rgba8UnormSrgb,
-                blend: None,
-                write_mask: ColorWrites::ALL,
-            })],
-            ..default()
-        }),
-        ..default()
-    });
-    commands.insert_resource(CinematicLdrBlitPipeline {
-        bind_group_layout,
-        sampler,
-        pipeline_id,
-    });
-}
-
-fn cinematic_ldr_blit_pass(
-    view: ViewQuery<(&'static ViewTarget, &'static CinematicLdrBlit)>,
-    pipeline_res: Res<CinematicLdrBlitPipeline>,
-    pipeline_cache: Res<PipelineCache>,
-    gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
-    mut render_context: RenderContext,
-) {
-    let (view_target, blit) = view.into_inner();
-    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
-        return;
-    };
-    let Some(ldr) = gpu_images.get(&blit.ldr_image) else {
-        return;
-    };
-
-    let bind_group = render_context.render_device().create_bind_group(
-        "cinematic_ldr_blit_bind_group",
-        &pipeline_res.bind_group_layout,
-        &BindGroupEntries::sequential((view_target.main_texture_view(), &pipeline_res.sampler)),
-    );
-
-    let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-        label: Some("cinematic_ldr_blit_pass"),
-        color_attachments: &[Some(RenderPassColorAttachment {
-            view: &ldr.texture_view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: Operations::default(),
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        ..default()
-    });
-    render_pass.set_render_pipeline(pipeline);
-    render_pass.set_bind_group(0, &bind_group, &[]);
-    render_pass.draw(0..3, 0..1);
-}
-
-fn cinematic_ldr_effect_pass(
-    view: ViewQuery<(
-        &'static CinematicLdrBlit,
-        &'static SensorEffectSettings,
-        &'static DynamicUniformIndex<SensorEffectSettings>,
-    )>,
-    pipeline_res: Res<SensorPostProcessPipeline>,
-    pipeline_cache: Res<PipelineCache>,
-    settings_uniforms: Res<ComponentUniforms<SensorEffectSettings>>,
-    gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
-    mut render_context: RenderContext,
-) {
-    let (blit, settings, settings_index) = view.into_inner();
-    if settings.effect_type == 0 {
-        return;
-    }
-    let Some(effect_image) = &blit.effect_image else {
-        return;
-    };
-    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_res.pipeline_id) else {
-        return;
-    };
-    let Some(src) = gpu_images.get(&blit.ldr_image) else {
-        return;
-    };
-    let Some(dst) = gpu_images.get(effect_image) else {
-        return;
-    };
-    let Some(settings_binding) = settings_uniforms.uniforms().binding() else {
-        return;
-    };
-
-    let bind_group = render_context.render_device().create_bind_group(
-        "cinematic_ldr_effect_bind_group",
-        &pipeline_res.bind_group_layout,
-        &BindGroupEntries::sequential((
-            &src.texture_view,
-            &pipeline_res.sampler,
-            settings_binding.clone(),
-        )),
-    );
-
-    let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-        label: Some("cinematic_ldr_effect_pass"),
-        color_attachments: &[Some(RenderPassColorAttachment {
-            view: &dst.texture_view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: Operations::default(),
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        ..default()
-    });
-    render_pass.set_render_pipeline(pipeline);
-    render_pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
-    render_pass.draw(0..3, 0..1);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,19 +288,22 @@ impl Plugin for SensorCameraPlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = flume::unbounded();
 
-        embedded_asset!(app, "assets/shaders/sensor_post_process.wgsl");
-        embedded_asset!(app, "assets/shaders/cinematic_ldr_blit.wgsl");
+        embedded_asset!(app, "assets/shaders/sensor_output.wgsl");
 
         app.init_resource::<SensorCameraConfigs>()
+            .init_resource::<ThermalTagConfigs>()
             .init_resource::<SensorCamerasSpawned>()
             .insert_resource(SensorFrameReceiver(rx))
             .add_plugins((
-                ExtractComponentPlugin::<SensorEffectSettings>::default(),
-                UniformComponentPlugin::<SensorEffectSettings>::default(),
-                ExtractComponentPlugin::<CinematicLdrBlit>::default(),
+                ExtractComponentPlugin::<SensorOutputSettings>::default(),
+                UniformComponentPlugin::<SensorOutputSettings>::default(),
+                ExtractComponentPlugin::<SensorOutputTarget>::default(),
             ))
             // Headless path only; editor registers load_sensor_configs_from_db in lib.rs.
-            .add_systems(PreUpdate, load_sensor_configs_from_db)
+            .add_systems(
+                PreUpdate,
+                (load_sensor_configs_from_db, load_thermal_tags_from_db),
+            )
             .add_systems(
                 PreUpdate,
                 spawn_sensor_cameras.run_if(should_spawn_sensor_cameras),
@@ -436,8 +312,14 @@ impl Plugin for SensorCameraPlugin {
                 PreUpdate,
                 update_sensor_camera_transforms.after(crate::PositionSync),
             )
-            .add_systems(Update, update_sensor_camera_render_layers)
-            .add_systems(Update, tick_effect_time);
+            .add_systems(
+                Update,
+                (
+                    update_sensor_camera_render_layers,
+                    update_sensor_output_seed,
+                    spawn_thermal_mask_proxies,
+                ),
+            );
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -452,26 +334,12 @@ impl Plugin for SensorCameraPlugin {
                         .chain()
                         .after(RenderSystems::Render),
                 )
-                .add_systems(RenderStartup, init_sensor_post_process_pipeline)
-                .add_systems(RenderStartup, init_cinematic_ldr_blit_pipeline)
+                .add_systems(RenderStartup, init_sensor_output_pipeline)
                 .add_systems(
                     Core3d,
-                    sensor_post_process_pass
+                    sensor_output_pass
                         .in_set(Core3dSystems::PostProcess)
                         .after(tonemapping),
-                )
-                .add_systems(
-                    Core3d,
-                    cinematic_ldr_blit_pass
-                        .in_set(Core3dSystems::PostProcess)
-                        .after(tonemapping)
-                        .after(sensor_post_process_pass),
-                )
-                .add_systems(
-                    Core3d,
-                    cinematic_ldr_effect_pass
-                        .in_set(Core3dSystems::PostProcess)
-                        .after(cinematic_ldr_blit_pass),
                 );
         }
     }
@@ -504,6 +372,19 @@ pub fn load_sensor_configs_from_db(
                 bevy::log::warn!("Failed to parse sensor_cameras from DB config: {e}");
             }
         }
+    }
+}
+
+fn load_thermal_tags_from_db(db_config: Res<DbConfig>, mut tags: ResMut<ThermalTagConfigs>) {
+    if !tags.0.is_empty() {
+        return;
+    }
+    let Some(json) = db_config.metadata.get("thermal_tags") else {
+        return;
+    };
+    match serde_json::from_str::<Vec<ThermalTagConfig>>(json) {
+        Ok(loaded) => tags.0 = loaded,
+        Err(error) => bevy::log::warn!("Failed to parse thermal_tags from DB config: {error}"),
     }
 }
 
@@ -555,6 +436,140 @@ pub fn spawn_sensor_camera_frustum_sources(
     spawned.0 = true;
 }
 
+#[derive(Clone, Copy)]
+enum SensorPalette {
+    WhiteHot,
+    BlackHot,
+    Ironbow,
+}
+
+fn palette_image(palette: SensorPalette) -> Image {
+    let mut data = Vec::with_capacity(256 * 4);
+    for value in 0..=255 {
+        let t = value as f32 / 255.0;
+        let rgb = match palette {
+            SensorPalette::WhiteHot => [t, t, t],
+            SensorPalette::BlackHot => [1.0 - t, 1.0 - t, 1.0 - t],
+            SensorPalette::Ironbow => {
+                let r = (1.5 * t - 0.25).clamp(0.0, 1.0);
+                let g = (2.0 * t - 0.75).clamp(0.0, 1.0);
+                let b = (3.0 * (t - 0.1) * (0.6 - t)).clamp(0.0, 1.0)
+                    + ((t - 0.85).clamp(0.0, 1.0) * 3.0);
+                [r, g, b.clamp(0.0, 1.0)]
+            }
+        };
+        data.extend(rgb.map(|channel| (channel * 255.0).round() as u8));
+        data.push(255);
+    }
+    Image::new(
+        Extent3d {
+            width: 256,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    )
+}
+
+fn empty_thermal_mask_image() -> Image {
+    Image::new(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        vec![0, 0],
+        TextureFormat::R16Float,
+        RenderAssetUsages::default(),
+    )
+}
+
+fn thermal_mask_target_image(width: u32, height: u32) -> Image {
+    let mut image = Image::new_target_texture(width, height, TextureFormat::R16Float, None);
+    image.texture_descriptor.usage |= TextureUsages::TEXTURE_BINDING;
+    image
+}
+
+fn sensor_output_settings(config: &SensorCameraConfig) -> SensorOutputSettings {
+    let value = |path: &[&str], legacy: &str, default: f32| {
+        config.effect_param_f32(path, config.effect_param_f32(&[legacy], default))
+    };
+    let (effect_type, param_a, param_b) = match config.effect.as_str() {
+        "thermal" => (
+            1,
+            value(&["contrast"], "contrast", 1.5),
+            value(&["noise_sigma"], "noise_sigma", 0.02),
+        ),
+        "night_vision" => (
+            2,
+            value(&["gain"], "gain", 2.0),
+            value(&["noise_sigma"], "noise_sigma", 0.04),
+        ),
+        "depth" => (3, 0.0, 0.0),
+        "lwir" => (4, 0.0, 0.0),
+        _ => (0, 0.0, 0.0),
+    };
+    let palette = match config.effect_param_str(
+        &["palette"],
+        if config.effect == "thermal" {
+            "ironbow"
+        } else {
+            "white_hot"
+        },
+    ) {
+        "black_hot" => SensorPalette::BlackHot,
+        "ironbow" => SensorPalette::Ironbow,
+        _ => SensorPalette::WhiteHot,
+    };
+    let palette_index = match palette {
+        SensorPalette::WhiteHot => 0,
+        SensorPalette::BlackHot => 1,
+        SensorPalette::Ironbow => 2,
+    };
+    SensorOutputSettings {
+        mode: UVec4::new(effect_type, palette_index, 0, 0),
+        viewport: Vec4::new(
+            config.width as f32,
+            config.height as f32,
+            config.near.max(1.0e-6),
+            config.far.max(config.near + 1.0e-6),
+        ),
+        legacy: Vec4::new(param_a, param_b, 1.0, 0.0),
+        thermal: Vec4::new(
+            value(&["t_air_c"], "t_air_c", 30.0),
+            value(&["t_sky_zenith_c"], "t_sky_zenith_c", -50.0),
+            value(&["t_base_c"], "t_base_c", 45.0),
+            value(&["sun_gain"], "sun_gain", 10.0),
+        ),
+        agc: Vec4::new(
+            value(&["agc", "min_c"], "agc_min_c", 20.0),
+            value(&["agc", "max_c"], "agc_max_c", 60.0),
+            value(&["agc", "smoothing"], "agc_smoothing", 0.9),
+            value(&["dde"], "dde", 0.6),
+        ),
+        sensor: Vec4::new(
+            value(&["mtf_blur_px"], "mtf_blur_px", 0.65),
+            value(
+                &["temporal_noise_sigma_dn"],
+                "temporal_noise_sigma_dn",
+                2.526,
+            ),
+            value(&["column_fpn_sigma_dn"], "column_fpn_sigma_dn", 0.25),
+            value(&["vignette"], "vignette", 0.1),
+        ),
+        range: Vec4::new(
+            value(&["transmission_km"], "transmission_km", 8.0),
+            value(&["dead_pixel_ppm"], "dead_pixel_ppm", 0.0),
+            value(&["agc", "low"], "agc_low_percentile", 0.01),
+            value(&["agc", "high"], "agc_high_percentile", 0.99),
+        ),
+    }
+}
+
 fn spawn_sensor_cameras(
     mut commands: Commands,
     configs: Res<SensorCameraConfigs>,
@@ -571,7 +586,6 @@ fn spawn_sensor_cameras(
             depth_or_array_layers: 1,
         };
 
-        let mut cinematic_blit = None;
         let render_target_handle = if config.cinematic {
             let mut hdr_image = Image::new_target_texture(
                 size.width,
@@ -580,36 +594,7 @@ fn spawn_sensor_cameras(
                 None,
             );
             hdr_image.texture_descriptor.usage |= TextureUsages::TEXTURE_BINDING;
-            let hdr = images.add(hdr_image);
-
-            let mut ldr_image = Image::new_target_texture(
-                size.width,
-                size.height,
-                TextureFormat::Rgba8UnormSrgb,
-                None,
-            );
-            ldr_image.texture_descriptor.usage |=
-                TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING;
-            let ldr = images.add(ldr_image);
-
-            let effect_image = if config.effect != "normal" && !config.effect.is_empty() {
-                let mut effect = Image::new_target_texture(
-                    size.width,
-                    size.height,
-                    TextureFormat::Rgba8UnormSrgb,
-                    None,
-                );
-                effect.texture_descriptor.usage |= TextureUsages::COPY_SRC;
-                Some(images.add(effect))
-            } else {
-                None
-            };
-
-            cinematic_blit = Some(CinematicLdrBlit {
-                ldr_image: ldr,
-                effect_image,
-            });
-            hdr
+            images.add(hdr_image)
         } else {
             let mut render_target_image = Image::new_target_texture(
                 size.width,
@@ -617,18 +602,34 @@ fn spawn_sensor_cameras(
                 TextureFormat::Rgba8UnormSrgb,
                 None,
             );
-            render_target_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+            render_target_image.texture_descriptor.usage |= TextureUsages::TEXTURE_BINDING;
             images.add(render_target_image)
         };
 
-        let copier_src = cinematic_blit.as_ref().map_or_else(
-            || render_target_handle.clone(),
-            |blit| {
-                blit.effect_image
-                    .clone()
-                    .unwrap_or_else(|| blit.ldr_image.clone())
-            },
-        );
+        let mut output_image =
+            Image::new_target_texture(size.width, size.height, TextureFormat::Rgba8UnormSrgb, None);
+        output_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+        let output_image = images.add(output_image);
+        let mut output_settings = sensor_output_settings(config);
+        let palette = match output_settings.mode.y {
+            1 => SensorPalette::BlackHot,
+            2 => SensorPalette::Ironbow,
+            _ => SensorPalette::WhiteHot,
+        };
+        let palette_lut = images.add(palette_image(palette));
+        let has_thermal_mask = config.effect == "lwir";
+        let thermal_mask = if has_thermal_mask {
+            output_settings.mode.z |= 1;
+            images.add(thermal_mask_target_image(size.width, size.height))
+        } else {
+            images.add(empty_thermal_mask_image())
+        };
+        let thermal_mask_target = thermal_mask.clone();
+        let output_target = SensorOutputTarget {
+            output_image: output_image.clone(),
+            palette_lut,
+            thermal_mask,
+        };
 
         let padded_bytes_per_row =
             RenderDevice::align_copy_bytes_per_row((size.width as usize) * 4);
@@ -648,7 +649,7 @@ fn spawn_sensor_cameras(
 
         let copier = ImageCopier {
             buffers: [cpu_buffer_0, cpu_buffer_1],
-            src_image: copier_src,
+            src_image: output_image,
             camera_name: config.camera_name.clone(),
             width: config.width,
             height: config.height,
@@ -662,33 +663,27 @@ fn spawn_sensor_cameras(
             near_clip_plane: crate::plugins::frustum_common::near_clip_plane(config.near),
             ..default()
         };
+        let mask_perspective = perspective.clone();
+        let camera_order = -(10 + i as isize);
 
-        let (effect_type, param_a, param_b) = match config.effect.as_str() {
-            "thermal" => (
-                1u32,
-                *config.effect_params.get("contrast").unwrap_or(&1.5) as f32,
-                *config.effect_params.get("noise_sigma").unwrap_or(&0.02) as f32,
-            ),
-            "night_vision" => (
-                2u32,
-                *config.effect_params.get("gain").unwrap_or(&2.0) as f32,
-                *config.effect_params.get("noise_sigma").unwrap_or(&0.04) as f32,
-            ),
-            "depth" => (3u32, 0.0, 0.0),
-            _ => (0u32, 0.0, 0.0),
+        let camera_3d = Camera3d {
+            depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
         };
 
         let mut entity = commands.spawn((
             (
-                Camera3d::default(),
+                camera_3d,
                 Camera {
-                    order: -(10 + i as isize),
+                    order: camera_order,
                     is_active: false,
                     ..default()
                 },
                 RenderTarget::Image(render_target_handle.into()),
                 Projection::Perspective(perspective),
-                if config.cinematic {
+                if config.cinematic && config.effect != "lwir" {
                     Tonemapping::TonyMcMapface
                 } else {
                     Tonemapping::None
@@ -700,12 +695,8 @@ fn spawn_sensor_cameras(
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             SensorCamera { config_index: i },
-            SensorEffectSettings {
-                effect_type,
-                param_a,
-                param_b,
-                time: 0.0,
-            },
+            output_settings,
+            output_target,
             copier,
             ReadbackArmed(false),
             sensor_camera_render_layers(config),
@@ -728,7 +719,6 @@ fn spawn_sensor_cameras(
                 Exposure {
                     ev100: config.cinematic_ev100(),
                 },
-                bloom_from_config(config.bloom.as_ref(), true),
                 AmbientLight {
                     brightness: 0.0,
                     ..default()
@@ -740,7 +730,32 @@ fn spawn_sensor_cameras(
                     intensity: 2000.0,
                     ..Default::default()
                 },
-                cinematic_blit.expect("cinematic blit target"),
+            ));
+            if config.effect != "lwir" {
+                entity.insert(bloom_from_config(config.bloom.as_ref(), true));
+            }
+        }
+        let sensor_entity = entity.id();
+
+        if has_thermal_mask {
+            commands.spawn((
+                Camera3d::default(),
+                Camera {
+                    order: camera_order - 1000,
+                    is_active: false,
+                    clear_color: ClearColorConfig::Custom(Color::BLACK),
+                    ..default()
+                },
+                RenderTarget::Image(thermal_mask_target.into()),
+                Projection::Perspective(mask_perspective),
+                Tonemapping::None,
+                bevy::render::view::Msaa::Off,
+                Transform::IDENTITY,
+                GlobalTransform::IDENTITY,
+                ThermalMaskCamera { config_index: i },
+                RenderLayers::layer(THERMAL_MASK_RENDER_LAYER),
+                ChildOf(sensor_entity),
+                Name::new(format!("thermal_mask_camera_{}", config.camera_name)),
             ));
         }
 
@@ -783,10 +798,81 @@ pub(crate) fn update_sensor_camera_render_layers(
     }
 }
 
-fn tick_effect_time(time: Res<Time>, mut query: Query<&mut SensorEffectSettings>) {
-    let t = time.elapsed_secs();
+fn update_sensor_output_seed(
+    timestamp: Option<Res<CurrentTimestamp>>,
+    mut query: Query<&mut SensorOutputSettings>,
+) {
+    let timestamp = timestamp.map_or(0, |timestamp| timestamp.0.0 as u64);
+    let seed = (timestamp ^ (timestamp >> 32)) as u32;
     for mut settings in &mut query {
-        settings.time = t;
+        settings.mode.w = seed;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_thermal_mask_proxies(
+    mut commands: Commands,
+    tags: Res<ThermalTagConfigs>,
+    source_meshes: Query<(Entity, &Mesh3d), Without<ThermalMaskProxy>>,
+    parents: Query<&ChildOf>,
+    objects: Query<&Object3DState>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut inspected: Local<HashSet<Entity>>,
+    mut material_cache: Local<HashMap<(u32, u32), Handle<StandardMaterial>>>,
+) {
+    if tags.0.is_empty() {
+        return;
+    }
+    for (mesh_entity, mesh) in &source_meshes {
+        if inspected.contains(&mesh_entity) {
+            continue;
+        }
+        let mut ancestor = mesh_entity;
+        let object = loop {
+            if let Ok(object) = objects.get(ancestor) {
+                break Some(object);
+            }
+            let Ok(parent) = parents.get(ancestor) else {
+                break None;
+            };
+            ancestor = parent.parent();
+        };
+        let tag = object.and_then(|object| {
+            tags.0.iter().find(|tag| {
+                object
+                    .data
+                    .eql
+                    .strip_prefix(&tag.entity_name)
+                    .is_some_and(|suffix| suffix.starts_with(".world_pos"))
+            })
+        });
+        if let Some(tag) = tag {
+            let key = (tag.temperature_c.to_bits(), tag.emissivity.to_bits());
+            let material = material_cache
+                .entry(key)
+                .or_insert_with(|| {
+                    let apparent_temperature = 20.0 + tag.emissivity * (tag.temperature_c - 20.0);
+                    let encoded = ((apparent_temperature + 100.0) / 500.0).clamp(f32::EPSILON, 1.0);
+                    materials.add(StandardMaterial {
+                        base_color: Color::linear_rgba(encoded, 0.0, 0.0, 1.0),
+                        unlit: true,
+                        ..default()
+                    })
+                })
+                .clone();
+            commands.spawn((
+                Mesh3d(mesh.0.clone()),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                RenderLayers::layer(THERMAL_MASK_RENDER_LAYER),
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
+                ThermalMaskProxy,
+                ChildOf(mesh_entity),
+                Name::new("thermal mask proxy"),
+            ));
+        }
+        inspected.insert(mesh_entity);
     }
 }
 
@@ -1224,10 +1310,113 @@ pub fn set_cameras_active(world: &mut World, camera_names: &[String], active: bo
         .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
         .collect();
 
-    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
-    for (sensor, mut camera) in query.iter_mut(world) {
-        if target_indices.contains(&sensor.config_index) {
+    {
+        let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+        for (sensor, mut camera) in query.iter_mut(world) {
+            if target_indices.contains(&sensor.config_index) {
+                camera.is_active = active;
+            }
+        }
+    }
+    let mut masks = world.query::<(&ThermalMaskCamera, &mut Camera)>();
+    for (mask, mut camera) in masks.iter_mut(world) {
+        if target_indices.contains(&mask.config_index) {
             camera.is_active = active;
+        }
+    }
+}
+
+fn percentile_bin(histogram: &[u32; 256], fraction: f32) -> u8 {
+    let total: u32 = histogram.iter().sum();
+    let threshold = ((total as f32 * fraction.clamp(0.0, 1.0)).ceil() as u32).max(1);
+    let mut seen = 0;
+    for (value, count) in histogram.iter().enumerate() {
+        seen += count;
+        if seen >= threshold {
+            return value as u8;
+        }
+    }
+    255
+}
+
+/// Feed post-AGC output percentiles back into the next LWIR frame's level/span.
+pub fn update_auto_agc(world: &mut World, frames: &[(String, Vec<u8>)]) {
+    let configs = world.resource::<SensorCameraConfigs>();
+    let updates: Vec<_> = frames
+        .iter()
+        .filter_map(|(name, bytes)| {
+            let config_index = configs
+                .0
+                .iter()
+                .position(|config| &config.camera_name == name)?;
+            let config = &configs.0[config_index];
+            if config.effect != "lwir"
+                || config.effect_param_str(&["agc", "mode"], "manual") != "auto"
+                || bytes.len() < 4
+            {
+                return None;
+            }
+            let mut histogram = [0u32; 256];
+            let black_hot = config.effect_param_str(&["palette"], "white_hot") == "black_hot";
+            for pixel in bytes.as_chunks::<4>().0 {
+                let value = if black_hot { 255 - pixel[0] } else { pixel[0] };
+                if value >= 2 {
+                    histogram[value as usize] += 1;
+                }
+            }
+            let low_fraction = config.effect_param_f32(&["agc", "low"], 0.01);
+            let high_fraction = config.effect_param_f32(&["agc", "high"], 0.99);
+            Some((
+                config_index,
+                percentile_bin(&histogram, low_fraction),
+                percentile_bin(&histogram, high_fraction),
+                percentile_bin(&histogram, 0.5),
+                config.effect_param_f32(&["agc", "target_median"], 0.35),
+            ))
+        })
+        .collect();
+    if updates.is_empty() {
+        return;
+    }
+
+    let mut cameras = world.query::<(&SensorCamera, &mut SensorOutputSettings)>();
+    for (camera, mut settings) in cameras.iter_mut(world) {
+        let Some((_, low, high, median, target_median)) = updates
+            .iter()
+            .find(|(config_index, ..)| *config_index == camera.config_index)
+        else {
+            continue;
+        };
+        let saturated_highlights = *high >= 254;
+        if high.saturating_sub(*low) < 4 && !saturated_highlights {
+            continue;
+        }
+        let old_min = settings.agc.x;
+        let old_max = settings.agc.y;
+        let span = (old_max - old_min).max(1.0e-3);
+        let candidate_min = if saturated_highlights {
+            old_min
+        } else {
+            old_min + f32::from(*low) / 255.0 * span
+        };
+        let candidate_max = if saturated_highlights {
+            old_max + span * 0.1
+        } else {
+            old_min + f32::from(*high) / 255.0 * span
+        };
+        if candidate_max - candidate_min < 0.5 {
+            continue;
+        }
+        let history = settings.agc.z.clamp(0.0, 0.999);
+        settings.agc.x = old_min * history + candidate_min * (1.0 - history);
+        settings.agc.y = old_max * history + candidate_max * (1.0 - history);
+        let observed_median = f32::from(*median) / 255.0;
+        if (0.01..0.99).contains(&observed_median) {
+            let old_gamma = settings.legacy.z.max(0.1);
+            let candidate_gamma = (old_gamma * (*target_median).clamp(0.05, 0.95).ln()
+                / observed_median.ln())
+            .clamp(0.1, 64.0);
+            settings.legacy.z = old_gamma * history + candidate_gamma * (1.0 - history);
         }
     }
 }
@@ -1336,5 +1525,59 @@ mod tests {
             pose.translation.distance(legacy_unrebased) > 1.0e6,
             "ECEF pose still looks like an unrebased flat swizzle"
         );
+    }
+
+    #[test]
+    fn depth_effect_uses_output_pipeline_settings() {
+        let mut config = camera_config([0.0; 3]);
+        config.effect = "depth".into();
+        let settings = sensor_output_settings(&config);
+        assert_eq!(settings.mode.x, 3);
+        assert_eq!(settings.viewport, Vec4::new(640.0, 480.0, 0.1, 100_000.0));
+    }
+
+    #[test]
+    fn auto_agc_converges_toward_observed_span() {
+        let mut config = camera_config([0.0; 3]);
+        config.effect = "lwir".into();
+        config.camera_name = "vehicle.ir".into();
+        config.effect_params = serde_json::json!({
+            "agc": {"mode": "auto", "low": 0.01, "high": 0.99, "smoothing": 0.0}
+        });
+        let settings = sensor_output_settings(&config);
+        let mut world = World::new();
+        world.insert_resource(SensorCameraConfigs(vec![config]));
+        let camera = world
+            .spawn((SensorCamera { config_index: 0 }, settings))
+            .id();
+        let frame: Vec<u8> = (0..256)
+            .flat_map(|value| [value as u8, value as u8, value as u8, 255])
+            .collect();
+        update_auto_agc(&mut world, &[("vehicle.ir".into(), frame)]);
+        let settings = world.get::<SensorOutputSettings>(camera).unwrap();
+        assert!(settings.agc.x > 20.0);
+        assert!(settings.agc.y < 60.0);
+        assert!(settings.agc.y > settings.agc.x);
+    }
+
+    #[test]
+    fn auto_agc_recovers_from_saturated_highlights() {
+        let mut config = camera_config([0.0; 3]);
+        config.effect = "lwir".into();
+        config.camera_name = "vehicle.ir".into();
+        config.effect_params = serde_json::json!({
+            "agc": {"mode": "auto", "low": 0.01, "high": 0.99, "smoothing": 0.0}
+        });
+        let settings = sensor_output_settings(&config);
+        let mut world = World::new();
+        world.insert_resource(SensorCameraConfigs(vec![config]));
+        let camera = world
+            .spawn((SensorCamera { config_index: 0 }, settings))
+            .id();
+        let frame = [255, 255, 255, 255].repeat(256);
+        update_auto_agc(&mut world, &[("vehicle.ir".into(), frame)]);
+        let settings = world.get::<SensorOutputSettings>(camera).unwrap();
+        assert_eq!(settings.agc.x, 20.0);
+        assert!(settings.agc.y > 60.0);
     }
 }

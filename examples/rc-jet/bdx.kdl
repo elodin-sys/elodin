@@ -8,7 +8,8 @@
 // scene at heading 350°.
 //
 // Cinematic Earth lives on `world.sensor_camera(..., cinematic=True)`
-// (render-server FPV), not on these viewports.
+// (render-server FPV), not on these viewports. The Boson-style LWIR camera
+// uses this terrain through a normal off-screen view plus its final sensor pass.
 
 coordinate frame="ECEF" lat=35.350664 lon=-117.809027 alt=589.274
 
@@ -35,6 +36,7 @@ tabs {
             viewport name=TGTViewport pos="target.world_pos.translate_world(1.078, -0.099, 0.931)" look_at="bdx.world_pos" show_grid=#false
             viewport name=FPVViewport pos="bdx.world_pos.translate(1,0,0.1)" look_at="bdx.world_pos.translate(2,0,0.1)" up="bdx.world_pos.direction(0,0,1)" show_grid=#false
             sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
+            sensor_view "bdx.ir_cam" name="LWIR (Boson+ 640)"
         }
     }
     vsplit name="Flight Data" {

@@ -401,13 +401,62 @@ impl WorldBuilder {
         Ok(())
     }
 
+    #[pyo3(signature = (entity, temperature_c, emissivity = 1.0))]
+    fn thermal_tag(
+        &mut self,
+        entity: crate::entity::EntityId,
+        temperature_c: f32,
+        emissivity: f32,
+    ) -> Result<(), crate::error::Error> {
+        if !temperature_c.is_finite() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "thermal_tag temperature_c must be finite",
+            )));
+        }
+        if !(emissivity.is_finite() && (0.0..=1.0).contains(&emissivity)) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "thermal_tag emissivity must be finite and between 0 and 1",
+            )));
+        }
+        let entity_name = self
+            .world
+            .metadata
+            .entity_metadata
+            .get(&entity.inner)
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(format!(
+                    "entity {:?} not found in metadata; spawn it before calling thermal_tag()",
+                    entity.inner
+                )))
+            })?
+            .name
+            .clone();
+        let tag = crate::world::ThermalTagConfig {
+            entity_name: entity_name.clone(),
+            temperature_c,
+            emissivity,
+        };
+        if let Some(existing) = self
+            .world
+            .metadata
+            .thermal_tags
+            .iter_mut()
+            .find(|existing| existing.entity_name == entity_name)
+        {
+            *existing = tag;
+        } else {
+            self.world.metadata.thermal_tags.push(tag);
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         entity,
         name,
-        width,
-        height,
-        fov = 90.0,
+        width = None,
+        height = None,
+        fov = None,
         near = 0.01,
         far = 1000.0,
         pos_offset = vec![0.0, 0.0, 0.0],
@@ -415,12 +464,14 @@ impl WorldBuilder {
         format = "rgba",
         effect = "normal",
         effect_params = None,
+        camera_model = None,
+        lens_hfov = None,
         create_frustum = false,
         show_ellipsoids = false,
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
-        fps = 30.0,
+        fps = None,
         cinematic = false,
         ev100 = None,
         bloom = None,
@@ -431,22 +482,24 @@ impl WorldBuilder {
         &mut self,
         entity: crate::entity::EntityId,
         name: String,
-        width: u32,
-        height: u32,
-        fov: f32,
+        width: Option<u32>,
+        height: Option<u32>,
+        fov: Option<f32>,
         near: f32,
         far: f32,
         pos_offset: Vec<f64>,
         rot_offset: Vec<f64>,
         format: &str,
         effect: &str,
-        effect_params: Option<&Bound<'_, PyDict>>,
+        effect_params: Option<&Bound<'_, PyAny>>,
+        camera_model: Option<&str>,
+        lens_hfov: Option<f32>,
         create_frustum: bool,
         show_ellipsoids: bool,
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
-        fps: f32,
+        fps: Option<f32>,
         cinematic: bool,
         ev100: Option<f32>,
         bloom: Option<&Bound<'_, PyAny>>,
@@ -471,25 +524,100 @@ impl WorldBuilder {
                 )))
             })?;
         let pair_name = format!("{}.{}", entity_meta.name, name);
+        let preset = match camera_model {
+            Some(name) => Some(impeller2_wkt::sensor_camera_model_preset(name).ok_or_else(
+                || {
+                    Error::PyO3(PyValueError::new_err(format!(
+                        "unsupported sensor camera model '{name}'; expected 'boson640p'"
+                    )))
+                },
+            )?),
+            None => None,
+        };
+        let width = width
+            .or_else(|| preset.map(|preset| preset.width))
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(
+                    "sensor_camera width is required unless camera_model supplies it",
+                ))
+            })?;
+        let height = height
+            .or_else(|| preset.map(|preset| preset.height))
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(
+                    "sensor_camera height is required unless camera_model supplies it",
+                ))
+            })?;
+        if width == 0 || height == 0 {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera width and height must be greater than zero",
+            )));
+        }
+        if fov.is_some() && lens_hfov.is_some() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera fov and lens_hfov are mutually exclusive",
+            )));
+        }
+        let resolved_lens_hfov = if fov.is_none() {
+            lens_hfov.or_else(|| preset.map(|preset| preset.lens_hfov_degrees))
+        } else {
+            None
+        };
+        if resolved_lens_hfov.is_some_and(|fov| !(fov > 0.0 && fov < 180.0 && fov.is_finite())) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera lens_hfov must be finite and between 0 and 180 degrees",
+            )));
+        }
+        let fov = fov
+            .or_else(|| {
+                resolved_lens_hfov
+                    .map(|hfov| impeller2_wkt::vertical_fov_from_hfov(hfov, width, height))
+            })
+            .unwrap_or(90.0);
+        if !(fov > 0.0 && fov < 180.0 && fov.is_finite()) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera fov must be finite and between 0 and 180 degrees",
+            )));
+        }
+        let fps = fps
+            .or_else(|| preset.map(|preset| preset.fps))
+            .unwrap_or(30.0);
+        if !(near > 0.0 && far > near && near.is_finite() && far.is_finite()) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera requires finite clipping planes with 0 < near < far",
+            )));
+        }
         match format {
-            "rgba" | "gray" => {}
+            "rgba" => {}
             _ => {
                 return Err(crate::error::Error::PyO3(
                     pyo3::exceptions::PyValueError::new_err(format!(
-                        "unsupported format '{}': expected 'rgba' or 'gray'",
+                        "unsupported format '{}': expected 'rgba'",
                         format
                     )),
                 ));
             }
         }
+        if !matches!(
+            effect,
+            "normal" | "thermal" | "night_vision" | "depth" | "lwir"
+        ) {
+            return Err(Error::PyO3(PyValueError::new_err(format!(
+                "unsupported sensor camera effect '{effect}'"
+            ))));
+        }
 
-        let mut parsed_effect_params = std::collections::HashMap::new();
+        let mut parsed_effect_params = camera_model
+            .and_then(impeller2_wkt::sensor_camera_model_effect_params)
+            .unwrap_or_else(|| serde_json::json!({}));
         if let Some(params) = effect_params {
-            for (key, value) in params.iter() {
-                if let (Ok(k), Ok(v)) = (key.extract::<String>(), value.extract::<f64>()) {
-                    parsed_effect_params.insert(k, v);
-                }
+            let overrides = py_json_value(params)?;
+            if !overrides.is_object() {
+                return Err(Error::PyO3(PyValueError::new_err(
+                    "sensor_camera effect_params must be a dictionary",
+                )));
             }
+            impeller2_wkt::merge_json(&mut parsed_effect_params, overrides);
         }
 
         let pos_off = [
@@ -579,6 +707,8 @@ impl WorldBuilder {
                 format: format.to_string(),
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
+                camera_model: camera_model.map(str::to_owned),
+                lens_hfov_degrees: resolved_lens_hfov,
                 create_frustum,
                 show_ellipsoids,
                 frustums_color: color_from_vec(

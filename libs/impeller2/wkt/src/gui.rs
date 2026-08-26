@@ -1777,6 +1777,87 @@ fn default_rot_offset() -> [f64; 3] {
     [0.0, 0.0, 0.0]
 }
 
+fn default_sensor_effect_params() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SensorCameraModelPreset {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f32,
+    pub lens_hfov_degrees: f32,
+}
+
+pub fn sensor_camera_model_preset(name: &str) -> Option<SensorCameraModelPreset> {
+    match name {
+        "boson640p" => Some(SensorCameraModelPreset {
+            width: 640,
+            height: 512,
+            fps: 60.0,
+            lens_hfov_degrees: 18.0,
+        }),
+        _ => None,
+    }
+}
+
+pub fn sensor_camera_model_effect_params(name: &str) -> Option<serde_json::Value> {
+    match name {
+        "boson640p" => Some(serde_json::json!({
+            "palette": "white_hot",
+            "agc": {
+                "mode": "auto",
+                "min_c": 20.0,
+                "max_c": 60.0,
+                "low": 0.01,
+                "high": 0.99,
+                "smoothing": 0.9,
+                "target_median": 0.35
+            },
+            "dde": 0.6,
+            "mtf_blur_px": 0.65,
+            "temporal_noise_sigma_dn": 2.526,
+            "column_fpn_sigma_dn": 0.25,
+            "vignette": 0.1,
+            "t_air_c": 30.0,
+            "t_sky_zenith_c": -50.0,
+            "t_base_c": 45.0,
+            "sun_gain": 10.0,
+            "transmission_km": 8.0,
+            "dead_pixel_ppm": 0.0
+        })),
+        _ => None,
+    }
+}
+
+pub fn vertical_fov_from_hfov(hfov_degrees: f32, width: u32, height: u32) -> f32 {
+    let aspect_scale = height as f32 / width as f32;
+    (2.0 * ((hfov_degrees.to_radians() * 0.5).tan() * aspect_scale).atan()).to_degrees()
+}
+
+pub fn merge_json(base: &mut serde_json::Value, overrides: serde_json::Value) {
+    match (base, overrides) {
+        (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
+            for (key, value) in overrides {
+                match base.get_mut(&key) {
+                    Some(existing) => merge_json(existing, value),
+                    None => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, overrides) => *base = overrides,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermalTagConfig {
+    pub entity_name: String,
+    pub temperature_c: f32,
+    pub emissivity: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SensorCameraConfig {
     pub entity_name: String,
@@ -1793,8 +1874,12 @@ pub struct SensorCameraConfig {
     pub format: String,
     #[serde(default)]
     pub effect: String,
+    #[serde(default = "default_sensor_effect_params")]
+    pub effect_params: serde_json::Value,
     #[serde(default)]
-    pub effect_params: HashMap<String, f64>,
+    pub camera_model: Option<String>,
+    #[serde(default)]
+    pub lens_hfov_degrees: Option<f32>,
     #[serde(default)]
     pub create_frustum: bool,
     #[serde(default)]
@@ -1838,7 +1923,9 @@ impl Default for SensorCameraConfig {
             rot_offset: [0.0; 3],
             format: default_format(),
             effect: String::new(),
-            effect_params: HashMap::new(),
+            effect_params: default_sensor_effect_params(),
+            camera_model: None,
+            lens_hfov_degrees: None,
             create_frustum: false,
             show_ellipsoids: false,
             frustums_color: default_viewport_frustums_color(),
@@ -1854,6 +1941,26 @@ impl Default for SensorCameraConfig {
 }
 
 impl SensorCameraConfig {
+    pub fn effect_param(&self, path: &[&str]) -> Option<&serde_json::Value> {
+        let mut value = &self.effect_params;
+        for key in path {
+            value = value.get(*key)?;
+        }
+        Some(value)
+    }
+
+    pub fn effect_param_f32(&self, path: &[&str], default: f32) -> f32 {
+        self.effect_param(path)
+            .and_then(serde_json::Value::as_f64)
+            .map_or(default, |value| value as f32)
+    }
+
+    pub fn effect_param_str<'a>(&'a self, path: &[&str], default: &'a str) -> &'a str {
+        self.effect_param(path)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(default)
+    }
+
     pub fn resolved_environment(&self) -> Option<EnvironmentConfig> {
         if !self.cinematic {
             return None;
@@ -2018,5 +2125,40 @@ mod tests {
         assert!(env.earth.is_some());
         assert!((env.ambient_scale - 0.05).abs() < f32::EPSILON);
         assert_eq!(camera.cinematic_ev100(), CINEMATIC_DEFAULT_EV100);
+    }
+
+    #[test]
+    fn boson640p_preset_matches_hardware() {
+        let preset = sensor_camera_model_preset("boson640p").unwrap();
+        assert_eq!((preset.width, preset.height), (640, 512));
+        assert_eq!(preset.fps, 60.0);
+        assert_eq!(preset.lens_hfov_degrees, 18.0);
+        let vfov = vertical_fov_from_hfov(preset.lens_hfov_degrees, preset.width, preset.height);
+        assert!((vfov - 14.442_653).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn model_effect_params_merge_nested_overrides() {
+        let mut params = sensor_camera_model_effect_params("boson640p").unwrap();
+        merge_json(
+            &mut params,
+            serde_json::json!({"agc": {"high": 0.95}, "dde": 0.25}),
+        );
+        assert_eq!(params["agc"]["low"], 0.01);
+        assert_eq!(params["agc"]["high"], 0.95);
+        assert_eq!(params["dde"], 0.25);
+    }
+
+    #[test]
+    fn legacy_flat_effect_params_still_deserialize() {
+        let mut value = serde_json::to_value(SensorCameraConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("camera_model");
+        object.remove("lens_hfov_degrees");
+        object.insert("effect_params".into(), serde_json::json!({"contrast": 1.5}));
+        let config: SensorCameraConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(config.effect_param_f32(&["contrast"], 0.0), 1.5);
+        assert!(config.camera_model.is_none());
+        assert!(config.lens_hfov_degrees.is_none());
     }
 }

@@ -282,6 +282,19 @@ pub fn init_db(
                 }
             }
         }
+        if !world.metadata.thermal_tags.is_empty() {
+            match serde_json::to_string(&world.metadata.thermal_tags) {
+                Ok(json) => {
+                    state
+                        .db_config
+                        .metadata
+                        .insert("thermal_tags".to_string(), json);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to serialize thermal_tags metadata: {e}");
+                }
+            }
+        }
         for entity_metadata in world.entity_metadata().values() {
             state.set_component_metadata(
                 ComponentMetadata {

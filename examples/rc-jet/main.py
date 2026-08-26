@@ -4,8 +4,8 @@
 Aircraft data comes from the vendored open-air package (analysis-correlated;
 see model/elodin_package/provenance.md) plus a logged class-D fallback set.
 The world is WGS84 ECEF anchored over the Mojave RC field: editor
-viewports are drone-like (aircraft + Mojave mesh) while FPV cinematic
-Earth is rendered by the sibling render-server.
+viewports are drone-like (aircraft + Mojave mesh) while cinematic RGB and
+Boson+ 640-style LWIR cameras are rendered by the sibling render-server.
 
 Usage:
     elodin editor examples/rc-jet/main.py     # 3D visualization + RC control
@@ -84,6 +84,7 @@ def setup_world(
         ),
         name="target",
     )
+    world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
 
     world.sensor_camera(
         entity=jet,
@@ -110,6 +111,18 @@ def setup_world(
             "ambient_scale": 0.05,
             "earth": True,
         },
+    )
+    world.sensor_camera(
+        entity=jet,
+        name="ir_cam",
+        camera_model="boson640p",
+        lens_hfov=18.0,
+        effect="lwir",
+        near=0.1,
+        far=100_000.0,
+        pos_offset=[1.2, 0.0, 0.1],
+        rot_offset=[0.0, 0.0, 0.0],
+        create_frustum=False,
     )
 
     schematic_path = Path(__file__).with_name("bdx.kdl")

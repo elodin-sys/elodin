@@ -90,7 +90,7 @@ world.sensor_camera(
     pos_offset=[0, 0, 0.5],    # Body-frame offset from entity origin
     rot_offset=[0, 0, 45],     # Body-frame [roll, pitch, yaw] in degrees
     format="rgba",             # Pixel format
-    effect="normal",           # "normal", "thermal", "night_vision", "depth"
+    effect="normal",           # "normal", "thermal", "night_vision", "depth", "lwir"
     effect_params={},          # Effect-specific parameters
     create_frustum=True,       # Show this camera's frustum in 3D viewports
     show_ellipsoids=False,     # Hide ellipsoid debug objects from camera frames
@@ -224,9 +224,11 @@ This pattern gives you deterministic, reproducible testing of the full sensor st
 | `pos_offset` | [f64; 3] | [0,0,0] | Camera position offset in entity body frame |
 | `rot_offset` | [f64; 3] | [0,0,0] | Body-frame `[roll, pitch, yaw]` rotation in degrees |
 | `format` | str | "rgba" | Pixel format (`"rgba"`) |
-| `effect` | str | "normal" | Post-process effect |
-| `effect_params` | dict | {} | Effect-specific parameters |
-| `fps` | float | 30.0 | Rendering rate in frames per second of sim time |
+| `effect` | str | "normal" | Final sensor-output effect |
+| `effect_params` | dict | {} | Effect-specific parameters; nested dictionaries are supported |
+| `camera_model` | str | None | Camera preset, such as `"boson640p"` |
+| `lens_hfov` | float | None | Horizontal lens FOV, converted to vertical camera FOV |
+| `fps` | float | 30.0 | Rendering rate in frames per second of sim time (or model default) |
 | `create_frustum` | bool | false | Create this sensor camera as a frustum source for 3D viewports |
 | `show_ellipsoids` | bool | false | Render ellipsoid debug objects in this sensor camera |
 | `frustums_color` | [f32; 3/4] | yellow | Frustum color, normalized RGBA |

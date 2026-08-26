@@ -41,7 +41,7 @@ use impeller2_wkt::{CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schem
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, set_cameras_active, set_readback_armed,
+    SensorCamerasSpawned, set_cameras_active, set_readback_armed, update_auto_agc,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
@@ -906,6 +906,7 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
         }
     }
 
+    update_auto_agc(app.world_mut(), &frames);
     push_frames_to_db(app, sim_ts, &frames);
     set_readback_armed(app.world_mut(), due_names, false);
     set_cameras_active(app.world_mut(), due_names, false);
