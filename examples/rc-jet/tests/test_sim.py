@@ -13,7 +13,15 @@ import pytest
 
 import bdx_model
 from class_d_fallbacks import FALLBACKS
-from scenario import MOJAVE_RC_FIELD, Numerics, Scenario, _initial_state, load_scenario
+from scenario import (
+    DEATH_VALLEY_FLOOR,
+    MOJAVE_RC_FIELD,
+    Numerics,
+    Scenario,
+    Site,
+    _initial_state,
+    load_scenario,
+)
 from sim import build_system, make_jet
 
 MODEL = bdx_model.load()
@@ -175,3 +183,10 @@ def test_demo_scenario_solves_equilibrium():
     scenario = load_scenario(MODEL, FALLBACKS, name="demo")
     assert scenario.trim.valid
     assert math.degrees(scenario.trim.alpha_rad) < MODEL.validity.attached_flow_alpha_deg[1]
+
+
+def test_site_latlon_uses_signed_hemisphere():
+    assert MOJAVE_RC_FIELD.format_latlon() == "35.3507 N, 117.8090 W"
+    assert DEATH_VALLEY_FLOOR.format_latlon() == "36.2300 N, 116.9700 W"
+    south_east = Site("test", lat_deg=-12.5, lon_deg=45.25, field_elevation_m=0.0)
+    assert south_east.format_latlon() == "12.5000 S, 45.2500 E"

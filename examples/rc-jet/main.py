@@ -145,7 +145,7 @@ print(
 )
 print(f"Scenario: {SCENARIO.name} at {SCENARIO.site.name}")
 print(
-    f"  location: {SCENARIO.site.lat_deg:.4f} N, {SCENARIO.site.lon_deg:.4f} E, "
+    f"  location: {SCENARIO.site.format_latlon()}, "
     f"field elevation {SCENARIO.site.field_elevation_m:.0f} m"
 )
 print(

@@ -42,6 +42,11 @@ class Site:
     lon_deg: float
     field_elevation_m: float
 
+    def format_latlon(self) -> str:
+        lat_h = "N" if self.lat_deg >= 0.0 else "S"
+        lon_h = "E" if self.lon_deg >= 0.0 else "W"
+        return f"{abs(self.lat_deg):.4f} {lat_h}, {abs(self.lon_deg):.4f} {lon_h}"
+
 
 DEATH_VALLEY_FLOOR = Site(
     name="Death Valley floor (CA)",

@@ -2655,12 +2655,7 @@ timeline
 
     #[test]
     fn test_parse_rc_jet_schematic_has_no_skybox() {
-        let kdl = include_str!("../../../../examples/rc-jet/main.py");
-        let kdl = kdl
-            .split("world.schematic(")
-            .nth(1)
-            .and_then(|rest| rest.split("\"\"\"").nth(1))
-            .expect("rc-jet schematic string");
+        let kdl = include_str!("../../../../examples/rc-jet/bdx.kdl");
         let schematic = parse_schematic(kdl).expect("rc-jet schematic should parse");
         assert!(
             schematic.skybox.is_none(),
