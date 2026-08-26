@@ -67,6 +67,15 @@ impl Plugin for PlanarScenePlugin {
 /// uses, so the `preprocess` binary builds an atlas with matching scale +
 /// height bounds.
 pub fn terrain_config() -> TerrainConfig {
+    terrain_config_with_atlas(crate::terrain::terrain::planar_atlas_size)
+}
+
+/// Preprocess atlas: one layer per on-disk tile, not the runtime working set.
+pub fn preprocess_terrain_config() -> TerrainConfig {
+    terrain_config_with_atlas(crate::terrain::terrain::planar_preprocess_atlas_size)
+}
+
+fn terrain_config_with_atlas(atlas_size: fn(u32) -> u32) -> TerrainConfig {
     let manifest = RegionManifest::load_or_default();
     let terrain_size = manifest.terrain_size_m();
     let height = manifest.height_m();
@@ -84,7 +93,7 @@ pub fn terrain_config() -> TerrainConfig {
             height,
         ),
         path,
-        atlas_size: crate::terrain::terrain::planar_atlas_size(dataset_tiles),
+        atlas_size: atlas_size(dataset_tiles),
         ..default()
     }
     .add_attachment(AttachmentConfig {
