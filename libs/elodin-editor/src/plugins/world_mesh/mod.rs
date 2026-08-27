@@ -525,10 +525,10 @@ fn sync_terrain_view_components(
         .collect();
 
     for key in dropped {
-        if let Some(mut tree) = tile_trees.remove(&key) {
-            if let Ok((_, mut tile_atlas)) = terrains.get_mut(key.0) {
-                tree.disconnect(&mut tile_atlas);
-            }
+        if let Some(mut tree) = tile_trees.remove(&key)
+            && let Ok((_, mut tile_atlas)) = terrains.get_mut(key.0)
+        {
+            tree.disconnect(&mut tile_atlas);
         }
     }
 
