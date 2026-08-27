@@ -69,8 +69,14 @@ pub struct Coordinate(pub Option<GeoFrame>);
 
 pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
     WgpuSettings {
+        // wgpu's Vulkan preflight cannot determine which device-local heap a
+        // resource will use, so it rejects the allocation when *any* such
+        // heap would cross this threshold. NVIDIA exposes its small BAR heap
+        // as device-local in addition to VRAM; large VRAM-only textures (for
+        // example, terrain atlases) can therefore get a false OOM while VRAM
+        // is almost empty. Let the native allocator report real OOMs instead.
         instance_memory_budget_thresholds: wgpu::MemoryBudgetThresholds {
-            for_resource_creation: Some(99),
+            for_resource_creation: None,
             for_device_loss: None,
         },
         memory_hints: wgpu::MemoryHints::MemoryUsage,
