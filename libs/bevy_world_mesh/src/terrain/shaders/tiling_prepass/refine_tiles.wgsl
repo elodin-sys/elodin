@@ -42,6 +42,10 @@ fn try_reserve_children() -> i32 {
             return current;
         }
     }
+
+    // Naga does not infer that the loop can only exit via one of the returns
+    // above, so an explicit fallback is required to satisfy the i32 return.
+    return -1;
 }
 
 fn subdivide(tile: TileCoordinate) -> bool {
