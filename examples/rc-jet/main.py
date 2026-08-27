@@ -25,7 +25,7 @@ import numpy as np
 
 import bdx_model
 from class_d_fallbacks import FALLBACKS
-from frames import enu_basis
+from frames import enu_basis, level_attitude_ecef, quaternion_xyzw_from_matrix
 from scenario import Numerics, Scenario, load_scenario
 from sim import build_system, make_jet
 
@@ -74,12 +74,14 @@ def setup_world(
         name="bdx",
     )
 
-    # Target drone ~9 s ahead on the initial flight path.
+    # Target drone ~9 s ahead; local-level attitude so the mesh is not ECEF-tilted.
     target_pos = init.pos_ecef + 350.0 * forward + 5.0 * basis[2]
+    target_att = quaternion_xyzw_from_matrix(level_attitude_ecef(lat, lon, scenario.heading_deg))
     target = world.spawn(
         StaticMarker(
             world_pos=el.SpatialTransform(
-                angular=el.Quaternion.identity(), linear=jnp.asarray(target_pos)
+                angular=el.Quaternion(jnp.asarray(target_att)),
+                linear=jnp.asarray(target_pos),
             ),
         ),
         name="target",
