@@ -1,5 +1,21 @@
 # BDX RC Jet Turbine Simulation: Technical Whitepaper
 
+> **Supersession notice (2026-08-23).** The numeric content of this document
+> (geometry estimates, longitudinal coefficients, trim/performance targets,
+> mass properties) is **superseded by the generated open-air aero package**
+> vendored at `model/elodin_package/` — `elodin_model.json` is the machine
+> truth and `bdx_model.py` is its only consumer. This whitepaper remains the
+> reference for the *model structure* (polynomial force/moment layout,
+> actuator and turbine forms) and is the documented origin of the **class-D
+> fallback set** in `class_d_fallbacks.py` (lateral-directional, rate, and
+> control derivatives; inertia; servo limits), which the package does not yet
+> provide. The example is a *provisional parametric 6-DOF demonstration
+> model, geometry- and analysis-correlated; not validated against a physical
+> aircraft.* The implementation also differs from this document where noted:
+> semi-implicit integration at 300 Hz (not RK4/120 Hz), a rotating WGS84 ECEF
+> world (not flat ENU), and solved trim initialization (no embedded trim
+> coefficients).
+
 ## Executive Summary
 
 This document describes the technical approach for developing an Elodin simulation of the **Elite Aerosports BDX**, a high-performance RC jet turbine aircraft. The simulation targets a "simple but accurate" fidelity level—sufficient for control system development, pilot training scenarios, and flight dynamics visualization—without the complexity of a full system identification or high-fidelity CFD-derived model.
@@ -12,44 +28,48 @@ The approach draws from established small-UAV aerodynamic modeling literature wh
 
 ### 1.1 BDX Specifications
 
-The Elite Aerosports BDX is a modern interpretation of the legendary BD-5J, designed for RC sport jet flying and UAS applications.
+The Elite Aerosports BDX is a modern interpretation of the legendary BD-5J, designed for RC sport jet flying. This example models the **standard 2.65 m sport aircraft only** (no BDXL/UAS variants).
 
-| Parameter | RC Sport Version | UAS Version |
-|-----------|------------------|-------------|
-| Wingspan | 2.65 m (104 in) | 2.65 m |
-| Length | 2.8 m (110 in) | 2.8 m |
-| Empty Weight | 18.1–19 kg (40–42 lb) | 19 kg (42 lb) |
-| Max Weight | ~22 kg | 56.7 kg (125 lb) |
-| Recommended Thrust | 180–210 N | 210–320 N |
-| Max Speed | ~200 kt | >200 kt |
-| Maneuverability | High (aerobatic) | Up to 18 g |
-| Endurance | 15–20 min typical | ~50 min cruise |
+| Parameter | Standard Sport BDX |
+|-----------|--------------------|
+| Wingspan | 2.65 m (104 in) |
+| Length | 2.8 m (110 in) |
+| Listed weight | 18.14–19.05 kg (40–42 lb) — **dry/fueled state unpublished** |
+| Recommended Thrust | 180–210 N |
+| Advertised speed | "can exceed 200 mph" (89.4 m/s) — marketing claim, not a measured map |
+| Fuel cell | 6.0 L |
+| Maneuverability | High (aerobatic) |
 
-**Sources**: Elite Aerosports product page, AIR-RC specifications
+**Sources**: Elite Aerosports product page, AIR-RC specifications. Note the
+model's solved full-throttle dash is 85.1 m/s with the provisional 200 N
+engine — slightly below the advertised speed; treat max speed as unvalidated.
 
 ### 1.2 Airfoil Heritage
 
-The BDX descends from the BD-5J design which used:
-- **Root**: NACA 64-212
-- **Tip**: NACA 64-218
+The BDX was *inspired by* the BD-5J, whose wing used NACA 64-212 (root) and
+64-218 (tip). That lineage does **not** establish the BDX's actual section:
+the manufacturer refers to "the BDX airfoil" without publishing it. The
+generated aero package analyzes the traced planform with an explicitly
+labeled **NACA 0012 surrogate**; any 64-series assumption here is likewise a
+surrogate, not verified BDX geometry, and must not be used to validate stall
+behavior.
 
-For our simplified model, we treat the wing as having uniform NACA 64-212 characteristics, which provides:
-- Good lift-to-drag ratio at cruise
-- Well-documented 2D section data
-- Reasonable low-Reynolds behavior for RC scale
+### 1.3 Estimated Geometric Parameters — **superseded**
 
-### 1.3 Estimated Geometric Parameters
+The original hand estimates below were superseded by the traced, solver-
+verified reconstruction in the aero package (`elodin_model.json
+.reference_geometry`): S **1.332 m²**, MAC **0.518 m**, AR **5.27**,
+S_h 0.397 m², S_v 0.215 m². The wing is nearly twice the area assumed here.
+Kept for the historical record only:
 
-For the simulation, we derive or estimate:
-
-| Parameter | Symbol | Value | Notes |
-|-----------|--------|-------|-------|
-| Wing Area | S | 0.75 m² | Estimated from planform |
-| Mean Aerodynamic Chord | c̄ | 0.30 m | S/b with taper |
-| Wingspan | b | 2.65 m | From spec |
-| Horizontal Tail Area | S_h | 0.15 m² | ~20% of wing area |
-| Vertical Tail Area | S_v | 0.10 m² | Typical for jets |
-| Tail Moment Arm | l_t | 1.2 m | CG to tail AC |
+| Parameter | Symbol | Superseded value | Package value |
+|-----------|--------|------------------|---------------|
+| Wing Area | S | 0.75 m² | 1.332 m² |
+| Mean Aerodynamic Chord | c̄ | 0.30 m | 0.518 m |
+| Wingspan | b | 2.65 m | 2.65 m |
+| Horizontal Tail Area | S_h | 0.15 m² | 0.397 m² |
+| Vertical Tail Area | S_v | 0.10 m² | 0.215 m² |
+| Tail Moment Arm | l_t | 1.2 m | (from package tail geometry) |
 
 ---
 
@@ -69,9 +89,9 @@ We adopt the standard aerospace body-fixed frame:
 The simulation state comprises:
 
 **Rigid Body States** (managed by `el.Body`):
-- Position: (x, y, z) in NED world frame
+- Position: (x, y, z) in the rotating WGS84 **ECEF** world frame
 - Velocity: (u, v, w) in body frame or (Vx, Vy, Vz) in world frame
-- Attitude: Quaternion q = (qw, qx, qy, qz)
+- Attitude: Quaternion q = (qw, qx, qy, qz), body→ECEF
 - Angular rates: (p, q, r) in body frame (roll, pitch, yaw rates)
 
 **Engine States**:
@@ -143,7 +163,13 @@ Where:
 
 ### 3.3 Baseline Aerodynamic Coefficients
 
-These values are estimated for a clean, high-speed RC jet configuration at low angles of attack. They can be refined with XFLR5 analysis or flight test data.
+**Status:** the longitudinal statics (C_L0, C_Lα, C_m0, C_mα, C_D0, k) are
+superseded by the package linearization (CL0 −0.043, CLα 4.78 /rad,
+Cm0 +0.046, Cmα −0.97 /rad, CD0 0.0333, k 0.0538 — trim-consistent at stab
+incidence −1.221°). The remaining rows are the documented **class-D fallback
+set** consumed by `class_d_fallbacks.py` until the package's derivative tier
+exists. Signs follow the standard aerospace convention (note C_mδe is
+negative).
 
 #### Longitudinal Derivatives
 
@@ -480,7 +506,8 @@ def system():
     effectors = gravity | apply_thrust | apply_aero_forces
     
     # Compose with 6-DOF integrator
-    return non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
+    # (implementation uses el.Integrator.SemiImplicit at 300 Hz)
+    return non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImplicit)
 ```
 
 ---
@@ -489,17 +516,24 @@ def system():
 
 ### 9.1 Sanity Checks
 
-1. **Trim verification**: Aircraft should maintain level flight at ~40 m/s with ~70% throttle
-2. **Static stability**: Positive C_mα (nose-down with positive α perturbation)
+1. **Trim verification**: level flight at **~37.8 m/s with ~21% throttle**
+   (300 m, package cruise anchor; the earlier 40 m/s / 70% figures were
+   artifacts of the wrong wing area)
+2. **Static stability**: **negative** C_mα (a nose-down restoring moment for
+   a positive α perturbation)
 3. **Phugoid mode**: Period ~10-15 seconds, lightly damped
 4. **Dutch roll**: Period ~2-3 seconds, adequately damped with yaw damper
 5. **Roll response**: Time to 60° bank < 1 second at full aileron
 
 ### 9.2 Comparison Data
 
-- Compare trim throttle and speed to pilot experience
-- Validate stall speed (~25 m/s at 19 kg, sea level)
-- Check climb rate at full power (~15-20 m/s)
+- Compare trim throttle and speed to the package anchors
+  (`elodin_model.json .performance_anchors`), never to copied literals
+- Stall ~**15 m/s** under the documented section-CLmax assumption (class C —
+  a consequence of stated assumptions, not a validated figure; the earlier
+  25 m/s figure came from the wrong wing area)
+- Full-throttle level dash ~**85 m/s** at 100 m (thrust-limited, provisional
+  200 N engine)
 
 ### 9.3 Tuning Process
 
@@ -551,7 +585,11 @@ def system():
 
 ---
 
-## Appendix A: Quick-Start Configuration
+## Appendix A: Quick-Start Configuration — **superseded**
+
+Superseded by `bdx_model.load()` (aircraft data) plus `scenario.py`
+(scenario/numerics); the implementation runs at 300 Hz with solved trim
+initial conditions. Historical sketch:
 
 ```python
 # config.py

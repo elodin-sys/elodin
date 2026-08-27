@@ -14,7 +14,8 @@ use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller2_kdl::FromKdl;
+use impeller2_wkt::{BloomConfig, ComponentMetadata, EntityMetadata, EnvironmentConfig, Schematic};
 use miette::miette;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::exceptions::PyValueError;
@@ -125,7 +126,53 @@ pub struct WorldBuilder {
     pub recipes: HashMap<String, ::s10::Recipe>,
 }
 
+fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
+    let json = obj.py().import("json")?;
+    let dumped: String = json.call_method1("dumps", (obj,))?.extract()?;
+    Ok(serde_json::from_str(&dumped)?)
+}
+
+fn parse_sensor_camera_environment(obj: &Bound<'_, PyAny>) -> Result<EnvironmentConfig, Error> {
+    let value = py_json_value(obj)?;
+    serde_json::from_value(value).map_err(|err| {
+        Error::PyO3(PyValueError::new_err(format!(
+            "sensor_camera environment is invalid: {err}"
+        )))
+    })
+}
+
+fn parse_sensor_camera_bloom(obj: &Bound<'_, PyAny>) -> Result<BloomConfig, Error> {
+    let value = py_json_value(obj)?;
+    serde_json::from_value(value).map_err(|err| {
+        Error::PyO3(PyValueError::new_err(format!(
+            "sensor_camera bloom is invalid: {err}"
+        )))
+    })
+}
+
+fn cinematic_look_requires_cinematic(
+    cinematic: bool,
+    has_environment: bool,
+    has_ev100: bool,
+    has_bloom: bool,
+) -> bool {
+    cinematic || !(has_environment || has_ev100 || has_bloom)
+}
+
 impl WorldBuilder {
+    fn parsed_schematic(&self) -> Option<Schematic> {
+        let content = self.world.metadata.schematic.as_deref()?;
+        Schematic::from_kdl(content).ok()
+    }
+
+    fn validate_cinematic_owners(&self) -> Result<(), Error> {
+        impeller2_wkt::validate_single_cinematic_environment(
+            self.parsed_schematic().as_ref(),
+            &self.world.metadata.sensor_cameras,
+        )
+        .map_err(|err| Error::PyO3(PyValueError::new_err(err.to_string())))
+    }
+
     fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
         let mut depends_on = self
             .recipes
@@ -354,13 +401,62 @@ impl WorldBuilder {
         Ok(())
     }
 
+    #[pyo3(signature = (entity, temperature_c, emissivity = 1.0))]
+    fn thermal_tag(
+        &mut self,
+        entity: crate::entity::EntityId,
+        temperature_c: f32,
+        emissivity: f32,
+    ) -> Result<(), crate::error::Error> {
+        if !temperature_c.is_finite() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "thermal_tag temperature_c must be finite",
+            )));
+        }
+        if !(emissivity.is_finite() && (0.0..=1.0).contains(&emissivity)) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "thermal_tag emissivity must be finite and between 0 and 1",
+            )));
+        }
+        let entity_name = self
+            .world
+            .metadata
+            .entity_metadata
+            .get(&entity.inner)
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(format!(
+                    "entity {:?} not found in metadata; spawn it before calling thermal_tag()",
+                    entity.inner
+                )))
+            })?
+            .name
+            .clone();
+        let tag = crate::world::ThermalTagConfig {
+            entity_name: entity_name.clone(),
+            temperature_c,
+            emissivity,
+        };
+        if let Some(existing) = self
+            .world
+            .metadata
+            .thermal_tags
+            .iter_mut()
+            .find(|existing| existing.entity_name == entity_name)
+        {
+            *existing = tag;
+        } else {
+            self.world.metadata.thermal_tags.push(tag);
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         entity,
         name,
-        width,
-        height,
-        fov = 90.0,
+        width = None,
+        height = None,
+        fov = None,
         near = 0.01,
         far = 1000.0,
         pos_offset = vec![0.0, 0.0, 0.0],
@@ -368,33 +464,46 @@ impl WorldBuilder {
         format = "rgba",
         effect = "normal",
         effect_params = None,
+        camera_model = None,
+        lens_hfov = None,
         create_frustum = false,
         show_ellipsoids = false,
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
-        fps = 30.0,
+        fps = None,
+        cinematic = false,
+        ev100 = None,
+        bloom = None,
+        environment = None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
         &mut self,
         entity: crate::entity::EntityId,
         name: String,
-        width: u32,
-        height: u32,
-        fov: f32,
+        width: Option<u32>,
+        height: Option<u32>,
+        fov: Option<f32>,
         near: f32,
         far: f32,
         pos_offset: Vec<f64>,
         rot_offset: Vec<f64>,
         format: &str,
         effect: &str,
-        effect_params: Option<&Bound<'_, PyDict>>,
+        effect_params: Option<&Bound<'_, PyAny>>,
+        camera_model: Option<&str>,
+        lens_hfov: Option<f32>,
         create_frustum: bool,
         show_ellipsoids: bool,
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
-        fps: f32,
+        fps: Option<f32>,
+        cinematic: bool,
+        ev100: Option<f32>,
+        bloom: Option<&Bound<'_, PyAny>>,
+        environment: Option<&Bound<'_, PyAny>>,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -415,25 +524,100 @@ impl WorldBuilder {
                 )))
             })?;
         let pair_name = format!("{}.{}", entity_meta.name, name);
+        let preset = match camera_model {
+            Some(name) => Some(impeller2_wkt::sensor_camera_model_preset(name).ok_or_else(
+                || {
+                    Error::PyO3(PyValueError::new_err(format!(
+                        "unsupported sensor camera model '{name}'; expected 'boson640p'"
+                    )))
+                },
+            )?),
+            None => None,
+        };
+        let width = width
+            .or_else(|| preset.map(|preset| preset.width))
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(
+                    "sensor_camera width is required unless camera_model supplies it",
+                ))
+            })?;
+        let height = height
+            .or_else(|| preset.map(|preset| preset.height))
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(
+                    "sensor_camera height is required unless camera_model supplies it",
+                ))
+            })?;
+        if width == 0 || height == 0 {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera width and height must be greater than zero",
+            )));
+        }
+        if fov.is_some() && lens_hfov.is_some() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera fov and lens_hfov are mutually exclusive",
+            )));
+        }
+        let resolved_lens_hfov = if fov.is_none() {
+            lens_hfov.or_else(|| preset.map(|preset| preset.lens_hfov_degrees))
+        } else {
+            None
+        };
+        if resolved_lens_hfov.is_some_and(|fov| !(fov > 0.0 && fov < 180.0 && fov.is_finite())) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera lens_hfov must be finite and between 0 and 180 degrees",
+            )));
+        }
+        let fov = fov
+            .or_else(|| {
+                resolved_lens_hfov
+                    .map(|hfov| impeller2_wkt::vertical_fov_from_hfov(hfov, width, height))
+            })
+            .unwrap_or(90.0);
+        if !(fov > 0.0 && fov < 180.0 && fov.is_finite()) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera fov must be finite and between 0 and 180 degrees",
+            )));
+        }
+        let fps = fps
+            .or_else(|| preset.map(|preset| preset.fps))
+            .unwrap_or(30.0);
+        if !(near > 0.0 && far > near && near.is_finite() && far.is_finite()) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera requires finite clipping planes with 0 < near < far",
+            )));
+        }
         match format {
-            "rgba" | "gray" => {}
+            "rgba" => {}
             _ => {
                 return Err(crate::error::Error::PyO3(
                     pyo3::exceptions::PyValueError::new_err(format!(
-                        "unsupported format '{}': expected 'rgba' or 'gray'",
+                        "unsupported format '{}': expected 'rgba'",
                         format
                     )),
                 ));
             }
         }
+        if !matches!(
+            effect,
+            "normal" | "thermal" | "night_vision" | "depth" | "lwir"
+        ) {
+            return Err(Error::PyO3(PyValueError::new_err(format!(
+                "unsupported sensor camera effect '{effect}'"
+            ))));
+        }
 
-        let mut parsed_effect_params = std::collections::HashMap::new();
+        let mut parsed_effect_params = camera_model
+            .and_then(impeller2_wkt::sensor_camera_model_effect_params)
+            .unwrap_or_else(|| serde_json::json!({}));
         if let Some(params) = effect_params {
-            for (key, value) in params.iter() {
-                if let (Ok(k), Ok(v)) = (key.extract::<String>(), value.extract::<f64>()) {
-                    parsed_effect_params.insert(k, v);
-                }
+            let overrides = py_json_value(params)?;
+            if !overrides.is_object() {
+                return Err(Error::PyO3(PyValueError::new_err(
+                    "sensor_camera effect_params must be a dictionary",
+                )));
             }
+            impeller2_wkt::merge_json(&mut parsed_effect_params, overrides);
         }
 
         let pos_off = [
@@ -470,6 +654,20 @@ impl WorldBuilder {
                 )),
             ));
         }
+        if !cinematic_look_requires_cinematic(
+            cinematic,
+            environment.is_some(),
+            ev100.is_some(),
+            bloom.is_some(),
+        ) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "ev100, bloom, and environment require cinematic=True",
+            )));
+        }
+        let bloom = bloom.map(parse_sensor_camera_bloom).transpose()?;
+        let environment = environment
+            .map(parse_sensor_camera_environment)
+            .transpose()?;
 
         let color_from_vec = |value: Option<Vec<f32>>,
                               default_color: impeller2_wkt::Color,
@@ -509,6 +707,8 @@ impl WorldBuilder {
                 format: format.to_string(),
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
+                camera_model: camera_model.map(str::to_owned),
+                lens_hfov_degrees: resolved_lens_hfov,
                 create_frustum,
                 show_ellipsoids,
                 frustums_color: color_from_vec(
@@ -523,7 +723,15 @@ impl WorldBuilder {
                 )?,
                 frustums_thickness,
                 fps,
+                cinematic,
+                ev100,
+                bloom,
+                environment,
             });
+        if let Err(err) = self.validate_cinematic_owners() {
+            self.world.metadata.sensor_cameras.pop();
+            return Err(err);
+        }
 
         Ok(())
     }
@@ -592,6 +800,7 @@ impl WorldBuilder {
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
         let path = PathBuf::from(path);
         let args = Args::parse_from(args);
+        self.validate_cinematic_owners()?;
         match args {
             Args::Run {
                 addr,
@@ -1569,7 +1778,11 @@ impl WorldBuilder {
     /// the user may make changes and save the schematic to the given path, but
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
-    pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
+    pub fn schematic(
+        &mut self,
+        default_content: Option<String>,
+        path: Option<String>,
+    ) -> Result<(), Error> {
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
             .as_ref()
@@ -1600,7 +1813,13 @@ impl WorldBuilder {
                     None
                 }
             });
+        let previous = self.world.metadata.schematic.clone();
         self.world.metadata.schematic = file_contents.or(default_content);
+        if let Err(err) = self.validate_cinematic_owners() {
+            self.world.metadata.schematic = previous;
+            return Err(err);
+        }
+        Ok(())
     }
 
     pub fn discover_components(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
@@ -2025,5 +2244,68 @@ mod test {
         assert!(is_snake_case("e1"));
         assert!(is_snake_case("e_1"));
         assert!(!is_snake_case("E1"));
+    }
+
+    #[test]
+    fn cinematic_false_rejects_look_kwargs() {
+        assert!(!cinematic_look_requires_cinematic(
+            false, true, false, false
+        ));
+        assert!(!cinematic_look_requires_cinematic(
+            false, false, true, false
+        ));
+        assert!(!cinematic_look_requires_cinematic(
+            false, false, false, true
+        ));
+        assert!(cinematic_look_requires_cinematic(true, true, true, true));
+        assert!(cinematic_look_requires_cinematic(
+            false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn two_cinematic_sensor_cameras_are_rejected() {
+        let err = impeller2_wkt::validate_single_cinematic_environment(
+            None,
+            &[
+                impeller2_wkt::SensorCameraConfig {
+                    camera_name: "a.cam".into(),
+                    cinematic: true,
+                    ..Default::default()
+                },
+                impeller2_wkt::SensorCameraConfig {
+                    camera_name: "b.cam".into(),
+                    cinematic: true,
+                    ..Default::default()
+                },
+            ],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("a.cam"), "{msg}");
+        assert!(msg.contains("b.cam"), "{msg}");
+    }
+
+    #[test]
+    fn cinematic_viewport_and_sensor_camera_are_rejected() {
+        let schematic = impeller2_wkt::Schematic::from_kdl(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true
+"#,
+        )
+        .unwrap();
+        let err = impeller2_wkt::validate_single_cinematic_environment(
+            Some(&schematic),
+            &[impeller2_wkt::SensorCameraConfig {
+                camera_name: "bdx.fpv_cam".into(),
+                cinematic: true,
+                ..Default::default()
+            }],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Chase"), "{msg}");
+        assert!(msg.contains("bdx.fpv_cam"), "{msg}");
     }
 }

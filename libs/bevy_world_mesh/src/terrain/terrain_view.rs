@@ -48,7 +48,7 @@ impl Default for TerrainViewConfig {
     fn default() -> Self {
         Self {
             tree_size: 8,
-            geometry_tile_count: 1000000,
+            geometry_tile_count: geometry_tile_capacity(8, 5, 6),
             refinement_count: 30,
             grid_size: 16,
             subdivision_tolerance: 0.1,
@@ -60,5 +60,66 @@ impl Default for TerrainViewConfig {
             precision_threshold_distance: 0.001,
             origin_lod: 10,
         }
+    }
+}
+
+/// STORAGE slots for the refine/draw tile lists (two buffers of
+/// `count * 16` bytes per view). `1_000_000` was ~15.26 MiB each.
+///
+/// The data clipmap is `tree_size² × lods × sides`. GPU `refine_tiles`
+/// can 4× that working set each step, so the buffer also holds one
+/// generation of `4^REFINE_STEPS` children per side.
+pub fn geometry_tile_capacity(tree_size: u32, lod_count: u32, side_count: u32) -> u32 {
+    const LEAF_HEADROOM: u32 = 16;
+    const REFINE_STEPS: u32 = 8;
+    const MIN: u32 = 4096;
+    const MAX: u32 = 262_144;
+    let sides = side_count.max(1);
+    let clipmap = tree_size
+        .saturating_mul(tree_size)
+        .saturating_mul(lod_count.max(1))
+        .saturating_mul(sides)
+        .saturating_mul(LEAF_HEADROOM);
+    let refine = sides.saturating_mul(1 << (2 * REFINE_STEPS));
+    clipmap.max(refine).clamp(MIN, MAX)
+}
+
+/// Matches `try_reserve_children` in `refine_tiles.wgsl`: four ping-pong
+/// slots, or none. A failed reserve must not move `child_index`.
+pub fn try_reserve_refine_children(child_index: i32, counter: i32, tile_count: i32) -> Option<i32> {
+    let last = child_index.checked_add(counter.checked_mul(3)?)?;
+    if (0..tile_count).contains(&child_index) && (0..tile_count).contains(&last) {
+        Some(child_index)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn geometry_tile_capacity_fits_planar_refine() {
+        assert_eq!(geometry_tile_capacity(8, 5, 1), 65_536);
+    }
+
+    #[test]
+    fn geometry_tile_capacity_fits_globe_refine() {
+        assert_eq!(geometry_tile_capacity(8, 5, 6), 262_144);
+    }
+
+    #[test]
+    fn geometry_tile_capacity_clamps() {
+        assert_eq!(geometry_tile_capacity(1, 1, 1), 65_536);
+        assert_eq!(geometry_tile_capacity(32, 16, 6), 262_144);
+    }
+
+    #[test]
+    fn refine_reserve_rejects_a_partial_generation() {
+        assert_eq!(try_reserve_refine_children(0, 1, 8), Some(0));
+        assert_eq!(try_reserve_refine_children(5, 1, 8), None);
+        assert_eq!(try_reserve_refine_children(7, -1, 8), Some(7));
+        assert_eq!(try_reserve_refine_children(2, -1, 8), None);
     }
 }

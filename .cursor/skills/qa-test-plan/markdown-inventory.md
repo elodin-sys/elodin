@@ -108,8 +108,8 @@
 - `examples/logstream/README.md` — C++ log client ingesting postcard-encoded FSW log messages into the DB for the editor log-viewer panel.
 - `examples/monte-carlo/README.md` — Minimal Monte Carlo SITL campaign: UDP external controller, LHS sampling, port planning, scaling/memory profiling, hooks.
 - `examples/n-body/README.md` — Solar-system N-body gravity with CSV truth overlays, RK4, backend benchmark matrix, accuracy reports.
-- `examples/rc-jet/README.md` — BDX RC jet 6-DOF: polynomial aero, turbine/servo dynamics, Death Valley terrain, scripted flight plan, Rust gamepad/keyboard controller.
-- `examples/rc-jet/BDX_Simulation_Whitepaper.md` — Technical design of the BDX jet model: stability-derivative aero, spool/thrust, actuators, ISA atmosphere, module architecture.
+- `examples/rc-jet/README.md` — BDX RC jet 6-DOF in rotating ECEF over Death Valley: open-air aero package loader (hash-verified), class-D fallbacks, solved trim scenarios, cinematic Earth + geo-anchored terrain, Rust gamepad/keyboard controller, acceptance test suite.
+- `examples/rc-jet/BDX_Simulation_Whitepaper.md` — Original BDX model-structure design (polynomial aero, spool/thrust, actuators); numeric sections superseded by the generated aero package (see banner).
 - `examples/rc-jet/sources/references.md` — Bibliography and integration plan for BDX modeling from JSBSim, XFLR5, UAV literature, turbojet identification.
 - `examples/rocket/README.md` — 6-DOF rocket with Mach/AoA lookup-table aero, thrust curve, wind, pitch PID, EQL-derived plots, external fin trim control.
 - `examples/rocket-barrowman/README.md` — Streamlit app + Elodin integration for Barrowman rocket design: ThrustCurve motors, AI builder, 3D trajectory visualization.

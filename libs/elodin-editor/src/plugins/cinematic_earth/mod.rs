@@ -174,8 +174,11 @@ struct CinematicSunFlare;
 struct NightGlobeFill;
 
 /// Camera carrying the built-in Milky Way [`Skybox`].
+///
+/// Distinct from `bevy_ai_skybox`'s [`PrimarySkybox`]: the render-server
+/// skybox gate must ignore this cubemap or it never emits frames.
 #[derive(Component)]
-struct CinematicSkybox;
+pub(crate) struct CinematicSkybox;
 
 /// Strong handles retained across Earth activation cycles.
 #[derive(Resource, Clone)]

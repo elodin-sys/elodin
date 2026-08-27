@@ -45,6 +45,7 @@ pub struct World {
 }
 
 pub use impeller2_wkt::SensorCameraConfig;
+pub use impeller2_wkt::ThermalTagConfig;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
@@ -62,6 +63,8 @@ pub struct WorldMetadata {
     pub schematic: Option<String>,
     #[serde(default)]
     pub sensor_cameras: Vec<SensorCameraConfig>,
+    #[serde(default)]
+    pub thermal_tags: Vec<ThermalTagConfig>,
 }
 
 impl MetadataExt for World {}
@@ -80,6 +83,7 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             sensor_cameras: Vec::new(),
+            thermal_tags: Vec::new(),
         }
     }
 }

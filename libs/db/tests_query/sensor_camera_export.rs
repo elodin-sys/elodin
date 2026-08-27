@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::Cursor;
 
 use elodin_db::DB;
@@ -23,13 +22,14 @@ fn sensor_camera_config() -> SensorCameraConfig {
         rot_offset: [0.0; 3],
         format: "rgba".to_string(),
         effect: "normal".to_string(),
-        effect_params: HashMap::new(),
+        effect_params: serde_json::json!({}),
         create_frustum: false,
         show_ellipsoids: false,
         frustums_color: color(0.0, 1.0, 0.4, 0.4),
         projection_color: color(0.0, 1.0, 0.4, 0.1),
         frustums_thickness: 0.008,
         fps: 60.0,
+        ..Default::default()
     }
 }
 

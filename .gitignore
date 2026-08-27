@@ -54,6 +54,7 @@ testvids/
 *.log
 **/testdata/*
 screenlog*
+assets/terrains/*
 
 # macOS debug symbols
 *.dSYM/

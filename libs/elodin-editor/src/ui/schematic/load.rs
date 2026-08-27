@@ -445,6 +445,13 @@ impl LoadSchematicParams<'_, '_> {
         base_dir: Option<&Path>,
         window_assets: Option<&[SchematicWindow]>,
     ) {
+        if let Err(err) = impeller2_wkt::validate_single_cinematic_environment(
+            Some(schematic),
+            &self.sensor_camera_configs.0,
+        ) {
+            bevy::log::error!("{err}");
+            return;
+        }
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
 
@@ -1733,6 +1740,22 @@ pub fn apply_document_loaded(
     };
     pending.0 = false;
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
+}
+
+pub fn reject_mixed_cinematic_environment(
+    schematic: Res<CurrentSchematic>,
+    configs: Res<crate::sensor_camera::SensorCameraConfigs>,
+    mut logged: Local<bool>,
+) {
+    if *logged {
+        return;
+    }
+    if let Err(err) =
+        impeller2_wkt::validate_single_cinematic_environment(Some(&schematic.0), &configs.0)
+    {
+        bevy::log::error!("{err}");
+        *logged = true;
+    }
 }
 
 /// Spawns remote window sub-schematics once their off-thread fetch completes

@@ -1,121 +1,127 @@
-"""
-BDX Simulation System Composition
-
-Integrates all subsystems into a complete 6-DOF simulation.
-Following Section 8 of BDX_Simulation_Whitepaper.md.
-"""
+"""BDX system composition: package-driven plant in a rotating ECEF world."""
 
 from dataclasses import field
 
 import elodin as el
 import jax.numpy as jnp
 
-# Import all component types from the proper aero module
+from actuators import ControlCommands, ControlSurfaces, build_actuator_dynamics
 from aero import (
-    AngleOfAttack,
-    Sideslip,
-    DynamicPressure,
-    Mach,
     AeroCoefs,
     AeroForce,
-    Wind,
+    AeroValid,
+    AngleOfAttack,
+    DynamicPressure,
+    Mach,
+    Sideslip,
     VelocityBody,
-    compute_velocity_body,
-    compute_aero_angles,
-    dynamic_pressure_and_mach,
-    compute_aero_coefs,
-    aero_forces,
+    Wind,
     apply_aero_forces,
+    build_aero_coefs,
+    build_aero_forces,
+    build_aero_validity,
+    compute_aero_angles,
+    compute_velocity_body,
+    dynamic_pressure_and_mach,
 )
+from bdx_model import BdxModel
+from class_d_fallbacks import ClassDFallbacks
+from frames import frame_accel, gravity_accel
+from ground import build_ground_contact
 from propulsion import (
+    FuelFlow,
+    FuelMass,
     SpoolSpeed,
-    ThrottleCommand,
     Thrust,
+    ThrottleCommand,
+    build_apply_thrust,
+    build_fuel_integration,
+    build_mass_update,
+    build_spool_dynamics,
+    build_thrust_and_fuel_flow,
     extract_throttle_command,
-    spool_dynamics,
-    compute_thrust,
-    apply_thrust,
 )
-from actuators import (
-    ControlSurfaces,
-    ControlCommands,
-    actuator_dynamics,
-)
-from ground import ground_contact
+from scenario import Numerics, Scenario
+from telemetry import Geodetic, PosENU, build_geodetic_telemetry
 
 
 @el.dataclass
 class BDXJet(el.Archetype):
-    """
-    Complete BDX jet aircraft archetype combining all subsystems.
+    """BDX jet subsystem states (rigid-body states live in el.Body)."""
 
-    Components:
-    - Aerodynamics: alpha, beta, aero_coefs, aero_force, dynamic_pressure, mach, velocity_body
-    - Propulsion: spool_speed, throttle_command, thrust
-    - Actuators: control_surfaces, control_commands
-    - Environment: wind
-    """
-
-    # Aerodynamic states
-    velocity_body: VelocityBody = field(default_factory=lambda: jnp.array([70.0, 0.0, 0.0]))
+    velocity_body: VelocityBody = field(default_factory=lambda: jnp.zeros(3))
     alpha: AngleOfAttack = field(default_factory=lambda: jnp.float64(0.0))
-    beta: Sideslip = field(default_factory=lambda: jnp.float64(0.0))  # Added missing beta
-    dynamic_pressure: DynamicPressure = field(default_factory=lambda: jnp.float64(1.0))
+    beta: Sideslip = field(default_factory=lambda: jnp.float64(0.0))
+    dynamic_pressure: DynamicPressure = field(default_factory=lambda: jnp.float64(0.0))
     mach: Mach = field(default_factory=lambda: jnp.float64(0.0))
-    aero_coefs: AeroCoefs = field(default_factory=lambda: jnp.zeros(6))  # 6 coefficients now
+    aero_coefs: AeroCoefs = field(default_factory=lambda: jnp.zeros(6))
     aero_force: AeroForce = field(default_factory=el.SpatialForce)
+    aero_valid: AeroValid = field(default_factory=lambda: jnp.float64(1.0))
 
-    # Propulsion states
-    spool_speed: SpoolSpeed = field(default_factory=lambda: jnp.float64(0.3))
-    throttle_command: ThrottleCommand = field(default_factory=lambda: jnp.float64(0.3))
+    spool_speed: SpoolSpeed = field(default_factory=lambda: jnp.float64(0.0))
+    throttle_command: ThrottleCommand = field(default_factory=lambda: jnp.float64(0.0))
     thrust: Thrust = field(default_factory=lambda: jnp.float64(0.0))
+    fuel_mass: FuelMass = field(default_factory=lambda: jnp.float64(0.0))
+    fuel_flow: FuelFlow = field(default_factory=lambda: jnp.float64(0.0))
 
-    # Actuator states
     control_surfaces: ControlSurfaces = field(default_factory=lambda: jnp.zeros(3))
-    control_commands: ControlCommands = field(
-        default_factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.3])
-    )
+    control_commands: ControlCommands = field(default_factory=lambda: jnp.zeros(4))
 
-    # Environment
     wind: Wind = field(default_factory=lambda: jnp.zeros(3))
+    geodetic: Geodetic = field(default_factory=lambda: jnp.zeros(3))
+    pos_enu: PosENU = field(default_factory=lambda: jnp.zeros(3))
+
+
+def make_jet(scenario: Scenario) -> BDXJet:
+    init = scenario.initial
+    tas = scenario.tas_mps
+    alpha = init.alpha_rad
+    return BDXJet(
+        velocity_body=jnp.array([tas * jnp.cos(alpha), 0.0, -tas * jnp.sin(alpha)]),
+        alpha=jnp.float64(alpha),
+        spool_speed=jnp.float64(init.throttle),
+        throttle_command=jnp.float64(init.throttle),
+        fuel_mass=jnp.float64(init.fuel_kg),
+        control_surfaces=jnp.array([init.elevator_rad, 0.0, 0.0]),
+        control_commands=jnp.array([init.elevator_rad, 0.0, 0.0, init.throttle]),
+        wind=jnp.asarray(init.wind_ecef),
+    )
 
 
 @el.map
-def gravity(inertia: el.Inertia, force: el.Force) -> el.Force:
-    """Apply gravitational force (Z-up world frame)."""
-    return force + el.SpatialForce(linear=jnp.array([0.0, 0.0, -9.81]) * inertia.mass())
+def gravity_and_frame_forces(
+    force: el.Force, inertia: el.Inertia, pos: el.WorldPos, vel: el.WorldVel
+) -> el.Force:
+    """Point-mass gravitation plus Coriolis/centrifugal of the rotating ECEF frame."""
+    accel = gravity_accel(pos.linear()) + frame_accel(pos.linear(), vel.linear())
+    return force + el.SpatialForce(linear=accel * inertia.mass())
 
 
-def system() -> el.System:
-    """
-    Compose the complete BDX simulation system.
+def build_system(
+    model: BdxModel, fallbacks: ClassDFallbacks, scenario: Scenario, numerics: Numerics
+) -> el.System:
+    dt = numerics.dt
+    site = scenario.site
 
-    System graph (Section 8.4 of whitepaper):
-    1. Non-effectors: Compute derived quantities (angles, pressures, coefficients)
-    2. Effectors: Apply forces (gravity, thrust, aerodynamics)
-    3. Integration: 6-DOF rigid body dynamics
-    """
-
-    # Non-effector systems (compute derived quantities in dependency order)
     non_effectors = (
-        extract_throttle_command  # Extract throttle from control commands
-        | compute_velocity_body  # Transform world vel to body frame
-        | compute_aero_angles  # Calculate α, β
-        | dynamic_pressure_and_mach  # Calculate q̄, M
-        | actuator_dynamics  # Update control surface positions
-        | spool_dynamics  # Update engine spool speed
-        | compute_aero_coefs  # Calculate aerodynamic coefficients
-        | aero_forces  # Convert coefficients to forces/moments
-        | compute_thrust  # Calculate thrust from spool speed
+        extract_throttle_command
+        | compute_velocity_body
+        | compute_aero_angles
+        | dynamic_pressure_and_mach
+        | build_actuator_dynamics(fallbacks, dt)
+        | build_spool_dynamics(model, fallbacks, dt)
+        | build_aero_coefs(model, fallbacks)
+        | build_aero_validity(model)
+        | build_aero_forces(model)
+        | build_thrust_and_fuel_flow(model)
+        | build_fuel_integration(model, dt)
+        | build_mass_update(model, fallbacks)
+        | build_geodetic_telemetry(site.lat_deg, site.lon_deg, site.field_elevation_m)
     )
-
-    # Effector systems (apply forces to rigid body)
     effectors = (
-        gravity  # Apply gravitational force
-        | apply_thrust  # Apply propulsion force
-        | apply_aero_forces  # Apply aerodynamic forces
-        | ground_contact  # Apply ground contact forces
+        gravity_and_frame_forces
+        | build_apply_thrust(model)
+        | apply_aero_forces
+        | build_ground_contact(site.field_elevation_m)
     )
-
-    # Compose with 6-DOF integrator
     return non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImplicit)

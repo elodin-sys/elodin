@@ -14,8 +14,10 @@ use crate::terrain::{
     shaders::{load_terrain_shaders, InternalShaders},
     terrain::TerrainComponents,
     terrain_data::{
-        gpu_tile_atlas::GpuTileAtlas, gpu_tile_tree::GpuTileTree, tile_atlas::TileAtlas,
-        tile_tree::TileTree,
+        gpu_tile_atlas::GpuTileAtlas,
+        gpu_tile_tree::GpuTileTree,
+        tile_atlas::TileAtlas,
+        tile_tree::{TerrainViewPosition, TileTree},
     },
     terrain_view::TerrainViewComponents,
 };
@@ -64,6 +66,7 @@ impl Plugin for TerrainPlugin {
         // rather than a generic system.)
         app.init_resource::<InternalShaders>()
             .init_resource::<TerrainViewComponents<TileTree>>()
+            .init_resource::<TerrainViewComponents<TerrainViewPosition>>()
             .init_resource::<TerrainViewComponents<TerrainModelApproximation>>()
             .add_systems(
                 Last,

@@ -25,8 +25,8 @@ pub const TEXTURE_SIZE: u32 = 512;
 /// Atlas LOD depth for the planar path. LOD_COUNT=5 gives deepest LOD at
 /// 2^4 * TEXTURE_SIZE = 8192 px per terrain dim; for a 20-30 km region that
 /// resolves to ~2-4 m/px display, backed by Sentinel-2 z=14 source via
-/// OUTPUT_SIZE=4096. Default `atlas_size=1024` comfortably fits
-/// (4^5 - 1) / 3 = 341 total tiles.
+/// OUTPUT_SIZE=4096. The on-disk set is (4^5 - 1) / 3 = 341 tiles; the GPU
+/// atlas is sized by [`crate::terrain::terrain::planar_atlas_size`].
 pub const LOD_COUNT: u32 = 5;
 
 /// End-to-end scene plugin for planar terrain. Reads the active region's
@@ -67,10 +67,21 @@ impl Plugin for PlanarScenePlugin {
 /// uses, so the `preprocess` binary builds an atlas with matching scale +
 /// height bounds.
 pub fn terrain_config() -> TerrainConfig {
+    terrain_config_with_atlas(crate::terrain::terrain::planar_atlas_size)
+}
+
+/// Preprocess atlas: one layer per on-disk tile, not the runtime working set.
+pub fn preprocess_terrain_config() -> TerrainConfig {
+    terrain_config_with_atlas(crate::terrain::terrain::planar_preprocess_atlas_size)
+}
+
+fn terrain_config_with_atlas(atlas_size: fn(u32) -> u32) -> TerrainConfig {
     let manifest = RegionManifest::load_or_default();
     let terrain_size = manifest.terrain_size_m();
     let height = manifest.height_m();
 
+    let path = planar_path();
+    let dataset_tiles = TileAtlas::load_tile_config(&path).len() as u32;
     TerrainConfig {
         lod_count: LOD_COUNT,
         // y=0 sits at min_height_m on the ground. Anchor the centre of the
@@ -81,7 +92,8 @@ pub fn terrain_config() -> TerrainConfig {
             0.0,
             height,
         ),
-        path: planar_path(),
+        path,
+        atlas_size: atlas_size(dataset_tiles),
         ..default()
     }
     .add_attachment(AttachmentConfig {

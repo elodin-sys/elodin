@@ -15,6 +15,7 @@
 #   ./scripts/render_region.sh brienz
 #   ./scripts/render_region.sh death_valley
 #   ./scripts/render_region.sh mojave_desert
+#   ./scripts/render_region.sh mojave_rc_field
 #
 # Environment overrides:
 #   SCREENSHOT_DELAY            (default: 8)
@@ -37,7 +38,7 @@ cd "$(dirname "$0")/.."
 
 if [ "${1:-}" = "" ]; then
     echo "usage: $0 <region>" >&2
-    echo "  known regions: brienz, death_valley, mojave_desert" >&2
+    echo "  known regions: brienz, death_valley, mojave_desert, mojave_rc_field" >&2
     exit 2
 fi
 region="$1"

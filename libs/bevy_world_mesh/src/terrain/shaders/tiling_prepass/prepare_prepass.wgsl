@@ -25,10 +25,13 @@ fn prepare_root() {
 @compute @workgroup_size(1, 1, 1)
 fn prepare_next() {
     if (parameters.counter == 1) {
-        parameters.tile_count = u32(atomicExchange(&parameters.child_index, i32(view_config.tile_count - 1u)));
+        let raw = atomicExchange(&parameters.child_index, i32(view_config.tile_count - 1u));
+        parameters.tile_count = min(u32(max(raw, 0)), view_config.tile_count);
     }
     else {
-        parameters.tile_count = view_config.tile_count - 1u - u32(atomicExchange(&parameters.child_index, 0));
+        let raw = atomicExchange(&parameters.child_index, 0);
+        let used = i32(view_config.tile_count) - 1 - raw;
+        parameters.tile_count = min(u32(max(used, 0)), view_config.tile_count);
     }
 
     parameters.counter = -parameters.counter;
@@ -37,7 +40,7 @@ fn prepare_next() {
 
 @compute @workgroup_size(1, 1, 1)
 fn prepare_render() {
-    let tile_count = u32(atomicLoad(&parameters.final_index));
+    let tile_count = min(u32(max(atomicLoad(&parameters.final_index), 0)), view_config.tile_count);
     let vertex_count = view_config.vertices_per_tile * tile_count;
 
     indirect_buffer.workgroup_count = vec3<u32>(vertex_count, 1u, 0u);

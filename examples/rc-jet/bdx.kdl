@@ -1,0 +1,116 @@
+// BDX RC jet ECEF scene over the Mojave RC field.
+//
+// Site (baked): pilot pad 35.350664 N, 117.809027 W, ellipsoid height
+// 589.274 m — also the mojave_rc_field region center, so ENU east/north
+// are zero. Physics uses that ellipsoid height; world_mesh +Z (below)
+// lifts the planar DEM onto that pad. Chase / TGT / top-down
+// ECEF offsets keep the same local-ENU geometry as the Death Valley
+// scene at heading 350°.
+//
+// Cinematic Earth lives on `world.sensor_camera(..., cinematic=True)`
+// (render-server FPV), not on these viewports. The Boson-style LWIR camera
+// uses this terrain through a normal off-screen view plus its final sensor pass.
+
+coordinate frame="ECEF" lat=35.350664 lon=-117.809027 alt=589.274
+
+timeline follow_latest=#true range="last_30s"
+telemetry_mode #true
+
+// Planar TerrainModel: y=0 at region min (450 m), then Y -= 0.4*(max-min)
+// = 700 m. Pad DEM ≈ 621.5 m orthometric, so
+// tz = 700 - (621.5 - 450) ≈ 528 puts the mesh on the ENU origin
+// (physics ellipsoid 589.274 m). Align surfaces; do not add the ~32 m geoid.
+world_mesh "mojave_rc_field" frame="ENU" translate="(0.000, 0.000, 528.000)"
+
+tabs {
+    hsplit name="Main View" {
+        vsplit share=0.4 {
+            // ECEF pose: the gauge derives the local vertical from the
+            // vehicle's own position (ellipsoid normal).
+            horizon_gauge "bdx.world_pos" name="ADI" share=3.0
+            graph "bdx.alpha" name="Angle of Attack (rad)"
+            graph "bdx.aero_valid" name="Aero Validity Flag"
+        }
+        viewport name=Chase near=1.0 pos="bdx.world_pos.translate_world(-3.128, -11.885, -10.827)" look_at="bdx.world_pos.translate_world(-0.087, 2.067, 5.976)" up="(-0.381, -0.721, 0.578)" show_grid=#false active=#true
+        vsplit share=0.4 {
+            viewport name=TGTViewport pos="target.world_pos.translate_world(1.078, -0.099, 0.931)" look_at="bdx.world_pos" show_grid=#false
+            viewport name=FPVViewport pos="bdx.world_pos.translate(1,0,0.1)" look_at="bdx.world_pos.translate(2,0,0.1)" up="bdx.world_pos.direction(0,0,1)" show_grid=#false
+            sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
+            sensor_view "bdx.ir_cam" name="LWIR (Boson+ 640)"
+        }
+    }
+    vsplit name="Flight Data" {
+        hsplit {
+            graph "bdx.velocity_body" name="Body Velocity (m/s)"
+            graph "bdx.geodetic.alt_m" name="Geodetic Altitude (m)"
+        }
+        hsplit {
+            graph "bdx.control_surfaces" name="Control Surfaces (rad)"
+            graph "bdx.dynamic_pressure, bdx.mach" name="Dynamic Pressure / Mach"
+        }
+    }
+    vsplit name="Propulsion" {
+        hsplit {
+            graph "bdx.thrust" name="Thrust (N)"
+            graph "bdx.spool_speed" name="Effective Throttle (spool)"
+        }
+        hsplit {
+            graph "bdx.fuel_mass" name="Fuel Mass (kg)"
+            graph "bdx.fuel_flow" name="Fuel Flow (kg/s)"
+        }
+    }
+    vsplit name="Control Input" {
+        graph "bdx.control_commands" name="Control Commands (rad/normalized)"
+        graph "bdx.control_surfaces" name="Control Surfaces (rad)"
+    }
+    vsplit name="Aerodynamics" {
+        hsplit {
+            graph "bdx.alpha" name="Angle of Attack (rad)"
+            graph "bdx.beta" name="Sideslip (rad)"
+        }
+        hsplit {
+            graph "bdx.aero_coefs.CL, bdx.aero_coefs.CD" name="CL, CD"
+            graph "bdx.aero_coefs.Cm" name="Pitch Moment Cm"
+        }
+    }
+    hsplit name="Navigation" {
+        viewport name="Top-Down View" pos="bdx.world_pos.translate_world(-57.076, -108.214, 86.787)" look_at="bdx.world_pos" up="(0.270, 0.512, 0.816)" fov=60.0 show_grid=#false
+        query_plot name="Ground Track (ENU)" query="SELECT bdx_pos_enu.bdx_pos_enu[1], bdx_pos_enu.bdx_pos_enu[2] FROM bdx_pos_enu" type="sql" mode="xy" x_label="East (m)" y_label="North (m)" auto_refresh=#true refresh_interval=500 {
+            color cyan
+        }
+    }
+}
+
+// Package render mesh: already Elodin body (X forward, Y left, Z up, CG
+// origin). The editor always lifts glTF Y-up with Rx(+90°); this Rx(-90°)
+// cancels that so a Z-up GLB is not rolled onto its side. Do not rewrite
+// the hashed package GLB — assets/bdx.glb is hash-checked by the tests.
+object_3d bdx.world_pos {
+    glb path="bdx.glb" rotate="(-90, 0, 0)"
+    icon builtin="flight_takeoff" {
+        visibility_range min=50.0 fade_distance=50.0
+        color 76 175 80
+    }
+}
+
+object_3d target.world_pos {
+    glb path="edu-450-v2-drone.glb" scale=10.0 
+    icon builtin="adjust" {
+        visibility_range min=50.0 fade_distance=50.0
+        color 244 67 54
+    }
+}
+
+vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" show_name=#true body_frame=#true {
+   color red 150
+}
+vector_arrow "(0, 1, 0)" origin="bdx.world_pos" scale=1.0 name="Left (Y)" show_name=#true body_frame=#true {
+   color green 150
+}
+vector_arrow "(0, 0, 1)" origin="bdx.world_pos" scale=1.0 name="Up (Z)" show_name=#true body_frame=#true {
+   color blue 150
+}
+
+line_3d bdx.world_pos line_width=3.0 perspective=#false {
+    color yolk
+}

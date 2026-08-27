@@ -52,30 +52,60 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0)` -> None
+- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)` -> None
 
     Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every `1 / fps` µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with `ctx.read_msg("entity.name", timestamp=...)`.
 
     - `entity` : [elodin.EntityId], the entity the camera is attached to.
     - `name` : `string`, the camera name. Combined with the entity name to form the full identifier (e.g., entity `"drone"` + name `"scene_cam"` → `"drone.scene_cam"`).
-    - `width` : `int`, frame width in pixels.
-    - `height` : `int`, frame height in pixels.
-    - `fov` : `float`, vertical field of view in degrees, defaults to `90.0`.
+    - `width` : `int | None`, frame width in pixels. Required unless supplied by `camera_model`.
+    - `height` : `int | None`, frame height in pixels. Required unless supplied by `camera_model`.
+    - `fov` : `float | None`, vertical field of view in degrees. Defaults to `90.0` without a model. Mutually exclusive with `lens_hfov`.
     - `near` : `float`, near clipping plane, defaults to `0.01`.
     - `far` : `float`, far clipping plane, defaults to `1000.0`.
     - `pos_offset` : `list[float]`, body-frame translation from the entity origin in metres, defaults to `[0, 0, 0]`. Applied first.
     - `rot_offset` : `list[float]`, body-frame rotation as `[roll, pitch, yaw]` in **degrees** (intrinsic X/Y/Z, aerospace convention), defaults to `[0, 0, 0]` (camera looks along body +X with body +Z as up). Applied around the camera's own axes after `pos_offset` and inherits the entity's attitude — when the host banks, the camera image banks with it.
-    - `format` : `string`, pixel format, defaults to `"rgba"`.
-    - `effect` : `string`, GPU post-process effect: `"normal"`, `"thermal"`, `"night_vision"`, or `"depth"`. Defaults to `"normal"`.
-    - `effect_params` : `dict`, effect-specific parameters (e.g., `{"contrast": 1.5, "noise_sigma": 0.02}` for thermal).
+    - `format` : `string`, output pixel format. Currently `"rgba"` (RGBA8) only.
+    - `effect` : `string`, final GPU sensor-output effect: `"normal"`, `"thermal"`, `"night_vision"`, `"depth"`, or `"lwir"`. Defaults to `"normal"`. `"depth"` uses real linearized camera depth.
+    - `effect_params` : `dict`, effect-specific nested parameters. LWIR supports `palette`, `agc`, `dde`, `mtf_blur_px`, detector noise, scene temperatures, atmospheric transmission, and `sky_offset_dn` (cosmetic sky black level). Auto AGC adapts from the scene temperature statistics with sky masked out and freezes on sky-only views.
+    - `camera_model` : `string | None`, calibrated camera preset. `"boson640p"` supplies 640×512, 60 Hz, the Boson+ detector defaults, and an 18° horizontal lens.
+    - `lens_hfov` : `float | None`, physical horizontal field of view in degrees. Converted to vertical `fov` using the resolved image aspect ratio. Mutually exclusive with `fov`.
     - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
-    - `fps` : `float`, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to `30.0`.
+    - `fps` : `float | None`, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to the camera-model rate, or `30.0` without a model.
+    - `cinematic` : `bool`, same meaning as KDL `viewport cinematic=#true`. When true, the sibling render-server loads the cinematic Earth stack for this camera. Defaults to `False`.
+    - `ev100` : `float | None`, camera exposure. With `cinematic=True` the default is `13.5`. Requires `cinematic=True`.
+    - `bloom` : `dict | None`, viewport bloom settings (`preset`, `intensity`, `threshold`, `threshold_softness`). `None` with `cinematic=True` uses the cinematic preset. Requires `cinematic=True`.
+    - `environment` : `dict | None`, schematic `environment { }` (`sun`, `ambient_scale`, `sky_color`, `atmosphere`, `earth`). `earth` may be `True` for the house look. Omitted with `cinematic=True` implies Earth, a 100 klx sun, and ambient `0.05`. Requires `cinematic=True`.
+
+    At most one cinematic environment owner is allowed: a KDL `viewport cinematic=#true` **or** `sensor_camera(cinematic=True)`, never both, never two of either. Mixing them raises `ValueError` before the GPU starts.
 
     The camera transform follows the entity as a rigid body: as the entity moves and rotates, the camera mount position and orientation rotate with it in body frame.
 
     {% alert(kind="notice") %}
     Frames render continuously and are pushed to the DB automatically — there is no per-call render trigger. To simulate camera latency, read with a timestamp offset: `ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)` returns the frame as it would have appeared 33 ms ago.
     {% end %}
+
+- `thermal_tag(entity, temperature_c, emissivity=1.0)` -> None
+
+    Assign an apparent LWIR surface temperature to an entity's rendered mesh. LWIR sensor cameras render tagged entities through a temperature mask, allowing an object's thermal polarity to differ from its visible color.
+    - `entity` : [elodin.EntityId], the entity whose `object_3d` visual is tagged.
+    - `temperature_c` : `float`, apparent surface temperature in degrees Celsius.
+    - `emissivity` : `float`, value from `0.0` to `1.0`. Defaults to `1.0`.
+
+    ```python
+    world.thermal_tag(target_drone, temperature_c=18.0, emissivity=0.92)
+    world.sensor_camera(
+        entity=aircraft,
+        name="ir_cam",
+        camera_model="boson640p",
+        lens_hfov=18.0,
+        effect="lwir",
+        effect_params={
+            "palette": "white_hot",
+            "agc": {"mode": "auto", "low": 0.01, "high": 0.99},
+        },
+    )
+    ```
 
 - `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend)` -> None
 

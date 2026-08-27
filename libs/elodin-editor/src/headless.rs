@@ -41,7 +41,8 @@ use impeller2_wkt::{CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schem
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, set_cameras_active, set_readback_armed,
+    SensorCamerasSpawned, TEMP_MAP_SUFFIX, set_cameras_active, set_readback_armed,
+    temp_map_msg_name, update_auto_agc,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
@@ -116,10 +117,17 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
-        app.add_plugins(
-            crate::plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin,
-        );
+        {
+            crate::register_earth_embedded_assets(app);
+            crate::register_ibl_embedded_assets(app);
+            app.add_plugins(bevy_hanabi::HanabiPlugin);
+            app.add_plugins(
+                crate::plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin,
+            );
+            app.add_plugins(crate::plugins::cinematic_earth::CinematicEarthPlugin);
+        }
         app.add_plugins(GeoFramePlugin {
             apply_transforms: false,
             ..default()
@@ -150,6 +158,11 @@ impl Plugin for HeadlessEditorPlugin {
                 .in_set(PositionSync),
         )
         .add_systems(Startup, setup_headless_lighting)
+        .add_systems(Update, disable_headless_fallback_for_cinematic)
+        .add_systems(
+            Update,
+            apply_cinematic_sensor_environment.after(load_headless_scene),
+        )
         .init_resource::<crate::EqlContext>()
         .init_resource::<crate::Coordinate>()
         .init_resource::<crate::SyncedObject3d>()
@@ -190,9 +203,13 @@ impl Plugin for HeadlessEditorPlugin {
 // Scene loading
 // ---------------------------------------------------------------------------
 
+#[derive(Component)]
+struct HeadlessFallbackLight;
+
 fn setup_headless_lighting(mut commands: Commands) {
     commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 256 });
     commands.spawn((
+        HeadlessFallbackLight,
         DirectionalLight {
             illuminance: 10_000.0,
             shadow_maps_enabled: false,
@@ -200,6 +217,32 @@ fn setup_headless_lighting(mut commands: Commands) {
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, 0.4, 0.0)),
     ));
+}
+
+fn disable_headless_fallback_for_cinematic(
+    configs: Res<SensorCameraConfigs>,
+    lights: Query<Entity, With<HeadlessFallbackLight>>,
+    mut commands: Commands,
+) {
+    if !configs.0.iter().any(|config| config.cinematic) {
+        return;
+    }
+    for entity in &lights {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn apply_cinematic_sensor_environment(
+    configs: Res<SensorCameraConfigs>,
+    mut scene_environment: ResMut<crate::plugins::scene_environment::SceneEnvironment>,
+) {
+    let Some(camera) = configs.0.iter().find(|config| config.cinematic) else {
+        return;
+    };
+    let desired = camera.resolved_environment();
+    if scene_environment.0 != desired {
+        scene_environment.0 = desired;
+    }
 }
 
 /// Loads the active schematic's scene and keeps it in sync with the DB.
@@ -224,6 +267,8 @@ fn load_headless_scene(
     connection_addr: Option<Res<ConnectionAddr>>,
     mut geo_context: ResMut<GeoContext>,
     mut coordinate: ResMut<crate::Coordinate>,
+    mut scene_environment: ResMut<crate::plugins::scene_environment::SceneEnvironment>,
+    configs: Res<SensorCameraConfigs>,
 ) {
     // Poll an in-flight fetch. The blocking HTTP request runs on the IO pool
     // (RFD #724): a slow/unreachable DB Asset Server never freezes the app.
@@ -256,6 +301,7 @@ fn load_headless_scene(
         let Some(key) = config.schematic_active().map(str::to_owned) else {
             // The active pointer was cleared: tear down the loaded scene so the
             // renderer doesn't keep a schematic the DB no longer designates.
+            scene_environment.0 = None;
             if let Some(previous) = pending.loaded.take() {
                 despawn_headless_scene(&mut commands, &previous);
                 schematic_skybox.0 = None;
@@ -299,6 +345,13 @@ fn load_headless_scene(
         pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
         return;
     };
+    if let Err(err) =
+        impeller2_wkt::validate_single_cinematic_environment(Some(&schematic), &configs.0)
+    {
+        tracing::error!("{err}");
+        pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
+        return;
+    };
     // Parse succeeded: replace the previous scene with the new one.
     if let Some(previous) = pending.loaded.take() {
         despawn_headless_scene(&mut commands, &previous);
@@ -307,6 +360,7 @@ fn load_headless_scene(
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
+    scene_environment.0 = schematic.environment.clone();
 
     geo_context.origin = crate::ui::schematic::schematic_geo_origin(&schematic);
 
@@ -427,15 +481,36 @@ impl Default for HeadlessSkyboxRenderGate {
     }
 }
 
+type AiSkyboxCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static PrimarySkybox>,
+        Option<&'static Skybox>,
+        Has<crate::plugins::cinematic_earth::CinematicSkybox>,
+    ),
+    With<Camera3d>,
+>;
+
+fn is_ai_skybox_target(
+    apply_to_all_cameras: bool,
+    has_primary: bool,
+    has_cinematic_skybox: bool,
+) -> bool {
+    !has_cinematic_skybox && (apply_to_all_cameras || has_primary)
+}
+
 fn headless_skybox_applied(
     desired: &Option<String>,
     cache: &SkyboxCache,
     settings: &SkyboxAssetSettings,
-    cameras: &Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
+    cameras: &AiSkyboxCameraQuery,
 ) -> bool {
     let targets: Vec<_> = cameras
         .iter()
-        .filter(|(primary, _)| settings.apply_to_all_cameras || primary.is_some())
+        .filter(|(primary, _, cinematic)| {
+            is_ai_skybox_target(settings.apply_to_all_cameras, primary.is_some(), *cinematic)
+        })
         .collect();
 
     if targets.is_empty() {
@@ -446,10 +521,10 @@ fn headless_skybox_applied(
     }
 
     match desired {
-        None => targets.iter().all(|(_, skybox)| skybox.is_none()),
+        None => targets.iter().all(|(_, skybox, _)| skybox.is_none()),
         Some(name) => {
             cache.active.as_deref() == Some(name.as_str())
-                && targets.iter().all(|(_, skybox)| skybox.is_some())
+                && targets.iter().all(|(_, skybox, _)| skybox.is_some())
         }
     }
 }
@@ -467,8 +542,7 @@ struct SyncHeadlessSkyboxParams<'w, 's> {
     config: Res<'w, DbConfig>,
     cache: Res<'w, SkyboxCache>,
     settings: Res<'w, SkyboxAssetSettings>,
-    cameras:
-        Query<'w, 's, (Option<&'static PrimarySkybox>, Option<&'static Skybox>), With<Camera3d>>,
+    cameras: AiSkyboxCameraQuery<'w, 's>,
     render_gate: ResMut<'w, HeadlessSkyboxRenderGate>,
     skybox_writer: MessageWriter<'w, SetActiveSkybox>,
     failed: MessageReader<'w, 's, SkyboxFailed>,
@@ -810,6 +884,19 @@ fn render_server_runner(mut app: App) -> AppExit {
 fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
 
+    // Due DB frames plus the AGC temperature maps of due LWIR cameras.
+    let mut expected_names = due_names.to_vec();
+    {
+        let configs = app.world().resource::<SensorCameraConfigs>();
+        expected_names.extend(
+            configs
+                .0
+                .iter()
+                .filter(|config| config.effect == "lwir" && due_names.contains(&config.camera_name))
+                .map(|config| temp_map_msg_name(&config.camera_name)),
+        );
+    }
+
     // Drain any stale frames from the previous pass before arming.
     drain_stale_frames(app);
     set_cameras_active(app.world_mut(), due_names, true);
@@ -818,14 +905,14 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     // The render-graph + GPU readback runs inside `app.update()`.
     run_headless_update(app);
 
-    let mut frames = collect_frames(app, due_names);
+    let mut frames = collect_frames(app, &expected_names);
     // The readback ping-pong may need one more update before all frames are
     // mapped on slow GPUs / first runs after a warm reload. We deliberately
     // leave the cameras active for this retry — a rare second render is
     // cheaper than wiring up readback-only updates.
-    if frames.len() < due_names.len() {
+    if frames.len() < expected_names.len() {
         run_headless_update(app);
-        let more = collect_frames(app, due_names);
+        let more = collect_frames(app, &expected_names);
         for (name, data) in more {
             if !frames.iter().any(|(n, _)| n == &name) {
                 frames.push((name, data));
@@ -833,7 +920,11 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
         }
     }
 
-    push_frames_to_db(app, sim_ts, &frames);
+    let (temp_frames, db_frames): (Vec<_>, Vec<_>) = frames
+        .into_iter()
+        .partition(|(name, _)| name.ends_with(TEMP_MAP_SUFFIX));
+    update_auto_agc(app.world_mut(), &temp_frames);
+    push_frames_to_db(app, sim_ts, &db_frames);
     set_readback_armed(app.world_mut(), due_names, false);
     set_cameras_active(app.world_mut(), due_names, false);
 }
@@ -895,4 +986,16 @@ fn collect_frames(app: &App, camera_names: &[String]) -> Vec<(String, Vec<u8>)> 
         .iter()
         .filter_map(|name| frames_map.remove(name).map(|bytes| (name.clone(), bytes)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_ai_skybox_target;
+
+    #[test]
+    fn cinematic_earth_skybox_is_not_an_ai_skybox_target() {
+        assert!(!is_ai_skybox_target(false, true, true));
+        assert!(is_ai_skybox_target(false, true, false));
+        assert!(!is_ai_skybox_target(false, false, false));
+    }
 }

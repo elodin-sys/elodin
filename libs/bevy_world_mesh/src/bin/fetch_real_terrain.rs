@@ -15,6 +15,7 @@
 //   cargo run --release --bin fetch_real_terrain -- --region brienz
 //   cargo run --release --bin fetch_real_terrain -- --region death_valley
 //   cargo run --release --bin fetch_real_terrain -- --region mojave_desert
+//   cargo run --release --bin fetch_real_terrain -- --region mojave_rc_field
 
 use anyhow::{anyhow, Context, Result};
 use bevy_world_mesh::fetch::{

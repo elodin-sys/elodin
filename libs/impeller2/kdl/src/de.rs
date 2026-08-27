@@ -2655,12 +2655,7 @@ timeline
 
     #[test]
     fn test_parse_rc_jet_schematic_has_no_skybox() {
-        let kdl = include_str!("../../../../examples/rc-jet/main.py");
-        let kdl = kdl
-            .split("world.schematic(")
-            .nth(1)
-            .and_then(|rest| rest.split("\"\"\"").nth(1))
-            .expect("rc-jet schematic string");
+        let kdl = include_str!("../../../../examples/rc-jet/bdx.kdl");
         let schematic = parse_schematic(kdl).expect("rc-jet schematic should parse");
         assert!(
             schematic.skybox.is_none(),
@@ -2889,6 +2884,42 @@ hsplit {
         assert!(!aux.hdr);
         assert_eq!(cine.fov, 45.0);
         assert_eq!(aux.fov, 45.0);
+    }
+
+    #[test]
+    fn falcon9_style_cinematic_viewport_is_a_single_owner() {
+        let schematic = parse_schematic(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true ev100=13.5
+"#,
+        )
+        .unwrap();
+        impeller2_wkt::validate_single_cinematic_environment(Some(&schematic), &[]).unwrap();
+    }
+
+    #[test]
+    fn cinematic_viewport_plus_cinematic_sensor_is_rejected() {
+        let schematic = parse_schematic(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true
+"#,
+        )
+        .unwrap();
+        let err = impeller2_wkt::validate_single_cinematic_environment(
+            Some(&schematic),
+            &[impeller2_wkt::SensorCameraConfig {
+                camera_name: "bdx.fpv_cam".into(),
+                cinematic: true,
+                ..Default::default()
+            }],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Chase"), "{msg}");
+        assert!(msg.contains("bdx.fpv_cam"), "{msg}");
+        assert!(msg.contains("Bevy 0.19"), "{msg}");
     }
 
     #[test]
