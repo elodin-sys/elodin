@@ -67,6 +67,11 @@
     # uncomment for debug mode (slower)
     # CARGO_PROFILE = "dev";
     # CARGO_PROFILE_RELEASE_DEBUG = true;
+
+    meta = {
+      description = "Elodin CLI and editor";
+      mainProgram = "elodin";
+    };
   };
 in
   bin
