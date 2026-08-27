@@ -1,7 +1,7 @@
 use crate::terrain::{
     math::{Coordinate, TerrainModel, TileCoordinate},
     terrain_data::{sample_height, tile_atlas::TileAtlas, INVALID_ATLAS_INDEX, INVALID_LOD},
-    terrain_view::{TerrainViewComponents, TerrainViewConfig},
+    terrain_view::{geometry_tile_capacity, TerrainViewComponents, TerrainViewConfig},
     util::inverse_mix,
 };
 use bevy::{
@@ -149,7 +149,11 @@ impl TileTree {
         Self {
             lod_count: tile_atlas.lod_count,
             tree_size: view_config.tree_size,
-            geometry_tile_count: view_config.geometry_tile_count,
+            geometry_tile_count: geometry_tile_capacity(
+                view_config.tree_size,
+                tile_atlas.lod_count,
+                tile_atlas.model.side_count(),
+            ),
             refinement_count: view_config.refinement_count,
             grid_size: view_config.grid_size,
             morph_distance: view_config.morph_distance * scale,
@@ -179,6 +183,20 @@ impl TileTree {
             )),
             released_tiles: default(),
             requested_tiles: default(),
+        }
+    }
+
+    /// Drop this tree's atlas holds. Despawned views never emit `Released`.
+    pub fn disconnect(&mut self, tile_atlas: &mut TileAtlas) {
+        self.requested_tiles.clear();
+        for tile in self.tiles.iter_mut() {
+            if tile.state == RequestState::Requested {
+                tile.state = RequestState::Released;
+                self.released_tiles.push(tile.coordinate);
+            }
+        }
+        for coordinate in self.released_tiles.drain(..) {
+            tile_atlas.state.release_tile(coordinate);
         }
     }
 
@@ -442,5 +460,47 @@ impl TileTree {
             tile_tree.approximate_height =
                 sample_height(tile_tree, tile_atlas, tile_tree.view_world_position);
         }
+    }
+
+    #[cfg(test)]
+    fn mark_requested_for_test(&mut self, slot: usize, coordinate: TileCoordinate) {
+        self.tiles[[0, 0, 0, slot]] = TileState {
+            coordinate,
+            state: RequestState::Requested,
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terrain::math::TerrainModel;
+    use crate::terrain::terrain::TerrainConfig;
+    use bevy::math::DVec3;
+
+    fn coord(x: u32) -> TileCoordinate {
+        TileCoordinate::new(0, 0, x, 0)
+    }
+
+    #[test]
+    fn disconnect_releases_atlas_and_pending_holds() {
+        let mut atlas = TileAtlas::new(&TerrainConfig {
+            atlas_size: 1,
+            lod_count: 1,
+            model: TerrainModel::planar(DVec3::ZERO, 1.0, 0.0, 1.0),
+            ..Default::default()
+        });
+        atlas.state.existing_tiles.extend([coord(0), coord(1)]);
+        atlas.state.request_tile(coord(0));
+        atlas.state.request_tile(coord(1));
+        assert_eq!(atlas.state.pending_count(coord(1)), 1);
+
+        let mut tree = TileTree::new(&atlas, &TerrainViewConfig::default());
+        tree.mark_requested_for_test(0, coord(0));
+        tree.mark_requested_for_test(1, coord(1));
+        tree.disconnect(&mut atlas);
+
+        assert_eq!(atlas.state.request_count(coord(0)), 0);
+        assert_eq!(atlas.state.pending_count(coord(1)), 0);
     }
 }
