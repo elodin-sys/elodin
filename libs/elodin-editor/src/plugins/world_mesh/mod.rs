@@ -2,6 +2,7 @@ use bevy::{
     ecs::query::Or,
     math::{DQuat, DVec3},
     pbr::wireframe::{Wireframe, WireframeColor},
+    platform::collections::HashSet,
     prelude::*,
 };
 use bevy_geo_frames::{GeoContext, GeoPosition, GeoRotation, OrDefault};
@@ -511,19 +512,32 @@ fn spawn_globe_fallback(
 /// Only schematic viewports and sensor cameras participate — graph
 /// `MainCamera`s are excluded by [`WorldMeshViewFilter`].
 fn sync_terrain_view_components(
-    terrains: Query<(Entity, &TileAtlas), With<WorldMeshTerrain>>,
+    mut terrains: Query<(Entity, &mut TileAtlas), With<WorldMeshTerrain>>,
     cameras: Query<Entity, WorldMeshViewFilter>,
     mut tile_trees: ResMut<TerrainViewComponents<TileTree>>,
 ) {
-    tile_trees
-        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
+    let live_terrains: HashSet<Entity> = terrains.iter().map(|(terrain, _)| terrain).collect();
+    let live_views: HashSet<Entity> = cameras.iter().collect();
+    let dropped: Vec<(Entity, Entity)> = tile_trees
+        .keys()
+        .copied()
+        .filter(|(terrain, view)| !live_terrains.contains(terrain) || !live_views.contains(view))
+        .collect();
+
+    for key in dropped {
+        if let Some(mut tree) = tile_trees.remove(&key) {
+            if let Ok((_, mut tile_atlas)) = terrains.get_mut(key.0) {
+                tree.disconnect(&mut tile_atlas);
+            }
+        }
+    }
 
     let view_config = TerrainViewConfig::default();
-    for (terrain, tile_atlas) in &terrains {
+    for (terrain, tile_atlas) in &mut terrains {
         for view in &cameras {
             tile_trees
                 .entry((terrain, view))
-                .or_insert_with(|| TileTree::new(tile_atlas, &view_config));
+                .or_insert_with(|| TileTree::new(&tile_atlas, &view_config));
         }
     }
 }
@@ -739,6 +753,41 @@ mod tests {
         assert!(trees.get(&(renderer, sensor)).is_some());
         assert!(trees.get(&(renderer, graph_cam)).is_none());
         assert_eq!(trees.len(), 2);
+    }
+
+    #[test]
+    fn sync_drops_trees_for_despawned_viewports() {
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        app.init_resource::<TerrainViewComponents<TileTree>>();
+        let viewport = app
+            .world_mut()
+            .spawn((MainCamera, test_viewport_config()))
+            .id();
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<TerrainViewComponents<TileTree>>()
+                .get(&(renderer, viewport))
+                .is_some()
+        );
+
+        app.world_mut().entity_mut(viewport).despawn();
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<TerrainViewComponents<TileTree>>()
+                .get(&(renderer, viewport))
+                .is_none(),
+            "despawned viewports must drop their terrain tree"
+        );
     }
 
     #[test]

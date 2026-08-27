@@ -64,19 +64,24 @@ impl Default for TerrainViewConfig {
 }
 
 /// STORAGE slots for the refine/draw tile lists (two buffers of
-/// `count * 16` bytes per view). `1_000_000` was ~15.26 MiB each; a
-/// clipmap of `tree_size² × lods × sides` with leaf headroom covers the
-/// refine fan-out.
+/// `count * 16` bytes per view). `1_000_000` was ~15.26 MiB each.
+///
+/// The data clipmap is `tree_size² × lods × sides`. GPU `refine_tiles`
+/// can 4× that working set each step, so the buffer also holds one
+/// generation of `4^REFINE_STEPS` children per side.
 pub fn geometry_tile_capacity(tree_size: u32, lod_count: u32, side_count: u32) -> u32 {
     const LEAF_HEADROOM: u32 = 16;
+    const REFINE_STEPS: u32 = 8;
     const MIN: u32 = 4096;
-    const MAX: u32 = 65_536;
-    tree_size
+    const MAX: u32 = 262_144;
+    let sides = side_count.max(1);
+    let clipmap = tree_size
         .saturating_mul(tree_size)
         .saturating_mul(lod_count.max(1))
-        .saturating_mul(side_count.max(1))
-        .saturating_mul(LEAF_HEADROOM)
-        .clamp(MIN, MAX)
+        .saturating_mul(sides)
+        .saturating_mul(LEAF_HEADROOM);
+    let refine = sides.saturating_mul(1 << (2 * REFINE_STEPS));
+    clipmap.max(refine).clamp(MIN, MAX)
 }
 
 #[cfg(test)]
@@ -84,18 +89,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn geometry_tile_capacity_fits_a_planar_clipmap() {
-        assert_eq!(geometry_tile_capacity(8, 5, 1), 8 * 8 * 5 * 16);
+    fn geometry_tile_capacity_fits_planar_refine() {
+        assert_eq!(geometry_tile_capacity(8, 5, 1), 65_536);
     }
 
     #[test]
-    fn geometry_tile_capacity_fits_a_globe_clipmap() {
-        assert_eq!(geometry_tile_capacity(8, 5, 6), 8 * 8 * 5 * 6 * 16);
+    fn geometry_tile_capacity_fits_globe_refine() {
+        assert_eq!(geometry_tile_capacity(8, 5, 6), 262_144);
     }
 
     #[test]
     fn geometry_tile_capacity_clamps() {
-        assert_eq!(geometry_tile_capacity(1, 1, 1), 4096);
-        assert_eq!(geometry_tile_capacity(32, 16, 6), 65_536);
+        assert_eq!(geometry_tile_capacity(1, 1, 1), 65_536);
+        assert_eq!(geometry_tile_capacity(32, 16, 6), 262_144);
     }
 }

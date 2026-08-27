@@ -197,9 +197,13 @@ impl AtlasAttachment {
         self.loading_tiles.retain_mut(|tile| {
             future::block_on(future::poll_once(tile)).is_none_or(|tile| {
                 if let Ok(tile) = tile {
-                    atlas_state.loaded_tile_attachment(tile.tile);
-                    self.uploading_tiles.push(tile.clone());
-                    self.data[tile.tile.atlas_index as usize] = tile.data;
+                    if atlas_state.occupies_slot(tile.tile) {
+                        atlas_state.loaded_tile_attachment(tile.tile);
+                        self.uploading_tiles.push(tile.clone());
+                        self.data[tile.tile.atlas_index as usize] = tile.data;
+                    } else {
+                        atlas_state.load_slots += 1;
+                    }
                 } else {
                     atlas_state.load_slots += 1;
                 }
@@ -211,7 +215,9 @@ impl AtlasAttachment {
         self.downloading_tiles.retain_mut(|tile| {
             future::block_on(future::poll_once(tile)).is_none_or(|tile| {
                 atlas_state.downloaded_tile_attachment(tile.tile);
-                self.data[tile.tile.atlas_index as usize] = tile.data;
+                if atlas_state.occupies_slot(tile.tile) {
+                    self.data[tile.tile.atlas_index as usize] = tile.data;
+                }
                 false
             })
         });
@@ -345,6 +351,12 @@ impl TileAtlasState {
                 break;
             }
         }
+    }
+
+    fn occupies_slot(&self, tile: AtlasTileAttachment) -> bool {
+        self.tile_states
+            .get(&tile.coordinate)
+            .is_some_and(|state| state.atlas_index == tile.atlas_index)
     }
 
     fn loaded_tile_attachment(&mut self, tile: AtlasTileAttachment) {
@@ -491,7 +503,21 @@ impl TileAtlasState {
         true
     }
 
-    fn request_tile(&mut self, tile_coordinate: TileCoordinate) {
+    pub(crate) fn request_count(&self, tile_coordinate: TileCoordinate) -> u32 {
+        self.tile_states
+            .get(&tile_coordinate)
+            .map(|tile| tile.requests)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn pending_count(&self, tile_coordinate: TileCoordinate) -> u32 {
+        self.pending_requests
+            .get(&tile_coordinate)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn request_tile(&mut self, tile_coordinate: TileCoordinate) {
         if !self.existing_tiles.contains(&tile_coordinate) {
             return;
         }
@@ -543,7 +569,7 @@ impl TileAtlasState {
         self.tile_states = tile_states;
     }
 
-    fn release_tile(&mut self, tile_coordinate: TileCoordinate) {
+    pub(crate) fn release_tile(&mut self, tile_coordinate: TileCoordinate) {
         if !self.existing_tiles.contains(&tile_coordinate) {
             return;
         }
@@ -817,5 +843,26 @@ mod tests {
         });
         assert!(state.tile_states.contains_key(&coord(1)));
         assert!(!state.tile_states.contains_key(&coord(0)));
+    }
+
+    #[test]
+    fn occupies_slot_is_false_after_reuse() {
+        let mut state = TileAtlasState::new(1, 1, HashSet::default());
+        state.existing_tiles.extend([coord(0), coord(1)]);
+        state.request_tile(coord(0));
+        let stale = AtlasTileAttachment {
+            coordinate: coord(0),
+            atlas_index: state.tile_states[&coord(0)].atlas_index,
+            attachment_index: 0,
+        };
+        assert!(state.occupies_slot(stale));
+        state.release_tile(coord(0));
+        state.request_tile(coord(1));
+        assert!(!state.occupies_slot(stale));
+        assert!(state.occupies_slot(AtlasTileAttachment {
+            coordinate: coord(1),
+            atlas_index: stale.atlas_index,
+            attachment_index: 0,
+        }));
     }
 }

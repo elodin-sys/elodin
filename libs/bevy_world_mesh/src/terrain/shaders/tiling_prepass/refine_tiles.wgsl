@@ -2,8 +2,8 @@
 #import bevy_terrain::bindings::{config, culling_view, view_config, final_tiles, temporary_tiles, parameters, terrain_model_approximation}
 #import bevy_terrain::functions::{approximate_view_distance, compute_relative_position, position_local_to_world, normal_local_to_world, tile_count, compute_subdivision_coordinate}
 
-fn child_index() -> i32 {
-    return atomicAdd(&parameters.child_index, parameters.counter);
+fn in_tile_buffer(index: i32) -> bool {
+    return index >= 0 && index < i32(view_config.tile_count);
 }
 
 fn parent_index(id: u32) -> i32 {
@@ -21,24 +21,45 @@ fn should_be_divided(tile: TileCoordinate) -> bool {
     return view_distance < view_config.subdivision_distance / tile_count(tile.lod);
 }
 
-fn subdivide(tile: TileCoordinate) {
+fn emit_final(tile: TileCoordinate) {
+    let index = final_index();
+    if (in_tile_buffer(index)) {
+        final_tiles[index] = tile;
+    }
+}
+
+fn subdivide(tile: TileCoordinate) -> bool {
+    let first = atomicAdd(&parameters.child_index, 4 * parameters.counter);
     for (var i: u32 = 0u; i < 4u; i = i + 1u) {
+        if (!in_tile_buffer(first + i32(i) * parameters.counter)) {
+            return false;
+        }
+    }
+
+    for (var i: u32 = 0u; i < 4u; i = i + 1u) {
+        let index = first + i32(i) * parameters.counter;
         let child_xy  = vec2<u32>((tile.xy.x << 1u) + (i & 1u), (tile.xy.y << 1u) + (i >> 1u & 1u));
         let child_lod = tile.lod + 1u;
-
-        temporary_tiles[child_index()] = TileCoordinate(tile.side, child_lod, child_xy);
+        temporary_tiles[index] = TileCoordinate(tile.side, child_lod, child_xy);
     }
+
+    return true;
 }
 
 @compute @workgroup_size(64, 1, 1)
 fn refine_tiles(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     if (invocation_id.x >= parameters.tile_count) { return; }
 
-    let tile = temporary_tiles[parent_index(invocation_id.x)];
+    let parent = parent_index(invocation_id.x);
+    if (!in_tile_buffer(parent)) { return; }
+
+    let tile = temporary_tiles[parent];
 
     if (should_be_divided(tile)) {
-        subdivide(tile);
+        if (!subdivide(tile)) {
+            emit_final(tile);
+        }
     } else {
-        final_tiles[final_index()] = tile;
+        emit_final(tile);
     }
 }
