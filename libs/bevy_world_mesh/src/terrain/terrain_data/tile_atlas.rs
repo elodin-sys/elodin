@@ -290,7 +290,7 @@ pub(crate) struct TileAtlasState {
     to_load: VecDeque<AtlasTileAttachment>,
     load_slots: u32,
     to_save: VecDeque<AtlasTileAttachment>,
-    pending_requests: Vec<TileCoordinate>,
+    pending_requests: HashMap<TileCoordinate, u32>,
     pub(crate) save_slots: u32,
     pub(crate) max_save_slots: u32,
 
@@ -425,21 +425,70 @@ impl TileAtlasState {
     fn evict_atlas_index(&mut self, atlas_index: u32, coordinate: TileCoordinate) {
         self.tile_states.remove(&coordinate);
         self.to_load.retain(|tile| tile.atlas_index != atlas_index);
-        self.pending_requests
-            .retain(|pending| *pending != coordinate);
+        self.pending_requests.remove(&coordinate);
     }
 
     fn enqueue_pending_request(&mut self, tile_coordinate: TileCoordinate) {
-        if !self.pending_requests.contains(&tile_coordinate) {
-            self.pending_requests.push(tile_coordinate);
+        *self.pending_requests.entry(tile_coordinate).or_insert(0) += 1;
+    }
+
+    fn cancel_pending_request(&mut self, tile_coordinate: TileCoordinate) {
+        let Some(count) = self.pending_requests.get_mut(&tile_coordinate) else {
+            return;
+        };
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            self.pending_requests.remove(&tile_coordinate);
         }
     }
 
     fn retry_pending_requests(&mut self) {
         let pending = mem::take(&mut self.pending_requests);
-        for tile_coordinate in pending {
-            self.request_tile(tile_coordinate);
+        for (tile_coordinate, count) in pending {
+            if !self.fulfill_requests(tile_coordinate, count) {
+                self.pending_requests.insert(tile_coordinate, count);
+            }
         }
+    }
+
+    fn fulfill_requests(&mut self, tile_coordinate: TileCoordinate, count: u32) -> bool {
+        if count == 0 || !self.existing_tiles.contains(&tile_coordinate) {
+            return true;
+        }
+
+        if let Some(tile) = self.tile_states.get_mut(&tile_coordinate) {
+            if tile.requests == 0 {
+                self.unused_tiles
+                    .retain(|unused_tile| tile.atlas_index != unused_tile.atlas_index);
+            }
+            tile.requests += count;
+            return true;
+        }
+
+        let Some(unused) = self.allocate_tile() else {
+            return false;
+        };
+        self.evict_atlas_index(unused.atlas_index, unused.coordinate);
+
+        let atlas_index = unused.atlas_index;
+        self.tile_states.insert(
+            tile_coordinate,
+            TileState {
+                requests: count,
+                state: LoadingState::Loading(self.attachment_count),
+                atlas_index,
+            },
+        );
+
+        for attachment_index in 0..self.attachment_count {
+            self.to_load.push_back(AtlasTileAttachment {
+                coordinate: tile_coordinate,
+                atlas_index,
+                attachment_index,
+            });
+        }
+
+        true
     }
 
     fn request_tile(&mut self, tile_coordinate: TileCoordinate) {
@@ -470,8 +519,7 @@ impl TileAtlasState {
             tile_states.remove(&unused.coordinate);
             self.to_load
                 .retain(|tile| tile.atlas_index != unused.atlas_index);
-            self.pending_requests
-                .retain(|pending| *pending != unused.coordinate);
+            self.pending_requests.remove(&unused.coordinate);
             let atlas_index = unused.atlas_index;
 
             tile_states.insert(
@@ -501,6 +549,7 @@ impl TileAtlasState {
         }
 
         let Some(tile) = self.tile_states.get_mut(&tile_coordinate) else {
+            self.cancel_pending_request(tile_coordinate);
             return;
         };
         tile.requests -= 1;
@@ -632,13 +681,17 @@ impl TileAtlas {
 
             for tile_coordinate in tile_tree.released_tiles.drain(..) {
                 tile_atlas.state.release_tile(tile_coordinate);
-                tile_atlas
-                    .state
-                    .pending_requests
-                    .retain(|pending| *pending != tile_coordinate);
             }
+        }
 
+        for mut tile_atlas in tile_atlases.iter_mut() {
             tile_atlas.state.retry_pending_requests();
+        }
+
+        for (&(terrain, _view), tile_tree) in tile_trees.iter_mut() {
+            let Ok(mut tile_atlas) = tile_atlases.get_mut(terrain) else {
+                continue;
+            };
 
             for tile_coordinate in tile_tree.requested_tiles.drain(..) {
                 tile_atlas.state.request_tile(tile_coordinate);
@@ -696,7 +749,36 @@ mod tests {
         state.request_tile(coord(1));
         assert!(state.tile_states.contains_key(&coord(0)));
         assert!(!state.tile_states.contains_key(&coord(1)));
-        assert_eq!(state.pending_requests, vec![coord(1)]);
+        assert_eq!(state.pending_requests.get(&coord(1)), Some(&1));
+    }
+
+    #[test]
+    fn pending_keeps_other_views_after_one_release() {
+        let mut state = TileAtlasState::new(1, 1, HashSet::default());
+        state.existing_tiles.extend([coord(0), coord(1)]);
+        state.request_tile(coord(0));
+        state.request_tile(coord(1));
+        state.request_tile(coord(1));
+        assert_eq!(state.pending_requests.get(&coord(1)), Some(&2));
+        state.release_tile(coord(1));
+        assert_eq!(state.pending_requests.get(&coord(1)), Some(&1));
+        state.release_tile(coord(0));
+        state.retry_pending_requests();
+        assert_eq!(state.tile_states[&coord(1)].requests, 1);
+        assert!(state.pending_requests.is_empty());
+    }
+
+    #[test]
+    fn pending_retry_preserves_all_view_requests() {
+        let mut state = TileAtlasState::new(1, 1, HashSet::default());
+        state.existing_tiles.extend([coord(0), coord(1)]);
+        state.request_tile(coord(0));
+        state.request_tile(coord(1));
+        state.request_tile(coord(1));
+        state.release_tile(coord(0));
+        state.retry_pending_requests();
+        assert_eq!(state.tile_states[&coord(1)].requests, 2);
+        assert!(state.pending_requests.is_empty());
     }
 
     #[test]
