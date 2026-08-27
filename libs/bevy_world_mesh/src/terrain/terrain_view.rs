@@ -84,6 +84,17 @@ pub fn geometry_tile_capacity(tree_size: u32, lod_count: u32, side_count: u32) -
     clipmap.max(refine).clamp(MIN, MAX)
 }
 
+/// Matches `try_reserve_children` in `refine_tiles.wgsl`: four ping-pong
+/// slots, or none. A failed reserve must not move `child_index`.
+pub fn try_reserve_refine_children(child_index: i32, counter: i32, tile_count: i32) -> Option<i32> {
+    let last = child_index.checked_add(counter.checked_mul(3)?)?;
+    if (0..tile_count).contains(&child_index) && (0..tile_count).contains(&last) {
+        Some(child_index)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +113,13 @@ mod tests {
     fn geometry_tile_capacity_clamps() {
         assert_eq!(geometry_tile_capacity(1, 1, 1), 65_536);
         assert_eq!(geometry_tile_capacity(32, 16, 6), 262_144);
+    }
+
+    #[test]
+    fn refine_reserve_rejects_a_partial_generation() {
+        assert_eq!(try_reserve_refine_children(0, 1, 8), Some(0));
+        assert_eq!(try_reserve_refine_children(5, 1, 8), None);
+        assert_eq!(try_reserve_refine_children(7, -1, 8), Some(7));
+        assert_eq!(try_reserve_refine_children(2, -1, 8), None);
     }
 }

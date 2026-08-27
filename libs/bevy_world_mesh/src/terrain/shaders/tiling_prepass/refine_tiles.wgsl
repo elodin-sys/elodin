@@ -28,12 +28,26 @@ fn emit_final(tile: TileCoordinate) {
     }
 }
 
-fn subdivide(tile: TileCoordinate) -> bool {
-    let first = atomicAdd(&parameters.child_index, 4 * parameters.counter);
-    for (var i: u32 = 0u; i < 4u; i = i + 1u) {
-        if (!in_tile_buffer(first + i32(i) * parameters.counter)) {
-            return false;
+fn try_reserve_children() -> i32 {
+    loop {
+        let current = atomicLoad(&parameters.child_index);
+        let last = current + 3 * parameters.counter;
+        if (!in_tile_buffer(current) || !in_tile_buffer(last)) {
+            return -1;
         }
+
+        let next = current + 4 * parameters.counter;
+        let gate = atomicCompareExchangeWeak(&parameters.child_index, current, next);
+        if (gate.exchanged) {
+            return current;
+        }
+    }
+}
+
+fn subdivide(tile: TileCoordinate) -> bool {
+    let first = try_reserve_children();
+    if (first < 0) {
+        return false;
     }
 
     for (var i: u32 = 0u; i < 4u; i = i + 1u) {
