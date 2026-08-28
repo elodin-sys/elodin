@@ -10,13 +10,12 @@ import numpy as np
 from pathlib import Path
 
 from dynamics import heliocentric_relative_acceleration
+from gravity_parameters import DE440_GM_M3_S2
 
 # SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
 # SIM_TIME_STEP = 86400.0
-# Set the gravitational constant for Newton's law of universal gravitation
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
-G = 6.6743e-11
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
 MAX_TICKS_ENV = "MAX_TICKS"
@@ -102,6 +101,9 @@ PLANETS = [
         "mass": 1.02413e26,
     },
 ]
+for planet in PLANETS:
+    planet["gm"] = DE440_GM_M3_S2[planet["spice_name"]]
+
 PROBE_RADIUS = 4000000000.0
 PROBES = [
     {
@@ -155,10 +157,18 @@ VelocityErrorMps = ty.Annotated[
         metadata={"external_control": "true"},
     ),
 ]
+GravitationalParameter = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "gravitational_parameter_m3_s2",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+    ),
+]
 
 EPHEMERIS_BODIES = PLANETS
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
 SUN_MASS = 1.9885e30
+SUN_GM = DE440_GM_M3_S2["SUN"]
 
 
 w = el.World()
@@ -170,6 +180,7 @@ sun = w.spawn(
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.0, 0.0])),
             inertia=el.Inertia(SUN_MASS),
         ),
+        el.C(GravitationalParameter, jnp.array([SUN_GM], dtype=jnp.float64)),
     ],
     name="Sun",
 )
@@ -193,6 +204,13 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
             inertia=el.Inertia(body["mass"]),
         ),
     ]
+    if "gm" in body:
+        components.append(
+            el.C(
+                GravitationalParameter,
+                jnp.array([body["gm"]], dtype=jnp.float64),
+            )
+        )
     if body in PROBES:
         components.extend(
             [
@@ -272,19 +290,20 @@ class GravityConstraint(el.Archetype):
 @el.system
 def gravity(
     graph: el.GraphQuery[GravityEdge],
-    query: el.Query[el.WorldPos, el.Inertia],
+    probe_query: el.Query[el.WorldPos, el.Inertia],
+    source_query: el.Query[el.WorldPos, GravitationalParameter],
 ) -> el.Query[el.Force]:
-    def gravity_fn(force, a_pos, a_inertia, b_pos, b_inertia):
-        r = a_pos.linear() - b_pos.linear()
-        m = a_inertia.mass()
-        M = b_inertia.mass()
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
+        r = probe_pos.linear() - source_pos.linear()
+        mass = probe_inertia.mass()
+        mu = source_gm[0]
         norm = la.norm(r)
-        f = G * M * m * r / (norm * norm * norm)
+        f = mu * mass * r / (norm * norm * norm)
         return el.Force(linear=force.force() - f)
 
     return graph.edge_fold(
-        left_query=query,
-        right_query=query,
+        left_query=probe_query,
+        right_query=source_query,
         return_type=el.Force,
         init_value=el.Force(),
         fold_fn=gravity_fn,
@@ -294,17 +313,18 @@ def gravity(
 @el.system
 def heliocentric_gravity(
     graph: el.GraphQuery[GravityEdge],
-    query: el.Query[el.WorldPos, el.Inertia],
+    probe_query: el.Query[el.WorldPos, el.Inertia],
+    source_query: el.Query[el.WorldPos, GravitationalParameter],
 ) -> el.Query[el.Force]:
-    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_inertia):
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
         acc = heliocentric_relative_acceleration(
-            probe_pos.linear(), source_pos.linear(), G * source_inertia.mass()
+            probe_pos.linear(), source_pos.linear(), source_gm[0]
         )
         return el.Force(linear=force.force() + probe_inertia.mass() * acc)
 
     return graph.edge_fold(
-        left_query=query,
-        right_query=query,
+        left_query=probe_query,
+        right_query=source_query,
         return_type=el.Force,
         init_value=el.Force(),
         fold_fn=gravity_fn,
