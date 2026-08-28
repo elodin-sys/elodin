@@ -9,47 +9,54 @@ ENCOUNTER_KERNEL_SHA256 = (
 PROBE = "VOYAGER 1"
 FRAME = "ECLIPJ2000"
 OBSERVER = "SUN"
-INITIALIZATION_UTC = "1979-02-21T00:00:00Z"
+INITIALIZATION_UTC = "1979-02-22T00:00:00Z"
 CHECKPOINT_UTCS = (
-    "1979-02-21T00:00:00Z",
+    "1979-02-22T00:00:00Z",
     "1979-02-24T00:00:00Z",
+    "1979-02-26T00:00:00Z",
     "1979-02-28T00:00:00Z",
-    "1979-03-04T00:00:00Z",
-    "1979-03-05T00:00:00Z",
-    "1979-03-06T00:00:00Z",
 )
 CHECKPOINT_NAMES = (
     "initialization",
     "feb_24",
-    "feb_28",
-    "mar_04",
-    "closest_approach_day",
+    "feb_26",
     "end",
 )
 CHECKPOINT_ROLES = (
     "anchor",
     "diagnostic",
     "diagnostic",
-    "near_encounter",
-    "near_encounter",
-    "post_encounter",
+    "diagnostic",
 )
 
 # The PDS data-set envelope is 1979-02-05 through 1979-04-08.
 PDS_COVERAGE_UTC = ("1979-02-05T12:00:00Z", "1979-04-08T12:00:00Z")
 
-# Important limitation: this interval is not a clean no-thrust coast. A 1995 JPL
-# reanalysis of the Voyager 1 Jupiter tracking data modeled impulsive thruster
-# events inside this exact window, including one only 3 h 58 min after our
-# initialization epoch. It also modeled piecewise attitude-control accelerations.
-# These are not applied by the current gravity-only Chapter 1/2 comparison.
-MODELED_THRUSTER_EVENTS_UTC = (
+# Folkner & Haw (1995), Table 1. The selected Feb 22-28 arc is after the
+# Feb 21 03:58 modeled impulse and before the Mar 1 23:00 modeled impulse.
+# Their reanalysis also estimated small attitude-control accelerations; those
+# remain outside the current gravity-only Chapter 1/2 model.
+KNOWN_IMPULSIVE_MANEUVER_EVENTS_UTC = (
+    "1979-02-04T00:00:00Z",
+    "1979-02-05T12:00:00Z",
+    "1979-02-09T04:02:00Z",
+    "1979-02-17T00:00:00Z",
+    "1979-02-18T18:00:00Z",
+    "1979-02-19T00:00:00Z",
     "1979-02-21T03:58:00Z",
     "1979-03-01T23:00:00Z",
     "1979-03-03T20:00:00Z",
     "1979-03-04T00:00:00Z",
 )
 MODELED_ACCELERATION_STARTS_UTC = (
+    "1979-02-01T00:00:00Z",
+    "1979-02-04T08:30:00Z",
+    "1979-02-05T12:00:00Z",
+    "1979-02-09T04:00:00Z",
+    "1979-02-11T02:00:00Z",
+    "1979-02-15T00:00:00Z",
+    "1979-02-17T15:00:00Z",
+    "1979-02-19T05:00:00Z",
     "1979-02-21T18:00:00Z",
 )
 
