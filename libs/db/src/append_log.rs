@@ -7,7 +7,6 @@ use std::{
     io::{Seek, SeekFrom, Write as _},
     marker::PhantomData,
     mem::size_of,
-    os::fd::AsRawFd,
     path::{Path, PathBuf},
     slice::{self, SliceIndex},
     sync::{
@@ -62,7 +61,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
             .open(path)?;
         file.seek(SeekFrom::Start(FILE_SIZE))?;
         file.write_all(&[0])?;
-        let map = Arc::new(memmap2::MmapRaw::map_raw(file.as_raw_fd())?);
+        let map = Arc::new(memmap2::MmapRaw::map_raw(&file)?);
         let map = Self {
             map,
             header_extra: PhantomData,
@@ -83,7 +82,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let file = OpenOptions::new().write(true).read(true).open(path)?;
-        let map = Arc::new(memmap2::MmapRaw::map_raw(file.as_raw_fd())?);
+        let map = Arc::new(memmap2::MmapRaw::map_raw(&file)?);
         let map = Self {
             map,
             header_extra: PhantomData,

@@ -1,0 +1,54 @@
+# The release pipeline is the only place Windows gets compiled, and it only runs
+# on a tag, so portability breaks surface after a release is already announced.
+# This job type-checks the one package dist builds for Windows (`--package=elodin`,
+# see dist-workspace.toml) on every pull request instead.
+
+name: Windows Check
+
+on:
+  pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/windows-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/windows-check.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: cargo check (x86_64-pc-windows-msvc)
+    runs-on: windows-latest
+    steps:
+      - name: Enable windows longpaths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          # `embedded_lfs_asset!` const-asserts that embedded assets are not LFS
+          # pointer stubs, and const assertions are evaluated by `cargo check`.
+          lfs: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      # Mirrors [dist.dependencies.chocolatey] in dist-workspace.toml.
+      - name: Install dependencies
+        run: |
+          choco install cmake --yes
+          choco install protoc --yes
+      - name: cargo check
+        run: cargo check --locked --package elodin
