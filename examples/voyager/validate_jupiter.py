@@ -2,9 +2,9 @@
 
 The propagation matches the Voyager example's source-body timing: each planet is
 refreshed from SPICE once at the start of an hourly tick, then its sampled
-velocity carries it through the RK4 substeps. The output is diagnostic only;
-the selected arc contains modeled historical thruster events that are not
-included in this gravity-only propagation.
+velocity carries it through the RK4 substeps. The selected Feb 22-28 arc excludes
+the documented impulsive maneuver times in the 1995 JPL reanalysis. Small
+attitude-control accelerations from that analysis are still not modeled here.
 """
 
 import hashlib
@@ -19,7 +19,7 @@ from validation_case import (
     ENCOUNTER_KERNEL_SHA256,
     FRAME,
     INITIALIZATION_UTC,
-    MODELED_THRUSTER_EVENTS_UTC,
+    KNOWN_IMPULSIVE_MANEUVER_EVENTS_UTC,
     OBSERVER,
     PROBE,
     checkpoints,
@@ -230,7 +230,7 @@ def main() -> None:
             "initialization_utc": INITIALIZATION_UTC,
             "step_seconds": STEP_SECONDS,
             "source_sampling": "SPICE once per tick + linear source drift through RK4 stages",
-            "known_unmodeled_thruster_events_utc": MODELED_THRUSTER_EVENTS_UTC,
+            "documented_impulsive_maneuver_events_utc": KNOWN_IMPULSIVE_MANEUVER_EVENTS_UTC,
             "chapters": {
                 "1": run_chapter(1),
                 "2": run_chapter(2),
