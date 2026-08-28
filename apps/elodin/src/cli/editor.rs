@@ -231,6 +231,7 @@ impl Cli {
         }))
     }
 
+    #[cfg_attr(target_os = "windows", allow(unused_mut))]
     pub fn editor(self, mut args: Args, rt: Runtime) -> miette::Result<()> {
         #[cfg(not(target_os = "windows"))]
         use_plan_addr(&mut args)?;

@@ -45,6 +45,11 @@ jobs:
           # pointer stubs, and const assertions are evaluated by `cargo check`.
           lfs: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # The action defaults to `-D warnings`, which would make this job
+          # stricter than the release build. It also sets RUSTFLAGS, which
+          # overrides `[build] rustflags` in .cargo/config.toml.
+          rustflags: ""
       # Mirrors [dist.dependencies.chocolatey] in dist-workspace.toml.
       - name: Install dependencies
         run: |
