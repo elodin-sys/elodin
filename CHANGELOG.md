@@ -22,6 +22,7 @@
 - **(feat)** Add an artificial horizon gauge. (#753)
 - **(feat)** Add headless video capture. (#754, #757)
 - **(feat)** Add --kdl to allow local KDL and asset development. (#763)
+- **(feat:examples)** Model the RC-jet on measured BDX aero data, with WGS84 ECEF trim, a Mojave RC field scene, and an LWIR sensor camera. (#820)
 - **(feat:examples)** Update Betaflight SITL to 2026.6.1 with 8 kHz real-time lockstep. (#815, #818)
 - **(feat:aleph)** Add initrd-based one-shot Aleph UEFI and OS flashing over USB-C. (#748)
 - **(feat:db)** Add Elodin DB gRPC. (#772)
