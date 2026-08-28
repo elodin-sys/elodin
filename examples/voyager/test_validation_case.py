@@ -3,7 +3,8 @@
 import numpy as np
 
 from dynamics import heliocentric_relative_acceleration
-from validate_jupiter import _heliocentric_relative_acceleration
+from gravity_parameters import DE440_GM_M3_S2
+from validate_jupiter import PLANETS, SUN_GM, _heliocentric_relative_acceleration
 from validation_case import (
     CHECKPOINT_ROLES,
     CHECKPOINT_UTCS,
@@ -52,10 +53,18 @@ def test_selected_arc_excludes_documented_impulsive_maneuvers():
     )
 
 
+def test_validation_uses_de440_system_gravity_parameters():
+    planet_gms = dict(PLANETS)
+
+    assert SUN_GM == DE440_GM_M3_S2["SUN"]
+    assert planet_gms["JUPITER BARYCENTER"] == 1.2671276409999998e17
+    assert planet_gms["JUPITER BARYCENTER"] == DE440_GM_M3_S2["JUPITER BARYCENTER"]
+
+
 def test_validation_chapter_two_term_matches_shared_dynamics_helper():
     probe = np.array([7.5e11, -2.0e11, 1.0e10], dtype=np.float64)
     source = np.array([7.0e11, -1.0e11, 2.0e10], dtype=np.float64)
-    mu = 1.26686534e17
+    mu = DE440_GM_M3_S2["JUPITER BARYCENTER"]
 
     expected = np.asarray(
         heliocentric_relative_acceleration(probe, source, mu), dtype=np.float64
