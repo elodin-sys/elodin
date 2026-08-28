@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import spiceypy as spice
 
+from gravity_parameters import DE440_GM_M3_S2
 from validation_case import (
     ENCOUNTER_KERNEL,
     ENCOUNTER_KERNEL_SHA256,
@@ -25,22 +26,23 @@ from validation_case import (
     checkpoints,
 )
 
-G = 6.6743e-11
-SUN_MASS = 1.9885e30
 STEP_SECONDS = 3600.0
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 
-# Keep the same source names and rounded masses as the Voyager example.
-PLANETS = (
-    ("MERCURY BARYCENTER", 3.3011e23),
-    ("VENUS BARYCENTER", 4.8675e24),
-    ("EARTH", 5.97219e24),
-    ("MARS BARYCENTER", 6.4171e23),
-    ("JUPITER BARYCENTER", 1.898125e27),
-    ("SATURN BARYCENTER", 5.6834e26),
-    ("URANUS BARYCENTER", 8.6813e25),
-    ("NEPTUNE BARYCENTER", 1.02413e26),
+# Use the same DE440 gravitational parameters as the Voyager example. Barycenter
+# sources use the full system GM, which matters during the Jupiter encounter.
+PLANET_NAMES = (
+    "MERCURY BARYCENTER",
+    "VENUS BARYCENTER",
+    "EARTH",
+    "MARS BARYCENTER",
+    "JUPITER BARYCENTER",
+    "SATURN BARYCENTER",
+    "URANUS BARYCENTER",
+    "NEPTUNE BARYCENTER",
 )
+PLANETS = tuple((name, DE440_GM_M3_S2[name]) for name in PLANET_NAMES)
+SUN_GM = DE440_GM_M3_S2["SUN"]
 
 
 def _sha256(path: Path) -> str:
@@ -93,11 +95,10 @@ def _acceleration(
     source_positions_m: tuple[np.ndarray, ...],
 ) -> np.ndarray:
     acceleration = _direct_acceleration(
-        position_m, np.zeros(3, dtype=np.float64), G * SUN_MASS
+        position_m, np.zeros(3, dtype=np.float64), SUN_GM
     )
 
-    for (_, mass), source_position_m in zip(PLANETS, source_positions_m, strict=True):
-        mu = G * mass
+    for (_, mu), source_position_m in zip(PLANETS, source_positions_m, strict=True):
         if chapter == 1:
             acceleration += _direct_acceleration(position_m, source_position_m, mu)
         elif chapter == 2:
@@ -230,6 +231,7 @@ def main() -> None:
             "initialization_utc": INITIALIZATION_UTC,
             "step_seconds": STEP_SECONDS,
             "source_sampling": "SPICE once per tick + linear source drift through RK4 stages",
+            "gravity_parameters": "DE440 GM values in m^3/s^2",
             "documented_impulsive_maneuver_events_utc": KNOWN_IMPULSIVE_MANEUVER_EVENTS_UTC,
             "chapters": {
                 "1": run_chapter(1),
