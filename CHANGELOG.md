@@ -1,14 +1,6 @@
 # Changelog
 
 ## unreleased
-- **(fix)** Bind world-mesh terrain views to schematic viewports and sensor cameras, not 2D graph cameras.
-- **(fix)** Size planar terrain atlases to the dataset working set instead of 1024 GPU layers.
-- **(fix)** Keep planar preprocess atlases large enough for the full tile set, retry rejected clipmap requests, and ignore stale loads after LRU eviction.
-- **(fix)** Size terrain view geometry buffers for refine fan-out instead of 1e6 tiles.
-- **(fix)** Draw 2D plot windows longer than 30 s at full resolution instead of a few points per pixel.
-- **(fix)** Slide trailing 2D plot windows over existing samples instead of rebuilding every 100 ms.
-- **(fix)** Rebuild 2D plot lines when backfill fills holes inside an already-covered window.
-- **(fix)** Clear 2D plot lines when seeking or sliding into a covered gap instead of leaving a phantom trace.
 
 ## v0.19
 
@@ -22,6 +14,7 @@
 - **(feat)** Add an artificial horizon gauge. (#753)
 - **(feat)** Add headless video capture. (#754, #757)
 - **(feat)** Add --kdl to allow local KDL and asset development. (#763)
+- **(feat:examples)** Model the RC-jet on measured BDX aero data, with WGS84 ECEF trim, a Mojave RC field scene, and an LWIR sensor camera. (#820)
 - **(feat:examples)** Update Betaflight SITL to 2026.6.1 with 8 kHz real-time lockstep. (#815, #818)
 - **(feat:aleph)** Add initrd-based one-shot Aleph UEFI and OS flashing over USB-C. (#748)
 - **(feat:db)** Add Elodin DB gRPC. (#772)
