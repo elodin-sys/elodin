@@ -199,59 +199,39 @@ jobs:
 
           # Wrappers needed because cc-rs treats CC_*/CXX_* as paths, not shell
           # commands, so we cannot inline `-target <triple>` in the env var.
-          # The wrappers strip the `--target=<rust-triple>` that cc-rs appends
-          # to every invocation: Zig rejects it with "UnknownOperatingSystem"
-          # because it expects its own triple format (e.g. `aarch64-linux-musl`
-          # without the `unknown` vendor component). We then pass the correct
-          # Zig-flavoured `-target` ourselves.
-          # printf (no heredoc) ensures the shebang sits at byte 0 of the file
-          # — kernels require `#!` as the first two bytes for it to be honored.
+          # printf (no heredoc) keeps `#!` at byte 0 of each trampoline.
           wrap_dir="/opt/zig-cc-${env_target}"
           sudo mkdir -p "$wrap_dir"
-          # Use `printf '%s\n'` line-by-line so each wrapper-script line is
-          # a distinct printf arg — keeps the YAML block scalar valid even
-          # though the generated script itself has no leading indentation.
-          # The wrapper strips:
-          #   1. --target=<rust-triple>  — Zig rejects this format
-          #      ("UnknownOperatingSystem"); we pass the Zig-flavoured
-          #      -target ourselves.
-          #   2. rustc self-contained CRT objects (rcrt1.o, crti.o,
-          #      crtbeginS.o, crtendS.o, crtn.o passed positionally) — Zig
-          #      adds its own CRT for -target *-linux-musl, so without this
-          #      filter we get duplicate _start / _start_c symbols at link
-          #      time. Filtering here (rather than via -C link-self-contained
-          #      =no in cargo config) is robust against `dist build` setting
-          #      its own RUSTFLAGS env var which would shadow our config.
-          printf '%s\n' \
-            '#!/bin/bash' \
-            'args=()' \
-            'for a in "$@"; do' \
-            '  case "$a" in' \
-            '    --target=*) ;;' \
-            '    */self-contained/*crt*.o) ;;' \
-            '    *) args+=("$a") ;;' \
-            '  esac' \
-            'done' \
-            "exec \"${zig_bin}\" cc -target ${zig_target} \"\${args[@]}\"" \
-            | sudo tee "${wrap_dir}/cc" >/dev/null
-          printf '%s\n' \
-            '#!/bin/bash' \
-            'args=()' \
-            'for a in "$@"; do' \
-            '  case "$a" in' \
-            '    --target=*) ;;' \
-            '    */self-contained/*crt*.o) ;;' \
-            '    *) args+=("$a") ;;' \
-            '  esac' \
-            'done' \
-            "exec \"${zig_bin}\" c++ -target ${zig_target} \"\${args[@]}\"" \
-            | sudo tee "${wrap_dir}/c++" >/dev/null
+          # Trampolines (not the logic) live here: cc-rs needs CC_*/CXX_* as
+          # paths. Logic is scripts/zig-musl-wrapper.sh.
+          #
+          # rustc 1.98+ gcc-flavor injects -Wl,--fix-cortex-a53-843419 on
+          # aarch64-linux. zig cc 0.16 rejects it even with -fuse-ld=lld;
+          # the wrapper unwraps -Wl, and execs zig ld.lld, failing if rustc
+          # asked for the flag and LLD would not run with it.
+          wrapper_src="$(pwd)/scripts/zig-musl-wrapper.sh"
+          if [ ! -f "$wrapper_src" ]; then
+            echo "::error::missing $wrapper_src"
+            exit 1
+          fi
+          write_zig_trampoline() {
+            local dest="$1" cmd="$2"
+            printf '%s\n' \
+              '#!/bin/bash' \
+              "export ELODIN_ZIG_BIN=\"${zig_bin}\"" \
+              "export ELODIN_ZIG_TARGET=\"${zig_target}\"" \
+              "export ELODIN_ZIG_CMD=\"${cmd}\"" \
+              "exec /bin/bash \"${wrapper_src}\" \"\$@\"" \
+              | sudo tee "$dest" >/dev/null
+          }
+          write_zig_trampoline "${wrap_dir}/cc" cc
+          write_zig_trampoline "${wrap_dir}/c++" c++
           printf '%s\n' \
             '#!/bin/sh' \
             "exec \"${zig_bin}\" ar \"\$@\"" \
             | sudo tee "${wrap_dir}/ar" >/dev/null
           sudo chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
-          echo "--- generated cc wrapper ---"
+          echo "--- generated cc trampoline ---"
           cat "${wrap_dir}/cc"
 
           {
@@ -266,14 +246,21 @@ jobs:
           # var is silently ignored by cargo, but a [target.<triple>] section
           # in config.toml has unambiguous higher precedence.
           #
-          # link-self-contained=no disables rustc's bundled CRT
-          # (crt1.o, crti.o, libc.a, ...) — Zig provides those itself when
-          # invoked with -target *-linux-musl. Same approach as cargo-zigbuild.
+          # Keep rustc's gcc linker-flavor (linker named cc) so it still
+          # emits -Wl,--fix-cortex-a53-843419. On aarch64 the wrapper
+          # forwards that to zig ld.lld and rustc must supply musl CRT
+          # (do not set link-self-contained=no). On x86_64 there is no
+          # errata flag; zig cc remains the linker and provides CRT.
           mkdir -p .cargo
-          printf '\n[target.%s]\nlinker = "%s/cc"\nrustflags = ["-C", "link-self-contained=no"]\n' \
-            "$target" "$wrap_dir" >> .cargo/config.toml
+          if [ "$target" = "aarch64-unknown-linux-musl" ]; then
+            printf '\n[target.%s]\nlinker = "%s/cc"\n' \
+              "$target" "$wrap_dir" >> .cargo/config.toml
+          else
+            printf '\n[target.%s]\nlinker = "%s/cc"\nrustflags = ["-C", "link-self-contained=no"]\n' \
+              "$target" "$wrap_dir" >> .cargo/config.toml
+          fi
           echo "--- appended to .cargo/config.toml ---"
-          tail -5 .cargo/config.toml
+          tail -8 .cargo/config.toml
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
