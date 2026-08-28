@@ -10,7 +10,7 @@ from validation_case import (
     ENCOUNTER_KERNEL,
     ENCOUNTER_KERNEL_SHA256,
     INITIALIZATION_UTC,
-    MODELED_THRUSTER_EVENTS_UTC,
+    KNOWN_IMPULSIVE_MANEUVER_EVENTS_UTC,
     PDS_COVERAGE_UTC,
     checkpoints,
     parse_utc,
@@ -28,11 +28,9 @@ def test_v1_jupiter_case_is_fixed_and_inside_encounter_coverage():
     assert len(CHECKPOINT_ROLES) == len(CHECKPOINT_UTCS)
     assert [record["elapsed_seconds"] for record in records] == [
         0,
-        3 * 86400,
-        7 * 86400,
-        11 * 86400,
-        12 * 86400,
-        13 * 86400,
+        2 * 86400,
+        4 * 86400,
+        6 * 86400,
     ]
     assert all(
         coverage_start <= parse_utc(str(record["utc"])) <= coverage_end
@@ -40,13 +38,18 @@ def test_v1_jupiter_case_is_fixed_and_inside_encounter_coverage():
     )
 
 
-def test_selected_arc_is_not_mislabeled_as_maneuver_free():
+def test_selected_arc_excludes_documented_impulsive_maneuvers():
     start = parse_utc(INITIALIZATION_UTC)
     end = parse_utc(CHECKPOINT_UTCS[-1])
-    events = tuple(map(parse_utc, MODELED_THRUSTER_EVENTS_UTC))
+    events = tuple(map(parse_utc, KNOWN_IMPULSIVE_MANEUVER_EVENTS_UTC))
 
-    assert any(start < event <= end for event in events)
-    assert events[0] == parse_utc("1979-02-21T03:58:00Z")
+    assert not any(start < event <= end for event in events)
+    assert max(event for event in events if event <= start) == parse_utc(
+        "1979-02-21T03:58:00Z"
+    )
+    assert min(event for event in events if event > end) == parse_utc(
+        "1979-03-01T23:00:00Z"
+    )
 
 
 def test_validation_chapter_two_term_matches_shared_dynamics_helper():
