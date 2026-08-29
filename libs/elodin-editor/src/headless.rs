@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use bevy::core_pipeline::Skybox;
@@ -33,16 +33,27 @@ use bevy_ai_skybox::prelude::{
 };
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
-use impeller2::types::{LenPacket, Timestamp, msg_id};
-use impeller2_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
+use impeller2::types::{ComponentId, LenPacket, Timestamp, msg_id};
+use impeller2_bevy::{
+    ConnectionAddr, ConnectionStatus, CurrentStreamId, MsgPacketTx, PacketTx, SeriesFetchPriority,
+    ThreadConnectionStatus,
+};
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, SchematicElem};
+use impeller2_wkt::{
+    CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, MsgMetadata, SchematicElem,
+    SetMsgMetadata, SetStreamFilter, opaque_bytes_msg_schema,
+};
+use openh264::OpenH264API;
+use openh264::encoder::{
+    BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode, SpsPpsStrategy,
+};
+use openh264::formats::{RgbaSliceU8, YUVBuffer};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, TEMP_MAP_SUFFIX, set_cameras_active, set_readback_armed,
-    temp_map_msg_name, update_auto_agc,
+    SensorCamerasSpawned, SensorReadbackStatus, TEMP_MAP_SUFFIX, set_cameras_active,
+    set_readback_armed, update_auto_agc,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
@@ -163,6 +174,10 @@ impl Plugin for HeadlessEditorPlugin {
             Update,
             apply_cinematic_sensor_environment.after(load_headless_scene),
         )
+        .add_systems(
+            Update,
+            disable_lwir_shadows.after(apply_cinematic_sensor_environment),
+        )
         .init_resource::<crate::EqlContext>()
         .init_resource::<crate::Coordinate>()
         .init_resource::<crate::SyncedObject3d>()
@@ -174,6 +189,10 @@ impl Plugin for HeadlessEditorPlugin {
         // allowlist means Option D admits no live/backfill samples, freezing
         // sensor cameras and object_3d at spawn defaults.
         .add_systems(Update, crate::ui::plot::update_series_fetch_priority)
+        .add_systems(
+            Update,
+            sync_headless_stream_filter.after(crate::ui::plot::update_series_fetch_priority),
+        )
         .add_systems(
             Update,
             impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
@@ -197,6 +216,51 @@ impl Plugin for HeadlessEditorPlugin {
                 .init_resource::<SensorCameraRenderMetrics>();
         }
     }
+}
+
+#[derive(Default)]
+struct SentStreamFilter {
+    component_ids: HashSet<ComponentId>,
+    frequency: Option<u64>,
+    connected: bool,
+}
+
+fn sync_headless_stream_filter(
+    priority: Res<SeriesFetchPriority>,
+    stream_id: Res<CurrentStreamId>,
+    packet_tx: Res<PacketTx>,
+    connection: Res<ThreadConnectionStatus>,
+    configs: Res<SensorCameraConfigs>,
+    mut sent: Local<SentStreamFilter>,
+) {
+    let connected = connection.status() == ConnectionStatus::Success;
+    if !connected {
+        sent.connected = false;
+        return;
+    }
+    let frequency = Some(
+        configs
+            .0
+            .iter()
+            .map(|config| config.fps.ceil().max(1.0) as u64)
+            .max()
+            .unwrap_or(60),
+    );
+    if sent.connected && sent.component_ids == priority.high && sent.frequency == frequency {
+        return;
+    }
+    packet_tx.send_msg(SetStreamFilter {
+        id: stream_id.0,
+        component_ids: priority.high.iter().copied().collect(),
+        frequency,
+    });
+    tracing::info!(
+        components = priority.high.len(),
+        "render server stream filter updated"
+    );
+    sent.component_ids.clone_from(&priority.high);
+    sent.frequency = frequency;
+    sent.connected = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +293,18 @@ fn disable_headless_fallback_for_cinematic(
     }
     for entity in &lights {
         commands.entity(entity).despawn();
+    }
+}
+
+fn disable_lwir_shadows(
+    configs: Res<SensorCameraConfigs>,
+    mut lights: Query<&mut DirectionalLight>,
+) {
+    if configs.0.is_empty() || configs.0.iter().any(|config| config.effect != "lwir") {
+        return;
+    }
+    for mut light in &mut lights {
+        light.shadow_maps_enabled = false;
     }
 }
 
@@ -360,7 +436,13 @@ fn load_headless_scene(
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
-    scene_environment.0 = schematic.environment.clone();
+    scene_environment.0 = schematic.environment.clone().map(|mut environment| {
+        if !configs.0.iter().any(|config| config.cinematic) {
+            environment.earth = None;
+            environment.atmosphere = None;
+        }
+        environment
+    });
 
     geo_context.origin = crate::ui::schematic::schematic_geo_origin(&schematic);
 
@@ -676,6 +758,10 @@ fn run_headless_update(app: &mut App) {
     app.update();
 }
 
+fn run_headless_main_update(app: &mut App) {
+    app.main_mut().update();
+}
+
 enum SkyboxEmissionGate {
     Ready,
     WaitingForApply,
@@ -694,11 +780,252 @@ fn consume_skybox_emission_gate(app: &mut App) -> SkyboxEmissionGate {
     SkyboxEmissionGate::Ready
 }
 
-fn drain_stale_frames(app: &App) {
-    let rx = app
-        .world()
-        .resource::<crate::sensor_camera::SensorFrameReceiver>();
-    while rx.0.try_recv().is_ok() {}
+struct SensorH264Encoder {
+    encoder: Encoder,
+    yuv: YUVBuffer,
+    width: usize,
+    height: usize,
+    parameter_sets: Vec<u8>,
+}
+
+impl SensorH264Encoder {
+    fn new(width: u32, height: u32, fps: f32) -> Result<Self, String> {
+        if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+            return Err("h264 width and height must be positive and even".to_string());
+        }
+        let fps = fps.max(1.0);
+        let keyframe_interval = (fps.ceil() as u32).saturating_mul(2).max(1);
+        let target_bitrate = ((width as f64) * (height as f64) * (fps as f64) * 3.0)
+            .clamp(300_000.0, 12_000_000.0) as u32;
+        let config = EncoderConfig::new()
+            .bitrate(BitRate::from_bps(target_bitrate))
+            .skip_frames(true)
+            .max_frame_rate(FrameRate::from_hz(fps))
+            .rate_control_mode(RateControlMode::Bitrate)
+            .sps_pps_strategy(SpsPpsStrategy::ConstantId)
+            .intra_frame_period(IntraFramePeriod::from_num_frames(keyframe_interval));
+        let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
+            .map_err(|err| format!("openh264 encoder init: {err}"))?;
+        Ok(Self {
+            encoder,
+            yuv: YUVBuffer::new(width as usize, height as usize),
+            width: width as usize,
+            height: height as usize,
+            parameter_sets: Vec::new(),
+        })
+    }
+
+    fn encode(&mut self, rgba: &[u8]) -> Result<Vec<u8>, String> {
+        let expected = self
+            .width
+            .checked_mul(self.height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "sensor frame dimensions overflow".to_string())?;
+        if rgba.len() != expected {
+            return Err(format!(
+                "unexpected RGBA frame size {} (expected {expected})",
+                rgba.len()
+            ));
+        }
+        let rgba = RgbaSliceU8::new(rgba, (self.width, self.height));
+        self.yuv.read_rgb(rgba);
+        let mut annex_b = self
+            .encoder
+            .encode(&self.yuv)
+            .map_err(|err| format!("openh264 encode: {err}"))?
+            .to_vec();
+        let nals = annex_b_nals(&annex_b);
+        let mut parameter_sets = Vec::new();
+        for &(start, end, nal_type) in &nals {
+            if matches!(nal_type, 7 | 8) {
+                parameter_sets.extend_from_slice(&annex_b[start..end]);
+            }
+        }
+        if !parameter_sets.is_empty() {
+            self.parameter_sets = parameter_sets;
+        }
+        let is_idr = nals.iter().any(|(_, _, nal_type)| *nal_type == 5);
+        let has_sps = nals.iter().any(|(_, _, nal_type)| *nal_type == 7);
+        let has_pps = nals.iter().any(|(_, _, nal_type)| *nal_type == 8);
+        if is_idr && (!has_sps || !has_pps) && !self.parameter_sets.is_empty() {
+            let mut prefixed = self.parameter_sets.clone();
+            prefixed.extend_from_slice(&annex_b);
+            annex_b = prefixed;
+        }
+        Ok(annex_b)
+    }
+}
+
+fn annex_b_nals(data: &[u8]) -> Vec<(usize, usize, u8)> {
+    let mut starts = Vec::new();
+    let mut i = 0;
+    while i + 3 <= data.len() {
+        let start_code_len = if data.get(i..i + 4) == Some(&[0, 0, 0, 1]) {
+            Some(4)
+        } else if data.get(i..i + 3) == Some(&[0, 0, 1]) {
+            Some(3)
+        } else {
+            None
+        };
+        let Some(start_code_len) = start_code_len else {
+            i += 1;
+            continue;
+        };
+        let payload_start = i + start_code_len;
+        if let Some(&header) = data.get(payload_start) {
+            starts.push((i, header & 0x1f));
+        }
+        i = payload_start + 1;
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, &(start, nal_type))| {
+            let end = starts
+                .get(index + 1)
+                .map(|(next, _)| *next)
+                .unwrap_or(data.len());
+            (start, end, nal_type)
+        })
+        .collect()
+}
+
+struct SensorEncoderJob {
+    timestamp: Timestamp,
+    rgba: Vec<u8>,
+}
+
+struct SensorH264Worker {
+    sender: Option<std::sync::mpsc::SyncSender<SensorEncoderJob>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl SensorH264Worker {
+    fn new(
+        camera_name: String,
+        width: u32,
+        height: u32,
+        fps: f32,
+        msg_tx: MsgPacketTx,
+    ) -> Result<Self, std::io::Error> {
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<SensorEncoderJob>(64);
+        let thread_name = format!("h264-{camera_name}");
+        let handle = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                let mut encoder = match SensorH264Encoder::new(width, height, fps) {
+                    Ok(encoder) => encoder,
+                    Err(err) => {
+                        tracing::error!("sensor camera {camera_name}: {err}");
+                        return;
+                    }
+                };
+                msg_tx.send_msg(SetMsgMetadata {
+                    id: msg_id(&camera_name),
+                    metadata: MsgMetadata {
+                        name: camera_name.clone(),
+                        schema: opaque_bytes_msg_schema(),
+                        metadata: HashMap::new(),
+                    },
+                });
+                while let Ok(job) = receiver.recv() {
+                    let encoded = match encoder.encode(&job.rgba) {
+                        Ok(encoded) if !encoded.is_empty() => encoded,
+                        Ok(_) => continue,
+                        Err(err) => {
+                            tracing::warn!("sensor camera {camera_name}: {err}");
+                            continue;
+                        }
+                    };
+                    let mut packet = LenPacket::msg_with_timestamp(
+                        msg_id(&camera_name),
+                        job.timestamp,
+                        encoded.len(),
+                    );
+                    packet.extend_from_slice(&encoded);
+                    if msg_tx.0.try_send(Some(packet)).is_err() {
+                        tracing::warn!(
+                            "render server: MsgPacketTx queue full; dropping frame for {camera_name}"
+                        );
+                    }
+                }
+            })?;
+        Ok(Self {
+            sender: Some(sender),
+            handle: Some(handle),
+        })
+    }
+
+    fn send(&self, timestamp: Timestamp, rgba: Vec<u8>) {
+        let Some(sender) = &self.sender else {
+            return;
+        };
+        if sender
+            .try_send(SensorEncoderJob { timestamp, rgba })
+            .is_err()
+        {
+            tracing::warn!("sensor camera encoder queue full; dropping frame");
+        }
+    }
+}
+
+impl Drop for SensorH264Worker {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn dispatch_sensor_frames(
+    app: &App,
+    frames: Vec<(String, Timestamp, Vec<u8>)>,
+    encoders: &mut HashMap<String, SensorH264Worker>,
+) -> Vec<(String, Timestamp, Vec<u8>)> {
+    let configs = app.world().resource::<SensorCameraConfigs>();
+    let msg_tx = app.world().get_resource::<MsgPacketTx>().cloned();
+    frames
+        .into_iter()
+        .filter_map(|(camera_name, timestamp, bytes)| {
+            let Some(config) = configs
+                .0
+                .iter()
+                .find(|config| config.camera_name == camera_name)
+            else {
+                return Some((camera_name, timestamp, bytes));
+            };
+            if config.format != "h264" {
+                return Some((camera_name, timestamp, bytes));
+            }
+            let Some(msg_tx) = msg_tx.clone() else {
+                tracing::warn!("render server: MsgPacketTx not available; dropping frame");
+                return None;
+            };
+            if !encoders.contains_key(&camera_name) {
+                match SensorH264Worker::new(
+                    camera_name.clone(),
+                    config.width,
+                    config.height,
+                    config.fps,
+                    msg_tx,
+                ) {
+                    Ok(worker) => {
+                        encoders.insert(camera_name.clone(), worker);
+                    }
+                    Err(err) => {
+                        tracing::error!("sensor camera {camera_name}: {err}");
+                        return None;
+                    }
+                }
+            }
+            encoders
+                .get(&camera_name)
+                .expect("encoder inserted")
+                .send(timestamp, bytes);
+            None
+        })
+        .collect()
 }
 
 /// Per-camera scheduling state for the autonomous render loop.
@@ -746,12 +1073,9 @@ fn render_server_runner(mut app: App) -> AppExit {
         if app.world().resource::<SensorCamerasSpawned>().0 {
             enable_all_sensor_cameras(app.world_mut());
             let names: Vec<String> = build_schedules(&app).into_iter().map(|s| s.name).collect();
-            set_readback_armed(app.world_mut(), &names, true);
             for _ in 0..4 {
                 run_headless_update(&mut app);
             }
-            drain_stale_frames(&app);
-            set_readback_armed(app.world_mut(), &names, false);
             set_cameras_active(app.world_mut(), &names, false);
             tracing::info!(
                 "Sensor cameras spawned and primed after {i} warm-up cycles ({} cameras)",
@@ -768,19 +1092,20 @@ fn render_server_runner(mut app: App) -> AppExit {
     }
 
     let mut schedules = build_schedules(&app);
+    let mut encoders = HashMap::new();
+    let mut rendered_frames = 0u64;
+    let mut render_time = Duration::ZERO;
 
     loop {
         if let Some(exit) = app.should_exit() {
+            flush_pending_sensor_frames(&mut app, &mut encoders);
+            encoders.clear();
             return exit;
         }
 
-        // Pump one update first. This:
-        //   1. Drains the impeller2 TCP packet queue into the TelemetryCache,
-        //      so component poses for the latest sim_ts are visible to the
-        //      camera-transform system before we decide which cameras to render.
-        //   2. Receives the next `LastUpdated` packet from the DB (set when
-        //      the sim bumps `db.last_updated`).
-        run_headless_update(&mut app);
+        if !cameras_warmed {
+            run_headless_update(&mut app);
+        }
 
         // If sensor cameras spawned only after the warm-up loop bailed out,
         // pick them up now. We still briefly flip everything active so the
@@ -805,32 +1130,23 @@ fn render_server_runner(mut app: App) -> AppExit {
 
         let sim_ts = app.world().resource::<LastUpdated>().0;
         if sim_ts.0 == i64::MIN {
-            // Sim hasn't published a `LastUpdated` yet.
+            run_headless_main_update(&mut app);
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
 
-        // Pick the cameras whose frame interval has elapsed.
-        let due_names: Vec<String> = schedules
+        let next_render = schedules
             .iter()
-            .filter(|s| match s.last_rendered {
-                None => true,
-                Some(prev) => sim_ts.0 - prev.0 >= s.interval_us,
+            .filter_map(|schedule| match schedule.last_rendered {
+                None => Some(sim_ts),
+                Some(previous) if sim_ts.0.saturating_sub(previous.0) >= schedule.interval_us => {
+                    Some(Timestamp(previous.0 + schedule.interval_us))
+                }
+                Some(_) => None,
             })
-            .map(|s| s.name.clone())
-            .collect();
-
-        if due_names.is_empty() {
-            // Nothing to render right now; sleep briefly to avoid a busy loop.
-            // Choose the sleep based on the shortest remaining wait across all
-            // cameras, capped at 5 ms so we stay responsive to new
-            // `LastUpdated` events.
-            //
-            // If a skybox transition is in flight, pump another update so asset
-            // loading / apply systems can progress even when no camera is due.
-            if !app.world().resource::<HeadlessSkyboxRenderGate>().applied {
-                run_headless_update(&mut app);
-            }
+            .min_by_key(|timestamp| timestamp.0);
+        let Some(render_ts) = next_render else {
+            run_headless_main_update(&mut app);
             let next_wait_us = schedules
                 .iter()
                 .filter_map(|s| {
@@ -839,10 +1155,18 @@ fn render_server_runner(mut app: App) -> AppExit {
                 })
                 .filter(|w| *w > 0)
                 .min()
-                .unwrap_or(5_000);
-            std::thread::sleep(Duration::from_micros(next_wait_us.clamp(500, 5_000) as u64));
+                .unwrap_or(1_000);
+            std::thread::sleep(Duration::from_micros(next_wait_us.clamp(250, 1_000) as u64));
             continue;
-        }
+        };
+        let due_names: Vec<String> = schedules
+            .iter()
+            .filter(|schedule| match schedule.last_rendered {
+                None => render_ts == sim_ts,
+                Some(previous) => previous.0 + schedule.interval_us == render_ts.0,
+            })
+            .map(|schedule| schedule.name.clone())
+            .collect();
 
         match consume_skybox_emission_gate(&mut app) {
             SkyboxEmissionGate::Ready => {}
@@ -850,24 +1174,33 @@ fn render_server_runner(mut app: App) -> AppExit {
                 // Priming renders are required while the cubemap loads and
                 // `apply_skybox_to_camera` attaches the `Skybox` component.
                 // Skipping render here can stall `HeadlessSkyboxRenderGate.applied`.
-                render_without_emit(&mut app, sim_ts, &due_names);
+                render_without_emit(&mut app, render_ts, &due_names);
                 std::thread::sleep(Duration::from_millis(5));
                 continue;
             }
             SkyboxEmissionGate::Warming => {
-                render_without_emit(&mut app, sim_ts, &due_names);
+                render_without_emit(&mut app, render_ts, &due_names);
                 continue;
             }
         }
 
-        render_and_emit(&mut app, sim_ts, &due_names);
+        let render_start = Instant::now();
+        render_and_emit(&mut app, render_ts, &due_names, &mut encoders);
+        render_time += render_start.elapsed();
+        rendered_frames += 1;
+        if rendered_frames.is_multiple_of(120) {
+            tracing::info!(
+                average_ms = render_time.as_secs_f64() * 1000.0 / rendered_frames as f64,
+                "sensor camera render cadence"
+            );
+        }
 
-        // Mark every emitted camera as rendered at `sim_ts`. (If a frame was
+        // Mark every emitted camera as rendered at `render_ts`. (If a frame was
         // dropped by `collect_frames` we still advance — the renderer's
         // schedule is independent of whether the emit succeeded.)
         for s in schedules.iter_mut() {
             if due_names.iter().any(|n| n == &s.name) {
-                s.last_rendered = Some(sim_ts);
+                s.last_rendered = Some(render_ts);
             }
         }
     }
@@ -881,52 +1214,42 @@ fn render_server_runner(mut app: App) -> AppExit {
 /// Combined with `ReadbackArmed`, this means each `due` camera does one
 /// render plus one GPU->CPU copy per scheduled frame, and idle cameras cost
 /// nothing per polling iteration.
-fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
+fn render_and_emit(
+    app: &mut App,
+    sim_ts: Timestamp,
+    due_names: &[String],
+    encoders: &mut HashMap<String, SensorH264Worker>,
+) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
-
-    // Due DB frames plus the AGC temperature maps of due LWIR cameras.
-    let mut expected_names = due_names.to_vec();
-    {
-        let configs = app.world().resource::<SensorCameraConfigs>();
-        expected_names.extend(
-            configs
-                .0
-                .iter()
-                .filter(|config| config.effect == "lwir" && due_names.contains(&config.camera_name))
-                .map(|config| temp_map_msg_name(&config.camera_name)),
-        );
-    }
-
-    // Drain any stale frames from the previous pass before arming.
-    drain_stale_frames(app);
     set_cameras_active(app.world_mut(), due_names, true);
     set_readback_armed(app.world_mut(), due_names, true);
-
-    // The render-graph + GPU readback runs inside `app.update()`.
     run_headless_update(app);
-
-    let mut frames = collect_frames(app, &expected_names);
-    // The readback ping-pong may need one more update before all frames are
-    // mapped on slow GPUs / first runs after a warm reload. We deliberately
-    // leave the cameras active for this retry — a rare second render is
-    // cheaper than wiring up readback-only updates.
-    if frames.len() < expected_names.len() {
-        run_headless_update(app);
-        let more = collect_frames(app, &expected_names);
-        for (name, data) in more {
-            if !frames.iter().any(|(n, _)| n == &name) {
-                frames.push((name, data));
-            }
-        }
-    }
-
-    let (temp_frames, db_frames): (Vec<_>, Vec<_>) = frames
-        .into_iter()
-        .partition(|(name, _)| name.ends_with(TEMP_MAP_SUFFIX));
-    update_auto_agc(app.world_mut(), &temp_frames);
-    push_frames_to_db(app, sim_ts, &db_frames);
     set_readback_armed(app.world_mut(), due_names, false);
     set_cameras_active(app.world_mut(), due_names, false);
+
+    emit_completed_frames(app, encoders);
+}
+
+fn emit_completed_frames(app: &mut App, encoders: &mut HashMap<String, SensorH264Worker>) {
+    let frames = collect_frames(app);
+    let (temp_frames, db_frames): (Vec<_>, Vec<_>) = frames
+        .into_iter()
+        .partition(|(name, _, _)| name.ends_with(TEMP_MAP_SUFFIX));
+    let temp_frames: Vec<_> = temp_frames
+        .into_iter()
+        .map(|(name, _, bytes)| (name, bytes))
+        .collect();
+    update_auto_agc(app.world_mut(), &temp_frames);
+    let db_frames = dispatch_sensor_frames(app, db_frames, encoders);
+    push_frames_to_db(app, &db_frames);
+}
+
+fn flush_pending_sensor_frames(app: &mut App, encoders: &mut HashMap<String, SensorH264Worker>) {
+    while app.world().resource::<SensorReadbackStatus>().pending() > 0 {
+        emit_completed_frames(app, encoders);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    emit_completed_frames(app, encoders);
 }
 
 fn render_without_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
@@ -939,7 +1262,7 @@ fn render_without_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
 
 /// Push rendered frames to the DB as `MsgWithTimestamp` packets via the
 /// existing TCP connection (managed by `TcpImpellerPlugin`).
-fn push_frames_to_db(app: &App, sim_ts: Timestamp, frames: &[(String, Vec<u8>)]) {
+fn push_frames_to_db(app: &App, frames: &[(String, Timestamp, Vec<u8>)]) {
     let Some(tx) = app.world().get_resource::<MsgPacketTx>() else {
         tracing::warn!(
             "render server: MsgPacketTx not available; dropping {} frame(s)",
@@ -947,9 +1270,9 @@ fn push_frames_to_db(app: &App, sim_ts: Timestamp, frames: &[(String, Vec<u8>)])
         );
         return;
     };
-    for (camera_name, bytes) in frames {
+    for (camera_name, timestamp, bytes) in frames {
         let id = msg_id(camera_name);
-        let mut pkt = LenPacket::msg_with_timestamp(id, sim_ts, bytes.len());
+        let mut pkt = LenPacket::msg_with_timestamp(id, *timestamp, bytes.len());
         pkt.extend_from_slice(bytes);
         if tx.0.try_send(Some(pkt)).is_err() {
             tracing::warn!(
@@ -971,31 +1294,48 @@ fn enable_all_sensor_cameras(world: &mut World) {
     }
 }
 
-/// Collect rendered frames from the frame receiver, matching requested camera names.
-fn collect_frames(app: &App, camera_names: &[String]) -> Vec<(String, Vec<u8>)> {
+fn collect_frames(app: &App) -> Vec<(String, Timestamp, Vec<u8>)> {
     let world = app.world();
     let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
 
-    let mut frames_map: HashMap<String, Vec<u8>> = HashMap::new();
-
-    while let Ok((camera_name, frame_bytes, _, _)) = frame_rx.0.try_recv() {
-        frames_map.insert(camera_name, frame_bytes);
+    let mut frames = Vec::new();
+    while let Ok((camera_name, timestamp, frame_bytes, _, _)) = frame_rx.0.try_recv() {
+        frames.push((camera_name, timestamp, frame_bytes));
     }
-
-    camera_names
-        .iter()
-        .filter_map(|name| frames_map.remove(name).map(|bytes| (name.clone(), bytes)))
-        .collect()
+    frames
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_ai_skybox_target;
+    use super::{SensorH264Encoder, annex_b_nals, is_ai_skybox_target};
 
     #[test]
     fn cinematic_earth_skybox_is_not_an_ai_skybox_target() {
         assert!(!is_ai_skybox_target(false, true, true));
         assert!(is_ai_skybox_target(false, true, false));
         assert!(!is_ai_skybox_target(false, false, false));
+    }
+
+    #[test]
+    fn sensor_h264_idrs_include_parameter_sets() {
+        let mut encoder = SensorH264Encoder::new(32, 32, 30.0).unwrap();
+        let mut idr_count = 0;
+        for frame in 0..130u8 {
+            let rgba = [frame, frame.wrapping_mul(3), 128, 255].repeat(32 * 32);
+            let encoded = encoder.encode(&rgba).unwrap();
+            let nals = annex_b_nals(&encoded);
+            if nals.iter().any(|(_, _, nal_type)| *nal_type == 5) {
+                idr_count += 1;
+                assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
+                assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
+            }
+        }
+        assert!(idr_count >= 2);
+    }
+
+    #[test]
+    fn sensor_h264_rejects_odd_dimensions() {
+        assert!(SensorH264Encoder::new(31, 32, 30.0).is_err());
+        assert!(SensorH264Encoder::new(32, 31, 30.0).is_err());
     }
 }

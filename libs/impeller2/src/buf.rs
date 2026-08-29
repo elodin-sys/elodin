@@ -212,13 +212,17 @@ impl UmbraBuf {
     ///
     /// Prefix is the first 4 bytes of the payload
     pub fn with_offset(len: u32, prefix: [u8; 4], offset: u32) -> Self {
+        Self::with_segment_offset(len, prefix, 0, offset)
+    }
+
+    pub fn with_segment_offset(len: u32, prefix: [u8; 4], segment_index: u32, offset: u32) -> Self {
         debug_assert!(len > 12, "offset is only valid for lens above 12");
         Self {
             len,
             data: UmbraBufData {
                 offset: LongBufOffset {
                     prefix,
-                    _index: 0,
+                    segment_index,
                     offset,
                 },
             },
@@ -227,8 +231,16 @@ impl UmbraBuf {
 
     /// Returns the offset of the UmbraBuf if it is an offset buffer
     pub fn offset(&self) -> Option<u32> {
-        if self.len >= 12 {
+        if self.len > 12 {
             Some(unsafe { self.data.offset.offset })
+        } else {
+            None
+        }
+    }
+
+    pub fn segment_index(&self) -> Option<u32> {
+        if self.len > 12 {
+            Some(unsafe { self.data.offset.segment_index })
         } else {
             None
         }
@@ -258,9 +270,8 @@ unsafe impl IntoBytes for UmbraBufData {
 pub struct LongBufOffset {
     /// A copy of the first 4 bytes of the data stored in the long buf
     pub prefix: [u8; 4],
-    /// Which buffer to pull the data from, in our case this is always zero, but we need to keep this
-    /// field for compatibility
-    pub _index: u32,
+    /// Which external buffer stores the payload.
+    pub segment_index: u32,
     /// The offset into the buffer that contains the data
     pub offset: u32,
 }

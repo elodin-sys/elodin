@@ -1,5 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::Instant,
 };
 
@@ -35,7 +39,7 @@ use bevy::{
 };
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
-use impeller2::types::ComponentId;
+use impeller2::types::{ComponentId, Timestamp};
 pub use impeller2_wkt::SensorCameraConfig;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, ThermalTagConfig};
 
@@ -102,7 +106,8 @@ struct SensorOutputTarget {
 /// so it persists across extract rebuilds.
 #[derive(Clone, Component)]
 struct ImageCopier {
-    buffers: [Buffer; 2],
+    buffers: Vec<Buffer>,
+    in_flight: Vec<Arc<AtomicBool>>,
     src_image: Handle<Image>,
     camera_name: String,
     width: u32,
@@ -124,23 +129,44 @@ pub fn temp_map_msg_name(camera_name: &str) -> String {
     format!("{camera_name}{TEMP_MAP_SUFFIX}")
 }
 
+const READBACK_BUFFER_COUNT: usize = 4;
+const READBACK_WORKER_COUNT: usize = 2;
+const LWIR_AGC_READBACK_INTERVAL_US: i64 = 100_000;
+
 #[derive(Clone, Default, Resource)]
-struct ImageCopiers(pub Vec<ImageCopier>);
+struct ImageCopiers(pub Vec<ImageCopier>, pub Timestamp);
 
 #[derive(Resource)]
-pub struct SensorFrameReceiver(pub flume::Receiver<(String, Vec<u8>, u32, u32)>);
+pub struct SensorFrameReceiver(pub flume::Receiver<(String, Timestamp, Vec<u8>, u32, u32)>);
 
 #[derive(Resource, Clone)]
-struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
+struct SensorFrameSender(flume::Sender<(String, Timestamp, Vec<u8>, u32, u32)>);
 
-/// Per-camera reusable buffers for GPU readback to avoid per-frame allocation.
-/// Indexed by camera position in the `ImageCopiers` list.
-#[derive(Resource, Default)]
-struct ReusableFrameBuffer(Vec<Vec<u8>>);
+#[derive(Clone, Default, Resource)]
+pub struct SensorReadbackStatus(Arc<AtomicUsize>);
 
-/// Render-world resource that persists buffer toggle state across frames.
-/// The extract system rebuilds `ImageCopiers` each frame (resetting `write_buffer_idx`),
-/// so we track the actual ping-pong indices here.
+impl SensorReadbackStatus {
+    pub fn pending(&self) -> usize {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+struct PendingReadback(SensorReadbackStatus);
+
+impl PendingReadback {
+    fn new(status: SensorReadbackStatus) -> Self {
+        status.0.fetch_add(1, Ordering::AcqRel);
+        Self(status)
+    }
+}
+
+impl Drop for PendingReadback {
+    fn drop(&mut self) {
+        self.0.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Render-world resource that persists the next readback-buffer index.
 #[derive(Resource, Default)]
 struct BufferToggle(Vec<usize>);
 
@@ -326,12 +352,14 @@ pub struct SensorCameraPlugin;
 impl Plugin for SensorCameraPlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = flume::unbounded();
+        let readback_status = SensorReadbackStatus::default();
 
         embedded_asset!(app, "assets/shaders/sensor_output.wgsl");
 
         app.init_resource::<SensorCameraConfigs>()
             .init_resource::<ThermalTagConfigs>()
             .init_resource::<SensorCamerasSpawned>()
+            .insert_resource(readback_status.clone())
             .insert_resource(SensorFrameReceiver(rx))
             .add_plugins((
                 ExtractComponentPlugin::<SensorOutputSettings>::default(),
@@ -363,16 +391,11 @@ impl Plugin for SensorCameraPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(SensorFrameSender(tx))
-                .init_resource::<ReusableFrameBuffer>()
+                .insert_resource(readback_status)
                 .init_resource::<BufferToggle>()
                 .init_resource::<SensorCameraRenderMetrics>()
                 .add_systems(ExtractSchedule, image_copy_extract)
-                .add_systems(
-                    Render,
-                    (image_copy_driver, receive_image_from_buffer)
-                        .chain()
-                        .after(RenderSystems::Render),
-                )
+                .add_systems(Render, image_copy_driver.after(RenderSystems::Render))
                 .add_systems(RenderStartup, init_sensor_output_pipeline)
                 .add_systems(
                     Core3d,
@@ -700,10 +723,12 @@ fn spawn_sensor_cameras(
         };
 
         let copier = ImageCopier {
-            buffers: [
-                readback_buffer("sensor_camera_readback_0"),
-                readback_buffer("sensor_camera_readback_1"),
-            ],
+            buffers: (0..READBACK_BUFFER_COUNT)
+                .map(|_| readback_buffer("sensor_camera_readback"))
+                .collect(),
+            in_flight: (0..READBACK_BUFFER_COUNT)
+                .map(|_| Arc::new(AtomicBool::new(false)))
+                .collect(),
             src_image: output_image,
             camera_name: config.camera_name.clone(),
             width: config.width,
@@ -712,10 +737,12 @@ fn spawn_sensor_cameras(
         };
         let temp_map_copier = (config.effect == "lwir").then(|| {
             TempMapCopier(ImageCopier {
-                buffers: [
-                    readback_buffer("sensor_camera_temp_readback_0"),
-                    readback_buffer("sensor_camera_temp_readback_1"),
-                ],
+                buffers: (0..READBACK_BUFFER_COUNT)
+                    .map(|_| readback_buffer("sensor_camera_temp_readback"))
+                    .collect(),
+                in_flight: (0..READBACK_BUFFER_COUNT)
+                    .map(|_| Arc::new(AtomicBool::new(false)))
+                    .collect(),
                 src_image: temp_map,
                 camera_name: temp_map_msg_name(&config.camera_name),
                 width: config.width,
@@ -1137,6 +1164,8 @@ fn image_copy_extract(
     mut commands: Commands,
     headless_mode: Option<Res<HeadlessMode>>,
     image_copiers: Extract<ImageCopierQuery>,
+    current_timestamp: Extract<Res<CurrentTimestamp>>,
+    mut last_temp_readback: Local<HashMap<String, Timestamp>>,
 ) {
     let headless = headless_mode.is_some();
     let mut copiers = Vec::new();
@@ -1151,11 +1180,125 @@ fn image_copy_extract(
         copiers.push(main);
         if let Some(TempMapCopier(temp)) = temp_map_copier {
             let mut temp = temp.clone();
-            temp.is_active = is_active;
+            let last = last_temp_readback.get(&temp.camera_name).copied();
+            temp.is_active = is_active
+                && last.is_none_or(|last| {
+                    current_timestamp.0.0.saturating_sub(last.0) >= LWIR_AGC_READBACK_INTERVAL_US
+                });
+            if temp.is_active {
+                last_temp_readback.insert(temp.camera_name.clone(), current_timestamp.0);
+            }
             copiers.push(temp);
         }
     }
-    commands.insert_resource(ImageCopiers(copiers));
+    commands.insert_resource(ImageCopiers(copiers, current_timestamp.0));
+}
+
+struct ReadbackJob {
+    buffer: Buffer,
+    in_flight: Arc<AtomicBool>,
+    _pending: PendingReadback,
+    camera_name: String,
+    timestamp: Timestamp,
+    width: u32,
+    height: u32,
+}
+
+struct SensorReadbackWorker {
+    sender: Option<std::sync::mpsc::Sender<ReadbackJob>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl SensorReadbackWorker {
+    fn new(
+        index: usize,
+        render_device: RenderDevice,
+        frame_sender: SensorFrameSender,
+    ) -> Result<Self, std::io::Error> {
+        let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
+        let handle = std::thread::Builder::new()
+            .name(format!("sensor-readback-{index}"))
+            .spawn(move || {
+                while let Ok(job) = receiver.recv() {
+                    readback_sensor_frame(&render_device, &frame_sender, job);
+                }
+            })?;
+        Ok(Self {
+            sender: Some(sender),
+            handle: Some(handle),
+        })
+    }
+
+    fn send(&self, job: ReadbackJob) {
+        if let Some(sender) = &self.sender
+            && let Err(err) = sender.send(job)
+        {
+            err.0.in_flight.store(false, Ordering::Release);
+        }
+    }
+}
+
+impl Drop for SensorReadbackWorker {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn readback_sensor_frame(
+    render_device: &RenderDevice,
+    frame_sender: &SensorFrameSender,
+    job: ReadbackJob,
+) {
+    let buffer_slice = job.buffer.slice(..);
+    let (sender, receiver) = crossbeam_channel::bounded(1);
+    buffer_slice.map_async(MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    let mapped = loop {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let _ = render_device.poll(PollType::Poll);
+        match receiver.try_recv() {
+            Ok(result) => break result.is_ok(),
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => break false,
+        }
+    };
+    if !mapped {
+        job.buffer.unmap();
+        job.in_flight.store(false, Ordering::Release);
+        return;
+    }
+
+    let data = buffer_slice.get_mapped_range();
+    let row_bytes = job.width as usize * 4;
+    let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
+    let required_len = job.height as usize * row_bytes;
+    let mut frame = vec![0; required_len];
+    if row_bytes == aligned_row_bytes {
+        let copy_len = required_len.min(data.len());
+        frame[..copy_len].copy_from_slice(&data[..copy_len]);
+    } else {
+        for (row_idx, chunk) in data
+            .chunks(aligned_row_bytes)
+            .take(job.height as usize)
+            .enumerate()
+        {
+            let len = row_bytes.min(chunk.len());
+            let start = row_idx * row_bytes;
+            if start + len <= frame.len() {
+                frame[start..start + len].copy_from_slice(&chunk[..len]);
+            }
+        }
+    }
+    drop(data);
+    job.buffer.unmap();
+    job.in_flight.store(false, Ordering::Release);
+    let _ = frame_sender
+        .0
+        .send((job.camera_name, job.timestamp, frame, job.width, job.height));
 }
 
 fn image_copy_driver(
@@ -1163,14 +1306,31 @@ fn image_copy_driver(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
-    buffer_toggle: Res<BufferToggle>,
+    frame_sender: Res<SensorFrameSender>,
+    readback_status: Res<SensorReadbackStatus>,
+    mut buffer_toggle: ResMut<BufferToggle>,
+    mut workers: Local<Vec<SensorReadbackWorker>>,
     mut metrics: ResMut<SensorCameraRenderMetrics>,
 ) {
     let _span = tracing::info_span!("sensor_camera_image_copy_driver").entered();
     let copy_start = Instant::now();
+    if buffer_toggle.0.len() < image_copiers.0.len() {
+        buffer_toggle.0.resize(image_copiers.0.len(), 0);
+    }
+    if workers.is_empty() {
+        for index in 0..READBACK_WORKER_COUNT {
+            match SensorReadbackWorker::new(index, render_device.clone(), frame_sender.clone()) {
+                Ok(readback_worker) => workers.push(readback_worker),
+                Err(err) => {
+                    tracing::error!("failed to start sensor readback worker: {err}");
+                    return;
+                }
+            }
+        }
+    }
 
     let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor::default());
-    let mut any_copies = false;
+    let mut jobs = Vec::new();
 
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
@@ -1192,7 +1352,17 @@ fn image_copy_driver(
                 * block_size as usize,
         );
 
-        let buf_idx = buffer_toggle.0.get(i).copied().unwrap_or(0);
+        let preferred = buffer_toggle.0[i];
+        let buffer_count = image_copier.buffers.len();
+        let buf_idx = loop {
+            if let Some(index) = (0..buffer_count)
+                .map(|offset| (preferred + offset) % buffer_count)
+                .find(|index| !image_copier.in_flight[*index].swap(true, Ordering::AcqRel))
+            {
+                break index;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        };
         encoder.copy_texture_to_buffer(
             src_image.texture.as_image_copy(),
             TexelCopyBufferInfo {
@@ -1209,160 +1379,58 @@ fn image_copy_driver(
             },
             src_image.texture_descriptor.size,
         );
-        any_copies = true;
+        buffer_toggle.0[i] = (buf_idx + 1) % buffer_count;
+        jobs.push((
+            i,
+            ReadbackJob {
+                buffer: image_copier.buffers[buf_idx].clone(),
+                in_flight: image_copier.in_flight[buf_idx].clone(),
+                _pending: PendingReadback::new(readback_status.clone()),
+                camera_name: image_copier.camera_name.clone(),
+                timestamp: image_copiers.1,
+                width: image_copier.width,
+                height: image_copier.height,
+            },
+        ));
     }
 
-    if any_copies {
+    if !jobs.is_empty() {
         render_queue.submit(std::iter::once(encoder.finish()));
     }
+    for (index, job) in jobs {
+        workers[index % workers.len()].send(job);
+    }
     metrics.image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0;
-}
-
-fn receive_image_from_buffer(
-    image_copiers: Res<ImageCopiers>,
-    render_device: Res<RenderDevice>,
-    sender: Res<SensorFrameSender>,
-    mut reusable: ResMut<ReusableFrameBuffer>,
-    mut buffer_toggle: ResMut<BufferToggle>,
-    mut metrics: ResMut<SensorCameraRenderMetrics>,
-) {
-    let receive_span = tracing::info_span!(
-        "sensor_camera_receive_image_from_buffer",
-        receive_image_poll_wait_ms = tracing::field::Empty,
-        receive_image_from_buffer_ms = tracing::field::Empty,
-    );
-    let _receive_span = receive_span.enter();
-    let cam_count = image_copiers.0.len();
-    if buffer_toggle.0.len() < cam_count {
-        buffer_toggle.0.resize(cam_count, 0);
-    }
-    if reusable.0.len() < cam_count {
-        reusable.0.resize_with(cam_count, Vec::new);
-    }
-
-    metrics.receive_image_poll_wait_ms = 0.0;
-    metrics.receive_image_from_buffer_ms = 0.0;
-    let receive_start = Instant::now();
-
-    // Phase 1: request async map for all active cameras.
-    let mut pending: Vec<(usize, crossbeam_channel::Receiver<()>)> = Vec::new();
-    for (i, image_copier) in image_copiers.0.iter().enumerate() {
-        if !image_copier.is_active {
-            continue;
-        }
-        let buf_idx = buffer_toggle.0[i];
-        let buffer = &image_copier.buffers[buf_idx];
-        let buffer_slice = buffer.slice(..);
-
-        let (s, r) = crossbeam_channel::bounded(1);
-        buffer_slice.map_async(MapMode::Read, move |result| match result {
-            Ok(()) => {
-                let _ = s.send(());
-            }
-            Err(err) => tracing::warn!("Failed to map sensor camera buffer: {err}"),
-        });
-        pending.push((i, r));
-    }
-
-    if pending.is_empty() {
-        return;
-    }
-
-    // Phase 2: single blocking poll for all pending copies.
-    {
-        let _span = tracing::info_span!("sensor_camera_poll_wait").entered();
-        let poll_start = Instant::now();
-        if render_device.poll(PollType::wait_indefinitely()).is_err() {
-            for (i, _) in &pending {
-                let buf_idx = buffer_toggle.0[*i];
-                image_copiers.0[*i].buffers[buf_idx].unmap();
-            }
-            return;
-        }
-        metrics.receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0;
-    }
-
-    // Phase 3: read all mapped buffers.
-    for (i, r) in pending {
-        let image_copier = &image_copiers.0[i];
-        let buf_idx = buffer_toggle.0[i];
-        let buffer = &image_copier.buffers[buf_idx];
-
-        if r.recv().is_ok() {
-            let buffer_slice = buffer.slice(..);
-            let data = buffer_slice.get_mapped_range();
-            let width = image_copier.width;
-            let height = image_copier.height;
-            let row_bytes = width as usize * 4;
-            let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
-            let required_len = (height as usize) * row_bytes;
-
-            reusable.0[i].resize(required_len, 0);
-            let buf = &mut reusable.0[i][..required_len];
-            if row_bytes == aligned_row_bytes {
-                let copy_len = required_len.min(data.len());
-                buf[..copy_len].copy_from_slice(&data[..copy_len]);
-            } else {
-                for (row_idx, chunk) in data
-                    .chunks(aligned_row_bytes)
-                    .take(height as usize)
-                    .enumerate()
-                {
-                    let len = row_bytes.min(chunk.len());
-                    let start = row_idx * row_bytes;
-                    if start + len <= buf.len() {
-                        buf[start..start + len].copy_from_slice(&chunk[..len]);
-                    }
-                }
-            }
-
-            drop(data);
-            buffer.unmap();
-
-            let _ = sender.0.send((
-                image_copier.camera_name.clone(),
-                std::mem::take(&mut reusable.0[i]),
-                width,
-                height,
-            ));
-        } else {
-            buffer.unmap();
-        }
-
-        buffer_toggle.0[i] = 1 - buf_idx;
-    }
-
-    metrics.receive_image_from_buffer_ms = receive_start.elapsed().as_secs_f64() * 1000.0;
-    receive_span.record(
-        "receive_image_poll_wait_ms",
-        metrics.receive_image_poll_wait_ms,
-    );
-    receive_span.record(
-        "receive_image_from_buffer_ms",
-        metrics.receive_image_from_buffer_ms,
-    );
 }
 
 // ---------------------------------------------------------------------------
 // Patch sensor_view panel dimensions once configs arrive
 // ---------------------------------------------------------------------------
 
-/// The sensor_view panels may be spawned before SensorCameraConfigs are loaded
-/// from the DB. This system patches their `raw_rgba_dims` once configs arrive.
+/// The sensor_view panels may be spawned before SensorCameraConfigs are loaded.
 pub fn patch_sensor_view_dims(
     configs: Res<SensorCameraConfigs>,
-    mut streams: Query<&mut crate::ui::video_stream::VideoStream>,
+    mut streams: Query<(
+        &mut crate::ui::video_stream::VideoStream,
+        &mut crate::ui::video_stream::VideoFrameCache,
+    )>,
 ) {
     if configs.0.is_empty() {
         return;
     }
-    for mut stream in streams.iter_mut() {
-        if stream.raw_rgba_dims.is_some() {
-            continue;
-        }
-        // Only set dims when msg_name matches a sensor camera config; H.264 video_stream names (e.g. obs_stream) never match.
+    for (mut stream, mut cache) in streams.iter_mut() {
         if let Some(config) = configs.0.iter().find(|c| c.camera_name == stream.msg_name) {
-            stream.raw_rgba_dims = Some((config.width, config.height));
+            if config.format == "h264" {
+                if stream.raw_rgba_dims.take().is_some() || !cache.is_h264 {
+                    *cache = crate::ui::video_stream::VideoFrameCache::default();
+                }
+            } else {
+                let dimensions = (config.width, config.height);
+                if stream.raw_rgba_dims != Some(dimensions) || cache.is_h264 {
+                    stream.raw_rgba_dims = Some(dimensions);
+                    *cache = crate::ui::video_stream::VideoFrameCache::for_raw_rgba();
+                }
+            }
         }
     }
 }
@@ -1577,6 +1645,15 @@ mod tests {
             fps: 30.0,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pending_readback_tracks_job_lifetime() {
+        let status = SensorReadbackStatus::default();
+        let pending = PendingReadback::new(status.clone());
+        assert_eq!(status.pending(), 1);
+        drop(pending);
+        assert_eq!(status.pending(), 0);
     }
 
     fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller2_wkt::WorldPos {

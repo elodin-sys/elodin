@@ -347,6 +347,10 @@ fn export_one(
     sensor_cfg: Option<&SensorCameraConfig>,
 ) -> Result<bool, Error> {
     match sensor_cfg {
+        Some(cfg) if cfg.format == "h264" => {
+            let fps = sensor_camera_export_fps(cfg, default_fps).round().max(1.0) as u32;
+            export_one_h264(msg_log, name, output_path, fps)
+        }
         Some(cfg) => export_one_sensor(msg_log, name, output_path, cfg, default_fps),
         None => export_one_h264(msg_log, name, output_path, default_fps),
     }

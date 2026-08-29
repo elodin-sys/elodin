@@ -30,6 +30,14 @@ pub struct Stream {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct SetStreamFilter {
+    pub id: StreamId,
+    pub component_ids: Vec<ComponentId>,
+    #[serde(default)]
+    pub frequency: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct VTableStream {
     pub id: PacketId,
 }

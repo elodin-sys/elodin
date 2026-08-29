@@ -93,7 +93,7 @@ impl MsgPacketRx {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct MsgPacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
 
 impl MsgPacketTx {

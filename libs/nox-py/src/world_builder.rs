@@ -200,16 +200,33 @@ impl WorldBuilder {
             .collect();
 
         if !self.world.metadata.sensor_cameras.is_empty() {
+            #[cfg(target_family = "unix")]
+            let (cmd, args) = (
+                "nice",
+                vec![
+                    "-n".to_string(),
+                    "19".to_string(),
+                    "elodin".to_string(),
+                    "render-server".to_string(),
+                    "--addr".to_string(),
+                    addr.to_string(),
+                ],
+            );
+            #[cfg(not(target_family = "unix"))]
+            let (cmd, args) = (
+                "elodin",
+                vec![
+                    "render-server".to_string(),
+                    "--addr".to_string(),
+                    addr.to_string(),
+                ],
+            );
             recipes.insert(
                 "render-server".to_string(),
                 ::s10::Recipe::Process(::s10::ProcessRecipe {
-                    cmd: "elodin".to_string(),
+                    cmd: cmd.to_string(),
                     process_args: ::s10::ProcessArgs {
-                        args: vec![
-                            "render-server".to_string(),
-                            "--addr".to_string(),
-                            addr.to_string(),
-                        ],
+                        args,
                         cwd: None,
                         env: std::collections::HashMap::from([(
                             "TRACY_PORT".to_string(),
@@ -588,15 +605,20 @@ impl WorldBuilder {
             )));
         }
         match format {
-            "rgba" => {}
+            "rgba" | "h264" => {}
             _ => {
                 return Err(crate::error::Error::PyO3(
                     pyo3::exceptions::PyValueError::new_err(format!(
-                        "unsupported format '{}': expected 'rgba'",
+                        "unsupported format '{}': expected 'rgba' or 'h264'",
                         format
                     )),
                 ));
             }
+        }
+        if format == "h264" && (width % 2 != 0 || height % 2 != 0) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera h264 width and height must be even",
+            )));
         }
         if !matches!(
             effect,

@@ -104,6 +104,13 @@ pub fn copy_file_sparse(src: &Path, dst: &Path) -> io::Result<()> {
 const APPEND_LOG_FILE_NAMES: &[&str] = &["data", "index", "timestamps", "offsets", "data_log"];
 const APPEND_LOG_MIN_HEADER: u64 = 16;
 
+fn is_append_log_file_name(name: &str) -> bool {
+    APPEND_LOG_FILE_NAMES.contains(&name)
+        || name.strip_prefix("data_log.").is_some_and(|segment| {
+            !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
 /// Truncate a finalized run DB's preallocated files to their committed
 /// length, so retained DBs have apparent size ≈ real size. Safe only once the
 /// writing process has exited. Returns the apparent bytes reclaimed.
@@ -126,7 +133,7 @@ pub fn compact_run_db(db_path: &Path) -> io::Result<u64> {
             }
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
-            if !APPEND_LOG_FILE_NAMES.contains(&name) {
+            if !is_append_log_file_name(name) {
                 continue;
             }
             let path = entry.path();
@@ -202,5 +209,26 @@ mod tests {
         move_dir_sparse(&src, &dst).unwrap();
         assert!(!src.exists());
         assert_eq!(fs::read(dst.join("nested/file.txt")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn compact_run_db_includes_segmented_message_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        let msg_dir = dir.path().join("msgs/1");
+        fs::create_dir_all(&msg_dir).unwrap();
+        for name in ["data_log.1", "data_log.invalid"] {
+            let mut bytes = vec![0; 128];
+            bytes[..8].copy_from_slice(&16u64.to_le_bytes());
+            fs::write(msg_dir.join(name), bytes).unwrap();
+        }
+
+        assert_eq!(compact_run_db(dir.path()).unwrap(), 112);
+        assert_eq!(fs::metadata(msg_dir.join("data_log.1")).unwrap().len(), 16);
+        assert_eq!(
+            fs::metadata(msg_dir.join("data_log.invalid"))
+                .unwrap()
+                .len(),
+            128
+        );
     }
 }

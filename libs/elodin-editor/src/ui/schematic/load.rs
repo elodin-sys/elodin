@@ -1489,12 +1489,19 @@ impl LoadSchematicParams<'_, '_> {
                     .clone()
                     .unwrap_or_else(|| format!("Sensor View {}", sensor_view.msg_name));
 
-                let raw_rgba_dims = self
+                let sensor_config = self
                     .sensor_camera_configs
                     .0
                     .iter()
-                    .find(|c| c.camera_name == sensor_view.msg_name)
-                    .map(|c| (c.width, c.height));
+                    .find(|c| c.camera_name == sensor_view.msg_name);
+                let raw_rgba_dims = sensor_config
+                    .filter(|config| config.format != "h264")
+                    .map(|config| (config.width, config.height));
+                let frame_cache = if sensor_config.is_some_and(|config| config.format == "h264") {
+                    crate::ui::video_stream::VideoFrameCache::default()
+                } else {
+                    crate::ui::video_stream::VideoFrameCache::for_raw_rgba()
+                };
 
                 let entity = self
                     .commands
@@ -1514,7 +1521,7 @@ impl LoadSchematicParams<'_, '_> {
                             ..Default::default()
                         },
                         crate::ui::video_stream::VideoDecoderHandle::default(),
-                        crate::ui::video_stream::VideoFrameCache::for_raw_rgba(),
+                        frame_cache,
                     ))
                     .id();
 

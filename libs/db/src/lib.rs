@@ -286,10 +286,58 @@ pub struct State {
 
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
+    real_time_stream_filters: HashMap<StreamId, Arc<RealTimeStreamFilter>>,
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 
     pub db_config: DbConfig,
+}
+
+struct RealTimeStreamFilter {
+    component_ids: RwLock<Option<HashSet<ComponentId>>>,
+    frequency: AtomicU64,
+    generation: AtomicU64,
+    changed: WaitQueue,
+}
+
+impl RealTimeStreamFilter {
+    fn new() -> Self {
+        Self {
+            component_ids: RwLock::new(None),
+            frequency: AtomicU64::new(0),
+            generation: AtomicU64::new(0),
+            changed: WaitQueue::new(),
+        }
+    }
+
+    fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>) {
+        let mut current = self.component_ids.write().unwrap();
+        *current = Some(component_ids.into_iter().collect());
+        self.frequency
+            .store(frequency.unwrap_or(0), atomic::Ordering::Release);
+        self.generation.fetch_add(1, atomic::Ordering::Release);
+        drop(current);
+        self.changed.wake_all();
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.load(atomic::Ordering::Acquire)
+    }
+
+    fn component_ids(&self) -> Option<HashSet<ComponentId>> {
+        self.component_ids.read().unwrap().clone()
+    }
+
+    fn frequency(&self) -> Option<u64> {
+        match self.frequency.load(atomic::Ordering::Acquire) {
+            0 => None,
+            frequency => Some(frequency),
+        }
+    }
+}
+
+fn stream_interval_us(frequency: u64) -> i64 {
+    (1_000_000 / frequency.max(1)).max(1) as i64
 }
 
 pub(crate) fn component_creation_index(metadata: &ComponentMetadata) -> Option<u64> {
@@ -2120,6 +2168,17 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let db = db.clone();
             handle_stream(tx, stream, db, m.req_id);
         }
+        Packet::Msg(m) if m.id == SetStreamFilter::ID => {
+            let filter = m.parse::<SetStreamFilter>()?;
+            let state = db.with_state(|state| {
+                state
+                    .real_time_stream_filters
+                    .get(&filter.id)
+                    .cloned()
+                    .ok_or(Error::StreamNotFound(filter.id))
+            })?;
+            state.set(filter.component_ids, filter.frequency);
+        }
         Packet::Msg(m) if m.id == SetStreamState::ID => {
             let set_stream_state = m.parse::<SetStreamState>()?;
             let stream_id = set_stream_state.id;
@@ -3060,15 +3119,23 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
-        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
-            match handle_real_time_stream_batched(tx, req_id, db).await {
-                Ok(_) => {}
-                Err(err) if err.is_stream_closed() => {}
-                Err(err) => {
-                    warn!(?err, "error streaming data");
+        StreamBehavior::RealTimeBatched => {
+            let filter = Arc::new(RealTimeStreamFilter::new());
+            db.with_state_mut(|state| {
+                state
+                    .real_time_stream_filters
+                    .insert(stream.id, filter.clone());
+            });
+            stellarator::spawn(async move {
+                match handle_real_time_stream_batched(tx, req_id, db, filter).await {
+                    Ok(_) => {}
+                    Err(err) if err.is_stream_closed() => {}
+                    Err(err) => {
+                        warn!(?err, "error streaming data");
+                    }
                 }
-            }
-        }),
+            })
+        }
     }
 }
 
@@ -3178,20 +3245,24 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     sink: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
     db: Arc<DB>,
+    filter: Arc<RealTimeStreamFilter>,
 ) -> Result<(), Error> {
-    let mut current_gen = u64::MAX;
+    let mut current_vtable_gen = u64::MAX;
+    let mut current_filter_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
-    let mut components = HashMap::new();
+    let mut all_components = HashMap::new();
+    let mut stream_components = HashMap::new();
+    let mut last_sent = None;
 
     loop {
-        // Re-check for new components when vtable_gen changes.
         let vtable_gen = db.vtable_gen.latest();
-        if vtable_gen != current_gen {
+        let filter_gen = filter.generation();
+        if vtable_gen != current_vtable_gen {
             let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
                 .with_state(|state| {
                     let mut new_comps = Vec::new();
                     for component in state.components.values() {
-                        if components.contains_key(&component.component_id) {
+                        if all_components.contains_key(&component.component_id) {
                             continue;
                         }
                         let metadata = state
@@ -3203,7 +3274,6 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     new_comps
                 });
 
-            // Send metadata and schema for each new component.
             for (component, metadata, schema) in new_components {
                 if let Some(metadata) = metadata {
                     send_with_timeout(&sink, metadata.into_len_packet().with_request_id(req_id))
@@ -3218,11 +3288,22 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 send_with_timeout(&sink, schema_msg.into_len_packet().with_request_id(req_id))
                     .await?;
 
-                components.insert(component.component_id, component);
+                all_components.insert(component.component_id, component);
             }
+        }
 
-            // Rebuild the VTable with the full component set.
-            let vtable_msg = DBVisitor.vtable(&components)?;
+        let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
+        if stream_changed {
+            let component_filter = filter.component_ids();
+            stream_components = match &component_filter {
+                Some(filter) => all_components
+                    .iter()
+                    .filter(|(component_id, _)| filter.contains(*component_id))
+                    .map(|(component_id, component)| (*component_id, component.clone()))
+                    .collect(),
+                None => all_components.clone(),
+            };
+            let vtable_msg = DBVisitor.vtable(&stream_components)?;
             let id: PacketId = fastrand::u16(..).to_le_bytes();
             table = LenPacket::table(id, 2048 - 16);
             {
@@ -3233,20 +3314,26 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
             }
-            current_gen = vtable_gen;
+            current_vtable_gen = vtable_gen;
+            current_filter_gen = filter_gen;
         }
 
-        // Populate the table with every component's latest data point.
-        table.clear();
-        DBVisitor.populate_table_latest(&components, &mut table);
-
-        // Single lock + send for all components.
-        {
+        let timestamp = db.last_updated.latest();
+        let due = filter.frequency().is_none_or(|frequency| {
+            let interval_us = stream_interval_us(frequency);
+            last_sent
+                .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
+        });
+        if stream_changed || due {
+            table.clear();
+            DBVisitor.populate_table_latest(&stream_components, &mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
+            last_sent = Some(timestamp);
         }
-
-        // Wait for the simulation to write new data (1 wake per sim tick).
-        db.last_updated.wait().await;
+        futures_lite::future::race(db.last_updated.wait(), async {
+            let _ = filter.changed.wait().await;
+        })
+        .await;
     }
 }
 
@@ -3530,6 +3617,13 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_interval_matches_microsecond_timestamps() {
+        assert_eq!(stream_interval_us(60), 16_666);
+        assert_eq!(stream_interval_us(120), 8_333);
+        assert_eq!(stream_interval_us(2_000_000), 1);
+    }
 
     struct PendingWrite;
 

@@ -446,6 +446,9 @@ fn classify_msg_log(
     // packet id still matches — name-based lookup would miss and fall through
     // to H.264/raw while the layout still points at a video topic.
     if let Some(cfg) = sensor_by_msg_id.get(&packet_id) {
+        if cfg.format == "h264" {
+            return MsgLogKind::H264Video;
+        }
         return MsgLogKind::SensorCamera(Box::new(cfg.clone()));
     }
     if let Some(metadata) = log.metadata()

@@ -159,14 +159,22 @@ fn pin_render_server_recipe_inner(recipe: &mut s10::Recipe, exe: &str) {
         return;
     };
 
-    if let Some(s10::Recipe::Process(process)) = group.recipes.get_mut("render-server")
-        && process
+    if let Some(s10::Recipe::Process(process)) = group.recipes.get_mut("render-server") {
+        if process
             .process_args
             .args
             .first()
             .is_some_and(|arg| arg == "render-server")
-    {
-        process.cmd = exe.to_string();
+        {
+            process.cmd = exe.to_string();
+        } else if let Some(index) = process
+            .process_args
+            .args
+            .windows(2)
+            .position(|args| args == ["elodin", "render-server"])
+        {
+            process.process_args.args[index] = exe.to_string();
+        }
     }
 
     for recipe in group.recipes.values_mut() {
@@ -216,6 +224,39 @@ mod tests {
             panic!("expected render-server process");
         };
         assert_eq!(render_server.cmd, "/tmp/current-elodin");
+    }
+
+    #[test]
+    fn pins_nice_wrapped_render_server_recipe() {
+        let mut recipe = Recipe::Group(GroupRecipe {
+            refs: vec!["render-server".to_string()],
+            recipes: HashMap::from([(
+                "render-server".to_string(),
+                Recipe::Process(ProcessRecipe {
+                    cmd: "nice".to_string(),
+                    process_args: process_args([
+                        "-n",
+                        "10",
+                        "elodin",
+                        "render-server",
+                        "--addr",
+                        "[::]:2240",
+                    ]),
+                    no_watch: true,
+                }),
+            )]),
+        });
+
+        pin_render_server_recipe(&mut recipe, Path::new("/tmp/current-elodin"));
+
+        let Recipe::Group(group) = recipe else {
+            panic!("expected group recipe");
+        };
+        let Some(Recipe::Process(render_server)) = group.recipes.get("render-server") else {
+            panic!("expected render-server process");
+        };
+        assert_eq!(render_server.cmd, "nice");
+        assert_eq!(render_server.process_args.args[2], "/tmp/current-elodin");
     }
 
     #[test]

@@ -53,13 +53,20 @@ pub fn compact(db_path: &Path, dry_run: bool) -> Result<CompactStats, Error> {
             }
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
-            if !APPEND_LOG_FILE_NAMES.contains(&name) {
+            if !is_append_log_file(name) {
                 continue;
             }
             compact_file(&path, dry_run, &mut stats)?;
         }
     }
     Ok(stats)
+}
+
+fn is_append_log_file(name: &str) -> bool {
+    APPEND_LOG_FILE_NAMES.contains(&name)
+        || name
+            .strip_prefix("data_log.")
+            .is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn compact_file(path: &PathBuf, dry_run: bool, stats: &mut CompactStats) -> Result<(), Error> {
@@ -167,5 +174,21 @@ mod tests {
         let stats = compact(&db_path, true).unwrap();
         assert_eq!(stats.files, 1);
         assert_eq!(fs::metadata(component.join("data")).unwrap().len(), before);
+    }
+
+    #[test]
+    fn compact_includes_segmented_message_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("db");
+        let msg = db_path.join("msgs/42");
+        fs::create_dir_all(&msg).unwrap();
+        fs::write(db_path.join("db_state"), b"{}").unwrap();
+        let log = AppendLog::create(msg.join("data_log.1"), ()).unwrap();
+        log.write(&[1u8; 16]).unwrap();
+        drop(log);
+
+        let stats = compact(&db_path, false).unwrap();
+        assert_eq!(stats.files, 1);
+        assert_eq!(fs::metadata(msg.join("data_log.1")).unwrap().len(), 32);
     }
 }
