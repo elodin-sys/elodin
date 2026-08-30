@@ -111,6 +111,37 @@ pub(crate) fn rgba_to_i420(
     Ok(YUVBuffer::from_rgb_source(rgba))
 }
 
+pub(crate) fn gray8_to_i420(
+    payload: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<YUVBuffer, Error> {
+    if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+        return Err(invalid_data(format!(
+            "sensor camera dimensions must be even for I420: {}x{}",
+            width, height
+        )));
+    }
+    let pixels = width
+        .checked_mul(height)
+        .ok_or_else(|| invalid_data("sensor camera frame dimensions overflow"))?;
+    if payload.len() != pixels {
+        return Err(invalid_data(format!(
+            "unexpected gray8 sensor camera frame size {} (expected {})",
+            payload.len(),
+            pixels
+        )));
+    }
+    let mut yuv = Vec::with_capacity(pixels + pixels / 2);
+    yuv.extend(
+        payload
+            .iter()
+            .map(|&value| ((u16::from(value) * 219 + 127) / 255 + 16) as u8),
+    );
+    yuv.resize(pixels + pixels / 2, 128);
+    Ok(YUVBuffer::from_vec(yuv, width, height))
+}
+
 pub(crate) struct SensorEncoder {
     encoder: Encoder,
 }
@@ -286,7 +317,11 @@ fn export_one_sensor(
         let Some(payload) = msg_log.get(ts) else {
             continue;
         };
-        let yuv = match rgba_to_i420(payload, width as usize, height as usize) {
+        let yuv = match if cfg.format == "gray8" {
+            gray8_to_i420(payload, width as usize, height as usize)
+        } else {
+            rgba_to_i420(payload, width as usize, height as usize)
+        } {
             Ok(yuv) => yuv,
             Err(e) => {
                 eprintln!("  {}: skipping frame at {}: {}", name, ts.0, e);
@@ -562,5 +597,13 @@ mod tests {
         assert_eq!(yuv.y().len(), width * height);
         assert_eq!(yuv.u().len(), width * height / 4);
         assert_eq!(yuv.v().len(), width * height / 4);
+    }
+
+    #[test]
+    fn gray8_to_i420_maps_full_range_luma_to_video_range() {
+        let yuv = gray8_to_i420(&[0, 64, 128, 255], 2, 2).expect("gray8_to_i420");
+        assert_eq!(yuv.y(), [16, 71, 126, 235]);
+        assert_eq!(yuv.u(), [128]);
+        assert_eq!(yuv.v(), [128]);
     }
 }

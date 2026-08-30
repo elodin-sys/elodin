@@ -605,19 +605,19 @@ impl WorldBuilder {
             )));
         }
         match format {
-            "rgba" | "h264" => {}
+            "rgba" | "gray8" | "h264" => {}
             _ => {
                 return Err(crate::error::Error::PyO3(
                     pyo3::exceptions::PyValueError::new_err(format!(
-                        "unsupported format '{}': expected 'rgba' or 'h264'",
+                        "unsupported format '{}': expected 'rgba', 'gray8', or 'h264'",
                         format
                     )),
                 ));
             }
         }
-        if format == "h264" && (width % 2 != 0 || height % 2 != 0) {
+        if matches!(format, "gray8" | "h264") && (width % 2 != 0 || height % 2 != 0) {
             return Err(Error::PyO3(PyValueError::new_err(
-                "sensor_camera h264 width and height must be even",
+                "sensor_camera gray8 and h264 width and height must be even",
             )));
         }
         if !matches!(

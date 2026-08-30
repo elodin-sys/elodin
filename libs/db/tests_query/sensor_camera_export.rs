@@ -127,6 +127,43 @@ fn sensor_camera_rgba_msg_log_exports_to_mp4() {
 }
 
 #[test]
+fn sensor_camera_gray8_msg_log_exports_to_mp4() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let db_path = tempdir.path().join("db");
+    let out_path = tempdir.path().join("out");
+    let db = DB::create(db_path.clone()).expect("DB::create");
+    let mut camera = sensor_camera_config();
+    camera.format = "gray8".to_string();
+    let sensor_json = serde_json::to_string(&vec![camera.clone()]).expect("sensor json");
+    db.with_state_mut(|state| {
+        state
+            .db_config
+            .metadata
+            .insert("sensor_cameras".to_string(), sensor_json);
+    });
+
+    let id = msg_id(&camera.camera_name);
+    for step in 0..5 {
+        let frame = (0..camera.width * camera.height)
+            .map(|pixel| (pixel as u8).wrapping_add(step as u8))
+            .collect::<Vec<_>>();
+        db.push_msg(Timestamp(1_000_000 + step * 16_667), id, &frame)
+            .expect("push_msg");
+    }
+    db.save_db_state().expect("save_db_state");
+    db.flush_all().expect("flush_all");
+    drop(db);
+
+    elodin_db::export_videos::run(db_path, out_path.clone(), None, 30).expect("export_videos");
+
+    let mp4 = std::fs::read(out_path.join("drone.fpv.mp4")).expect("read mp4");
+    let sps = extract_avcc_sps(&mp4).expect("avcC SPS");
+    let sps = Sps::parse_with_emulation_prevention(Cursor::new(sps)).expect("parse SPS");
+    assert_eq!(sps.width(), camera.width as u64);
+    assert_eq!(sps.height(), camera.height as u64);
+}
+
+#[test]
 fn malformed_sensor_camera_frames_do_not_leave_mp4() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let db_path = tempdir.path().join("db");

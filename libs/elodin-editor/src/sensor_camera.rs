@@ -1421,14 +1421,19 @@ pub fn patch_sensor_view_dims(
     for (mut stream, mut cache) in streams.iter_mut() {
         if let Some(config) = configs.0.iter().find(|c| c.camera_name == stream.msg_name) {
             if config.format == "h264" {
-                if stream.raw_rgba_dims.take().is_some() || !cache.is_h264 {
+                if stream.raw_dims.take().is_some() || !cache.is_h264 {
                     *cache = crate::ui::video_stream::VideoFrameCache::default();
                 }
             } else {
-                let dimensions = (config.width, config.height);
-                if stream.raw_rgba_dims != Some(dimensions) || cache.is_h264 {
-                    stream.raw_rgba_dims = Some(dimensions);
-                    *cache = crate::ui::video_stream::VideoFrameCache::for_raw_rgba();
+                let format = if config.format == "gray8" {
+                    crate::ui::video_stream::RawPixelFormat::Gray8
+                } else {
+                    crate::ui::video_stream::RawPixelFormat::Rgba8
+                };
+                let dimensions = (config.width, config.height, format);
+                if stream.raw_dims != Some(dimensions) || cache.is_h264 {
+                    stream.raw_dims = Some(dimensions);
+                    *cache = crate::ui::video_stream::VideoFrameCache::for_raw();
                 }
             }
         }

@@ -978,6 +978,40 @@ impl Drop for SensorH264Worker {
     }
 }
 
+fn rgba_to_gray8(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    monochrome_lwir: bool,
+) -> Result<Vec<u8>, String> {
+    let pixels = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| "sensor frame dimensions overflow".to_string())?;
+    let expected = pixels
+        .checked_mul(4)
+        .ok_or_else(|| "sensor frame dimensions overflow".to_string())?;
+    if rgba.len() != expected {
+        return Err(format!(
+            "unexpected RGBA frame size {} (expected {})",
+            rgba.len(),
+            expected
+        ));
+    }
+    if monochrome_lwir {
+        return Ok(rgba.chunks_exact(4).map(|pixel| pixel[0]).collect());
+    }
+    Ok(rgba
+        .chunks_exact(4)
+        .map(|pixel| {
+            ((77 * u32::from(pixel[0])
+                + 150 * u32::from(pixel[1])
+                + 29 * u32::from(pixel[2])
+                + 128)
+                >> 8) as u8
+        })
+        .collect())
+}
+
 fn dispatch_sensor_frames(
     app: &App,
     frames: Vec<(String, Timestamp, Vec<u8>)>,
@@ -995,6 +1029,17 @@ fn dispatch_sensor_frames(
             else {
                 return Some((camera_name, timestamp, bytes));
             };
+            if config.format == "gray8" {
+                let monochrome_lwir = config.effect == "lwir"
+                    && config.effect_param_str(&["palette"], "white_hot") != "ironbow";
+                return match rgba_to_gray8(&bytes, config.width, config.height, monochrome_lwir) {
+                    Ok(gray) => Some((camera_name, timestamp, gray)),
+                    Err(err) => {
+                        tracing::warn!("sensor camera {camera_name}: {err}");
+                        None
+                    }
+                };
+            }
             if config.format != "h264" {
                 return Some((camera_name, timestamp, bytes));
             }
@@ -1307,7 +1352,7 @@ fn collect_frames(app: &App) -> Vec<(String, Timestamp, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SensorH264Encoder, annex_b_nals, is_ai_skybox_target};
+    use super::{SensorH264Encoder, annex_b_nals, is_ai_skybox_target, rgba_to_gray8};
 
     #[test]
     fn cinematic_earth_skybox_is_not_an_ai_skybox_target() {
@@ -1337,5 +1382,12 @@ mod tests {
     fn sensor_h264_rejects_odd_dimensions() {
         assert!(SensorH264Encoder::new(31, 32, 30.0).is_err());
         assert!(SensorH264Encoder::new(32, 31, 30.0).is_err());
+    }
+
+    #[test]
+    fn gray8_repack_handles_lwir_and_rgb() {
+        let rgba = [10, 20, 30, 255, 200, 100, 50, 255];
+        assert_eq!(rgba_to_gray8(&rgba, 2, 1, true).unwrap(), [10, 200]);
+        assert_eq!(rgba_to_gray8(&rgba, 2, 1, false).unwrap(), [18, 124]);
     }
 }

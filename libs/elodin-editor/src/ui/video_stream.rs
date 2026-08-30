@@ -54,6 +54,21 @@ pub struct VideoStreamWidgetArgs {
 // VideoStream component
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawPixelFormat {
+    Rgba8,
+    Gray8,
+}
+
+impl RawPixelFormat {
+    fn bytes_per_pixel(self) -> usize {
+        match self {
+            Self::Rgba8 => 4,
+            Self::Gray8 => 1,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct VideoStream {
     pub msg_id: [u8; 2],
@@ -61,9 +76,8 @@ pub struct VideoStream {
     pub current_frame: Option<Image>,
     pub size: Vec2,
     pub state: StreamState,
-    /// When set, incoming MsgBatch bytes are treated as raw RGBA pixels
-    /// (bypassing the H.264 decoder). The tuple is `(width, height)`.
-    pub raw_rgba_dims: Option<(u32, u32)>,
+    /// When set, incoming MsgBatch bytes bypass the H.264 decoder.
+    pub raw_dims: Option<(u32, u32, RawPixelFormat)>,
 }
 
 #[derive(Component)]
@@ -77,7 +91,7 @@ impl Default for VideoStream {
             current_frame: None,
             size: Vec2::ZERO,
             state: StreamState::default(),
-            raw_rgba_dims: None,
+            raw_dims: None,
         }
     }
 }
@@ -265,8 +279,7 @@ impl Default for VideoFrameCache {
 }
 
 impl VideoFrameCache {
-    /// For sensor_view tiles: raw RGBA frames, no H.264 keyframe scan.
-    pub fn for_raw_rgba() -> Self {
+    pub fn for_raw() -> Self {
         Self {
             is_h264: false,
             ..Self::default()
@@ -778,9 +791,9 @@ const BACKFILL_ASSUMED_MAX_RAW_FRAME: usize = 640 * 480 * 4;
 const BACKFILL_ASSUMED_H264_FRAME: usize = 50 * 1024;
 
 /// Compute the backfill frame limit from a byte budget.
-fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>, is_h264: bool) -> usize {
-    let frame_bytes = match raw_rgba_dims {
-        Some((w, h)) => (w as usize * h as usize * 4).max(1),
+fn backfill_frame_limit(raw_dims: Option<(u32, u32, RawPixelFormat)>, is_h264: bool) -> usize {
+    let frame_bytes = match raw_dims {
+        Some((w, h, format)) => (w as usize * h as usize * format.bytes_per_pixel()).max(1),
         None if is_h264 => BACKFILL_ASSUMED_H264_FRAME,
         None => BACKFILL_ASSUMED_MAX_RAW_FRAME,
     };
@@ -870,6 +883,22 @@ fn upload_frame(
     }
 }
 
+fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) -> bool {
+    match format {
+        RawPixelFormat::Rgba8 if src.len() == dst.len() => {
+            dst.copy_from_slice(src);
+            true
+        }
+        RawPixelFormat::Gray8 if src.len().checked_mul(4) == Some(dst.len()) => {
+            for (&gray, pixel) in src.iter().zip(dst.chunks_exact_mut(4)) {
+                pixel.copy_from_slice(&[gray, gray, gray, 255]);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Widget implementation — cache-first playback
 // ---------------------------------------------------------------------------
@@ -907,13 +936,13 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // Connection + drain handled by `connect_streams` system.
             }
             StreamState::Active => {
-                if let Some((w, h)) = stream.raw_rgba_dims {
+                if let Some((w, h, format)) = stream.raw_dims {
                     if let Some((found_ts, data)) =
                         cache.raw_frames.range(..=current_ts).next_back()
                     {
                         let found_ts = *found_ts;
                         if cache.last_displayed_ts != Some(found_ts) {
-                            let expected = (w * h * 4) as usize;
+                            let expected = w as usize * h as usize * format.bytes_per_pixel();
                             if data.len() == expected {
                                 let data = Arc::clone(data);
                                 let mut wrote_direct = false;
@@ -922,10 +951,12 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                     && existing.height() == h
                                     && let Some(dst) = &mut existing.data
                                 {
-                                    dst.copy_from_slice(&data);
-                                    wrote_direct = true;
+                                    wrote_direct = copy_raw_frame_to_rgba(&data, dst, format);
                                 }
                                 if !wrote_direct {
+                                    let mut rgba = vec![0; w as usize * h as usize * 4];
+                                    let copied = copy_raw_frame_to_rgba(&data, &mut rgba, format);
+                                    debug_assert!(copied);
                                     let img = Image::new(
                                         Extent3d {
                                             width: w,
@@ -933,7 +964,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                             depth_or_array_layers: 1,
                                         },
                                         TextureDimension::D2,
-                                        (*data).clone(),
+                                        rgba,
                                         bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
                                         RenderAssetUsages::MAIN_WORLD
                                             | RenderAssetUsages::RENDER_WORLD,
@@ -1133,7 +1164,7 @@ pub fn connect_streams(
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
+                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
@@ -1146,7 +1177,7 @@ pub fn connect_streams(
                     bevy::log::debug!(
                         "video stream connected: msg_name={}, raw_dims={:?}",
                         stream.msg_name,
-                        stream.raw_rgba_dims
+                        stream.raw_dims
                     );
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
                     stream.state = StreamState::Active;
@@ -1180,7 +1211,7 @@ pub fn connect_streams(
                 if !cache.backfill_in_flight && retry_ok && cache.backfill_frontier < last_updated.0
                 {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
+                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     cache.backfill_retry_at = Some(Instant::now());
@@ -1197,7 +1228,7 @@ pub fn connect_streams(
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
+                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
@@ -1281,5 +1312,28 @@ fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
         } else {
             cache.last_displayed_ts = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gray8_expands_to_opaque_rgba() {
+        let mut rgba = [0; 8];
+        assert!(copy_raw_frame_to_rgba(
+            &[16, 235],
+            &mut rgba,
+            RawPixelFormat::Gray8
+        ));
+        assert_eq!(rgba, [16, 16, 16, 255, 235, 235, 235, 255]);
+    }
+
+    #[test]
+    fn gray8_backfill_uses_one_byte_per_pixel() {
+        let gray = backfill_frame_limit(Some((640, 512, RawPixelFormat::Gray8)), false);
+        let rgba = backfill_frame_limit(Some((640, 512, RawPixelFormat::Rgba8)), false);
+        assert_eq!(gray, rgba * 4);
     }
 }

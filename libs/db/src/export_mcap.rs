@@ -476,8 +476,8 @@ fn msg_log_json(kind: &MsgLogKind, name: &str, payload: &[u8], ts_ns: u64) -> Ve
             "frame_id": name,
             "width": cfg.width,
             "height": cfg.height,
-            "encoding": "rgba8",
-            "step": cfg.width * 4,
+            "encoding": if cfg.format == "gray8" { "mono8" } else { "rgba8" },
+            "step": if cfg.format == "gray8" { cfg.width } else { cfg.width * 4 },
             "data": BASE64.encode(payload),
         }),
         MsgLogKind::LogEntries => {
@@ -2231,20 +2231,15 @@ fn encode_sensor_frame(
         crate::export_videos::SensorEncoder::new(cfg.width, cfg.height, fps)
             .expect("openh264 encoder init")
     });
-    let yuv = match crate::export_videos::rgba_to_i420(
-        raw_payload,
-        cfg.width as usize,
-        cfg.height as usize,
-    ) {
+    let yuv = match if cfg.format == "gray8" {
+        crate::export_videos::gray8_to_i420(raw_payload, cfg.width as usize, cfg.height as usize)
+    } else {
+        crate::export_videos::rgba_to_i420(raw_payload, cfg.width as usize, cfg.height as usize)
+    } {
         Ok(yuv) => yuv,
         Err(e) => {
             eprintln!("Warning: sensor frame encode skip for {name}: {e}");
-            return msg_log_json(
-                &MsgLogKind::SensorCamera(Box::new(cfg.clone())),
-                name,
-                raw_payload,
-                ts_ns,
-            );
+            return Vec::new();
         }
     };
     match encoder.encode_frame(&yuv) {
@@ -2260,12 +2255,7 @@ fn encode_sensor_frame(
         Ok(_) => Vec::new(),
         Err(e) => {
             eprintln!("Warning: sensor frame encode error for {name}: {e}");
-            msg_log_json(
-                &MsgLogKind::SensorCamera(Box::new(cfg.clone())),
-                name,
-                raw_payload,
-                ts_ns,
-            )
+            Vec::new()
         }
     }
 }
@@ -2862,18 +2852,20 @@ pub fn run(
             )
         };
 
-        let sequence = sequences.entry(channel_id).or_insert(0);
-        writer.write_to_known_channel(
-            &MessageHeader {
-                channel_id,
-                sequence: *sequence,
-                log_time: ts_ns,
-                publish_time: ts_ns,
-            },
-            &payload,
-        )?;
-        *sequence += 1;
-        message_count += 1;
+        if !payload.is_empty() {
+            let sequence = sequences.entry(channel_id).or_insert(0);
+            writer.write_to_known_channel(
+                &MessageHeader {
+                    channel_id,
+                    sequence: *sequence,
+                    log_time: ts_ns,
+                    publish_time: ts_ns,
+                },
+                &payload,
+            )?;
+            *sequence += 1;
+            message_count += 1;
+        }
 
         positions[cursor_id] = pos + 1;
         if let Some(next) = next_ts {
