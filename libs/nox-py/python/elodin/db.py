@@ -622,8 +622,14 @@ class Server:
 
     @staticmethod
     def start(path: str, addr: str = "127.0.0.1:2240") -> "Server":
-        """Bind ``addr`` (errors raise immediately, e.g. port in use) and serve
-        the database at ``path`` until ``stop()`` or process exit."""
+        """Bind Impeller TCP on ``addr`` (errors raise immediately, e.g. port
+        in use) and the DB Asset Server on ``addr.port + 1``. Serve the
+        database at ``path`` until ``stop()`` or process exit.
+
+        The editor loads ``schematic.active`` (usually ``schematics/main.kdl``)
+        over that HTTP port — without it you get
+        ``error sending request for url http://…:N+1/schematics/main.kdl``.
+        """
         return Server(_native.Server(str(path), addr))
 
     @property
