@@ -1211,6 +1211,7 @@ mod tests {
     };
     use crate::ui::plot::{
         CollectedGraphData, Line, PlotDataComponent, PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
+        XYLine,
     };
     use bevy::asset::Assets;
     use bevy::ecs::system::SystemState;
@@ -1307,5 +1308,42 @@ mod tests {
             "unused line must still be dropped"
         );
         assert_eq!(world.resource::<PlotLineUsers>().count(key), 0);
+    }
+
+    /// Bevy runs `on_discard`/`on_insert` — not `on_add`/`on_remove` — when a
+    /// component is overwritten, so `LineHandle`'s hooks skip a replacement and
+    /// neither retain the new asset nor release the old one. No caller replaces
+    /// a handle with a different asset today; this records the latent trap.
+    #[test]
+    #[ignore = "LineHandle still uses on_add/on_remove; see #822 follow-up"]
+    fn replacing_line_handle_runs_retain_and_release_hooks() {
+        let mut world = plot_world();
+        world.insert_resource(Assets::<XYLine>::default());
+        let old = world
+            .resource_mut::<Assets<XYLine>>()
+            .add(XYLine::default());
+        let new = world
+            .resource_mut::<Assets<XYLine>>()
+            .add(XYLine::default());
+        let old_key = PlotLineKey::XY(old.id());
+        let new_key = PlotLineKey::XY(new.id());
+
+        let entity = world.spawn(LineHandle::XY(old.clone())).id();
+        assert_eq!(world.resource::<PlotLineUsers>().count(old_key), 1);
+
+        world.entity_mut(entity).insert(LineHandle::XY(new.clone()));
+        world.flush();
+        apply_pending_unused_plot_lines(&mut world);
+
+        assert_eq!(
+            world.resource::<PlotLineUsers>().count(new_key),
+            1,
+            "replacement handle must be retained"
+        );
+        assert_eq!(
+            world.resource::<PlotLineUsers>().count(old_key),
+            0,
+            "replaced handle must be released"
+        );
     }
 }
