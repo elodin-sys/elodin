@@ -108,10 +108,14 @@ impl QueryPlotData {
         xy_lines: &mut Assets<XYLine>,
     ) -> Vec<Entity> {
         let default_color = self.data.color.into_color32();
+        // Refill last refresh's lines so their GPU allocations survive; fresh
+        // assets would force new pool buffers on every interval.
+        let reusable: Vec<_> = self.series.iter().map(|s| s.handle.clone()).collect();
         let Some(plot) = process_sql_record_batch(
             &batch,
             self.data.plot_mode,
             xy_lines,
+            &reusable,
             &self.series_colors,
             default_color,
         ) else {
@@ -541,5 +545,33 @@ mod tests {
         assert_eq!(plot.series.len(), 1);
         assert_eq!(plot.series[0].entity, Some(kept));
         assert_eq!(leftover, vec![extra_a, extra_b]);
+    }
+
+    #[test]
+    fn refresh_keeps_series_asset_and_entity() {
+        let mut xy_lines = Assets::<XYLine>::default();
+        let mut plot = QueryPlotData::default();
+        plot.data.plot_mode = PlotMode::XY;
+
+        assert!(
+            plot.process_record_batch(batch_xy(1), &mut xy_lines)
+                .is_empty()
+        );
+        let handle = plot.series[0].handle.clone();
+        let entity = Entity::from_bits(1);
+        plot.series[0].entity = Some(entity);
+
+        assert!(
+            plot.process_record_batch(batch_xy(1), &mut xy_lines)
+                .is_empty()
+        );
+
+        assert_eq!(
+            plot.series[0].handle.id(),
+            handle.id(),
+            "refresh must refill the same asset so its GPU allocations survive"
+        );
+        assert_eq!(plot.series[0].entity, Some(entity));
+        assert_eq!(xy_lines.len(), 1);
     }
 }

@@ -778,7 +778,6 @@ pub fn sync_plot_lines_from_series_store(
     if !(range_changed || enabled_changed || (gen_changed && due)) {
         return;
     }
-
     sync_state.last_range = Some(range_key);
     sync_state.last_generation = series_store.generation();
     sync_state.last_enabled = fetch_ids.clone();
@@ -1432,11 +1431,30 @@ pub struct XYLine {
     pub y_shard_alloc: Option<BufferShardAlloc>,
     pub x_values: Vec<SharedBuffer<f32, CHUNK_LEN>>,
     pub y_values: Vec<SharedBuffer<f32, CHUNK_LEN>>,
+    /// Set by [`XYLine::replace_points`]; consumed by [`XYLine::queue_load`].
+    content_replaced: bool,
 }
 
 impl XYLine {
     pub fn point_count(&self) -> usize {
         self.x_values.iter().map(|c| c.cpu().len()).sum()
+    }
+
+    /// Swap in a whole new point set, keeping the shard allocations so a
+    /// re-queried line does not have to take pool buffers on every refresh.
+    ///
+    /// Dropping the old chunks does not deallocate their shards, so the
+    /// allocations are reclaimed by the next `queue_load`, which holds the
+    /// render queue that a reset needs.
+    pub fn replace_points(&mut self, label: String, points: impl IntoIterator<Item = (f32, f32)>) {
+        self.label = label;
+        self.x_values.clear();
+        self.y_values.clear();
+        self.content_replaced = true;
+        for (x, y) in points {
+            self.push_x_value(x);
+            self.push_y_value(y);
+        }
     }
 
     pub fn has_samples(&self) -> bool {
@@ -1454,6 +1472,14 @@ impl XYLine {
         }
         let x_class = value_shard_class(self.x_values.len());
         let y_class = value_shard_class(self.y_values.len());
+        if std::mem::take(&mut self.content_replaced) {
+            // The replaced chunks dropped their shards without deallocating
+            // them, so hand the whole allocation back rather than leaking a
+            // shard per refresh. An unchanged class is reset in place, which
+            // keeps this off the pool entirely.
+            reclaim_or_release(&mut self.x_shard_alloc, x_class, pool, render_queue);
+            reclaim_or_release(&mut self.y_shard_alloc, y_class, pool, render_queue);
+        }
         if self
             .x_shard_alloc
             .as_ref()
@@ -4113,6 +4139,31 @@ mod tests {
         tree.unload_gpu(&mut PlotGpuBufferPool::default());
         assert!(!tree.all_gpu_dirty());
         assert!(!tree.gpu_resident());
+    }
+
+    #[test]
+    fn replace_points_swaps_content_instead_of_appending() {
+        let mut xy = XYLine::default();
+        xy.replace_points("first".into(), [(0.0, 1.0), (1.0, 2.0)]);
+        assert_eq!(xy.point_count(), 2);
+
+        xy.replace_points("second".into(), [(5.0, 6.0)]);
+
+        assert_eq!(xy.label, "second");
+        assert_eq!(xy.point_count(), 1);
+        let xs: Vec<f32> = xy.x_values.iter().flat_map(|c| c.cpu()).copied().collect();
+        let ys: Vec<f32> = xy.y_values.iter().flat_map(|c| c.cpu()).copied().collect();
+        assert_eq!(xs, vec![5.0]);
+        assert_eq!(ys, vec![6.0]);
+    }
+
+    #[test]
+    fn replace_points_marks_allocations_for_reclaim() {
+        let mut xy = XYLine::default();
+        xy.replace_points("first".into(), [(0.0, 1.0)]);
+        // `queue_load` needs a render queue, so the reclaim itself can only be
+        // exercised on a device; assert the request survives until then.
+        assert!(xy.content_replaced);
     }
 
     #[test]

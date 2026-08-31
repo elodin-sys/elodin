@@ -137,10 +137,15 @@ fn column_label(batch: &RecordBatch, col: usize) -> String {
 }
 
 /// Build one XY line per Y column. Column 0 is X (time); columns 1..N are series.
+///
+/// `reusable` holds the handles this plot produced last time, positionally by
+/// series. Refilling them keeps their GPU allocations alive across a refresh,
+/// so an auto-refreshing plot does not take new pool buffers every interval.
 pub fn process_sql_record_batch(
     batch: &RecordBatch,
     plot_mode: PlotMode,
     xy_lines: &mut Assets<XYLine>,
+    reusable: &[Handle<XYLine>],
     series_colors: &[Color32],
     default_color: Color32,
 ) -> Option<SqlBatchPlot> {
@@ -184,17 +189,22 @@ pub fn process_sql_record_batch(
 
         let skip = skip_initial_points(&points, is_xy_mode);
         let label = column_label(batch, col_idx);
-        let mut xy_line = XYLine {
-            label: label.clone(),
-            x_shard_alloc: None,
-            y_shard_alloc: None,
-            x_values: vec![],
-            y_values: vec![],
+        let points = points
+            .into_iter()
+            .skip(skip)
+            .map(|(x, y)| ((x - x_offset) as f32, (y - y_offset) as f32));
+
+        let reused = reusable.get(col_idx - 1).cloned();
+        let handle = if let Some(handle) = reused
+            && let Some(mut line) = xy_lines.get_mut(handle.id())
+        {
+            line.replace_points(label.clone(), points);
+            handle
+        } else {
+            let mut line = XYLine::default();
+            line.replace_points(label.clone(), points);
+            xy_lines.add(line)
         };
-        for (x_value, y_value) in points.into_iter().skip(skip) {
-            xy_line.push_x_value((x_value - x_offset) as f32);
-            xy_line.push_y_value((y_value - y_offset) as f32);
-        }
 
         let color = series_colors.get(col_idx - 1).copied().unwrap_or_else(|| {
             if col_idx == 1 {
@@ -206,7 +216,7 @@ pub fn process_sql_record_batch(
 
         series.push(SqlPlotSeries {
             label,
-            handle: xy_lines.add(xy_line),
+            handle,
             color,
         });
     }
@@ -413,6 +423,7 @@ mod tests {
             &batch,
             PlotMode::TimeSeries,
             &mut xy_lines,
+            &[],
             &colors,
             Color32::WHITE,
         )
@@ -425,5 +436,55 @@ mod tests {
         assert_eq!(plot.series[1].color, colors[1]);
         assert_eq!(plot.series[2].color, colors[2]);
         assert!(plot.x_offset.is_finite());
+    }
+
+    fn plot_batch(xy_lines: &mut Assets<XYLine>, reusable: &[Handle<XYLine>]) -> SqlBatchPlot {
+        process_sql_record_batch(
+            &batch_time_xyz(),
+            PlotMode::TimeSeries,
+            xy_lines,
+            reusable,
+            &[],
+            Color32::WHITE,
+        )
+        .expect("plot")
+    }
+
+    #[test]
+    fn refresh_refills_previous_series_assets() {
+        let mut xy_lines = Assets::<XYLine>::default();
+        let first = plot_batch(&mut xy_lines, &[]);
+        let handles: Vec<_> = first.series.iter().map(|s| s.handle.clone()).collect();
+        let ids: Vec<_> = handles.iter().map(|h| h.id()).collect();
+
+        let second = plot_batch(&mut xy_lines, &handles);
+
+        assert_eq!(
+            second
+                .series
+                .iter()
+                .map(|s| s.handle.id())
+                .collect::<Vec<_>>(),
+            ids,
+            "a refresh must refill the same assets, not allocate new ones"
+        );
+        assert_eq!(xy_lines.len(), 3, "refresh must not accumulate assets");
+        assert_eq!(
+            xy_lines.get(ids[0]).expect("line").point_count(),
+            3,
+            "refilled line must hold one copy of the batch"
+        );
+    }
+
+    #[test]
+    fn refresh_adds_assets_only_for_series_without_a_predecessor() {
+        let mut xy_lines = Assets::<XYLine>::default();
+        let first = plot_batch(&mut xy_lines, &[]);
+        let kept = first.series[0].handle.clone();
+
+        let second = plot_batch(&mut xy_lines, std::slice::from_ref(&kept));
+
+        assert_eq!(second.series[0].handle.id(), kept.id());
+        assert_ne!(second.series[1].handle.id(), first.series[1].handle.id());
     }
 }
