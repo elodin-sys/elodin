@@ -91,6 +91,25 @@
         packages = with pkgs.elodin; {
           inherit elodin-cli elodin-db elodin-db-protos elodinsink rtsp-streamer;
           elodin-py = elodin-py.py;
+          elodin = elodin-cli;
+          default = elodin-cli;
+        };
+
+        apps = let
+          elodinApp = {
+            type = "app";
+            program = "${pkgs.elodin.elodin-cli}/bin/elodin";
+            meta.description = "Elodin CLI and editor";
+          };
+          elodinDbApp = {
+            type = "app";
+            program = "${pkgs.elodin.elodin-db}/bin/elodin-db";
+            meta.description = "Elodin time-series database";
+          };
+        in {
+          elodin = elodinApp;
+          elodin-db = elodinDbApp;
+          default = elodinApp;
         };
 
         devShells =

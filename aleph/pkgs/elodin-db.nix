@@ -36,6 +36,11 @@
     GIT_HASH = gitRev;
 
     doCheck = false;
+
+    meta = {
+      description = "Elodin time-series database";
+      mainProgram = "elodin-db";
+    };
   };
 in
   bin
