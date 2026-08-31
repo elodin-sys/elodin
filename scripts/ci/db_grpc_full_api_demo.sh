@@ -2,7 +2,9 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-work="$(mktemp -d "${TMPDIR:-/tmp}/elodin-db-grpc-full.XXXXXX")"
+# Stay out of nix-shell $TMPDIR; that tree is deleted on flake exit and races
+# `rm -rf` once the render-server has written a large DB into it.
+work="$(mktemp -d /tmp/elodin-db-grpc-full.XXXXXX)"
 server_pid=""
 sim_pid=""
 
@@ -25,10 +27,11 @@ cleanup() {
     done
   fi
   if [[ "${ELODIN_GRPC_DEMO_KEEP:-0}" != "1" ]]; then
-    rm -rf "${work}"
+    rm -rf "${work}" || true
   else
     printf 'kept gRPC demo artifacts: %s\n' "${work}"
   fi
+  exit "${status}"
 }
 trap cleanup EXIT
 

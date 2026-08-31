@@ -13,7 +13,6 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
-use impeller2::types::Timestamp;
 use impeller2_wkt::DbConfig;
 
 use crate::msg_log::MsgLog;
@@ -530,8 +529,8 @@ fn trim_msg_log(
     let max_kept = msg_timestamps[end_idx - 1].0;
     let dst_log = MsgLog::create(dst_dir)?;
     for index in start_idx..end_idx {
-        let (_, payload) = src_log.get_index(index).ok_or(Error::BadMessage)?;
-        dst_log.push(Timestamp(msg_timestamps[index].0), payload)?;
+        let (ts, payload) = src_log.get_index(index).ok_or(Error::BadMessage)?;
+        dst_log.push(ts, payload)?;
     }
     dst_log.sync_all()?;
     Ok((min_kept, max_kept))
@@ -745,7 +744,7 @@ fn write_empty_appendlog(path: &Path) -> Result<(), Error> {
 mod tests {
     use super::*;
     use impeller2::buf::UmbraBuf;
-    use impeller2::types::ComponentId;
+    use impeller2::types::{ComponentId, Timestamp};
     use impeller2_wkt::ComponentMetadata;
     use std::collections::HashMap;
     use tempfile::TempDir;
