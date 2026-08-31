@@ -231,19 +231,19 @@ impl UmbraBuf {
 
     /// Returns the offset of the UmbraBuf if it is an offset buffer
     pub fn offset(&self) -> Option<u32> {
-        if self.len > 12 {
-            Some(unsafe { self.data.offset.offset })
-        } else {
-            None
-        }
+        self.long_offset().map(|o| o.offset)
     }
 
+    /// Returns the external-buffer segment if this is an offset buffer.
     pub fn segment_index(&self) -> Option<u32> {
-        if self.len > 12 {
-            Some(unsafe { self.data.offset.segment_index })
-        } else {
-            None
+        self.long_offset().map(|o| o.segment_index)
+    }
+
+    fn long_offset(&self) -> Option<LongBufOffset> {
+        if self.len <= 12 {
+            return None;
         }
+        LongBufOffset::read_from_bytes(&self.as_bytes()[4..]).ok()
     }
 }
 
@@ -274,4 +274,19 @@ pub struct LongBufOffset {
     pub segment_index: u32,
     /// The offset into the buffer that contains the data
     pub offset: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_buf_exposes_segment_and_offset() {
+        let buf = UmbraBuf::with_segment_offset(20, [1, 2, 3, 4], 7, 99);
+        assert_eq!(buf.segment_index(), Some(7));
+        assert_eq!(buf.offset(), Some(99));
+        let inline = UmbraBuf::with_inline(4, [0; 12]);
+        assert_eq!(inline.segment_index(), None);
+        assert_eq!(inline.offset(), None);
+    }
 }

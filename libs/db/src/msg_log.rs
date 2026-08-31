@@ -292,7 +292,7 @@ impl BufLog {
             len @ ..=12 => unsafe { &buf.data.inline[..len] },
             len => {
                 let segment_index = buf.segment_index()?;
-                let offset = unsafe { buf.data.offset.offset } as usize;
+                let offset = buf.offset()? as usize;
                 self.segment(segment_index)?.log.get(offset..offset + len)?
             }
         };

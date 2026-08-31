@@ -1089,6 +1089,29 @@ struct CameraSchedule {
     last_rendered: Option<Timestamp>,
 }
 
+/// Latest cadence-aligned timestamp at or before `sim_ts`. Overdue intervals
+/// are skipped so a slow renderer stays live instead of accumulating debt.
+fn next_due_ts(
+    last_rendered: Option<Timestamp>,
+    sim_ts: Timestamp,
+    interval_us: i64,
+) -> Option<Timestamp> {
+    match last_rendered {
+        None => Some(sim_ts),
+        Some(_) if interval_us <= 0 => Some(sim_ts),
+        Some(previous) => {
+            let elapsed = sim_ts.0.saturating_sub(previous.0);
+            if elapsed >= interval_us {
+                Some(Timestamp(
+                    previous.0 + (elapsed / interval_us) * interval_us,
+                ))
+            } else {
+                None
+            }
+        }
+    }
+}
+
 fn build_schedules(app: &App) -> Vec<CameraSchedule> {
     app.world()
         .resource::<SensorCameraConfigs>()
@@ -1158,6 +1181,9 @@ fn render_server_runner(mut app: App) -> AppExit {
             encoders.clear();
             return exit;
         }
+        // Readback finishes after the schedule advances; drain here so a
+        // paused/stopped sim still publishes the last in-flight frames.
+        emit_completed_frames(&mut app, &mut encoders);
 
         if !cameras_warmed {
             run_headless_update(&mut app);
@@ -1192,12 +1218,8 @@ fn render_server_runner(mut app: App) -> AppExit {
 
         let next_render = schedules
             .iter()
-            .filter_map(|schedule| match schedule.last_rendered {
-                None => Some(sim_ts),
-                Some(previous) if sim_ts.0.saturating_sub(previous.0) >= schedule.interval_us => {
-                    Some(Timestamp(previous.0 + schedule.interval_us))
-                }
-                Some(_) => None,
+            .filter_map(|schedule| {
+                next_due_ts(schedule.last_rendered, sim_ts, schedule.interval_us)
             })
             .min_by_key(|timestamp| timestamp.0);
         let Some(render_ts) = next_render else {
@@ -1216,9 +1238,8 @@ fn render_server_runner(mut app: App) -> AppExit {
         };
         let due_names: Vec<String> = schedules
             .iter()
-            .filter(|schedule| match schedule.last_rendered {
-                None => render_ts == sim_ts,
-                Some(previous) => previous.0 + schedule.interval_us == render_ts.0,
+            .filter(|schedule| {
+                next_due_ts(schedule.last_rendered, sim_ts, schedule.interval_us) == Some(render_ts)
             })
             .map(|schedule| schedule.name.clone())
             .collect();
@@ -1362,7 +1383,8 @@ fn collect_frames(app: &App) -> Vec<(String, Timestamp, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SensorH264Encoder, annex_b_nals, is_ai_skybox_target, rgba_to_gray8};
+    use super::{SensorH264Encoder, annex_b_nals, is_ai_skybox_target, next_due_ts, rgba_to_gray8};
+    use impeller2::types::Timestamp;
 
     #[test]
     fn cinematic_earth_skybox_is_not_an_ai_skybox_target() {
@@ -1399,5 +1421,24 @@ mod tests {
         let rgba = [10, 20, 30, 255, 200, 100, 50, 255];
         assert_eq!(rgba_to_gray8(&rgba, 2, 1, true).unwrap(), [10, 200]);
         assert_eq!(rgba_to_gray8(&rgba, 2, 1, false).unwrap(), [18, 124]);
+    }
+
+    #[test]
+    fn next_due_stays_on_cadence_and_skips_overdue_intervals() {
+        let t0 = Timestamp(1_000_000);
+        let interval = 16_667;
+        assert_eq!(next_due_ts(None, t0, interval), Some(t0));
+        assert_eq!(
+            next_due_ts(Some(t0), Timestamp(t0.0 + interval - 1), interval),
+            None
+        );
+        assert_eq!(
+            next_due_ts(Some(t0), Timestamp(t0.0 + interval), interval),
+            Some(Timestamp(t0.0 + interval))
+        );
+        assert_eq!(
+            next_due_ts(Some(t0), Timestamp(t0.0 + 3 * interval + 100), interval),
+            Some(Timestamp(t0.0 + 3 * interval))
+        );
     }
 }
