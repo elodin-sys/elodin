@@ -654,13 +654,15 @@ fn spawn_sensor_cameras(
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
+        // LDR clipping erases the radiance variation used for LWIR terrain contrast.
+        let hdr_input = config.cinematic || config.effect == "lwir";
         let size = Extent3d {
             width: config.width,
             height: config.height,
             depth_or_array_layers: 1,
         };
 
-        let render_target_handle = if config.cinematic {
+        let render_target_handle = if hdr_input {
             let mut hdr_image = Image::new_target_texture(
                 size.width,
                 size.height,
@@ -778,7 +780,7 @@ fn spawn_sensor_cameras(
                 },
                 RenderTarget::Image(render_target_handle.into()),
                 Projection::Perspective(perspective),
-                if config.cinematic && config.effect != "lwir" {
+                if hdr_input {
                     Tonemapping::TonyMcMapface
                 } else {
                     Tonemapping::None
@@ -810,13 +812,18 @@ fn spawn_sensor_cameras(
             entity.insert(PrimarySkybox);
         }
 
-        if config.cinematic {
+        if hdr_input {
             entity.insert((
                 Hdr,
-                CinematicViewport,
                 Exposure {
                     ev100: config.cinematic_ev100(),
                 },
+            ));
+        }
+
+        if config.cinematic {
+            entity.insert((
+                CinematicViewport,
                 AmbientLight {
                     brightness: 0.0,
                     ..default()

@@ -58,6 +58,9 @@ use crate::sensor_camera::{
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
 
+const SENSOR_CAMERA_CONFIG_WARMUP_CYCLES: usize = 600;
+const SENSOR_CAMERA_PRIME_CYCLES: usize = 60;
+
 /// A headless Bevy app dedicated to sensor camera rendering.
 ///
 /// Used by both `elodin run` (as a sibling s10 process) and `elodin editor`
@@ -450,6 +453,9 @@ fn load_headless_scene(
     for elem in &schematic.elems {
         match elem {
             SchematicElem::Object3d(obj) => {
+                if !obj.sensor_visible {
+                    continue;
+                }
                 let mut obj = obj.clone();
                 if obj.frame.is_none() {
                     obj.frame = fallback_frame;
@@ -1099,6 +1105,15 @@ fn build_schedules(app: &App) -> Vec<CameraSchedule> {
         .collect()
 }
 
+fn prime_sensor_cameras(app: &mut App, names: &[String]) {
+    enable_all_sensor_cameras(app.world_mut());
+    for _ in 0..SENSOR_CAMERA_PRIME_CYCLES {
+        run_headless_update(app);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    set_cameras_active(app.world_mut(), names, false);
+}
+
 /// Autonomous render-server runner. Replaces the previous request-response
 /// loop with a continuous renderer paced by the DB's `LastUpdated` signal.
 fn render_server_runner(mut app: App) -> AppExit {
@@ -1113,15 +1128,11 @@ fn render_server_runner(mut app: App) -> AppExit {
     // each scheduled frame so we don't spend GPU time rendering scenes
     // nobody is going to read.
     let mut cameras_warmed = false;
-    for i in 0..120 {
+    for i in 0..SENSOR_CAMERA_CONFIG_WARMUP_CYCLES {
         run_headless_update(&mut app);
         if app.world().resource::<SensorCamerasSpawned>().0 {
-            enable_all_sensor_cameras(app.world_mut());
             let names: Vec<String> = build_schedules(&app).into_iter().map(|s| s.name).collect();
-            for _ in 0..4 {
-                run_headless_update(&mut app);
-            }
-            set_cameras_active(app.world_mut(), &names, false);
+            prime_sensor_cameras(&mut app, &names);
             tracing::info!(
                 "Sensor cameras spawned and primed after {i} warm-up cycles ({} cameras)",
                 names.len()
@@ -1157,10 +1168,9 @@ fn render_server_runner(mut app: App) -> AppExit {
         // pipelines exist, then drop back to inactive so the per-render
         // gating in `render_and_emit` is the only source of truth.
         if !cameras_warmed && app.world().resource::<SensorCamerasSpawned>().0 {
-            enable_all_sensor_cameras(app.world_mut());
             schedules = build_schedules(&app);
             let names: Vec<String> = schedules.iter().map(|s| s.name.clone()).collect();
-            set_cameras_active(app.world_mut(), &names, false);
+            prime_sensor_cameras(&mut app, &names);
             cameras_warmed = true;
             tracing::info!(
                 "Sensor cameras late-spawned; render server now scheduling {} cameras",

@@ -1576,6 +1576,10 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .and_then(|s| GeoFrame::from_str(s).ok());
     let frame_orientation = parse_optional_geo_frame(node, "frame_orientation", "object_3d", src)?;
     let orientation = parse_rotation_kind(node, src)?;
+    let sensor_visible = node
+        .get("sensor_visible")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
     let mut icon = None;
     let mut mesh_visibility_range = None;
     let mut thrusters = Vec::new();
@@ -1668,6 +1672,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         frame,
         frame_orientation,
         orientation,
+        sensor_visible,
         icon,
         thrusters,
         mesh_visibility_range,
@@ -3278,7 +3283,7 @@ object_3d frame="NED" "ball.world_pos" {
     #[test]
     fn test_parse_object_3d_with_absolute_orientation() {
         let kdl = r#"
-object_3d frame="NED" orientation=absolute "ball.world_pos" {
+object_3d frame="NED" orientation=absolute sensor_visible=#false "ball.world_pos" {
     glb path="compass.glb"
 }
 "#;
@@ -3289,6 +3294,7 @@ object_3d frame="NED" orientation=absolute "ball.world_pos" {
             assert_eq!(obj.eql, "ball.world_pos");
             assert!(matches!(obj.frame, Some(GeoFrame::NED)));
             assert_eq!(obj.orientation, RotationKind::Absolute);
+            assert!(!obj.sensor_visible);
         } else {
             panic!("Expected object_3d");
         }

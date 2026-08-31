@@ -942,6 +942,10 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("orientation", "absolute"));
     }
+    if !obj.sensor_visible {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("sensor_visible", false));
+    }
 
     let mut children = KdlDocument::new();
     let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
@@ -2062,6 +2066,7 @@ graph "value" {
             frame: None,
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             node_id: NodeId::default(),
         }));
 
@@ -2106,6 +2111,7 @@ graph "value" {
             frame: None,
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             node_id: NodeId::default(),
         }));
 
@@ -2289,6 +2295,7 @@ object_3d lander.world_pos {
             frame: None,
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             node_id: NodeId::default(),
         }));
 
@@ -2328,6 +2335,7 @@ object_3d lander.world_pos {
             frame: None,
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             node_id: NodeId::default(),
         }));
 
@@ -2373,6 +2381,7 @@ object_3d lander.world_pos {
             frame: Some(GeoFrame::NED),
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2407,6 +2416,7 @@ object_3d lander.world_pos {
             frame: Some(GeoFrame::NED),
             frame_orientation: None,
             orientation: RotationKind::Absolute,
+            sensor_visible: false,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2418,10 +2428,12 @@ object_3d lander.world_pos {
             serialized.contains("orientation=absolute"),
             "serialized output should contain orientation=absolute, got:\n{serialized}"
         );
+        assert!(serialized.contains("sensor_visible=#false"));
 
         let parsed = parse_schematic(&serialized).unwrap();
         if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
             assert_eq!(obj.orientation, RotationKind::Absolute);
+            assert!(!obj.sensor_visible);
         } else {
             panic!("Expected object_3d");
         }
@@ -2439,6 +2451,7 @@ object_3d lander.world_pos {
             frame: Some(GeoFrame::NED),
             frame_orientation: None,
             orientation: RotationKind::Relative,
+            sensor_visible: true,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2464,6 +2477,7 @@ object_3d lander.world_pos {
             frame: Some(GeoFrame::ECEF),
             frame_orientation: Some(GeoFrame::NED),
             orientation: RotationKind::Absolute,
+            sensor_visible: true,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2498,6 +2512,7 @@ object_3d lander.world_pos {
             frame: None,             // Default (no frame)
             frame_orientation: None, // Default (no frame)
             orientation: Default::default(),
+            sensor_visible: true,
             icon: None,
             thrusters: Vec::new(),
             mesh_visibility_range: None,

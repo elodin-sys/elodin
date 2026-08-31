@@ -1389,6 +1389,7 @@ pub fn sync_object_3d(
                 frame: None,
                 frame_orientation: None,
                 orientation: Default::default(),
+                sensor_visible: true,
                 node_id: Default::default(),
             },
             expr,

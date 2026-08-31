@@ -163,6 +163,7 @@ viewport hdr=#true {
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position. Inherits from global `coordinate` if omitted.
 - `frame_orientation`: optional; `ENU`, `NED`, or `ECEF`. Coordinate frame used for orientation (`GeoRotation`). Falls back to `frame`, then the global default, when omitted.
 - `orientation`: optional; `relative` (default) or `absolute`. Both compose the object's attitude with the frame→Bevy basis (`bevy_R * att`). An identity attitude therefore aligns mesh local axes with the schematic frame (ENU: +X east, +Y north, +Z up) — not with the editor's Bevy Y-up axes. Use `absolute` when you want to be explicit about frame-aligned geometry (compasses, multi-frame scenes).
+- `sensor_visible`: optional boolean, default `#true`. Set `#false` for editor-only overlays or estimated-state meshes that must not appear in headless sensor-camera imagery.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server). Material overrides (both open-ended strengths, default 0.0 = use the GLB's own materials):
     - `emissivity`: brightens the surface — boosts the model's emissive by `4 × emissivity`, modulated by its base-color texture so the pattern still shows.
@@ -472,6 +473,7 @@ object_3d = "object_3d"
           [frame=ENU|NED|ECEF]
           [frame_orientation=ENU|NED|ECEF]
           [orientation=relative|absolute]
+          [sensor_visible=boolean]
           { glb { animate }*
           | sphere
           | box

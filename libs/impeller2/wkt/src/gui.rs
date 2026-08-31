@@ -1558,6 +1558,8 @@ pub struct Object3D {
     pub frame_orientation: Option<bevy_geo_frames::GeoFrame>,
     #[serde(default)]
     pub orientation: bevy_geo_frames::RotationKind,
+    #[serde(default = "default_true")]
+    pub sensor_visible: bool,
     pub icon: Option<Object3DIcon>,
     #[serde(default)]
     pub thrusters: Vec<Thruster>,
