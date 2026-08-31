@@ -738,6 +738,29 @@ impl bevy::prelude::FromWorld for ExtractLinesState {
     }
 }
 
+/// Whether last frame's draw may stand in for a line whose upload was deferred.
+///
+/// Only when the cache still names the value buffers the line owns. An
+/// allocation the line has given up may already have been handed to another
+/// line and overwritten, and replaying that bind group would draw the wrong
+/// data — a far worse failure than a gap.
+pub(crate) fn plot_draw_replay_allowed<T: PartialEq>(cached: Option<T>, owned: Option<T>) -> bool {
+    owned.is_some() && cached == owned
+}
+
+/// Last frame's draw for this line, if replaying it is safe.
+fn replayable_gpu_line<'a>(
+    cache: Option<&'a GpuLineCache>,
+    line: &LineMut<'_>,
+) -> Option<&'a GpuLine> {
+    let owned = line
+        .x_buffer_shard_alloc()
+        .zip(line.y_buffer_shard_alloc())
+        .map(|(x, y)| (x.buffer().id(), y.buffer().id()));
+    let gpu = cache?.0.as_ref()?;
+    plot_draw_replay_allowed(Some(gpu.value_buffer_ids), owned).then_some(gpu)
+}
+
 fn line_gpu_pane_on_screen(
     child_of: Option<&ChildOf>,
     viewport_rects: &Query<&ViewportRect>,
@@ -964,16 +987,32 @@ fn extract_lines(
                 let required_value_shards = line.required_value_shards(clip_range.clone());
                 let value_buffers_needed =
                     line.value_buffers_needing_allocation(clip_range.clone());
+                let new_values = plot_gpu_pool
+                    .new_value_allocations_needed(value_buffers_needed, required_value_shards);
                 if plot_gpu_pool.defer_new_allocs(
                     value_buffers_needed,
                     has_index_cache,
                     required_value_shards,
-                ) {
-                    continue;
-                }
-                let new_values = plot_gpu_pool
-                    .new_value_allocations_needed(value_buffers_needed, required_value_shards);
-                if new_values > new_value_budget {
+                ) || new_values > new_value_budget
+                {
+                    // Replay last frame's geometry rather than leaving the line
+                    // out of this frame: the draw is rebuilt from scratch every
+                    // frame, so a gap here is a visible flicker while a few
+                    // stale frames are not.
+                    if let Some(gpu_line) = replayable_gpu_line(cache.as_deref(), &line) {
+                        commands.spawn((
+                            MainEntity::from(entity),
+                            LineBundle {
+                                line: line_handle.clone(),
+                                config: config.clone(),
+                                uniform: *uniform,
+                                line_visible_range: line_visible_range.clone(),
+                                graph_type: *graph_type,
+                            },
+                            gpu_line.clone(),
+                            TemporaryRenderEntity,
+                        ));
+                    }
                     continue;
                 }
                 new_value_budget -= new_values;
@@ -1207,7 +1246,7 @@ fn queue_line(
 mod tests {
     use super::{
         LineHandle, PendingUnusedPlotLines, apply_pending_unused_plot_lines,
-        release_unused_plot_line,
+        plot_draw_replay_allowed, release_unused_plot_line,
     };
     use crate::ui::plot::{
         CollectedGraphData, Line, PlotDataComponent, PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
@@ -1308,6 +1347,24 @@ mod tests {
             "unused line must still be dropped"
         );
         assert_eq!(world.resource::<PlotLineUsers>().count(key), 0);
+    }
+
+    #[test]
+    fn draw_replay_needs_the_line_to_still_own_the_cached_buffers() {
+        assert!(plot_draw_replay_allowed(Some((1, 2)), Some((1, 2))));
+        assert!(
+            !plot_draw_replay_allowed(Some((1, 2)), Some((3, 4))),
+            "buffers moved: the cached bind group may now hold another line's data"
+        );
+        assert!(
+            !plot_draw_replay_allowed(Some((1, 2)), None),
+            "line owns no buffers, so nothing keeps the cached ones out of the pool"
+        );
+        assert!(
+            !plot_draw_replay_allowed(None, Some((1, 2))),
+            "nothing drawn yet"
+        );
+        assert!(!plot_draw_replay_allowed::<(u32, u32)>(None, None));
     }
 
     /// Bevy runs `on_discard`/`on_insert` — not `on_add`/`on_remove` — when a
