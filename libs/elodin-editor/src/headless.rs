@@ -796,7 +796,7 @@ struct SensorH264Encoder {
 
 impl SensorH264Encoder {
     fn new(width: u32, height: u32, fps: f32) -> Result<Self, String> {
-        if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+        if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             return Err("h264 width and height must be positive and even".to_string());
         }
         let fps = fps.max(1.0);
@@ -1004,10 +1004,12 @@ fn rgba_to_gray8(
         ));
     }
     if monochrome_lwir {
-        return Ok(rgba.chunks_exact(4).map(|pixel| pixel[0]).collect());
+        return Ok(rgba.as_chunks::<4>().0.iter().map(|pixel| pixel[0]).collect());
     }
     Ok(rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| {
             ((77 * u32::from(pixel[0])
                 + 150 * u32::from(pixel[1])

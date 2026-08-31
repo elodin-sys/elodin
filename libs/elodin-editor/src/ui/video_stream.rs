@@ -890,7 +890,7 @@ fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) ->
             true
         }
         RawPixelFormat::Gray8 if src.len().checked_mul(4) == Some(dst.len()) => {
-            for (&gray, pixel) in src.iter().zip(dst.chunks_exact_mut(4)) {
+            for (&gray, pixel) in src.iter().zip(dst.as_chunks_mut::<4>().0) {
                 pixel.copy_from_slice(&[gray, gray, gray, 255]);
             }
             true

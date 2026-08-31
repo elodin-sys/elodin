@@ -1308,6 +1308,7 @@ fn readback_sensor_frame(
         .send((job.camera_name, job.timestamp, frame, job.width, job.height));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn image_copy_driver(
     image_copiers: Res<ImageCopiers>,
     render_device: Res<RenderDevice>,
