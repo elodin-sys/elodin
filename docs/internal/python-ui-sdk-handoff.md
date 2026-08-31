@@ -189,6 +189,7 @@ JAX → StableHLO display kernels in the editor. **Do not start unless Tier B op
 - `Expr.__add__` parenthesizes (`(a + b)`). Handwritten `examples/db-client/schematic.kdl` chase `pos` was updated to match; model equality is after parse, not byte-identical KDL.
 - `test_ui.py` `test_push_to_embedded_server` needs a free DB port; don’t run two demos on 2240.
 - Headless `main.py --db-schematic` + concurrent client can hit `Already borrowed` on `latest()` — demo issue, not the SDK path.
+- **Fixed 2026-08-31:** `edb.Server.start` did not spawn the DB Asset Server on TCP+1. The editor then failed with `http://127.0.0.1:2241/schematics/main.kdl: error sending request for url`. `libs/nox-py/src/db/server.rs` now calls `spawn_assets_http` like `elodin-db run` / `world.run`. Rebuild the Python wheel after pulling.
 
 ---
 
