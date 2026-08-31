@@ -21,6 +21,12 @@ export ELODIN_PYTHON="$(pwd)/.venv/bin/python"
 uv run python examples/db-client/main.py --db-schematic
 ```
 
+The embedded DB listens on Impeller `2240` and serves assets (including
+`schematics/main.kdl`) on HTTP `2241`. The editor fetches that URL. If you
+see `error sending request for url http://127.0.0.1:2241/schematics/main.kdl`,
+nothing is listening on 2241 — rebuild the Python wheel so `edb.Server`
+starts the asset HTTP server, and make sure 2241 is free.
+
 **2. Watch / push** (rebuilds on save):
 
 ```bash
