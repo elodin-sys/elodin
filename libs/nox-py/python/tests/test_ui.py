@@ -90,6 +90,9 @@ def test_world_schematic_accepts_ui_schematic():
 
 
 def test_push_to_embedded_server(tmp_path):
+    import urllib.error
+    import urllib.request
+
     addr = "127.0.0.1:23551"
     db_path = tmp_path / "db"
     server = edb.Server.start(str(db_path), addr)
@@ -99,12 +102,29 @@ def test_push_to_embedded_server(tmp_path):
         ui.push(s, addr)
         asset = db_path / "assets" / "schematics" / "main.kdl"
         deadline = time.time() + 5
+        body = None
         while time.time() < deadline:
             if asset.exists():
                 body = asset.read_text()
-                assert "drone.thrust" in body
-                return
+                break
             time.sleep(0.1)
-        pytest.fail(f"asset not written after push: missing {asset}")
+        if body is None:
+            pytest.fail(f"asset not written after push: missing {asset}")
+        assert "drone.thrust" in body
+
+        # Editor loads the active schematic from the Asset Server on N+1.
+        url = "http://127.0.0.1:23552/schematics/main.kdl"
+        http_deadline = time.time() + 5
+        last_err: Exception | None = None
+        while time.time() < http_deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=1) as resp:
+                    fetched = resp.read().decode()
+                assert "drone.thrust" in fetched
+                return
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_err = exc
+                time.sleep(0.1)
+        pytest.fail(f"asset HTTP GET {url} failed: {last_err}")
     finally:
         server.stop()
