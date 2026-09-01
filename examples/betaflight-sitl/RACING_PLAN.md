@@ -184,12 +184,16 @@ The completed core plan provides an opt-in example in which one simulated drone:
 
 The same mission must first work using ground-truth state and gate poses, then
 work using rendered frames without exposing truth or gate poses to vision
-guidance. Betaflight remains responsible for attitude stabilization, rate PID,
-and motor mixing. Python guidance initially commands RC sticks in ANGLE mode.
+guidance. Before either autonomous path, a manual mode must let a pilot assess
+basic controllability through the same RC boundary using a gamepad or keyboard.
+Betaflight remains responsible for attitude stabilization, rate PID, and motor
+mixing. Manual and Python guidance initially command RC sticks in ANGLE mode.
 
 Completion of the core plan means:
 
 - the existing scripted takeoff remains available and is still the default;
+- a pilot can safely arm, fly, land, and disarm manually with a gamepad or
+  keyboard, independently of autonomous guidance;
 - the truth-guided straight course completes repeatably in headless CI;
 - the vision-guided straight course completes in three consecutive qualified
   runs, with GPU CI when suitable infrastructure exists;
@@ -201,6 +205,8 @@ Completion of the core plan means:
 ### 5.1 Goals
 
 - Preserve the existing Betaflight SITL integration example.
+- Provide an opt-in manual piloting mode for controllability testing and
+  guidance-independent debugging.
 - Add realistic asynchronous 30 FPS camera input without blocking physics.
 - Make course geometry and pass scoring reusable and independently tested.
 - Keep control, camera geometry, detection, and tracking separately testable.
@@ -233,14 +239,18 @@ Deferred work must not be introduced as part of Packages A–L without approval.
 
 ### 6.1 Processes
 
-The running system has three independent processes:
+The running system always has the simulation and Betaflight processes and may
+add independently supervised render-server, manual-controller, and editor
+processes:
 
 ```text
+Manual controller (manual mode only)
+    ↕ semantic pilot commands through Elodin DB
 Simulation: Python physics + sensors + post_step + Elodin DB
     ↕ UDP FDM/RC/motors
 Betaflight SITL
 
-Render server
+Render server (camera enabled only)
     ↕ camera frames through Elodin DB message logs
 Simulation
 
@@ -261,10 +271,11 @@ After Package D, `post_step` must use this order:
 2. Send FDM plus the **previously computed** RC command to Betaflight.
 3. Block for one motor response and write `drone.motor_command`.
 4. Read the latest latency-adjusted camera frame without blocking.
-5. Run guidance and retain its RC command for the next physics tick.
+5. Run the selected command source—manual, scripted, truth, or vision—and retain
+   its RC command for the next physics tick.
 6. Run referee scoring from ground truth and emit telemetry/results.
 
-Guidance computed on tick N therefore reaches Betaflight on tick N+1. At the
+A command selected on tick N therefore reaches Betaflight on tick N+1. At the
 8 kHz default this is 125 microseconds. Tests comparing command and response
 must account for that one-tick delay.
 
@@ -278,15 +289,17 @@ The following environment variables form the core user-facing configuration:
 
 | Variable | Values | Default | Meaning |
 |---|---|---|---|
-| `RACE_GUIDANCE` | `scripted`, `truth`, `vision` | `scripted` | Selects the guidance source |
+| `RACE_GUIDANCE` | `scripted`, `manual`, `truth`, `vision` | `scripted` | Selects the RC command source |
 | `RACE_COURSE` | `none`, `single`, `c1_straight` | `none` | Selects course geometry |
 | `RACE_CAMERA` | `0`, `1` | `0` | Enables the FPV camera independently for bring-up |
 
-`vision` requires the camera and a non-`none` course; the program must either
-enable the camera explicitly with a clear startup message or reject the invalid
-combination. `truth` requires a non-`none` course. Unknown values must fail at
-startup. Running with no environment variables must preserve the current
-scripted behavior and must not require a GPU render server.
+`manual` starts or connects to the manual controller and does not require a
+course or camera. `vision` requires the camera and a non-`none` course; the
+program must either enable the camera explicitly with a clear startup message or
+reject the invalid combination. `truth` requires a non-`none` course. Unknown
+values must fail at startup. Running with no environment variables must preserve
+the current scripted behavior and must not require a manual controller or GPU
+render server.
 
 New knobs may be added in configuration dataclasses, but avoid an expanding set
 of environment variables for controller gains and detector internals.
@@ -298,7 +311,7 @@ may evolve, but changing field meaning or truth boundaries requires approval.
 
 ### 7.1 RC command
 
-Guidance outputs six integer PWM values:
+The selected command source outputs six integer PWM values:
 
 ```text
 roll, pitch, throttle, yaw, arm, mode
@@ -313,6 +326,28 @@ use ANGLE initially.
 The empirically observed signs and stick-to-angle behavior must be recorded by
 Package D in this document and encoded in one tested conversion helper. Do not
 infer the signs from comments alone.
+
+#### Manual input provider
+
+`RACE_GUIDANCE=manual` uses an s10-managed controller modeled on the RC-jet
+controller pattern: a separate process polls a gamepad and keyboard at about
+100 Hz and writes semantic pilot input through Elodin DB. It must feed the same
+RC conversion and clamping helper used by autonomous guidance; it must not write
+motor commands or bypass Betaflight.
+
+Semantic input consists of normalized roll, pitch, and yaw in `[-1, 1]`, throttle
+in `[0, 1]`, explicit arm/disarm state, and ANGLE-mode state. Mode 2 is the
+default gamepad layout (left throttle/yaw, right pitch/roll), with optional Mode
+1. Keyboard control provides W/S throttle, Q/E or A/D yaw, and arrow-key
+pitch/roll. Arm/disarm and mode changes require dedicated, documented controls;
+throttle position alone must never arm the vehicle.
+
+The manual command transport must carry a heartbeat or equivalent freshness
+signal. Missing input, no display/device, controller disconnect, or a stale
+heartbeat must result in a documented safe command: disarmed, minimum throttle,
+centered axes. A headless host must not panic or accidentally arm. Raw semantic
+input and resulting `drone.rc_command` must be recorded so pilot action can be
+compared with plant response.
 
 ### 7.2 Guidance update
 
@@ -453,6 +488,7 @@ names and meanings are:
 
 | Component | Meaning |
 |---|---|
+| `drone.manual_control` | Latest normalized pilot axes, arm/mode state, and freshness/heartbeat used by manual mode |
 | `drone.rc_command` | Six commanded PWM values in Section 7.1 order |
 | `drone.guidance_mode` | Numeric mission phase, with the name/number mapping documented in code |
 | `drone.last_gate_passed` | Last ordered gate index, initially `-1` |
@@ -612,22 +648,34 @@ prove valid, missed, backward, yawed, and diagonal behavior.
 **Handoff:** Record final gate coordinate/yaw conventions and the race result
 example.
 
-### [ ] D — Guidance seam and ANGLE mode
+### [ ] D — Manual piloting, control seam, and ANGLE mode
 
-**Objective:** Replace hardcoded RC construction with a minimal, testable guidance
-boundary while preserving default behavior and proving ANGLE-mode conventions.
+**Objective:** Replace hardcoded RC construction with a minimal, testable command
+boundary; add a safe manual piloting option; preserve default behavior; and prove
+ANGLE-mode conventions before autonomous guidance.
 
 **Prerequisites:** A.
 
 **Required work:**
 
-- Implement the RC and guidance-update contracts in Sections 7.1 and 7.2.
+- Implement the RC, manual-input, and guidance-update contracts in Sections 7.1
+  and 7.2.
 - Move the existing timed script behind `RACE_GUIDANCE=scripted` without changing
   its default behavior.
+- Add `RACE_GUIDANCE=manual` using an s10-managed gamepad/keyboard controller
+  modeled on `examples/rc-jet/controller`; reuse or factor its proven input
+  patterns where practical without coupling the two vehicle command schemas.
+- Support Mode 2 by default and optional Mode 1, explicit arm/disarm and ANGLE
+  controls, deadbands, clamping, smoothing where justified, and stale-input
+  failsafe behavior.
+- Record semantic manual input and resulting RC commands in the DB.
 - Refactor `post_step` to the ordering in Section 6.2.
 - Configure and verify AUX2 as ANGLE mode in `init_eeprom.py` while retaining all
   existing required EEPROM settings.
-- Implement RC clamping and AETR/AUX channel filling in one tested helper.
+- Implement semantic-input-to-RC conversion, RC clamping, and AETR/AUX channel
+  filling in one tested path shared by manual and autonomous sources.
+- Add deterministic injected-input tests for throttle, roll, pitch, yaw, arm,
+  mode, disconnect, and stale heartbeat behavior.
 - Add an opt-in physical sign audit: from a controlled airborne condition, apply
   bounded roll and pitch commands separately and assert observed world-direction
   responses. The audit may use a short, purpose-built initial condition and
@@ -635,13 +683,18 @@ boundary while preserving default behavior and proving ANGLE-mode conventions.
   position controller.
 - Record the measured stick signs and encode them in one tested location.
 
-**Out of scope:** Position hold, gate logic, camera input, or vision.
+**Out of scope:** Position hold, gate logic, camera input, autonomous flight, or
+vision.
 
-**Acceptance:** Default C0 still passes. Unit tests cover clamping, channel order,
-and one-tick command delay. The sign audit proves ANGLE engagement and records
-unambiguous roll/pitch conventions without relying on old comments.
+**Acceptance:** Default C0 still passes. Unit tests cover input mapping,
+deadbands, clamping, channel order, one-tick command delay, and safe behavior
+when the controller is absent or stale. A deterministic injected-input run proves
+all four control-axis responses and ANGLE engagement. A documented manual
+qualification session demonstrates that an operator can arm, take off, command
+roll/pitch/yaw/throttle, land, and disarm using a supported gamepad or keyboard.
 
-**Handoff:** Update Section 7.1 with measured signs and the audit command.
+**Handoff:** Update Section 7.1 with measured signs, document controls and
+failsafe timing, and record both automated and manual qualification commands.
 
 ### [ ] E — Truth-guided single-gate hold
 
@@ -896,6 +949,7 @@ Useful stopping points are:
 - after A: trustworthy existing SITL example;
 - after B: camera-equipped SITL example;
 - after C: reusable course and scoring harness;
+- after D: manually pilotable Betaflight vehicle with verified RC conventions;
 - after E: truth-guided single-gate position hold;
 - after F: complete autonomous truth race;
 - after H/I: offline validated perception stack;
@@ -914,7 +968,7 @@ branch for later resumption.
 | A | Not started | This plan exists, but tests and real C0 pass/fail do not |
 | B | Not started | Platform camera API exists; no Betaflight integration |
 | C | Not started | No course or referee code |
-| D | Not started | RC remains hardcoded; AUX2 ANGLE not configured |
+| D | Not started | RC remains hardcoded; no manual mode; AUX2 ANGLE not configured |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
 | G | Blocked by B | No racing camera geometry contract in code |
@@ -944,7 +998,8 @@ camera, course, or guidance scaffolding as part of A.
 | Date | Decision | Reason and affected packages |
 |---|---|---|
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
-| 2026-09-01 | Preserve scripted takeoff as the default and make racing opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |
+| 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |
+| 2026-09-01 | Add manual piloting through the same semantic-input-to-RC boundary before autonomy. | Separates vehicle controllability and Betaflight integration from guidance behavior; D provides gamepad/keyboard control and safe stale-input handling. |
 | 2026-09-01 | Prove control with truth before integrating perception. | Separates controller failures from detector/tracker failures. E/F precede J/K. |
 | 2026-09-01 | Use ANGLE-mode RC first. | Retains Betaflight stabilization and limits initial control scope. D–K rely on it. |
 | 2026-09-01 | Use a level 640×360 camera and 2.5 m orange training gates for the core course. | Provides controlled geometry for incremental bring-up. B, C, G–K rely on it. |
@@ -960,6 +1015,8 @@ camera, course, or guidance scaffolding as part of A.
   and one motor response before the simulation proceeds.
 - **ANGLE mode:** Betaflight self-leveling mode where roll/pitch sticks represent
   attitude targets rather than raw body-rate targets.
+- **Manual mode:** An opt-in gamepad/keyboard command source used to pilot the
+  simulated vehicle through the same Betaflight RC path as autonomous guidance.
 - **FPV camera:** Forward-facing camera used as the vision sensor.
 - **PnP:** Perspective-n-point pose recovery from known 3D geometry and observed
   image points.
