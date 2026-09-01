@@ -9,6 +9,8 @@
 # * builds artifacts with dist (archives, installers, hashes)
 # * uploads those artifacts to temporary workflow zip
 # * on success, uploads the artifacts to a GitHub Release
+# * on push to main (or workflow_dispatch), dry-runs the full build
+#   without creating a GitHub Release or publishing to PyPI
 #
 # Note that the GitHub Release will be created with a generated
 # title/body based on your changelogs.
@@ -16,6 +18,10 @@
 name: Release
 permissions:
   "contents": "write"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -43,6 +49,9 @@ on:
   push:
     tags:
       - "**[0-9]+.[0-9]+.[0-9]+*"
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
@@ -50,9 +59,10 @@ jobs:
     runs-on: "ubuntu-24.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
-      tag: ${{ !github.event.pull_request && github.ref_name || '' }}
-      tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
-      publishing: ${{ !github.event.pull_request }}
+      tag: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+      tag-flag: ${{ startsWith(github.ref, 'refs/tags/') && format('--tag={0}', github.ref_name) || '' }}
+      publishing: ${{ startsWith(github.ref, 'refs/tags/') }}
+      dry-run: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -76,7 +86,7 @@ jobs:
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
         run: |
-          dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          dist ${{ (startsWith(github.ref, 'refs/tags/') && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
@@ -92,7 +102,7 @@ jobs:
     # Let the initial task tell us to not run (currently very blunt)
     needs:
       - plan
-    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
+    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
       # Target platforms/runners are computed by dist in create-release.
@@ -338,7 +348,7 @@ jobs:
     runs-on: "ubuntu-24.04-xl"
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -376,7 +386,7 @@ jobs:
     runs-on: "ubuntu-24.04-xl"
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -450,7 +460,7 @@ jobs:
     runs-on: "macos-14-xlarge"
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -592,3 +602,33 @@ jobs:
         run: |
           pip install uv
           uv publish dist/*.whl --token "$UV_PUBLISH_TOKEN"
+
+  # Single status check for main-push / workflow_dispatch dry runs.
+  # Publish jobs (host, announce, pypi-publish) stay skipped.
+  release-dry-run:
+    if: ${{ always() && needs.plan.outputs.dry-run == 'true' }}
+    needs:
+      - plan
+      - build-local-artifacts
+      - build-global-artifacts
+      - linux-wheel
+      - cargo-deb
+      - macos-wheel
+    runs-on: "ubuntu-24.04"
+    steps:
+      - name: Fail if any release build job failed or was cancelled
+        run: |
+          failed=0
+          check() {
+            local name="$1" result="$2"
+            echo "$name: $result"
+            if [ "$result" != "success" ]; then
+              failed=1
+            fi
+          }
+          check build-local-artifacts "${{ needs.build-local-artifacts.result }}"
+          check build-global-artifacts "${{ needs.build-global-artifacts.result }}"
+          check linux-wheel "${{ needs.linux-wheel.result }}"
+          check cargo-deb "${{ needs.cargo-deb.result }}"
+          check macos-wheel "${{ needs.macos-wheel.result }}"
+          exit "$failed"
