@@ -4,7 +4,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bevy::{
@@ -132,6 +132,7 @@ pub fn temp_map_msg_name(camera_name: &str) -> String {
 const READBACK_BUFFER_COUNT: usize = 4;
 const READBACK_WORKER_COUNT: usize = 2;
 const LWIR_AGC_READBACK_INTERVAL_US: i64 = 100_000;
+const READBACK_MAP_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Default, Resource)]
 struct ImageCopiers(pub Vec<ImageCopier>, pub Timestamp);
@@ -1201,9 +1202,23 @@ fn image_copy_extract(
     commands.insert_resource(ImageCopiers(copiers, current_timestamp.0));
 }
 
+struct InFlightSlot(Arc<AtomicBool>);
+
+impl Drop for InFlightSlot {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn claim_readback_slot(in_flight: &[Arc<AtomicBool>], preferred: usize) -> Option<usize> {
+    (0..in_flight.len())
+        .map(|offset| (preferred + offset) % in_flight.len())
+        .find(|&index| !in_flight[index].swap(true, Ordering::AcqRel))
+}
+
 struct ReadbackJob {
     buffer: Buffer,
-    in_flight: Arc<AtomicBool>,
+    _in_flight: InFlightSlot,
     _pending: PendingReadback,
     camera_name: String,
     timestamp: Timestamp,
@@ -1237,10 +1252,8 @@ impl SensorReadbackWorker {
     }
 
     fn send(&self, job: ReadbackJob) {
-        if let Some(sender) = &self.sender
-            && let Err(err) = sender.send(job)
-        {
-            err.0.in_flight.store(false, Ordering::Release);
+        if let Some(sender) = &self.sender {
+            let _ = sender.send(job);
         }
     }
 }
@@ -1264,8 +1277,12 @@ fn readback_sensor_frame(
     buffer_slice.map_async(MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
+    let deadline = Instant::now() + READBACK_MAP_TIMEOUT;
     let mapped = loop {
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        if Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(2));
         let _ = render_device.poll(PollType::Poll);
         match receiver.try_recv() {
             Ok(result) => break result.is_ok(),
@@ -1275,7 +1292,6 @@ fn readback_sensor_frame(
     };
     if !mapped {
         job.buffer.unmap();
-        job.in_flight.store(false, Ordering::Release);
         return;
     }
 
@@ -1302,7 +1318,6 @@ fn readback_sensor_frame(
     }
     drop(data);
     job.buffer.unmap();
-    job.in_flight.store(false, Ordering::Release);
     let _ = frame_sender
         .0
         .send((job.camera_name, job.timestamp, frame, job.width, job.height));
@@ -1362,14 +1377,12 @@ fn image_copy_driver(
 
         let preferred = buffer_toggle.0[i];
         let buffer_count = image_copier.buffers.len();
-        let buf_idx = loop {
-            if let Some(index) = (0..buffer_count)
-                .map(|offset| (preferred + offset) % buffer_count)
-                .find(|index| !image_copier.in_flight[*index].swap(true, Ordering::AcqRel))
-            {
-                break index;
-            }
-            std::thread::sleep(std::time::Duration::from_micros(100));
+        let Some(buf_idx) = claim_readback_slot(&image_copier.in_flight, preferred) else {
+            tracing::warn!(
+                camera = %image_copier.camera_name,
+                "sensor readback ring full; dropping frame"
+            );
+            continue;
         };
         encoder.copy_texture_to_buffer(
             src_image.texture.as_image_copy(),
@@ -1392,7 +1405,7 @@ fn image_copy_driver(
             i,
             ReadbackJob {
                 buffer: image_copier.buffers[buf_idx].clone(),
-                in_flight: image_copier.in_flight[buf_idx].clone(),
+                _in_flight: InFlightSlot(image_copier.in_flight[buf_idx].clone()),
                 _pending: PendingReadback::new(readback_status.clone()),
                 camera_name: image_copier.camera_name.clone(),
                 timestamp: image_copiers.1,
@@ -1667,6 +1680,22 @@ mod tests {
         assert_eq!(status.pending(), 1);
         drop(pending);
         assert_eq!(status.pending(), 0);
+    }
+
+    #[test]
+    fn in_flight_slot_clears_on_drop() {
+        let flag = Arc::new(AtomicBool::new(true));
+        drop(InFlightSlot(flag.clone()));
+        assert!(!flag.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn claim_readback_slot_skips_when_ring_is_full() {
+        let slots: Vec<_> = (0..4).map(|_| Arc::new(AtomicBool::new(true))).collect();
+        assert_eq!(claim_readback_slot(&slots, 0), None);
+        slots[2].store(false, Ordering::Release);
+        assert_eq!(claim_readback_slot(&slots, 0), Some(2));
+        assert!(slots[2].load(Ordering::Acquire));
     }
 
     fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller2_wkt::WorldPos {

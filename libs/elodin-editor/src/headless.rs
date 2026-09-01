@@ -1004,7 +1004,12 @@ fn rgba_to_gray8(
         ));
     }
     if monochrome_lwir {
-        return Ok(rgba.as_chunks::<4>().0.iter().map(|pixel| pixel[0]).collect());
+        return Ok(rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect());
     }
     Ok(rgba
         .as_chunks::<4>()
@@ -1323,7 +1328,15 @@ fn emit_completed_frames(app: &mut App, encoders: &mut HashMap<String, SensorH26
 }
 
 fn flush_pending_sensor_frames(app: &mut App, encoders: &mut HashMap<String, SensorH264Worker>) {
+    let deadline = Instant::now() + Duration::from_secs(2);
     while app.world().resource::<SensorReadbackStatus>().pending() > 0 {
+        if Instant::now() >= deadline {
+            tracing::warn!(
+                pending = app.world().resource::<SensorReadbackStatus>().pending(),
+                "timed out waiting for in-flight sensor readbacks"
+            );
+            break;
+        }
         emit_completed_frames(app, encoders);
         std::thread::sleep(Duration::from_millis(1));
     }
