@@ -198,7 +198,7 @@ fn export_one_h264(
     }
 
     let mut sps_bytes: Option<&[u8]> = None;
-    for &ts in timestamps.iter().take(20) {
+    for &ts in timestamps {
         if let Some(payload) = msg_log.get(ts)
             && let Some(sps) = find_sps_nal(payload)
         {
@@ -209,7 +209,7 @@ fn export_one_h264(
     let sps_bytes = match sps_bytes {
         Some(b) => b,
         None => {
-            eprintln!("  {}: no SPS NAL found in first frames, skipping", name);
+            eprintln!("  {}: no SPS NAL found, skipping", name);
             return Ok(false);
         }
     };
@@ -238,38 +238,54 @@ fn export_one_h264(
             ))
         })?;
 
-    let first_ts = timestamps[0];
+    let remove_partial = |path: &std::path::Path| {
+        let _ = std::fs::remove_file(path);
+    };
+
+    let mut start_ts = None;
+    let mut written = 0usize;
     for &ts in timestamps {
         let payload = match msg_log.get(ts) {
             Some(p) => p,
             None => continue,
         };
-        let pts_secs = (ts.0 - first_ts.0) as f64 / 1_000_000.0;
         let keyframe = is_h264_keyframe(payload);
-        muxer
-            .write_video(pts_secs, payload, keyframe)
-            .map_err(|e| {
-                Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("muxide write_video: {}", e),
-                ))
-            })?;
+        if start_ts.is_none() {
+            if !keyframe {
+                continue;
+            }
+            start_ts = Some(ts);
+        }
+        let first_ts = start_ts.expect("start_ts set");
+        let pts_secs = (ts.0 - first_ts.0) as f64 / 1_000_000.0;
+        if let Err(e) = muxer.write_video(pts_secs, payload, keyframe) {
+            drop(muxer);
+            remove_partial(&mp4_path);
+            return Err(invalid_data(format!("muxide write_video: {}", e)));
+        }
+        written += 1;
     }
 
-    let _stats = muxer.finish_with_stats().map_err(|e| {
-        Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("muxide finish: {}", e),
-        ))
-    })?;
+    if written == 0 {
+        eprintln!("  {}: no IDR after leading P-frames, skipping", name);
+        drop(muxer);
+        remove_partial(&mp4_path);
+        return Ok(false);
+    }
 
-    let frame_count = timestamps.len();
-    let duration_secs = if frame_count > 0 {
-        (timestamps[frame_count - 1].0 - first_ts.0) as f64 / 1_000_000.0
-    } else {
-        0.0
-    };
-    println!("  {}: {} frames, {:.1}s", name, frame_count, duration_secs);
+    if let Err(e) = muxer.finish_with_stats() {
+        remove_partial(&mp4_path);
+        return Err(invalid_data(format!("muxide finish: {}", e)));
+    }
+
+    let first_ts = start_ts.expect("start_ts set");
+    let last_ts = timestamps[timestamps.len() - 1];
+    let duration_secs = (last_ts.0 - first_ts.0) as f64 / 1_000_000.0;
+    let skipped = timestamps.len().saturating_sub(written);
+    println!("  {}: {} frames, {:.1}s", name, written, duration_secs);
+    if skipped > 0 {
+        println!("    Skipped {skipped} leading non-IDR frame(s) (e.g. after trim)");
+    }
     println!(
         "    Detected resolution: {}x{} from SPS (frame rate: {} fps)",
         width, height, fps
@@ -277,7 +293,7 @@ fn export_one_h264(
     println!(
         "    Exported {} ({} frames, {} fps, fast-start)",
         mp4_path.display(),
-        frame_count,
+        written,
         fps
     );
     Ok(true)

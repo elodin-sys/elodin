@@ -229,3 +229,42 @@ fn sensor_camera_h264_msg_log_muxes_without_reencoding() {
     assert_eq!(sps.width(), camera.width as u64);
     assert_eq!(sps.height(), camera.height as u64);
 }
+
+#[test]
+fn sensor_camera_h264_skips_leading_non_idr_after_trim() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let db_path = tempdir.path().join("db");
+    let out_path = tempdir.path().join("out");
+    let db = DB::create(db_path.clone()).expect("DB::create");
+    let mut camera = sensor_camera_config();
+    camera.format = "h264".to_string();
+    let sensor_json = serde_json::to_string(&vec![camera.clone()]).expect("sensor json");
+
+    db.with_state_mut(|state| {
+        state
+            .db_config
+            .metadata
+            .insert("sensor_cameras".to_string(), sensor_json);
+    });
+    let id = msg_id(&camera.camera_name);
+    let frames = encode_h264_frames(&camera, 5);
+    db.push_msg(Timestamp(1_000_000), id, &[0, 0, 1, 0x41, 0, 0, 0])
+        .expect("push non-idr");
+    for (step, frame) in frames.iter().enumerate() {
+        db.push_msg(Timestamp(1_016_667 + step as i64 * 16_667), id, frame)
+            .expect("push_msg");
+    }
+    db.save_db_state().expect("save_db_state");
+    db.flush_all().expect("flush_all");
+    drop(db);
+
+    elodin_db::export_videos::run(db_path, out_path.clone(), None, 30).expect("export_videos");
+
+    let mp4_path = out_path.join("drone.fpv.mp4");
+    let mp4 = std::fs::read(&mp4_path).expect("read mp4");
+    assert_eq!(mp4.get(4..8), Some(&b"ftyp"[..]));
+    let sps = extract_avcc_sps(&mp4).expect("avcC SPS");
+    let sps = Sps::parse_with_emulation_prevention(Cursor::new(sps)).expect("parse SPS");
+    assert_eq!(sps.width(), camera.width as u64);
+    assert_eq!(sps.height(), camera.height as u64);
+}
