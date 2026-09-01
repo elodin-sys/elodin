@@ -1527,17 +1527,15 @@ impl XYLine {
     }
 
     pub fn value_buffers_needing_allocation(&self) -> usize {
-        let x_class = value_shard_class(self.x_values.len());
-        let y_class = value_shard_class(self.y_values.len());
-        usize::from(
-            self.x_shard_alloc
-                .as_ref()
-                .is_none_or(|alloc| alloc.capacity_shards() < x_class),
-        ) + usize::from(
-            self.y_shard_alloc
-                .as_ref()
-                .is_none_or(|alloc| alloc.capacity_shards() < y_class),
-        )
+        let needed = |slot: &Option<BufferShardAlloc>, class: usize| {
+            usize::from(xy_takes_from_pool(
+                slot.as_ref().map(BufferShardAlloc::capacity_shards),
+                class,
+                self.content_replaced,
+            ))
+        };
+        needed(&self.x_shard_alloc, value_shard_class(self.x_values.len()))
+            + needed(&self.y_shard_alloc, value_shard_class(self.y_values.len()))
     }
 
     pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
@@ -4329,6 +4327,30 @@ mod tests {
     }
 
     #[test]
+    fn a_shrinking_xy_refresh_is_counted_as_an_allocation() {
+        assert!(
+            xy_takes_from_pool(Some(64), 16, true),
+            "a refresh that drops a class hands its buffer back, so the gate must see it"
+        );
+        assert!(
+            !xy_takes_from_pool(Some(16), 16, true),
+            "a refresh that keeps its class is reclaimed in place"
+        );
+        assert!(
+            xy_takes_from_pool(Some(4), 16, true),
+            "a refresh that outgrows its class needs a bigger buffer"
+        );
+        assert!(
+            !xy_takes_from_pool(Some(64), 16, false),
+            "an untouched oversized buffer is left alone"
+        );
+        assert!(
+            xy_takes_from_pool(None, 16, false),
+            "a line without a buffer must take one"
+        );
+    }
+
+    #[test]
     fn new_plot_gpu_upload_is_blocked_only_while_value_buffers_are_quarantined() {
         assert!(!plot_gpu_upload_blocked(0, 0, 2));
         assert!(plot_gpu_upload_blocked(0, 4, 2));
@@ -4635,6 +4657,19 @@ fn takes_from_pool(capacity_shards: Option<usize>, value_class: usize, needs_res
         None => true,
         Some(capacity) => needs_resize && capacity != value_class,
     }
+}
+
+/// Same question for [`XYLine::queue_load`], which rebuilds on two triggers:
+/// replaced content, which hands back every class but its own, and an outgrown
+/// buffer. A shrinking refresh therefore allocates just like a growing one.
+fn xy_takes_from_pool(
+    capacity_shards: Option<usize>,
+    value_class: usize,
+    content_replaced: bool,
+) -> bool {
+    let needs_resize =
+        content_replaced || capacity_shards.is_some_and(|capacity| capacity < value_class);
+    takes_from_pool(capacity_shards, value_class, needs_resize)
 }
 
 /// Hand a value buffer whose shards were all just released back to its owner or
