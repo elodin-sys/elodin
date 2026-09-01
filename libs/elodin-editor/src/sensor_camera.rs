@@ -1210,6 +1210,20 @@ impl Drop for InFlightSlot {
     }
 }
 
+struct MappedBufferGuard<'a>(&'a Buffer);
+
+impl Drop for MappedBufferGuard<'_> {
+    fn drop(&mut self) {
+        self.0.unmap();
+    }
+}
+
+enum ReadbackMapOutcome {
+    Mapped,
+    Failed,
+    TimedOut,
+}
+
 fn claim_readback_slot(in_flight: &[Arc<AtomicBool>], preferred: usize) -> Option<usize> {
     (0..in_flight.len())
         .map(|offset| (preferred + offset) % in_flight.len())
@@ -1218,12 +1232,20 @@ fn claim_readback_slot(in_flight: &[Arc<AtomicBool>], preferred: usize) -> Optio
 
 struct ReadbackJob {
     buffer: Buffer,
-    _in_flight: InFlightSlot,
+    in_flight: Option<InFlightSlot>,
     _pending: PendingReadback,
     camera_name: String,
     timestamp: Timestamp,
     width: u32,
     height: u32,
+}
+
+impl ReadbackJob {
+    fn retire_in_flight(&mut self) {
+        if let Some(slot) = self.in_flight.take() {
+            std::mem::forget(slot);
+        }
+    }
 }
 
 struct SensorReadbackWorker {
@@ -1241,8 +1263,18 @@ impl SensorReadbackWorker {
         let handle = std::thread::Builder::new()
             .name(format!("sensor-readback-{index}"))
             .spawn(move || {
-                while let Ok(job) = receiver.recv() {
-                    readback_sensor_frame(&render_device, &frame_sender, job);
+                while let Ok(mut job) = receiver.recv() {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        readback_sensor_frame(&render_device, &frame_sender, &mut job);
+                    }))
+                    .is_err()
+                    {
+                        job.retire_in_flight();
+                        tracing::error!(
+                            worker = index,
+                            "sensor readback worker recovered from panic"
+                        );
+                    }
                 }
             })?;
         Ok(Self {
@@ -1270,31 +1302,57 @@ impl Drop for SensorReadbackWorker {
 fn readback_sensor_frame(
     render_device: &RenderDevice,
     frame_sender: &SensorFrameSender,
-    job: ReadbackJob,
+    job: &mut ReadbackJob,
 ) {
-    let buffer_slice = job.buffer.slice(..);
     let (sender, receiver) = crossbeam_channel::bounded(1);
-    buffer_slice.map_async(MapMode::Read, move |result| {
-        let _ = sender.send(result);
-    });
+    job.buffer
+        .slice(..)
+        .map_async(MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
     let deadline = Instant::now() + READBACK_MAP_TIMEOUT;
-    let mapped = loop {
-        if Instant::now() >= deadline {
-            break false;
-        }
-        std::thread::sleep(Duration::from_millis(2));
+    let outcome = loop {
         let _ = render_device.poll(PollType::Poll);
         match receiver.try_recv() {
-            Ok(result) => break result.is_ok(),
+            Ok(Ok(())) => break ReadbackMapOutcome::Mapped,
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    camera = %job.camera_name,
+                    %err,
+                    "sensor buffer map failed"
+                );
+                break ReadbackMapOutcome::Failed;
+            }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(crossbeam_channel::TryRecvError::Disconnected) => break false,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                tracing::warn!(
+                    camera = %job.camera_name,
+                    "sensor buffer map callback disconnected"
+                );
+                break ReadbackMapOutcome::Failed;
+            }
         }
+        if Instant::now() >= deadline {
+            break ReadbackMapOutcome::TimedOut;
+        }
+        std::thread::sleep(Duration::from_millis(2));
     };
-    if !mapped {
-        job.buffer.unmap();
-        return;
+    match outcome {
+        ReadbackMapOutcome::Mapped => {}
+        ReadbackMapOutcome::Failed => return,
+        ReadbackMapOutcome::TimedOut => {
+            tracing::warn!(
+                camera = %job.camera_name,
+                timeout_ms = READBACK_MAP_TIMEOUT.as_millis(),
+                "sensor buffer map timed out; retiring readback slot"
+            );
+            job.retire_in_flight();
+            return;
+        }
     }
 
+    let mapped_buffer = MappedBufferGuard(&job.buffer);
+    let buffer_slice = job.buffer.slice(..);
     let data = buffer_slice.get_mapped_range();
     let row_bytes = job.width as usize * 4;
     let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
@@ -1317,10 +1375,14 @@ fn readback_sensor_frame(
         }
     }
     drop(data);
-    job.buffer.unmap();
-    let _ = frame_sender
-        .0
-        .send((job.camera_name, job.timestamp, frame, job.width, job.height));
+    drop(mapped_buffer);
+    let _ = frame_sender.0.send((
+        job.camera_name.clone(),
+        job.timestamp,
+        frame,
+        job.width,
+        job.height,
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1405,7 +1467,7 @@ fn image_copy_driver(
             i,
             ReadbackJob {
                 buffer: image_copier.buffers[buf_idx].clone(),
-                _in_flight: InFlightSlot(image_copier.in_flight[buf_idx].clone()),
+                in_flight: Some(InFlightSlot(image_copier.in_flight[buf_idx].clone())),
                 _pending: PendingReadback::new(readback_status.clone()),
                 camera_name: image_copier.camera_name.clone(),
                 timestamp: image_copiers.1,
@@ -1696,6 +1758,16 @@ mod tests {
         slots[2].store(false, Ordering::Release);
         assert_eq!(claim_readback_slot(&slots, 0), Some(2));
         assert!(slots[2].load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn retired_in_flight_slot_stays_claimed() {
+        let retired = Arc::new(AtomicBool::new(true));
+        std::mem::forget(InFlightSlot(retired.clone()));
+        let available = Arc::new(AtomicBool::new(false));
+        let slots = [retired.clone(), available];
+        assert_eq!(claim_readback_slot(&slots, 0), Some(1));
+        assert!(retired.load(Ordering::Acquire));
     }
 
     fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller2_wkt::WorldPos {
