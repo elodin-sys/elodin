@@ -11,7 +11,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use impeller2::types::IntoLenPacket;
-use impeller2_kdl::{parse_schematic, serialize_schematic};
+use impeller2_kdl::{
+    apply_overlay as apply_overlay_model, extract_overlay as extract_overlay_model,
+    overlay_asset_key, parse_overlay, parse_schematic, serialize_overlay, serialize_schematic,
+};
 use impeller2_wkt::{Schematic, SetDbConfig, StoreAsset};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -49,6 +52,19 @@ impl PySchematic {
     /// Emit deterministic KDL (FR-2 / FR-3).
     fn emit_kdl(&self) -> String {
         self.emit_kdl_string()
+    }
+
+    /// Merge a layout overlay (KDL text) into this schematic (FR-9).
+    fn apply_overlay(&mut self, overlay_kdl: &str) -> PyResult<()> {
+        let overlay = parse_overlay(overlay_kdl)
+            .map_err(|e| PyValueError::new_err(format!("parse overlay: {e}")))?;
+        apply_overlay_model(&mut self.inner, &overlay);
+        Ok(())
+    }
+
+    /// Emit a layout overlay for the current shares / window rects.
+    fn extract_overlay(&self) -> String {
+        serialize_overlay(&extract_overlay_model(&self.inner))
     }
 
     fn __repr__(&self) -> String {
@@ -270,6 +286,9 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_function(wrap_pyfunction!(write, &child)?)?;
     child.add_function(wrap_pyfunction!(push, &child)?)?;
     child.add_function(wrap_pyfunction!(set_build_error, &child)?)?;
+    child.add_function(wrap_pyfunction!(overlay_key, &child)?)?;
+    child.add_function(wrap_pyfunction!(apply_overlay_kdl, &child)?)?;
+    child.add_function(wrap_pyfunction!(extract_overlay_kdl, &child)?)?;
     builders::register_builders(&child)?;
     // Do not register as `sys.modules["elodin.ui"]` — that would shadow the
     // Python package (`elodin/ui/`) which wraps this native submodule and adds
@@ -281,4 +300,24 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 fn from_kdl(text: &str) -> PyResult<PySchematic> {
     PySchematic::from_kdl(text)
+}
+
+#[pyfunction]
+fn overlay_key(schematic_key: &str) -> String {
+    overlay_asset_key(schematic_key)
+}
+
+/// `ui.apply_overlay(schematic, overlay_kdl) -> Schematic` (FR-9).
+#[pyfunction]
+#[pyo3(name = "apply_overlay")]
+fn apply_overlay_kdl(schematic: &PySchematic, overlay_kdl: &str) -> PyResult<PySchematic> {
+    let mut out = schematic.clone();
+    out.apply_overlay(overlay_kdl)?;
+    Ok(out)
+}
+
+#[pyfunction]
+#[pyo3(name = "extract_overlay")]
+fn extract_overlay_kdl(schematic: &PySchematic) -> String {
+    schematic.extract_overlay()
 }
