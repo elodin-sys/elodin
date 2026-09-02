@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import spiceypy as spice
 
+from dynamics import heliocentric_relative_acceleration
 from gravity_parameters import DE440_GM_M3_S2
 from validation_case import (
     ENCOUNTER_KERNEL,
@@ -63,19 +64,6 @@ def _direct_acceleration(
     return mu * delta / distance**3
 
 
-def _heliocentric_relative_acceleration(
-    probe_position_m: np.ndarray,
-    source_position_m: np.ndarray,
-    mu: float,
-) -> np.ndarray:
-    """Chapter 2 direct pull minus the source's acceleration of the Sun."""
-    direct = _direct_acceleration(probe_position_m, source_position_m, mu)
-    source_distance = np.linalg.norm(source_position_m)
-    if source_distance == 0.0:
-        return direct
-    return direct - mu * source_position_m / source_distance**3
-
-
 def _planet_states(epoch_et: float) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
     states = []
     for spice_name, _ in PLANETS:
@@ -102,8 +90,11 @@ def _acceleration(
         if chapter == 1:
             acceleration += _direct_acceleration(position_m, source_position_m, mu)
         elif chapter == 2:
-            acceleration += _heliocentric_relative_acceleration(
-                position_m, source_position_m, mu
+            acceleration += np.asarray(
+                heliocentric_relative_acceleration(
+                    position_m, source_position_m, mu
+                ),
+                dtype=np.float64,
             )
         else:
             raise ValueError("chapter must be 1 or 2")
