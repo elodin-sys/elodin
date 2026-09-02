@@ -15,7 +15,7 @@ pub use operations::{
 };
 pub(crate) use operations::{
     fetch_schematic_index, plan_db_save, schematic_name_from_key, schematic_save_key_from_name,
-    upload_db_save_plan,
+    upload_db_save_plan, upload_overlay_bytes,
 };
 pub use types::*;
 

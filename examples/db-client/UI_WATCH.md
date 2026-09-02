@@ -48,3 +48,18 @@ ELODIN_ASSETS_DIR=./assets elodin editor 127.0.0.1:2240
 3. Introduce a syntax error — the editor keeps the last-good schematic and shows
    `Schematic build error: …` in the bottom status bar.
 4. Fix the error — watch recovers and pushes again.
+
+## Layout overlay (Phase 4)
+
+Drag a split, then command palette → **Save Layout**. That writes layout-only
+state (split shares + window rects), **not** `schematic.py`.
+
+- **Canonical:** DB asset `http://127.0.0.1:2241/schematics/main.overlay.kdl`
+  (inside the DB data dir, often a temp path for this demo).
+- **Temporary local copy** (for inspection; may go away later):
+  `schematics/main.overlay.kdl` under the process cwd (repo root if you
+  launched from there). The file starts with a comment saying so.
+
+The next `elodin ui watch` rebuild applies the DB overlay before push. Delete
+the overlay asset (or the local copy if you are testing apply from disk) to
+return to authored shares. **Save Schematic** still writes a full KDL snapshot.
