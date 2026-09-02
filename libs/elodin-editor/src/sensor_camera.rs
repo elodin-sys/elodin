@@ -1240,14 +1240,6 @@ struct ReadbackJob {
     height: u32,
 }
 
-impl ReadbackJob {
-    fn retire_in_flight(&mut self) {
-        if let Some(slot) = self.in_flight.take() {
-            std::mem::forget(slot);
-        }
-    }
-}
-
 struct SensorReadbackWorker {
     sender: Option<std::sync::mpsc::Sender<ReadbackJob>>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -1269,7 +1261,6 @@ impl SensorReadbackWorker {
                     }))
                     .is_err()
                     {
-                        job.retire_in_flight();
                         tracing::error!(
                             worker = index,
                             "sensor readback worker recovered from panic"
@@ -1297,6 +1288,21 @@ impl Drop for SensorReadbackWorker {
             let _ = handle.join();
         }
     }
+}
+
+fn release_slot_after_late_map<E: Send + 'static>(
+    receiver: crossbeam_channel::Receiver<Result<(), E>>,
+    buffer: Buffer,
+    slot: Option<InFlightSlot>,
+) {
+    let _ = std::thread::Builder::new()
+        .name("sensor-readback-late-map".to_string())
+        .spawn(move || {
+            if let Ok(Ok(())) = receiver.recv() {
+                drop(MappedBufferGuard(&buffer));
+            }
+            drop(slot);
+        });
 }
 
 fn readback_sensor_frame(
@@ -1344,9 +1350,9 @@ fn readback_sensor_frame(
             tracing::warn!(
                 camera = %job.camera_name,
                 timeout_ms = READBACK_MAP_TIMEOUT.as_millis(),
-                "sensor buffer map timed out; retiring readback slot"
+                "sensor buffer map timed out; waiting to release readback slot"
             );
-            job.retire_in_flight();
+            release_slot_after_late_map(receiver, job.buffer.clone(), job.in_flight.take());
             return;
         }
     }
@@ -1761,13 +1767,11 @@ mod tests {
     }
 
     #[test]
-    fn retired_in_flight_slot_stays_claimed() {
-        let retired = Arc::new(AtomicBool::new(true));
-        std::mem::forget(InFlightSlot(retired.clone()));
-        let available = Arc::new(AtomicBool::new(false));
-        let slots = [retired.clone(), available];
-        assert_eq!(claim_readback_slot(&slots, 0), Some(1));
-        assert!(retired.load(Ordering::Acquire));
+    fn late_map_releases_readback_slot() {
+        let flag = Arc::new(AtomicBool::new(true));
+        drop(InFlightSlot(flag.clone()));
+        let slots = [flag.clone()];
+        assert_eq!(claim_readback_slot(&slots, 0), Some(0));
     }
 
     fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller2_wkt::WorldPos {

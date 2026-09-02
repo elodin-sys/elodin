@@ -836,15 +836,23 @@ impl SensorH264Worker {
         })
     }
 
-    fn send(&self, timestamp: Timestamp, rgba: Vec<u8>) {
+    fn is_alive(&self) -> bool {
+        self.handle
+            .as_ref()
+            .is_some_and(|handle| !handle.is_finished())
+    }
+
+    fn send(&self, timestamp: Timestamp, rgba: Vec<u8>) -> bool {
         let Some(sender) = &self.sender else {
-            return;
+            return false;
         };
-        if sender
-            .try_send(SensorEncoderJob { timestamp, rgba })
-            .is_err()
-        {
-            tracing::warn!("sensor camera encoder queue full; dropping frame");
+        match sender.try_send(SensorEncoderJob { timestamp, rgba }) {
+            Ok(()) => true,
+            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                tracing::warn!("sensor camera encoder queue full; dropping frame");
+                true
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
         }
     }
 }
@@ -950,6 +958,12 @@ fn dispatch_sensor_frames(
                 tracing::warn!("render server: MsgPacketTx not available; dropping frame");
                 return None;
             };
+            if encoders
+                .get(&camera_name)
+                .is_some_and(|worker| !worker.is_alive())
+            {
+                encoders.remove(&camera_name);
+            }
             if !encoders.contains_key(&camera_name) {
                 match SensorH264Worker::new(
                     camera_name.clone(),
@@ -967,10 +981,12 @@ fn dispatch_sensor_frames(
                     }
                 }
             }
-            encoders
+            if encoders
                 .get(&camera_name)
-                .expect("encoder inserted")
-                .send(timestamp, bytes);
+                .is_none_or(|worker| !worker.send(timestamp, bytes))
+            {
+                encoders.remove(&camera_name);
+            }
             None
         })
         .collect()

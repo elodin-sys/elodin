@@ -209,16 +209,17 @@ def frames_at(ctx, timestamp: int):
         or gray8_latest[0] < timestamp
     ):
         return None
-    rgba = ctx.read_msg("cam.ir_rgba", timestamp)
-    gray8 = ctx.read_msg("cam.ir_gray8", timestamp)
-    if rgba is None or gray8 is None:
-        return None
+    # Live frames sit on the camera 1/fps grid from the first render, not
+    # on phase_s * 1e6. Once both streams have passed the capture time,
+    # use those latest payloads instead of an exact historical lookup.
+    rgba_ts, rgba = rgba_latest
+    gray8_ts, gray8 = gray8_latest
     rgba = np.asarray(rgba, dtype=np.uint8)
     gray8 = np.asarray(gray8, dtype=np.uint8)
     if rgba.size != WIDTH * HEIGHT * 4 or gray8.size != WIDTH * HEIGHT:
         return None
     rgba_r = np.ascontiguousarray(rgba.reshape(-1, 4)[:, 0])
-    return timestamp, rgba_r, gray8
+    return min(rgba_ts, gray8_ts), rgba_r, gray8
 
 
 def target_contrast(gray: np.ndarray) -> float:
