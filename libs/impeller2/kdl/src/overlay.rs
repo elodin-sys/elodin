@@ -293,15 +293,13 @@ fn apply_split_shares(panel: &mut Panel, path: &str, overlay: &LayoutOverlay) {
             for entry in overlay.splits.iter().filter(|s| s.path == path) {
                 split.shares.insert(entry.child, entry.share);
             }
-            let n = split.panels.len();
-            for i in 0..n {
-                apply_split_shares(&mut split.panels[i], &format!("{path}/{i}"), overlay);
+            for (i, child) in split.panels.iter_mut().enumerate() {
+                apply_split_shares(child, &format!("{path}/{i}"), overlay);
             }
         }
         Panel::Tabs(tabs) => {
-            let n = tabs.len();
-            for i in 0..n {
-                apply_split_shares(&mut tabs[i], &format!("{path}/{i}"), overlay);
+            for (i, child) in tabs.iter_mut().enumerate() {
+                apply_split_shares(child, &format!("{path}/{i}"), overlay);
             }
         }
         _ => {}

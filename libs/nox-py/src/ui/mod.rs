@@ -283,6 +283,7 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<PyTimeline>()?;
     child.add_function(wrap_pyfunction!(schematic, &child)?)?;
     child.add_function(wrap_pyfunction!(from_kdl, &child)?)?;
+    child.add_function(wrap_pyfunction!(to_python, &child)?)?;
     child.add_function(wrap_pyfunction!(write, &child)?)?;
     child.add_function(wrap_pyfunction!(push, &child)?)?;
     child.add_function(wrap_pyfunction!(set_build_error, &child)?)?;
@@ -300,6 +301,13 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 fn from_kdl(text: &str) -> PyResult<PySchematic> {
     PySchematic::from_kdl(text)
+}
+
+#[pyfunction]
+#[pyo3(signature = (text, source_name=None))]
+fn to_python(text: &str, source_name: Option<&str>) -> PyResult<String> {
+    impeller2_kdl::schematic_to_python(text, source_name)
+        .map_err(|err| PyValueError::new_err(err.to_string()))
 }
 
 #[pyfunction]

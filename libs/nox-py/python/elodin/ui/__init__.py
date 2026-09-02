@@ -33,6 +33,7 @@ Timeline = _native.Timeline
 
 schematic = _native.schematic
 from_kdl = _native.from_kdl
+to_python = _native.to_python
 write = _native.write
 push = _native.push
 set_build_error = _native.set_build_error
@@ -90,6 +91,7 @@ __all__ = [
     "as_eql_strings",
     "schematic",
     "from_kdl",
+    "to_python",
     "write",
     "push",
     "set_build_error",
