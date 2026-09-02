@@ -65,3 +65,18 @@ def test_g1_still_matches_with_expr_schematic():
     handwritten = ui.from_kdl((repo / "examples" / "db-client" / "schematic.kdl").read_text())
     rebuilt = mod.build()
     assert ui.from_kdl(rebuilt.emit_kdl()) == ui.from_kdl(handwritten.emit_kdl())
+
+
+def test_apply_overlay_changes_share_without_source():
+    built = ui.schematic(
+        ui.hsplit(
+            ui.graph("a", name="A", share=0.5),
+            ui.graph("b", name="B", share=0.5),
+        )
+    )
+    overlay = ui.extract_overlay(built)
+    assert "split" in overlay
+    tweaked = overlay.replace("0.5", "0.25", 1)
+    merged = ui.apply_overlay(built, tweaked)
+    assert "0.25" in merged.emit_kdl() or "0.250" in merged.emit_kdl()
+    assert ui.overlay_key("schematics/main.kdl") == "schematics/main.overlay.kdl"

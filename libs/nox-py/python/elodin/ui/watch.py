@@ -13,6 +13,8 @@ import argparse
 import importlib.util
 import sys
 import traceback
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -42,11 +44,35 @@ def _set_build_error(db: str, message: str | None) -> None:
     ui.set_build_error(db, message)
 
 
+def _assets_http_url(db: str, key: str) -> str:
+    host, _, port = db.rpartition(":")
+    host = host.strip("[]")
+    if host in ("", "0.0.0.0", "::"):
+        host = "127.0.0.1"
+    return f"http://{host}:{int(port) + 1}/{key}"
+
+
+def _fetch_overlay_kdl(db: str, schematic_key: str) -> str | None:
+    import elodin.ui as ui
+
+    url = _assets_http_url(db, ui.overlay_key(schematic_key))
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            if resp.status != 200:
+                return None
+            text = resp.read().decode()
+        return text or None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+
+
 def run_once(path: Path, db: str, *, quiet: bool = False) -> bool:
     import elodin.ui as ui
 
     try:
         schematic = _build_schematic(path)
+        if overlay := _fetch_overlay_kdl(db, "schematics/main.kdl"):
+            schematic = ui.apply_overlay(schematic, overlay)
         ui.push(schematic, db)
         _set_build_error(db, None)
         if not quiet:

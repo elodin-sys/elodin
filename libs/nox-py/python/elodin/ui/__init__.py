@@ -36,6 +36,9 @@ from_kdl = _native.from_kdl
 write = _native.write
 push = _native.push
 set_build_error = _native.set_build_error
+overlay_key = _native.overlay_key
+apply_overlay = _native.apply_overlay
+extract_overlay = _native.extract_overlay
 
 coordinate = _native.coordinate
 theme = _native.theme
@@ -90,6 +93,9 @@ __all__ = [
     "write",
     "push",
     "set_build_error",
+    "overlay_key",
+    "apply_overlay",
+    "extract_overlay",
     "coordinate",
     "theme",
     "timeline",
