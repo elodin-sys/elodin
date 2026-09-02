@@ -14,6 +14,7 @@ import elodin.ui as ui
 
 REPO = Path(__file__).resolve().parents[4]
 EXAMPLES = REPO / "examples"
+KDL_CORPUS = REPO / "libs" / "impeller2" / "kdl" / "tests" / "corpus" / "sources"
 
 
 def _load_example(path: Path, name: str):
@@ -26,6 +27,25 @@ def _load_example(path: Path, name: str):
 
 def _canonical(schematic: ui.Schematic) -> ui.Schematic:
     return ui.from_kdl(schematic.emit_kdl())
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(KDL_CORPUS.rglob("*.kdl")),
+    ids=lambda path: str(path.relative_to(KDL_CORPUS)),
+)
+def test_to_python_preserves_corpus_model(path: Path):
+    source = path.read_text()
+    generated = ui.to_python(source, source_name=path.name)
+    namespace = {"__name__": "generated_schematic"}
+    exec(compile(generated, str(path.with_suffix(".py")), "exec"), namespace)
+    assert namespace["build"]() == ui.from_kdl(source)
+
+
+def test_to_python_preserves_line_comments():
+    generated = ui.to_python("// Flight dashboard\nviewport\n")
+    assert "# Flight dashboard" in generated
+    assert '"// Flight dashboard\\n"' in generated
 
 
 def test_from_kdl_emit_idempotent():

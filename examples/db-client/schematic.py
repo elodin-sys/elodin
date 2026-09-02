@@ -39,7 +39,7 @@ def build() -> ui.Schematic:
                 name="Flight",
             ),
             ui.vsplit(
-                ui.graph("drone.battery.voltage", name="Battery BBB(V)"),
+                ui.graph("drone.battery.voltage", name="Battery (V)"),
                 ui.graph("drone.motor.rpm", name="Motor RPM"),
                 ui.graph("drone.status.armed", name="Armed"),
                 ui.graph(
