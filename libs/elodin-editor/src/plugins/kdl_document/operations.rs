@@ -413,6 +413,23 @@ fn local_asset_file(src: &str) -> PathBuf {
     }
 }
 
+pub(crate) fn upload_overlay_bytes(
+    key: &str,
+    bytes: Vec<u8>,
+    connection_addr: SocketAddr,
+) -> Result<(), String> {
+    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), Some(connection_addr));
+    let len = bytes.len();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?;
+    put_db_asset(&client, key, bytes, Some(connection_addr))?;
+    bevy::log::info!(key, url = %url, bytes = len, "wrote layout overlay");
+    eprintln!("[elodin] wrote layout overlay {key} → {url} ({len} bytes)");
+    Ok(())
+}
+
 fn put_db_asset(
     client: &reqwest::blocking::Client,
     key: &str,

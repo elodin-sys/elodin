@@ -39,7 +39,7 @@ FSW KDLs live at `../fsw/assets/schematics` (sibling of this repo). Corpus copie
 | **1** | Builders + emit/parse/write/push; examples match handwritten KDL | **Done.** G1: pytest `test_ui.py` |
 | **2** | Typed expr + schema | **Mostly done.** Python `Expr`/`Schema`/`pose()`/`sym_mat3()` emit **EQL strings**. **Not done:** PyO3 over `eql::Expr`; property test random AST → parse → equal AST; reproducing every expression in FSW `main.kdl`. That is leftover G2 work, not a reason to restart Phase 2. |
 | **3** | `elodin ui watch`, last-good, editor error banner | **Done enough to demo.** No headless-editor integration test (G3 still wants save→re-render &lt; 1s recorded). |
-| **4** | Layout overlay | **Not started** — next real feature |
+| **4** | Layout overlay | **In progress.** Overlay KDL + `ui.apply_overlay` / `extract_overlay`; watch merges `*.overlay.kdl`; editor **Save Layout**. G4 demo: drag + Save Layout + watch; Python source `git diff` empty. |
 | **5** | Fleet migration + `to-python` codegen | **Not started** |
 | **6** | Tier B: real math in editor/eql (faer, per-sample graph eval) | **Not started** |
 | **7** | Tier C: JAX/StableHLO display kernels | **Not started** (do not build speculatively) |
@@ -185,7 +185,7 @@ JAX → StableHLO display kernels in the editor. **Do not start unless Tier B op
 - Expressions are **strings**, not `eql::Expr` nodes in Rust.
 - G2 “every EQL in `main.kdl` via typed layer” not done.
 - No `elodin schematic to-python`.
-- No overlay / Save Layout change beyond the status-bar error string.
+- Overlay is per-schematic (`schematics/<stem>.overlay.kdl`), not per-workstation. Active-tab index is not in the model yet, so overlay covers split shares + window rects only.
 - `Expr.__add__` parenthesizes (`(a + b)`). Handwritten `examples/db-client/schematic.kdl` chase `pos` was updated to match; model equality is after parse, not byte-identical KDL.
 - `test_ui.py` `test_push_to_embedded_server` needs a free DB port; don’t run two demos on 2240.
 - Headless `main.py --db-schematic` + concurrent client can hit `Already borrowed` on `latest()` — demo issue, not the SDK path.
