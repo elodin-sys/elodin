@@ -4,6 +4,7 @@ mod db;
 mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
+mod schematic;
 #[cfg(not(target_os = "windows"))]
 mod ui;
 
@@ -39,6 +40,8 @@ enum Commands {
     /// Author / push schematics from Python (`elodin.ui`)
     #[cfg(not(target_os = "windows"))]
     Ui(ui::Args),
+    /// Convert and inspect schematic source
+    Schematic(schematic::Args),
 }
 
 impl Cli {
@@ -114,6 +117,7 @@ impl Cli {
             Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
+            Some(Commands::Schematic(args)) => self.clone().schematic(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }

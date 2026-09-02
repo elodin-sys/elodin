@@ -39,8 +39,8 @@ FSW KDLs live at `../fsw/assets/schematics` (sibling of this repo). Corpus copie
 | **1** | Builders + emit/parse/write/push; examples match handwritten KDL | **Done.** G1: pytest `test_ui.py` |
 | **2** | Typed expr + schema | **Mostly done.** Python `Expr`/`Schema`/`pose()`/`sym_mat3()` emit **EQL strings**. **Not done:** PyO3 over `eql::Expr`; property test random AST → parse → equal AST; reproducing every expression in FSW `main.kdl`. That is leftover G2 work, not a reason to restart Phase 2. |
 | **3** | `elodin ui watch`, last-good, editor error banner | **Done enough to demo.** No headless-editor integration test (G3 still wants save→re-render &lt; 1s recorded). |
-| **4** | Layout overlay | **In progress.** Overlay KDL + `ui.apply_overlay` / `extract_overlay`; watch merges `*.overlay.kdl`; editor **Save Layout**. G4 demo: drag + Save Layout + watch; Python source `git diff` empty. |
-| **5** | Fleet migration + `to-python` codegen | **Not started** |
+| **4** | Layout overlay | **Implemented.** Overlay KDL + `ui.apply_overlay` / `extract_overlay`; watch merges `*.overlay.kdl`; editor **Save Layout** writes DB asset plus a temporary local inspection copy. |
+| **5** | Fleet migration + `to-python` codegen | **In progress.** `elodin schematic to-python` emits a lossless executable scaffold; corpus model-equality coverage is in `test_ui.py`. Typed-builder rewrite of FSW `main.kdl` remains. |
 | **6** | Tier B: real math in editor/eql (faer, per-sample graph eval) | **Not started** |
 | **7** | Tier C: JAX/StableHLO display kernels | **Not started** (do not build speculatively) |
 
@@ -164,7 +164,7 @@ See original §5.4. Open question: per-schematic vs per-workstation overlays.
 
 ### Phase 5 — Fleet migration
 
-1. `elodin schematic to-python` (FR-10), preserve comments if the KDL parser allows.
+1. `elodin schematic to-python` (FR-10). The initial lossless scaffold preserves the complete source and promotes `//` lines to Python comments.
 2. Migrate `../fsw/assets/schematics` (~21 files). **Author** `main.kdl` in Python (showcase), do not only transliterate.
 3. Per-file model equality vs KDL (same G1 trick: `from_kdl(emit(py)) == from_kdl(handwritten)`), reviewed diffs where improvements are intentional.
 4. Replace fsw `main_kdl_contract.py` static half with `python dashboards/build_all.py`; keep SITL-CSV data-presence checks.
@@ -184,7 +184,7 @@ JAX → StableHLO display kernels in the editor. **Do not start unless Tier B op
 
 - Expressions are **strings**, not `eql::Expr` nodes in Rust.
 - G2 “every EQL in `main.kdl` via typed layer” not done.
-- No `elodin schematic to-python`.
+- `to-python` currently emits a lossless `ui.from_kdl(SOURCE_KDL)` scaffold. It does not yet mechanically translate every KDL node to typed builder calls because the typed builder surface does not cover every parser feature.
 - Overlay is per-schematic (`schematics/<stem>.overlay.kdl`), not per-workstation. Active-tab index is not in the model yet, so overlay covers split shares + window rects only.
 - `Expr.__add__` parenthesizes (`(a + b)`). Handwritten `examples/db-client/schematic.kdl` chase `pos` was updated to match; model equality is after parse, not byte-identical KDL.
 - `test_ui.py` `test_push_to_embedded_server` needs a free DB port; don’t run two demos on 2240.
