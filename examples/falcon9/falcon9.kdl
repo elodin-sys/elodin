@@ -102,8 +102,8 @@ object_3d orientation=absolute pad.world_pos {
 
 // Landing dust and ASDS visual at LZ-1.
 object_3d orientation=absolute lz1.world_pos {
-    // Y-up, deck-centered ASDS mesh.
-    glb path="spacex_drone_barge.glb"
+    // Y-up deck; Rx(-90) cancels y_up_to_schematic. translate matches BARGE_TRANSLATE_Y_M.
+    glb path="spacex_drone_barge.glb" rotate="(-90, 0, 0)" translate="(0, -48, 0)"
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
 }
 

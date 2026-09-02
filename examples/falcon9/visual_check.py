@@ -16,6 +16,8 @@ import jax
 import jax.numpy as jnp
 
 from constants import (
+    BARGE_TRANSLATE_Y_M,
+    BOOSTER_DECK_UP_M,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
     LZ1_LON_DEG,
@@ -48,6 +50,10 @@ SCENARIOS = {
     "plume-close": {"t0": 22.0, "t_s": 8.0, "delay": 10.0},
     "rcs-flip": {"t0": 36.0, "t_s": 4.0, "delay": 8.0},
     "barge": {"t0": 0.0, "t_s": 8.0, "delay": 10.0},
+    # Same landed pose, low side camera for the hull / water gap.
+    "barge-waterline": {"t0": 0.0, "t_s": 8.0, "delay": 10.0},
+    # Same pose, main.py chase camera.
+    "barge-chase": {"t0": 0.0, "t_s": 8.0, "delay": 10.0},
     # Coast near apogee with the Earth limb behind the booster.
     "apogee": {"t0": 225.0, "t_s": 8.0, "delay": 10.0},
     # Night phases at the same SoCal LEO slot as cube-sat/main.py.
@@ -87,6 +93,10 @@ RcsLevels = ty.Annotated[
 BoosterMarker = ty.Annotated[
     jax.Array, el.Component("vizcheck_booster", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
+
+
+# Same deck as falcon9.kdl translate + the sim's landed pin.
+LAND_UP_M = BOOSTER_DECK_UP_M + BARGE_TRANSLATE_Y_M
 
 
 def pad_ecef() -> jnp.ndarray:
@@ -185,7 +195,7 @@ def make_advance():
 
         return advance_night_sky
 
-    if SCENARIO == "barge":
+    if SCENARIO in ("barge", "barge-waterline", "barge-chase"):
 
         @el.system
         def advance_barge(
@@ -201,17 +211,15 @@ def make_advance():
             RcsLevels,
         ]:
             _ = tick[0]
-            # ~35 m above deck; keep landing smoke low so the barge stays visible.
-            r = lz1 + jnp.asarray(LZ1_UP) * 35.0
+            r = lz1 + jnp.asarray(LZ1_UP) * LAND_UP_M
             pose = el.SpatialTransform(angular=landing_att, linear=r)
-            thrust = 0.12
             vals = (
                 pose,
-                jnp.array([thrust]),
-                _plume_from_thrust(thrust, yaw_gimbal_rad=0.05),
-                jnp.array([0.05]),
                 jnp.array([0.0]),
-                jnp.array([0.08]),
+                jnp.zeros(3),
+                jnp.array([0.0]),
+                jnp.array([0.0]),
+                jnp.array([0.0]),
                 jnp.zeros(8),
             )
             return boosters.map(out_tys, lambda _m: vals)
@@ -269,12 +277,12 @@ pad_att = surface_attitude(PAD_LAT_DEG, PAD_LON_DEG)
 lz1_att = surface_attitude(LZ1_LAT_DEG, LZ1_LON_DEG)
 lz1_up = jnp.asarray(LZ1_UP)
 
-init_att = landing_att if SCENARIO == "barge" else ascent_att
+init_att = landing_att if SCENARIO.startswith("barge") else ascent_att
 if SCENARIO.startswith("night-sky"):
     init_r = cs_leo_ecef()
     init_att = attitude_along(init_r / jnp.linalg.norm(init_r))
-elif SCENARIO == "barge":
-    init_r = lz1 + lz1_up * 35.0
+elif SCENARIO.startswith("barge"):
+    init_r = lz1 + lz1_up * LAND_UP_M
 else:
     init_alt = float(jnp.interp(T0, ref_t, ref_alt))
     init_dr = float(jnp.interp(T0, ref_t, ref_dr))
@@ -300,6 +308,10 @@ kdl_path = Path(__file__).with_name("visual_check.kdl")
 # One viewport per scenario so the cinematic camera is unique.
 if SCENARIO == "barge":
     keep = "Landing"
+elif SCENARIO == "barge-waterline":
+    keep = "Waterline"
+elif SCENARIO == "barge-chase":
+    keep = "Chase"
 elif SCENARIO.startswith("night-sky"):
     keep = "NightSky"
 else:
@@ -317,7 +329,7 @@ world.run(
     make_advance(),
     simulation_rate=SIM_HZ,
     generate_real_time=True,
-    max_ticks=int((_cfg["t_s"] + 5.0) * SIM_HZ),
+    max_ticks=int((_cfg["t_s"] + float(os.environ.get("ELODIN_VIZCHECK_PAD", "5.0"))) * SIM_HZ),
     optimize=True,
     interactive=False,
     start_timestamp=(_cs_timestamp_us(*_cfg["utc"]) if "utc" in _cfg else START_TIMESTAMP_US),

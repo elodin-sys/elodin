@@ -192,9 +192,8 @@ fn star_field(
     color.add_key(0.0, hdr);
     color.add_key(1.0, hdr);
 
-    let mask_slot = writer.lit(0u32).expr();
     let mut module = writer.finish();
-    module.add_texture_slot("mask");
+    module.add_texture_slot("mask", SlotDimension::D2);
 
     let effect = EffectAsset::new(
         capacity,
@@ -219,7 +218,7 @@ fn star_field(
         .update(update_size)
         .render(OrientModifier::new(OrientMode::FaceCameraPosition))
         .render(ParticleTextureModifier {
-            texture_slot: mask_slot,
+            texture_slot: 0,
             sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
         })
         .render(ColorOverLifetimeModifier {
@@ -299,10 +298,9 @@ pub fn city_lights(earth: &EarthConfig) -> EffectAsset {
     color.add_key(0.0, hdr);
     color.add_key(1.0, hdr);
 
-    let veil_slot = writer.lit(0u32).expr();
     let mut module = writer.finish();
-    module.add_texture_slot("veil");
-    module.add_texture_slot("night");
+    module.add_texture_slot("veil", SlotDimension::D2);
+    module.add_texture_slot("night", SlotDimension::D2);
 
     EffectAsset::new(
         capacity,
@@ -323,7 +321,7 @@ pub fn city_lights(earth: &EarthConfig) -> EffectAsset {
     // Screen-aligned so lights stay round at the limb.
     .render(OrientModifier::new(OrientMode::ParallelCameraDepthPlane))
     .render(ParticleTextureModifier {
-        texture_slot: veil_slot,
+        texture_slot: 0,
         sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
     })
     .render(SphereMapColorModifier {
@@ -374,9 +372,8 @@ fn airglow_shell(
     color.add_key(0.0, hdr);
     color.add_key(1.0, hdr);
 
-    let veil_slot = writer.lit(0u32).expr();
     let mut module = writer.finish();
-    module.add_texture_slot("veil");
+    module.add_texture_slot("veil", SlotDimension::D2);
 
     EffectAsset::new(
         capacity,
@@ -396,7 +393,7 @@ fn airglow_shell(
     .update(update_size)
     .render(OrientModifier::new(OrientMode::FaceCameraPosition))
     .render(ParticleTextureModifier {
-        texture_slot: veil_slot,
+        texture_slot: 0,
         sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
     })
     .render(ColorOverLifetimeModifier {

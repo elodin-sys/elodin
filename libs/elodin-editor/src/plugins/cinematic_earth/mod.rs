@@ -21,6 +21,7 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{EffectAsset, EffectMaterial, EffectProperties, ParticleEffect};
 
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
+use crate::plugins::thruster_particles::images_ready;
 use crate::plugins::scene_environment::{
     CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun, SpaceVisibility,
 };
@@ -148,6 +149,12 @@ struct SkyEmitter;
 
 #[derive(Component)]
 struct CinematicParticleEmitter;
+
+#[derive(Component)]
+struct PendingEffectMaterial {
+    effect: Handle<EffectAsset>,
+    images: Vec<Handle<Image>>,
+}
 
 /// Globe-attached emitter (city lights / airglow).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -284,7 +291,13 @@ impl Plugin for CinematicEarthPlugin {
             // The chain flushes emitter swaps before Hanabi runs in PostUpdate.
             .add_systems(
                 Update,
-                (sync_cinematic_earth, sync_earth_look, tag_globe_meshes).chain(),
+                (
+                    sync_cinematic_earth,
+                    bind_ready_emitters,
+                    sync_earth_look,
+                    tag_globe_meshes,
+                )
+                    .chain(),
             );
         app.add_systems(
             PostUpdate,
@@ -428,14 +441,34 @@ fn sky_emitter_bundle(
     (
         Name::new(name),
         CinematicParticleEmitter,
-        ParticleEffect::new(effect),
-        EffectMaterial { images },
+        PendingEffectMaterial { effect, images },
         EffectProperties::default(),
         Transform::default(),
         Visibility::default(),
         NoFrustumCulling,
         RenderLayers::layer(CINEMATIC_EARTH_RENDER_LAYER),
     )
+}
+
+fn bind_ready_emitters(
+    mut commands: Commands,
+    pending: Query<(Entity, &PendingEffectMaterial)>,
+    asset_server: Res<AssetServer>,
+) {
+    for (entity, pending) in &pending {
+        if !images_ready(&pending.images, &asset_server) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .insert((
+                ParticleEffect::new(pending.effect.clone()),
+                EffectMaterial {
+                    images: pending.images.clone(),
+                },
+            ))
+            .remove::<PendingEffectMaterial>();
+    }
 }
 
 /// Spawns/despawns the whole rig when `environment { earth }` toggles.

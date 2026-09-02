@@ -36,6 +36,8 @@ from constants import (
     LEG_STIFFNESS_NPM,
     LEG_STROKE_M,
     LOX_LOAD_KG,
+    BARGE_TRANSLATE_Y_M,
+    BOOSTER_DECK_UP_M,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
     LZ1_LON_DEG,
@@ -926,7 +928,9 @@ def ground_contact(
     q_up = el.Quaternion.from_axis_angle(axis, angle)
 
     do_pin = landed_now & ~tipped
-    pinned_pos = jnp.where(do_pin, r - alt * up, r)
+    # WorldPos is the GLB origin; sit it BOOSTER_DECK_UP_M above the translated deck.
+    deck_alt = LZ1_ALT_M + BARGE_TRANSLATE_Y_M + BOOSTER_DECK_UP_M
+    pinned_pos = jnp.where(do_pin, r - (alt - deck_alt) * up, r)
     pinned_lin = jnp.where(do_pin, jnp.zeros(3), v)
     pinned_ang = jnp.where(do_pin, jnp.zeros(3), vel.angular())
     q_out = el.Quaternion.from_array(jnp.where(do_pin, q_up.vector(), q.vector()))

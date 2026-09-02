@@ -38,6 +38,10 @@ PAD_ALT_M = 3.0
 LZ1_LAT_DEG = 28.48580  # Landing Zone 1
 LZ1_LON_DEG = -80.54440
 LZ1_ALT_M = 5.0
+# Visual drop so the keel sits in the cinematic floor under LZ-1.
+BARGE_TRANSLATE_Y_M = -48.0
+# GLB origin vs deck; negative plants the bells / legs.
+BOOSTER_DECK_UP_M = -2.0
 
 # --- Stage 1 geometry and mass (WHITEPAPER 9.4) -------------------------------
 STAGE1_LENGTH_M = 47.0  # EST: tank stack + interstage
