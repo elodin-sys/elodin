@@ -287,6 +287,7 @@ pub struct State {
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
     real_time_stream_filters: HashMap<StreamId, Arc<RealTimeStreamFilter>>,
+    pending_real_time_stream_filters: HashMap<StreamId, (Vec<ComponentId>, Option<u64>)>,
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 
@@ -2170,14 +2171,14 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         }
         Packet::Msg(m) if m.id == SetStreamFilter::ID => {
             let filter = m.parse::<SetStreamFilter>()?;
-            let state = db.with_state(|state| {
+            db.with_state_mut(|state| {
+                if let Some(live) = state.real_time_stream_filters.get(&filter.id) {
+                    live.set(filter.component_ids.clone(), filter.frequency);
+                }
                 state
-                    .real_time_stream_filters
-                    .get(&filter.id)
-                    .cloned()
-                    .ok_or(Error::StreamNotFound(filter.id))
-            })?;
-            state.set(filter.component_ids, filter.frequency);
+                    .pending_real_time_stream_filters
+                    .insert(filter.id, (filter.component_ids, filter.frequency));
+            });
         }
         Packet::Msg(m) if m.id == SetStreamState::ID => {
             let set_stream_state = m.parse::<SetStreamState>()?;
@@ -3120,14 +3121,30 @@ fn handle_stream<A: AsyncWrite + 'static>(
             })
         }
         StreamBehavior::RealTimeBatched => {
+            let stream_id = stream.id;
             let filter = Arc::new(RealTimeStreamFilter::new());
             db.with_state_mut(|state| {
+                if let Some((component_ids, frequency)) =
+                    state.pending_real_time_stream_filters.remove(&stream_id)
+                {
+                    filter.set(component_ids, frequency);
+                }
                 state
                     .real_time_stream_filters
-                    .insert(stream.id, filter.clone());
+                    .insert(stream_id, filter.clone());
             });
             stellarator::spawn(async move {
-                match handle_real_time_stream_batched(tx, req_id, db, filter).await {
+                let result =
+                    handle_real_time_stream_batched(tx, req_id, db.clone(), filter.clone()).await;
+                db.with_state_mut(
+                    |state| match state.real_time_stream_filters.get(&stream_id) {
+                        Some(current) if Arc::ptr_eq(current, &filter) => {
+                            state.real_time_stream_filters.remove(&stream_id);
+                        }
+                        _ => {}
+                    },
+                );
+                match result {
                     Ok(_) => {}
                     Err(err) if err.is_stream_closed() => {}
                     Err(err) => {

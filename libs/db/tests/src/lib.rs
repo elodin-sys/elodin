@@ -394,6 +394,89 @@ mod tests {
     }
 
     #[test]
+    async fn test_batched_stream_filter_survives_reconnect() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let component_a = ComponentId::new("reconnect.a");
+        let component_b = ComponentId::new("reconnect.b");
+        send_f64_samples(
+            &mut writer,
+            component_a,
+            "Reconnect A",
+            [23, 0],
+            &[(Timestamp(1), 1.0)],
+        )
+        .await;
+        send_f64_samples(
+            &mut writer,
+            component_b,
+            "Reconnect B",
+            [24, 0],
+            &[(Timestamp(1), 2.0)],
+        )
+        .await;
+        sleep(Duration::from_millis(50)).await;
+
+        let stream_id = 43;
+        {
+            let mut reader = Client::connect(addr).await.unwrap();
+            let mut stream = reader
+                .stream(&Stream {
+                    behavior: StreamBehavior::RealTimeBatched,
+                    id: stream_id,
+                })
+                .await
+                .unwrap();
+            let initial = loop {
+                if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                    break vtable;
+                }
+            };
+            assert_eq!(initial.vtable.fields.len(), 2);
+            stream
+                .send(&SetStreamFilter {
+                    id: stream_id,
+                    component_ids: vec![component_a],
+                    frequency: Some(60),
+                })
+                .await
+                .0
+                .unwrap();
+            let filtered = loop {
+                if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                    break vtable;
+                }
+            };
+            assert_eq!(filtered.vtable.fields.len(), 1);
+        }
+        sleep(Duration::from_millis(50)).await;
+
+        let mut reader = Client::connect(addr).await.unwrap();
+        reader
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![component_a],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+        let reconnected = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(reconnected.vtable.fields.len(), 1);
+    }
+
+    #[test]
     async fn test_dump_metadata() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
