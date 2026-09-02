@@ -1,6 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::object_3d::create_object_3d_entity;
+use crate::sensor_camera::{
+    HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
+    SensorCamerasSpawned, SensorReadbackStatus, TEMP_MAP_SUFFIX, set_cameras_active,
+    set_readback_armed, update_auto_agc,
+};
+use crate::sensor_h264::SensorH264Encoder;
+use crate::{EqlContext, PositionSync, sync_pos};
 use bevy::core_pipeline::Skybox;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::{
@@ -32,6 +40,7 @@ use bevy_ai_skybox::prelude::{
     PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
 };
 use bevy_geo_frames::GeoContext;
+use bevy_geo_frames::GeoFramePlugin;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{ComponentId, LenPacket, Timestamp, msg_id};
 use impeller2_bevy::{
@@ -43,20 +52,6 @@ use impeller2_wkt::{
     CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, MsgMetadata, SchematicElem,
     SetMsgMetadata, SetStreamFilter, opaque_bytes_msg_schema,
 };
-use openh264::OpenH264API;
-use openh264::encoder::{
-    BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode, SpsPpsStrategy,
-};
-use openh264::formats::{RgbaSliceU8, YUVBuffer};
-
-use crate::object_3d::create_object_3d_entity;
-use crate::sensor_camera::{
-    HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, SensorReadbackStatus, TEMP_MAP_SUFFIX, set_cameras_active,
-    set_readback_armed, update_auto_agc,
-};
-use crate::{EqlContext, PositionSync, sync_pos};
-use bevy_geo_frames::GeoFramePlugin;
 
 const SENSOR_CAMERA_CONFIG_WARMUP_CYCLES: usize = 600;
 const SENSOR_CAMERA_PRIME_CYCLES: usize = 60;
@@ -786,116 +781,6 @@ fn consume_skybox_emission_gate(app: &mut App) -> SkyboxEmissionGate {
     SkyboxEmissionGate::Ready
 }
 
-struct SensorH264Encoder {
-    encoder: Encoder,
-    yuv: YUVBuffer,
-    width: usize,
-    height: usize,
-    parameter_sets: Vec<u8>,
-}
-
-impl SensorH264Encoder {
-    fn new(width: u32, height: u32, fps: f32) -> Result<Self, String> {
-        if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
-            return Err("h264 width and height must be positive and even".to_string());
-        }
-        let fps = fps.max(1.0);
-        let keyframe_interval = (fps.ceil() as u32).saturating_mul(2).max(1);
-        let target_bitrate = ((width as f64) * (height as f64) * (fps as f64) * 3.0)
-            .clamp(300_000.0, 12_000_000.0) as u32;
-        let config = EncoderConfig::new()
-            .bitrate(BitRate::from_bps(target_bitrate))
-            .skip_frames(true)
-            .max_frame_rate(FrameRate::from_hz(fps))
-            .rate_control_mode(RateControlMode::Bitrate)
-            .sps_pps_strategy(SpsPpsStrategy::ConstantId)
-            .intra_frame_period(IntraFramePeriod::from_num_frames(keyframe_interval));
-        let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
-            .map_err(|err| format!("openh264 encoder init: {err}"))?;
-        Ok(Self {
-            encoder,
-            yuv: YUVBuffer::new(width as usize, height as usize),
-            width: width as usize,
-            height: height as usize,
-            parameter_sets: Vec::new(),
-        })
-    }
-
-    fn encode(&mut self, rgba: &[u8]) -> Result<Vec<u8>, String> {
-        let expected = self
-            .width
-            .checked_mul(self.height)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or_else(|| "sensor frame dimensions overflow".to_string())?;
-        if rgba.len() != expected {
-            return Err(format!(
-                "unexpected RGBA frame size {} (expected {expected})",
-                rgba.len()
-            ));
-        }
-        let rgba = RgbaSliceU8::new(rgba, (self.width, self.height));
-        self.yuv.read_rgb(rgba);
-        let mut annex_b = self
-            .encoder
-            .encode(&self.yuv)
-            .map_err(|err| format!("openh264 encode: {err}"))?
-            .to_vec();
-        let nals = annex_b_nals(&annex_b);
-        let mut parameter_sets = Vec::new();
-        for &(start, end, nal_type) in &nals {
-            if matches!(nal_type, 7 | 8) {
-                parameter_sets.extend_from_slice(&annex_b[start..end]);
-            }
-        }
-        if !parameter_sets.is_empty() {
-            self.parameter_sets = parameter_sets;
-        }
-        let is_idr = nals.iter().any(|(_, _, nal_type)| *nal_type == 5);
-        let has_sps = nals.iter().any(|(_, _, nal_type)| *nal_type == 7);
-        let has_pps = nals.iter().any(|(_, _, nal_type)| *nal_type == 8);
-        if is_idr && (!has_sps || !has_pps) && !self.parameter_sets.is_empty() {
-            let mut prefixed = self.parameter_sets.clone();
-            prefixed.extend_from_slice(&annex_b);
-            annex_b = prefixed;
-        }
-        Ok(annex_b)
-    }
-}
-
-fn annex_b_nals(data: &[u8]) -> Vec<(usize, usize, u8)> {
-    let mut starts = Vec::new();
-    let mut i = 0;
-    while i + 3 <= data.len() {
-        let start_code_len = if data.get(i..i + 4) == Some(&[0, 0, 0, 1]) {
-            Some(4)
-        } else if data.get(i..i + 3) == Some(&[0, 0, 1]) {
-            Some(3)
-        } else {
-            None
-        };
-        let Some(start_code_len) = start_code_len else {
-            i += 1;
-            continue;
-        };
-        let payload_start = i + start_code_len;
-        if let Some(&header) = data.get(payload_start) {
-            starts.push((i, header & 0x1f));
-        }
-        i = payload_start + 1;
-    }
-    starts
-        .iter()
-        .enumerate()
-        .map(|(index, &(start, nal_type))| {
-            let end = starts
-                .get(index + 1)
-                .map(|(next, _)| *next)
-                .unwrap_or(data.len());
-            (start, end, nal_type)
-        })
-        .collect()
-}
-
 struct SensorEncoderJob {
     timestamp: Timestamp,
     rgba: Vec<u8>,
@@ -1398,7 +1283,7 @@ fn collect_frames(app: &App) -> Vec<(String, Timestamp, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SensorH264Encoder, annex_b_nals, is_ai_skybox_target, next_due_ts, rgba_to_gray8};
+    use super::{is_ai_skybox_target, next_due_ts, rgba_to_gray8};
     use impeller2::types::Timestamp;
 
     #[test]
@@ -1406,29 +1291,6 @@ mod tests {
         assert!(!is_ai_skybox_target(false, true, true));
         assert!(is_ai_skybox_target(false, true, false));
         assert!(!is_ai_skybox_target(false, false, false));
-    }
-
-    #[test]
-    fn sensor_h264_idrs_include_parameter_sets() {
-        let mut encoder = SensorH264Encoder::new(32, 32, 30.0).unwrap();
-        let mut idr_count = 0;
-        for frame in 0..130u8 {
-            let rgba = [frame, frame.wrapping_mul(3), 128, 255].repeat(32 * 32);
-            let encoded = encoder.encode(&rgba).unwrap();
-            let nals = annex_b_nals(&encoded);
-            if nals.iter().any(|(_, _, nal_type)| *nal_type == 5) {
-                idr_count += 1;
-                assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
-                assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
-            }
-        }
-        assert!(idr_count >= 2);
-    }
-
-    #[test]
-    fn sensor_h264_rejects_odd_dimensions() {
-        assert!(SensorH264Encoder::new(31, 32, 30.0).is_err());
-        assert!(SensorH264Encoder::new(32, 31, 30.0).is_err());
     }
 
     #[test]

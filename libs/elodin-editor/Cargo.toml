@@ -176,6 +176,7 @@ image.features = ["png"]
 
 [target.'cfg(all(not(target_family = "wasm"), not(target_os = "windows")))'.dependencies]
 s10.path = "../s10"
+ffmpeg-next = "8.0.0"
 
 # non-macos
 [target.'cfg(not(target_os = "macos"))'.dependencies]
