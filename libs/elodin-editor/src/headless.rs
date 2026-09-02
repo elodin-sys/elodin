@@ -820,25 +820,14 @@ impl SensorH264Worker {
                     },
                 });
                 while let Ok(job) = receiver.recv() {
-                    let encoded = match encoder.encode(&job.rgba) {
-                        Ok(encoded) if !encoded.is_empty() => encoded,
-                        Ok(_) => continue,
-                        Err(err) => {
-                            tracing::warn!("sensor camera {camera_name}: {err}");
-                            continue;
-                        }
-                    };
-                    let mut packet = LenPacket::msg_with_timestamp(
-                        msg_id(&camera_name),
-                        job.timestamp,
-                        encoded.len(),
-                    );
-                    packet.extend_from_slice(&encoded);
-                    if msg_tx.0.try_send(Some(packet)).is_err() {
-                        tracing::warn!(
-                            "render server: MsgPacketTx queue full; dropping frame for {camera_name}"
-                        );
+                    match encoder.encode(&job.rgba, job.timestamp) {
+                        Ok(frames) => send_encoded_h264(&camera_name, &msg_tx, frames),
+                        Err(err) => tracing::warn!("sensor camera {camera_name}: {err}"),
                     }
+                }
+                match encoder.flush() {
+                    Ok(frames) => send_encoded_h264(&camera_name, &msg_tx, frames),
+                    Err(err) => tracing::warn!("sensor camera {camera_name}: flush: {err}"),
                 }
             })?;
         Ok(Self {
@@ -856,6 +845,22 @@ impl SensorH264Worker {
             .is_err()
         {
             tracing::warn!("sensor camera encoder queue full; dropping frame");
+        }
+    }
+}
+
+fn send_encoded_h264(camera_name: &str, msg_tx: &MsgPacketTx, frames: Vec<(Timestamp, Vec<u8>)>) {
+    for (timestamp, encoded) in frames {
+        if encoded.is_empty() {
+            continue;
+        }
+        let mut packet =
+            LenPacket::msg_with_timestamp(msg_id(camera_name), timestamp, encoded.len());
+        packet.extend_from_slice(&encoded);
+        if msg_tx.0.try_send(Some(packet)).is_err() {
+            tracing::warn!(
+                "render server: MsgPacketTx queue full; dropping frame for {camera_name}"
+            );
         }
     }
 }

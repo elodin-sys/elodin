@@ -3,6 +3,9 @@
 //! Prefers a hardware encoder (NVENC / VideoToolbox / VAAPI via FFmpeg) and
 //! falls back to OpenH264. Override with `ELODIN_H264_ENCODER=cpu|auto|<name>`.
 
+use std::collections::VecDeque;
+
+use impeller2::types::Timestamp;
 use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode, SpsPpsStrategy,
@@ -65,33 +68,46 @@ impl SensorH264Encoder {
         })
     }
 
-    pub(crate) fn encode(&mut self, rgba: &[u8]) -> Result<Vec<u8>, String> {
-        let mut annex_b = match &mut self.inner {
-            EncoderInner::Software(enc) => enc.encode(rgba)?,
-            EncoderInner::Hardware(enc) => enc.encode(rgba)?,
-        };
-        if annex_b.is_empty() {
-            return Ok(annex_b);
-        }
-        let nals = annex_b_nals(&annex_b);
-        let mut parameter_sets = Vec::new();
-        for &(start, end, nal_type) in &nals {
-            if matches!(nal_type, 7 | 8) {
-                parameter_sets.extend_from_slice(&annex_b[start..end]);
+    pub(crate) fn encode(
+        &mut self,
+        rgba: &[u8],
+        timestamp: Timestamp,
+    ) -> Result<Vec<(Timestamp, Vec<u8>)>, String> {
+        let frames = match &mut self.inner {
+            EncoderInner::Software(enc) => {
+                let annex_b = enc.encode(rgba)?;
+                if annex_b.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![(timestamp, annex_b)]
+                }
             }
-        }
-        if !parameter_sets.is_empty() {
-            self.parameter_sets = parameter_sets;
-        }
-        let is_idr = nals.iter().any(|(_, _, nal_type)| *nal_type == 5);
-        let has_sps = nals.iter().any(|(_, _, nal_type)| *nal_type == 7);
-        let has_pps = nals.iter().any(|(_, _, nal_type)| *nal_type == 8);
-        if is_idr && (!has_sps || !has_pps) && !self.parameter_sets.is_empty() {
-            let mut prefixed = self.parameter_sets.clone();
-            prefixed.extend_from_slice(&annex_b);
-            annex_b = prefixed;
-        }
-        Ok(annex_b)
+            EncoderInner::Hardware(enc) => enc.encode(rgba, timestamp)?,
+        };
+        Ok(self.with_parameter_sets(frames))
+    }
+
+    pub(crate) fn flush(&mut self) -> Result<Vec<(Timestamp, Vec<u8>)>, String> {
+        let frames = match &mut self.inner {
+            EncoderInner::Software(_) => Vec::new(),
+            EncoderInner::Hardware(enc) => enc.flush()?,
+        };
+        Ok(self.with_parameter_sets(frames))
+    }
+
+    fn with_parameter_sets(
+        &mut self,
+        frames: Vec<(Timestamp, Vec<u8>)>,
+    ) -> Vec<(Timestamp, Vec<u8>)> {
+        frames
+            .into_iter()
+            .map(|(timestamp, annex_b)| {
+                (
+                    timestamp,
+                    apply_parameter_sets(annex_b, &mut self.parameter_sets),
+                )
+            })
+            .collect()
     }
 }
 
@@ -198,6 +214,7 @@ struct HardwareEncoder {
     width: u32,
     height: u32,
     pts: i64,
+    pending: VecDeque<(i64, Timestamp)>,
 }
 
 impl HardwareEncoder {
@@ -273,10 +290,15 @@ impl HardwareEncoder {
             width,
             height,
             pts: 0,
+            pending: VecDeque::new(),
         })
     }
 
-    fn encode(&mut self, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    fn encode(
+        &mut self,
+        rgba: &[u8],
+        timestamp: Timestamp,
+    ) -> Result<Vec<(Timestamp, Vec<u8>)>, String> {
         let expected = (self.width as usize)
             .checked_mul(self.height as usize)
             .and_then(|pixels| pixels.checked_mul(4))
@@ -291,23 +313,98 @@ impl HardwareEncoder {
         self.scaler
             .run(&self.rgba_frame, &mut self.yuv_frame)
             .map_err(|err| format!("ffmpeg scale: {err}"))?;
-        self.yuv_frame.set_pts(Some(self.pts));
+        let pts = self.pts;
+        self.yuv_frame.set_pts(Some(pts));
         self.yuv_frame.set_kind(ffmpeg_next::picture::Type::None);
+        self.pending.push_back((pts, timestamp));
         self.pts += 1;
         self.encoder
             .send_frame(&self.yuv_frame)
             .map_err(|err| format!("ffmpeg send_frame: {err}"))?;
+        let packets = self.drain_packets();
+        Ok(take_ready_frames(&mut self.pending, packets))
+    }
 
-        let mut annex_b = Vec::new();
+    fn flush(&mut self) -> Result<Vec<(Timestamp, Vec<u8>)>, String> {
+        if let Err(err) = self.encoder.send_eof() {
+            tracing::debug!("ffmpeg send_eof: {err}");
+        }
+        let packets = self.drain_packets();
+        Ok(take_ready_frames(&mut self.pending, packets))
+    }
+
+    fn drain_packets(&mut self) -> Vec<(Option<i64>, Vec<u8>)> {
+        let mut packets = Vec::new();
         let mut packet = ffmpeg_next::Packet::empty();
         while self.encoder.receive_packet(&mut packet).is_ok() {
             if let Some(data) = packet.data() {
-                annex_b.extend_from_slice(&to_annex_b(data));
+                packets.push((packet.pts(), to_annex_b(data)));
             }
             packet = ffmpeg_next::Packet::empty();
         }
-        Ok(annex_b)
+        packets
     }
+}
+
+fn take_ready_frames(
+    pending: &mut VecDeque<(i64, Timestamp)>,
+    packets: Vec<(Option<i64>, Vec<u8>)>,
+) -> Vec<(Timestamp, Vec<u8>)> {
+    let mut out: Vec<(Timestamp, Vec<u8>)> = Vec::new();
+    let mut last_pts = None;
+    for (pts, data) in packets {
+        if data.is_empty() {
+            continue;
+        }
+        if let (Some(p), Some(prev)) = (pts, last_pts) {
+            if p == prev {
+                if let Some(last) = out.last_mut() {
+                    last.1.extend_from_slice(&data);
+                    continue;
+                }
+            }
+        }
+        let timestamp = match pts {
+            Some(p) => pending
+                .iter()
+                .position(|(queued, _)| *queued == p)
+                .and_then(|idx| pending.remove(idx))
+                .map(|(_, timestamp)| timestamp)
+                .or_else(|| pending.pop_front().map(|(_, timestamp)| timestamp)),
+            None => pending.pop_front().map(|(_, timestamp)| timestamp),
+        };
+        let Some(timestamp) = timestamp else {
+            continue;
+        };
+        last_pts = pts;
+        out.push((timestamp, data));
+    }
+    out
+}
+
+fn apply_parameter_sets(mut annex_b: Vec<u8>, parameter_sets: &mut Vec<u8>) -> Vec<u8> {
+    if annex_b.is_empty() {
+        return annex_b;
+    }
+    let nals = annex_b_nals(&annex_b);
+    let mut found = Vec::new();
+    for &(start, end, nal_type) in &nals {
+        if matches!(nal_type, 7 | 8) {
+            found.extend_from_slice(&annex_b[start..end]);
+        }
+    }
+    if !found.is_empty() {
+        *parameter_sets = found;
+    }
+    let is_idr = nals.iter().any(|(_, _, nal_type)| *nal_type == 5);
+    let has_sps = nals.iter().any(|(_, _, nal_type)| *nal_type == 7);
+    let has_pps = nals.iter().any(|(_, _, nal_type)| *nal_type == 8);
+    if is_idr && (!has_sps || !has_pps) && !parameter_sets.is_empty() {
+        let mut prefixed = parameter_sets.clone();
+        prefixed.extend_from_slice(&annex_b);
+        annex_b = prefixed;
+    }
+    annex_b
 }
 
 fn fill_rgba_frame(
@@ -389,7 +486,42 @@ pub(crate) fn annex_b_nals(data: &[u8]) -> Vec<(usize, usize, u8)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SensorH264Encoder, annex_b_nals, to_annex_b};
+    use super::{SensorH264Encoder, annex_b_nals, take_ready_frames, to_annex_b};
+    use impeller2::types::Timestamp;
+    use std::collections::VecDeque;
+
+    #[test]
+    fn delayed_hw_packets_keep_input_timestamps() {
+        let mut pending = VecDeque::from([
+            (0, Timestamp(100)),
+            (1, Timestamp(200)),
+            (2, Timestamp(300)),
+        ]);
+        assert!(take_ready_frames(&mut pending, Vec::new()).is_empty());
+        assert_eq!(pending.len(), 3);
+
+        let out = take_ready_frames(&mut pending, vec![(Some(0), vec![1]), (Some(1), vec![2])]);
+        assert_eq!(
+            out,
+            vec![(Timestamp(100), vec![1]), (Timestamp(200), vec![2])]
+        );
+        assert_eq!(pending.len(), 1);
+
+        let out = take_ready_frames(&mut pending, vec![(Some(2), vec![3])]);
+        assert_eq!(out, vec![(Timestamp(300), vec![3])]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn same_pts_packets_merge() {
+        let mut pending = VecDeque::from([(0, Timestamp(10))]);
+        let out = take_ready_frames(
+            &mut pending,
+            vec![(Some(0), vec![1, 2]), (Some(0), vec![3])],
+        );
+        assert_eq!(out, vec![(Timestamp(10), vec![1, 2, 3])]);
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn avcc_converts_to_annex_b() {
@@ -415,12 +547,13 @@ mod tests {
         let mut idr_count = 0;
         for frame in 0..130u8 {
             let rgba = [frame, frame.wrapping_mul(3), 128, 255].repeat(32 * 32);
-            let encoded = encoder.encode(&rgba).unwrap();
-            let nals = annex_b_nals(&encoded);
-            if nals.iter().any(|(_, _, nal_type)| *nal_type == 5) {
-                idr_count += 1;
-                assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
-                assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
+            for (_, encoded) in encoder.encode(&rgba, Timestamp(i64::from(frame))).unwrap() {
+                let nals = annex_b_nals(&encoded);
+                if nals.iter().any(|(_, _, nal_type)| *nal_type == 5) {
+                    idr_count += 1;
+                    assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
+                    assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
+                }
             }
         }
         assert!(idr_count >= 2);
@@ -440,14 +573,24 @@ mod tests {
         let mut saw_idr = false;
         for frame in 0..8u8 {
             let rgba = [frame, 64, 128, 255].repeat(256 * 256);
-            let encoded = encoder.encode(&rgba).expect("nvenc encode");
-            if encoded.is_empty() {
-                continue;
+            for (_, encoded) in encoder
+                .encode(&rgba, Timestamp(i64::from(frame)))
+                .expect("nvenc encode")
+            {
+                if encoded.is_empty() {
+                    continue;
+                }
+                assert!(
+                    encoded.starts_with(&[0, 0, 0, 1]) || encoded.starts_with(&[0, 0, 1]),
+                    "NVENC output must be Annex-B"
+                );
+                let nals = annex_b_nals(&encoded);
+                if nals.iter().any(|(_, _, nal_type)| *nal_type == 5) {
+                    saw_idr = true;
+                }
             }
-            assert!(
-                encoded.starts_with(&[0, 0, 0, 1]) || encoded.starts_with(&[0, 0, 1]),
-                "NVENC output must be Annex-B"
-            );
+        }
+        for (_, encoded) in encoder.flush().expect("nvenc flush") {
             let nals = annex_b_nals(&encoded);
             if nals.iter().any(|(_, _, nal_type)| *nal_type == 5) {
                 saw_idr = true;
@@ -465,11 +608,12 @@ mod tests {
         let start = std::time::Instant::now();
         let mut packets = 0usize;
         for _ in 0..60 {
-            let encoded = encoder.encode(&rgba).expect("nvenc encode");
-            if !encoded.is_empty() {
-                packets += 1;
-            }
+            packets += encoder
+                .encode(&rgba, Timestamp(0))
+                .expect("nvenc encode")
+                .len();
         }
+        packets += encoder.flush().expect("nvenc flush").len();
         let elapsed = start.elapsed();
         eprintln!(
             "NVENC 640x512: 60 frames in {:.1}ms ({:.0} fps, {packets} packets)",
