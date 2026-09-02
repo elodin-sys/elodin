@@ -606,7 +606,7 @@ jobs:
   # Single status check for main-push / workflow_dispatch dry runs.
   # Publish jobs (host, announce, pypi-publish) stay skipped.
   release-dry-run:
-    if: ${{ always() && needs.plan.outputs.dry-run == 'true' }}
+    if: ${{ always() && !cancelled() && needs.plan.outputs.dry-run == 'true' }}
     needs:
       - plan
       - build-local-artifacts
