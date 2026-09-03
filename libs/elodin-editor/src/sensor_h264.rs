@@ -12,9 +12,15 @@ use openh264::encoder::{
 };
 use openh264::formats::{RgbaSliceU8, YUVBuffer};
 
+#[derive(Default)]
+struct ParameterSetCache {
+    sps: Option<Vec<u8>>,
+    pps: Option<Vec<u8>>,
+}
+
 pub(crate) struct SensorH264Encoder {
     inner: EncoderInner,
-    parameter_sets: Vec<u8>,
+    parameter_sets: ParameterSetCache,
 }
 
 enum EncoderInner {
@@ -37,7 +43,7 @@ impl SensorH264Encoder {
                             tracing::info!("sensor camera H.264: using {name}");
                             return Ok(Self {
                                 inner: EncoderInner::Hardware(Box::new(hw)),
-                                parameter_sets: Vec::new(),
+                                parameter_sets: ParameterSetCache::default(),
                             });
                         }
                         Err(err) => {
@@ -53,7 +59,7 @@ impl SensorH264Encoder {
                     tracing::info!("sensor camera H.264: using {name}");
                     Ok(Self {
                         inner: EncoderInner::Hardware(Box::new(hw)),
-                        parameter_sets: Vec::new(),
+                        parameter_sets: ParameterSetCache::default(),
                     })
                 }
                 Err(err) => Err(format!("ELODIN_H264_ENCODER={name} failed: {err}")),
@@ -64,7 +70,7 @@ impl SensorH264Encoder {
     pub(crate) fn software(width: u32, height: u32, fps: f32) -> Result<Self, String> {
         Ok(Self {
             inner: EncoderInner::Software(Box::new(SoftwareEncoder::new(width, height, fps)?)),
-            parameter_sets: Vec::new(),
+            parameter_sets: ParameterSetCache::default(),
         })
     }
 
@@ -381,25 +387,32 @@ fn take_ready_frames(
     out
 }
 
-fn apply_parameter_sets(mut annex_b: Vec<u8>, parameter_sets: &mut Vec<u8>) -> Vec<u8> {
+fn apply_parameter_sets(mut annex_b: Vec<u8>, cache: &mut ParameterSetCache) -> Vec<u8> {
     if annex_b.is_empty() {
         return annex_b;
     }
     let nals = annex_b_nals(&annex_b);
-    let mut found = Vec::new();
     for &(start, end, nal_type) in &nals {
-        if matches!(nal_type, 7 | 8) {
-            found.extend_from_slice(&annex_b[start..end]);
+        match nal_type {
+            7 => cache.sps = Some(annex_b[start..end].to_vec()),
+            8 => cache.pps = Some(annex_b[start..end].to_vec()),
+            _ => {}
         }
-    }
-    if !found.is_empty() {
-        *parameter_sets = found;
     }
     let is_idr = nals.iter().any(|(_, _, nal_type)| *nal_type == 5);
     let has_sps = nals.iter().any(|(_, _, nal_type)| *nal_type == 7);
     let has_pps = nals.iter().any(|(_, _, nal_type)| *nal_type == 8);
-    if is_idr && (!has_sps || !has_pps) && !parameter_sets.is_empty() {
-        let mut prefixed = parameter_sets.clone();
+    if is_idr && (!has_sps || !has_pps) {
+        let (Some(sps), Some(pps)) = (&cache.sps, &cache.pps) else {
+            return annex_b;
+        };
+        let mut prefixed = Vec::with_capacity(sps.len() + pps.len() + annex_b.len());
+        if !has_sps {
+            prefixed.extend_from_slice(sps);
+        }
+        if !has_pps {
+            prefixed.extend_from_slice(pps);
+        }
         prefixed.extend_from_slice(&annex_b);
         annex_b = prefixed;
     }
@@ -485,7 +498,10 @@ pub(crate) fn annex_b_nals(data: &[u8]) -> Vec<(usize, usize, u8)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SensorH264Encoder, annex_b_nals, take_ready_frames, to_annex_b};
+    use super::{
+        ParameterSetCache, SensorH264Encoder, annex_b_nals, apply_parameter_sets,
+        take_ready_frames, to_annex_b,
+    };
     use impeller2::types::Timestamp;
     use std::collections::VecDeque;
 
@@ -538,6 +554,22 @@ mod tests {
         );
         let annex = [0, 0, 0, 1, 0x65, 0x88];
         assert_eq!(to_annex_b(&annex), annex);
+    }
+
+    #[test]
+    fn pps_only_packet_keeps_cached_sps() {
+        let mut cache = ParameterSetCache::default();
+        let sps_pps = [0, 0, 0, 1, 0x67, 0x42, 0, 0, 0, 1, 0x68, 0xce];
+        apply_parameter_sets(sps_pps.to_vec(), &mut cache);
+        apply_parameter_sets([0, 0, 0, 1, 0x68, 0xff].to_vec(), &mut cache);
+        assert_eq!(cache.sps.as_deref(), Some(&[0, 0, 0, 1, 0x67, 0x42][..]));
+        assert_eq!(cache.pps.as_deref(), Some(&[0, 0, 0, 1, 0x68, 0xff][..]));
+
+        let out = apply_parameter_sets([0, 0, 0, 1, 0x65, 0x88].to_vec(), &mut cache);
+        let nals = annex_b_nals(&out);
+        assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
+        assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
+        assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 5));
     }
 
     #[test]
