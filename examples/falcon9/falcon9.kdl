@@ -15,7 +15,8 @@ environment {
 // Cinematic chase viewport with telemetry panels.
 vsplit {
     hsplit share=0.75 {
-        viewport name="Chase" share=0.72 near=1.0 pos="booster.world_pos.translate_world(46.740, -100.549, -144.705)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" cinematic=#true show_grid=#false active=#true
+        // Same series as the GLB (visual_pos); body +X ~20 m is near CoM so framing matches the old world_pos chase.
+        viewport name="Chase" share=0.72 near=1.0 pos="booster.visual_pos.translate(20, 0, 0).translate_world(46.740, -100.549, -144.705)" look_at="booster.visual_pos.translate(20, 0, 0).translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" cinematic=#true show_grid=#false active=#true
         vsplit share=0.28 {
             hsplit {
                 graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
