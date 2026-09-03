@@ -843,7 +843,7 @@ def ground_contact(
     legs_live = (lifted[0] > 0.5) & near_lz & (alt < 200.0)
     any_contact = jnp.logical_and(legs_live, n_contact >= 1.0)
     was_landed = landed[0] > 0.5
-    first_contact = jnp.logical_and(~was_landed, any_contact)
+    first_contact = (~was_landed) & any_contact & (metrics[3] <= 0.0)
 
     v_up = jnp.dot(v, up)
     v_lat = jnp.linalg.norm(v - v_up * up)
@@ -1093,23 +1093,27 @@ def gps_model(
 def radar_altimeter_model(
     timer: sn.RadarTimer,
     pos: el.WorldPos,
+    cg: CgStation,
     rng_prev: sn.RadarRange,
     count: sn.RadarCount,
 ) -> tuple[sn.RadarTimer, sn.RadarRange, sn.RadarCount]:
-    """Boresight (-X body) range to terrain at 40 Hz within FOV/max-range
-    gates; -1 when invalid (WHITEPAPER 12.2)."""
+    """Boresight range from the engine-plane antenna to terrain (deck at LZ-1)."""
     t = timer[0] + SIM_TIME_STEP
     fired = t >= sn.RADAR_DT_S
     t = jnp.where(fired, t - sn.RADAR_DT_S, t)
-    lat, lon, alt = ecef_to_geodetic(pos.linear())
+    r = pos.linear()
+    lat, lon, alt = ecef_to_geodetic(r)
     sin_lat, cos_lat = jnp.sin(lat), jnp.cos(lat)
     sin_lon, cos_lon = jnp.sin(lon), jnp.cos(lon)
     up = jnp.array([cos_lat * cos_lon, cos_lat * sin_lon, sin_lat])
     bore_world = pos.angular() @ jnp.array([-1.0, 0.0, 0.0])
     cos_tilt = jnp.dot(bore_world, -up)
-    slant = alt / jnp.maximum(cos_tilt, 1e-3)
+    h_ant = alt - cg[0] * jnp.maximum(cos_tilt, 1e-3)
+    near_lz = jnp.linalg.norm(r - lz1_ecef()) < 5_000.0
+    h_terr = jnp.where(near_lz, LZ1_ALT_M, 0.0)
+    slant = jnp.maximum(h_ant - h_terr, 0.0) / jnp.maximum(cos_tilt, 1e-3)
     n = count[0] + jnp.where(fired, 1.0, 0.0)
-    valid = (cos_tilt > sn.RADAR_FOV_COS) & (slant <= sn.RADAR_MAX_RANGE_M) & (alt > 0.0)
+    valid = (cos_tilt > sn.RADAR_FOV_COS) & (slant <= sn.RADAR_MAX_RANGE_M)
     meas = jnp.where(valid, slant + sn._noise(n, 5, (), sn.RADAR_SIGMA_M), -1.0)
     return (
         jnp.array([t]),
