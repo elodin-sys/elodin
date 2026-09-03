@@ -41,6 +41,9 @@
     buildInputs = with pkgs;
       [
         python
+        # libavutil / libavcodec for live sensor-camera H.264 (ffmpeg-next).
+        ffmpeg-full
+        ffmpeg-full.dev
       ]
       ++ common.commonBuildInputs
       ++ lib.optionals pkgs.stdenv.isDarwin common.darwinDeps

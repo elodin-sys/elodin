@@ -356,13 +356,12 @@ fn take_ready_frames(
         if data.is_empty() {
             continue;
         }
-        if let (Some(p), Some(prev)) = (pts, last_pts) {
-            if p == prev {
-                if let Some(last) = out.last_mut() {
-                    last.1.extend_from_slice(&data);
-                    continue;
-                }
-            }
+        if let (Some(p), Some(prev)) = (pts, last_pts)
+            && p == prev
+            && let Some(last) = out.last_mut()
+        {
+            last.1.extend_from_slice(&data);
+            continue;
         }
         let timestamp = match pts {
             Some(p) => pending
