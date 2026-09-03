@@ -970,7 +970,7 @@ branch for later resumption.
 
 | Package | Status | Evidence / notes |
 |---|---|---|
-| A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.836 m takeoff rise in 20 wall-clock seconds. Deliberate 100 m criterion returned 1. Shared headless propagation fix: `bd3aa4b9`. |
+| A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
 | C | Not started | No course or referee code |
 | D | Not started | RC remains hardcoded; no manual mode; AUX2 ANGLE not configured |
@@ -1002,10 +1002,10 @@ elodin run examples/betaflight-sitl/main.py
 The verified C0 result was:
 
 ```text
-[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.836 status=PASS
+[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.837 status=PASS
 ```
 
-The pure suite passed 24 tests in 0.05 seconds and C0 completed in 20 wall-clock
+The pure suite passed 24 tests in 0.15 seconds and C0 completed in 29 wall-clock
 seconds. Raising the takeoff criterion temporarily to 100 m emitted
 `status=FAIL` and returned process status 1; the required 0.1 m criterion was
 then restored.
@@ -1014,7 +1014,7 @@ then restored.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
-| 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fix (`bd3aa4b9`) makes headless execution one-shot without changing interactive editor recovery. This enables failure contracts in A, F, K, and L. |
+| 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
 | 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |
 | 2026-09-01 | Add manual piloting through the same semantic-input-to-RC boundary before autonomy. | Separates vehicle controllability and Betaflight integration from guidance behavior; D provides gamepad/keyboard control and safe stale-input handling. |
