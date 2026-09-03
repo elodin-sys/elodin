@@ -36,7 +36,6 @@ const THROTTLE_MIN: f64 = 0.57;
 const T_VAC_PER_ENGINE: f64 = 829_000.0; // matches plant constants
 const A_E_M2: f64 = 0.681;
 const LZ1_ALT_M: f64 = 5.0;
-const RADAR_STATION_M: f64 = 16.5; // CoM above the engine-plane antenna at landing mass
 const LZ1_LAT_RAD: f64 = 28.48580_f64.to_radians();
 const LZ1_LON_RAD: f64 = -80.54440_f64.to_radians();
 /// ZEM/ZEV terminal guidance (Guo/Hawkins/Wie) — LandingBurn.
@@ -200,6 +199,14 @@ impl Command {
     }
 }
 
+/// CoM station from the engine-plane antenna (plant `stack_mass_props`, m_upper=0).
+fn cg_station_m(lox_kg: f64, rp1_kg: f64) -> f64 {
+    let area = std::f64::consts::PI * 1.83 * 1.83;
+    let cg_lox = 17.5 + 0.5 * lox_kg / (1220.0 * area);
+    let cg_rp1 = 3.0 + 0.5 * rp1_kg / (830.0 * area);
+    (25_600.0 * 18.8 + lox_kg * cg_lox + rp1_kg * cg_rp1) / (25_600.0 + lox_kg + rp1_kg)
+}
+
 /// IMU + GPS navigator with the rotating-frame mechanization (WHITEPAPER 12).
 struct Navigator {
     pos: V3,
@@ -212,6 +219,8 @@ struct Navigator {
     wind_est: V3,
     /// Radar-smoothed antenna height above terrain (m); <0 when invalid.
     radar_agl_m: f64,
+    /// CoM above the engine-plane antenna (m), from current propellant.
+    station_m: f64,
 }
 
 impl Navigator {
@@ -225,6 +234,7 @@ impl Navigator {
             initialized: false,
             wind_est: [0.0; 3],
             radar_agl_m: -1.0,
+            station_m: 18.8,
         }
     }
 
@@ -249,9 +259,11 @@ impl Navigator {
         self.initialized = true;
         self.wind_est = [0.0; 3];
         self.radar_agl_m = -1.0;
+        self.station_m = cg_station_m(s.lox_kg, s.rp1_kg);
     }
 
     fn step(&mut self, s: &SensorPacket) {
+        self.station_m = cg_station_m(s.lox_kg, s.rp1_kg);
         if !self.initialized {
             if s.gps_count > 0.0 {
                 self.init(s);
@@ -291,7 +303,7 @@ impl Navigator {
             } else {
                 self.radar_agl_m = 0.7 * self.radar_agl_m + 0.3 * h_agl;
             }
-            let dh = (self.radar_agl_m + RADAR_STATION_M + self.site_alt()) - geo_alt;
+            let dh = (self.radar_agl_m + self.station_m + self.site_alt()) - geo_alt;
             if dh.abs() < 50.0 {
                 self.pos = add(self.pos, scale(up, 0.35 * dh));
             }
@@ -302,7 +314,7 @@ impl Navigator {
 
     fn altitude(&self) -> f64 {
         if self.radar_agl_m >= 0.0 {
-            self.radar_agl_m + RADAR_STATION_M + self.site_alt()
+            self.radar_agl_m + self.station_m + self.site_alt()
         } else {
             ecef_to_geodetic(self.pos).2
         }
@@ -312,7 +324,7 @@ impl Navigator {
         if self.radar_agl_m >= 0.0 {
             self.radar_agl_m
         } else {
-            ecef_to_geodetic(self.pos).2 - RADAR_STATION_M - self.site_alt()
+            ecef_to_geodetic(self.pos).2 - self.station_m - self.site_alt()
         }
     }
 
