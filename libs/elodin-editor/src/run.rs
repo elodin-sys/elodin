@@ -10,7 +10,17 @@ use std::{
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
 
+#[cfg(not(target_os = "windows"))]
 pub use s10::cli::RecipeExecution;
+
+// s10 is not supported on Windows, but the editor's public API and Windows
+// simulation stub still use this type.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecipeExecution {
+    Once,
+    Watch,
+}
 
 #[cfg(not(target_os = "windows"))]
 pub async fn run_recipe(
