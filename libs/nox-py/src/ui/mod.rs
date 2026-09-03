@@ -88,13 +88,22 @@ impl PySchematic {
 
 /// Build a schematic from panels/objects plus optional globals.
 #[pyfunction]
-#[pyo3(signature = (*elems, coordinate=None, theme=None, timeline=None, skybox=None, telemetry_mode=false))]
+#[pyo3(signature = (
+    *elems,
+    coordinate=None,
+    theme=None,
+    timeline=None,
+    skybox=None,
+    environment=None,
+    telemetry_mode=false,
+))]
 fn schematic(
     elems: Vec<Bound<'_, PyAny>>,
     coordinate: Option<Bound<'_, PyAny>>,
     theme: Option<Bound<'_, PyAny>>,
     timeline: Option<Bound<'_, PyAny>>,
     skybox: Option<String>,
+    environment: Option<Bound<'_, PyAny>>,
     telemetry_mode: bool,
 ) -> PyResult<PySchematic> {
     let mut inner = Schematic {
@@ -116,6 +125,9 @@ fn schematic(
     }
     if let Some(name) = skybox {
         inner.skybox = Some(impeller2_wkt::SkyboxConfig { name });
+    }
+    if let Some(environment) = environment {
+        inner.environment = Some(builders::extract_environment(&environment)?);
     }
 
     for elem in elems {
@@ -281,6 +293,16 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<PyCoordinate>()?;
     child.add_class::<PyTheme>()?;
     child.add_class::<PyTimeline>()?;
+    child.add_class::<PyColor>()?;
+    child.add_class::<PyEnvironment>()?;
+    child.add_class::<PySun>()?;
+    child.add_class::<PyAtmosphere>()?;
+    child.add_class::<PyEarth>()?;
+    child.add_class::<PyBloom>()?;
+    child.add_class::<PyIcon>()?;
+    child.add_class::<PyVisibilityRange>()?;
+    child.add_class::<PyThruster>()?;
+    child.add_class::<PyThrusterLight>()?;
     child.add_function(wrap_pyfunction!(schematic, &child)?)?;
     child.add_function(wrap_pyfunction!(from_kdl, &child)?)?;
     child.add_function(wrap_pyfunction!(to_python, &child)?)?;

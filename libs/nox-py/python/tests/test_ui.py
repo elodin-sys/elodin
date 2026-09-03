@@ -37,15 +37,17 @@ def _canonical(schematic: ui.Schematic) -> ui.Schematic:
 def test_to_python_preserves_corpus_model(path: Path):
     source = path.read_text()
     generated = ui.to_python(source, source_name=path.name)
+    assert "SOURCE_KDL" not in generated
+    assert "ui.from_kdl" not in generated
     namespace = {"__name__": "generated_schematic"}
     exec(compile(generated, str(path.with_suffix(".py")), "exec"), namespace)
-    assert namespace["build"]() == ui.from_kdl(source)
+    assert _canonical(namespace["build"]()) == _canonical(ui.from_kdl(source))
 
 
 def test_to_python_preserves_line_comments():
     generated = ui.to_python("// Flight dashboard\nviewport\n")
     assert "# Flight dashboard" in generated
-    assert '"// Flight dashboard\\n"' in generated
+    assert "SOURCE_KDL" not in generated
 
 
 def test_from_kdl_emit_idempotent():
@@ -72,6 +74,72 @@ def test_tabs_hsplit_vsplit_roundtrip():
                 ui.graph("c"),
                 name="Panel",
             ),
+        ),
+    )
+    assert ui.from_kdl(built.emit_kdl()) == built
+
+
+def test_extended_typed_builders_roundtrip():
+    visibility = ui.visibility_range(min=50.0, fade_distance=50.0)
+    arrow = ui.vector_arrow(
+        "(1, 2, 3)",
+        color=ui.color(12, 34, 56, 78),
+        show_name=False,
+        thickness=0.025,
+        label_position="0.5",
+        frame="ECEF",
+    )
+    built = ui.schematic(
+        ui.viewport(
+            cinematic=True,
+            bloom=ui.bloom(intensity=0.25),
+            ev100=13.5,
+            frustums_color=ui.color(1, 2, 3, 4),
+            projection_color=ui.color(5, 6, 7),
+            frustums_thickness=0.01,
+            view_cube_frame="NED",
+            smoothing=1.0,
+            arrows=[arrow],
+        ),
+        ui.geo_position_gauge("pose", source="ECEF", display="LLA"),
+        ui.orientation_gauge("pose", source="ECEF", display="NED", reference=(0, 0, 0, 1)),
+        ui.horizon_gauge("pose", source="ECEF", reference=(0, 0, 0, 1)),
+        ui.object_3d(
+            "pose",
+            ui.ellipsoid(
+                error_covariance="cov",
+                color=ui.color(0, 188, 212, 40),
+                show_grid=True,
+                grid_color=ui.color(255, 255, 255, 120),
+            ),
+            frame="ECEF",
+            frame_orientation="NED",
+            orientation="absolute",
+            icon=ui.icon(
+                builtin="rocket_launch",
+                color=ui.color(76, 175, 80),
+                visibility=visibility,
+            ),
+            thrusters=[
+                ui.thruster(
+                    "thrust",
+                    (-0.6, 0, 0),
+                    direction=(-1, 0, 0),
+                    body_frame=True,
+                    effect="effects/core.effect",
+                    extra_effects=["effects/flame.effect"],
+                    light=ui.thruster_light((1.0, 0.5, 0.1), 1_000_000.0),
+                )
+            ],
+            visibility=visibility,
+        ),
+        ui.window(rect=(0, 0, 50, 100)),
+        environment=ui.environment(
+            sun=ui.sun(direction=(0.2, -0.8, 0.4)),
+            ambient=0.05,
+            sky=ui.color(135, 206, 235),
+            atmosphere=ui.atmosphere(),
+            earth=ui.earth(),
         ),
     )
     assert ui.from_kdl(built.emit_kdl()) == built

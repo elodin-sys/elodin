@@ -1265,11 +1265,11 @@ impl LoadSchematicParams<'_, '_> {
                     })
                     .ok()?;
                 let graph_label = graph_label(graph);
-                let uses_sql = eql.frame_conversion_name().is_some();
+                let uses_query_plot = eql.requires_plot_evaluation();
 
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
-                if !uses_sql {
+                if !uses_query_plot {
                     let mut component_vec = eql.to_graph_components();
                     component_vec.sort();
                     for (j, (component, i)) in component_vec.iter().enumerate() {
@@ -1308,7 +1308,7 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.graph_type = graph.graph_type;
 
                 let mut entity_cmds = self.commands.spawn(bundle);
-                if uses_sql {
+                if uses_query_plot {
                     let series_colors: Vec<_> = graph
                         .colors
                         .iter()
@@ -2611,6 +2611,58 @@ mod tests {
                 .0,
             "clearing should disable telemetry mode"
         );
+    }
+
+    fn install_scalar_eql_component(app: &mut App) {
+        let component = std::sync::Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            impeller2::types::ComponentId::new("sample.value"),
+            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+                .expect("schema"),
+        ));
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            impeller2::types::Timestamp(0),
+            impeller2::types::Timestamp(1),
+        )));
+    }
+
+    #[test]
+    fn formula_graph_uses_query_plot_evaluation() {
+        let mut app = test_app();
+        install_scalar_eql_component(&mut app);
+        let schematic = Schematic::from_kdl(r#"graph "sample.value.sqrt()" name="Square root""#)
+            .expect("schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::query_plot::QueryPlotData>();
+        let plots: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(plots.len(), 1);
+        assert_eq!(plots[0].data.query, "sample.value.sqrt()");
+        let sql = crate::ui::sql_eql::eql_to_sql_with_time(
+            &app.world().resource::<EqlContext>().0,
+            &plots[0].data.query,
+        )
+        .expect("plot SQL");
+        assert!(sql.contains("sample_value.time"));
+        assert!(sql.contains("sqrt(sample_value.sample_value)"));
+    }
+
+    #[test]
+    fn invalid_formula_graph_is_not_loaded() {
+        let mut app = test_app();
+        install_scalar_eql_component(&mut app);
+        let schematic =
+            Schematic::from_kdl(r#"graph "sample.value.sqrt(1.0)" name="Invalid square root""#)
+                .expect("schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        assert_eq!(query.iter(app.world()).count(), 0);
     }
 
     #[test]
