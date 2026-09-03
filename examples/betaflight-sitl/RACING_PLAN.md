@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-01  
-**Current resume point:** Package A — Baseline safety net
+**Last verified against repository:** 2026-09-03
+**Current resume point:** Package D — Manual piloting, control seam, and ANGLE mode
 
 ## 1. Purpose and authority
 
@@ -166,8 +166,8 @@ A healthy current run prints:
 SUCCESS: SITL integration working! Drone took off!
 ```
 
-Before Package A, this message is only a manual observation: failure paths print
-warnings but do not reliably return a failing process status.
+Package A makes this message part of a real C0 result: unmet lockstep,
+motor-response, or takeoff criteria return a failing process status.
 
 ## 4. Final core outcome
 
@@ -543,6 +543,9 @@ by Package E rather than introducing an unrelated controller.
 - Every integration scenario must return a nonzero process status on failed
   acceptance criteria; grepping a warning from a successful process is not a
   test.
+- Headless `elodin run` executes a generated recipe once and propagates
+  simulation failures. Interactive `elodin editor` retains watch-and-reload
+  behavior so source errors can be corrected without closing the editor.
 
 The standard pure-test command, created by Package A and extended thereafter, is:
 
@@ -556,7 +559,7 @@ Each package is approximately one focused engineer-week. The estimate is a scope
 limit, not a promise. If acceptance cannot be reached without broadening scope,
 follow the change protocol rather than silently extending the package.
 
-### [ ] A — Baseline safety net
+### [x] A — Baseline safety net
 
 **Objective:** Make the current SITL boundary and scripted takeoff a trustworthy
 base for later work.
@@ -572,6 +575,8 @@ base for later work.
   native motor order, and motor spin/position consistency.
 - Convert the current headless takeoff result into a true pass/fail exit status.
 - Assert nonzero lockstep steps, motor response, and at least 0.1 m takeoff.
+- Ensure headless `elodin run` propagates simulation failure while preserving
+  the editor's interactive watch-and-reload behavior.
 - Repair the README's nonexistent `test_comms.py` instructions.
 - Ensure running with no race environment variables remains unchanged.
 
@@ -965,7 +970,7 @@ branch for later resumption.
 
 | Package | Status | Evidence / notes |
 |---|---|---|
-| A | Not started | This plan exists, but tests and real C0 pass/fail do not |
+| A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.836 m takeoff rise in 20 wall-clock seconds. Deliberate 100 m criterion returned 1. Shared headless propagation fix: `bd3aa4b9`. |
 | B | Not started | Platform camera API exists; no Betaflight integration |
 | C | Not started | No course or referee code |
 | D | Not started | RC remains hardcoded; no manual mode; AUX2 ANGLE not configured |
@@ -980,23 +985,36 @@ branch for later resumption.
 
 ### Resume point
 
-Implement **Package A — Baseline safety net**.
+Implement **Package D — Manual piloting, control seam, and ANGLE mode**.
 
-Before changing code:
+Packages B and C remain valid independent alternatives if camera or course work
+is prioritized first. Package D is the recommended continuation because A now
+provides its required protocol, convention, and C0 safety net.
+
+Package A verification from the repository root, with the Elodin Python
+environment active and the current release CLI on `PATH`:
 
 ```bash
-git status --short
-python3 examples/betaflight-sitl/config.py
+python3 -m pytest examples/betaflight-sitl/tests -q
+elodin run examples/betaflight-sitl/main.py
 ```
 
-Build and manually verify the baseline as described in Section 3.2. Then add the
-pure tests and make the C0 command fail correctly on unmet criteria. Do not add
-camera, course, or guidance scaffolding as part of A.
+The verified C0 result was:
+
+```text
+[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.836 status=PASS
+```
+
+The pure suite passed 24 tests in 0.05 seconds and C0 completed in 20 wall-clock
+seconds. Raising the takeoff criterion temporarily to 100 m emitted
+`status=FAIL` and returned process status 1; the required 0.1 m criterion was
+then restored.
 
 ## 13. Decision log
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fix (`bd3aa4b9`) makes headless execution one-shot without changing interactive editor recovery. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
 | 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |
 | 2026-09-01 | Add manual piloting through the same semantic-input-to-RC boundary before autonomy. | Separates vehicle controllability and Betaflight integration from guidance behavior; D provides gamepad/keyboard control and safe stale-input handling. |
