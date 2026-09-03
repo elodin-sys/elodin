@@ -160,6 +160,11 @@ test_steps = [
             ),
         ],
     ),
+    nix_step(
+        emoji=":gear:",
+        label="headless s10 lifecycle",
+        command="cargo build --release -p elodin && scripts/ci/test-headless-s10-exit.sh",
+    ),
     group(
         name=":racehorse: performance",
         steps=[

@@ -7,6 +7,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use stellarator::util::CancelToken;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecipeExecution {
+    Once,
+    Watch,
+}
+
+impl RecipeExecution {
+    fn from_watch(watch: bool) -> Self {
+        if watch { Self::Watch } else { Self::Once }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
@@ -124,12 +136,90 @@ async fn run_recipe_with_token_admitted_inner(
         tokio::signal::ctrl_c().await
     });
 
-    let res = if watch {
-        recipe
-            .watch(recipe_name, release, cancel_token, cgroup)
-            .await
-    } else {
-        recipe.run(recipe_name, release, cancel_token, cgroup).await
+    execute_recipe_with_token_in_cgroup(
+        recipe_name,
+        recipe,
+        RecipeExecution::from_watch(watch),
+        release,
+        cancel_token,
+        cgroup,
+    )
+    .await
+}
+
+/// Execute a recipe without adding admission control or signal handling.
+///
+/// This is the shared run-vs-watch dispatch used by normal headless/editor
+/// execution and by the admitted wrapper used for Monte Carlo runs.
+pub async fn execute_recipe_with_token_in_cgroup(
+    recipe_name: String,
+    recipe: Recipe,
+    execution: RecipeExecution,
+    release: bool,
+    cancel_token: CancelToken,
+    cgroup: Option<Arc<CgroupScope>>,
+) -> miette::Result<()> {
+    let result = match execution {
+        RecipeExecution::Watch => {
+            recipe
+                .watch(recipe_name, release, cancel_token, cgroup)
+                .await
+        }
+        RecipeExecution::Once => recipe.run(recipe_name, release, cancel_token, cgroup).await,
     };
-    Ok(res?)
+    Ok(result?)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use stellarator::util::CancelToken;
+
+    use super::{RecipeExecution, execute_recipe_with_token_in_cgroup};
+    use crate::{ProcessArgs, ProcessRecipe, Recipe, RestartPolicy};
+
+    #[test]
+    fn watch_flag_maps_to_shared_execution_mode() {
+        assert_eq!(RecipeExecution::from_watch(false), RecipeExecution::Once);
+        assert_eq!(RecipeExecution::from_watch(true), RecipeExecution::Watch);
+    }
+
+    #[tokio::test]
+    async fn one_shot_execution_propagates_process_failure() {
+        let recipe = Recipe::Process(ProcessRecipe {
+            cmd: "sh".to_string(),
+            process_args: ProcessArgs {
+                args: vec!["-c".to_string(), "exit 7".to_string()],
+                cwd: None,
+                env: HashMap::new(),
+                restart_policy: RestartPolicy::Never,
+                fail_on_error: true,
+                log_path: None,
+                silence: false,
+                depends_on: Vec::new(),
+                ready: None,
+                ready_timeout: None,
+                own_process_group: false,
+            },
+            no_watch: true,
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            execute_recipe_with_token_in_cgroup(
+                "test".to_string(),
+                recipe,
+                RecipeExecution::Once,
+                false,
+                CancelToken::new(),
+                None,
+            ),
+        )
+        .await
+        .expect("one-shot execution waited instead of returning the process error");
+
+        assert!(result.is_err());
+    }
 }
