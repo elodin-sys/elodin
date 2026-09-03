@@ -17,10 +17,7 @@ use bevy::{
 use egui::{self, Color32, Vec2};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{
-    CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch,
-    TimestampedMsgStream,
-};
+use impeller2_wkt::{CurrentTimestamp, ErrorResponse, GetMsgs, MsgBatch, TimestampedMsgStream};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -112,6 +109,10 @@ const MAX_CACHED_FRAMES: usize = 300;
 /// show the "No video at this time" overlay.  500 ms.
 const NO_DATA_THRESHOLD_US: i64 = 500_000;
 
+/// Live follow can sit on `LastUpdated` while the last camera AU is older
+/// (encode + IDR spacing). Keep showing that frame for one GOP.
+const LIVE_HOLD_THRESHOLD_US: i64 = 2_000_000;
+
 /// If the decoder's last position is within this many microseconds of
 /// `current_ts` (in either direction), suppress seek retries.  This is
 /// wider than `SEQUENTIAL_THRESHOLD_US` to prevent the seek loop where
@@ -124,7 +125,7 @@ const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
 /// at 30 fps.  Prevents unbounded memory growth during long live sessions.
 const MAX_RAW_FRAMES: usize = 50_000;
 
-/// If the live-tail `FixedRateMsgStream` has not delivered a frame for this
+/// If the live-tail `TimestampedMsgStream` has not delivered a frame for this
 /// many seconds, re-send the backfill and stream requests to recover from
 /// a dropped DB connection.
 const STREAM_RECOVERY_TIMEOUT_SECS: f32 = 30.0;
@@ -204,8 +205,8 @@ impl Default for StreamState {
 ///
 /// Two sources fill `raw_frames`:
 /// - A one-shot `GetMsgs` backfill (historical data already in the DB)
-/// - A continuous live tail (`FixedRateMsgStream` for H.264 video streams,
-///   `TimestampedMsgStream` for raw RGBA sensor views)
+/// - A continuous live tail (`TimestampedMsgStream`) so H.264 sensor cameras
+///   land on the same clock as gray8/rgba instead of the playback tick driver.
 ///
 /// Neither source ever touches the decoder directly.  The playback loop reads
 /// `CurrentTimestamp`, looks up the cache, and feeds controlled sequences to
@@ -230,7 +231,7 @@ pub struct VideoFrameCache {
     /// Generation counter for `SeekBatch` coalescing.
     seek_generation: u64,
     /// Wall-clock time of the last frame received from the live-tail
-    /// `FixedRateMsgStream`.  Used to detect DB disconnection and trigger
+    /// `TimestampedMsgStream`.  Used to detect DB disconnection and trigger
     /// recovery.  `None` until the first live frame arrives.
     last_stream_activity: Option<Instant>,
     /// Timestamp just past the last frame loaded by the paginated backfill.
@@ -350,6 +351,20 @@ impl VideoFrameCache {
             return true;
         }
         false
+    }
+
+    /// True when a tile should paint (or drop the "No video" overlay).
+    ///
+    /// Live follow uses `LastUpdated` as the playhead. Camera AUs can lag that
+    /// by more than [`NO_DATA_THRESHOLD_US`] without being missing.
+    pub fn has_video_at(&self, target: Timestamp) -> bool {
+        if self.has_raw_data_near(target, NO_DATA_THRESHOLD_US) {
+            return true;
+        }
+        self.raw_frames
+            .iter()
+            .next_back()
+            .is_some_and(|(t, _)| target.0 >= t.0 && target.0 - t.0 <= LIVE_HOLD_THRESHOLD_US)
     }
 
     /// Extract raw frames in `[from, to]` for decoding (cloned out of cache).
@@ -742,8 +757,8 @@ fn send_stream_request(
     commands: &mut Commands,
     entity: Entity,
     msg_id: [u8; 2],
-    stream_id: u64,
-    is_h264: bool,
+    _stream_id: u64,
+    _is_h264: bool,
 ) {
     let handler = move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
                         mut caches: Query<&mut VideoFrameCache>| {
@@ -757,20 +772,7 @@ fn send_stream_request(
         false
     };
 
-    if is_h264 {
-        commands.send_msg_req_reply_raw(
-            FixedRateMsgStream {
-                msg_id,
-                fixed_rate: FixedRateOp {
-                    stream_id,
-                    behavior: Default::default(),
-                },
-            },
-            handler,
-        );
-    } else {
-        commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
-    }
+    commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
 }
 
 /// Maximum payload size (in bytes) for a single backfill `GetMsgs` batch.
@@ -986,7 +988,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     }
 
                     if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
-                        && (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                        && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                            || (current_ts.0 >= ts.0
+                                && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
                     {
                         stream.current_frame = Some(img.clone());
                     } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
@@ -1008,7 +1012,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         false
                     };
 
-                    let has_raw = cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US);
+                    let has_raw = cache.has_video_at(current_ts);
 
                     if is_sequential && !cache.seeking {
                         if let Some((ts, data)) =
@@ -1114,7 +1118,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 
                 // "No video at this time" overlay when there is no raw data
                 // near the current playback position.
-                if !cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US) {
+                if !cache.has_video_at(current_ts) {
                     ui.painter()
                         .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                     ui.put(
@@ -1335,5 +1339,15 @@ mod tests {
         let gray = backfill_frame_limit(Some((640, 512, RawPixelFormat::Gray8)), false);
         let rgba = backfill_frame_limit(Some((640, 512, RawPixelFormat::Rgba8)), false);
         assert_eq!(gray, rgba * 4);
+    }
+
+    #[test]
+    fn live_hold_keeps_video_when_playhead_is_ahead() {
+        let mut cache = VideoFrameCache::default();
+        cache.insert_raw(Timestamp(1_000_000), vec![0, 0, 0, 1, 0x65]);
+        assert!(cache.has_video_at(Timestamp(1_000_000)));
+        assert!(cache.has_video_at(Timestamp(2_500_000)));
+        assert!(!cache.has_video_at(Timestamp(4_000_000)));
+        assert!(!cache.has_video_at(Timestamp(0)));
     }
 }
