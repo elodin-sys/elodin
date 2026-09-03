@@ -21,10 +21,10 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{EffectAsset, EffectMaterial, EffectProperties, ParticleEffect};
 
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
-use crate::plugins::thruster_particles::images_ready;
 use crate::plugins::scene_environment::{
     CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun, SpaceVisibility,
 };
+use crate::plugins::thruster_particles::images_ready;
 
 use earth_night_material::{EarthNightExt, EarthNightMaterial, EarthNightParams};
 
