@@ -324,11 +324,11 @@ impl HardwareEncoder {
         let pts = self.pts;
         self.yuv_frame.set_pts(Some(pts));
         self.yuv_frame.set_kind(ffmpeg_next::picture::Type::None);
-        self.pending.push_back((pts, timestamp));
-        self.pts += 1;
         self.encoder
             .send_frame(&self.yuv_frame)
             .map_err(|err| format!("ffmpeg send_frame: {err}"))?;
+        self.pending.push_back((pts, timestamp));
+        self.pts += 1;
         let packets = self.drain_packets();
         Ok(take_ready_frames(
             &mut self.pending,

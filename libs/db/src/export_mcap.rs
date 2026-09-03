@@ -2588,16 +2588,15 @@ pub fn run(
                 })
         })
         .collect();
-    let msg_entries: Vec<Vec<(Timestamp, Cow<'_, [u8]>)>> = export_msg_logs
-        .iter()
-        .map(|log| log.log.get_range(&full_range).collect())
-        .collect();
-
     let start_ts = component_cursors
         .iter()
         .flatten()
         .filter_map(|c| c.timestamps.first())
-        .chain(msg_entries.iter().filter_map(|m| m.first().map(|(t, _)| t)))
+        .chain(
+            export_msg_logs
+                .iter()
+                .filter_map(|log| log.log.timestamps().first()),
+        )
         .min()
         .copied()
         .unwrap_or(earliest);
@@ -2764,8 +2763,8 @@ pub fn run(
             }
         }
     }
-    for (i, entries) in msg_entries.iter().enumerate() {
-        if let Some((ts, _)) = entries.first() {
+    for (i, log) in export_msg_logs.iter().enumerate() {
+        if let Some(ts) = log.log.timestamps().first() {
             heap.push(Reverse((ts.0, 2 * n + i)));
         }
     }
@@ -2811,35 +2810,38 @@ pub fn run(
         } else if cursor_id < 2 * n + m {
             let idx = cursor_id - 2 * n;
             let log = &export_msg_logs[idx];
-            let raw_payload = msg_entries[idx][pos].1.as_ref();
-
-            let payload = {
-                #[cfg(feature = "video-export")]
-                {
-                    if let MsgLogKind::SensorCamera(cfg) = &log.kind {
-                        encode_sensor_frame(
-                            cfg,
-                            raw_payload,
-                            ts_ns,
-                            &log.name,
-                            &mut sensor_encoders,
-                            idx,
-                        )
-                    } else {
-                        msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
-                    }
+            match log.log.get_index(pos) {
+                Some((_, raw)) => {
+                    let raw_payload = raw.as_ref();
+                    let payload = {
+                        #[cfg(feature = "video-export")]
+                        {
+                            if let MsgLogKind::SensorCamera(cfg) = &log.kind {
+                                encode_sensor_frame(
+                                    cfg,
+                                    raw_payload,
+                                    ts_ns,
+                                    &log.name,
+                                    &mut sensor_encoders,
+                                    idx,
+                                )
+                            } else {
+                                msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
+                            }
+                        }
+                        #[cfg(not(feature = "video-export"))]
+                        {
+                            msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
+                        }
+                    };
+                    (
+                        msg_channels[idx],
+                        payload,
+                        log.log.timestamps().get(pos + 1).map(|t| t.0),
+                    )
                 }
-                #[cfg(not(feature = "video-export"))]
-                {
-                    msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
-                }
-            };
-
-            (
-                msg_channels[idx],
-                payload,
-                msg_entries[idx].get(pos + 1).map(|(t, _)| t.0),
-            )
+                None => (msg_channels[idx], Vec::new(), None),
+            }
         } else {
             // Dynamic arrow scene updates, one channel per arrow.
             let idx = cursor_id - 2 * n - m;
