@@ -1446,7 +1446,7 @@ fn image_copy_driver(
         let preferred = buffer_toggle.0[i];
         let buffer_count = image_copier.buffers.len();
         let Some(buf_idx) = claim_readback_slot(&image_copier.in_flight, preferred) else {
-            tracing::warn!(
+            tracing::debug!(
                 camera = %image_copier.camera_name,
                 "sensor readback ring full; dropping frame"
             );

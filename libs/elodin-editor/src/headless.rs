@@ -857,7 +857,7 @@ impl SensorH264Worker {
         match sender.try_send(SensorEncoderJob { timestamp, rgba }) {
             Ok(()) => true,
             Err(std::sync::mpsc::TrySendError::Full(_)) => {
-                tracing::warn!("sensor camera encoder queue full; dropping frame");
+                tracing::debug!("sensor camera encoder queue full; dropping frame");
                 true
             }
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
@@ -874,7 +874,7 @@ fn send_encoded_h264(camera_name: &str, msg_tx: &MsgPacketTx, frames: Vec<(Times
             LenPacket::msg_with_timestamp(msg_id(camera_name), timestamp, encoded.len());
         packet.extend_from_slice(&encoded);
         if msg_tx.0.try_send(Some(packet)).is_err() {
-            tracing::warn!(
+            tracing::debug!(
                 "render server: MsgPacketTx queue full; dropping frame for {camera_name}"
             );
         }
@@ -1186,7 +1186,7 @@ fn render_server_runner(mut app: App) -> AppExit {
         render_time += render_start.elapsed();
         rendered_frames += 1;
         if rendered_frames.is_multiple_of(120) {
-            tracing::info!(
+            tracing::debug!(
                 average_ms = render_time.as_secs_f64() * 1000.0 / rendered_frames as f64,
                 "sensor camera render cadence"
             );
@@ -1280,7 +1280,7 @@ fn push_frames_to_db(app: &App, frames: &[(String, Timestamp, Vec<u8>)]) {
         let mut pkt = LenPacket::msg_with_timestamp(id, *timestamp, bytes.len());
         pkt.extend_from_slice(bytes);
         if tx.0.try_send(Some(pkt)).is_err() {
-            tracing::warn!(
+            tracing::debug!(
                 "render server: MsgPacketTx queue full; dropping frame for {camera_name}"
             );
         }
