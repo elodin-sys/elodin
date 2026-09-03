@@ -71,7 +71,7 @@ vsplit {
 }
 
 // Rotate the 70 m Y-up GLB onto the simulation's body +X axis.
-object_3d orientation=absolute booster.world_pos {
+object_3d orientation=absolute booster.visual_pos {
     glb path="falcon9.glb" rotate="(0, 0, -90)" scale=0.9944
     icon builtin="rocket_launch" size=32 {
         color 70 130 240
@@ -102,8 +102,8 @@ object_3d orientation=absolute pad.world_pos {
 
 // Landing dust and ASDS visual at LZ-1.
 object_3d orientation=absolute lz1.world_pos {
-    // Y-up deck; Rx(-90) cancels y_up_to_schematic. translate matches BARGE_TRANSLATE_Y_M.
-    glb path="spacex_drone_barge.glb" rotate="(-90, 0, 0)" translate="(0, -48, 0)"
+    // Rx(-90) cancels the editor's Y-up lift for a +Y-up parent; barge floats above the coarse globe until the surface fix.
+    glb path="spacex_drone_barge.glb" rotate="(-90, 0, 0)"
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
 }
 

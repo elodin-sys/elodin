@@ -6,7 +6,7 @@ import math
 import jax.numpy as jnp
 import numpy as np
 import sensors as sn
-from constants import N_ENGINES, OMEGA_EARTH_RADPS
+from constants import GLB_ORIGIN_STATION_M, LOX_LOAD_KG, N_ENGINES, OMEGA_EARTH_RADPS, PAD_ALT_M, RP1_LOAD_KG
 from reference import build_reference, sanity_check
 from sim import (
     N_VALVES,
@@ -205,3 +205,23 @@ def test_mission_scoring_gates_on_liftoff():
     # (altitude_geodetic exists on both entities; index the ghost's row.)
     ghost_alt = float(get("altitude_geodetic", "booster_truth")[0])
     assert abs(ghost_alt - ref.altitude(0.5)) < 200.0
+
+
+def test_visual_pose_tracks_engine_plane():
+    import frames
+    import propulsion
+
+    up = frames.ellipsoid_up(math.radians(28.60839), math.radians(-80.60433))
+    cg = float(propulsion.stack_mass_props(LOX_LOAD_KG, RP1_LOAD_KG, 0.0)[1])
+    world, system = build_powered(
+        pad_ecef() + up * cg,
+        jnp.zeros(3),
+        init_attitude=upright_attitude(),
+        extra_systems=_script(_no_valves, _engines_off),
+    )
+    get = _run(world, system, 1)
+    vis = get("visual_pos")
+    _, _, vis_alt = frames.ecef_to_geodetic(vis[4:7])
+    assert abs(float(vis_alt) - (PAD_ALT_M + GLB_ORIGIN_STATION_M)) < 0.05
+    alt = float(get("altitude_geodetic")[0])
+    assert abs(alt - (PAD_ALT_M + cg)) < 0.05

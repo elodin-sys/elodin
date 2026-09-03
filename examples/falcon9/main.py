@@ -368,6 +368,7 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             "pos_err_m": float(np.hypot(miss_ned[0], miss_ned[1])),
             "miss_north_m": float(miss_ned[0]),
             "miss_east_m": float(miss_ned[1]),
+            "alt_m": float(reads["booster.altitude_geodetic"][0]),
         }
 
     # Let the run continue ~2 s past contact so the shutdown purge is visible.
@@ -416,6 +417,10 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             "descent_max_aoa_deg": float(max(descent[1], 0.0)),
             "landing_ignition_tilt_deg": float(max(descent[2], 0.0)),
             "vlat_at_100m_mps": float(max(descent[3], 0.0)),
+            "touchdown_alt_m": (touchdown_state or {}).get(
+                "alt_m", float(reads["booster.altitude_geodetic"][0])
+            ),
+            "rest_alt_m": float(reads["booster.altitude_geodetic"][0]),
         }
         # Phase entry times as scalar metrics (phase id -> seconds).
         for pid, ev in phase_events.items():

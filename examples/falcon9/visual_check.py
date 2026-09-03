@@ -16,8 +16,7 @@ import jax
 import jax.numpy as jnp
 
 from constants import (
-    BARGE_TRANSLATE_Y_M,
-    BOOSTER_DECK_UP_M,
+    GLB_ORIGIN_STATION_M,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
     LZ1_LON_DEG,
@@ -95,8 +94,8 @@ BoosterMarker = ty.Annotated[
 ]
 
 
-# Same deck as falcon9.kdl translate + the sim's landed pin.
-LAND_UP_M = BOOSTER_DECK_UP_M + BARGE_TRANSLATE_Y_M
+# Origin sits GLB_ORIGIN_STATION_M above the deck so the bells / tips touch.
+LAND_UP_M = GLB_ORIGIN_STATION_M
 
 
 def pad_ecef() -> jnp.ndarray:
