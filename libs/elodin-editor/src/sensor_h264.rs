@@ -221,6 +221,7 @@ struct HardwareEncoder {
     height: u32,
     pts: i64,
     pending: VecDeque<(i64, Timestamp)>,
+    held_headers: Vec<u8>,
 }
 
 impl HardwareEncoder {
@@ -297,6 +298,7 @@ impl HardwareEncoder {
             height,
             pts: 0,
             pending: VecDeque::new(),
+            held_headers: Vec::new(),
         })
     }
 
@@ -328,7 +330,11 @@ impl HardwareEncoder {
             .send_frame(&self.yuv_frame)
             .map_err(|err| format!("ffmpeg send_frame: {err}"))?;
         let packets = self.drain_packets();
-        Ok(take_ready_frames(&mut self.pending, packets))
+        Ok(take_ready_frames(
+            &mut self.pending,
+            &mut self.held_headers,
+            packets,
+        ))
     }
 
     fn flush(&mut self) -> Result<Vec<(Timestamp, Vec<u8>)>, String> {
@@ -336,7 +342,11 @@ impl HardwareEncoder {
             tracing::debug!("ffmpeg send_eof: {err}");
         }
         let packets = self.drain_packets();
-        Ok(take_ready_frames(&mut self.pending, packets))
+        Ok(take_ready_frames(
+            &mut self.pending,
+            &mut self.held_headers,
+            packets,
+        ))
     }
 
     fn drain_packets(&mut self) -> Vec<(Option<i64>, Vec<u8>)> {
@@ -352,8 +362,17 @@ impl HardwareEncoder {
     }
 }
 
+fn is_non_vcl_only(data: &[u8]) -> bool {
+    let nals = annex_b_nals(data);
+    !nals.is_empty()
+        && nals
+            .iter()
+            .all(|(_, _, nal_type)| !matches!(*nal_type, 1..=5))
+}
+
 fn take_ready_frames(
     pending: &mut VecDeque<(i64, Timestamp)>,
+    held_headers: &mut Vec<u8>,
     packets: Vec<(Option<i64>, Vec<u8>)>,
 ) -> Vec<(Timestamp, Vec<u8>)> {
     let mut out: Vec<(Timestamp, Vec<u8>)> = Vec::new();
@@ -362,6 +381,23 @@ fn take_ready_frames(
         if data.is_empty() {
             continue;
         }
+        if is_non_vcl_only(&data) {
+            if let (Some(p), Some(prev)) = (pts, last_pts)
+                && p == prev
+                && let Some(last) = out.last_mut()
+            {
+                last.1.extend_from_slice(&data);
+                continue;
+            }
+            held_headers.extend_from_slice(&data);
+            continue;
+        }
+        let data = if held_headers.is_empty() {
+            data
+        } else {
+            held_headers.extend_from_slice(&data);
+            std::mem::take(held_headers)
+        };
         if let (Some(p), Some(prev)) = (pts, last_pts)
             && p == prev
             && let Some(last) = out.last_mut()
@@ -512,17 +548,22 @@ mod tests {
             (1, Timestamp(200)),
             (2, Timestamp(300)),
         ]);
-        assert!(take_ready_frames(&mut pending, Vec::new()).is_empty());
+        let mut held = Vec::new();
+        assert!(take_ready_frames(&mut pending, &mut held, Vec::new()).is_empty());
         assert_eq!(pending.len(), 3);
 
-        let out = take_ready_frames(&mut pending, vec![(Some(0), vec![1]), (Some(1), vec![2])]);
+        let out = take_ready_frames(
+            &mut pending,
+            &mut held,
+            vec![(Some(0), vec![1]), (Some(1), vec![2])],
+        );
         assert_eq!(
             out,
             vec![(Timestamp(100), vec![1]), (Timestamp(200), vec![2])]
         );
         assert_eq!(pending.len(), 1);
 
-        let out = take_ready_frames(&mut pending, vec![(Some(2), vec![3])]);
+        let out = take_ready_frames(&mut pending, &mut held, vec![(Some(2), vec![3])]);
         assert_eq!(out, vec![(Timestamp(300), vec![3])]);
         assert!(pending.is_empty());
     }
@@ -530,8 +571,10 @@ mod tests {
     #[test]
     fn same_pts_packets_merge() {
         let mut pending = VecDeque::from([(0, Timestamp(10))]);
+        let mut held = Vec::new();
         let out = take_ready_frames(
             &mut pending,
+            &mut held,
             vec![(Some(0), vec![1, 2]), (Some(0), vec![3])],
         );
         assert_eq!(out, vec![(Timestamp(10), vec![1, 2, 3])]);
@@ -570,6 +613,45 @@ mod tests {
         assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
         assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
         assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 5));
+    }
+
+    #[test]
+    fn header_packet_does_not_steal_frame_timestamp() {
+        let sps_pps = vec![0, 0, 0, 1, 0x67, 0x42, 0, 0, 0, 1, 0x68, 0xce];
+        let idr = vec![0, 0, 0, 1, 0x65, 0x88];
+        let mut pending = VecDeque::from([(0, Timestamp(100))]);
+        let mut held = Vec::new();
+
+        let out = take_ready_frames(&mut pending, &mut held, vec![(None, sps_pps.clone())]);
+        assert!(out.is_empty());
+        assert_eq!(pending.len(), 1);
+        assert!(!held.is_empty());
+
+        let out = take_ready_frames(&mut pending, &mut held, vec![(Some(0), idr)]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0, Timestamp(100));
+        let nals = annex_b_nals(&out[0].1);
+        assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 7));
+        assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 8));
+        assert!(nals.iter().any(|(_, _, nal_type)| *nal_type == 5));
+        assert!(pending.is_empty());
+        assert!(held.is_empty());
+
+        let mut pending = VecDeque::from([(0, Timestamp(200))]);
+        let mut held = Vec::new();
+        let out = take_ready_frames(
+            &mut pending,
+            &mut held,
+            vec![(None, sps_pps), (Some(0), vec![0, 0, 0, 1, 0x65, 0x88])],
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0, Timestamp(200));
+        assert!(
+            annex_b_nals(&out[0].1)
+                .iter()
+                .any(|(_, _, nal_type)| *nal_type == 5)
+        );
+        assert!(pending.is_empty());
     }
 
     #[test]
