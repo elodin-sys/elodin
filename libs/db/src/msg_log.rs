@@ -288,15 +288,45 @@ impl BufLog {
 
     pub fn get_msg(&self, index: usize) -> Option<&[u8]> {
         let buf = self.bufs().get(index)?;
-        let data = match buf.len as usize {
-            len @ ..=12 => unsafe { &buf.data.inline[..len] },
+        match buf.len as usize {
+            len @ ..=12 => Some(unsafe { &buf.data.inline[..len] }),
             len => {
                 let segment_index = buf.segment_index()?;
                 let offset = buf.offset()? as usize;
-                self.segment(segment_index)?.log.get(offset..offset + len)?
+                let prefix = buf.prefix()?;
+                self.long_payload(segment_index, offset, len, prefix)
             }
-        };
-        Some(data)
+        }
+    }
+
+    fn long_payload(
+        &self,
+        segment_index: u32,
+        offset: usize,
+        len: usize,
+        prefix: [u8; 4],
+    ) -> Option<&[u8]> {
+        let matches_prefix = |data: &[u8]| data.get(..4) == Some(&prefix[..]);
+        if let Some(data) = self
+            .segment(segment_index)
+            .and_then(|segment| segment.log.get(offset..offset + len))
+            .filter(|data| matches_prefix(data))
+        {
+            return Some(data);
+        }
+        // Single-segment logs that stored the file offset in the middle word
+        // (legacy `_index` slot) instead of the last word.
+        if segment_index != 0 {
+            self.segment(0)
+                .and_then(|segment| {
+                    segment
+                        .log
+                        .get(segment_index as usize..segment_index as usize + len)
+                })
+                .filter(|data| matches_prefix(data))
+        } else {
+            None
+        }
     }
 
     pub fn insert_msg(&self, msg: &[u8]) -> Result<(), Error> {

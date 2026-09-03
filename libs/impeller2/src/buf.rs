@@ -239,6 +239,11 @@ impl UmbraBuf {
         self.long_offset().map(|o| o.segment_index)
     }
 
+    /// First four payload bytes copied into a long `UmbraBuf`.
+    pub fn prefix(&self) -> Option<[u8; 4]> {
+        self.long_offset().map(|o| o.prefix)
+    }
+
     fn long_offset(&self) -> Option<LongBufOffset> {
         if self.len <= 12 {
             return None;
@@ -271,6 +276,9 @@ pub struct LongBufOffset {
     /// A copy of the first 4 bytes of the data stored in the long buf
     pub prefix: [u8; 4],
     /// Which external buffer stores the payload.
+    ///
+    /// On-disk this was always the middle word (`_index`, 0 for single-segment
+    /// logs). Do not reorder these fields.
     pub segment_index: u32,
     /// The offset into the buffer that contains the data
     pub offset: u32,
@@ -288,5 +296,19 @@ mod tests {
         let inline = UmbraBuf::with_inline(4, [0; 12]);
         assert_eq!(inline.segment_index(), None);
         assert_eq!(inline.offset(), None);
+        assert_eq!(inline.prefix(), None);
+    }
+
+    #[test]
+    fn historical_single_segment_bytes_keep_offset_in_last_word() {
+        let mut raw = [0u8; 16];
+        raw[0..4].copy_from_slice(&20u32.to_le_bytes());
+        raw[4..8].copy_from_slice(&[1, 2, 3, 4]);
+        raw[8..12].copy_from_slice(&0u32.to_le_bytes());
+        raw[12..16].copy_from_slice(&99u32.to_le_bytes());
+        let buf = UmbraBuf::read_from_bytes(&raw).unwrap();
+        assert_eq!(buf.prefix(), Some([1, 2, 3, 4]));
+        assert_eq!(buf.segment_index(), Some(0));
+        assert_eq!(buf.offset(), Some(99));
     }
 }
