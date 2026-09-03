@@ -409,7 +409,7 @@ impl MessageService for MessageServiceImpl {
                 }
                 index += 1;
                 let payload = if is_log {
-                    match postcard::from_bytes::<LogEntry>(payload) {
+                    match postcard::from_bytes::<LogEntry>(&payload) {
                         Ok(log) => get_messages_response::Payload::Log(v1::LogPayload {
                             level: log.level as u32,
                             message: log.message,

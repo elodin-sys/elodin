@@ -1,7 +1,8 @@
 use std::{
+    borrow::Cow,
     fs::File,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 
 use impeller2::{buf::UmbraBuf, types::Timestamp};
@@ -79,13 +80,13 @@ impl MsgLog {
             .expect("mmep unaligned")
     }
 
-    pub fn get(&self, timestamp: Timestamp) -> Option<&[u8]> {
+    pub fn get(&self, timestamp: Timestamp) -> Option<Cow<'_, [u8]>> {
         let timestamps = self.timestamps();
         let i = timestamps.binary_search(&timestamp).ok()?;
         self.bufs.get_msg(i)
     }
 
-    pub fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, &[u8])> {
+    pub fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, Cow<'_, [u8]>)> {
         let timestamps = self.timestamps();
         let i = match timestamps.binary_search(&timestamp) {
             Ok(i) => i,
@@ -96,7 +97,7 @@ impl MsgLog {
         Some((*timestamp, buf))
     }
 
-    pub fn latest(&self) -> Option<(Timestamp, &[u8])> {
+    pub fn latest(&self) -> Option<(Timestamp, Cow<'_, [u8]>)> {
         let timestamps = self.timestamps();
         let i = timestamps.len().saturating_sub(1);
         let timestamp = timestamps.get(i)?;
@@ -104,7 +105,7 @@ impl MsgLog {
         Some((*timestamp, buf))
     }
 
-    pub fn get_index(&self, index: usize) -> Option<(Timestamp, &[u8])> {
+    pub fn get_index(&self, index: usize) -> Option<(Timestamp, Cow<'_, [u8]>)> {
         let timestamp = self.timestamps().get(index)?;
         let buf = self.bufs.get_msg(index)?;
         Some((*timestamp, buf))
@@ -113,7 +114,7 @@ impl MsgLog {
     pub fn get_range(
         &self,
         range: &std::ops::Range<Timestamp>,
-    ) -> impl Iterator<Item = (Timestamp, &[u8])> {
+    ) -> impl Iterator<Item = (Timestamp, Cow<'_, [u8]>)> {
         let timestamps = self.timestamps();
         let start_index = match timestamps.binary_search(&range.start) {
             Ok(i) => i,
@@ -151,8 +152,8 @@ impl MsgLog {
 
     /// Truncate the message log, clearing all messages while preserving metadata.
     ///
-    /// This resets all underlying append logs, effectively removing all stored
-    /// messages without deallocating the underlying files.
+    /// Extra `data_log.N` segments are dropped so the next write starts at
+    /// `data_log` again.
     pub fn truncate(&self) {
         self.timestamps.truncate();
         self.bufs.truncate();
@@ -181,14 +182,14 @@ struct BufLog {
 
 struct DataLogSegment {
     log: AppendLog<()>,
-    next: OnceLock<Arc<DataLogSegment>>,
+    next: Mutex<Option<Arc<DataLogSegment>>>,
 }
 
 impl DataLogSegment {
     fn new(log: AppendLog<()>) -> Self {
         Self {
             log,
-            next: OnceLock::new(),
+            next: Mutex::new(None),
         }
     }
 }
@@ -222,10 +223,7 @@ impl BufLog {
                 break;
             }
             let next = Arc::new(DataLogSegment::new(AppendLog::open(segment_path)?));
-            current
-                .next
-                .set(next.clone())
-                .map_err(|_| Error::BadMessage)?;
+            *current.next.lock().unwrap() = Some(next.clone());
             current = next;
             index = index.checked_add(1).ok_or(Error::MapOverflow)?;
         }
@@ -242,33 +240,36 @@ impl BufLog {
         <[UmbraBuf]>::ref_from_bytes(self.offsets.data()).expect("offsets buf invalid")
     }
 
-    fn segment(&self, index: u32) -> Option<&DataLogSegment> {
-        let mut segment = self.data_logs.as_ref();
+    /// Clone each link so a concurrent `truncate` cannot drop a segment
+    /// still being read. The mmap stays alive until this `Arc` is dropped.
+    fn segment(&self, index: u32) -> Option<Arc<DataLogSegment>> {
+        let mut segment = self.data_logs.clone();
         for _ in 0..index {
-            segment = segment.next.get()?.as_ref();
+            let next = segment.next.lock().unwrap().clone()?;
+            segment = next;
         }
         Some(segment)
     }
 
-    fn last_segment(&self) -> (u32, &DataLogSegment) {
+    fn last_segment(&self) -> (u32, Arc<DataLogSegment>) {
         let mut index = 0u32;
-        let mut segment = self.data_logs.as_ref();
-        while let Some(next) = segment.next.get() {
+        let mut segment = self.data_logs.clone();
+        loop {
+            let next = segment.next.lock().unwrap().clone();
+            let Some(next) = next else {
+                return (index, segment);
+            };
             index += 1;
             segment = next;
         }
-        (index, segment)
     }
 
     fn sync_all(&self) -> Result<(), Error> {
         self.offsets.sync_all()?;
-        let mut segment = self.data_logs.as_ref();
-        loop {
-            segment.log.sync_all()?;
-            let Some(next) = segment.next.get() else {
-                break;
-            };
-            segment = next;
+        let mut segment = Some(self.data_logs.clone());
+        while let Some(current) = segment {
+            current.log.sync_all()?;
+            segment = current.next.lock().unwrap().clone();
         }
         Ok(())
     }
@@ -276,25 +277,30 @@ impl BufLog {
     fn truncate(&self) {
         let _guard = self.write_lock.lock().unwrap();
         self.offsets.truncate();
-        let mut segment = self.data_logs.as_ref();
-        loop {
-            segment.log.truncate();
-            let Some(next) = segment.next.get() else {
-                break;
-            };
-            segment = next;
+        self.data_logs.log.truncate();
+        let mut current = self.data_logs.next.lock().unwrap().take();
+        let mut index = 1u32;
+        while let Some(segment) = current {
+            current = segment.next.lock().unwrap().take();
+            drop(segment);
+            let _ = std::fs::remove_file(data_log_path(&self.path, index));
+            index = index.saturating_add(1);
         }
     }
 
-    pub fn get_msg(&self, index: usize) -> Option<&[u8]> {
+    pub fn get_msg(&self, index: usize) -> Option<Cow<'_, [u8]>> {
         let buf = self.bufs().get(index)?;
         match buf.len as usize {
-            len @ ..=12 => Some(unsafe { &buf.data.inline[..len] }),
+            len @ ..=12 => {
+                let inline = unsafe { &buf.data.inline[..len] };
+                Some(Cow::Owned(inline.to_vec()))
+            }
             len => {
                 let segment_index = buf.segment_index()?;
                 let offset = buf.offset()? as usize;
                 let prefix = buf.prefix()?;
                 self.long_payload(segment_index, offset, len, prefix)
+                    .map(Cow::Owned)
             }
         }
     }
@@ -305,12 +311,17 @@ impl BufLog {
         offset: usize,
         len: usize,
         prefix: [u8; 4],
-    ) -> Option<&[u8]> {
-        let matches_prefix = |data: &[u8]| data.get(..4) == Some(&prefix[..]);
+    ) -> Option<Vec<u8>> {
+        let copy = |segment: &DataLogSegment, start: usize| {
+            segment
+                .log
+                .get(start..start + len)
+                .filter(|data| data.get(..4) == Some(&prefix[..]))
+                .map(|data| data.to_vec())
+        };
         if let Some(data) = self
             .segment(segment_index)
-            .and_then(|segment| segment.log.get(offset..offset + len))
-            .filter(|data| matches_prefix(data))
+            .and_then(|segment| copy(&segment, offset))
         {
             return Some(data);
         }
@@ -318,12 +329,7 @@ impl BufLog {
         // (legacy `_index` slot) instead of the last word.
         if segment_index != 0 {
             self.segment(0)
-                .and_then(|segment| {
-                    segment
-                        .log
-                        .get(segment_index as usize..segment_index as usize + len)
-                })
-                .filter(|data| matches_prefix(data))
+                .and_then(|segment| copy(&segment, segment_index as usize))
         } else {
             None
         }
@@ -339,12 +345,16 @@ impl BufLog {
             let (mut segment_index, mut segment) = self.last_segment();
             if segment.log.len() + msg.len() as u64 > self.segment_limit {
                 segment_index = segment_index.checked_add(1).ok_or(Error::MapOverflow)?;
-                let next = Arc::new(DataLogSegment::new(AppendLog::create(
-                    data_log_path(&self.path, segment_index),
-                    (),
-                )?));
-                segment.next.set(next).map_err(|_| Error::BadMessage)?;
-                segment = segment.next.get().ok_or(Error::BadMessage)?;
+                {
+                    let mut next = segment.next.lock().unwrap();
+                    if next.is_none() {
+                        *next = Some(Arc::new(DataLogSegment::new(AppendLog::create(
+                            data_log_path(&self.path, segment_index),
+                            (),
+                        )?)));
+                    }
+                }
+                segment = self.segment(segment_index).ok_or(Error::BadMessage)?;
             }
             let prefix = msg[..4].try_into().expect("trivial cast failed");
             let offset = u32::try_from(segment.log.write(msg)?).map_err(|_| Error::MapOverflow)?;
@@ -370,6 +380,7 @@ fn data_log_path(path: &Path, segment_index: u32) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     #[test]
@@ -385,13 +396,13 @@ mod tests {
         assert!(temp.path().join("data_log.1").exists());
         assert!(temp.path().join("data_log.2").exists());
         for (index, payload) in payloads.iter().enumerate() {
-            assert_eq!(log.get_index(index).unwrap().1, payload);
+            assert_eq!(log.get_index(index).unwrap().1.as_ref(), payload);
         }
 
         drop(log);
         let reopened = MsgLog::open(temp.path()).unwrap();
         for (index, payload) in payloads.iter().enumerate() {
-            assert_eq!(reopened.get_index(index).unwrap().1, payload);
+            assert_eq!(reopened.get_index(index).unwrap().1.as_ref(), payload);
         }
     }
 
@@ -401,10 +412,48 @@ mod tests {
         let log = MsgLog::create_with_segment_limit(temp.path(), 32).unwrap();
         log.push(Timestamp(1), &[1u8; 20]).unwrap();
         log.push(Timestamp(2), &[2u8; 20]).unwrap();
+        assert!(temp.path().join("data_log.1").exists());
 
         log.truncate();
         assert!(log.timestamps().is_empty());
+        assert!(!temp.path().join("data_log.1").exists());
         log.push(Timestamp(3), &[3u8; 20]).unwrap();
-        assert_eq!(log.get_index(0).unwrap(), (Timestamp(3), &[3u8; 20][..]));
+        assert_eq!(log.get_index(0).unwrap().0, Timestamp(3));
+        assert_eq!(log.get_index(0).unwrap().1.as_ref(), &[3u8; 20]);
+        assert!(!temp.path().join("data_log.1").exists());
+
+        drop(log);
+        let reopened = MsgLog::open(temp.path()).unwrap();
+        assert_eq!(reopened.get_index(0).unwrap().0, Timestamp(3));
+        assert_eq!(reopened.get_index(0).unwrap().1.as_ref(), &[3u8; 20]);
+        assert!(!temp.path().join("data_log.1").exists());
+    }
+
+    #[test]
+    fn get_survives_concurrent_truncate() {
+        let temp = TempDir::new().unwrap();
+        let log = MsgLog::create_with_segment_limit(temp.path(), 32).unwrap();
+        for index in 0..8 {
+            log.push(Timestamp(index), &[index as u8; 20]).unwrap();
+        }
+        assert!(temp.path().join("data_log.1").exists());
+
+        let log = Arc::new(log);
+        let reader = {
+            let log = log.clone();
+            std::thread::spawn(move || {
+                for _ in 0..8_000 {
+                    let _ = log.get_index(0);
+                    let _ = log.get_index(7);
+                    let _ = log.latest();
+                    let _ = log.get_range(&(Timestamp(0)..Timestamp(100))).count();
+                }
+            })
+        };
+        std::thread::yield_now();
+        log.truncate();
+        reader.join().unwrap();
+        assert!(log.timestamps().is_empty());
+        assert!(!temp.path().join("data_log.1").exists());
     }
 }

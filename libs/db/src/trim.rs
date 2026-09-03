@@ -530,7 +530,7 @@ fn trim_msg_log(
     let dst_log = MsgLog::create(dst_dir)?;
     for index in start_idx..end_idx {
         let (ts, payload) = src_log.get_index(index).ok_or(Error::BadMessage)?;
-        dst_log.push(ts, payload)?;
+        dst_log.push(ts, &payload)?;
     }
     dst_log.sync_all()?;
     Ok((min_kept, max_kept))
@@ -1095,8 +1095,8 @@ mod tests {
             trimmed.timestamps(),
             &[Timestamp(2_000_000), Timestamp(3_000_000)]
         );
-        assert_eq!(trimmed.get_index(0).unwrap().1, &[2u8; 20]);
-        assert_eq!(trimmed.get_index(1).unwrap().1, &[3u8; 20]);
+        assert_eq!(trimmed.get_index(0).unwrap().1.as_ref(), &[2u8; 20]);
+        assert_eq!(trimmed.get_index(1).unwrap().1.as_ref(), &[3u8; 20]);
     }
 
     #[test]

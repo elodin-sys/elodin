@@ -2835,7 +2835,7 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
             continue;
         };
         pkt.clear();
-        pkt.extend_from_slice(msg);
+        pkt.extend_from_slice(&msg);
         pkt = send_with_timeout(&tx, pkt).await?;
     }
 }
@@ -2856,7 +2856,7 @@ pub async fn handle_timestamped_msg_stream<A: AsyncWrite>(
         };
         pkt.clear();
         pkt.extend_from_slice(timestamp.as_bytes());
-        pkt.extend_from_slice(msg);
+        pkt.extend_from_slice(&msg);
         pkt = send_with_timeout(&tx, pkt).await?;
     }
 }
@@ -2904,7 +2904,7 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite + Send + Sync>(
         {
             pkt.clear();
             pkt.extend_from_slice(msg_timestamp.as_bytes());
-            pkt.extend_from_slice(msg);
+            pkt.extend_from_slice(&msg);
             pkt = send_with_timeout(&tx, pkt).await?;
         }
         last_sent_timestamp = Some(msg_timestamp);

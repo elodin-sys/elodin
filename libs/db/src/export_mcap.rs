@@ -457,7 +457,7 @@ fn classify_msg_log(
         return MsgLogKind::LogEntries;
     }
     let first_payload = log.timestamps().first().and_then(|ts| log.get(*ts));
-    if video_names.contains(name) || first_payload.is_some_and(is_annex_b) {
+    if video_names.contains(name) || first_payload.as_deref().is_some_and(is_annex_b) {
         return MsgLogKind::H264Video;
     }
     MsgLogKind::Raw
@@ -2588,7 +2588,7 @@ pub fn run(
                 })
         })
         .collect();
-    let msg_entries: Vec<Vec<(Timestamp, &[u8])>> = export_msg_logs
+    let msg_entries: Vec<Vec<(Timestamp, Cow<'_, [u8]>)>> = export_msg_logs
         .iter()
         .map(|log| log.log.get_range(&full_range).collect())
         .collect();
@@ -2811,7 +2811,7 @@ pub fn run(
         } else if cursor_id < 2 * n + m {
             let idx = cursor_id - 2 * n;
             let log = &export_msg_logs[idx];
-            let (_, raw_payload) = msg_entries[idx][pos];
+            let raw_payload = msg_entries[idx][pos].1.as_ref();
 
             let payload = {
                 #[cfg(feature = "video-export")]

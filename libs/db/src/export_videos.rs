@@ -197,12 +197,12 @@ fn export_one_h264(
         return Ok(false);
     }
 
-    let mut sps_bytes: Option<&[u8]> = None;
+    let mut sps_bytes: Option<Vec<u8>> = None;
     for &ts in timestamps {
         if let Some(payload) = msg_log.get(ts)
-            && let Some(sps) = find_sps_nal(payload)
+            && let Some(sps) = find_sps_nal(&payload)
         {
-            sps_bytes = Some(sps);
+            sps_bytes = Some(sps.to_vec());
             break;
         }
     }
@@ -249,7 +249,7 @@ fn export_one_h264(
             Some(p) => p,
             None => continue,
         };
-        let keyframe = is_h264_keyframe(payload);
+        let keyframe = is_h264_keyframe(&payload);
         if start_ts.is_none() {
             if !keyframe {
                 continue;
@@ -258,7 +258,7 @@ fn export_one_h264(
         }
         let first_ts = start_ts.expect("start_ts set");
         let pts_secs = (ts.0 - first_ts.0) as f64 / 1_000_000.0;
-        if let Err(e) = muxer.write_video(pts_secs, payload, keyframe) {
+        if let Err(e) = muxer.write_video(pts_secs, &payload, keyframe) {
             drop(muxer);
             remove_partial(&mp4_path);
             return Err(invalid_data(format!("muxide write_video: {}", e)));
@@ -334,9 +334,9 @@ fn export_one_sensor(
             continue;
         };
         let yuv = match if cfg.format == "gray8" {
-            gray8_to_i420(payload, width as usize, height as usize)
+            gray8_to_i420(&payload, width as usize, height as usize)
         } else {
-            rgba_to_i420(payload, width as usize, height as usize)
+            rgba_to_i420(&payload, width as usize, height as usize)
         } {
             Ok(yuv) => yuv,
             Err(e) => {
