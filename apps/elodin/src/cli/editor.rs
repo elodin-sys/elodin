@@ -159,6 +159,7 @@ impl Cli {
         args: &Args,
         rt: Runtime,
         cancel_token: CancelToken,
+        execution: elodin_editor::run::RecipeExecution,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
         let sim_addr = args.addr;
@@ -186,12 +187,14 @@ impl Cli {
                 match &sim {
                     Simulator::File(path) => {
                         let mut res = None;
-                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe_at(
-                            cache_dir,
-                            path.clone(),
-                            cancel_token.clone(),
-                            sim_addr,
-                        ));
+                        let mut recipe_fut =
+                            Box::pin(elodin_editor::run::run_recipe_at_with_execution(
+                                cache_dir,
+                                path.clone(),
+                                cancel_token.clone(),
+                                sim_addr,
+                                execution,
+                            ));
                         tokio::select! {
                             r = &mut recipe_fut => res = Some(r),
                             _ = cancel_on_ctrl_c => {
@@ -222,6 +225,7 @@ impl Cli {
         _args: &Args,
         rt: Runtime,
         cancel_token: CancelToken,
+        _execution: elodin_editor::run::RecipeExecution,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         Ok(std::thread::spawn(move || {
             rt.block_on(async move {
@@ -245,7 +249,12 @@ impl Cli {
             )?),
             _ => None,
         };
-        let thread = self.run_sim(&args, rt, cancel_token.clone())?;
+        let thread = self.run_sim(
+            &args,
+            rt,
+            cancel_token.clone(),
+            elodin_editor::run::RecipeExecution::Watch,
+        )?;
         let mut app = self.editor_app()?;
         match args.sim {
             Simulator::None => {
@@ -298,7 +307,12 @@ impl Cli {
             )?),
             _ => None,
         };
-        let thread = self.run_sim(&args, rt, cancel_token.clone())?;
+        let thread = self.run_sim(
+            &args,
+            rt,
+            cancel_token.clone(),
+            elodin_editor::run::RecipeExecution::Once,
+        )?;
         let result = thread
             .join()
             .map_err(|_| miette!("simulation thread panicked"))
