@@ -32,8 +32,37 @@ if [[ ! -x "${server_bin}" ]]; then
   exit 1
 fi
 
-db_port=$((30000 + $$ % 10000))
-grpc_port=$((db_port + 2))
+port_listening() {
+  python3 - "$1" <<'PY'
+import socket
+import sys
+
+with socket.socket() as sock:
+    sock.settimeout(0.1)
+    sys.exit(sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) != 0)
+PY
+}
+
+pick_ports() {
+  local base attempts
+  base=$((20000 + $$ % 10000))
+  (( base > 29997 )) && base=20000
+  for attempts in $(seq 1 64); do
+    if ! port_listening "${base}" && ! port_listening "$((base + 1))" && ! port_listening "$((base + 2))"; then
+      db_port="${base}"
+      grpc_port="$((base + 2))"
+      return 0
+    fi
+    base=$((base + 3))
+    if (( base > 29997 )); then
+      base=20000
+    fi
+  done
+  printf 'no free elodin-db port triple in 20000-29999\n' >&2
+  exit 1
+}
+
+pick_ports
 db_dir="${work}/db"
 (
   trap - INT
@@ -43,15 +72,7 @@ server_pid=$!
 
 ready=0
 for _ in $(seq 1 100); do
-  if python3 - "${grpc_port}" <<'PY'
-import socket
-import sys
-
-with socket.socket() as sock:
-    sock.settimeout(0.1)
-    sys.exit(sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) != 0)
-PY
-  then
+  if port_listening "${grpc_port}"; then
     ready=1
     break
   fi

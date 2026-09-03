@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{LoadState, RenderAssetUsages};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::math::{DQuat, DVec3, Quat, Vec4};
 use bevy::prelude::*;
@@ -37,7 +37,7 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{
     AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectProperties,
     EffectSimulation, EffectSimulationTime, EffectSpawner, Gradient, HanabiPlugin, Module,
-    ParticleEffect, SimulationSpace, SpawnerSettings,
+    ParticleEffect, SimulationSpace, SlotDimension, SpawnerSettings,
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
@@ -120,6 +120,20 @@ impl FileEffectAssets {
         self.handles.insert(path, handle.clone());
         handle
     }
+}
+
+/// Server-loaded images must be `Loaded` before `EffectMaterial` is inserted.
+/// `Assets::add` handles have no load state (`None`) and are ready immediately.
+pub(crate) fn images_ready(images: &[Handle<Image>], server: &AssetServer) -> bool {
+    images
+        .iter()
+        .all(|h| server.get_load_state(h.id()).is_none_or(|s| s.is_loaded()))
+}
+
+fn images_failed(images: &[Handle<Image>], server: &AssetServer) -> bool {
+    images
+        .iter()
+        .any(|h| matches!(server.get_load_state(h.id()), Some(LoadState::Failed(_))))
 }
 
 /// Retained sprite handles (`smoke` / fallback). Seek despawns jets; this map
@@ -426,8 +440,7 @@ fn build_dps_exhaust() -> EffectAsset {
     size_over_life.add_key(0.75, Vec3::new(1.18, 0.52, 0.52));
     size_over_life.add_key(1.0, Vec3::new(0.42, 0.2, 0.2));
 
-    let mask_slot = module.lit(0u32);
-    module.add_texture_slot("mask");
+    module.add_texture_slot("mask", SlotDimension::D2);
 
     EffectAsset::new(16384, SpawnerSettings::rate(220.0.into()), module)
         .with_name("dps_exhaust")
@@ -441,7 +454,7 @@ fn build_dps_exhaust() -> EffectAsset {
         .render(OrientModifier::new(OrientMode::AlongVelocity))
         // Soft round mask so the quads are not visible flat squares up close.
         .render(ParticleTextureModifier {
-            texture_slot: mask_slot,
+            texture_slot: 0,
             sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
         })
         .render(SizeOverLifetimeModifier {
@@ -499,8 +512,7 @@ fn build_rcs_jet() -> EffectAsset {
     size_over_life.add_key(0.75, Vec3::splat(0.17));
     size_over_life.add_key(1.0, Vec3::splat(0.07));
 
-    let mask_slot = module.lit(0u32);
-    module.add_texture_slot("mask");
+    module.add_texture_slot("mask", SlotDimension::D2);
 
     EffectAsset::new(16384, SpawnerSettings::rate(1100.0.into()), module)
         .with_name("rcs_jet")
@@ -515,7 +527,7 @@ fn build_rcs_jet() -> EffectAsset {
         .render(OrientModifier::new(OrientMode::FaceCameraPosition))
         // Soft round mask so the quads are not visible flat squares up close.
         .render(ParticleTextureModifier {
-            texture_slot: mask_slot,
+            texture_slot: 0,
             sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
         })
         .render(SizeOverLifetimeModifier {
@@ -871,6 +883,17 @@ fn bind_file_effect_assets(
                 )
             })
             .collect();
+        if images_failed(&images, &asset_server) {
+            warn!(
+                "hanabi effect textures failed to load; skipping bind for {}",
+                handle.path().map(|p| p.to_string()).unwrap_or_default()
+            );
+            jet.pending_effect = None;
+            continue;
+        }
+        if !images_ready(&images, &asset_server) {
+            continue;
+        }
         jet.has_intensity_property = asset
             .properties()
             .iter()

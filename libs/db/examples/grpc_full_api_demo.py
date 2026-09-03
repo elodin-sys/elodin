@@ -26,6 +26,12 @@ from elodin.db.v1 import (
 from grpc_health.v1 import health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection_pb2, reflection_pb2_grpc
 
+LIVE_BUDGET_S = 90.0
+
+
+def live_timeout(deadline):
+    return max(1.0, deadline - time.monotonic())
+
 
 def requests_from(items):
     while True:
@@ -486,7 +492,7 @@ def exercise_recorded_playback(channel, call_metadata, camera_messages):
     return second_frame_ns - first_frame_ns
 
 
-def collect_live_component(stub, call_metadata, component, immediate):
+def collect_live_component(stub, call_metadata, component, immediate, timeout):
     responses = stub.StreamComponents(
         iter(
             [
@@ -499,7 +505,7 @@ def collect_live_component(stub, call_metadata, component, immediate):
             ]
         ),
         metadata=call_metadata,
-        timeout=8,
+        timeout=timeout,
     )
     timestamps = []
     for response in responses:
@@ -514,8 +520,7 @@ def collect_live_component(stub, call_metadata, component, immediate):
     raise RuntimeError(f"live {component} stream ended before three updates")
 
 
-def collect_live_camera(stub, call_metadata):
-    deadline = time.monotonic() + 6
+def collect_live_camera(stub, call_metadata, deadline):
     while time.monotonic() < deadline:
         responses = stub.StreamMessages(
             iter(
@@ -529,7 +534,7 @@ def collect_live_camera(stub, call_metadata):
                 ]
             ),
             metadata=call_metadata,
-            timeout=8,
+            timeout=live_timeout(deadline),
         )
         try:
             timestamps = []
@@ -548,7 +553,7 @@ def collect_live_camera(stub, call_metadata):
 
 def exercise_live(channel, call_metadata):
     query = query_pb2_grpc.QueryServiceStub(channel)
-    deadline = time.monotonic() + 6
+    deadline = time.monotonic() + LIVE_BUDGET_S
     while time.monotonic() < deadline:
         schema = query.DumpSchema(query_pb2.DumpSchemaRequest(), metadata=call_metadata)
         names = {component.name for component in schema.components}
@@ -559,10 +564,18 @@ def exercise_live(channel, call_metadata):
         raise RuntimeError("live RC-jet schema did not become available")
 
     stream = stream_pb2_grpc.StreamServiceStub(channel)
-    batched = collect_live_component(stream, call_metadata, "bdx.world_pos", False)
-    immediate = collect_live_component(stream, call_metadata, "bdx.mach", True)
-    frames = collect_live_camera(stream, call_metadata)
-    events = stream.WatchDb(stream_pb2.WatchDbRequest(), metadata=call_metadata, timeout=8)
+    batched = collect_live_component(
+        stream, call_metadata, "bdx.world_pos", False, live_timeout(deadline)
+    )
+    immediate = collect_live_component(
+        stream, call_metadata, "bdx.mach", True, live_timeout(deadline)
+    )
+    frames = collect_live_camera(stream, call_metadata, deadline)
+    events = stream.WatchDb(
+        stream_pb2.WatchDbRequest(),
+        metadata=call_metadata,
+        timeout=live_timeout(deadline),
+    )
     last_updated = []
     for event in events:
         if event.WhichOneof("event") != "last_updated_ns":

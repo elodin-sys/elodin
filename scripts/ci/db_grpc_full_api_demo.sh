@@ -34,8 +34,38 @@ trap cleanup EXIT
 
 cd "${root}"
 python3 -c 'import elodin, grpc, grpc_tools, pyarrow'
-db_port=$((30000 + $$ % 10000))
-grpc_port=$((db_port + 2))
+
+port_listening() {
+  python3 - "$1" <<'PY'
+import socket
+import sys
+
+with socket.socket() as sock:
+    sock.settimeout(0.1)
+    sys.exit(sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) != 0)
+PY
+}
+
+pick_ports() {
+  local base attempts
+  base=$((20000 + $$ % 10000))
+  (( base > 29997 )) && base=20000
+  for attempts in $(seq 1 64); do
+    if ! port_listening "${base}" && ! port_listening "$((base + 1))" && ! port_listening "$((base + 2))"; then
+      db_port="${base}"
+      grpc_port="$((base + 2))"
+      return 0
+    fi
+    base=$((base + 3))
+    if (( base > 29997 )); then
+      base=20000
+    fi
+  done
+  printf 'no free elodin-db port triple in 20000-29999\n' >&2
+  exit 1
+}
+
+pick_ports
 
 generated="${work}/python"
 mkdir -p "${generated}"
@@ -55,51 +85,66 @@ touch "${generated}/elodin/db/v1/__init__.py"
 
 wait_for_port() {
   local port="$1"
-  for _ in $(seq 1 100); do
-    if python3 - "${port}" <<'PY'
-import socket
-import sys
-
-with socket.socket() as sock:
-    sock.settimeout(0.1)
-    sys.exit(sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) != 0)
-PY
-    then
+  local pid="${2:-}"
+  local deadline=$((SECONDS + 120))
+  while (( SECONDS < deadline )); do
+    if port_listening "${port}"; then
       return 0
+    fi
+    if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then
+      return 1
     fi
     sleep 0.1
   done
   return 1
 }
 
-if [[ -n "${ELODIN_GRPC_DEMO_DB:-}" ]]; then
-  cp -a "${ELODIN_GRPC_DEMO_DB}" "${work}/db"
-else
+start_sim() {
+  local ticks="$1"
   sim_log="${work}/rc-jet.log"
   touch "${sim_log}"
-  controller_bin="${ELODIN_RC_JET_CONTROLLER_BIN:-}"
-  if [[ -z "${controller_bin}" ]] && command -v cargo >/dev/null; then
-    cargo build --release -p rc-jet-controller
-    controller_bin="${root}/target/release/rc-jet-controller"
-  fi
   setsid env \
     ELODIN_DB_PATH="${work}/db" \
-    ELODIN_MAX_TICKS="${ELODIN_GRPC_DEMO_TICKS:-3000}" \
+    ELODIN_MAX_TICKS="${ticks}" \
     ELODIN_NON_INTERACTIVE=1 \
     ELODIN_RC_JET_CONTROLLER_HOST="127.0.0.1:${db_port}" \
     ELODIN_RC_JET_CONTROLLER_BIN="${controller_bin}" \
     elodin run examples/rc-jet/main.py --addr "127.0.0.1:${db_port}" \
     >"${sim_log}" 2>&1 &
   sim_pid=$!
-  if ! wait_for_port "${grpc_port}"; then
-    rg -n '^' "${sim_log}" >&2 || true
-    printf 'embedded RC-jet gRPC server did not become ready\n' >&2
-    exit 1
+}
+
+stop_sim() {
+  if [[ -z "${sim_pid}" ]]; then
+    return
   fi
-  PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
-    --live --target "127.0.0.1:${grpc_port}"
-  complete=0
-  for _ in $(seq 1 720); do
+  if kill -0 "${sim_pid}" 2>/dev/null; then
+    kill -INT -- "-${sim_pid}" 2>/dev/null || true
+    local deadline=$((SECONDS + 20))
+    while (( SECONDS < deadline )) && kill -0 "${sim_pid}" 2>/dev/null; do
+      sleep 0.1
+    done
+    if kill -0 "${sim_pid}" 2>/dev/null; then
+      kill -KILL -- "-${sim_pid}" 2>/dev/null || true
+    fi
+  fi
+  wait "${sim_pid}" 2>/dev/null || true
+  sim_pid=""
+}
+
+wait_for_sim_ready() {
+  if wait_for_port "${grpc_port}" "${sim_pid}"; then
+    return 0
+  fi
+  rg -n '^' "${sim_log}" >&2 || true
+  printf 'embedded RC-jet gRPC server did not become ready\n' >&2
+  exit 1
+}
+
+wait_for_sim_summary() {
+  local complete=0
+  local deadline=$((SECONDS + 120))
+  while (( SECONDS < deadline )); do
     if rg -q 'elodin simulation summary' "${sim_log}"; then
       complete=1
       break
@@ -114,6 +159,14 @@ else
     printf 'RC-jet simulation did not complete\n' >&2
     exit 1
   fi
+}
+
+assert_sim_log() {
+  if ! rg -q 'elodin simulation summary' "${sim_log}"; then
+    rg -n '^' "${sim_log}" >&2 || true
+    printf 'RC-jet simulation did not complete\n' >&2
+    exit 1
+  fi
   if ! rg -q 'controller.*Connected to' "${sim_log}"; then
     rg -n '^' "${sim_log}" >&2 || true
     printf 'RC controller did not connect\n' >&2
@@ -124,17 +177,38 @@ else
     printf 'headless renderer did not initialize the sensor camera\n' >&2
     exit 1
   fi
-  sleep 1
-  kill -TERM -- "-${sim_pid}" 2>/dev/null || true
-  for _ in $(seq 1 40); do
-    kill -0 "${sim_pid}" 2>/dev/null || break
-    sleep 0.1
-  done
-  if kill -0 "${sim_pid}" 2>/dev/null; then
-    kill -KILL -- "-${sim_pid}" 2>/dev/null || true
+}
+
+run_recorded_demo() {
+  PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
+    --target "127.0.0.1:${grpc_port}"
+}
+
+run_sim_fixed() {
+  local ticks="$1"
+  rm -rf "${work}/db"
+  : > "${sim_log}"
+  start_sim "${ticks}"
+  wait_for_sim_ready
+  wait_for_sim_summary
+  stop_sim
+  assert_sim_log
+}
+
+if [[ -n "${ELODIN_GRPC_DEMO_DB:-}" ]]; then
+  cp -a "${ELODIN_GRPC_DEMO_DB}" "${work}/db"
+else
+  controller_bin="${ELODIN_RC_JET_CONTROLLER_BIN:-}"
+  if [[ -z "${controller_bin}" ]] && command -v cargo >/dev/null; then
+    cargo build --release -p rc-jet-controller
+    controller_bin="${root}/target/release/rc-jet-controller"
   fi
-  wait "${sim_pid}" 2>/dev/null || true
-  sim_pid=""
+  start_sim "${ELODIN_GRPC_DEMO_TICKS:-36000}"
+  wait_for_sim_ready
+  PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
+    --live --target "127.0.0.1:${grpc_port}"
+  stop_sim
+  assert_sim_log
 fi
 
 if [[ -n "${ELODIN_DB_BIN:-}" ]]; then
@@ -165,7 +239,7 @@ start_server() {
       "${auth[@]}"
   ) >"${work}/server.log" 2>&1 &
   server_pid=$!
-  wait_for_port "${grpc_port}" && return
+  wait_for_port "${grpc_port}" "${server_pid}" && return
   rg -n '^' "${work}/server.log" >&2 || true
   printf 'elodin-db did not become ready\n' >&2
   exit 1
@@ -184,8 +258,17 @@ stop_server() {
 }
 
 start_server
-PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
-  --target "127.0.0.1:${grpc_port}"
+if ! run_recorded_demo; then
+  stop_server
+  if [[ -n "${ELODIN_GRPC_DEMO_DB:-}" ]]; then
+    printf 'recorded gRPC demo failed against the provided DB\n' >&2
+    exit 1
+  fi
+  printf 'recorded DB incomplete after SIGINT; falling back to a 45s run\n' >&2
+  run_sim_fixed 13500
+  start_server
+  run_recorded_demo
+fi
 stop_server
 
 start_server "demo-token"

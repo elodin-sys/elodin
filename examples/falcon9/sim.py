@@ -36,6 +36,7 @@ from constants import (
     LEG_STIFFNESS_NPM,
     LEG_STROKE_M,
     LOX_LOAD_KG,
+    GLB_ORIGIN_STATION_M,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
     LZ1_LON_DEG,
@@ -164,6 +165,14 @@ InletPressureRp1 = ty.Annotated[
 CgStation = ty.Annotated[
     jax.Array,
     el.Component("cg_station", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+VisualPos = ty.Annotated[
+    el.SpatialTransform,
+    el.Component(
+        "visual_pos",
+        el.ComponentType.SpatialPosF64,
+        metadata={"element_names": "q0,q1,q2,q3,x,y,z"},
+    ),
 ]
 AxialSpecificForce = ty.Annotated[
     jax.Array,
@@ -773,7 +782,7 @@ def leg_contact_wrench(
         offset_world = q @ offset_body
         pad_r = r + offset_world
         _, _, pad_alt = ecef_to_geodetic(pad_r)
-        depth = jnp.clip(-pad_alt, 0.0, LEG_STROKE_M)
+        depth = jnp.clip(LZ1_ALT_M - pad_alt, 0.0, LEG_STROKE_M)
         v_pad = v + jnp.cross(q @ omega_body, offset_world)
         v_n = jnp.dot(v_pad, up)
         # Compression-only damper (no stick-to-ground suction).
@@ -829,12 +838,12 @@ def ground_contact(
         return ecef_to_geodetic(pad_r)[2]
 
     pad_alts = jax.vmap(pad_alt)(pads)
-    n_contact = jnp.sum(pad_alts <= 0.0)
+    n_contact = jnp.sum(pad_alts <= LZ1_ALT_M)
     near_lz = jnp.linalg.norm(r - lz1_ecef()) < 5_000.0
     legs_live = (lifted[0] > 0.5) & near_lz & (alt < 200.0)
     any_contact = jnp.logical_and(legs_live, n_contact >= 1.0)
     was_landed = landed[0] > 0.5
-    first_contact = jnp.logical_and(~was_landed, any_contact)
+    first_contact = (~was_landed) & any_contact & (metrics[3] <= 0.0)
 
     v_up = jnp.dot(v, up)
     v_lat = jnp.linalg.norm(v - v_up * up)
@@ -848,7 +857,7 @@ def ground_contact(
     # Tip-over: CoM ground projection outside support radius, or extreme tilt.
     pad_world = jax.vmap(lambda o: r + q @ o)(pads)
     pad_cent = jnp.sum(
-        jnp.where(pad_alts[:, None] <= 0.0, pad_world, jnp.zeros_like(pad_world)), axis=0
+        jnp.where(pad_alts[:, None] <= LZ1_ALT_M, pad_world, jnp.zeros_like(pad_world)), axis=0
     ) / jnp.maximum(n_contact, 1.0)
     com_ground = r - alt * up
     cent_ground = pad_cent - jnp.dot(pad_cent, up) * up
@@ -870,7 +879,9 @@ def ground_contact(
         & (jnp.abs(cross_m) <= DECK_HALF_CROSS_M)
         & any_contact
     )
-    peak_load = jnp.maximum(deck[4], LEG_STIFFNESS_NPM * jnp.max(jnp.maximum(-pad_alts, 0.0)))
+    peak_load = jnp.maximum(
+        deck[4], LEG_STIFFNESS_NPM * jnp.max(jnp.maximum(LZ1_ALT_M - pad_alts, 0.0))
+    )
     deck_at_contact = jnp.array(
         [
             along_m,
@@ -926,7 +937,7 @@ def ground_contact(
     q_up = el.Quaternion.from_axis_angle(axis, angle)
 
     do_pin = landed_now & ~tipped
-    pinned_pos = jnp.where(do_pin, r - alt * up, r)
+    pinned_pos = jnp.where(do_pin, r - (alt - (LZ1_ALT_M + cg[0])) * up, r)
     pinned_lin = jnp.where(do_pin, jnp.zeros(3), v)
     pinned_ang = jnp.where(do_pin, jnp.zeros(3), vel.angular())
     q_out = el.Quaternion.from_array(jnp.where(do_pin, q_up.vector(), q.vector()))
@@ -937,6 +948,14 @@ def ground_contact(
         latched,
         deck_next,
     )
+
+
+@el.map
+def booster_visual_pose(pos: el.WorldPos, cg: CgStation) -> VisualPos:
+    r = pos.linear()
+    q = pos.angular()
+    offset = q @ jnp.array([GLB_ORIGIN_STATION_M - cg[0], 0.0, 0.0])
+    return el.SpatialTransform(angular=q, linear=r + offset)
 
 
 @el.map
@@ -984,21 +1003,23 @@ def descent_metrics_latch(
 @el.system
 def pad_clamp(
     tick: el.Query[el.SimulationTick],
-    q: el.Query[el.WorldPos, el.WorldVel, Lifted, LiftoffTime, ThrustTotal, el.Inertia],
+    q: el.Query[el.WorldPos, el.WorldVel, Lifted, LiftoffTime, ThrustTotal, el.Inertia, CgStation],
 ) -> el.Query[el.WorldPos, el.WorldVel, Lifted, LiftoffTime]:
     """Hold-down clamps: pin the stack to the pad until thrust exceeds
     weight, then release for good (the real T-0 release condition), latching
     the release time for liftoff-referenced truth comparison."""
     t_s = tick[0] * SIM_TIME_STEP
     pad = pad_ecef()
+    up = jnp.asarray(PAD_UP)
 
-    def update(pos, vel, lifted, t_liftoff, thrust, inertia):
+    def update(pos, vel, lifted, t_liftoff, thrust, inertia, cg):
         r = pos.linear()
         weight = inertia.mass() * 9.79
         was_lifted = lifted[0] > 0.5
         release = jnp.logical_or(was_lifted, thrust[0] > weight)
         first = jnp.logical_and(~was_lifted, release)
-        held_pos = el.SpatialTransform(angular=pos.angular(), linear=jnp.where(release, r, pad))
+        pin = pad + up * cg[0]
+        held_pos = el.SpatialTransform(angular=pos.angular(), linear=jnp.where(release, r, pin))
         held_vel = el.SpatialMotion(
             angular=jnp.where(release, vel.angular(), jnp.zeros(3)),
             linear=jnp.where(release, vel.linear(), jnp.zeros(3)),
@@ -1072,23 +1093,27 @@ def gps_model(
 def radar_altimeter_model(
     timer: sn.RadarTimer,
     pos: el.WorldPos,
+    cg: CgStation,
     rng_prev: sn.RadarRange,
     count: sn.RadarCount,
 ) -> tuple[sn.RadarTimer, sn.RadarRange, sn.RadarCount]:
-    """Boresight (-X body) range to terrain at 40 Hz within FOV/max-range
-    gates; -1 when invalid (WHITEPAPER 12.2)."""
+    """Boresight range from the engine-plane antenna to terrain (deck at LZ-1)."""
     t = timer[0] + SIM_TIME_STEP
     fired = t >= sn.RADAR_DT_S
     t = jnp.where(fired, t - sn.RADAR_DT_S, t)
-    lat, lon, alt = ecef_to_geodetic(pos.linear())
+    r = pos.linear()
+    lat, lon, alt = ecef_to_geodetic(r)
     sin_lat, cos_lat = jnp.sin(lat), jnp.cos(lat)
     sin_lon, cos_lon = jnp.sin(lon), jnp.cos(lon)
     up = jnp.array([cos_lat * cos_lon, cos_lat * sin_lon, sin_lat])
     bore_world = pos.angular() @ jnp.array([-1.0, 0.0, 0.0])
     cos_tilt = jnp.dot(bore_world, -up)
-    slant = alt / jnp.maximum(cos_tilt, 1e-3)
+    h_ant = alt - cg[0] * jnp.maximum(cos_tilt, 1e-3)
+    near_lz = jnp.linalg.norm(r - lz1_ecef()) < 5_000.0
+    h_terr = jnp.where(near_lz, LZ1_ALT_M, 0.0)
+    slant = jnp.maximum(h_ant - h_terr, 0.0) / jnp.maximum(cos_tilt, 1e-3)
     n = count[0] + jnp.where(fired, 1.0, 0.0)
-    valid = (cos_tilt > sn.RADAR_FOV_COS) & (slant <= sn.RADAR_MAX_RANGE_M) & (alt > 0.0)
+    valid = (cos_tilt > sn.RADAR_FOV_COS) & (slant <= sn.RADAR_MAX_RANGE_M)
     meas = jnp.where(valid, slant + sn._noise(n, 5, (), sn.RADAR_SIGMA_M), -1.0)
     return (
         jnp.array([t]),
@@ -1484,10 +1509,12 @@ def build_powered(
     world = el.World()
     if init_attitude is None:
         init_attitude = el.Quaternion.identity()
-    mass0, _cg0, inertia0 = propulsion.stack_mass_props(lox_kg, rp1_kg, upper_kg)
+    mass0, cg0, inertia0 = propulsion.stack_mass_props(lox_kg, rp1_kg, upper_kg)
     # The hold-down clamp only applies to pad starts; test articles spawned
     # aloft are born released.
     on_pad = float(jnp.linalg.norm(jnp.asarray(init_pos_ecef) - pad_ecef())) < 100.0
+    vis_off = init_attitude @ jnp.array([GLB_ORIGIN_STATION_M - float(cg0), 0.0, 0.0])
+    vis_lin = jnp.asarray(init_pos_ecef, dtype=jnp.float64) + vis_off
     world.spawn(
         [
             el.Body(
@@ -1497,6 +1524,7 @@ def build_powered(
                 world_vel=el.SpatialMotion(linear=jnp.asarray(init_vel_ecef, dtype=jnp.float64)),
                 inertia=el.SpatialInertia(float(mass0), inertia0),
             ),
+            el.C(VisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
             el.C(AltitudeGeodetic, jnp.array([0.0])),
             el.C(GroundSpeed, jnp.array([0.0])),
             el.C(ScoreState, jnp.zeros(3)),
@@ -1524,6 +1552,7 @@ def build_powered(
         | el.six_dof(sys=effectors, integrator=integrator)
         | pad_clamp
         | ground_contact
+        | booster_visual_pose
         | descent_metrics_latch
     )
     system = (extra_systems | plant) if extra_systems is not None else plant
@@ -1549,8 +1578,9 @@ def build_mission(
 ) -> tuple[el.World, el.System]:
     """The full mission world: booster upright on the pad, truth ghost
     replaying `ref`, display scoring accumulating in-sim."""
+    _, cg0, _ = propulsion.stack_mass_props(lox_kg, rp1_kg, upper_kg)
     world, system = build_powered(
-        pad_ecef(),
+        pad_ecef() + jnp.asarray(PAD_UP) * cg0,
         jnp.zeros(3),
         init_attitude=upright_attitude(),
         lox_kg=lox_kg,

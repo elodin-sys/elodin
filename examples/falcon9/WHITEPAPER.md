@@ -1008,9 +1008,11 @@ quantization, sample-and-hold at the IMU rate).
 - **GPS** emits ECEF position/velocity directly (its native frame — another
   ECEF convenience), at 25 Hz with meter-class position noise, plus an
   outage window during the high-plasma entry burn (flagged, dispersable).
-- **Radar altimeter** measures the boresight ray to terrain, not CG
-  altitude: `range = (h − h_terrain)/cosθ_tilt` within FOV and a max-range
-  gate of a few hundred meters (Ainstein-class device
+- **Radar altimeter** measures the boresight ray from the engine-plane
+  antenna to terrain, not CoM altitude:
+  `range = (h_ant − h_terrain)/cosθ_tilt`, with `h_terrain` the 5 m LZ-1
+  deck inside a 5 km gate (else ellipsoid 0). Valid within FOV and a
+  max-range gate of a few hundred meters (Ainstein-class device
   [product family docs](https://ainstein.ai/us-d1-all-weather-radar-altimeter/)),
   at 40 Hz with latency and dropout. It matters only in the last
   seconds — which is honest: that is also true on the real vehicle.

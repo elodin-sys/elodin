@@ -15,7 +15,8 @@ environment {
 // Cinematic chase viewport with telemetry panels.
 vsplit {
     hsplit share=0.75 {
-        viewport name="Chase" share=0.72 near=1.0 pos="booster.world_pos.translate_world(46.740, -100.549, -144.705)" look_at="booster.world_pos.translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" cinematic=#true show_grid=#false active=#true
+        // Same series as the GLB (visual_pos); body +X ~20 m is near CoM so framing matches the old world_pos chase.
+        viewport name="Chase" share=0.72 near=1.0 pos="booster.visual_pos.translate(20, 0, 0).translate_world(46.740, -100.549, -144.705)" look_at="booster.visual_pos.translate(20, 0, 0).translate_world(1.433, -8.661, 4.788)" up="(0.1433, -0.8661, 0.4788)" cinematic=#true show_grid=#false active=#true
         vsplit share=0.28 {
             hsplit {
                 graph "booster.ground_speed[0], booster_truth.ground_speed[0]" name="Speed vs recorded (m/s)" {
@@ -71,7 +72,7 @@ vsplit {
 }
 
 // Rotate the 70 m Y-up GLB onto the simulation's body +X axis.
-object_3d orientation=absolute booster.world_pos {
+object_3d orientation=absolute booster.visual_pos {
     glb path="falcon9.glb" rotate="(0, 0, -90)" scale=0.9944
     icon builtin="rocket_launch" size=32 {
         color 70 130 240
@@ -102,8 +103,8 @@ object_3d orientation=absolute pad.world_pos {
 
 // Landing dust and ASDS visual at LZ-1.
 object_3d orientation=absolute lz1.world_pos {
-    // Y-up, deck-centered ASDS mesh.
-    glb path="spacex_drone_barge.glb"
+    // Rx(-90) cancels the editor's Y-up lift for a +Y-up parent; barge floats above the coarse globe until the surface fix.
+    glb path="spacex_drone_barge.glb" rotate="(-90, 0, 0)"
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
 }
 

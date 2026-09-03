@@ -187,7 +187,7 @@ version = "0.2.5"
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
 # Local-space FaceCamera/AlongVelocity: full inverse affine for camera
 # position in effect space (elodin-sys fork; upstream candidate).
-bevy_hanabi = { git = "https://github.com/elodin-sys/bevy_hanabi", rev = "91176ce93c2b6226f320c3f2ae11b10170dd6317" }
+bevy_hanabi = { git = "https://github.com/elodin-sys/bevy_hanabi", rev = "485c0a6ca18065a8a5b6de30190a9fe94a337176" }
 
 # bevy_editor_cam's bevy-0.19 branch depends on bevy_framepace from this
 # personal git branch; redirect it to the official v0.22.0 tag so the whole

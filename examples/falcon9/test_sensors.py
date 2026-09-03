@@ -6,7 +6,16 @@ import math
 import jax.numpy as jnp
 import numpy as np
 import sensors as sn
-from constants import N_ENGINES, OMEGA_EARTH_RADPS
+from constants import (
+    GLB_ORIGIN_STATION_M,
+    LOX_LOAD_KG,
+    LZ1_LAT_DEG,
+    LZ1_LON_DEG,
+    N_ENGINES,
+    OMEGA_EARTH_RADPS,
+    PAD_ALT_M,
+    RP1_LOAD_KG,
+)
 from reference import build_reference, sanity_check
 from sim import (
     N_VALVES,
@@ -19,6 +28,7 @@ from sim import (
     ValveCmd,
     build_mission,
     build_powered,
+    lz1_ecef,
     pad_ecef,
     upright_attitude,
 )
@@ -135,11 +145,21 @@ def test_gps_cadence_hold_and_display_quantization():
     assert abs(dalt / sn.DISPLAY_ALT_STEP - round(dalt / sn.DISPLAY_ALT_STEP)) < 1e-9
 
 
+def _attitude_along_up(up):
+    x = jnp.array([1.0, 0.0, 0.0])
+    axis = jnp.cross(x, up)
+    axis = axis / jnp.linalg.norm(axis)
+    angle = jnp.arccos(jnp.clip(jnp.dot(x, up), -1.0, 1.0))
+    return el.Quaternion.from_axis_angle(axis, angle)
+
+
 def test_radar_geometry_gates():
-    # 100 m up, nose up: boresight (-X body) looks straight down -> range ~ alt.
+    # 100 m up, nose up: boresight from the engine plane to ellipsoid 0.
     import frames
+    import propulsion
 
     up = frames.ellipsoid_up(math.radians(28.60839), math.radians(-80.60433))
+    cg = float(propulsion.stack_mass_props(LOX_LOAD_KG, RP1_LOAD_KG, 0.0)[1])
     world, system = build_powered(
         pad_ecef() + up * 100.0,
         jnp.zeros(3),
@@ -150,7 +170,7 @@ def test_radar_geometry_gates():
     rng_meas = float(get("radar_range")[0])
     alt = float(get("altitude_geodetic")[0])
     assert rng_meas > 0.0
-    assert abs(rng_meas - alt) < 2.0
+    assert abs(rng_meas - (alt - cg)) < 2.0
     # 45-degree tilt about the pad's local NORTH axis exceeds the 35-degree
     # FOV: invalid (-1). (Tilting about a world axis would not tilt from
     # vertical by the same angle.)
@@ -173,6 +193,51 @@ def test_radar_geometry_gates():
     )
     get = _run(world, system, 100)
     assert float(get("radar_range")[0]) < 0.0
+
+
+def test_radar_reads_deck_clearance_near_lz1():
+    import frames
+    import propulsion
+
+    up = frames.ellipsoid_up(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG))
+    att = _attitude_along_up(up)
+    cg = float(propulsion.stack_mass_props(LOX_LOAD_KG, RP1_LOAD_KG, 0.0)[1])
+    world, system = build_powered(
+        lz1_ecef() + up * (cg + 30.0),
+        jnp.zeros(3),
+        init_attitude=att,
+        extra_systems=_script(_no_valves, _engines_off),
+    )
+    get = _run(world, system, 100)
+    assert abs(float(get("radar_range")[0]) - 30.0) < 0.5
+    world, system = build_powered(
+        lz1_ecef() + up * cg,
+        jnp.zeros(3),
+        init_attitude=att,
+        extra_systems=_script(_no_valves, _engines_off),
+    )
+    get = _run(world, system, 100)
+    rng = float(get("radar_range")[0])
+    assert rng >= 0.0
+    assert rng < 0.5
+
+
+def test_touchdown_metrics_latch_first_impact():
+    import frames
+    import propulsion
+
+    up = frames.ellipsoid_up(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG))
+    att = _attitude_along_up(up)
+    cg = float(propulsion.stack_mass_props(LOX_LOAD_KG, RP1_LOAD_KG, 0.0)[1])
+    world, system = build_powered(
+        lz1_ecef() + up * (cg + 1.0),
+        -up * 3.0,
+        init_attitude=att,
+        extra_systems=_script(_no_valves, _engines_off),
+    )
+    get = _run(world, system, 2000)
+    v_up = float(get("touchdown_metrics")[0])
+    assert 2.5 < v_up < 8.0
 
 
 def test_mission_scoring_gates_on_liftoff():
@@ -205,3 +270,23 @@ def test_mission_scoring_gates_on_liftoff():
     # (altitude_geodetic exists on both entities; index the ghost's row.)
     ghost_alt = float(get("altitude_geodetic", "booster_truth")[0])
     assert abs(ghost_alt - ref.altitude(0.5)) < 200.0
+
+
+def test_visual_pose_tracks_engine_plane():
+    import frames
+    import propulsion
+
+    up = frames.ellipsoid_up(math.radians(28.60839), math.radians(-80.60433))
+    cg = float(propulsion.stack_mass_props(LOX_LOAD_KG, RP1_LOAD_KG, 0.0)[1])
+    world, system = build_powered(
+        pad_ecef() + up * cg,
+        jnp.zeros(3),
+        init_attitude=upright_attitude(),
+        extra_systems=_script(_no_valves, _engines_off),
+    )
+    get = _run(world, system, 1)
+    vis = get("visual_pos")
+    _, _, vis_alt = frames.ecef_to_geodetic(vis[4:7])
+    assert abs(float(vis_alt) - (PAD_ALT_M + GLB_ORIGIN_STATION_M)) < 0.05
+    alt = float(get("altitude_geodetic")[0])
+    assert abs(alt - (PAD_ALT_M + cg)) < 0.05

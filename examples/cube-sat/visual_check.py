@@ -116,7 +116,7 @@ w.run(
     system=park,
     simulation_rate=SIM_HZ,
     generate_real_time=True,
-    max_ticks=int((T_S + 5.0) * SIM_HZ),
+    max_ticks=int((T_S + float(os.environ.get("ELODIN_VIZCHECK_PAD", "5.0"))) * SIM_HZ),
     optimize=True,
     interactive=False,
     start_timestamp=START_TIMESTAMP_US,

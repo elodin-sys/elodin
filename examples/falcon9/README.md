@@ -359,7 +359,7 @@ Defaults in `main.py` fly that vehicle. Nominal run vs targets:
 | Event: touchdown | ±3 s | **~+1 s** |
 | Speed RMSE (display space) | ≤ 15 m/s | ~48 m/s (display-lag ascent still dominates residual) |
 | Altitude RMSE (display space) | ≤ 150 m | ~1,410 m |
-| Touchdown vertical / lateral / impact | ≤ 2 / ≤ 1.5 / ≤ 2 m/s | **~1.5 / ~1.2 / ~1.9 m/s** (`soft_landing: true`) |
+| Touchdown vertical / lateral / impact | ≤ 2 / ≤ 1.5 / ≤ 2 m/s | **0.57 / 0.22 / 0.61 m/s** (`soft_landing: true`) |
 | Touchdown tilt / \|ω\| | ≤ 2° / ≤ 1°/s | **~0.6° / ~0.4°/s** |
 | Touchdown position error | ≤ 5 m (bullseye) | **~4.9 m** |
 | Descent max \|ω_yz\| / AoA (aero, &lt;30 km) | &lt; 10°/s / &lt; 12° | **~4.2°/s / ~12°** |

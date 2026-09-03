@@ -38,6 +38,8 @@ PAD_ALT_M = 3.0
 LZ1_LAT_DEG = 28.48580  # Landing Zone 1
 LZ1_LON_DEG = -80.54440
 LZ1_ALT_M = 5.0
+# falcon9.glb origin is 0.13 m above the Merlin bells (Y-up); KDL scale 0.9944.
+GLB_ORIGIN_STATION_M = 0.129
 
 # --- Stage 1 geometry and mass (WHITEPAPER 9.4) -------------------------------
 STAGE1_LENGTH_M = 47.0  # EST: tank stack + interstage

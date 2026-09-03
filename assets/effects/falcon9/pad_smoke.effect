@@ -82,7 +82,7 @@
     },
     {
       "bevy_hanabi::modifier::output::ParticleTextureModifier": (
-        texture_slot: "#38",
+        texture_slot: 0,
         sample_mapping: Modulate,
       ),
     },
@@ -242,6 +242,7 @@
       layout: [
         (
           name: "smoke",
+          dimension: r#2d,
         ),
       ],
     ),

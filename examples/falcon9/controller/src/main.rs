@@ -35,6 +35,9 @@ const V_PURGE: usize = 7;
 const THROTTLE_MIN: f64 = 0.57;
 const T_VAC_PER_ENGINE: f64 = 829_000.0; // matches plant constants
 const A_E_M2: f64 = 0.681;
+const LZ1_ALT_M: f64 = 5.0;
+const LZ1_LAT_RAD: f64 = 28.48580_f64.to_radians();
+const LZ1_LON_RAD: f64 = -80.54440_f64.to_radians();
 /// ZEM/ZEV terminal guidance (Guo/Hawkins/Wie) — LandingBurn.
 const ZEM_WAYPOINT_ALT_M: f64 = 150.0;
 const ZEM_WAYPOINT_VDOWN_MPS: f64 = 25.0;
@@ -196,6 +199,14 @@ impl Command {
     }
 }
 
+/// CoM station from the engine-plane antenna (plant `stack_mass_props`, m_upper=0).
+fn cg_station_m(lox_kg: f64, rp1_kg: f64) -> f64 {
+    let area = std::f64::consts::PI * 1.83 * 1.83;
+    let cg_lox = 17.5 + 0.5 * lox_kg / (1220.0 * area);
+    let cg_rp1 = 3.0 + 0.5 * rp1_kg / (830.0 * area);
+    (25_600.0 * 18.8 + lox_kg * cg_lox + rp1_kg * cg_rp1) / (25_600.0 + lox_kg + rp1_kg)
+}
+
 /// IMU + GPS navigator with the rotating-frame mechanization (WHITEPAPER 12).
 struct Navigator {
     pos: V3,
@@ -206,8 +217,10 @@ struct Navigator {
     initialized: bool,
     /// Steady wind estimate (ECEF m/s) from GPS–IMU innovation.
     wind_est: V3,
-    /// Radar-smoothed altitude (m); <0 when invalid.
-    radar_alt_m: f64,
+    /// Radar-smoothed antenna height above terrain (m); <0 when invalid.
+    radar_agl_m: f64,
+    /// CoM above the engine-plane antenna (m), from current propellant.
+    station_m: f64,
 }
 
 impl Navigator {
@@ -220,7 +233,17 @@ impl Navigator {
             last_t: 0.0,
             initialized: false,
             wind_est: [0.0; 3],
-            radar_alt_m: -1.0,
+            radar_agl_m: -1.0,
+            station_m: 18.8,
+        }
+    }
+
+    fn site_alt(&self) -> f64 {
+        let lz1 = geodetic_to_ecef(LZ1_LAT_RAD, LZ1_LON_RAD, LZ1_ALT_M);
+        if norm(sub(self.pos, lz1)) < 5_000.0 {
+            LZ1_ALT_M
+        } else {
+            0.0
         }
     }
 
@@ -235,10 +258,12 @@ impl Navigator {
         self.last_t = s.t;
         self.initialized = true;
         self.wind_est = [0.0; 3];
-        self.radar_alt_m = -1.0;
+        self.radar_agl_m = -1.0;
+        self.station_m = cg_station_m(s.lox_kg, s.rp1_kg);
     }
 
     fn step(&mut self, s: &SensorPacket) {
+        self.station_m = cg_station_m(s.lox_kg, s.rp1_kg);
         if !self.initialized {
             if s.gps_count > 0.0 {
                 self.init(s);
@@ -266,30 +291,40 @@ impl Navigator {
             self.vel = add(self.vel, scale(sub(s.gps_vel, self.vel), 0.50));
             self.last_gps_count = s.gps_count;
         }
-        // Radar altimeter below 500 m for h / t_go (when valid).
+        // Radar altimeter below 500 m: slant → antenna AGL, then reconstruct CoM.
         if s.radar_range >= 0.0 && s.radar_range < 500.0 {
-            let geo_alt = ecef_to_geodetic(self.pos).2;
-            if self.radar_alt_m < 0.0 {
-                self.radar_alt_m = s.radar_range;
-            } else {
-                self.radar_alt_m = 0.7 * self.radar_alt_m + 0.3 * s.radar_range;
-            }
-            let (lat, lon, _) = ecef_to_geodetic(self.pos);
+            let (lat, lon, geo_alt) = ecef_to_geodetic(self.pos);
             let up = scale(ned_basis(lat, lon)[2], -1.0);
-            let dh = self.radar_alt_m - geo_alt;
+            let body_x = quat_rotate(self.att, [1.0, 0.0, 0.0]);
+            let cos_tilt = dot(body_x, up).max(0.6);
+            let h_agl = s.radar_range * cos_tilt;
+            if self.radar_agl_m < 0.0 {
+                self.radar_agl_m = h_agl;
+            } else {
+                self.radar_agl_m = 0.7 * self.radar_agl_m + 0.3 * h_agl;
+            }
+            let dh = (self.radar_agl_m + self.station_m + self.site_alt()) - geo_alt;
             if dh.abs() < 50.0 {
                 self.pos = add(self.pos, scale(up, 0.35 * dh));
             }
         } else {
-            self.radar_alt_m = -1.0;
+            self.radar_agl_m = -1.0;
         }
     }
 
     fn altitude(&self) -> f64 {
-        if self.radar_alt_m >= 0.0 {
-            self.radar_alt_m
+        if self.radar_agl_m >= 0.0 {
+            self.radar_agl_m + self.station_m + self.site_alt()
         } else {
             ecef_to_geodetic(self.pos).2
+        }
+    }
+
+    fn height_agl(&self) -> f64 {
+        if self.radar_agl_m >= 0.0 {
+            self.radar_agl_m
+        } else {
+            ecef_to_geodetic(self.pos).2 - self.station_m - self.site_alt()
         }
     }
 
@@ -324,7 +359,7 @@ struct Fsw {
 
 impl Fsw {
     fn new() -> Self {
-        let lz1 = geodetic_to_ecef(28.48580_f64.to_radians(), -80.54440_f64.to_radians(), 5.0);
+        let lz1 = geodetic_to_ecef(LZ1_LAT_RAD, LZ1_LON_RAD, LZ1_ALT_M);
         Fsw {
             nav: Navigator::new(),
             phase: Phase::PadPress,
@@ -399,6 +434,7 @@ impl Fsw {
         let p = &s.params;
         let t = s.t;
         let alt = self.nav.altitude();
+        let h_agl = self.nav.height_agl();
         let speed = self.nav.speed();
 
         // Common frames.
@@ -620,7 +656,7 @@ impl Fsw {
                 // charging ~2.5 s of spool-up distance against the altitude.
                 let vdown = -dot(self.nav.vel, up_here);
                 let a_land = 0.70 * self.landing_accel_net(s, 3.0);
-                let h_eff = (alt - 2.5 * vdown.max(0.0) - 20.0).max(1.0);
+                let h_eff = (h_agl - 2.5 * vdown.max(0.0)).max(1.0);
                 let v_profile = (2.0 * a_land * h_eff).sqrt();
                 if t - self.phase_t0 > 5.0
                     && ((t - self.phase_t0) as u64).is_multiple_of(10)
@@ -650,14 +686,15 @@ impl Fsw {
                 // the center engine once a single-engine profile can finish.
                 let mass = 25_600.0 + s.lox_kg + s.rp1_kg;
                 let vdown = -dot(self.nav.vel, up_here);
-                let h = (alt - 2.0).max(0.5);
+                let h = h_agl.max(0.5);
                 let t_single_min = THROTTLE_MIN * T_VAC_PER_ENGINE - 101_325.0 * A_E_M2;
                 let a_floor = (t_single_min / mass - 9.81).max(0.5);
                 let a_single = self.landing_accel_net(s, 1.0);
                 let a_mid = 0.5 * (a_floor + a_single);
+                let a_land_1 = 0.70 * a_mid;
                 if self.landing_escalated
                     && !self.landing_deescalated
-                    && vdown <= (2.0 * a_mid * h).sqrt() + 1.0
+                    && vdown <= (2.0 * a_land_1 * h).sqrt() + 1.0
                 {
                     self.landing_deescalated = true;
                 }
@@ -665,15 +702,26 @@ impl Fsw {
                 let (n, a_land) = if three {
                     (3.0, 0.70 * self.landing_accel_net(s, 3.0))
                 } else {
-                    (1.0, a_mid)
+                    (1.0, a_land_1)
                 };
                 // Continuous hoverslam vertical (WHITEAPER 11.5): T_min/W > 1
                 // so we never coast mid-burn — the rate loop keeps vdown on the
                 // suicide curve. ZEM/ZEV only shapes the thrust *direction*.
                 let v_des = (2.0 * a_land * h).sqrt() + ZEM_V_TD_MPS;
-                // Slightly higher rate gain in the last 200 m to keep impact ≤ 2 m/s.
-                let kv = if alt < 200.0 { 4.0 } else { 3.2 };
-                let a_up = (9.81 + kv * (vdown - v_des)).max(0.0);
+                let kv = if h_agl < 15.0 {
+                    6.5
+                } else if h_agl < 50.0 {
+                    5.0
+                } else if h_agl < 200.0 {
+                    4.0
+                } else {
+                    3.2
+                };
+                // Feedforward a_land: on-speed must still decelerate, not hover.
+                let mut a_up = (9.81 + a_land + kv * (vdown - v_des)).max(0.0);
+                if h_agl < 8.0 && vdown > 2.5 {
+                    a_up += 2.0; // last-metres flare for spool lag
+                }
 
                 let (t_go, t_raw) = Self::t_go_hoverslam(h, vdown.max(1.0));
                 let miss_h = {
@@ -683,9 +731,9 @@ impl Fsw {
                 // Commit-to-vertical once near the pad *and* the divert is
                 // mostly closed — don't freeze lateral with a large miss left.
                 if !self.landing_vertical_commit {
-                    let time_gate = t_raw > 0.0 && t_raw < ZEM_COMMIT_TGO_S && alt < 200.0;
-                    let alt_gate = alt < ZEM_COMMIT_ALT_M;
-                    if (alt_gate || time_gate) && (miss_h < 25.0 || alt < 25.0) {
+                    let time_gate = t_raw > 0.0 && t_raw < ZEM_COMMIT_TGO_S && h_agl < 200.0;
+                    let alt_gate = h_agl < ZEM_COMMIT_ALT_M;
+                    if (alt_gate || time_gate) && (miss_h < 25.0 || h_agl < 25.0) {
                         self.landing_vertical_commit = true;
                     }
                 }
@@ -711,12 +759,16 @@ impl Fsw {
                 cmd.fins = self.fin_attitude_pd(body_x, s, true);
 
                 let cos_tilt = dot(body_x, up_here).max(0.6);
-                let u = ((mass * a_up / cos_tilt / n + 101_325.0 * A_E_M2) / T_VAC_PER_ENGINE)
+                let mut u = ((mass * a_up / cos_tilt / n + 101_325.0 * A_E_M2)
+                    / T_VAC_PER_ENGINE)
                     .clamp(THROTTLE_MIN, 1.0);
+                if h_agl < 2.5 && vdown > 2.2 {
+                    u = u.max(0.76); // don't ease off in the last 2.5 m
+                }
                 let mut engines = [0.0; N_ENGINES];
                 // If min-throttle has lofted us (T_min/W > 1), cut until we
                 // are descending again — otherwise we climb away from the pad.
-                let lofting = alt < 100.0 && vdown < -0.5;
+                let lofting = h_agl > 1.0 && h_agl < 100.0 && vdown < -0.5;
                 if !lofting {
                     engines[0] = u;
                     if three {
@@ -725,7 +777,8 @@ impl Fsw {
                     }
                 }
                 cmd.engines = engines;
-                if s.landed > 0.5 || (alt < 2.0 && speed < 1.5) {
+                if s.landed > 0.5 || (h_agl < 0.25 && vdown > 0.0 && vdown < 1.0 && speed < 1.5)
+                {
                     self.cutoff_with_purge(&mut cmd, t);
                     self.set_phase(Phase::Touchdown, t);
                 }
@@ -925,7 +978,7 @@ impl Fsw {
         let aim = sub(self.lz1_pos, scale(wind_h, t_go.min(25.0)));
         let r = sub(self.nav.pos, aim);
         let v = self.nav.vel;
-        let alt = self.nav.altitude();
+        let alt = self.nav.height_agl();
         let g_vec = scale(up, -9.81);
         let (r_tgt, v_tgt) = if alt > ZEM_WAYPOINT_ALT_M {
             (scale(up, ZEM_WAYPOINT_ALT_M), scale(up, -ZEM_WAYPOINT_VDOWN_MPS))

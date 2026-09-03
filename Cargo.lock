@@ -1987,7 +1987,7 @@ dependencies = [
 [[package]]
 name = "bevy_hanabi"
 version = "0.20.0-dev"
-source = "git+https://github.com/elodin-sys/bevy_hanabi?rev=91176ce93c2b6226f320c3f2ae11b10170dd6317#91176ce93c2b6226f320c3f2ae11b10170dd6317"
+source = "git+https://github.com/elodin-sys/bevy_hanabi?rev=485c0a6ca18065a8a5b6de30190a9fe94a337176#485c0a6ca18065a8a5b6de30190a9fe94a337176"
 dependencies = [
  "anyhow",
  "bevy",
