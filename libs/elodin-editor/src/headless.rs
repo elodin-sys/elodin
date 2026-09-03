@@ -244,6 +244,14 @@ fn sync_headless_stream_filter(
             .max()
             .unwrap_or(60),
     );
+    // Empty high-priority set means "schematic not ready yet", not "subscribe
+    // to nothing". Sending [] would drop every pose until cameras appear.
+    if priority.high.is_empty() {
+        sent.connected = true;
+        sent.component_ids.clear();
+        sent.frequency = frequency;
+        return;
+    }
     if sent.connected && sent.component_ids == priority.high && sent.frequency == frequency {
         return;
     }

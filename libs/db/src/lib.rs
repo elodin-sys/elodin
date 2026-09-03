@@ -313,7 +313,11 @@ impl RealTimeStreamFilter {
 
     fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>) {
         let mut current = self.component_ids.write().unwrap();
-        *current = Some(component_ids.into_iter().collect());
+        *current = if component_ids.is_empty() {
+            None
+        } else {
+            Some(component_ids.into_iter().collect())
+        };
         self.frequency
             .store(frequency.unwrap_or(0), atomic::Ordering::Release);
         self.generation.fetch_add(1, atomic::Ordering::Release);
@@ -3640,6 +3644,20 @@ mod tests {
         assert_eq!(stream_interval_us(60), 16_666);
         assert_eq!(stream_interval_us(120), 8_333);
         assert_eq!(stream_interval_us(2_000_000), 1);
+    }
+
+    #[test]
+    fn empty_real_time_stream_filter_is_unfiltered() {
+        let filter = RealTimeStreamFilter::new();
+        assert!(filter.component_ids().is_none());
+        filter.set(vec![ComponentId::new("a")], Some(60));
+        assert_eq!(
+            filter.component_ids(),
+            Some([ComponentId::new("a")].into_iter().collect())
+        );
+        filter.set(vec![], Some(60));
+        assert!(filter.component_ids().is_none());
+        assert_eq!(filter.frequency(), Some(60));
     }
 
     struct PendingWrite;
