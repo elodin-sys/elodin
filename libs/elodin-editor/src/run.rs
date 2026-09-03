@@ -6,37 +6,11 @@ use miette::{Context, IntoDiagnostic, miette};
 use std::{
     net::{Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RecipeExecution {
-    Once,
-    Watch,
-}
-
-#[cfg(not(target_os = "windows"))]
-async fn execute_recipe(
-    recipe: s10::Recipe,
-    execution: RecipeExecution,
-    cancel_token: CancelToken,
-    cgroup: Option<Arc<s10::CgroupScope>>,
-) -> Result<(), s10::Error> {
-    match execution {
-        RecipeExecution::Once => {
-            recipe
-                .run("sim".to_string(), false, cancel_token, cgroup)
-                .await
-        }
-        RecipeExecution::Watch => {
-            recipe
-                .watch("sim".to_string(), false, cancel_token, cgroup)
-                .await
-        }
-    }
-}
+pub use s10::cli::RecipeExecution;
 
 #[cfg(not(target_os = "windows"))]
 pub async fn run_recipe(
@@ -145,7 +119,15 @@ pub async fn run_recipe_at_with_execution(
         None
     };
 
-    let result = execute_recipe(recipe, execution, cancel_token.clone(), cgroup.clone()).await;
+    let result = s10::cli::execute_recipe_with_token_in_cgroup(
+        "sim".to_string(),
+        recipe,
+        execution,
+        false,
+        cancel_token.clone(),
+        cgroup.clone(),
+    )
+    .await;
     cancel_token.cancel();
     if let Some(scope) = cgroup {
         let _ = scope.kill();
@@ -188,25 +170,8 @@ mod tests {
     use std::path::Path;
 
     use s10::{GroupRecipe, ProcessArgs, ProcessRecipe, Recipe, RestartPolicy};
-    use stellarator::util::CancelToken;
 
-    use super::{RecipeExecution, execute_recipe, pin_render_server_recipe};
-
-    #[tokio::test]
-    async fn one_shot_recipe_propagates_process_failure() {
-        let mut process_args = empty_process_args();
-        process_args.args = vec!["-c".to_string(), "exit 7".to_string()];
-        process_args.fail_on_error = true;
-        let recipe = Recipe::Process(ProcessRecipe {
-            cmd: "sh".to_string(),
-            process_args,
-            no_watch: true,
-        });
-
-        let result = execute_recipe(recipe, RecipeExecution::Once, CancelToken::new(), None).await;
-
-        assert!(result.is_err());
-    }
+    use super::pin_render_server_recipe;
 
     #[test]
     fn pins_render_server_recipe_to_current_binary() {
