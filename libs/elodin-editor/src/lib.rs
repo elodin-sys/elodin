@@ -93,6 +93,8 @@ mod offset_parse;
 pub mod plugins;
 pub mod rim_glow_material;
 pub mod sensor_camera;
+#[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
+mod sensor_h264;
 mod skybox_db_assets;
 mod skybox_generation;
 #[cfg(feature = "big_space")]
@@ -1389,6 +1391,7 @@ pub fn sync_object_3d(
                 frame: None,
                 frame_orientation: None,
                 orientation: Default::default(),
+                sensor_visible: true,
                 node_id: Default::default(),
             },
             expr,

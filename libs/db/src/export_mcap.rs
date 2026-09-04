@@ -446,6 +446,9 @@ fn classify_msg_log(
     // packet id still matches — name-based lookup would miss and fall through
     // to H.264/raw while the layout still points at a video topic.
     if let Some(cfg) = sensor_by_msg_id.get(&packet_id) {
+        if cfg.format == "h264" {
+            return MsgLogKind::H264Video;
+        }
         return MsgLogKind::SensorCamera(Box::new(cfg.clone()));
     }
     if let Some(metadata) = log.metadata()
@@ -454,7 +457,7 @@ fn classify_msg_log(
         return MsgLogKind::LogEntries;
     }
     let first_payload = log.timestamps().first().and_then(|ts| log.get(*ts));
-    if video_names.contains(name) || first_payload.is_some_and(is_annex_b) {
+    if video_names.contains(name) || first_payload.as_deref().is_some_and(is_annex_b) {
         return MsgLogKind::H264Video;
     }
     MsgLogKind::Raw
@@ -473,8 +476,8 @@ fn msg_log_json(kind: &MsgLogKind, name: &str, payload: &[u8], ts_ns: u64) -> Ve
             "frame_id": name,
             "width": cfg.width,
             "height": cfg.height,
-            "encoding": "rgba8",
-            "step": cfg.width * 4,
+            "encoding": if cfg.format == "gray8" { "mono8" } else { "rgba8" },
+            "step": if cfg.format == "gray8" { cfg.width } else { cfg.width * 4 },
             "data": BASE64.encode(payload),
         }),
         MsgLogKind::LogEntries => {
@@ -2228,20 +2231,15 @@ fn encode_sensor_frame(
         crate::export_videos::SensorEncoder::new(cfg.width, cfg.height, fps)
             .expect("openh264 encoder init")
     });
-    let yuv = match crate::export_videos::rgba_to_i420(
-        raw_payload,
-        cfg.width as usize,
-        cfg.height as usize,
-    ) {
+    let yuv = match if cfg.format == "gray8" {
+        crate::export_videos::gray8_to_i420(raw_payload, cfg.width as usize, cfg.height as usize)
+    } else {
+        crate::export_videos::rgba_to_i420(raw_payload, cfg.width as usize, cfg.height as usize)
+    } {
         Ok(yuv) => yuv,
         Err(e) => {
             eprintln!("Warning: sensor frame encode skip for {name}: {e}");
-            return msg_log_json(
-                &MsgLogKind::SensorCamera(Box::new(cfg.clone())),
-                name,
-                raw_payload,
-                ts_ns,
-            );
+            return Vec::new();
         }
     };
     match encoder.encode_frame(&yuv) {
@@ -2257,12 +2255,7 @@ fn encode_sensor_frame(
         Ok(_) => Vec::new(),
         Err(e) => {
             eprintln!("Warning: sensor frame encode error for {name}: {e}");
-            msg_log_json(
-                &MsgLogKind::SensorCamera(Box::new(cfg.clone())),
-                name,
-                raw_payload,
-                ts_ns,
-            )
+            Vec::new()
         }
     }
 }
@@ -2595,16 +2588,15 @@ pub fn run(
                 })
         })
         .collect();
-    let msg_entries: Vec<Vec<(Timestamp, &[u8])>> = export_msg_logs
-        .iter()
-        .map(|log| log.log.get_range(&full_range).collect())
-        .collect();
-
     let start_ts = component_cursors
         .iter()
         .flatten()
         .filter_map(|c| c.timestamps.first())
-        .chain(msg_entries.iter().filter_map(|m| m.first().map(|(t, _)| t)))
+        .chain(
+            export_msg_logs
+                .iter()
+                .filter_map(|log| log.log.timestamps().first()),
+        )
         .min()
         .copied()
         .unwrap_or(earliest);
@@ -2771,8 +2763,8 @@ pub fn run(
             }
         }
     }
-    for (i, entries) in msg_entries.iter().enumerate() {
-        if let Some((ts, _)) = entries.first() {
+    for (i, log) in export_msg_logs.iter().enumerate() {
+        if let Some(ts) = log.log.timestamps().first() {
             heap.push(Reverse((ts.0, 2 * n + i)));
         }
     }
@@ -2818,35 +2810,35 @@ pub fn run(
         } else if cursor_id < 2 * n + m {
             let idx = cursor_id - 2 * n;
             let log = &export_msg_logs[idx];
-            let (_, raw_payload) = msg_entries[idx][pos];
-
-            let payload = {
-                #[cfg(feature = "video-export")]
-                {
-                    if let MsgLogKind::SensorCamera(cfg) = &log.kind {
-                        encode_sensor_frame(
-                            cfg,
-                            raw_payload,
-                            ts_ns,
-                            &log.name,
-                            &mut sensor_encoders,
-                            idx,
-                        )
-                    } else {
-                        msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
-                    }
+            let next_ts = log.log.timestamps().get(pos + 1).map(|t| t.0);
+            match log.log.get_index(pos) {
+                Some((_, raw)) => {
+                    let raw_payload = raw.as_ref();
+                    let payload = {
+                        #[cfg(feature = "video-export")]
+                        {
+                            if let MsgLogKind::SensorCamera(cfg) = &log.kind {
+                                encode_sensor_frame(
+                                    cfg,
+                                    raw_payload,
+                                    ts_ns,
+                                    &log.name,
+                                    &mut sensor_encoders,
+                                    idx,
+                                )
+                            } else {
+                                msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
+                            }
+                        }
+                        #[cfg(not(feature = "video-export"))]
+                        {
+                            msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
+                        }
+                    };
+                    (msg_channels[idx], payload, next_ts)
                 }
-                #[cfg(not(feature = "video-export"))]
-                {
-                    msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
-                }
-            };
-
-            (
-                msg_channels[idx],
-                payload,
-                msg_entries[idx].get(pos + 1).map(|(t, _)| t.0),
-            )
+                None => (msg_channels[idx], Vec::new(), next_ts),
+            }
         } else {
             // Dynamic arrow scene updates, one channel per arrow.
             let idx = cursor_id - 2 * n - m;
@@ -2859,18 +2851,20 @@ pub fn run(
             )
         };
 
-        let sequence = sequences.entry(channel_id).or_insert(0);
-        writer.write_to_known_channel(
-            &MessageHeader {
-                channel_id,
-                sequence: *sequence,
-                log_time: ts_ns,
-                publish_time: ts_ns,
-            },
-            &payload,
-        )?;
-        *sequence += 1;
-        message_count += 1;
+        if !payload.is_empty() {
+            let sequence = sequences.entry(channel_id).or_insert(0);
+            writer.write_to_known_channel(
+                &MessageHeader {
+                    channel_id,
+                    sequence: *sequence,
+                    log_time: ts_ns,
+                    publish_time: ts_ns,
+                },
+                &payload,
+            )?;
+            *sequence += 1;
+            message_count += 1;
+        }
 
         positions[cursor_id] = pos + 1;
         if let Some(next) = next_ts {
@@ -3265,6 +3259,7 @@ mod tests {
             frame: None,
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             icon: None,
             thrusters: vec![],
             mesh_visibility_range: None,

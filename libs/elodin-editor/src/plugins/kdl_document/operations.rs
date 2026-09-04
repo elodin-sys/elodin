@@ -701,6 +701,7 @@ mod db_save_tests {
             frame: None,
             frame_orientation: None,
             orientation: Default::default(),
+            sensor_visible: true,
             icon: None,
             thrusters: Vec::new(),
             mesh_visibility_range: None,

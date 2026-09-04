@@ -17,10 +17,7 @@ use bevy::{
 use egui::{self, Color32, Vec2};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{
-    CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch,
-    TimestampedMsgStream,
-};
+use impeller2_wkt::{CurrentTimestamp, ErrorResponse, GetMsgs, MsgBatch, TimestampedMsgStream};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -54,6 +51,21 @@ pub struct VideoStreamWidgetArgs {
 // VideoStream component
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawPixelFormat {
+    Rgba8,
+    Gray8,
+}
+
+impl RawPixelFormat {
+    fn bytes_per_pixel(self) -> usize {
+        match self {
+            Self::Rgba8 => 4,
+            Self::Gray8 => 1,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct VideoStream {
     pub msg_id: [u8; 2],
@@ -61,9 +73,8 @@ pub struct VideoStream {
     pub current_frame: Option<Image>,
     pub size: Vec2,
     pub state: StreamState,
-    /// When set, incoming MsgBatch bytes are treated as raw RGBA pixels
-    /// (bypassing the H.264 decoder). The tuple is `(width, height)`.
-    pub raw_rgba_dims: Option<(u32, u32)>,
+    /// When set, incoming MsgBatch bytes bypass the H.264 decoder.
+    pub raw_dims: Option<(u32, u32, RawPixelFormat)>,
 }
 
 #[derive(Component)]
@@ -77,7 +88,7 @@ impl Default for VideoStream {
             current_frame: None,
             size: Vec2::ZERO,
             state: StreamState::default(),
-            raw_rgba_dims: None,
+            raw_dims: None,
         }
     }
 }
@@ -98,6 +109,10 @@ const MAX_CACHED_FRAMES: usize = 300;
 /// show the "No video at this time" overlay.  500 ms.
 const NO_DATA_THRESHOLD_US: i64 = 500_000;
 
+/// Live follow can sit on `LastUpdated` while the last camera AU is older
+/// (encode + IDR spacing). Keep showing that frame for one GOP.
+const LIVE_HOLD_THRESHOLD_US: i64 = 2_000_000;
+
 /// If the decoder's last position is within this many microseconds of
 /// `current_ts` (in either direction), suppress seek retries.  This is
 /// wider than `SEQUENTIAL_THRESHOLD_US` to prevent the seek loop where
@@ -110,7 +125,7 @@ const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
 /// at 30 fps.  Prevents unbounded memory growth during long live sessions.
 const MAX_RAW_FRAMES: usize = 50_000;
 
-/// If the live-tail `FixedRateMsgStream` has not delivered a frame for this
+/// If the live-tail `TimestampedMsgStream` has not delivered a frame for this
 /// many seconds, re-send the backfill and stream requests to recover from
 /// a dropped DB connection.
 const STREAM_RECOVERY_TIMEOUT_SECS: f32 = 30.0;
@@ -190,8 +205,8 @@ impl Default for StreamState {
 ///
 /// Two sources fill `raw_frames`:
 /// - A one-shot `GetMsgs` backfill (historical data already in the DB)
-/// - A continuous live tail (`FixedRateMsgStream` for H.264 video streams,
-///   `TimestampedMsgStream` for raw RGBA sensor views)
+/// - A continuous live tail (`TimestampedMsgStream`) so H.264 sensor cameras
+///   land on the same clock as gray8/rgba instead of the playback tick driver.
 ///
 /// Neither source ever touches the decoder directly.  The playback loop reads
 /// `CurrentTimestamp`, looks up the cache, and feeds controlled sequences to
@@ -216,7 +231,7 @@ pub struct VideoFrameCache {
     /// Generation counter for `SeekBatch` coalescing.
     seek_generation: u64,
     /// Wall-clock time of the last frame received from the live-tail
-    /// `FixedRateMsgStream`.  Used to detect DB disconnection and trigger
+    /// `TimestampedMsgStream`.  Used to detect DB disconnection and trigger
     /// recovery.  `None` until the first live frame arrives.
     last_stream_activity: Option<Instant>,
     /// Timestamp just past the last frame loaded by the paginated backfill.
@@ -265,8 +280,7 @@ impl Default for VideoFrameCache {
 }
 
 impl VideoFrameCache {
-    /// For sensor_view tiles: raw RGBA frames, no H.264 keyframe scan.
-    pub fn for_raw_rgba() -> Self {
+    pub fn for_raw() -> Self {
         Self {
             is_h264: false,
             ..Self::default()
@@ -337,6 +351,20 @@ impl VideoFrameCache {
             return true;
         }
         false
+    }
+
+    /// True when a tile should paint (or drop the "No video" overlay).
+    ///
+    /// Live follow uses `LastUpdated` as the playhead. Camera AUs can lag that
+    /// by more than [`NO_DATA_THRESHOLD_US`] without being missing.
+    pub fn has_video_at(&self, target: Timestamp) -> bool {
+        if self.has_raw_data_near(target, NO_DATA_THRESHOLD_US) {
+            return true;
+        }
+        self.raw_frames
+            .iter()
+            .next_back()
+            .is_some_and(|(t, _)| target.0 >= t.0 && target.0 - t.0 <= LIVE_HOLD_THRESHOLD_US)
     }
 
     /// Extract raw frames in `[from, to]` for decoding (cloned out of cache).
@@ -729,8 +757,8 @@ fn send_stream_request(
     commands: &mut Commands,
     entity: Entity,
     msg_id: [u8; 2],
-    stream_id: u64,
-    is_h264: bool,
+    _stream_id: u64,
+    _is_h264: bool,
 ) {
     let handler = move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
                         mut caches: Query<&mut VideoFrameCache>| {
@@ -744,20 +772,7 @@ fn send_stream_request(
         false
     };
 
-    if is_h264 {
-        commands.send_msg_req_reply_raw(
-            FixedRateMsgStream {
-                msg_id,
-                fixed_rate: FixedRateOp {
-                    stream_id,
-                    behavior: Default::default(),
-                },
-            },
-            handler,
-        );
-    } else {
-        commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
-    }
+    commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
 }
 
 /// Maximum payload size (in bytes) for a single backfill `GetMsgs` batch.
@@ -778,9 +793,9 @@ const BACKFILL_ASSUMED_MAX_RAW_FRAME: usize = 640 * 480 * 4;
 const BACKFILL_ASSUMED_H264_FRAME: usize = 50 * 1024;
 
 /// Compute the backfill frame limit from a byte budget.
-fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>, is_h264: bool) -> usize {
-    let frame_bytes = match raw_rgba_dims {
-        Some((w, h)) => (w as usize * h as usize * 4).max(1),
+fn backfill_frame_limit(raw_dims: Option<(u32, u32, RawPixelFormat)>, is_h264: bool) -> usize {
+    let frame_bytes = match raw_dims {
+        Some((w, h, format)) => (w as usize * h as usize * format.bytes_per_pixel()).max(1),
         None if is_h264 => BACKFILL_ASSUMED_H264_FRAME,
         None => BACKFILL_ASSUMED_MAX_RAW_FRAME,
     };
@@ -870,6 +885,22 @@ fn upload_frame(
     }
 }
 
+fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) -> bool {
+    match format {
+        RawPixelFormat::Rgba8 if src.len() == dst.len() => {
+            dst.copy_from_slice(src);
+            true
+        }
+        RawPixelFormat::Gray8 if src.len().checked_mul(4) == Some(dst.len()) => {
+            for (&gray, pixel) in src.iter().zip(dst.as_chunks_mut::<4>().0) {
+                pixel.copy_from_slice(&[gray, gray, gray, 255]);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Widget implementation — cache-first playback
 // ---------------------------------------------------------------------------
@@ -907,13 +938,13 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // Connection + drain handled by `connect_streams` system.
             }
             StreamState::Active => {
-                if let Some((w, h)) = stream.raw_rgba_dims {
+                if let Some((w, h, format)) = stream.raw_dims {
                     if let Some((found_ts, data)) =
                         cache.raw_frames.range(..=current_ts).next_back()
                     {
                         let found_ts = *found_ts;
                         if cache.last_displayed_ts != Some(found_ts) {
-                            let expected = (w * h * 4) as usize;
+                            let expected = w as usize * h as usize * format.bytes_per_pixel();
                             if data.len() == expected {
                                 let data = Arc::clone(data);
                                 let mut wrote_direct = false;
@@ -922,10 +953,12 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                     && existing.height() == h
                                     && let Some(dst) = &mut existing.data
                                 {
-                                    dst.copy_from_slice(&data);
-                                    wrote_direct = true;
+                                    wrote_direct = copy_raw_frame_to_rgba(&data, dst, format);
                                 }
                                 if !wrote_direct {
+                                    let mut rgba = vec![0; w as usize * h as usize * 4];
+                                    let copied = copy_raw_frame_to_rgba(&data, &mut rgba, format);
+                                    debug_assert!(copied);
                                     let img = Image::new(
                                         Extent3d {
                                             width: w,
@@ -933,7 +966,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                             depth_or_array_layers: 1,
                                         },
                                         TextureDimension::D2,
-                                        (*data).clone(),
+                                        rgba,
                                         bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
                                         RenderAssetUsages::MAIN_WORLD
                                             | RenderAssetUsages::RENDER_WORLD,
@@ -955,7 +988,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     }
 
                     if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
-                        && (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                        && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                            || (current_ts.0 >= ts.0
+                                && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
                     {
                         stream.current_frame = Some(img.clone());
                     } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
@@ -977,7 +1012,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         false
                     };
 
-                    let has_raw = cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US);
+                    let has_raw = cache.has_video_at(current_ts);
 
                     if is_sequential && !cache.seeking {
                         if let Some((ts, data)) =
@@ -1083,7 +1118,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 
                 // "No video at this time" overlay when there is no raw data
                 // near the current playback position.
-                if !cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US) {
+                if !cache.has_video_at(current_ts) {
                     ui.painter()
                         .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                     ui.put(
@@ -1133,7 +1168,7 @@ pub fn connect_streams(
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
+                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
@@ -1146,7 +1181,7 @@ pub fn connect_streams(
                     bevy::log::debug!(
                         "video stream connected: msg_name={}, raw_dims={:?}",
                         stream.msg_name,
-                        stream.raw_rgba_dims
+                        stream.raw_dims
                     );
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
                     stream.state = StreamState::Active;
@@ -1180,7 +1215,7 @@ pub fn connect_streams(
                 if !cache.backfill_in_flight && retry_ok && cache.backfill_frontier < last_updated.0
                 {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
+                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     cache.backfill_retry_at = Some(Instant::now());
@@ -1197,7 +1232,7 @@ pub fn connect_streams(
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
+                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
@@ -1281,5 +1316,38 @@ fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
         } else {
             cache.last_displayed_ts = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gray8_expands_to_opaque_rgba() {
+        let mut rgba = [0; 8];
+        assert!(copy_raw_frame_to_rgba(
+            &[16, 235],
+            &mut rgba,
+            RawPixelFormat::Gray8
+        ));
+        assert_eq!(rgba, [16, 16, 16, 255, 235, 235, 235, 255]);
+    }
+
+    #[test]
+    fn gray8_backfill_uses_one_byte_per_pixel() {
+        let gray = backfill_frame_limit(Some((640, 512, RawPixelFormat::Gray8)), false);
+        let rgba = backfill_frame_limit(Some((640, 512, RawPixelFormat::Rgba8)), false);
+        assert_eq!(gray, rgba * 4);
+    }
+
+    #[test]
+    fn live_hold_keeps_video_when_playhead_is_ahead() {
+        let mut cache = VideoFrameCache::default();
+        cache.insert_raw(Timestamp(1_000_000), vec![0, 0, 0, 1, 0x65]);
+        assert!(cache.has_video_at(Timestamp(1_000_000)));
+        assert!(cache.has_video_at(Timestamp(2_500_000)));
+        assert!(!cache.has_video_at(Timestamp(4_000_000)));
+        assert!(!cache.has_video_at(Timestamp(0)));
     }
 }

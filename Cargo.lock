@@ -5697,6 +5697,7 @@ dependencies = [
  "egui_tiles",
  "eql",
  "fastrand 2.4.1",
+ "ffmpeg-next",
  "flume",
  "fuzzy-matcher",
  "hamann-chen-line",

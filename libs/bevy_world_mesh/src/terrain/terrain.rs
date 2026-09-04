@@ -59,8 +59,6 @@ impl TerrainConfig {
 pub const PLANAR_ATLAS_MIN: u32 = 64;
 /// Working-set cap. LOD5 planar datasets are 341 tiles; 1024 layers is ~2 GiB.
 pub const PLANAR_ATLAS_MAX: u32 = 256;
-/// Preprocess must hold every on-disk tile. First-run `config.tc` is empty.
-pub const PLANAR_PREPROCESS_ATLAS_MIN: u32 = 1024;
 
 /// GPU atlas layers for a planar region: at least [`PLANAR_ATLAS_MIN`], at
 /// most [`PLANAR_ATLAS_MAX`], and never larger than the on-disk tile count
@@ -72,10 +70,10 @@ pub fn planar_atlas_size(dataset_tiles: u32) -> u32 {
     dataset_tiles.clamp(PLANAR_ATLAS_MIN, PLANAR_ATLAS_MAX)
 }
 
-/// Atlas layers for the preprocess binary. Must fit the full dataset, not
-/// the runtime working set.
-pub fn planar_preprocess_atlas_size(dataset_tiles: u32) -> u32 {
-    dataset_tiles.max(PLANAR_PREPROCESS_ATLAS_MIN)
+/// Atlas layers for the preprocess binary: the whole planar tile pyramid,
+/// `(4^lod_count - 1) / 3` tiles (341 at LOD 5), lives in the atlas at once.
+pub fn planar_preprocess_atlas_size(dataset_tiles: u32, lod_count: u32) -> u32 {
+    dataset_tiles.max((4u32.pow(lod_count) - 1) / 3)
 }
 
 #[cfg(test)]
@@ -97,12 +95,9 @@ mod tests {
 
     #[test]
     fn planar_preprocess_atlas_holds_the_full_dataset() {
-        assert_eq!(planar_preprocess_atlas_size(0), PLANAR_PREPROCESS_ATLAS_MIN);
-        assert_eq!(
-            planar_preprocess_atlas_size(341),
-            PLANAR_PREPROCESS_ATLAS_MIN
-        );
-        assert_eq!(planar_preprocess_atlas_size(2048), 2048);
+        assert_eq!(planar_preprocess_atlas_size(0, 5), 341);
+        assert_eq!(planar_preprocess_atlas_size(341, 5), 341);
+        assert_eq!(planar_preprocess_atlas_size(2048, 5), 2048);
     }
 }
 

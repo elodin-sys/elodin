@@ -120,6 +120,7 @@ def setup_world(
         camera_model="boson640p",
         lens_hfov=18.0,
         effect="lwir",
+        format="gray8",
         near=0.1,
         far=100_000.0,
         pos_offset=[1.2, 0.0, 0.1],

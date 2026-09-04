@@ -29,6 +29,16 @@ pub struct Stream {
     pub id: StreamId,
 }
 
+/// Restrict a `RealTimeBatched` stream. An empty `component_ids` list means
+/// the full stream (no component filter).
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct SetStreamFilter {
+    pub id: StreamId,
+    pub component_ids: Vec<ComponentId>,
+    #[serde(default)]
+    pub frequency: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct VTableStream {
     pub id: PacketId,

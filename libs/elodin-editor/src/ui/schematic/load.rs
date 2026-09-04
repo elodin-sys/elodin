@@ -1489,12 +1489,29 @@ impl LoadSchematicParams<'_, '_> {
                     .clone()
                     .unwrap_or_else(|| format!("Sensor View {}", sensor_view.msg_name));
 
-                let raw_rgba_dims = self
+                let sensor_config = self
                     .sensor_camera_configs
                     .0
                     .iter()
-                    .find(|c| c.camera_name == sensor_view.msg_name)
-                    .map(|c| (c.width, c.height));
+                    .find(|c| c.camera_name == sensor_view.msg_name);
+                let raw_dims = sensor_config.and_then(|config| match config.format.as_str() {
+                    "h264" => None,
+                    "gray8" => Some((
+                        config.width,
+                        config.height,
+                        crate::ui::video_stream::RawPixelFormat::Gray8,
+                    )),
+                    _ => Some((
+                        config.width,
+                        config.height,
+                        crate::ui::video_stream::RawPixelFormat::Rgba8,
+                    )),
+                });
+                let frame_cache = if sensor_config.is_some_and(|config| config.format == "h264") {
+                    crate::ui::video_stream::VideoFrameCache::default()
+                } else {
+                    crate::ui::video_stream::VideoFrameCache::for_raw()
+                };
 
                 let entity = self
                     .commands
@@ -1502,7 +1519,7 @@ impl LoadSchematicParams<'_, '_> {
                         crate::ui::video_stream::VideoStream {
                             msg_id,
                             msg_name: sensor_view.msg_name.clone(),
-                            raw_rgba_dims,
+                            raw_dims,
                             ..Default::default()
                         },
                         bevy::ui::Node {
@@ -1514,7 +1531,7 @@ impl LoadSchematicParams<'_, '_> {
                             ..Default::default()
                         },
                         crate::ui::video_stream::VideoDecoderHandle::default(),
-                        crate::ui::video_stream::VideoFrameCache::for_raw_rgba(),
+                        frame_cache,
                     ))
                     .id();
 

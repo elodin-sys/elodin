@@ -13,10 +13,9 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
-use impeller2::buf::UmbraBuf;
 use impeller2_wkt::DbConfig;
-use zerocopy::FromBytes;
 
+use crate::msg_log::MsgLog;
 use crate::utils::{
     INDEX_HEADER_SIZE, MSG_HEADER_SIZE, is_timestamp_source_component, read_msg_timestamp_range,
     read_timestamp_range,
@@ -496,9 +495,7 @@ fn trim_msg_log(
 
     let timestamps_src = src_dir.join("timestamps");
     let offsets_src = src_dir.join("offsets");
-    let data_log_src = src_dir.join("data_log");
-
-    if !timestamps_src.exists() || !offsets_src.exists() {
+    if !timestamps_src.exists() || !offsets_src.exists() || !src_dir.join("data_log").exists() {
         write_empty_appendlog(&dst_dir.join("timestamps"))?;
         write_empty_appendlog(&dst_dir.join("offsets"))?;
         write_empty_appendlog(&dst_dir.join("data_log"))?;
@@ -506,7 +503,8 @@ fn trim_msg_log(
         return Ok((i64::MAX, i64::MIN));
     }
 
-    let msg_timestamps = read_msg_timestamps(&timestamps_src)?;
+    let src_log = MsgLog::open(src_dir)?;
+    let msg_timestamps = src_log.timestamps();
 
     if msg_timestamps.is_empty() {
         write_empty_appendlog(&dst_dir.join("timestamps"))?;
@@ -516,8 +514,8 @@ fn trim_msg_log(
         return Ok((i64::MAX, i64::MIN));
     }
 
-    let start_idx = msg_timestamps.partition_point(|&ts| ts < keep_start);
-    let end_idx = msg_timestamps.partition_point(|&ts| ts <= keep_end);
+    let start_idx = msg_timestamps.partition_point(|ts| ts.0 < keep_start);
+    let end_idx = msg_timestamps.partition_point(|ts| ts.0 <= keep_end);
 
     if start_idx >= end_idx {
         write_empty_appendlog(&dst_dir.join("timestamps"))?;
@@ -527,52 +525,14 @@ fn trim_msg_log(
         return Ok((i64::MAX, i64::MIN));
     }
 
-    let min_kept = msg_timestamps[start_idx];
-    let max_kept = msg_timestamps[end_idx - 1];
-
-    let src_offsets_data = read_appendlog_data(&offsets_src, MSG_HEADER_SIZE)?;
-    let src_data_log_data = read_appendlog_data(&data_log_src, MSG_HEADER_SIZE)?;
-
-    let umbra_buf_size = size_of::<UmbraBuf>();
-    let num_bufs = src_offsets_data.len() / umbra_buf_size;
-
-    let mut new_timestamps_data: Vec<u8> = Vec::new();
-    let mut new_offsets_data: Vec<u8> = Vec::new();
-    let mut new_data_log: Vec<u8> = Vec::new();
-
-    for (src_idx, &ts) in msg_timestamps[start_idx..end_idx].iter().enumerate() {
-        let abs_idx = start_idx + src_idx;
-        if abs_idx >= num_bufs {
-            break;
-        }
-        let buf_offset = abs_idx * umbra_buf_size;
-        let buf_bytes = &src_offsets_data[buf_offset..buf_offset + umbra_buf_size];
-        let umbra = <UmbraBuf>::ref_from_bytes(buf_bytes).expect("UmbraBuf alignment");
-
-        let len = umbra.len as usize;
-        if len <= 12 {
-            new_timestamps_data.extend_from_slice(&ts.to_le_bytes());
-            new_offsets_data.extend_from_slice(buf_bytes);
-        } else {
-            let old_offset = unsafe { umbra.data.offset.offset } as usize;
-            if old_offset + len > src_data_log_data.len() {
-                break;
-            }
-            let payload = &src_data_log_data[old_offset..old_offset + len];
-            let prefix: [u8; 4] = payload[..4].try_into().expect("trivial cast");
-            let new_offset = new_data_log.len() as u32;
-            new_data_log.extend_from_slice(payload);
-            let new_buf = UmbraBuf::with_offset(len as u32, prefix, new_offset);
-            new_timestamps_data.extend_from_slice(&ts.to_le_bytes());
-            new_offsets_data.extend_from_slice(zerocopy::IntoBytes::as_bytes(&new_buf));
-        }
+    let min_kept = msg_timestamps[start_idx].0;
+    let max_kept = msg_timestamps[end_idx - 1].0;
+    let dst_log = MsgLog::create(dst_dir)?;
+    for index in start_idx..end_idx {
+        let (ts, payload) = src_log.get_index(index).ok_or(Error::BadMessage)?;
+        dst_log.push(ts, &payload)?;
     }
-
-    write_msg_appendlog(&dst_dir.join("timestamps"), &new_timestamps_data)?;
-    write_msg_appendlog(&dst_dir.join("offsets"), &new_offsets_data)?;
-    write_msg_appendlog(&dst_dir.join("data_log"), &new_data_log)?;
-
-    sync_dir(dst_dir)?;
+    dst_log.sync_all()?;
     Ok((min_kept, max_kept))
 }
 
@@ -728,6 +688,7 @@ fn write_trimmed_data(
 
 // -- Message log I/O helpers --
 
+#[cfg(test)]
 fn read_msg_timestamps(path: &Path) -> Result<Vec<i64>, Error> {
     let mut file = File::open(path)?;
     let mut header = [0u8; MSG_HEADER_SIZE];
@@ -759,33 +720,6 @@ fn read_msg_timestamps(path: &Path) -> Result<Vec<i64>, Error> {
     Ok(timestamps)
 }
 
-fn read_appendlog_data(path: &Path, header_size: usize) -> Result<Vec<u8>, Error> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut file = File::open(path)?;
-    let mut header_buf = vec![0u8; header_size];
-    let bytes_read = file.read(&mut header_buf)?;
-
-    if bytes_read < header_size {
-        return Ok(Vec::new());
-    }
-
-    let committed_len = u64::from_le_bytes(header_buf[0..8].try_into().unwrap()) as usize;
-    let committed_len = committed_len.max(header_size);
-    let data_len = committed_len.saturating_sub(header_size);
-
-    if data_len == 0 {
-        return Ok(Vec::new());
-    }
-
-    let mut data = vec![0u8; data_len];
-    file.read_exact(&mut data)?;
-
-    Ok(data)
-}
-
 fn write_msg_appendlog(path: &Path, data: &[u8]) -> Result<(), Error> {
     let committed_len = (MSG_HEADER_SIZE + data.len()) as u64;
     let mut header = [0u8; MSG_HEADER_SIZE];
@@ -809,7 +743,8 @@ fn write_empty_appendlog(path: &Path) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2::types::ComponentId;
+    use impeller2::buf::UmbraBuf;
+    use impeller2::types::{ComponentId, Timestamp};
     use impeller2_wkt::ComponentMetadata;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -1130,6 +1065,38 @@ mod tests {
 
         let msg_timestamps = read_msg_timestamps(&output_path.join("msgs/42/timestamps")).unwrap();
         assert_eq!(msg_timestamps, vec![2_000_000]);
+    }
+
+    #[test]
+    fn test_trim_segmented_msg_log() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("db");
+        let output_path = temp.path().join("trimmed");
+        create_test_db(&db_path, &[("comp", 0, &[1_000_000, 2_000_000, 3_000_000])]).unwrap();
+
+        let msg_dir = db_path.join("msgs/42");
+        let log = MsgLog::create_with_segment_limit(&msg_dir, 32).unwrap();
+        log.push(Timestamp(1_000_000), &[1u8; 20]).unwrap();
+        log.push(Timestamp(2_000_000), &[2u8; 20]).unwrap();
+        log.push(Timestamp(3_000_000), &[3u8; 20]).unwrap();
+
+        run(
+            db_path,
+            Some(1_500_000),
+            None,
+            Some(output_path.clone()),
+            false,
+            true,
+        )
+        .unwrap();
+
+        let trimmed = MsgLog::open(output_path.join("msgs/42")).unwrap();
+        assert_eq!(
+            trimmed.timestamps(),
+            &[Timestamp(2_000_000), Timestamp(3_000_000)]
+        );
+        assert_eq!(trimmed.get_index(0).unwrap().1.as_ref(), &[2u8; 20]);
+        assert_eq!(trimmed.get_index(1).unwrap().1.as_ref(), &[3u8; 20]);
     }
 
     #[test]

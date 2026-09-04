@@ -72,7 +72,9 @@ pub fn terrain_config() -> TerrainConfig {
 
 /// Preprocess atlas: one layer per on-disk tile, not the runtime working set.
 pub fn preprocess_terrain_config() -> TerrainConfig {
-    terrain_config_with_atlas(crate::terrain::terrain::planar_preprocess_atlas_size)
+    terrain_config_with_atlas(|tiles| {
+        crate::terrain::terrain::planar_preprocess_atlas_size(tiles, LOD_COUNT)
+    })
 }
 
 fn terrain_config_with_atlas(atlas_size: fn(u32) -> u32) -> TerrainConfig {

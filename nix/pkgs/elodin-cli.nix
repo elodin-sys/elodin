@@ -35,12 +35,16 @@
         (rustToolchain pkgs)
         makeWrapper # Required for wrapProgram in postInstall
         protobuf
+        clang
       ]
       ++ common.commonNativeBuildInputs;
 
     buildInputs = with pkgs;
       [
         python
+        # libavutil / libavcodec for live sensor-camera H.264 (ffmpeg-next).
+        # headless avoids ffmpeg-full's whisper dep, which fails on Aleph.
+        ffmpeg-headless
       ]
       ++ common.commonBuildInputs
       ++ lib.optionals pkgs.stdenv.isDarwin common.darwinDeps
@@ -51,6 +55,7 @@
     doCheck = false;
 
     GIT_HASH = gitRev;
+    LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
 
     postInstall = ''
       wrapProgram $out/bin/elodin \

@@ -212,13 +212,17 @@ impl UmbraBuf {
     ///
     /// Prefix is the first 4 bytes of the payload
     pub fn with_offset(len: u32, prefix: [u8; 4], offset: u32) -> Self {
+        Self::with_segment_offset(len, prefix, 0, offset)
+    }
+
+    pub fn with_segment_offset(len: u32, prefix: [u8; 4], segment_index: u32, offset: u32) -> Self {
         debug_assert!(len > 12, "offset is only valid for lens above 12");
         Self {
             len,
             data: UmbraBufData {
                 offset: LongBufOffset {
                     prefix,
-                    _index: 0,
+                    segment_index,
                     offset,
                 },
             },
@@ -227,11 +231,24 @@ impl UmbraBuf {
 
     /// Returns the offset of the UmbraBuf if it is an offset buffer
     pub fn offset(&self) -> Option<u32> {
-        if self.len >= 12 {
-            Some(unsafe { self.data.offset.offset })
-        } else {
-            None
+        self.long_offset().map(|o| o.offset)
+    }
+
+    /// Returns the external-buffer segment if this is an offset buffer.
+    pub fn segment_index(&self) -> Option<u32> {
+        self.long_offset().map(|o| o.segment_index)
+    }
+
+    /// First four payload bytes copied into a long `UmbraBuf`.
+    pub fn prefix(&self) -> Option<[u8; 4]> {
+        self.long_offset().map(|o| o.prefix)
+    }
+
+    fn long_offset(&self) -> Option<LongBufOffset> {
+        if self.len <= 12 {
+            return None;
         }
+        LongBufOffset::read_from_bytes(&self.as_bytes()[4..]).ok()
     }
 }
 
@@ -258,9 +275,40 @@ unsafe impl IntoBytes for UmbraBufData {
 pub struct LongBufOffset {
     /// A copy of the first 4 bytes of the data stored in the long buf
     pub prefix: [u8; 4],
-    /// Which buffer to pull the data from, in our case this is always zero, but we need to keep this
-    /// field for compatibility
-    pub _index: u32,
+    /// Which external buffer stores the payload.
+    ///
+    /// On-disk this was always the middle word (`_index`, 0 for single-segment
+    /// logs). Do not reorder these fields.
+    pub segment_index: u32,
     /// The offset into the buffer that contains the data
     pub offset: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_buf_exposes_segment_and_offset() {
+        let buf = UmbraBuf::with_segment_offset(20, [1, 2, 3, 4], 7, 99);
+        assert_eq!(buf.segment_index(), Some(7));
+        assert_eq!(buf.offset(), Some(99));
+        let inline = UmbraBuf::with_inline(4, [0; 12]);
+        assert_eq!(inline.segment_index(), None);
+        assert_eq!(inline.offset(), None);
+        assert_eq!(inline.prefix(), None);
+    }
+
+    #[test]
+    fn historical_single_segment_bytes_keep_offset_in_last_word() {
+        let mut raw = [0u8; 16];
+        raw[0..4].copy_from_slice(&20u32.to_le_bytes());
+        raw[4..8].copy_from_slice(&[1, 2, 3, 4]);
+        raw[8..12].copy_from_slice(&0u32.to_le_bytes());
+        raw[12..16].copy_from_slice(&99u32.to_le_bytes());
+        let buf = UmbraBuf::read_from_bytes(&raw).unwrap();
+        assert_eq!(buf.prefix(), Some([1, 2, 3, 4]));
+        assert_eq!(buf.segment_index(), Some(0));
+        assert_eq!(buf.offset(), Some(99));
+    }
 }

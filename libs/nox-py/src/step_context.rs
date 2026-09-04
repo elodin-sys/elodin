@@ -143,6 +143,42 @@ impl StepContext {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller2::types::msg_id;
+
+    #[test]
+    fn read_msg_latest_returns_timestamp_and_payload() {
+        pyo3::prepare_freethreaded_python();
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        db.push_msg(Timestamp(42), msg_id("camera.gray"), &[1, 2, 3])
+            .unwrap();
+        let ctx = StepContext::new(
+            db,
+            Arc::new(AtomicU64::new(0)),
+            Timestamp(42),
+            0,
+            Timestamp::EPOCH,
+            None,
+        );
+
+        Python::with_gil(|py| {
+            let (timestamp, payload) = ctx.read_msg_latest(py, "camera.gray").unwrap().unwrap();
+            assert_eq!(timestamp, 42);
+            assert_eq!(
+                payload
+                    .call_method0("tolist")
+                    .unwrap()
+                    .extract::<Vec<u8>>()
+                    .unwrap(),
+                [1, 2, 3]
+            );
+        });
+    }
+}
+
 #[pymethods]
 impl StepContext {
     /// Write component data to the database.
@@ -331,6 +367,25 @@ impl StepContext {
             } else {
                 Ok(None)
             }
+        })
+    }
+
+    /// Return the newest message's timestamp and payload.
+    fn read_msg_latest<'py>(
+        &self,
+        py: Python<'py>,
+        msg_name: &str,
+    ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        let msg_id = impeller2::types::msg_id(msg_name);
+        self.db.with_state(|state| {
+            let Some(msg_log) = state.get_msg_log(msg_id) else {
+                return Ok(None);
+            };
+            let Some((timestamp, payload)) = msg_log.latest() else {
+                return Ok(None);
+            };
+            let data = numpy::PyArray1::from_vec(py, payload.to_vec()).into_any();
+            Ok(Some((timestamp.0, data)))
         })
     }
 

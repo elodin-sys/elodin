@@ -2861,6 +2861,7 @@ mod ellipsoid_covariance_tests {
             frame: Some(GeoFrame::NED),
             frame_orientation: Some(GeoFrame::ECEF),
             orientation: Default::default(),
+            sensor_visible: true,
             icon: None,
             thrusters: Vec::new(),
             mesh_visibility_range: None,

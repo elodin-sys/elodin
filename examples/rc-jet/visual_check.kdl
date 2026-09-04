@@ -1,0 +1,23 @@
+coordinate frame="ECEF" lat=35.350664 lon=-117.809027 alt=589.274
+
+timeline follow_latest=#true range="last_5s"
+
+environment {
+    sun illuminance=100000.0 shadows=#true direction="(-0.870, -0.488, -0.070)"
+    ambient scale=0.05
+}
+
+// Same planar DEM lift as bdx.kdl: tz = 700 - (621.5 - 450) puts the mesh
+// surface on the pad's ENU origin (physics ellipsoid 589.274 m).
+world_mesh "mojave_rc_field" frame="ENU" translate="(0.000, 0.000, 528.000)"
+
+tabs {
+    hsplit name="LWIR parity" {
+        sensor_view "cam.ir_rgba" name="LWIR RGBA"
+        sensor_view "cam.ir_gray8" name="LWIR gray8"
+    }
+}
+
+object_3d target.world_pos {
+    glb path="edu-450-v2-drone.glb" scale=10.0
+}

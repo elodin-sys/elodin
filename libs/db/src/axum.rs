@@ -113,7 +113,7 @@ pub fn msg_stream(
         let waiter = msg_log.waiter();
         let _ = waiter.wait().await;
         let (_, buf) = msg_log.latest()?;
-        let json = match postcard_dyn::from_slice_dyn(&metadata.schema, buf) {
+        let json = match postcard_dyn::from_slice_dyn(&metadata.schema, &buf) {
             Ok(v) => v,
 
             Err(err) => {

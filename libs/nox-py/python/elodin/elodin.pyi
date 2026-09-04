@@ -162,6 +162,9 @@ class StepContext:
             exists at all).
         """
         ...
+    def read_msg_latest(self, msg_name: str) -> Optional[Tuple[int, Any]]:
+        """Return the latest message timestamp and NumPy ``uint8`` payload."""
+        ...
     def stop_recipes(self) -> None:
         """Gracefully terminate all s10-managed recipes (external processes).
 

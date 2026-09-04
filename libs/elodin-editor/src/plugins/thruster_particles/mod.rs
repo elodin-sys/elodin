@@ -1484,6 +1484,7 @@ mod tests {
                 frame: None,
                 frame_orientation: None,
                 orientation: Default::default(),
+                sensor_visible: true,
                 icon: None,
                 thrusters,
                 mesh_visibility_range: None,
