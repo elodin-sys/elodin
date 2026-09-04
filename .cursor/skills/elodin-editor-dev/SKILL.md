@@ -29,7 +29,7 @@ cargo run --bin elodin editor 127.0.0.1:2240
 | `ELODIN_KDL_DIR` | `.` (cwd) | Directory for `.kdl` schematic files |
 | `ELODIN_GPU` | `auto` | Nix shell GPU path (`nvidia` / `mesa` / `nvk`). Set **before** `nix develop`. |
 | `ELODIN_GPU_PANIC` | unset | Set to `true` to force the GPU-not-found panic and print the `ELODIN_GPU=… nix develop` help. |
-| `ELODIN_H264_ENCODER` | `auto` | Live `sensor_camera` `format="h264"`: `auto` tries NVENC / VideoToolbox / VAAPI then OpenH264; `cpu` forces OpenH264; any other value is an FFmpeg encoder name (`h264_nvenc`, …). |
+| `ELODIN_H264_ENCODER` | `auto` | Live `sensor_camera` `format="h264"`: `auto` tries NVENC / VideoToolbox then OpenH264; `cpu` forces OpenH264; any other value is an FFmpeg encoder name (`h264_nvenc`, …). `h264_vaapi` is not supported. |
 
 ## Cargo features
 

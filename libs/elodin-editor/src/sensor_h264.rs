@@ -1,7 +1,8 @@
 //! Live sensor-camera H.264 encode.
 //!
-//! Prefers a hardware encoder (NVENC / VideoToolbox / VAAPI via FFmpeg) and
+//! Prefers a hardware encoder (NVENC / VideoToolbox via FFmpeg) and
 //! falls back to OpenH264. Override with `ELODIN_H264_ENCODER=cpu|auto|<name>`.
+//! `h264_vaapi` is not wired: ffmpeg-next has no VAAPI device context.
 
 use std::collections::VecDeque;
 
@@ -149,7 +150,7 @@ fn hw_encoder_names() -> &'static [&'static str] {
     }
     #[cfg(target_os = "linux")]
     {
-        &["h264_nvenc", "h264_vaapi"]
+        &["h264_nvenc"]
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -232,6 +233,12 @@ impl HardwareEncoder {
         use ffmpeg_next::util::frame::Video;
         use ffmpeg_next::{Dictionary, Rational, encoder};
 
+        if name == "h264_vaapi" {
+            return Err(
+                "h264_vaapi needs an FFmpeg VAAPI device context; ffmpeg-next does not expose one"
+                    .to_string(),
+            );
+        }
         ffmpeg_next::init().map_err(|err| format!("ffmpeg init: {err}"))?;
         let codec = encoder::find_by_name(name).ok_or_else(|| format!("{name} not in ffmpeg"))?;
         let mut encoder = codec::context::Context::new_with_codec(codec)
@@ -266,10 +273,6 @@ impl HardwareEncoder {
                 opts.set("realtime", "1");
                 opts.set("allow_sw", "0");
                 opts.set("profile", "baseline");
-            }
-            "h264_vaapi" => {
-                opts.set("async_depth", "1");
-                opts.set("b_depth", "1");
             }
             _ => {}
         }
@@ -676,6 +679,15 @@ mod tests {
     fn rejects_odd_dimensions() {
         assert!(SensorH264Encoder::new(31, 32, 30.0).is_err());
         assert!(SensorH264Encoder::new(32, 31, 30.0).is_err());
+    }
+
+    #[test]
+    fn vaapi_is_not_opened_without_a_device_context() {
+        let err = match super::HardwareEncoder::open("h264_vaapi", 64, 64, 30.0) {
+            Ok(_) => panic!("h264_vaapi must not open without a device context"),
+            Err(err) => err,
+        };
+        assert!(err.contains("VAAPI device context"), "{err}");
     }
 
     #[test]
