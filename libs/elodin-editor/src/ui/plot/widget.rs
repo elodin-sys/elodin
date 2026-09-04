@@ -211,6 +211,10 @@ pub enum PlotDataSource<'a> {
     },
 }
 
+fn has_timeseries_selection(graph_state: &GraphState) -> bool {
+    !graph_state.components.is_empty() || graph_state.derived.is_some()
+}
+
 #[derive(Debug)]
 pub struct TimeseriesPlot {
     selected_range: Range<Timestamp>,
@@ -870,7 +874,7 @@ impl TimeseriesPlot {
                         );
                         ui.label(PrettyDuration(offset).to_string());
                         let mut current_component_path: Option<&ComponentPath> = None;
-                        for ((component_path, line_index), (entity, color)) in
+                        for ((component_path, _line_index), (entity, color)) in
                             graph_state.enabled_lines.iter()
                         {
                             let Ok(line_handle) = line_handles.get(*entity) else {
@@ -897,22 +901,27 @@ impl TimeseriesPlot {
                                             .color(with_opacity(get_scheme().text_primary, 0.6)),
                                     );
                                     ui.add_space(8.0);
+                                } else if graph_state
+                                    .derived
+                                    .as_ref()
+                                    .is_some_and(|derived| derived.path == *component_path)
+                                {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(graph_state.label.clone())
+                                            .size(11.0)
+                                            .color(with_opacity(get_scheme().text_primary, 0.6)),
+                                    );
+                                    ui.add_space(8.0);
                                 }
                             }
-
-                            let Some(line_data) = collected_graph_data
-                                .get_line(&component_path.id, *line_index)
-                                .and_then(|h| lines.get(h))
-                            else {
-                                continue;
-                            };
 
                             let value = line
                                 .data
                                 .get_nearest(timestamp)
                                 .map(|(_time, x)| format_num(*x as f64))
                                 .unwrap_or_else(|| "N/A".to_string());
-                            modal_series_row(ui, *color, &line_data.label, &value);
+                            modal_series_row(ui, *color, &line.label, &value);
                         }
                     }
                     PlotDataSource::XY {
@@ -1058,7 +1067,7 @@ impl TimeseriesPlot {
 
         // Check if we have data
         let (has_data, xy_point_count) = match &data_source {
-            PlotDataSource::Timeseries { .. } => (!graph_state.components.is_empty(), 0),
+            PlotDataSource::Timeseries { .. } => (has_timeseries_selection(graph_state), 0),
             PlotDataSource::XY {
                 xy_lines, series, ..
             } => {
@@ -2449,7 +2458,35 @@ pub fn graph_touch(
 
 #[cfg(test)]
 mod short_window_y_tests {
-    use super::should_update_short_window_y;
+    use super::{has_timeseries_selection, should_update_short_window_y};
+    use crate::{
+        plugins::render_layer_alloc::RenderLayerAllocator,
+        ui::plot::{DerivedGraph, GraphBundle},
+    };
+    use impeller2_bevy::ComponentPath;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn derived_graph_counts_as_a_timeseries_selection() {
+        let mut allocator = RenderLayerAllocator::default();
+        let mut graph_state =
+            GraphBundle::try_new(&mut allocator, BTreeMap::new(), "sqrt".to_string())
+                .expect("render layer")
+                .graph_state;
+        assert!(!has_timeseries_selection(&graph_state));
+
+        graph_state.derived = Some(DerivedGraph {
+            source: "sample.value.sqrt()".to_string(),
+            expr: eql::Expr::FloatLiteral(0.0),
+            dependencies: Vec::new(),
+            lines: Vec::new(),
+            colors: Vec::new(),
+            path: ComponentPath::from_name("derived.sqrt"),
+            last_generation: 0,
+            last_range: None,
+        });
+        assert!(has_timeseries_selection(&graph_state));
+    }
 
     #[test]
     fn short_y_hysteresis_ignores_small_drift() {
