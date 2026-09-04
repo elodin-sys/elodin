@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-841/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-841/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-841/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-841/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-841/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Python Client | Elodin</title>
+<meta name="description" content="Stream external telemetry from Python with elodin.db">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-841/logo.png">
+  
+  <meta name="twitter:title" content="Python Client">
+  <meta name="twitter:description" content="Stream external telemetry from Python with elodin.db">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Python Client">
+  <meta property="og:description" content="Stream external telemetry from Python with elodin.db">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-841/home/db/python-client/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-841/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Python Client">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-841/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-841/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Db",
+            "item": "https://docs.elodin.systems/preview/pr-841/home/db/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Python Client",
+            "item": "https://docs.elodin.systems/preview/pr-841/home/db/python-client/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.19.1" selected>
+                        v0.19.1
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-841/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-841/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-841/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/apollo-lander/"
+                    >Apollo Lander</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/"
+                    >Python Client</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#quick-start">Quick start</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#writing-telemetry">Writing telemetry</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#schema-declaration">Schema declaration</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#never-block-a-control-loop">Never block a control loop</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#reading-telemetry">Reading telemetry</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#message-logs-events">Message logs (events)</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#example-drive-a-3d-viewport-from-a-flight-controller">Example: drive a 3D viewport from a flight controller</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/#lifecycle-troubleshooting">Lifecycle &amp; troubleshooting</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Python Client</h1>
+                  
+                  <p class="lead">Write and read Elodin DB telemetry from any plain Python process with `elodin.db`.</p>
+                   <p>The <code>elodin</code> Python wheel ships a first-class Elodin DB client: <code>elodin.db</code>.
+It lets any Python process — a hardware-in-the-loop rig, a third-party
+simulator bridge, a flight-test logger, a notebook — start or connect to
+Elodin DB, write telemetry, and read it back. No Elodin simulation required.
+This page is a guided tour; the full API surface is documented in the
+<a href="/reference/python-api#elodin-db-client">Python API reference</a>, and a runnable
+end-to-end demo lives at <code>examples/db-client</code> in the repository
+(<code>uv run python examples/db-client/main.py</code>).</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">pip</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#2AA198, #2AA198);"> elodin</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">      #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> or use the repo&#39;s nix devshell + `just install`</span></span></code></pre><h2 id="quick-start">Quick start</h2>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>db</span><span style="color: light-dark(#859900, #859900);"> as</span><span> edb</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Embedded server (tests, notebooks, single-box logging) — or connect to an</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> external `elodin-db run` instance instead.</span></span>
+<span class="giallo-l"><span>server</span><span style="color: light-dark(#859900, #859900);"> =</span><span> edb</span><span>.</span><span>Server</span><span>.</span><span>start</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./dbs/run42</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:2240</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>client</span><span style="color: light-dark(#859900, #859900);"> =</span><span> edb</span><span>.</span><span>Client</span><span>.</span><span>connect</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:2240</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>writer</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>table_writer</span><span>(</span><span>{</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> edb</span><span>.</span><span>f64</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>]</span><span>.</span><span>labeled</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">x</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">y</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">z</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.cmd.throttle</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> edb</span><span>.</span><span>f64</span><span>,</span></span>
+<span class="giallo-l"><span>}</span><span>)</span></span>
+<span class="giallo-l"><span>writer</span><span>.</span><span>write</span><span>(</span><span>timestamp_us</span><span style="color: light-dark(#859900, #859900);">=</span><span>t_us</span><span>,</span><span> values</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> [</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#859900, #859900);"> -</span><span style="color: light-dark(#D33682, #D33682);">9.81</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.cmd.throttle</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#D33682, #D33682);"> 0.42</span><span>,</span></span>
+<span class="giallo-l"><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>ts</span><span>,</span><span> accel</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>time_series</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> t0_us</span><span>,</span><span> t1_us</span><span>)</span></span>
+<span class="giallo-l"><span>table</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>sql</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">SELECT * FROM drone_imu_accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> pyarrow.Table</span></span></code></pre>
+<p>Everything written this way is a normal Elodin DB citizen: plottable live in
+the Elodin Editor (<code>elodin editor 127.0.0.1:2240</code>, with <code>.labeled(...)</code> names
+appearing as axis labels), queryable via <code>:sql</code> in <code>elodin-db lua</code>, and
+replicable with follow mode.</p>
+<h2 id="writing-telemetry">Writing telemetry</h2>
+<h3 id="schema-declaration">Schema declaration</h3>
+<p>A writer is declared once with the component names, dtypes, shapes, and
+optional element labels:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>writer</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>table_writer</span><span>(</span></span>
+<span class="giallo-l"><span>    {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span>    edb</span><span>.</span><span>f64</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>]</span><span>.</span><span>labeled</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">x</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">y</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">z</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.gyro</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span>     edb</span><span>.</span><span>f64</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.cmd.throttle</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> edb</span><span>.</span><span>f64</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.cmd.body_rate</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> edb</span><span>.</span><span>f32</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">race.active_gate</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span>   edb</span><span>.</span><span>i32</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">nav.covariance</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span>     edb</span><span>.</span><span>f64</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 3</span><span>]</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> tensors up to rank 3</span></span>
+<span class="giallo-l"><span>    }</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>All primitive types are supported: <code>f32/f64</code>, <code>i8..i64</code>, <code>u8..u64</code>, <code>bool_</code>.
+Every write emits exactly <strong>one</strong> Impeller2 <code>Table</code> packet: a shared <code>i64</code>
+timestamp followed by each field's values — one packet per tick, not one per
+component. All declared fields are required on every write; use one writer
+per rate group (e.g. one 110 Hz IMU writer, one 50 Hz control writer).</p>
+<h3 id="never-block-a-control-loop">Never block a control loop</h3>
+<p><code>write</code> blocks until the row is handed to the socket and raises on failure.
+<code>write_nowait</code> never blocks and never raises for transport reasons — rows are
+shed according to the queue policy when the database is unreachable or the
+bounded queue is full:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>writer</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>table_writer</span><span>(</span><span>schema</span><span>,</span><span> queue</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drop-oldest</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> maxlen</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">2048</span><span>)</span></span>
+<span class="giallo-l"><span>writer</span><span>.</span><span>write_nowait</span><span>(</span><span>timestamp_us</span><span style="color: light-dark(#859900, #859900);">=</span><span>t_us</span><span>,</span><span> values</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#CB4B16, #CB4B16);">...</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> microseconds-cheap</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">print</span><span>(</span><span>writer</span><span>.</span><span>dropped</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">      #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> rows shed so far</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">print</span><span>(</span><span>writer</span><span>.</span><span>state</span><span>(</span><span>)</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">      #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> &quot;Connected&quot; | &quot;Disconnected&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">print</span><span>(</span><span>writer</span><span>.</span><span>last_error</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> most recent transport error or DB rejection</span></span></code></pre>
+<p>Writers reconnect automatically with the component-metadata + vtable
+handshake replayed. Server-side rejections (e.g. re-registering a component
+with a different shape) surface asynchronously via <code>writer.last_error</code>.</p>
+<p>For nanosecond sources, declare the writer with <code>timestamp="ns"</code> and pass
+<code>timestamp_ns=</code> to writes; the database stores microseconds.</p>
+<p>For one-off scripts there is also <code>client.send(name, values, timestamp_us)</code> —
+a convenience single-component f64 write.</p>
+<h2 id="reading-telemetry">Reading telemetry</h2>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Discovery</span></span>
+<span class="giallo-l"><span>client</span><span>.</span><span>components</span><span>(</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">          #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> {name: ComponentInfo(prim_type, shape, element_names, ...)}</span></span>
+<span class="giallo-l"><span>client</span><span>.</span><span>earliest_timestamp</span><span>(</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> first data timestamp (µs)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Latest value (starts a background real-time subscription on first call).</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Values keep their true dtype and shape.</span></span>
+<span class="giallo-l"><span>sample</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>latest</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Sample(name, timestamp_us, values)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Historical range [start_us, stop_us) — paginated internally, returns numpy</span></span>
+<span class="giallo-l"><span>ts</span><span>,</span><span> pos</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>time_series</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.vio.position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> t0_us</span><span>,</span><span> t1_us</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Live stream (rows of the requested components as they arrive)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">for</span><span> row</span><span style="color: light-dark(#859900, #859900);"> in</span><span> client</span><span>.</span><span>stream</span><span>(</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.cmd.throttle</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">    print</span><span>(</span><span>row</span><span>.</span><span>timestamp_us</span><span>,</span><span> row</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.imu.accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Fixed-rate replay of recorded data</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">for</span><span> row</span><span style="color: light-dark(#859900, #859900);"> in</span><span> client</span><span>.</span><span>stream</span><span>(</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.vio.position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>,</span><span> rate_hz</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">50</span><span>,</span><span> start</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">earliest</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">    ...</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> SQL over the same socket; component names map to snake_case table names</span></span>
+<span class="giallo-l"><span>name</span><span style="color: light-dark(#859900, #859900);"> =</span><span> edb</span><span>.</span><span>sql_table_name</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.vio.position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> &quot;drone_vio_position&quot;</span></span>
+<span class="giallo-l"><span>df</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>sql</span><span>(</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">f</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">SELECT * FROM </span><span style="color: light-dark(#CB4B16, #CB4B16);">{</span><span>name</span><span style="color: light-dark(#CB4B16, #CB4B16);">}</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>.</span><span>to_pandas</span><span>(</span><span>)</span></span></code></pre>
+<p><code>client.stream(...)</code> returns an iterator usable as a context manager;
+iteration ends when the stream is closed or its connection fails. <code>start</code>
+accepts <code>"earliest"</code>, <code>"latest"</code>, or an integer microsecond timestamp.</p>
+<h2 id="message-logs-events">Message logs (events)</h2>
+<p>Discrete events with variable-length payloads use the message-log API.
+Payload encoding is a v1 convenience: <code>bytes</code> pass through untouched, <code>str</code>
+is UTF-8, anything else is JSON.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>client</span><span>.</span><span>send_msg</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">race.collision</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">id</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#D33682, #D33682);"> 1001</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">impulse</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#D33682, #D33682);"> 2.4</span><span>}</span><span>,</span><span> timestamp_us</span><span style="color: light-dark(#859900, #859900);">=</span><span>t_us</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>msgs</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>get_msgs</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">race.collision</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> t0_us</span><span>,</span><span> t1_us</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> [(timestamp_us, payload)]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">with</span><span> client</span><span>.</span><span>msg_stream</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">race.collision</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#859900, #859900);"> as</span><span> stream</span><span>:</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">      #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> live, new messages only</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    for</span><span> t_us</span><span>,</span><span> payload</span><span style="color: light-dark(#859900, #859900);"> in</span><span> stream</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">        ...</span></span></code></pre>
+<p>Live message streams wake on new data and may coalesce bursts to the latest
+message per wake. Use <code>get_msgs</code> for lossless historical reads.</p>
+<h2 id="example-drive-a-3d-viewport-from-a-flight-controller">Example: drive a 3D viewport from a flight controller</h2>
+<p>Anything that writes a <code>world_pos</code>-shaped component — 7 <code>f64</code>s holding a
+scalar-last quaternion <code>(q0, q1, q2, q3)</code> followed by an <code>(x, y, z)</code> position
+— can place a GLB model in an Editor viewport. Stream your attitude solution
+under a namespaced entity, e.g. <code>drone.world_pos</code>:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>db</span><span style="color: light-dark(#859900, #859900);"> as</span><span> edb</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>client</span><span style="color: light-dark(#859900, #859900);"> =</span><span> edb</span><span>.</span><span>Client</span><span>.</span><span>connect</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:2240</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>writer</span><span style="color: light-dark(#859900, #859900);"> =</span><span> client</span><span>.</span><span>table_writer</span><span>(</span></span>
+<span class="giallo-l"><span>    {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> edb</span><span>.</span><span>f64</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">7</span><span>]</span><span>.</span><span>labeled</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">q0</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">q1</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">q2</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">q3</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">x</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">y</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">z</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>}</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> in the estimator loop (e.g. attitude determination on the flight controller):</span></span>
+<span class="giallo-l"><span>writer</span><span>.</span><span>write_nowait</span><span>(</span></span>
+<span class="giallo-l"><span>    timestamp_us</span><span style="color: light-dark(#859900, #859900);">=</span><span>t_us</span><span>,</span></span>
+<span class="giallo-l"><span>    values</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> [</span><span>qx</span><span>,</span><span> qy</span><span>,</span><span> qz</span><span>,</span><span> qw</span><span>,</span><span> x</span><span>,</span><span> y</span><span>,</span><span> z</span><span>]</span><span>}</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> identity = 0,0,0,1</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>Then a KDL schematic (<code>drone.kdl</code>) loads a GLB model at that pose and keeps
+the camera on it:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="kdl"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">coordinate</span><span style="color: light-dark(#93A1A1, #93A1A1);"> frame</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">ENU</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">timeline</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">viewport</span><span style="color: light-dark(#93A1A1, #93A1A1);"> name</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">chase</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#93A1A1, #93A1A1);"> pos</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.world_pos + (0,0,0,0, -6, 0, 2)</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#93A1A1, #93A1A1);"> look_at</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#93A1A1, #93A1A1);"> show_grid</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#B58900, #B58900);">#true</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">object_3d</span><span style="color: light-dark(#2AA198, #2AA198);"> drone.world_pos</span><span> {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">    glb</span><span style="color: light-dark(#93A1A1, #93A1A1);"> path</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">assets/drone.glb</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#93A1A1, #93A1A1);"> scale</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#D33682, #D33682);">1.0</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>Open the Editor against the database with the schematic:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2240</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-kdl</span><span style="color: light-dark(#2AA198, #2AA198);"> drone.kdl</span></span></code></pre>
+<p>The <code>object_3d</code> element accepts any EQL expression that evaluates to a
+<code>world_pos</code>-like value, so the same pattern works for estimator ghosts
+(<code>drone.ekf_pos</code> vs <code>drone.vio_pos</code>), targets, or any other entity your
+process publishes. See the <a href="/reference/schematic">schematic reference</a> for
+the full <code>viewport</code>/<code>object_3d</code> syntax.</p>
+<h2 id="lifecycle-troubleshooting">Lifecycle &amp; troubleshooting</h2>
+<ul>
+<li><code>Server</code>, <code>Client</code>, <code>TableWriter</code>, and both stream types are context
+managers; <code>close()</code> is idempotent.</li>
+<li>Timestamps in the public API are <strong>microseconds</strong> (<code>int</code>), the database's
+native resolution.</li>
+<li>Set <code>ELODIN_DB_LOG=debug</code> (any <code>tracing</code> filter works) to surface the
+embedded server's and client's diagnostics from an <code>elodin.db</code>-using
+process.</li>
+</ul>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                    
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-841&#x2F;home&#x2F;aleph&#x2F;betaflight&#x2F;">
+        <div>
+            <div class="footer-card">&larr; Betaflight Install</div>
+        </div>
+    </a>
+                  
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+                                
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/search.js"></script>
+
+
+</body>
+
+</html>

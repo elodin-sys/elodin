@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-841/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-841/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-841/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-841/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-841/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-841/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Three-Body Orbit | Elodin</title>
+<meta name="description" content="Example using a classic physics problem.">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-841/home/3-body/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-841/logo.png">
+  
+  <meta name="twitter:title" content="Three-Body Orbit">
+  <meta name="twitter:description" content="Example using a classic physics problem.">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Three-Body Orbit">
+  <meta property="og:description" content="Example using a classic physics problem.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-841/home/3-body/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-841/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Three-Body Orbit">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-841/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-841/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "3 Body",
+            "item": "https://docs.elodin.systems/preview/pr-841/home/3-body/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.19.1" selected>
+                        v0.19.1
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-841/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-841/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-841/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-841/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-841/home/apollo-lander/"
+                    >Apollo Lander</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/python-client/"
+                    >Python Client</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/db/grpc-client/"
+                    >gRPC Client</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-841/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#import-elodin-and-jax">Import Elodin and JAX</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#add-1st-2nd-body">Add 1st &amp; 2nd Body</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#add-a-basic-system">Add a basic system</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#let-s-try-running-the-simulation">Let&#x27;s try running the simulation</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#setup-gravity-constraints">Setup Gravity Constraints</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#add-the-third-body">Add the Third Body</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#a-stable-starting-configuration">A stable starting configuration</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#add-some-gizmos">Add some gizmos</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#checking-your-work">Checking your work</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#make-it-fancy">Make it fancy</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#going-further">Going further</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-841/home/3-body/#next-steps">Next Steps</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Three-Body Orbit</h1>
+                   <img src="/assets/three-body-screenshot.jpg" alt="three-body-screenshot"/>
+<br></br>
+<p>The <a rel="external" href="https://en.wikipedia.org/wiki/Three-body_problem">three-body problem</a> is a classic orbital dynamics situation.
+You have three bodies, each with significant mass, all interacting gravitationally.
+This turns out to be a <a rel="external" href="https://en.wikipedia.org/wiki/Chaos_theory">chaotic system</a>, with no general closed-form solution. There are however
+a few stable configurations of the three-body problem.</p>
+<p>In this tutorial, we will model one of the stable configurations from
+R. A. Broucke's technical report <a rel="external" href="https://ntrs.nasa.gov/api/citations/19680013800/downloads/19680013800.pdf">"Period Orbits in the Restricted Three-Body Problem with Earth Moon Masses"</a>.</p>
+<h4 id="import-elodin-and-jax">Import Elodin and JAX</h4>
+<p>Our first step is to import Elodin and Jax into our environment:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> jax</span><span style="color: light-dark(#859900, #859900);"> import</span><span> numpy</span><span style="color: light-dark(#859900, #859900);"> as</span><span> jnp</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> jax</span><span>.</span><span>numpy</span><span style="color: light-dark(#859900, #859900);"> import</span><span> linalg</span><span style="color: light-dark(#859900, #859900);"> as</span><span> la</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">SIM_TIME_STEP</span><span style="color: light-dark(#859900, #859900);"> =</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#D33682, #D33682);"> 120.0</span></span></code></pre>
+<p><code>SIM_TIME_STEP</code> value is the duration of each tick in the simulation.</p>
+<h4 id="add-1st-2nd-body">Add 1st &amp; 2nd Body</h4>
+<p>Before we can do anything we'll need an instance of a World, and with that we can spawn our first entities:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>w</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>World</span><span>(</span><span>frame</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Frame</span><span>.</span><span style="color: light-dark(#CB4B16, #CB4B16);">GCRF</span><span>)</span></span>
+<span class="giallo-l"><span>mesh</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Mesh</span><span>.</span><span>sphere</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">0.2</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>a</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">25.3</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 18.4</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">A</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>b</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#859900, #859900);"> -</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 10.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">B</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre><h4 id="add-a-basic-system">Add a basic system</h4>
+<p>Let's bring in the simplified earth gravity system we just used in the ball example:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">@</span><span style="color: light-dark(#268BD2, #268BD2);">el</span><span style="color: light-dark(#268BD2, #268BD2);">.</span><span style="color: light-dark(#268BD2, #268BD2);">map</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> gravity</span><span>(</span><span>f</span><span>:</span><span> el</span><span>.</span><span>Force</span><span>,</span><span> inertia</span><span>:</span><span> el</span><span>.</span><span>Inertia</span><span>)</span><span> -&gt;</span><span> el</span><span>.</span><span>Force</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> f</span><span style="color: light-dark(#859900, #859900);"> +</span><span> el</span><span>.</span><span>SpatialForce</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#859900, #859900);"> -</span><span style="color: light-dark(#D33682, #D33682);">9.81</span><span>]</span><span>)</span><span style="color: light-dark(#859900, #859900);"> *</span><span> inertia</span><span>.</span><span>mass</span><span>(</span><span>)</span><span>)</span></span></code></pre><h4 id="let-s-try-running-the-simulation">Let's try running the simulation</h4>
+<p>But first, let's add a view port so we can observe the world:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    el</span><span>.</span><span>Panel</span><span>.</span><span>viewport</span><span>(</span></span>
+<span class="giallo-l"><span>        pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#859900, #859900);"> -</span><span style="color: light-dark(#D33682, #D33682);">3.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 3.0</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>        looking_at</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>        hdr</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">True</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">Viewport 1</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>Now, we're ready to start simulating:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>sys</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>six_dof</span><span>(</span><span>sys</span><span style="color: light-dark(#859900, #859900);">=</span><span>gravity</span><span>)</span></span>
+<span class="giallo-l"><span>sim</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>run</span><span>(</span><span>sys</span><span>,</span><span style="color: light-dark(#CB4B16, #CB4B16);"> SIM_TIME_STEP</span><span>)</span></span></code></pre>
+<p>At this point you should have a running simulation, with two bodies that simply fall just like the ball example.
+However we don't want a simulation of basic earth gravity, but instead we want the bodies to interact which
+each other gravitationally like planetary bodies, so let's update our system for that next.</p>
+<h4 id="setup-gravity-constraints">Setup Gravity Constraints</h4>
+<p>The gravitational force between two bodies is given by <a rel="external" href="https://en.wikipedia.org/wiki/Newton%27s_law_of_universal_gravitation#">Newton's law of universal gravitation</a>:
+$$
+F_{ba}=-G\frac{m_bm_a}{|r_{ba}|^3}{r}_{ba}
+$$
+<div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Notice how we're using the <a rel="external" href="https://en.wikipedia.org/wiki/Newton%27s_law_of_universal_gravitation#Vector_form">Vector form</a> of Newton's law,
+instead of the more well known <a rel="external" href="https://en.wikipedia.org/wiki/Newton%27s_law_of_universal_gravitation#Modern_form">scalar form</a>. This is
+because we're working in a 3D space. Sometimes you may have to convert between the two forms yourself.</p>
+</div>
+    </div>
+</div>
+</p>
+<p>Let's model this as a system that iterates over all gravity edges in a graph of connected bodies and calculates the forces between them.
+Modeling with graphs and edges is a more advanced Elodin API, review the documentation for it <a href="/reference/python-api/#class-elodin-graphquery">here</a>.</p>
+<p>
+    <img class="light-only" src="&#x2F;assets&#x2F;gravity-edge-light.png" alt="Gravity Constraints Light" />
+    <img class="dark-only" src="&#x2F;assets&#x2F;gravity-edge-dark.png" alt="Gravity Constraints Dark" />
+</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Set the gravitational constant for Newton&#39;s law of universal gravitation</span></span>
+<span class="giallo-l"><span>G</span><span style="color: light-dark(#859900, #859900);"> =</span><span style="color: light-dark(#D33682, #D33682);"> 6.6743e-11</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Define a new &quot;gravity edge&quot; component type</span></span>
+<span class="giallo-l"><span>GravityEdge</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>Annotated</span><span>[</span><span>el</span><span>.</span><span>Edge</span><span>,</span><span> el</span><span>.</span><span>Component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">gravity_edge</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> el</span><span>.</span><span>ComponentType</span><span>.</span><span>Edge</span><span>)</span><span>]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Define a new &quot;gravity constraint&quot; archetype using the gravity edge component</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">@</span><span style="color: light-dark(#268BD2, #268BD2);">el</span><span style="color: light-dark(#268BD2, #268BD2);">.</span><span style="color: light-dark(#268BD2, #268BD2);">dataclass</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">class</span><span style="color: light-dark(#CB4B16, #CB4B16);"> GravityConstraint</span><span>(</span><span style="color: light-dark(#6C71C4, #6C71C4);">el</span><span>.</span><span style="color: light-dark(#6C71C4, #6C71C4);">Archetype</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span>    a</span><span>:</span><span> GravityEdge</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    def</span><span style="color: light-dark(#268BD2, #268BD2);"> __init__</span><span>(</span><span>self</span><span>,</span><span> a</span><span>:</span><span> el</span><span>.</span><span>EntityId</span><span>,</span><span> b</span><span>:</span><span> el</span><span>.</span><span>EntityId</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">        self</span><span>.</span><span>a</span><span style="color: light-dark(#859900, #859900);"> =</span><span> GravityEdge</span><span>(</span><span>a</span><span>,</span><span> b</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Replace our simple system with one that applies gravity by iterating over</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> all gravity edge components, accessing the positions and inertias of both edges</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">@</span><span style="color: light-dark(#268BD2, #268BD2);">el</span><span style="color: light-dark(#268BD2, #268BD2);">.</span><span style="color: light-dark(#268BD2, #268BD2);">system</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> gravity</span><span>(</span></span>
+<span class="giallo-l"><span>    graph</span><span>:</span><span> el</span><span>.</span><span>GraphQuery</span><span>[</span><span>GravityEdge</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>    query</span><span>:</span><span> el</span><span>.</span><span>Query</span><span>[</span><span>el</span><span>.</span><span>WorldPos</span><span>,</span><span> el</span><span>.</span><span>Inertia</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span> -&gt;</span><span> el</span><span>.</span><span>Query</span><span>[</span><span>el</span><span>.</span><span>Force</span><span>]</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Create a fold function to take an accumulator and the query results for the</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> left and right entities, and apply Newton&#39;s law of universal gravitation:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    def</span><span style="color: light-dark(#268BD2, #268BD2);"> gravity_fn</span><span>(</span><span>force</span><span>,</span><span> a_pos</span><span>,</span><span> a_inertia</span><span>,</span><span> b_pos</span><span>,</span><span> b_inertia</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span>        r</span><span style="color: light-dark(#859900, #859900);"> =</span><span> a_pos</span><span>.</span><span>linear</span><span>(</span><span>)</span><span style="color: light-dark(#859900, #859900);"> -</span><span> b_pos</span><span>.</span><span>linear</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span>        m</span><span style="color: light-dark(#859900, #859900);"> =</span><span> a_inertia</span><span>.</span><span>mass</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span>        M</span><span style="color: light-dark(#859900, #859900);"> =</span><span> b_inertia</span><span>.</span><span>mass</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span>        norm</span><span style="color: light-dark(#859900, #859900);"> =</span><span> la</span><span>.</span><span>norm</span><span>(</span><span>r</span><span>)</span></span>
+<span class="giallo-l"><span>        f</span><span style="color: light-dark(#859900, #859900);"> =</span><span> G</span><span style="color: light-dark(#859900, #859900);"> *</span><span> M</span><span style="color: light-dark(#859900, #859900);"> *</span><span> m</span><span style="color: light-dark(#859900, #859900);"> *</span><span> r</span><span style="color: light-dark(#859900, #859900);"> /</span><span> (</span><span>norm</span><span style="color: light-dark(#859900, #859900);"> *</span><span> norm</span><span style="color: light-dark(#859900, #859900);"> *</span><span> norm</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">        #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> returns the updated force value applied to the left entity this tick</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        return</span><span> el</span><span>.</span><span>Force</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>force</span><span>.</span><span>force</span><span>(</span><span>)</span><span style="color: light-dark(#859900, #859900);"> -</span><span> f</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> graph</span><span>.</span><span>edge_fold</span><span>(</span></span>
+<span class="giallo-l"><span>        left_query</span><span style="color: light-dark(#859900, #859900);">=</span><span>query</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> i.e. fetches WorldPos and Inertia components from A</span></span>
+<span class="giallo-l"><span>        right_query</span><span style="color: light-dark(#859900, #859900);">=</span><span>query</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> reusing the same query for B</span></span>
+<span class="giallo-l"><span>        return_type</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Force</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> matching the system query return type</span></span>
+<span class="giallo-l"><span>        init_value</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Force</span><span>(</span><span>)</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> initial value for the fold function accumulator</span></span>
+<span class="giallo-l"><span>        fold_fn</span><span style="color: light-dark(#859900, #859900);">=</span><span>gravity_fn</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> the function you defined above to apply to each edge</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Add the gravity constraint entities to the world</span></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>GravityConstraint</span><span>(</span><span>a</span><span>,</span><span> b</span><span>)</span><span>,</span><span> name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">A -&gt; B</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>GravityConstraint</span><span>(</span><span>b</span><span>,</span><span> a</span><span>)</span><span>,</span><span> name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">B -&gt; A</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span></code></pre>
+<p>Also let's update the initial mass of our two bodies with the gravitational constant, this
+will give them a mass more representative of a planetary body:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span></code></pre>
+<p>Go ahead and run the simulation again, and you should see the two bodies interacting gravitationally.
+<div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>You'll want to make sure to always keep the <code>six_dof()</code> and <code>w.run()</code> calls at the end of your script.</p>
+</div>
+    </div>
+</div>
+</p>
+<video autoplay loop muted playsinline style="width: 100%; height: auto;">
+  <source src="/assets/2-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
+  <source src="/assets/2-body.h264.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+<h4 id="add-the-third-body">Add the Third Body</h4>
+<p>What's a gravitational system without a third body? Let's add a third body to the system.</p>
+<p>
+    <img class="light-only" src="&#x2F;assets&#x2F;3-body-light.png" alt="3-Body Light" />
+    <img class="dark-only" src="&#x2F;assets&#x2F;3-body-dark.png" alt="3-Body Dark" />
+</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>c</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">0.2</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.6</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 10.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">C</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>GravityConstraint</span><span>(</span><span>a</span><span>,</span><span> c</span><span>)</span><span>,</span><span> name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">A -&gt; C</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>GravityConstraint</span><span>(</span><span>b</span><span>,</span><span> c</span><span>)</span><span>,</span><span> name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">B -&gt; C</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>GravityConstraint</span><span>(</span><span>c</span><span>,</span><span> a</span><span>)</span><span>,</span><span> name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">C -&gt; A</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>GravityConstraint</span><span>(</span><span>c</span><span>,</span><span> b</span><span>)</span><span>,</span><span> name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">C -&gt; B</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span></code></pre>
+<p>If you run the simulation now, you'll see the three bodies interacting gravitationally. However, you'll notice that the it's a bit unstable.</p>
+<h4 id="a-stable-starting-configuration">A stable starting configuration</h4>
+<p>There are many known stable configurations for three-body systems, one of the most famous being the <a rel="external" href="https://en.wikipedia.org/wiki/Lagrange_point">Lagrange points</a>.
+For our first attempt we'll reference the <a rel="external" href="http://three-body.ipb.ac.rs/bsol.php?id=18">Brouke R 7 configuration</a>, which is a stable configuration for three bodies of equal mass.</p>
+<p>Go ahead and update the starting values for our three bodies to the following:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>a</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.8920281421</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.9957939373</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">25.3</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 18.4</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">A</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>b</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">0.6628498947</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#859900, #859900);"> -</span><span style="color: light-dark(#D33682, #D33682);">1.6191613336</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 10.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">B</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>c</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">0.2291782474</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.6233673964</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 10.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">C</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>Start the simulation again, and you should see the three bodies in a stable configuration.</p>
+<h4 id="add-some-gizmos">Add some gizmos</h4>
+<p>Sometimes it can be helpful to visualize the forces acting on the bodies and their movements in 3D space. Add these two
+lines to see a few options in action:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>el</span><span>.</span><span>VectorArrow</span><span>(</span><span>a</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">world_vel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> offset</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>,</span><span> body_frame</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">False</span><span>,</span><span> scale</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span>)</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>w</span><span>.</span><span>spawn</span><span>(</span><span>el</span><span>.</span><span>Line3d</span><span>(</span><span>b</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> index</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">4</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 5</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 6</span><span>]</span><span>,</span><span> line_width</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>)</span><span>)</span></span></code></pre>
+<p>Start the simulation again to see the gizmos in action.</p>
+<h4 id="checking-your-work">Checking your work</h4>
+<p>And that's it! You can now run the simulation and see the three bodies orbiting around each other in a stable configuration.
+If you'd like to check your work, you can compare to the example at <code>examples/three-body/</code>.</p>
+<h4 id="make-it-fancy">Make it fancy</h4>
+<p>Thanks to the amazing work done <a rel="external" href="https://observablehq.com/@rreusser/periodic-planar-three-body-orbits">here</a>, you can easily
+try a variety of stable configurations for the three-body system. Let's take the full set of Broucke's stable configurations
+and randomly select from them on each run of the simulation, for fun.</p>
+<p>Add a few new imports to the top of your script, as well as fetching the JSON data from the URL and selecting a random orbit:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> requests</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> random</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> json</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> URL of Bourke&#39;s stable orbits JSON data</span></span>
+<span class="giallo-l"><span>url</span><span style="color: light-dark(#859900, #859900);"> =</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">https://docs.elodin.systems/assets/brouke-stable-orbits.json</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Fetch data and select a random orbit</span></span>
+<span class="giallo-l"><span>orbit</span><span style="color: light-dark(#859900, #859900);"> =</span><span> random</span><span>.</span><span>choice</span><span>(</span><span>json</span><span>.</span><span>loads</span><span>(</span><span>requests</span><span>.</span><span>get</span><span>(</span><span>url</span><span>)</span><span>.</span><span>text</span><span>)</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Example resulting object:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     &quot;name&quot;: &quot;Broucke A 1&quot;,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     &quot;url&quot;: &quot;http://three-body.ipb.ac.rs/bsol.php?id=0&quot;,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     &quot;pos&quot;: [</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       [-0.9892620043, 0.0],</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       [2.2096177241, 0.0],</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       [-1.2203557197, 0.0]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     ],</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     &quot;vel&quot;: [</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       [0.0, 1.9169244185],</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       [0.0, 0.1910268738],</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       [0.0, -2.1079512924]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     ]</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   },</span></span></code></pre>
+<p>Then update your body creation to use the randomly selected orbit values for each of the three bodies:
+<div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>The stable orbits are all in the x-y plane, so we set the z element of the position and velocity to 0.0.</p>
+</div>
+    </div>
+</div>
+</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>a_pos</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#859900, #859900);">float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">pos</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">pos</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span></span>
+<span class="giallo-l"><span>a_vel</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#859900, #859900);">float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">vel</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">vel</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>b_pos</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#859900, #859900);">float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">pos</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">pos</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span></span>
+<span class="giallo-l"><span>b_vel</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#859900, #859900);">float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">vel</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">vel</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>c_pos</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#859900, #859900);">float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">pos</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">2</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">pos</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">2</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span></span>
+<span class="giallo-l"><span>c_vel</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#859900, #859900);">float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">vel</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">2</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#859900, #859900);"> float</span><span>(</span><span>orbit</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">vel</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">2</span><span>]</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>)</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>]</span></span>
+<span class="giallo-l"><span>a</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>a_pos</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>a_vel</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">25.3</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 18.4</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">A</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>b</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>b_pos</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>b_vel</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 10.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">B</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>c</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>spawn</span><span>(</span></span>
+<span class="giallo-l"><span>    [</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Body</span><span>(</span></span>
+<span class="giallo-l"><span>            world_pos</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldPos</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>c_pos</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            world_vel</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>WorldVel</span><span>(</span><span>linear</span><span style="color: light-dark(#859900, #859900);">=</span><span>jnp</span><span>.</span><span>array</span><span>(</span><span>c_vel</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>            inertia</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Inertia</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">1.0</span><span style="color: light-dark(#859900, #859900);"> /</span><span> G</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>Shape</span><span>(</span><span>mesh</span><span>,</span><span> w</span><span>.</span><span>insert_asset</span><span>(</span><span>el</span><span>.</span><span>Material</span><span>.</span><span>color</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">0.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 10.0</span><span>)</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">C</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>And voila, you have a randomly selected stable three-body system!</p>
+<video autoplay loop muted playsinline style="width: 100%; height: auto;">
+  <source src="/assets/3-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
+  <source src="/assets/3-body.h264.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+<h4 id="going-further">Going further</h4>
+<p>You'll notice all of the simulations we've done here are in the x-y plane. As a further exercise, you could try to extend
+what you've learned here to find and apply the starting configurations for stable three-body systems in all three dimensions.</p>
+<p>Post what you discover in the <a rel="external" href="https://discord.gg/7vzr8j6">Elodin Discord</a>!</p>
+<h2 id="next-steps">Next Steps</h2>
+<p>In the next tutorial we'll explore adding multiple systems and breaking up your code into files:</p>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;home&#x2F;bouncing-ball&#x2F;">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-ball"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Bouncing Ball Tutorial
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Learn how to model a bouncing ball in windy conditions.</p>
+</p>
+    </div>
+</a>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+            
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-841&#x2F;home&#x2F;aleph&#x2F;setup&#x2F;">
+        <div>
+            <div class="footer-card">Aleph Setup &rarr;</div>
+        </div>
+    </a>
+                                                      
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-841/js/search.js"></script>
+
+
+</body>
+
+</html>
