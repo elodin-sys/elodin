@@ -4,6 +4,16 @@
 
 ## v0.19
 
+### v0.19.1
+- **(feat)** Add H.264 and gray8 sensor-camera outputs, with hardware-accelerated live encoding (NVENC, VideoToolbox) and an OpenH264 fallback. (#827)
+- **(feat)** Add `StepContext.read_msg_latest()` and the `sensor_visible` flag on `Object3D`. (#827)
+- **(fix)** Fix plot line flicker on auto-refreshing query plots. (#829)
+- **(fix)** Propagate headless simulation failures to the `elodin` exit code. (#837, #838)
+- **(chore)** Bump Bevy Hanabi and update the Falcon 9 effects. (#836)
+- **(chore)** Add `nix run .#elodin` as an alias for `nix run .`. (#828)
+- **(chore)** Install FFmpeg for release editor builds and add a post-merge release dry-run. (#831, #835, #839)
+- **(doc)** Add an incremental Betaflight racing plan. (#830)
+
 ### v0.19.0
 - **(feat)** Report CPU, GPU, and plot-buffer usage in the status bar, with a `Dump GPU Allocations` command. (#817)
 - **(feat)** Open a recorded database directly with `elodin editor <path-to-db-folder>`. (#807)

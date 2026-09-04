@@ -15,7 +15,19 @@ order = 1
 
 ## v0.19
 
+### v0.19.1
+- **(feat)** Add H.264 and gray8 sensor-camera outputs, with hardware-accelerated live encoding (NVENC, VideoToolbox) and an OpenH264 fallback. (#827)
+- **(feat)** Add `StepContext.read_msg_latest()` and the `sensor_visible` flag on `Object3D`. (#827)
+- **(fix)** Fix plot line flicker on auto-refreshing query plots. (#829)
+- **(fix)** Propagate headless simulation failures to the `elodin` exit code. (#837, #838)
+- **(chore)** Bump Bevy Hanabi and update the Falcon 9 effects. (#836)
+- **(chore)** Add `nix run .#elodin` as an alias for `nix run .`. (#828)
+- **(chore)** Install FFmpeg for release editor builds and add a post-merge release dry-run. (#831, #835, #839)
+- **(doc)** Add an incremental Betaflight racing plan. (#830)
+
 ### v0.19.0
+- **(feat)** Report CPU, GPU, and plot-buffer usage in the status bar, with a `Dump GPU Allocations` command. (#817)
+- **(feat)** Open a recorded database directly with `elodin editor <path-to-db-folder>`. (#807)
 - **(feat)** Add a native Earth environment. (#778, #795)
 - **(feat)** Add heliocentric relative dynamics to Voyager. (#789)
 - **(feat)** Add Voyager trajectory error telemetry. (#769)
@@ -23,12 +35,18 @@ order = 1
 - **(feat)** Add an artificial horizon gauge. (#753)
 - **(feat)** Add headless video capture. (#754, #757)
 - **(feat)** Add --kdl to allow local KDL and asset development. (#763)
+- **(feat:examples)** Model the RC-jet on measured BDX aero data, with WGS84 ECEF trim, a Mojave RC field scene, and an LWIR sensor camera. (#820)
+- **(feat:examples)** Update Betaflight SITL to 2026.6.1 with 8 kHz real-time lockstep. (#815, #818)
 - **(feat:aleph)** Add initrd-based one-shot Aleph UEFI and OS flashing over USB-C. (#748)
 - **(feat:db)** Add Elodin DB gRPC. (#772)
 - **(feat:db)** Add `elodin-db export --format mcap`. (#746)
+- **(fix)** Fix video-stream GStreamer plugin discovery and Apollo `elodin run` exit. (#812)
+- **(fix)** Fix cinematic viewport lighting and overlays leaking into regular panes. (#811)
+- **(fix)** Limit viewport `far` to frustum visualization only. (#802)
+- **(fix)** Scale the viewport grid from camera distance. (#800)
 - **(fix)** Fix view-cube ECEF face labels, zoom in/out. (#796, #790, #758)
 - **(fix)** Fix Betaflight takeoff. (#791)
-- **(fix)** Fix GPU OOM and fins animation. (#788)
+- **(fix)** Fix GPU OOM and fins animation. (#788, #817)
 - **(fix)** Generate schematic planes in Z-up so identity pose is ground. (#786, #793)
 - **(fix)** Fix ECEF translate and add `ned_to_ecef()`. (#774)
 - **(fix)** Prevent an editor crash when scrubbing with particles. (#777)
@@ -40,8 +58,10 @@ order = 1
 - **(fix)** Restore minimal terrain rendering. (#761)
 - **(fix:examples)** Put Apollo thruster particles in schematic Z-up. (#797)
 - **(fix:impeller2)** Skip and log malformed fields instead of dropping the table. (#762)
+- **(perf)** Bump to Rust 1.98 and use algebraic float methods on hot paths. (#798)
 - **(perf)** Improve editor FPS on DB playback. (#771)
 - **(chore)** Bump Bevy Hanabi. (#773)
+- **(doc)** Index the examples by domain and by Elodin object. (#819)
 
 ## v0.18
 
