@@ -290,20 +290,39 @@ impl SchematicParam<'_, '_> {
                         let mut colors: Vec<impeller2_wkt::Color> = vec![];
                         let mut parts: Vec<String> = Vec::new();
 
-                        for (component_path, component_values) in &graph_state.components {
-                            for (index, (enabled, color)) in component_values.iter().enumerate() {
-                                if !*enabled {
-                                    continue;
+                        if let Some(derived) = &graph_state.derived {
+                            eql = derived.source.clone();
+                            for index in 0..derived.lines.len().max(derived.colors.len()) {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(derived.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| derived.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller2_wkt::Color::from_color32(color));
                                 }
-                                parts.push(component_expr(component_path, index, &self.metadata));
-                                colors.push(impeller2_wkt::Color::from_color32(*color));
                             }
-                        }
+                        } else {
+                            for (component_path, component_values) in &graph_state.components {
+                                for (index, (enabled, color)) in component_values.iter().enumerate()
+                                {
+                                    if !*enabled {
+                                        continue;
+                                    }
+                                    parts.push(component_expr(
+                                        component_path,
+                                        index,
+                                        &self.metadata,
+                                    ));
+                                    colors.push(impeller2_wkt::Color::from_color32(*color));
+                                }
+                            }
 
-                        if !parts.is_empty() {
-                            eql = parts.join(", ");
-                        } else if !graph_state.label.is_empty() {
-                            eql = graph_state.label.clone();
+                            if !parts.is_empty() {
+                                eql = parts.join(", ");
+                            } else if !graph_state.label.is_empty() {
+                                eql = graph_state.label.clone();
+                            }
                         }
 
                         let node_id = impeller2_wkt::NodeId::next();
@@ -879,7 +898,7 @@ impl EqlExt for eql::Expr {
             eql::Expr::ArrayAccess(expr, _)
             | eql::Expr::Last(expr, _)
             | eql::Expr::First(expr, _) => expr.requires_plot_evaluation(),
-            eql::Expr::Tuple(exprs) => exprs.iter().any(Self::requires_plot_evaluation),
+            eql::Expr::Tuple(_) => true,
             eql::Expr::ComponentPart(_)
             | eql::Expr::Time(_)
             | eql::Expr::FloatLiteral(_)

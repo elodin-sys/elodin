@@ -24,7 +24,8 @@ pub use widget::{
     AXIS_LABEL_MARGIN, LockTracker, NOTCH_LENGTH, PlotBounds, PlotDataSource, PlotWidget,
     STEPS_X_WIDTH_DIVISOR, STEPS_Y_HEIGHT_DIVISOR, TimeseriesPlot, XSyncClock, XYPlotSeries,
     auto_y_bounds, draw_borders, draw_y_axis, get_inner_rect, graph_touch, pan_graph, pretty_round,
-    reset_graph, sync_graphs, sync_locked_graphs, track_lock_toggles, zoom_graph,
+    reset_graph, sync_derived_graphs, sync_graphs, sync_locked_graphs, track_lock_toggles,
+    zoom_graph,
 };
 
 mod state;
@@ -72,7 +73,13 @@ impl Plugin for PlotPlugin {
                 Update,
                 queue_timestamp_read.after(update_series_fetch_priority),
             )
-            .add_systems(Update, auto_y_bounds.after(sync_graphs))
+            .add_systems(
+                Update,
+                sync_derived_graphs
+                    .after(queue_timestamp_read)
+                    .after(sync_graphs),
+            )
+            .add_systems(Update, auto_y_bounds.after(sync_derived_graphs))
             .add_plugins(PlotGpuPlugin);
     }
 }
