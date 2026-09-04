@@ -52,7 +52,7 @@ def build() -> ui.Schematic:
             ui.vsplit(
                 ui.graph(world_pos, name="World pos (quaternion + xyz)"),
                 ui.graph(ground_speed, name="Ground speed (m/s)"),
-                ui.graph(ground_speed.sqrt(), name="Square root of ground speed"),
+                ui.graph(ground_speed.sqrt() + 1, name="Square root of ground speed"),
                 name="Pose",
             ),
         ),
