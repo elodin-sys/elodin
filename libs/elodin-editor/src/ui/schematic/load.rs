@@ -44,7 +44,7 @@ use crate::{
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::GraphBundle,
+        plot::{DerivedGraph, GraphBundle},
         query_plot::QueryPlotData,
         schematic::{CurrentSchematic, EqlExt},
         tiles::{
@@ -1265,11 +1265,13 @@ impl LoadSchematicParams<'_, '_> {
                     })
                     .ok()?;
                 let graph_label = graph_label(graph);
-                let uses_query_plot = eql.requires_plot_evaluation();
+                let requires_evaluation = eql.requires_plot_evaluation();
+                let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
+                let uses_query_plot = requires_evaluation && !uses_derived_plot;
 
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
-                if !uses_query_plot {
+                if !requires_evaluation {
                     let mut component_vec = eql.to_graph_components();
                     component_vec.sort();
                     for (j, (component, i)) in component_vec.iter().enumerate() {
@@ -1306,6 +1308,30 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
+                if uses_derived_plot {
+                    let mut dependencies: Vec<_> = eql
+                        .to_graph_components()
+                        .into_iter()
+                        .map(|(path, _)| path.id)
+                        .collect();
+                    dependencies.sort();
+                    dependencies.dedup();
+                    bundle.graph_state.derived = Some(DerivedGraph {
+                        source: graph.eql.clone(),
+                        expr: eql.clone(),
+                        dependencies,
+                        lines: Vec::new(),
+                        colors: graph
+                            .colors
+                            .iter()
+                            .copied()
+                            .map(EColor::into_color32)
+                            .collect(),
+                        path: ComponentPath::from_name(&format!("derived.{graph_label}")),
+                        last_generation: u64::MAX,
+                        last_range: None,
+                    });
+                }
 
                 let mut entity_cmds = self.commands.spawn(bundle);
                 if uses_query_plot {
@@ -2628,7 +2654,7 @@ mod tests {
     }
 
     #[test]
-    fn formula_graph_uses_query_plot_evaluation() {
+    fn formula_graph_uses_sample_evaluation() {
         let mut app = test_app();
         install_scalar_eql_component(&mut app);
         let schematic = Schematic::from_kdl(r#"graph "sample.value.sqrt()" name="Square root""#)
@@ -2636,19 +2662,26 @@ mod tests {
 
         load_schematic(&mut app, &schematic);
 
-        let mut query = app
+        let mut graph_query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let graphs: Vec<_> = graph_query.iter(app.world()).collect();
+        assert_eq!(graphs.len(), 1);
+        assert!(graphs[0].components.is_empty());
+        let derived = graphs[0].derived.as_ref().expect("derived graph");
+        assert_eq!(
+            derived.dependencies,
+            vec![impeller2::types::ComponentId::new("sample.value")]
+        );
+
+        let mut query_plot = app
             .world_mut()
             .query::<&crate::ui::query_plot::QueryPlotData>();
-        let plots: Vec<_> = query.iter(app.world()).collect();
-        assert_eq!(plots.len(), 1);
-        assert_eq!(plots[0].data.query, "sample.value.sqrt()");
-        let sql = crate::ui::sql_eql::eql_to_sql_with_time(
-            &app.world().resource::<EqlContext>().0,
-            &plots[0].data.query,
-        )
-        .expect("plot SQL");
-        assert!(sql.contains("sample_value.time"));
-        assert!(sql.contains("sqrt(sample_value.sample_value)"));
+        assert_eq!(query_plot.iter(app.world()).count(), 0);
+
+        let saved = save_schematic(&mut app);
+        assert!(
+            impeller2_kdl::serialize_schematic(&saved)
+                .contains(r#"graph "sample.value.sqrt()" name="Square root""#)
+        );
     }
 
     #[test]

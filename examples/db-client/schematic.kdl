@@ -22,6 +22,7 @@ tabs {
     vsplit name="Pose" {
         graph "drone.world_pos" name="World pos (quaternion + xyz)"
         graph "drone.nav.speed" name="Ground speed (m/s)"
+        graph "drone.nav.speed.sqrt()" name="Square root of ground speed"
     }
 }
 

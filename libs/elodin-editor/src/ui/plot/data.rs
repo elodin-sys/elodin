@@ -184,6 +184,112 @@ pub struct CollectedGraphData {
     pub components: BTreeMap<ComponentId, PlotDataComponent>,
 }
 
+pub(crate) struct EvaluatedSeries {
+    pub timestamps: Vec<Timestamp>,
+    pub values: Vec<Vec<f32>>,
+}
+
+fn component_eval_value(value: &ComponentValue) -> eql::eval::EvalValue {
+    use nox::ArrayBuf;
+
+    macro_rules! numeric {
+        ($array:expr) => {
+            $array
+                .buf
+                .as_buf()
+                .iter()
+                .map(|&value| value as f64)
+                .collect::<Vec<_>>()
+        };
+    }
+
+    let values = match value {
+        ComponentValue::U8(array) => numeric!(array),
+        ComponentValue::U16(array) => numeric!(array),
+        ComponentValue::U32(array) => numeric!(array),
+        ComponentValue::U64(array) => numeric!(array),
+        ComponentValue::I8(array) => numeric!(array),
+        ComponentValue::I16(array) => numeric!(array),
+        ComponentValue::I32(array) => numeric!(array),
+        ComponentValue::I64(array) => numeric!(array),
+        ComponentValue::Bool(array) => array
+            .buf
+            .as_buf()
+            .iter()
+            .map(|&value| if value { 1.0 } else { 0.0 })
+            .collect(),
+        ComponentValue::F32(array) => numeric!(array),
+        ComponentValue::F64(array) => array.buf.as_buf().to_vec(),
+    };
+    if value.shape().is_empty() || values.len() == 1 {
+        eql::eval::EvalValue::Scalar(values.first().copied().unwrap_or_default())
+    } else {
+        eql::eval::EvalValue::Vector(values)
+    }
+}
+
+pub(crate) fn evaluate_series(
+    cache: &TelemetryCache,
+    expr: &eql::Expr,
+    dependencies: &[ComponentId],
+    range: Range<Timestamp>,
+    max_points: Option<usize>,
+) -> Result<EvaluatedSeries, eql::eval::EvalError> {
+    let Some(driver_id) = dependencies.first() else {
+        return Ok(EvaluatedSeries {
+            timestamps: Vec::new(),
+            values: Vec::new(),
+        });
+    };
+    let Some(driver) = cache.series(driver_id) else {
+        return Ok(EvaluatedSeries {
+            timestamps: Vec::new(),
+            values: Vec::new(),
+        });
+    };
+    let sample_count = driver.range(range.clone()).count();
+    let stride = max_points
+        .filter(|&limit| limit > 0)
+        .map(|limit| sample_count.div_ceil(limit))
+        .unwrap_or(1)
+        .max(1);
+    let mut timestamps = Vec::new();
+    let mut output: Vec<Vec<f32>> = Vec::new();
+    for (sample_index, (&timestamp, _)) in driver.range(range).enumerate() {
+        if sample_index % stride != 0 {
+            continue;
+        }
+        let value = match eql::eval::evaluate(expr, &|part| {
+            cache
+                .get_at_or_before(&part.id, timestamp)
+                .map(component_eval_value)
+                .ok_or_else(|| eql::eval::EvalError::MissingComponent(part.name.clone()))
+        }) {
+            Ok(value) => value,
+            Err(eql::eval::EvalError::MissingComponent(_)) => continue,
+            Err(err) => return Err(err),
+        };
+        let values = value.into_values();
+        if output.is_empty() {
+            output.resize_with(values.len(), Vec::new);
+        }
+        if values.len() != output.len() {
+            return Err(eql::eval::EvalError::Broadcast {
+                left: output.len(),
+                right: values.len(),
+            });
+        }
+        timestamps.push(timestamp);
+        for (series, value) in output.iter_mut().zip(values) {
+            series.push(value as f32);
+        }
+    }
+    Ok(EvaluatedSeries {
+        timestamps,
+        values: output,
+    })
+}
+
 impl CollectedGraphData {
     pub fn get_component(&self, component_id: &ComponentId) -> Option<&PlotDataComponent> {
         self.components.get(component_id)
@@ -1100,8 +1206,12 @@ fn plot_fetch_component_ids(
 ) -> HashSet<ComponentId> {
     let mut ids = HashSet::new();
     for gs in graph_states.iter() {
-        for (path, _) in gs.enabled_lines.keys() {
-            ids.insert(path.id);
+        if let Some(derived) = &gs.derived {
+            ids.extend(derived.dependencies.iter().copied());
+        } else {
+            for (path, _) in gs.enabled_lines.keys() {
+                ids.insert(path.id);
+            }
         }
     }
     for line in line_3ds.iter() {
@@ -3259,6 +3369,60 @@ mod tests {
             Timestamp(ts),
             ComponentValue::F64(nox::array![value].to_dyn()),
         );
+    }
+
+    #[test]
+    fn evaluate_series_projects_sqrt_per_sample() {
+        let id = ComponentId::new("sample.value");
+        let component = Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            id,
+            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+                .unwrap(),
+        ));
+        let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(3));
+        let expr = context.parse_str("sample.value.sqrt()").unwrap();
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, id, 0, 4.0);
+        insert_f64(&mut cache, id, 1, 9.0);
+        insert_f64(&mut cache, id, 2, 16.0);
+
+        let evaluated =
+            evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(3), None).unwrap();
+
+        assert_eq!(
+            evaluated.timestamps,
+            vec![Timestamp(0), Timestamp(1), Timestamp(2)]
+        );
+        assert_eq!(evaluated.values, vec![vec![2.0, 3.0, 4.0]]);
+    }
+
+    #[test]
+    fn evaluate_series_projects_vector_norm() {
+        let id = ComponentId::new("sample.vector");
+        let component = Arc::new(eql::Component::new(
+            "sample.vector".to_string(),
+            id,
+            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, vec![2_u64]).unwrap(),
+        ));
+        let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(2));
+        let expr = context.parse_str("sample.vector.norm()").unwrap();
+        let mut cache = TelemetryCache::default();
+        cache.insert(
+            id,
+            Timestamp(0),
+            ComponentValue::F64(nox::array![3.0, 4.0].to_dyn()),
+        );
+        cache.insert(
+            id,
+            Timestamp(1),
+            ComponentValue::F64(nox::array![5.0, 12.0].to_dyn()),
+        );
+
+        let evaluated =
+            evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(2), None).unwrap();
+
+        assert_eq!(evaluated.values, vec![vec![5.0, 13.0]]);
     }
 
     #[test]

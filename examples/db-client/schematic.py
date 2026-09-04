@@ -14,6 +14,7 @@ from elodin.ui import Expr
 def build() -> ui.Schematic:
     # Typed expressions (Phase 2): still emit EQL strings into KDL.
     world_pos = Expr("drone.world_pos")
+    ground_speed = Expr("drone.nav.speed")
     chase_pos = world_pos + Expr("(0,0,0,0, 0.4, 0.4, 0.25)")
 
     return ui.schematic(
@@ -50,7 +51,8 @@ def build() -> ui.Schematic:
             ),
             ui.vsplit(
                 ui.graph(world_pos, name="World pos (quaternion + xyz)"),
-                ui.graph("drone.nav.speed", name="Ground speed (m/s)"),
+                ui.graph(ground_speed, name="Ground speed (m/s)"),
+                ui.graph(ground_speed.sqrt(), name="Square root of ground speed"),
                 name="Pose",
             ),
         ),
