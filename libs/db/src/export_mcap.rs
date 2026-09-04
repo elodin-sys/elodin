@@ -2810,6 +2810,7 @@ pub fn run(
         } else if cursor_id < 2 * n + m {
             let idx = cursor_id - 2 * n;
             let log = &export_msg_logs[idx];
+            let next_ts = log.log.timestamps().get(pos + 1).map(|t| t.0);
             match log.log.get_index(pos) {
                 Some((_, raw)) => {
                     let raw_payload = raw.as_ref();
@@ -2834,13 +2835,9 @@ pub fn run(
                             msg_log_json(&log.kind, &log.name, raw_payload, ts_ns)
                         }
                     };
-                    (
-                        msg_channels[idx],
-                        payload,
-                        log.log.timestamps().get(pos + 1).map(|t| t.0),
-                    )
+                    (msg_channels[idx], payload, next_ts)
                 }
-                None => (msg_channels[idx], Vec::new(), None),
+                None => (msg_channels[idx], Vec::new(), next_ts),
             }
         } else {
             // Dynamic arrow scene updates, one channel per arrow.
