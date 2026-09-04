@@ -1,16 +1,19 @@
 import os
 import typing as ty
+from pathlib import Path
 
 import elodin as el
 import jax
 from jax import numpy as jnp
-from jax.numpy import linalg as la
-import spiceypy as spice
 import numpy as np
-from pathlib import Path
+import spiceypy as spice
 
-from dynamics import heliocentric_relative_acceleration
-from gravity_parameters import DE440_GM_M3_S2
+from simulation import (
+    PLANETS,
+    build_world,
+    chapter_gravity_system,
+    make_ephemeris_pre_step,
+)
 
 # SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
@@ -34,75 +37,6 @@ for kernel in SPICE_KERNELS:
 
 start_time_et = spice.utc2et("1978-01-01T00:00:00")
 start_time_epoch_us = 252_452_400_000_000
-
-PLANETS = [
-    {
-        "spice_name": "MERCURY BARYCENTER",
-        "entity_name": "mercury",
-        "radius": 2000000000.0,
-        "color": "white",
-        "trail_color": "white 220",
-        "mass": 3.3011e23,
-    },
-    {
-        "spice_name": "VENUS BARYCENTER",
-        "entity_name": "venus",
-        "radius": 3000000000.0,
-        "color": "peach",
-        "trail_color": "peach 220",
-        "mass": 4.8675e24,
-    },
-    {
-        "spice_name": "EARTH",
-        "entity_name": "earth",
-        "radius": 6000000000.0,
-        "color": "hyperblue",
-        "trail_color": "hyperblue 220",
-        "mass": 5.97219e24,
-    },
-    {
-        "spice_name": "MARS BARYCENTER",
-        "entity_name": "mars",
-        "radius": 4000000000.0,
-        "color": "red",
-        "trail_color": "red 220",
-        "mass": 6.4171e23,
-    },
-    {
-        "spice_name": "JUPITER BARYCENTER",
-        "entity_name": "jupiter",
-        "radius": 12000000000.0,
-        "color": "orange",
-        "trail_color": "orange 220",
-        "mass": 1.898125e27,
-    },
-    {
-        "spice_name": "SATURN BARYCENTER",
-        "entity_name": "saturn",
-        "radius": 10000000000.0,
-        "color": "yolk",
-        "trail_color": "yolk 220",
-        "mass": 5.6834e26,
-    },
-    {
-        "spice_name": "URANUS BARYCENTER",
-        "entity_name": "uranus",
-        "radius": 8000000000.0,
-        "color": "cyan",
-        "trail_color": "cyan 220",
-        "mass": 8.6813e25,
-    },
-    {
-        "spice_name": "NEPTUNE BARYCENTER",
-        "entity_name": "neptune",
-        "radius": 8000000000.0,
-        "color": "blue",
-        "trail_color": "blue 220",
-        "mass": 1.02413e26,
-    },
-]
-for planet in PLANETS:
-    planet["gm"] = DE440_GM_M3_S2[planet["spice_name"]]
 
 PROBE_RADIUS = 4000000000.0
 PROBES = [
@@ -157,90 +91,33 @@ VelocityErrorMps = ty.Annotated[
         metadata={"external_control": "true"},
     ),
 ]
-GravitationalParameter = ty.Annotated[
-    jax.Array,
-    el.Component(
-        "gravitational_parameter_m3_s2",
-        el.ComponentType(el.PrimitiveType.F64, (1,)),
-    ),
-]
 
 EPHEMERIS_BODIES = PLANETS
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
-SUN_MASS = 1.9885e30
-SUN_GM = DE440_GM_M3_S2["SUN"]
 
 
-w = el.World()
+def probe_components(body: dict) -> list:
+    if body not in PROBES:
+        return []
+    return [
+        el.C(PositionErrorKm, jnp.array([0.0], dtype=jnp.float64)),
+        el.C(VelocityErrorMps, jnp.array([0.0], dtype=jnp.float64)),
+    ]
 
-sun = w.spawn(
-    [
-        el.Body(
-            world_pos=el.WorldPos(linear=jnp.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel(linear=jnp.array([0.0, 0.0, 0.0])),
-            inertia=el.Inertia(SUN_MASS),
-        ),
-        el.C(GravitationalParameter, jnp.array([SUN_GM], dtype=jnp.float64)),
-    ],
-    name="Sun",
+
+w, body_entity_ids = build_world(
+    start_time_et,
+    probes=PROBES,
+    truth_probes=TRUTH_PROBES,
+    extra_components=probe_components,
+    log_initial_states=True,
 )
 
-body_entity_ids = {"Sun": sun}
-
-for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
-    init_state, _ = spice.spkezr(body["spice_name"], start_time_et, "ECLIPJ2000", "NONE", "SUN")
-
-    init_pos = jnp.array(init_state[:3]) * 1000.0
-    init_vel = jnp.array(init_state[3:]) * 1000.0
-
-    print(body["spice_name"])
-    print(init_pos)
-    print(init_vel)
-
-    components = [
-        el.Body(
-            world_pos=el.WorldPos(linear=init_pos),
-            world_vel=el.WorldVel(linear=init_vel),
-            inertia=el.Inertia(body["mass"]),
-        ),
-    ]
-    if "gm" in body:
-        components.append(
-            el.C(
-                GravitationalParameter,
-                jnp.array([body["gm"]], dtype=jnp.float64),
-            )
-        )
-    if body in PROBES:
-        components.extend(
-            [
-                el.C(PositionErrorKm, jnp.array([0.0], dtype=jnp.float64)),
-                el.C(VelocityErrorMps, jnp.array([0.0], dtype=jnp.float64)),
-            ]
-        )
-
-    body_entity_ids[body["entity_name"]] = w.spawn(
-        components,
-        name=body["entity_name"],
-    )
-
-
-def pre_step(tick: int, ctx: el.StepContext):
-    current_time_et = start_time_et + tick * SIM_TIME_STEP
-
-    for body in EPHEMERIS_BODIES + TRUTH_PROBES:
-        state, _ = spice.spkezr(body["spice_name"], current_time_et, "ECLIPJ2000", "NONE", "SUN")
-        pos_m = np.asarray(state[:3], dtype=np.float64) * 1000.0
-        vel_ms = np.asarray(state[3:], dtype=np.float64) * 1000.0
-
-        ctx.write_component(
-            f"{body['entity_name']}.world_pos",
-            np.array([0.0, 0.0, 0.0, 1.0, pos_m[0], pos_m[1], pos_m[2]], dtype=np.float64),
-        )
-        ctx.write_component(
-            f"{body['entity_name']}.world_vel",
-            np.array([0.0, 0.0, 0.0, vel_ms[0], vel_ms[1], vel_ms[2]], dtype=np.float64),
-        )
+pre_step = make_ephemeris_pre_step(
+    start_time_et,
+    SIM_TIME_STEP,
+    EPHEMERIS_BODIES + TRUTH_PROBES,
+)
 
 
 def post_step(tick: int, ctx: el.StepContext) -> None:
@@ -276,69 +153,6 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         )
 
 
-GravityEdge = el.Annotated[el.Edge, el.Component("gravity_edge", el.ComponentType.Edge)]
-
-
-@el.dataclass
-class GravityConstraint(el.Archetype):
-    a: GravityEdge
-
-    def __init__(self, a: el.EntityId, b: el.EntityId):
-        self.a = GravityEdge(a, b)
-
-
-@el.system
-def gravity(
-    graph: el.GraphQuery[GravityEdge],
-    probe_query: el.Query[el.WorldPos, el.Inertia],
-    source_query: el.Query[el.WorldPos, GravitationalParameter],
-) -> el.Query[el.Force]:
-    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
-        r = probe_pos.linear() - source_pos.linear()
-        mass = probe_inertia.mass()
-        mu = source_gm[0]
-        norm = la.norm(r)
-        f = mu * mass * r / (norm * norm * norm)
-        return el.Force(linear=force.force() - f)
-
-    return graph.edge_fold(
-        left_query=probe_query,
-        right_query=source_query,
-        return_type=el.Force,
-        init_value=el.Force(),
-        fold_fn=gravity_fn,
-    )
-
-
-@el.system
-def heliocentric_gravity(
-    graph: el.GraphQuery[GravityEdge],
-    probe_query: el.Query[el.WorldPos, el.Inertia],
-    source_query: el.Query[el.WorldPos, GravitationalParameter],
-) -> el.Query[el.Force]:
-    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
-        acc = heliocentric_relative_acceleration(
-            probe_pos.linear(), source_pos.linear(), source_gm[0]
-        )
-        return el.Force(linear=force.force() + probe_inertia.mass() * acc)
-
-    return graph.edge_fold(
-        left_query=probe_query,
-        right_query=source_query,
-        return_type=el.Force,
-        init_value=el.Force(),
-        fold_fn=gravity_fn,
-    )
-
-
-for probe in PROBES:
-    probe_id = body_entity_ids[probe["entity_name"]]
-    for source_name in ["Sun", *[planet["entity_name"] for planet in PLANETS]]:
-        w.spawn(
-            GravityConstraint(probe_id, body_entity_ids[source_name]),
-            name=f"{probe['entity_name']} -> {source_name}",
-        )
-
 body_objects = "\n".join(
     f"""    object_3d {body["entity_name"]}.world_pos {{
         sphere radius={body["radius"]} {{
@@ -353,6 +167,7 @@ body_objects = "\n".join(
 
 w.schematic(
     """
+    timeline follow_latest=#true
     hsplit {{
         tabs share=0.2 {{
             hierarchy
@@ -380,10 +195,7 @@ w.schematic(
 )
 
 dynamics_chapter = os.environ.get(DYNAMICS_CHAPTER_ENV, "1")
-if dynamics_chapter not in ("1", "2"):
-    raise ValueError(f"{DYNAMICS_CHAPTER_ENV} must be '1' or '2'")
-
-gravity_system = gravity if dynamics_chapter == "1" else heliocentric_gravity
+gravity_system = chapter_gravity_system(dynamics_chapter)
 sys = el.six_dof(sys=gravity_system)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
