@@ -46,6 +46,14 @@ def test_pose_wxyz_order():
     assert "NAV.POS.x" in str(p)
 
 
+def test_sym_mat3_packing_is_stable():
+    covariance = Expr("NAV.COV")
+    assert str(ui.sym_mat3(covariance)) == (
+        "(NAV.COV[0], NAV.COV[1], NAV.COV[2], NAV.COV[3], NAV.COV[4], NAV.COV[5])"
+    )
+    assert str(ui.sym_mat3([0, 1, 2, 3, 4, 5], packing="upper_row")) == ("(0, 1, 3, 2, 4, 5)")
+
+
 def test_graph_accepts_expr():
     built = ui.schematic(ui.graph(Expr("drone.thrust"), name="Thrust"))
     assert "drone.thrust" in built.emit_kdl()

@@ -24,7 +24,7 @@ use crate::{
         colors::{EColor, get_color_by_index_all, get_scheme},
         inspector::{color_popup, eql_autocomplete, inspector_text_field, query, search},
         label::{self, label_with_buttons},
-        plot::GraphState,
+        plot::{DerivedGraph, GraphState},
         query_plot::QueryPlotData,
         schematic::EqlExt,
         theme::{self, configure_input_with_border},
@@ -582,6 +582,7 @@ fn add_components_from_eql(
         }
         graph_state.components.clear();
         graph_state.enabled_lines.clear();
+        graph_state.derived = None;
         let color = get_scheme().highlight;
         commands.entity(graph_id).insert(QueryPlotData {
             data: impeller2_wkt::QueryPlot {
@@ -603,6 +604,41 @@ fn add_components_from_eql(
         });
         return Ok(true);
     }
+
+    if expr.requires_plot_evaluation() && eql::eval::supports(&expr) {
+        for (entity, _) in graph_state.enabled_lines.values() {
+            commands.entity(*entity).despawn();
+        }
+        graph_state.components.clear();
+        graph_state.enabled_lines.clear();
+        commands.entity(graph_id).remove::<QueryPlotData>();
+        let mut dependencies: Vec<_> = expr
+            .to_graph_components()
+            .into_iter()
+            .map(|(path, _)| path.id)
+            .collect();
+        dependencies.sort();
+        dependencies.dedup();
+        graph_state.derived = Some(DerivedGraph {
+            source: query.to_string(),
+            expr,
+            dependencies,
+            lines: Vec::new(),
+            colors: Vec::new(),
+            path: ComponentPath::from_name(&format!("derived.{}", graph_state.label)),
+            last_generation: u64::MAX,
+            last_range: None,
+        });
+        return Ok(true);
+    }
+
+    if graph_state.derived.take().is_some() {
+        for (entity, _) in graph_state.enabled_lines.values() {
+            commands.entity(*entity).despawn();
+        }
+        graph_state.enabled_lines.clear();
+    }
+    commands.entity(graph_id).remove::<QueryPlotData>();
 
     let mut requested_components = expr.to_graph_components();
     requested_components.sort();
@@ -761,5 +797,45 @@ mod tests {
             "the stale timeseries line must be despawned"
         );
         assert!(world.entity(graph_id).contains::<QueryPlotData>());
+    }
+
+    #[test]
+    fn scalar_formula_uses_derived_graph() {
+        let component = Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            ComponentId::new("sample.value"),
+            Schema::new(PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let eql_context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let mut world = World::new();
+        let mut render_layer_alloc = RenderLayerAllocator::default();
+        let mut graph_state = GraphBundle::try_new(
+            &mut render_layer_alloc,
+            BTreeMap::new(),
+            "graph".to_string(),
+        )
+        .expect("a free render layer")
+        .graph_state;
+        let graph_id = world.spawn_empty().id();
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        let converted = add_components_from_eql(
+            graph_id,
+            &mut graph_state,
+            &ComponentMetadataRegistry::default(),
+            &ComponentSchemaRegistry::default(),
+            &eql_context,
+            &mut commands,
+            "sample.value.sqrt()",
+        )
+        .expect("formula must be accepted");
+        system_state.apply(&mut world);
+
+        assert!(converted);
+        let derived = graph_state.derived.expect("derived graph");
+        assert_eq!(derived.source, "sample.value.sqrt()");
+        assert_eq!(derived.dependencies, vec![ComponentId::new("sample.value")]);
+        assert!(!world.entity(graph_id).contains::<QueryPlotData>());
     }
 }
