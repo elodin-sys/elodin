@@ -402,7 +402,9 @@ jobs:
             curl libssl-dev \
             g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 \
             libwayland-dev libxkbcommon-dev libopenblas-dev gfortran gfortran-12 libgfortran-12-dev liblzma-dev \
-            protobuf-compiler
+            protobuf-compiler \
+            libavutil-dev libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libswscale-dev libswresample-dev libclang-dev
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install cargo-deb
         run: cargo install cargo-deb
@@ -433,7 +435,7 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: |
-          brew install protobuf
+          brew install protobuf ffmpeg
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install cargo-deb
         run: cargo install cargo-bundle
