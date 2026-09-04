@@ -64,7 +64,9 @@ libclang-dev = '*'
 
 [dist.dependencies.homebrew]
 protobuf = '*'
-ffmpeg = '*'
+# ffmpeg-next 8.1.0 wraps FFmpeg 8. Unversioned `ffmpeg` is 9 and will not compile.
+# ffmpeg@8 is keg-only; release.yml prepends its pkgconfig on macOS.
+"ffmpeg@8" = '*'
 
 [dist.dependencies.chocolatey]
 cmake = '*'
