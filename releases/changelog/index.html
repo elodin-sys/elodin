@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.0" selected>
-                        v0.19.0
+                    <option value="v0.19.1" selected>
+                        v0.19.1
                     </option>
                 </select>
             </span>
@@ -325,6 +325,11 @@
                     <a href="/releases/changelog/#v0-19">v0.19</a>
                     
                     <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-19-1">v0.19.1</a>
+                            
+                        </li>
                         
                         <li>
                             <a href="/releases/changelog/#v0-19-0">v0.19.0</a>
@@ -757,8 +762,21 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-19">v0.19</h2>
+<h3 id="v0-19-1">v0.19.1</h3>
+<ul>
+<li><strong>(feat)</strong> Add H.264 and gray8 sensor-camera outputs, with hardware-accelerated live encoding (NVENC, VideoToolbox) and an OpenH264 fallback. (#827)</li>
+<li><strong>(feat)</strong> Add <code>StepContext.read_msg_latest()</code> and the <code>sensor_visible</code> flag on <code>Object3D</code>. (#827)</li>
+<li><strong>(fix)</strong> Fix plot line flicker on auto-refreshing query plots. (#829)</li>
+<li><strong>(fix)</strong> Propagate headless simulation failures to the <code>elodin</code> exit code. (#837, #838)</li>
+<li><strong>(chore)</strong> Bump Bevy Hanabi and update the Falcon 9 effects. (#836)</li>
+<li><strong>(chore)</strong> Add <code>nix run .#elodin</code> as an alias for <code>nix run .</code>. (#828)</li>
+<li><strong>(chore)</strong> Install FFmpeg for release editor builds and add a post-merge release dry-run. (#831, #835, #839)</li>
+<li><strong>(doc)</strong> Add an incremental Betaflight racing plan. (#830)</li>
+</ul>
 <h3 id="v0-19-0">v0.19.0</h3>
 <ul>
+<li><strong>(feat)</strong> Report CPU, GPU, and plot-buffer usage in the status bar, with a <code>Dump GPU Allocations</code> command. (#817)</li>
+<li><strong>(feat)</strong> Open a recorded database directly with <code>elodin editor &lt;path-to-db-folder&gt;</code>. (#807)</li>
 <li><strong>(feat)</strong> Add a native Earth environment. (#778, #795)</li>
 <li><strong>(feat)</strong> Add heliocentric relative dynamics to Voyager. (#789)</li>
 <li><strong>(feat)</strong> Add Voyager trajectory error telemetry. (#769)</li>
@@ -766,12 +784,18 @@
 <li><strong>(feat)</strong> Add an artificial horizon gauge. (#753)</li>
 <li><strong>(feat)</strong> Add headless video capture. (#754, #757)</li>
 <li><strong>(feat)</strong> Add --kdl to allow local KDL and asset development. (#763)</li>
+<li><strong>(feat:examples)</strong> Model the RC-jet on measured BDX aero data, with WGS84 ECEF trim, a Mojave RC field scene, and an LWIR sensor camera. (#820)</li>
+<li><strong>(feat:examples)</strong> Update Betaflight SITL to 2026.6.1 with 8 kHz real-time lockstep. (#815, #818)</li>
 <li><strong>(feat:aleph)</strong> Add initrd-based one-shot Aleph UEFI and OS flashing over USB-C. (#748)</li>
 <li><strong>(feat:db)</strong> Add Elodin DB gRPC. (#772)</li>
 <li><strong>(feat:db)</strong> Add <code>elodin-db export --format mcap</code>. (#746)</li>
+<li><strong>(fix)</strong> Fix video-stream GStreamer plugin discovery and Apollo <code>elodin run</code> exit. (#812)</li>
+<li><strong>(fix)</strong> Fix cinematic viewport lighting and overlays leaking into regular panes. (#811)</li>
+<li><strong>(fix)</strong> Limit viewport <code>far</code> to frustum visualization only. (#802)</li>
+<li><strong>(fix)</strong> Scale the viewport grid from camera distance. (#800)</li>
 <li><strong>(fix)</strong> Fix view-cube ECEF face labels, zoom in/out. (#796, #790, #758)</li>
 <li><strong>(fix)</strong> Fix Betaflight takeoff. (#791)</li>
-<li><strong>(fix)</strong> Fix GPU OOM and fins animation. (#788)</li>
+<li><strong>(fix)</strong> Fix GPU OOM and fins animation. (#788, #817)</li>
 <li><strong>(fix)</strong> Generate schematic planes in Z-up so identity pose is ground. (#786, #793)</li>
 <li><strong>(fix)</strong> Fix ECEF translate and add <code>ned_to_ecef()</code>. (#774)</li>
 <li><strong>(fix)</strong> Prevent an editor crash when scrubbing with particles. (#777)</li>
@@ -783,8 +807,10 @@
 <li><strong>(fix)</strong> Restore minimal terrain rendering. (#761)</li>
 <li><strong>(fix:examples)</strong> Put Apollo thruster particles in schematic Z-up. (#797)</li>
 <li><strong>(fix:impeller2)</strong> Skip and log malformed fields instead of dropping the table. (#762)</li>
+<li><strong>(perf)</strong> Bump to Rust 1.98 and use algebraic float methods on hot paths. (#798)</li>
 <li><strong>(perf)</strong> Improve editor FPS on DB playback. (#771)</li>
 <li><strong>(chore)</strong> Bump Bevy Hanabi. (#773)</li>
+<li><strong>(doc)</strong> Index the examples by domain and by Elodin object. (#819)</li>
 </ul>
 <h2 id="v0-18">v0.18</h2>
 <h3 id="v0-18-0">v0.18.0</h3>

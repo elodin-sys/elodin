@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.0" selected>
-                        v0.19.0
+                    <option value="v0.19.1" selected>
+                        v0.19.1
                     </option>
                 </select>
             </span>
@@ -701,6 +701,9 @@ When <code>near</code> is omitted, the camera controller derives it from the cur
 <p><code>orientation</code>: optional; <code>relative</code> (default) or <code>absolute</code>. Both compose the object's attitude with the frame→Bevy basis (<code>bevy_R * att</code>). An identity attitude therefore aligns mesh local axes with the schematic frame (ENU: +X east, +Y north, +Z up) — not with the editor's Bevy Y-up axes. Use <code>absolute</code> when you want to be explicit about frame-aligned geometry (compasses, multi-frame scenes).</p>
 </li>
 <li>
+<p><code>sensor_visible</code>: optional boolean, default <code>#true</code>. Set <code>#false</code> for editor-only overlays or estimated-state meshes that must not appear in headless sensor-camera imagery.</p>
+</li>
+<li>
 <p>Mesh child (required, exactly one):</p>
 <ul>
 <li><code>glb</code>: <code>path</code> (required), <code>scale</code> (default 1.0), <code>translate</code> <code>(x,y,z)</code> (default 0s), <code>rotate</code> <code>(deg_x,deg_y,deg_z)</code> in degrees (default 0s). On DB record, local paths are stored as <code>db:…</code> and served over HTTP on replay; see <a href="/reference/db-asset-server">DB Asset Server</a>. Material overrides (both open-ended strengths, default 0.0 = use the GLB's own materials):
@@ -1040,6 +1043,7 @@ suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").</li>
 <span class="giallo-l"><span>          [</span><span style="color: light-dark(#93A1A1, #93A1A1);">frame</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">ENU|NED|ECEF</span><span>]</span></span>
 <span class="giallo-l"><span>          [</span><span style="color: light-dark(#93A1A1, #93A1A1);">frame_orientation</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">ENU|NED|ECEF</span><span>]</span></span>
 <span class="giallo-l"><span>          [</span><span style="color: light-dark(#93A1A1, #93A1A1);">orientation</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">relative|absolute</span><span>]</span></span>
+<span class="giallo-l"><span>          [</span><span style="color: light-dark(#93A1A1, #93A1A1);">sensor_visible</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">boolean</span><span>]</span></span>
 <span class="giallo-l"><span>          {</span><span style="color: light-dark(#268BD2, #268BD2);"> glb</span><span> {</span><span style="color: light-dark(#268BD2, #268BD2);"> animate</span><span> }</span><span style="color: light-dark(#2AA198, #2AA198);">*</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">          |</span><span style="color: light-dark(#2AA198, #2AA198);"> sphere</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">          |</span><span style="color: light-dark(#2AA198, #2AA198);"> box</span></span>
