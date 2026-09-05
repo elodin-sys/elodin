@@ -40,7 +40,7 @@ import jax.random as rng
 import numpy as np
 
 from config import DroneConfig
-from comms import FDMPacket
+from comms import FDMPacket, build_fdm_from_components
 
 
 class Noise:
@@ -599,105 +599,6 @@ def extract_sensor_data(
         "position": position,  # World frame, m (ENU)
         "pressure": pressure,  # Pascals
     }
-
-
-def build_fdm_from_components(
-    world_pos: np.ndarray,
-    world_vel: np.ndarray,
-    accel: np.ndarray,
-    gyro: np.ndarray,
-    timestamp: float,
-    gravity: float = 9.80665,
-) -> FDMPacket:
-    """
-    Build an FDM packet directly from Elodin component data.
-
-    This is the primary function for extracting sensor data from the simulation
-    and packaging it for Betaflight. It handles:
-    - Quaternion extraction from world_pos (Elodin scalar-last to Betaflight scalar-first)
-    - Velocity extraction from world_vel
-    - FLU to FRD body frame conversion for gyro/accel
-    - Pressure calculation from altitude
-
-    Args:
-        world_pos: Position array [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
-        world_vel: Velocity array [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
-        accel: Accelerometer specific force [ax, ay, az] in body frame (FLU)
-        gyro: Gyroscope [wx, wy, wz] in body frame (FLU)
-        timestamp: Simulation time in seconds
-        gravity: Gravity constant (for reference)
-
-    Returns:
-        FDMPacket ready for transmission to Betaflight
-    """
-    # Import here to avoid circular dependency
-    from comms import FDMPacket
-
-    # Extract quaternion from Elodin format [qx, qy, qz, qw] and convert to [qw, qx, qy, qz]
-    quat_xyzw = np.array(world_pos[:4])
-    quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
-
-    # Betaflight 2026.6.1+ SITL defaults to the Gazebo bridge
-    # (ENABLE_GAZEBO_BRIDGE=1), which expects the attitude quaternion in the
-    # Gazebo BetaflightPlugin convention: q_plugin = Rx(pi) * M * Rx(pi), where
-    # M is the FLU-body to ENU-world attitude. Conjugation by Rx(pi) negates
-    # qy/qz, so send [w, x, -y, -z]; SITL undoes the conjugation and rotates
-    # the world frame ENU -> NWU internally. The result drives the virtual mag
-    # feed (and the attitude directly when built with SITL_ATTITUDE_DIRECT).
-    quat = np.array([quat_wxyz[0], quat_wxyz[1], -quat_wxyz[2], -quat_wxyz[3]])
-
-    # Extract position [x, y, z] (ENU)
-    position = np.array(world_pos[4:7])
-
-    # Elodin stores world_vel as [wx, wy, wz, vx, vy, vz]
-    linear_vel = np.array(world_vel[3:6])
-
-    # Use provided sensor readings or compute from velocity
-    accel_enu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
-    gyro_enu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
-
-    # Convert from Elodin FLU body frame to the FRD sensor frame that
-    # Betaflight 2026.6.1+ SITL expects (default ENABLE_GAZEBO_BRIDGE=1).
-    #
-    # This mirrors the Gazebo BetaflightPlugin, whose IMU sensor frame is FRD
-    # (Rx(pi) relative to the FLU body link):
-    #   accel: send specific force in FRD = [FLU_x, -FLU_y, -FLU_z]
-    #   gyro:  send body rates in FRD   = [FLU_x, -FLU_y, -FLU_z]
-    #
-    # sitl.c then maps these onto Betaflight's internal axes:
-    #   accel: negates all axes, so at rest the estimator sees acc_z = +1g
-    #          (up) and the Mahony filter converges to a level attitude
-    #   gyro:  (X, -Y, +Z) via sitlGyroBodyFromSim(), yielding Betaflight's
-    #          (roll right, pitch nose-down, yaw CW) sign convention
-    accel_ned = np.array(
-        [
-            accel_enu[0],  # FRD_x = FLU_x
-            -accel_enu[1],  # FRD_y = -FLU_y
-            -accel_enu[2],  # FRD_z = -FLU_z (at rest: -1g; BF negates to +1g)
-        ]
-    )
-
-    gyro_ned = np.array(
-        [
-            gyro_enu[0],  # FRD_x = FLU_x
-            -gyro_enu[1],  # FRD_y = -FLU_y
-            -gyro_enu[2],  # FRD_z = -FLU_z
-        ]
-    )
-
-    # Calculate pressure from altitude (simplified atmosphere model)
-    altitude = position[2]
-    pressure = 101325.0 - 12.0 * altitude
-
-    return FDMPacket(
-        timestamp=timestamp,
-        imu_angular_velocity_rpy=gyro_ned,
-        imu_linear_acceleration_xyz=accel_ned,
-        imu_orientation_quat=quat,
-        velocity_xyz=linear_vel,  # ENU, which Betaflight expects for GPS
-        position_xyz=position,  # ENU
-        pressure=pressure,
-    )
 
 
 def extract_from_history(df, tick: int = -1) -> dict:

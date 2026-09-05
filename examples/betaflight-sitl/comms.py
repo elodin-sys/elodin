@@ -220,6 +220,52 @@ class ServoPacketRaw:
         )
 
 
+def flu_to_frd(vector: np.ndarray) -> np.ndarray:
+    """Convert a body-frame vector from Forward-Left-Up to Forward-Right-Down."""
+    vector = np.asarray(vector)
+    return np.array([vector[0], -vector[1], -vector[2]])
+
+
+def elodin_quaternion_to_fdm(quaternion_xyzw: np.ndarray) -> np.ndarray:
+    """Convert Elodin scalar-last FLU→ENU attitude to FDM scalar-first form.
+
+    Betaflight's default Gazebo bridge expects the quaternion conjugated by a
+    180-degree rotation about body X, which negates its Y and Z components.
+    """
+    qx, qy, qz, qw = np.asarray(quaternion_xyzw)
+    return np.array([qw, qx, -qy, -qz])
+
+
+def build_fdm_from_components(
+    world_pos: np.ndarray,
+    world_vel: np.ndarray,
+    accel: np.ndarray,
+    gyro: np.ndarray,
+    timestamp: float,
+    gravity: float = 9.80665,
+) -> FDMPacket:
+    """Build an FDM packet from Elodin component arrays.
+
+    ``world_pos`` is ``[qx, qy, qz, qw, x, y, z]`` and ``world_vel`` is
+    ``[wx, wy, wz, vx, vy, vz]``. World position and linear velocity remain
+    ENU; body-frame IMU vectors are converted from FLU to FRD.
+    """
+    position = np.array(world_pos[4:7])
+    linear_velocity = np.array(world_vel[3:6])
+    accel_flu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
+    gyro_flu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
+
+    return FDMPacket(
+        timestamp=timestamp,
+        imu_angular_velocity_rpy=flu_to_frd(gyro_flu),
+        imu_linear_acceleration_xyz=flu_to_frd(accel_flu),
+        imu_orientation_quat=elodin_quaternion_to_fdm(world_pos[:4]),
+        velocity_xyz=linear_velocity,
+        position_xyz=position,
+        pressure=101325.0 - 12.0 * position[2],
+    )
+
+
 class BetaflightBridge:
     """
     UDP communication bridge between Elodin and Betaflight SITL.

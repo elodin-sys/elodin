@@ -137,38 +137,50 @@ On the Aleph flight computer the on-board `elodin-db` service applies the same
 ingest to each fresh boot database, so a HITL recording pulled off the vehicle
 replays the same way. See [DB Asset Server](https://docs.elodin.systems/reference/db-asset-server/).
 
-### Quick Arming Test
+### Baseline Verification
 
-Test that arming works correctly:
+Activate the Elodin Python environment, then run the pure protocol and
+conversion tests from the repository root:
+
 ```bash
-# Start SITL in one terminal
-./examples/betaflight-sitl/betaflight/obj/main/betaflight_SITL.elf
-
-# In another terminal, run the test
 source .venv/bin/activate
-python3 examples/betaflight-sitl/test_comms.py
+python3 -m pytest examples/betaflight-sitl/tests -q
 ```
 
-Expected output when working:
+Run the default scripted integration scenario with no racing environment
+variables:
+
+```bash
+elodin run examples/betaflight-sitl/main.py
 ```
-Phase 2: Setting AUX1=1800 to ARM (2 seconds)...
-  t=5.5s motors=[0.055 0.055 0.055 0.055]  # Motors at idle!
-Phase 3: Raising throttle...
-  t=7.2s motors=[0.402 0.402 0.402 0.402]  # Motors responding!
+
+A successful run prints one machine-readable C0 result in addition to the human
+diagnostics:
+
+```text
+[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.836 status=PASS
 ```
+
+The measured values may vary slightly by host. C0 requires at least one
+successful simulation-loop lockstep response, motor output greater than 0.06,
+and a peak altitude at least 0.1 m above the configured initial altitude. If any
+criterion is unmet, the result reports `status=FAIL` and the command exits
+nonzero.
 
 ## Project Structure
 
 ```
 examples/betaflight-sitl/
+├── baseline.py        # Default C0 scenario pass/fail assessment
 ├── build.sh           # Build script for Betaflight SITL
 ├── init_eeprom.py     # Create and configure eeprom.bin
 ├── main.py            # Main simulation entry point
 ├── config.py          # Drone physical parameters
 ├── sim.py             # Physics simulation systems
 ├── sensors.py         # IMU sensor simulation
-├── comms.py           # UDP communication bridge
-├── test_comms.py      # Standalone communication test
+├── comms.py           # UDP packets, conversions, and communication bridge
+├── tests/             # Pure pytest protocol and convention tests
+├── RACING_PLAN.md     # Incremental vision-guided racing plan
 ├── eeprom.bin         # Betaflight saved config (created on first run)
 ├── betaflight/        # Betaflight submodule
 │   └── obj/main/
