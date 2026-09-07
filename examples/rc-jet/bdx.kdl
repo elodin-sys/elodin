@@ -85,16 +85,16 @@ tabs {
 // origin). The editor always lifts glTF Y-up with Rx(+90°); this Rx(-90°)
 // cancels that so a Z-up GLB is not rolled onto its side. Do not rewrite
 // the hashed package GLB — assets/bdx.glb is hash-checked by the tests.
-object_3d bdx.world_pos {
-    glb path="bdx.glb" rotate="(-90, 0, 0)"
+object_3d orientation=absolute bdx.world_pos {
+    glb path="bdx.glb" //rotate="(-90, 0, 0)"
     icon builtin="flight_takeoff" {
         visibility_range min=50.0 fade_distance=50.0
         color 76 175 80
     }
 }
 
-object_3d target.world_pos {
-    glb path="edu-450-v2-drone.glb" scale=10.0 
+object_3d orientation=absolute target.world_pos {
+    glb path="edu-450-v2-drone.glb" scale=10.0  rotate="(90, 0, 0)"
     icon builtin="adjust" {
         visibility_range min=50.0 fade_distance=50.0
         color 244 67 54
