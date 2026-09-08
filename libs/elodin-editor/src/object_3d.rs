@@ -10,8 +10,9 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bitvec::prelude::*;
 use eql::Expr;
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Object3D, Object3DIconSource};
+use impeller2::types::{ComponentId, Timestamp};
+use impeller2_bevy::{EntityMap, TelemetryCache};
+use impeller2_wkt::{ComponentValue, CurrentTimestamp, Object3D, Object3DIconSource};
 use nox::Array;
 use smallvec::smallvec;
 
@@ -1135,6 +1136,18 @@ pub fn on_scene_ready(
     ready_entity
 }
 
+/// Same source the sensor camera uses: `ComponentId::new("target.world_pos")`.
+/// Covers the frame where `apply_cached_data` has the pose in `TelemetryCache`
+/// but has not yet flushed a `ComponentValue` onto the impeller entity.
+fn world_pos_from_cache(
+    eql: &str,
+    cache: &TelemetryCache,
+    ts: Timestamp,
+) -> Option<impeller2_wkt::WorldPos> {
+    let id = ComponentId::new(eql.trim());
+    cache.get_at_or_before(&id, ts)?.as_world_pos()
+}
+
 /// System that updates 3D object entities based on their EQL expressions
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn update_object_3d_system(
@@ -1152,18 +1165,24 @@ pub fn update_object_3d_system(
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
+    cache: Res<TelemetryCache>,
+    current_ts: Res<CurrentTimestamp>,
     geo_context: Res<GeoContext>,
     coordinate: Res<Coordinate>,
     eql_ctx: Res<EqlContext>,
 ) {
     let eql_ctx_changed = eql_ctx.is_changed();
+    let ts = current_ts.0;
     for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
     {
-        if let Some(compiled_expr) = &object_3d.compiled_expr
-            && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
-            && let Some(world_pos) = component_value.as_world_pos()
-        {
+        let world_pos = object_3d
+            .compiled_expr
+            .as_ref()
+            .and_then(|expr| expr.execute(&entity_map, &component_value_maps).ok())
+            .and_then(|value| value.as_world_pos())
+            .or_else(|| world_pos_from_cache(&object_3d.data.eql, &cache, ts));
+        if let Some(world_pos) = world_pos {
             *pos = world_pos;
             if !has_received {
                 commands.entity(entity).insert(WorldPosReceived);
@@ -3346,5 +3365,45 @@ mod db_asset_url_tests {
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+}
+
+#[cfg(test)]
+mod cache_pose_tests {
+    use bevy::math::{DQuat, DVec3};
+    use impeller2::types::{ComponentId, Timestamp};
+    use impeller2_bevy::TelemetryCache;
+    use impeller2_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::world_pos_from_cache;
+    use crate::WorldPosExt;
+
+    #[test]
+    fn cache_fallback_reads_bare_world_pos_eql() {
+        let att = DQuat::from_xyzw(0.0, 0.0, 0.0, 1.0);
+        let pos = DVec3::new(1.0, 2.0, 3.0);
+        let value = ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(
+                smallvec::smallvec![7],
+                vec![att.x, att.y, att.z, att.w, pos.x, pos.y, pos.z],
+            )
+            .expect("spatial buffer"),
+        );
+        let mut cache = TelemetryCache::default();
+        cache.insert(ComponentId::new("target.world_pos"), Timestamp(10), value);
+        let got = world_pos_from_cache("target.world_pos", &cache, Timestamp(10))
+            .expect("cache should yield a pose");
+        assert!((got.pos() - pos).length() < 1e-12);
+        assert!(got.att().abs_diff_eq(att, 1e-12));
+    }
+
+    #[test]
+    fn cache_fallback_ignores_compound_eql() {
+        let cache = TelemetryCache::default();
+        assert!(
+            world_pos_from_cache("target.world_pos.translate(1, 0, 0)", &cache, Timestamp(0))
+                .is_none()
+        );
     }
 }
