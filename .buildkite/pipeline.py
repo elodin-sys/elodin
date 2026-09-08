@@ -125,6 +125,11 @@ test_steps = [
                 command="pytest examples/rc-jet/tests -o 'pythonpath='",
             ),
             nix_step(
+                label=":python: betaflight-sitl tests",
+                flake=".#run",
+                command="python3 -m pytest examples/betaflight-sitl/tests -q",
+            ),
+            nix_step(
                 label=":python: frames",
                 flake=".#run",
                 command="python3 examples/frames/main.py",

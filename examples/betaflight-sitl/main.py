@@ -31,6 +31,7 @@ import elodin as el
 import jax.numpy as jnp
 import numpy as np
 
+from baseline import C0Result, evaluate_c0
 from config import DEFAULT_CONFIG
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
@@ -158,6 +159,8 @@ class SITLState:
     sim_time: float = 0.0
     motors: np.ndarray = None
     max_motor: float = 0.0
+    lockstep_steps: int = 0
+    max_altitude: float = float(config.initial_position[2])
 
     def __post_init__(self):
         if self.motors is None:
@@ -179,6 +182,7 @@ sensor_buf = [None]
 state = [None]
 start_time = [None]
 last_print = [0.0]
+c0_result: list[C0Result | None] = [None]
 
 # Pre-allocated buffers to avoid allocation in hot loop
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
@@ -252,6 +256,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         gyro = np.array(sensor_data["drone.gyro"])  # Body-frame gyroscope
         world_pos = np.array(sensor_data["drone.world_pos"])  # GPS simulation
         world_vel = np.array(sensor_data["drone.world_vel"])  # GPS velocity
+        s.max_altitude = max(s.max_altitude, float(world_pos[6]))
 
         # Update sensor buffer with real physics data
         buf.update(
@@ -301,8 +306,11 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         # Synchronous lockstep: send FDM+RC, wait for motor response
         # Motor order is native Betaflight Quad-X: BR(0), FR(1), BL(2), FL(3)
         # The physics simulation (config.py) uses the same motor layout
+        steps_before = b.step_count
         s.motors = b.step(fdm, rc)
-        s.max_motor = max(s.max_motor, np.max(s.motors))
+        if b.step_count > steps_before:
+            s.lockstep_steps += 1
+        s.max_motor = max(s.max_motor, float(np.max(s.motors)))
 
         # Write motor commands back to Elodin-DB for physics simulation
         # This uses the StepContext for direct DB access (no TCP overhead)
@@ -355,12 +363,14 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     # Check if simulation is complete - print summary and exit
     if tick >= MAX_TICKS - 1:
         b.stop()
+        ctx.stop_recipes()
         elapsed = time.time() - start_time[0]
 
         # Read final position
         try:
             final_pos = np.array(ctx.read_component("drone.world_pos"))
             final_z = final_pos[6] if len(final_pos) > 6 else final_pos[2]
+            s.max_altitude = max(s.max_altitude, float(final_z))
             final_vel = np.array(ctx.read_component("drone.world_vel"))
             final_vz = final_vel[5] if len(final_vel) > 5 else final_vel[2]
         except Exception:
@@ -380,18 +390,28 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
 
-        # Success criteria: motors responded AND drone moved
-        took_off = final_z > config.initial_position[2] + 0.1  # More than 10cm above start
+        result = evaluate_c0(
+            lockstep_steps=s.lockstep_steps,
+            max_motor=s.max_motor,
+            initial_altitude=float(config.initial_position[2]),
+            max_altitude=s.max_altitude,
+        )
+        c0_result[0] = result
 
-        if b.step_count > 0 and s.max_motor > 0.06 and took_off:
+        # Success criteria: lockstep and motors responded, and the drone rose at least 0.1 m.
+        if result.passed:
             print("SUCCESS: SITL integration working! Drone took off!")
-        elif b.step_count > 0 and s.max_motor > 0.06:
+        elif s.lockstep_steps <= 0:
+            print("WARNING: No lockstep motor responses received from Betaflight.")
+        elif result.motor_response:
             print("WARNING: Motors responded but drone did not take off.")
             print("  Check physics pipeline: motor_command -> thrust -> force")
-        elif b.step_count > 0 and s.max_motor > 0.02:
+        elif s.max_motor > 0.02:
             print("WARNING: Motors armed but no throttle response.")
         else:
             print("WARNING: No motor response. Check Betaflight configuration.")
+
+        print(result.format())
 
 
 # Return the next non-existent filename with auto-incremented
@@ -437,3 +457,5 @@ print(f"Wrote database to: {db_filename}")
 if not bridge[0]:
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
+elif c0_result[0] is not None and not c0_result[0].passed:
+    sys.exit(1)
