@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
-    HeadlessMode, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
+    HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
     SensorCamerasSpawned, SensorReadbackStatus, TEMP_MAP_SUFFIX, set_cameras_active,
-    set_readback_armed, sync_sensor_camera_activity, update_auto_agc,
+    set_readback_armed, update_auto_agc,
 };
 use crate::sensor_h264::SensorH264Encoder;
 use crate::{EqlContext, PositionSync, sync_pos};
@@ -148,7 +148,6 @@ impl Plugin for HeadlessEditorPlugin {
             PreUpdate,
             (
                 impeller2_bevy::apply_cached_data,
-                ApplyDeferred,
                 crate::object_3d::update_object_3d_system,
                 crate::sync_object_3d,
                 // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
@@ -1050,14 +1049,12 @@ fn build_schedules(app: &App) -> Vec<CameraSchedule> {
 }
 
 fn prime_sensor_cameras(app: &mut App, names: &[String]) {
-    set_cameras_active(app.world_mut(), names, true);
+    enable_all_sensor_cameras(app.world_mut());
     for _ in 0..SENSOR_CAMERA_PRIME_CYCLES {
         run_headless_update(app);
         std::thread::sleep(Duration::from_millis(10));
     }
-    // Leave cameras active. `ReadbackArmed` gates GPU copies; toggling
-    // `Camera.is_active` every scheduled frame makes every capture the first
-    // frame after activation (empty thermal mask / default object pose).
+    set_cameras_active(app.world_mut(), names, false);
 }
 
 /// Autonomous render-server runner. Replaces the previous request-response
@@ -1068,10 +1065,11 @@ fn render_server_runner(mut app: App) -> AppExit {
 
     // Warm-up: pump updates until DB metadata arrives, sensor camera configs
     // are loaded, and sensor camera entities are spawned. Then run a few
-    // priming cycles so the GPU shader cache is warm before we start
-    // emitting frames. Due cameras stay active after prime; `ReadbackArmed`
-    // is the only per-frame gate. Idle (not-due) cameras are turned off so
-    // a 30 fps cinematic view is not extracted on every 60 fps IR tick.
+    // priming cycles with readback armed so the GPU shader cache is warm
+    // before we start emitting frames. Steady state after warm-up is "all
+    // sensor cameras inactive"; `render_and_emit` flips the due set on for
+    // each scheduled frame so we don't spend GPU time rendering scenes
+    // nobody is going to read.
     let mut cameras_warmed = false;
     for i in 0..SENSOR_CAMERA_CONFIG_WARMUP_CYCLES {
         run_headless_update(&mut app);
@@ -1112,8 +1110,9 @@ fn render_server_runner(mut app: App) -> AppExit {
         }
 
         // If sensor cameras spawned only after the warm-up loop bailed out,
-        // pick them up now and leave the views warm. `render_and_emit` then
-        // syncs activity to the due set and arms readback.
+        // pick them up now. We still briefly flip everything active so the
+        // pipelines exist, then drop back to inactive so the per-render
+        // gating in `render_and_emit` is the only source of truth.
         if !cameras_warmed && app.world().resource::<SensorCamerasSpawned>().0 {
             schedules = build_schedules(&app);
             let names: Vec<String> = schedules.iter().map(|s| s.name.clone()).collect();
@@ -1203,16 +1202,14 @@ fn render_server_runner(mut app: App) -> AppExit {
     }
 }
 
-/// Set the timestamp, sync due-camera activity, arm readback, and emit.
+/// Set the timestamp resource, activate the due cameras, arm readback, run
+/// one update cycle, collect frames, push them to the DB, and tear down.
 ///
-/// Newly activated cameras get one extra `app.update()` before readback so
-/// extract/prepare can build the view. Copying on that first active tick
-/// captured default `WorldPos` (Absolute + I = ECEF identity) and an empty
-/// LWIR thermal mask — the IR flicker / target-flip the editor viewports
-/// never showed, because they do not toggle `Camera.is_active`.
-///
-/// Due cameras stay active afterwards. Idle cameras are turned off so a
-/// cinematic 30 fps view is not extracted on every 60 fps IR tick.
+/// Activating only `due_names` keeps Bevy's render extract from issuing a 3D
+/// pass for cameras whose configured `fps` interval has not yet elapsed.
+/// Combined with `ReadbackArmed`, this means each `due` camera does one
+/// render plus one GPU->CPU copy per scheduled frame, and idle cameras cost
+/// nothing per polling iteration.
 fn render_and_emit(
     app: &mut App,
     sim_ts: Timestamp,
@@ -1220,13 +1217,11 @@ fn render_and_emit(
     encoders: &mut HashMap<String, SensorH264Worker>,
 ) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
-    let newly_activated = sync_sensor_camera_activity(app.world_mut(), due_names);
-    if newly_activated {
-        run_headless_update(app);
-    }
+    set_cameras_active(app.world_mut(), due_names, true);
     set_readback_armed(app.world_mut(), due_names, true);
     run_headless_update(app);
     set_readback_armed(app.world_mut(), due_names, false);
+    set_cameras_active(app.world_mut(), due_names, false);
 
     emit_completed_frames(app, encoders);
 }
@@ -1263,8 +1258,10 @@ fn flush_pending_sensor_frames(app: &mut App, encoders: &mut HashMap<String, Sen
 
 fn render_without_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
-    sync_sensor_camera_activity(app.world_mut(), due_names);
+
+    set_cameras_active(app.world_mut(), due_names, true);
     run_headless_update(app);
+    set_cameras_active(app.world_mut(), due_names, false);
 }
 
 /// Push rendered frames to the DB as `MsgWithTimestamp` packets via the
@@ -1292,6 +1289,14 @@ fn push_frames_to_db(app: &App, frames: &[(String, Timestamp, Vec<u8>)]) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Enable all sensor cameras (used during warm-up).
+fn enable_all_sensor_cameras(world: &mut World) {
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (_, mut camera) in query.iter_mut(world) {
+        camera.is_active = true;
+    }
+}
 
 fn collect_frames(app: &App) -> Vec<(String, Timestamp, Vec<u8>)> {
     let world = app.world();

@@ -393,7 +393,6 @@ impl Plugin for EditorPlugin {
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller2_bevy::apply_cached_data,
-                    ApplyDeferred,
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,

@@ -1551,7 +1551,12 @@ pub fn set_readback_armed(world: &mut World, camera_names: &[String], armed: boo
     }
 }
 
-/// Toggle `Camera.is_active` for specific sensor cameras by name.
+/// Toggle `Camera.is_active` for specific sensor cameras by name. Bevy's
+/// render extract skips inactive cameras, so flipping this off between
+/// scheduled frames prevents the GPU from rendering an unread scene on every
+/// polling iteration. Headless steady state is "all sensor cameras inactive";
+/// the render-server flips the due set on for each `render_and_emit` cycle
+/// and back off afterwards.
 pub fn set_cameras_active(world: &mut World, camera_names: &[String], active: bool) {
     let configs = world.resource::<SensorCameraConfigs>();
     let target_indices: Vec<usize> = camera_names
@@ -1573,44 +1578,6 @@ pub fn set_cameras_active(world: &mut World, camera_names: &[String], active: bo
             camera.is_active = active;
         }
     }
-}
-
-/// Activate `due_names` and deactivate every other sensor / thermal-mask camera.
-///
-/// Returns `true` when at least one due camera (or its thermal-mask sibling)
-/// was inactive. The render-server uses that to run one extra update before
-/// arming readback, so the first tick after activation is never copied.
-pub fn sync_sensor_camera_activity(world: &mut World, due_names: &[String]) -> bool {
-    let configs = world.resource::<SensorCameraConfigs>();
-    let due: HashSet<usize> = due_names
-        .iter()
-        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
-        .collect();
-
-    let mut newly_activated = false;
-    {
-        let mut query = world.query::<(&SensorCamera, &mut Camera)>();
-        for (sensor, mut camera) in query.iter_mut(world) {
-            let want = due.contains(&sensor.config_index);
-            if want && !camera.is_active {
-                newly_activated = true;
-            }
-            if camera.is_active != want {
-                camera.is_active = want;
-            }
-        }
-    }
-    let mut masks = world.query::<(&ThermalMaskCamera, &mut Camera)>();
-    for (mask, mut camera) in masks.iter_mut(world) {
-        let want = due.contains(&mask.config_index);
-        if want && !camera.is_active {
-            newly_activated = true;
-        }
-        if camera.is_active != want {
-            camera.is_active = want;
-        }
-    }
-    newly_activated
 }
 
 fn percentile_bin(histogram: &[u32; 256], fraction: f32) -> u8 {
@@ -1749,58 +1716,6 @@ pub fn update_auto_agc(world: &mut World, temp_frames: &[(String, Vec<u8>)]) {
 mod tests {
     use super::*;
     use bevy_geo_frames::GeoOrigin;
-
-    #[test]
-    fn sync_activity_warms_new_due_cameras_and_idles_the_rest() {
-        let mut ir = camera_config([0.0; 3]);
-        ir.camera_name = "ir".into();
-        let mut fpv = camera_config([0.0; 3]);
-        fpv.camera_name = "fpv".into();
-        let mut world = World::new();
-        world.insert_resource(SensorCameraConfigs(vec![ir, fpv]));
-        let ir_cam = world
-            .spawn((
-                SensorCamera { config_index: 0 },
-                Camera {
-                    is_active: false,
-                    ..default()
-                },
-            ))
-            .id();
-        let ir_mask = world
-            .spawn((
-                ThermalMaskCamera { config_index: 0 },
-                Camera {
-                    is_active: false,
-                    ..default()
-                },
-            ))
-            .id();
-        let fpv_cam = world
-            .spawn((
-                SensorCamera { config_index: 1 },
-                Camera {
-                    is_active: false,
-                    ..default()
-                },
-            ))
-            .id();
-
-        assert!(sync_sensor_camera_activity(&mut world, &["ir".into()]));
-        assert!(world.get::<Camera>(ir_cam).unwrap().is_active);
-        assert!(world.get::<Camera>(ir_mask).unwrap().is_active);
-        assert!(!world.get::<Camera>(fpv_cam).unwrap().is_active);
-
-        assert!(!sync_sensor_camera_activity(&mut world, &["ir".into()]));
-        assert!(world.get::<Camera>(ir_cam).unwrap().is_active);
-
-        assert!(sync_sensor_camera_activity(
-            &mut world,
-            &["ir".into(), "fpv".into()]
-        ));
-        assert!(world.get::<Camera>(ir_cam).unwrap().is_active);
-        assert!(world.get::<Camera>(fpv_cam).unwrap().is_active);
-    }
 
     fn camera_config(pos_offset: [f64; 3]) -> SensorCameraConfig {
         SensorCameraConfig {
