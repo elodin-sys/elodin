@@ -18,9 +18,7 @@ def test_level_rest_fdm_conversion() -> None:
 
     assert packet.timestamp == 0.125
     np.testing.assert_array_equal(packet.imu_angular_velocity_rpy, [0.0, 0.0, 0.0])
-    np.testing.assert_array_equal(
-        packet.imu_linear_acceleration_xyz, [0.0, 0.0, -9.80665]
-    )
+    np.testing.assert_array_equal(packet.imu_linear_acceleration_xyz, [0.0, 0.0, -9.80665])
     np.testing.assert_array_equal(packet.imu_orientation_quat, [1.0, 0.0, 0.0, 0.0])
     np.testing.assert_array_equal(packet.velocity_xyz, [1.0, -2.0, 3.0])
     np.testing.assert_array_equal(packet.position_xyz, [12.0, -4.0, 2.0])

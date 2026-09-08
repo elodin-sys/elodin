@@ -23,9 +23,7 @@ def test_servo_packet_golden_native_motor_order() -> None:
 def test_rc_packet_golden_channel_order() -> None:
     """The RC packet keeps its timestamp and 16 channels in AETR/AUX order."""
     # Roll, pitch, throttle, yaw, AUX1, followed by centered unused channels.
-    channels = np.array(
-        [1600, 1400, 1000, 1550, 1800, *([1500] * 11)], dtype=np.uint16
-    )
+    channels = np.array([1600, 1400, 1000, 1550, 1800, *([1500] * 11)], dtype=np.uint16)
     golden = bytes.fromhex(
         "000000000000f83f "  # timestamp: 1.5 as a little-endian double
         "4006 7805 e803 0e06 0807 "
@@ -57,9 +55,7 @@ def test_fdm_packet_field_layout_and_round_trip() -> None:
 
     decoded = FDMPacket.from_bytes(packed)
     assert decoded.timestamp == packet.timestamp
-    np.testing.assert_array_equal(
-        decoded.imu_angular_velocity_rpy, packet.imu_angular_velocity_rpy
-    )
+    np.testing.assert_array_equal(decoded.imu_angular_velocity_rpy, packet.imu_angular_velocity_rpy)
     np.testing.assert_array_equal(
         decoded.imu_linear_acceleration_xyz, packet.imu_linear_acceleration_xyz
     )
@@ -94,7 +90,5 @@ def test_raw_servo_packet_field_layout_and_round_trip() -> None:
 )
 def test_packet_decoder_rejects_short_datagram(packet_type, valid_size: int) -> None:
     """A truncated UDP datagram must not be interpreted as a complete packet."""
-    with pytest.raises(
-        ValueError, match=rf"Data too short: {valid_size - 1} < {valid_size}"
-    ):
+    with pytest.raises(ValueError, match=rf"Data too short: {valid_size - 1} < {valid_size}"):
         packet_type.from_bytes(bytes(valid_size - 1))
