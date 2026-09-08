@@ -145,6 +145,13 @@ jobs:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+      # Runner images ship a frozen Homebrew index. ffmpeg@8 only entered
+      # homebrew-core on 2026-09-01, and `brew bundle` never updates, so an
+      # older image resolves ffmpeg@8 to the pre-9.0 alias or not at all.
+      - name: Refresh the Homebrew index
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew update --quiet
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
@@ -442,6 +449,7 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: |
+          brew update --quiet
           brew install protobuf ffmpeg@8
           prefix="$(brew --prefix ffmpeg@8)"
           echo "PKG_CONFIG_PATH=${prefix}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
