@@ -274,20 +274,32 @@ impl SimRecipe {
     }
 }
 
+fn python_from_venv(python: &std::path::Path) -> Option<std::process::Command> {
+    if !python.exists() {
+        return None;
+    }
+    let mut cmd = std::process::Command::new(python);
+    // When built with tracy, the nox-py .so is large enough (IREE+TracyClient)
+    // to exceed the default static TLS reservation. Increase the optional
+    // static TLS allocation so dlopen() succeeds. Unlike LD_PRELOAD, this
+    // env var is safe to inherit into child processes.
+    if std::env::var("TRACY_PORT").is_ok() {
+        cmd.env("GLIBC_TUNABLES", "glibc.rtld.optional_static_tls=16384");
+    }
+    Some(cmd)
+}
+
 pub fn python_command() -> Result<std::process::Command, Error> {
     if let Ok(python) = std::env::var("ELODIN_PYTHON") {
         return Ok(std::process::Command::new(python));
     }
-    let venv_python = std::path::Path::new(".venv/bin/python");
-    if venv_python.exists() {
-        let mut cmd = std::process::Command::new(venv_python);
-        // When built with tracy, the nox-py .so is large enough (IREE+TracyClient)
-        // to exceed the default static TLS reservation. Increase the optional
-        // static TLS allocation so dlopen() succeeds. Unlike LD_PRELOAD, this
-        // env var is safe to inherit into child processes.
-        if std::env::var("TRACY_PORT").is_ok() {
-            cmd.env("GLIBC_TUNABLES", "glibc.rtld.optional_static_tls=16384");
+    if let Ok(virtual_env) = std::env::var("VIRTUAL_ENV") {
+        let venv_python = std::path::Path::new(&virtual_env).join("bin/python");
+        if let Some(cmd) = python_from_venv(&venv_python) {
+            return Ok(cmd);
         }
+    }
+    if let Some(cmd) = python_from_venv(std::path::Path::new(".venv/bin/python")) {
         return Ok(cmd);
     }
     if let Ok(uv) = which("uv") {

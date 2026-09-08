@@ -149,6 +149,8 @@ with pkgs; let
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
+    UV_PYTHON = "${pythonBase}/bin/python3";
+
     # Set up library paths for Linux graphics/audio
     LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
       lib.makeLibraryPath [
@@ -167,7 +169,58 @@ with pkgs; let
           ${common.linuxEditorShellHook}
         ;;
       esac
-      # start the shell if we're in an interactive shell
+
+      export ELODIN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+      export VIRTUAL_ENV="$ELODIN_ROOT/.venv"
+      export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
+      PATH="$VIRTUAL_ENV/bin:$PATH"
+      if [ -x "$VIRTUAL_ENV/bin/python" ]; then
+        export UV_PYTHON="$VIRTUAL_ENV/bin/python"
+      fi
+
+      if [ -z "''${ELODIN_SHELL_ID:-}" ]; then
+        if [ "$(uname -s)" = Linux ]; then
+          ELODIN_SHELL_ID="$(ps -o sid= -p $$ | tr -d '[:space:]')"
+        else
+          ELODIN_SHELL_ID="$$"
+        fi
+      fi
+      export ELODIN_SHELL_ID
+      export ELODIN_SHELL_BIN="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/bin"
+      mkdir -p "$ELODIN_SHELL_BIN"
+      PATH="$ELODIN_SHELL_BIN:$PATH"
+      export PATH
+
+      if [ -d "$ELODIN_ROOT/target/shells" ]; then
+        for _elo_dir in "$ELODIN_ROOT/target/shells"/[0-9]*; do
+          [ -d "$_elo_dir" ] || continue
+          _elo_id="''${_elo_dir##*/}"
+          case "$_elo_id" in
+            *[!0-9]*) continue ;;
+          esac
+          if ! kill -0 "$_elo_id" 2>/dev/null; then
+            rm -rf "$_elo_dir"
+          fi
+        done
+        unset _elo_dir _elo_id
+      fi
+
+      # nix develop applies this hook via print-dev-env (non-interactive) then
+      # starts $SHELL. Set SHELL/ZDOTDIR here so -c env and interactive agree.
+      if [ "''${ELODIN_SHELL:-}" = zsh ]; then
+        export SHELL=${pkgs.zsh}/bin/zsh
+        export ELODIN_NIX_PATH="$PATH"
+        export ZDOTDIR="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/zdot"
+        mkdir -p "$ZDOTDIR"
+        printf '%s\n' \
+          'ZDOTDIR="$HOME"' \
+          '[ -f "$HOME/.zshenv" ] && . "$HOME/.zshenv"' \
+          '[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"' \
+          'typeset -U path' \
+          'path=(''${(s.:.)ELODIN_NIX_PATH} $path)' \
+          > "$ZDOTDIR/.zshrc"
+      fi
+
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "🚀 Elodin Development Shell (Nix)"
@@ -176,13 +229,18 @@ with pkgs; let
         echo "Environment ready:"
         echo "  • Rust: cargo, clippy, nextest"
         echo "  • Tools: uv, maturin, ruff, just, alejandra"
+        echo "  • Venv: $VIRTUAL_ENV (auto-active; no source needed)"
+        echo "  • Local bins: $ELODIN_SHELL_BIN"
         echo ""
         echo "Development flow:"
-        echo "  • Run 'just install' to build: elodin-py, elodin, and elodin-db"
-        echo "  • don't forget to source the venv with 'source .venv/bin/activate'"
+        echo "  • just local-install  — this shell only (use this in agents / parallel worktrees)"
+        echo "  • just install        — global ~/.cargo/bin (shared across shells)"
+        echo "  • ELODIN_SHELL=zsh    — opt-in zsh + p10k (PATH is re-asserted after ~/.zshrc)"
         echo ""
 
-        exec ${pkgs.zsh}/bin/zsh
+        if [ "''${ELODIN_SHELL:-}" = zsh ]; then
+          exec "$SHELL" -i
+        fi
       fi
     '';
   };

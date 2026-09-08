@@ -7,16 +7,11 @@ Install the editor from the [releases](https://github.com/elodin-sys/elodin/rele
 To run the editor locally and test the included examples, follow these steps:
 
 ```bash
-# Create a new virtual environment using uv
-uv venv
+# Prefer the nix shell (venv is auto-active; no source needed)
+nix develop
+just local-install py
 
-# Activate the environment (Bash)
-source .venv/bin/activate
-
-# Build and install nox-py in development mode
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
-
-# Run the three-body example from the editor (execute inside libs/nox-py)
+# Run the three-body example from the editor
 cargo run --bin elodin editor examples/three-body/main.py
 ```
 

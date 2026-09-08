@@ -22,8 +22,8 @@ same user's PipeWire socket under `XDG_RUNTIME_DIR`.
    ```
 
    Running a Python example also requires the project virtual environment. If
-   it is not already installed and active, run `just install` and then
-   `source .venv/bin/activate`.
+   it is not already installed, run `just local-install` (venv is auto-active
+   in the nix shell).
 
 2. Check that the host PipeWire service and portable software encoder are
    available:

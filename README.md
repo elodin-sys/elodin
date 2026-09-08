@@ -53,7 +53,7 @@ cd elodin
 nix develop
 ```
 > [!TIP]
-> The Nix shell supports Oh My Zsh + Powerlevel 10k; for first time configuration run: `p10k configure`
+> The shell is bash by default (venv on PATH; no `source` needed). For Oh My Zsh + Powerlevel 10k: `ELODIN_SHELL=zsh nix develop`, then `p10k configure`.
 >
 
 ### 4. Build and Install Elodin Editor and Elodin DB into your path
@@ -62,7 +62,7 @@ just install
 
 elodin --version
 
-.venv/bin/python examples/rocket/main.py run
+python examples/rocket/main.py run
 ```
 
 Open the Elodin editor in a new nix develop shell and connect to the local server
@@ -70,6 +70,8 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 ```sh
 elodin editor
 ```
+
+For parallel worktrees or agent shells, use `just local-install` instead of `just install`. That writes `elodin` / `elodin-db` to a per-shell bin dir so one checkout cannot overwrite another.
 
 ---
 
@@ -82,9 +84,8 @@ elodin editor
 # In a new terminal
 nix develop
 # build the SDK python wheel
-just install py
-# use the newly built wheel (venv is not active in this shell)
-.venv/bin/python examples/rocket/main.py run
+just local-install py
+python examples/rocket/main.py run
 ```
 
 Open the Elodin editor and connect to the local server

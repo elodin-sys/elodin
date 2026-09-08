@@ -12,11 +12,23 @@ Elodin uses Nix flakes for reproducible builds, CI dependencies, Docker images, 
 The unified dev shell includes all tools for Rust, Python, C/C++, cloud operations, documentation, and git-lfs:
 
 ```bash
-nix develop                              # Enter interactive shell
+nix develop                              # Enter interactive shell (bash)
+ELODIN_SHELL=zsh nix develop             # Opt-in zsh + p10k
 nix develop --command "cargo build"      # One-off command
 ```
 
 No need to switch shells for different tasks — everything is in one environment.
+
+## Shell isolation
+
+Each `nix develop` is self-contained so parallel worktrees and agent shells do not overwrite each other:
+
+- **`VIRTUAL_ENV`** is set to `<worktree>/.venv` and prepended to `PATH` on entry. Do not `source .venv/bin/activate`.
+- **`ELODIN_SHELL_ID`** defaults to the terminal session id on Linux (`ps -o sid= -p $$`), `$$` elsewhere, and is inherited when already set. Every `nix develop` / `nix develop --command` in the same tab shares one bin dir.
+- **`ELODIN_SHELL_BIN`** is `<worktree>/target/shells/$ELODIN_SHELL_ID/bin`. Dead numeric IDs are pruned on shell entry.
+- **`just local-install`** builds `elodin` / `elodin-db` into `$ELODIN_SHELL_BIN` (this shell only). **`just install`** still copies to `~/.cargo/bin` (global, shared). Agents must use `just local-install`.
+- **`ELODIN_SHELL=zsh`** sets `SHELL` to nix zsh and writes a wrapper `ZDOTDIR` `.zshrc` that sources `~/.zshrc` then re-prepends the nix PATH, so `~/.cargo/bin` cannot shadow local bins. `nix develop` then starts that `$SHELL`.
+- **direnv** (`.envrc`) is per-directory: it sets `ELODIN_SHELL_BIN=$PWD/target/bin`. Install direnv and `eval "$(direnv hook bash)"` to load the flake env on `cd` without an explicit `nix develop`.
 
 ## Nix Installation
 
