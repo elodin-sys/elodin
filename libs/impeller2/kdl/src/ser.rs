@@ -21,7 +21,13 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
         doc.nodes_mut().push(serialize_theme(theme));
     }
     if let Some(timeline) = schematic.timeline.as_ref() {
-        doc.nodes_mut().push(serialize_timeline(timeline));
+        let node = serialize_timeline(timeline);
+        // A bare `timeline` node carries no information: every setting is at
+        // its default, which is exactly what the loader assumes when the node
+        // is absent. Skip it so saved schematics don't accumulate noise.
+        if !node.entries().is_empty() {
+            doc.nodes_mut().push(node);
+        }
     }
     if schematic.telemetry_mode {
         let mut node = KdlNode::new("telemetry_mode");
@@ -1440,6 +1446,41 @@ mod tests {
         assert_eq!(timeline.played_color, Color::MINT);
         assert_eq!(timeline.future_color, Color::HYPERBLUE);
         assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_serialize_skips_bare_timeline_node() {
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig::default()),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("timeline"),
+            "default timeline settings should not emit a node: {serialized}"
+        );
+
+        // Omitting the node must load back to the same settings.
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            parsed.timeline.unwrap_or_default(),
+            TimelineConfig::default()
+        );
+
+        // Any non-default setting still emits the node.
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig {
+                follow_latest: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("timeline follow_latest=#true"),
+            "non-default timeline settings must still serialize: {serialized}"
+        );
     }
 
     #[test]
