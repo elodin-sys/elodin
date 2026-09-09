@@ -58,7 +58,7 @@ nix develop
 
 ### 4. Build and Install Elodin Editor and Elodin DB into your path
 ```sh
-just install
+just local-install
 
 elodin --version
 
@@ -71,7 +71,7 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 elodin editor
 ```
 
-For parallel worktrees or agent shells, use `just local-install` instead of `just install`. That writes `elodin` / `elodin-db` to a per-shell bin dir so one checkout cannot overwrite another.
+`just local-install` writes `elodin` / `elodin-db` and a Python venv into this shell's `target/shells/$ELODIN_SHELL_ID/` so parallel worktrees and agent shells cannot overwrite each other. `just install` still installs globally (`~/.cargo/bin` and the worktree `.venv`).
 
 ---
 

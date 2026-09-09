@@ -171,12 +171,6 @@ with pkgs; let
       esac
 
       export ELODIN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-      export VIRTUAL_ENV="$ELODIN_ROOT/.venv"
-      export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
-      PATH="$VIRTUAL_ENV/bin:$PATH"
-      if [ -x "$VIRTUAL_ENV/bin/python" ]; then
-        export UV_PYTHON="$VIRTUAL_ENV/bin/python"
-      fi
 
       if [ -z "''${ELODIN_SHELL_ID:-}" ]; then
         if [ "$(uname -s)" = Linux ]; then
@@ -188,7 +182,12 @@ with pkgs; let
       export ELODIN_SHELL_ID
       export ELODIN_SHELL_BIN="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/bin"
       mkdir -p "$ELODIN_SHELL_BIN"
-      PATH="$ELODIN_SHELL_BIN:$PATH"
+      export VIRTUAL_ENV="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/.venv"
+      export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
+      PATH="$ELODIN_SHELL_BIN:$VIRTUAL_ENV/bin:$PATH"
+      if [ -x "$VIRTUAL_ENV/bin/python" ]; then
+        export UV_PYTHON="$VIRTUAL_ENV/bin/python"
+      fi
       export PATH
 
       if [ -d "$ELODIN_ROOT/target/shells" ]; then

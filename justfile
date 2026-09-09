@@ -108,12 +108,13 @@ _install-py extra_maturin_args="":
   # otherwise short-circuit forever. The maturin@1.12.6 pin below stops new
   # ones from appearing while keeping uvx working in non-Nix setups too.
   find target -maxdepth 4 -name 'libelodin.so' -size 0 -delete 2>/dev/null || true
-  uv venv --python 3.13 --python-preference only-system --allow-existing
   VIRTUAL_ENV="${VIRTUAL_ENV:-$PWD/.venv}"
   export VIRTUAL_ENV
+  mkdir -p "$(dirname "$VIRTUAL_ENV")"
+  uv venv --python 3.13 --python-preference only-system --allow-existing "$VIRTUAL_ENV"
   export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
   # UV_PYTHON in the nix shell points at the immutable store interpreter so
-  # `uv venv` can create .venv. After that, uv/maturin must target the venv.
+  # `uv venv` can create the venv. After that, uv/maturin must target it.
   export UV_PYTHON="$VIRTUAL_ENV/bin/python"
   PATH="$VIRTUAL_ENV/bin:$PATH"
   uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml {{extra_maturin_args}}
@@ -126,6 +127,8 @@ install target="all":
   mkdir -p "$cargo_bin"
   case "{{target}}" in
     py)
+      VIRTUAL_ENV="${ELODIN_ROOT:-$PWD}/.venv"
+      export VIRTUAL_ENV
       just _install-py
       ;;
     editor)
@@ -141,6 +144,8 @@ install target="all":
         echo "Use a Linux machine or an OrbStack NixOS VM for profiling." >&2
         exit 1
       fi
+      VIRTUAL_ENV="${ELODIN_ROOT:-$PWD}/.venv"
+      export VIRTUAL_ENV
       just _install-py "-F tracy"
       cargo build --release -p elodin -p elodin-db --features tracy
       install -m 755 target/release/elodin "$cargo_bin/"
@@ -166,7 +171,11 @@ local-install target="all":
   mkdir -p "$ELODIN_SHELL_BIN"
   case "{{target}}" in
     py)
-      just install py
+      if [ -z "$VIRTUAL_ENV" ]; then
+        echo "error: VIRTUAL_ENV is unset; run inside nix develop" >&2
+        exit 1
+      fi
+      just _install-py
       ;;
     editor)
       just _install-bin elodin "$ELODIN_SHELL_BIN"

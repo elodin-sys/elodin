@@ -23,7 +23,7 @@ No need to switch shells for different tasks — everything is in one environmen
 
 Each `nix develop` is self-contained so parallel worktrees and agent shells do not overwrite each other:
 
-- **`VIRTUAL_ENV`** is set to `<worktree>/.venv` and prepended to `PATH` on entry. Do not `source .venv/bin/activate`.
+- **`VIRTUAL_ENV`** is set to `<worktree>/target/shells/$ELODIN_SHELL_ID/.venv` and prepended to `PATH` on entry. Do not `source .venv/bin/activate`. `just local-install py` creates that venv; `just install py` still uses the worktree `.venv`.
 - **`ELODIN_SHELL_ID`** defaults to the terminal session id on Linux (`ps -o sid= -p $$`), `$$` elsewhere, and is inherited when already set. Every `nix develop` / `nix develop --command` in the same tab shares one bin dir.
 - **`ELODIN_SHELL_BIN`** is `<worktree>/target/shells/$ELODIN_SHELL_ID/bin`. Dead numeric IDs are pruned on shell entry.
 - **`just local-install`** builds `elodin` / `elodin-db` into `$ELODIN_SHELL_BIN` (this shell only). **`just install`** still copies to `~/.cargo/bin` (global, shared). Agents must use `just local-install`.
