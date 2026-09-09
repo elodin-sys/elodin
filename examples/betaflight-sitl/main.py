@@ -153,7 +153,7 @@ world.schematic(
         }
     }
     object_3d drone.world_pos {
-        glb path="edu-450-v2-drone.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 1.0, 0.0)" scale=10.0
+        glb path="edu-450-v2-drone.glb" scale=10.0
     }
     """,
     "betaflight-sitl.kdl",
