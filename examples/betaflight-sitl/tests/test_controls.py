@@ -145,10 +145,21 @@ def test_new_heartbeat_recovers_after_stale_input() -> None:
     assert source.fresh is True
 
 
+def test_disconnect_allows_a_restarted_controller_heartbeat() -> None:
+    source = ManualGuidance()
+    first = np.array([0.2, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0])
+
+    assert _manual_update(source, first, now=1.0).roll == 0.2
+    assert _manual_update(source, None, now=1.1) == SemanticControl.safe()
+    assert _manual_update(source, first, now=1.2).roll == 0.2
+    assert source.fresh is True
+
+
 @pytest.mark.parametrize(
     "raw",
     [
         np.zeros(6),
+        np.zeros(7),  # Heartbeat zero is the uninitialized DB value, not a controller sample.
         np.zeros(8),
         np.array([0.0, 0.0, np.nan, 0.0, 1.0, 1.0, 1.0]),
     ],

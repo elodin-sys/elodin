@@ -39,6 +39,7 @@ from controls import (
     GuidanceMode,
     GuidanceUpdate,
     ManualGuidance,
+    RcCommand,
     ScriptedGuidance,
     SemanticControl,
     guidance_mode_from_env,
@@ -229,7 +230,12 @@ class SITLState:
     tick: int = 0
     sim_time: float = 0.0
     motors: np.ndarray = None
-    rc_latch: DelayedRcCommand = None
+    rc_latch: DelayedRcCommand | None = None
+    selected_control: SemanticControl | None = None
+    rc_telemetry: RcCommand | None = None
+    barometer: float | None = None
+    magnetometer: np.ndarray | None = None
+    manual_values: np.ndarray | None = None
     phase: str = "boot"
     max_motor: float = 0.0
     lockstep_steps: int = 0
@@ -240,6 +246,8 @@ class SITLState:
             self.motors = np.zeros(4)
         if self.rc_latch is None:
             self.rc_latch = DelayedRcCommand(semantic_to_rc(initial_control))
+        if self.selected_control is None:
+            self.selected_control = initial_control
 
 
 # Calculate max ticks for completion detection
@@ -256,6 +264,21 @@ axis_audit = AxisAudit() if audit_requested else None
 
 # Pre-allocated buffers to avoid allocation in hot loop
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+_rc_packet = RCPacket(timestamp=0.0, channels=_rc_channels_buffer)
+_rc_channels_command: list[RcCommand | None] = [None]
+_zero_sensor_vector = np.zeros(3)
+_component_reads = [
+    "drone.accel",
+    "drone.gyro",
+    "drone.world_pos",
+    "drone.world_vel",
+]
+# Manual packets arrive at about 100 Hz. Sampling the DB seam at 1 kHz keeps
+# control latency below 1 ms while avoiding an unnecessary array conversion on
+# every 125 microsecond physics tick. Freshness is still checked every tick.
+_manual_input_tick_interval = max(1, round(config.pid_rate / 1_000.0))
+_barometer_tick_interval = config.baro_tick_interval
+_magnetometer_tick_interval = config.mag_tick_interval
 
 
 def sitl_post_step(tick: int, ctx: el.StepContext):
@@ -312,58 +335,77 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     s.sim_time = tick * config.dt
     t = s.sim_time
 
-    # Read state and sensors in one DB transaction. These local arrays are
-    # copied again by GuidanceUpdate, so a source cannot observe later mutation.
-    accel = np.zeros(3)
-    gyro = np.zeros(3)
-    barometer = None
-    magnetometer = None
-    manual_values = None
+    # Read current state and due lower-rate samples in one DB transaction.
+    # component_batch_operation already returns fresh NumPy arrays, so the
+    # callback can transfer them to its short-lived FDM buffer without first
+    # making another copy.
+    accel = _zero_sensor_vector
+    gyro = _zero_sensor_vector
+    barometer = s.barometer
+    magnetometer = s.magnetometer
+    manual_values = s.manual_values
+    barometer_fresh = tick % _barometer_tick_interval == 0
+    magnetometer_fresh = tick % _magnetometer_tick_interval == 0
+    manual_input_poll = (
+        guidance_mode is GuidanceMode.MANUAL and tick % _manual_input_tick_interval == 0
+    )
+    reads = _component_reads.copy()
+    if barometer_fresh:
+        reads.append("drone.baro")
+    if magnetometer_fresh:
+        reads.append("drone.mag")
+    if manual_input_poll:
+        reads.append("drone.manual_control")
+    sensor_read_succeeded = False
     try:
-        sensor_data = ctx.component_batch_operation(
-            reads=[
-                "drone.accel",
-                "drone.gyro",
-                "drone.baro",
-                "drone.mag",
-                "drone.world_pos",
-                "drone.world_vel",
-                "drone.manual_control",
-            ]
-        )
-        accel = np.array(sensor_data["drone.accel"])
-        gyro = np.array(sensor_data["drone.gyro"])
-        barometer = float(np.asarray(sensor_data["drone.baro"])[0])
-        magnetometer = np.array(sensor_data["drone.mag"])
-        world_pos = np.array(sensor_data["drone.world_pos"])
-        world_vel = np.array(sensor_data["drone.world_vel"])
-        manual_values = np.array(sensor_data["drone.manual_control"])
+        sensor_data = ctx.component_batch_operation(reads=reads)
+        accel = sensor_data["drone.accel"]
+        gyro = sensor_data["drone.gyro"]
+        world_pos = sensor_data["drone.world_pos"]
+        world_vel = sensor_data["drone.world_vel"]
+        if barometer_fresh:
+            s.barometer = float(sensor_data["drone.baro"][0])
+            barometer = s.barometer
+        if magnetometer_fresh:
+            s.magnetometer = sensor_data["drone.mag"]
+            magnetometer = s.magnetometer
+        if manual_input_poll:
+            s.manual_values = sensor_data["drone.manual_control"]
+            manual_values = s.manual_values
+        sensor_read_succeeded = True
         s.max_altitude = max(s.max_altitude, float(world_pos[6]))
 
+        # The batch operation returned new owned arrays. The FDM buffer keeps
+        # those arrays only until they are replaced on the next tick, so another
+        # copy here would just consume the 125 microsecond lockstep budget.
         buf.update(
             world_pos=world_pos,
             world_vel=world_vel,
             accel=accel,
             gyro=gyro,
             timestamp=t,
+            copy=False,
         )
     except RuntimeError as e:
         if tick > 5:
             print(f"[SITL] Warning: Could not read sensor data: {e}")
         buf.timestamp = t
 
-    # Send the command retained on the previous tick. The remaining ten RC
-    # channels are reset to center on every exchange rather than leaking state.
+    # Send the command retained on the previous tick. A command change resets
+    # all sixteen channels, including the ten unused channels, to deterministic
+    # values; unchanged commands reuse that complete packet in the hot loop.
     command_sent = s.rc_latch.command_for_exchange()
-    channels = command_sent.fill_channels(_rc_channels_buffer)
+    if command_sent != _rc_channels_command[0]:
+        command_sent.fill_channels(_rc_channels_buffer)
+        _rc_channels_command[0] = command_sent
     fdm = buf.build_fdm()
-    rc = RCPacket(timestamp=t, channels=channels)
+    _rc_packet.timestamp = t
 
     try:
         # Synchronous lockstep: send FDM+RC, wait for motor response.
         # Motor order is native Betaflight Quad-X: BR(0), FR(1), BL(2), FL(3).
         steps_before = b.step_count
-        s.motors = b.step(fdm, rc)
+        s.motors = b.step(fdm, _rc_packet)
         if b.step_count > steps_before:
             s.lockstep_steps += 1
         s.max_motor = max(s.max_motor, float(np.max(s.motors)))
@@ -379,9 +421,9 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         gyro=gyro,
         accel=accel,
         barometer=barometer,
-        barometer_fresh=tick % config.baro_tick_interval == 0,
+        barometer_fresh=barometer_fresh and sensor_read_succeeded,
         magnetometer=magnetometer,
-        magnetometer_fresh=tick % config.mag_tick_interval == 0,
+        magnetometer_fresh=magnetometer_fresh and sensor_read_succeeded,
     )
     if isinstance(command_source, ScriptedGuidance):
         next_control = command_source.update(update)
@@ -391,9 +433,16 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         next_control = command_source.update(update)
         s.phase = "manual" if command_source.fresh else "failsafe"
 
-    next_command = semantic_to_rc(next_control)
-    s.rc_latch.retain_for_next_tick(next_command)
-    ctx.write_component("drone.rc_command", next_command.as_array())
+    # Most guidance ticks select the same command (manual input arrives at
+    # about 100 Hz). Preserve the one-tick latch while avoiding an 8 kHz stream
+    # of identical allocations and DB telemetry writes.
+    if next_control != s.selected_control:
+        s.selected_control = next_control
+        s.rc_latch.retain_for_next_tick(semantic_to_rc(next_control))
+    next_command = s.rc_latch.command_for_exchange()
+    if next_command != s.rc_telemetry:
+        ctx.write_component("drone.rc_command", next_command.as_array())
+        s.rc_telemetry = next_command
 
     # Print status every second
     if t - last_print[0] >= 1.0:

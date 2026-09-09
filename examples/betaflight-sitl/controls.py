@@ -225,6 +225,9 @@ class ManualSample:
         values = np.asarray(values, dtype=np.float64)
         if values.shape != (MANUAL_CONTROL_COUNT,) or not np.all(np.isfinite(values)):
             raise ValueError(f"manual control must contain {MANUAL_CONTROL_COUNT} finite values")
+        heartbeat = float(values[6])
+        if heartbeat <= 0.0:
+            raise ValueError("manual control heartbeat must be positive")
         return cls(
             control=SemanticControl(
                 roll=float(values[0]),
@@ -234,7 +237,7 @@ class ManualSample:
                 armed=bool(values[4] >= 0.5),
                 angle_mode=bool(values[5] >= 0.5),
             ),
-            heartbeat=float(values[6]),
+            heartbeat=heartbeat,
         )
 
 
@@ -250,25 +253,47 @@ class ManualGuidance:
     _control: SemanticControl = field(default_factory=SemanticControl.safe)
 
     def accept_input(self, values: NDArray[np.float64] | None, now: float) -> None:
-        """Accept the adapter's latest DB sample without gaining DB access."""
+        """Accept the adapter's latest DB sample without gaining DB access.
+
+        The adapter calls this at the 8 kHz physics rate while the controller
+        publishes at about 100 Hz. A heartbeat identifies a new transport
+        sample, so unchanged samples only need the inexpensive age check. This
+        keeps manual mode inside the lockstep real-time budget without changing
+        its freshness semantics.
+        """
 
         if values is None:
+            self._last_heartbeat = None
+            self._heartbeat_seen_at = None
             self.fresh = False
             self.reason = "controller absent"
             self._control = SemanticControl.safe()
             return
 
-        try:
-            sample = ManualSample.from_array(values)
-        except (TypeError, ValueError):
+        values = np.asarray(values, dtype=np.float64)
+        if values.shape != (MANUAL_CONTROL_COUNT,) or not math.isfinite(float(values[-1])):
             self.fresh = False
             self.reason = "invalid controller input"
             self._control = SemanticControl.safe()
             return
 
-        if self._last_heartbeat is None or sample.heartbeat != self._last_heartbeat:
+        heartbeat = float(values[-1])
+        if heartbeat <= 0.0:
+            self.fresh = False
+            self.reason = "invalid controller input"
+            self._control = SemanticControl.safe()
+            return
+        if self._last_heartbeat is None or heartbeat != self._last_heartbeat:
+            try:
+                sample = ManualSample.from_array(values)
+            except (TypeError, ValueError):
+                self.fresh = False
+                self.reason = "invalid controller input"
+                self._control = SemanticControl.safe()
+                return
             self._last_heartbeat = sample.heartbeat
             self._heartbeat_seen_at = now
+            self._control = sample.control
 
         age = (
             math.inf if self._heartbeat_seen_at is None else max(0.0, now - self._heartbeat_seen_at)
@@ -280,7 +305,6 @@ class ManualGuidance:
             return
 
         self.reason = "fresh"
-        self._control = sample.control
 
     def update(self, update: GuidanceUpdate) -> SemanticControl:
         """Return pilot intent for this tick through the common guidance API."""
