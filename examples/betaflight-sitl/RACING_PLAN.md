@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-03
-**Current resume point:** Package D — Manual piloting, control seam, and ANGLE mode
+**Last verified against repository:** 2026-09-08
+**Current resume point:** Package D — manual hardware qualification
 
 ## 1. Purpose and authority
 
@@ -323,9 +323,15 @@ They map to RC channels 0–5 in AETR/AUX order. All outputs must be clamped to
 may retain its current flight mode to preserve behavior; truth and vision modes
 use ANGLE initially.
 
-The empirically observed signs and stick-to-angle behavior must be recorded by
-Package D in this document and encoded in one tested conversion helper. Do not
-infer the signs from comments alone.
+The Package D physical audit measured these semantic signs in the live SITL:
+positive roll is right-wing-down (`+X` FLU rotation), positive pitch is
+nose-down/forward (`+Y` FLU rotation), and positive yaw is nose-right/clockwise
+(`-Z` FLU rotation). Roll and pitch map directly above PWM center; right yaw
+maps below PWM center. A bounded normalized `+0.25` roll or pitch command
+(`1625` PWM) produced approximately 5 degrees of ANGLE-mode attitude before the
+audit reversed it; the peak rates were 0.447 rad/s roll and 0.444 rad/s pitch.
+The tested `semantic_to_rc` helper in `controls.py` encodes these signs and maps
+full normalized axis travel to 1000–2000 PWM.
 
 #### Manual input provider
 
@@ -655,6 +661,9 @@ example.
 
 ### [ ] D — Manual piloting, control seam, and ANGLE mode
 
+**Implementation status:** Code and automated acceptance are complete; a manual
+qualification session with physical input hardware remains to close the package.
+
 **Objective:** Replace hardcoded RC construction with a minimal, testable command
 boundary; add a safe manual piloting option; preserve default behavior; and prove
 ANGLE-mode conventions before autonomous guidance.
@@ -700,6 +709,26 @@ roll/pitch/yaw/throttle, land, and disarm using a supported gamepad or keyboard.
 
 **Handoff:** Update Section 7.1 with measured signs, document controls and
 failsafe timing, and record both automated and manual qualification commands.
+
+Automated qualification (2026-09-08):
+
+```bash
+python3 -m pytest examples/betaflight-sitl/tests -q
+cargo test -p betaflight-sitl-controller
+RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1 elodin run examples/betaflight-sitl/main.py
+```
+
+The pure suite passed 46 tests, the controller passed 7 tests, and the live
+injected-input audit reported:
+
+```text
+[D-AUDIT] angle=true roll_right_rad_s=0.447 pitch_forward_rad_s=0.444 yaw_right_rad_s=1.480 max_motor=0.390 status=PASS
+```
+
+Manual gamepad/keyboard qualification is still pending. Follow the controls in
+`README.md`, demonstrate arm, takeoff, all four command axes, landing, and
+disarm, then record the hardware/layout and result here before marking D
+complete.
 
 ### [ ] E — Truth-guided single-gate hold
 
@@ -973,7 +1002,7 @@ branch for later resumption.
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
 | C | Not started | No course or referee code |
-| D | Not started | RC remains hardcoded; no manual mode; AUX2 ANGLE not configured |
+| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and physical sign audit implemented. 46 pure tests and 7 controller tests pass; live audit passes with roll 0.447, pitch 0.444, yaw 1.480 rad/s and max motor 0.390. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
 | G | Blocked by B | No racing camera geometry contract in code |
@@ -985,11 +1014,14 @@ branch for later resumption.
 
 ### Resume point
 
-Implement **Package D — Manual piloting, control seam, and ANGLE mode**.
+Complete Package D's **manual hardware qualification** using the documented
+gamepad or keyboard controls. The implementation and deterministic physical
+audit are complete, but Package D must remain open until an operator has armed,
+taken off, exercised roll/pitch/yaw/throttle, landed, and disarmed.
 
-Packages B and C remain valid independent alternatives if camera or course work
-is prioritized first. Package D is the recommended continuation because A now
-provides its required protocol, convention, and C0 safety net.
+After recording that result in the Package D handoff, Package E is the
+recommended implementation continuation. Packages B and C remain valid
+independent alternatives if camera or course work is prioritized first.
 
 Package A verification from the repository root, with the Elodin Python
 environment active and the current release CLI on `PATH`:

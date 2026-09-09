@@ -31,8 +31,19 @@ import elodin as el
 import jax.numpy as jnp
 import numpy as np
 
+from audit import AxisAudit
 from baseline import C0Result, evaluate_c0
 from config import DEFAULT_CONFIG
+from controls import (
+    DelayedRcCommand,
+    GuidanceMode,
+    GuidanceUpdate,
+    ManualGuidance,
+    ScriptedGuidance,
+    SemanticControl,
+    guidance_mode_from_env,
+    semantic_to_rc,
+)
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -44,7 +55,31 @@ from comms import (
 
 # --- Configuration ---
 config = DEFAULT_CONFIG
+
+try:
+    guidance_mode = guidance_mode_from_env()
+except ValueError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+audit_value = os.environ.get("RACE_MANUAL_AUDIT", "0")
+if audit_value not in ("0", "1"):
+    print("ERROR: RACE_MANUAL_AUDIT must be '0' or '1'", file=sys.stderr)
+    sys.exit(2)
+audit_requested = audit_value == "1"
+if audit_requested and guidance_mode is not GuidanceMode.MANUAL:
+    print("ERROR: RACE_MANUAL_AUDIT=1 requires RACE_GUIDANCE=manual", file=sys.stderr)
+    sys.exit(2)
+if audit_requested:
+    config.simulation_time = 24.0
 config.set_as_global()
+
+if guidance_mode is GuidanceMode.SCRIPTED:
+    command_source = ScriptedGuidance()
+    initial_control = SemanticControl(angle_mode=False)
+else:
+    command_source = ManualGuidance()
+    initial_control = SemanticControl.safe()
 
 
 # --- Betaflight Binary Path ---
@@ -141,7 +176,45 @@ betaflight_recipe = el.s10.PyRecipe.process(
 )
 world.recipe(betaflight_recipe)
 
+# Manual input is deliberately a separate s10-supervised process. The default
+# scripted example neither builds nor starts it.
+if guidance_mode is GuidanceMode.MANUAL:
+    controller_path = Path(__file__).parent / "controller"
+    stick_mode = os.environ.get("RACE_STICK_MODE", "2")
+    if stick_mode not in ("1", "2"):
+        raise ValueError("RACE_STICK_MODE must be '1' or '2'")
+    controller_args = ["--mode1"] if stick_mode == "1" else []
+    if audit_requested:
+        controller_args.append("--audit")
+    controller_host = os.environ.get("RACE_CONTROLLER_HOST")
+    if controller_host:
+        controller_args.extend(["--host", controller_host])
+    if not controller_args:
+        controller_args = None
+    controller_binary = os.environ.get("RACE_CONTROLLER_BIN")
+    if controller_binary:
+        binary = Path(controller_binary).resolve()
+        if not binary.is_file():
+            raise RuntimeError(f"manual controller binary not found: {binary}")
+        manual_controller_recipe = el.s10.PyRecipe.process(
+            name="Betaflight manual controller",
+            cmd=str(binary),
+            args=controller_args,
+            ready=el.s10.Ready.delay(100),
+            ready_timeout="120s",
+        )
+    else:
+        manual_controller_recipe = el.s10.PyRecipe.cargo(
+            name="Betaflight manual controller",
+            path=str(controller_path),
+            args=controller_args,
+            ready=el.s10.Ready.delay(100),
+            ready_timeout="120s",
+        )
+    world.recipe(manual_controller_recipe)
+
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
+print(f"Guidance: {guidance_mode.value}")
 print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
 print(
     f"Requested sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
@@ -153,11 +226,11 @@ print(
 class SITLState:
     """State for SITL synchronization."""
 
-    throttle: int = 1000
-    arm: int = 1000
     tick: int = 0
     sim_time: float = 0.0
     motors: np.ndarray = None
+    rc_latch: DelayedRcCommand = None
+    phase: str = "boot"
     max_motor: float = 0.0
     lockstep_steps: int = 0
     max_altitude: float = float(config.initial_position[2])
@@ -165,13 +238,9 @@ class SITLState:
     def __post_init__(self):
         if self.motors is None:
             self.motors = np.zeros(4)
+        if self.rc_latch is None:
+            self.rc_latch = DelayedRcCommand(semantic_to_rc(initial_control))
 
-
-# Test phases (durations in seconds)
-BOOTGRACE = 5.0  # Wait for Betaflight to initialize
-ARM_DUR = 2.0  # Arming phase
-THROTTLE_DUR = 10.0  # Apply throttle (longer for observation)
-# Remaining time is disarm phase
 
 # Calculate max ticks for completion detection
 MAX_TICKS = int(config.simulation_time / config.dt)
@@ -183,6 +252,7 @@ state = [None]
 start_time = [None]
 last_print = [0.0]
 c0_result: list[C0Result | None] = [None]
+axis_audit = AxisAudit() if audit_requested else None
 
 # Pre-allocated buffers to avoid allocation in hot loop
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
@@ -192,12 +262,9 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     """
     Post-step callback for lockstep SITL synchronization.
 
-    This implements the two-phase synchronization pattern:
-    1. Send sensor data (FDM) and RC inputs to Betaflight
-    2. Wait for motor response (blocking - this is the lockstep sync point)
-    3. Write motor commands back to Elodin-DB via ctx.write_component()
-
-    Following the pattern from ai-context/sitl-example/SITL_EXAMPLE_EXPLAINED.md
+    The ordering is intentional: sensors and the command retained on tick N-1
+    are exchanged first; only after the motor response does the selected source
+    compute and retain the command that will be sent on tick N+1.
     """
     # Lazy initialization - only start bridge when first tick runs
     if bridge[0] is None:
@@ -217,8 +284,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         warmup_buf = SensorDataBuffer()
         warmup_fdm = warmup_buf.build_fdm()
         warmup_channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
-        warmup_channels[2] = 1000  # Low throttle
-        warmup_channels[4] = 1000  # Disarmed
+        semantic_to_rc(initial_control).fill_channels(warmup_channels)
         warmup_rc = RCPacket(timestamp=0.0, channels=warmup_channels)
 
         warmup_count = 0
@@ -246,19 +312,34 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     s.sim_time = tick * config.dt
     t = s.sim_time
 
-    # Read actual sensor data from physics simulation using batch operation
-    # This acquires the DB lock once for all reads, improving performance at high tick rates
+    # Read state and sensors in one DB transaction. These local arrays are
+    # copied again by GuidanceUpdate, so a source cannot observe later mutation.
+    accel = np.zeros(3)
+    gyro = np.zeros(3)
+    barometer = None
+    magnetometer = None
+    manual_values = None
     try:
         sensor_data = ctx.component_batch_operation(
-            reads=["drone.accel", "drone.gyro", "drone.world_pos", "drone.world_vel"]
+            reads=[
+                "drone.accel",
+                "drone.gyro",
+                "drone.baro",
+                "drone.mag",
+                "drone.world_pos",
+                "drone.world_vel",
+                "drone.manual_control",
+            ]
         )
-        accel = np.array(sensor_data["drone.accel"])  # Body-frame accelerometer
-        gyro = np.array(sensor_data["drone.gyro"])  # Body-frame gyroscope
-        world_pos = np.array(sensor_data["drone.world_pos"])  # GPS simulation
-        world_vel = np.array(sensor_data["drone.world_vel"])  # GPS velocity
+        accel = np.array(sensor_data["drone.accel"])
+        gyro = np.array(sensor_data["drone.gyro"])
+        barometer = float(np.asarray(sensor_data["drone.baro"])[0])
+        magnetometer = np.array(sensor_data["drone.mag"])
+        world_pos = np.array(sensor_data["drone.world_pos"])
+        world_vel = np.array(sensor_data["drone.world_vel"])
+        manual_values = np.array(sensor_data["drone.manual_control"])
         s.max_altitude = max(s.max_altitude, float(world_pos[6]))
 
-        # Update sensor buffer with real physics data
         buf.update(
             world_pos=world_pos,
             world_vel=world_vel,
@@ -267,56 +348,52 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
             timestamp=t,
         )
     except RuntimeError as e:
-        # First few ticks may not have data yet
         if tick > 5:
             print(f"[SITL] Warning: Could not read sensor data: {e}")
         buf.timestamp = t
 
-    # Phase logic - determine arm and throttle based on sim time
-    if t < BOOTGRACE:
-        phase = "boot"
-        s.arm = 1000  # Disarmed
-        s.throttle = 1000  # Min throttle
-    elif t < BOOTGRACE + ARM_DUR:
-        phase = "arm"
-        s.arm = 1800  # Armed (AUX1 high)
-        s.throttle = 1000  # Min throttle during arm
-    elif t < BOOTGRACE + ARM_DUR + THROTTLE_DUR:
-        phase = "throttle"
-        s.arm = 1800  # Stay armed
-        s.throttle = 1400  # Mid throttle
-    else:
-        phase = "disarm"
-        s.arm = 1000  # Disarm
-        s.throttle = 1000
-
-    # Build RC packet with all channels (reuse pre-allocated buffer)
-    channels = _rc_channels_buffer
-    channels[0] = 1500  # Roll (center)
-    channels[1] = 1500  # Pitch (center)
-    channels[2] = s.throttle  # Throttle
-    channels[3] = 1500  # Yaw (center)
-    channels[4] = s.arm  # AUX1 (arm switch)
-
-    # Build FDM packet with sensor data
+    # Send the command retained on the previous tick. The remaining ten RC
+    # channels are reset to center on every exchange rather than leaking state.
+    command_sent = s.rc_latch.command_for_exchange()
+    channels = command_sent.fill_channels(_rc_channels_buffer)
     fdm = buf.build_fdm()
     rc = RCPacket(timestamp=t, channels=channels)
 
     try:
-        # Synchronous lockstep: send FDM+RC, wait for motor response
-        # Motor order is native Betaflight Quad-X: BR(0), FR(1), BL(2), FL(3)
-        # The physics simulation (config.py) uses the same motor layout
+        # Synchronous lockstep: send FDM+RC, wait for motor response.
+        # Motor order is native Betaflight Quad-X: BR(0), FR(1), BL(2), FL(3).
         steps_before = b.step_count
         s.motors = b.step(fdm, rc)
         if b.step_count > steps_before:
             s.lockstep_steps += 1
         s.max_motor = max(s.max_motor, float(np.max(s.motors)))
-
-        # Write motor commands back to Elodin-DB for physics simulation
-        # This uses the StepContext for direct DB access (no TCP overhead)
         ctx.write_component("drone.motor_command", s.motors)
+        if axis_audit is not None:
+            axis_audit.observe(command_sent, gyro, s.motors)
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
+
+    update = GuidanceUpdate(
+        sim_time=t,
+        tick=tick,
+        gyro=gyro,
+        accel=accel,
+        barometer=barometer,
+        barometer_fresh=tick % config.baro_tick_interval == 0,
+        magnetometer=magnetometer,
+        magnetometer_fresh=tick % config.mag_tick_interval == 0,
+    )
+    if isinstance(command_source, ScriptedGuidance):
+        next_control = command_source.update(update)
+        s.phase = command_source.phase
+    else:
+        command_source.accept_input(manual_values, time.monotonic())
+        next_control = command_source.update(update)
+        s.phase = "manual" if command_source.fresh else "failsafe"
+
+    next_command = semantic_to_rc(next_control)
+    s.rc_latch.retain_for_next_tick(next_command)
+    ctx.write_component("drone.rc_command", next_command.as_array())
 
     # Print status every second
     if t - last_print[0] >= 1.0:
@@ -354,7 +431,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
             debug_str = f"\n    [DEBUG] read failed: {e}"
 
         print(
-            f"  t={t:5.1f}s | {phase:8} | {armed:8} | "
+            f"  t={t:5.1f}s | {s.phase:8} | {armed:8} | "
             f"motors=[{s.motors[0]:.3f},{s.motors[1]:.3f},{s.motors[2]:.3f},{s.motors[3]:.3f}] | "
             f"{pos_str} | {rate:.1f}x realtime{debug_str}"
         )
@@ -390,28 +467,36 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
 
-        result = evaluate_c0(
-            lockstep_steps=s.lockstep_steps,
-            max_motor=s.max_motor,
-            initial_altitude=float(config.initial_position[2]),
-            max_altitude=s.max_altitude,
-        )
-        c0_result[0] = result
+        if guidance_mode is GuidanceMode.SCRIPTED:
+            result = evaluate_c0(
+                lockstep_steps=s.lockstep_steps,
+                max_motor=s.max_motor,
+                initial_altitude=float(config.initial_position[2]),
+                max_altitude=s.max_altitude,
+            )
+            c0_result[0] = result
 
-        # Success criteria: lockstep and motors responded, and the drone rose at least 0.1 m.
-        if result.passed:
-            print("SUCCESS: SITL integration working! Drone took off!")
-        elif s.lockstep_steps <= 0:
-            print("WARNING: No lockstep motor responses received from Betaflight.")
-        elif result.motor_response:
-            print("WARNING: Motors responded but drone did not take off.")
-            print("  Check physics pipeline: motor_command -> thrust -> force")
-        elif s.max_motor > 0.02:
-            print("WARNING: Motors armed but no throttle response.")
-        else:
-            print("WARNING: No motor response. Check Betaflight configuration.")
+            # C0 applies only to the default scripted source. Manual mode may
+            # legitimately remain disarmed for the entire run.
+            if result.passed:
+                print("SUCCESS: SITL integration working! Drone took off!")
+            elif s.lockstep_steps <= 0:
+                print("WARNING: No lockstep motor responses received from Betaflight.")
+            elif result.motor_response:
+                print("WARNING: Motors responded but drone did not take off.")
+                print("  Check physics pipeline: motor_command -> thrust -> force")
+            elif s.max_motor > 0.02:
+                print("WARNING: Motors armed but no throttle response.")
+            else:
+                print("WARNING: No motor response. Check Betaflight configuration.")
 
-        print(result.format())
+            print(result.format())
+        elif isinstance(command_source, ManualGuidance):
+            print(
+                f"Manual input ended in {command_source.reason!r}; vehicle commanded disarmed on exit."
+            )
+            if axis_audit is not None:
+                print(axis_audit.format())
 
 
 # Return the next non-existent filename with auto-incremented
@@ -458,4 +543,6 @@ if not bridge[0]:
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
 elif c0_result[0] is not None and not c0_result[0].passed:
+    sys.exit(1)
+elif axis_audit is not None and not axis_audit.passed:
     sys.exit(1)

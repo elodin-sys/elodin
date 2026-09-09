@@ -49,7 +49,9 @@ def initialize():
     sitl, cli = start_sitl()
     with cli:
         for text in (
+            # AUX1 arms above 1700; AUX2 selects ANGLE mode above 1700.
             "aux 0 0 0 1700 2100 0 0",
+            "aux 1 1 1 1700 2100 0 0",
             "set gyro_hardware_lpf = NORMAL",
             "set pid_process_denom = 1",
             # RC smoothing's auto cutoff relies on a valid RX frame-rate
@@ -73,6 +75,7 @@ def verify():
         ("get pid_process_denom", "pid_process_denom = 1"),
         ("get rc_smoothing", "rc_smoothing = OFF"),
         ("aux", "aux 0 0 0 1700 2100 0 0"),
+        ("aux", "aux 1 1 1 1700 2100 0 0"),
     )
 
     missing = []

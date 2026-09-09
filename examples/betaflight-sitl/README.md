@@ -56,10 +56,11 @@ cd examples/betaflight-sitl
 This compiles the Betaflight firmware for SITL mode. The binary will be at:
 `betaflight/obj/main/betaflight_SITL.elf`
 
-### First-Time Setup: Configure Arming
+### First-Time Setup: Configure Arming and ANGLE Mode
 
-**IMPORTANT**: Before running the simulation, you must configure an ARM switch in Betaflight.
-This only needs to be done once - the config is saved to `eeprom.bin`.
+**IMPORTANT**: Before running the simulation, configure the ARM switch on AUX1
+and ANGLE mode on AUX2. This only needs to be done once; the config is saved to
+`eeprom.bin`.
 
 Run the initialization script from the repository root:
 
@@ -90,8 +91,9 @@ and verifies the persisted settings. To do the same setup manually:
    #
    status
    
-   # Configure ARM switch (AUX1 channel, activated when > 1700)
+   # Configure ARM on AUX1 and ANGLE on AUX2 (both active above 1700)
    aux 0 0 0 1700 2100 0 0
+   aux 1 1 1 1700 2100 0 0
    
    # Process every available gyro/PID update
    set gyro_hardware_lpf = NORMAL
@@ -117,10 +119,60 @@ elodin editor examples/betaflight-sitl/main.py
 elodin run examples/betaflight-sitl/main.py
 ```
 
-**Direct Python (subprocess starts Betaflight):**
+**Direct Python:**
 ```bash
 python3 examples/betaflight-sitl/main.py run
 ```
+
+### Manual Piloting
+
+Manual input is opt-in; the no-environment-variable default remains the Package
+A scripted takeoff. Start the editor and s10-managed controller with:
+
+```bash
+RACE_GUIDANCE=manual elodin editor examples/betaflight-sitl/main.py
+```
+
+The controller polls at approximately 100 Hz and supports a gamepad or global X11
+keyboard input. Mode 2 is the default. Set `RACE_STICK_MODE=1` for Mode 1.
+
+| Input | Keyboard | Gamepad |
+|---|---|---|
+| Throttle | W / S (incremental) | Mode 2 left Y; Mode 1 right Y |
+| Yaw left / right | Q / E or A / D | Left X |
+| Pitch forward / back | Up / Down | Mode 2 right Y; Mode 1 left Y |
+| Roll left / right | Left / Right | Right X |
+| Arm | Shift+R, only at minimum throttle | A/South, only at minimum throttle |
+| Disarm | F | B/East |
+| Toggle ANGLE | M | Y/North |
+
+ANGLE mode starts enabled. Throttle never implicitly arms the vehicle. Gamepad
+disconnection immediately resets arm, throttle, and axes. If the controller
+process exits or its heartbeat stops for 250 ms, the simulation sends centered
+axes, minimum throttle, and disarm. A host with neither a reachable X display
+nor a gamepad continuously sends that same safe input rather than panicking.
+Raw `[roll,pitch,throttle,yaw,armed,angle_mode,heartbeat]` input is recorded as
+`drone.manual_control`; the six resulting PWM channels are recorded as
+`drone.rc_command`.
+
+The measured semantic signs are: positive roll = right wing down, positive pitch
+= nose down/forward, and positive yaw = nose right/clockwise from above. Roll
+and pitch map directly above RC center. Right yaw maps below RC center because
+the verified SITL yaw RC sign is inverted. `controls.py` is the single tested
+semantic-to-RC conversion path.
+
+Run the deterministic physical sign/ANGLE audit headlessly with:
+
+```bash
+RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1 \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+The external controller injects bounded roll, pitch, yaw, and throttle commands.
+A successful run emits a `[D-AUDIT] ... status=PASS` line and exits nonzero if
+an axis responds with the wrong sign, throttle has no motor response, or ANGLE
+was not requested.
+
 
 ### Recorded Database
 
@@ -171,7 +223,10 @@ nonzero.
 
 ```
 examples/betaflight-sitl/
+├── audit.py           # Opt-in physical control-sign audit
 ├── baseline.py        # Default C0 scenario pass/fail assessment
+├── controls.py        # Guidance, semantic input, RC conversion, and failsafe
+├── controller/        # s10-managed Rust gamepad/keyboard input provider
 ├── build.sh           # Build script for Betaflight SITL
 ├── init_eeprom.py     # Create and configure eeprom.bin
 ├── main.py            # Main simulation entry point
@@ -357,15 +412,17 @@ sequenceDiagram
         Sim->>Sim: Run physics (JAX)
         Sim->>DB: Commit world state
         Sim->>PS: Call post_step(tick)
-        
-        PS->>DB: Read sensor data (pos, vel, quat)
-        PS->>Bridge: Build FDM packet
-        Bridge->>BF: Send FDM (UDP 9003)
+
+        PS->>DB: Batch-read current sensors/state
+        PS->>Bridge: Send FDM + RC retained on tick N-1
+        Bridge->>BF: UDP 9003/9004
         Note over BF: GYROPID_SYNC unblocks
         BF->>BF: Run 1 PID iteration
         BF->>Bridge: Send motor output (UDP 9002)
         Bridge->>PS: Return motor values
-        PS->>DB: Write motor_command (external_control)
+        PS->>DB: Write motor_command
+        PS->>PS: Run selected command source
+        PS->>DB: Record RC command retained for tick N+1
         PS->>Sim: Return from post_step
     end
 ```
