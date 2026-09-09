@@ -103,8 +103,8 @@ object_3d orientation=absolute pad.world_pos {
 
 // Landing dust and ASDS visual at LZ-1.
 object_3d orientation=absolute lz1.world_pos {
-    // Rx(-90) cancels the editor's Y-up lift for a +Y-up parent; barge floats above the coarse globe until the surface fix.
-    glb path="spacex_drone_barge.glb" rotate="(-90, 0, 0)"
+    // Barge floats above the coarse globe until the surface fix.
+    glb path="spacex_drone_barge.glb"
     thruster name="lz1_smoke" effect="effects/falcon9/pad_smoke.effect" body_frame=#true position="(0, 2, 0)" direction="(0, -1, 0)" intensity="booster.landing_smoke_viz[0]" cutoff=0.01
 }
 
