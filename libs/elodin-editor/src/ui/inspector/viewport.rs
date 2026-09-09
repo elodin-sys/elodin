@@ -13,7 +13,7 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault, RotationKind};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault};
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
     BloomPreset, ComponentValue, EarthAirglowConfig, EarthCityLightsConfig, EarthNightMapConfig,
@@ -1186,10 +1186,9 @@ pub fn set_viewport_pos(
         if let Some(look_at) = look_at_point {
             let frame = viewport.frame.or_default().unwrap_or(GeoFrame::ENU);
             // Everything stays in the viewport's frame: direction and up
-            // are frame coordinates. Cameras are Absolute-kind so pose-riding
-            // WorldPos attitudes compose with the frame basis; convert
-            // look_at's Relative (similarity) quat into Absolute form so
-            // `sync_pos` + `to_bevy` recover the same Bevy aim.
+            // are frame coordinates, and `GeoRotation::look_at` yields the
+            // attitude expressed in that frame. `sync_pos` carries it into
+            // the entity's `GeoRotation` unchanged.
             let dir = look_at - pos.pos();
             let target_distance = dir.length();
 
@@ -1204,15 +1203,7 @@ pub fn set_viewport_pos(
                 .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
                 .and_then(|v| extract_vec3(&v))
                 .filter(|v| v.length_squared() > 1e-20);
-            let look = GeoRotation::look_at(frame, dir, up, &geo_context);
-            pos.att = GeoRotation::from_bevy_kind(
-                frame,
-                look.to_bevy(&geo_context),
-                &geo_context,
-                RotationKind::Absolute,
-            )
-            .1
-            .into();
+            pos.att = GeoRotation::look_at(frame, dir, up, &geo_context).1.into();
         }
     }
 }
@@ -1900,7 +1891,7 @@ mod tests {
             .spawn((
                 super::WorldPos::default(),
                 GeoPosition(frame, DVec3::ZERO),
-                GeoRotation::absolute(frame, DQuat::IDENTITY),
+                GeoRotation::relative(frame, DQuat::IDENTITY),
                 Transform::default(),
             ))
             .id();
@@ -2077,7 +2068,7 @@ mod tests {
                 .spawn((
                     super::WorldPos::default(),
                     GeoPosition(frame, DVec3::ZERO),
-                    GeoRotation::absolute(frame, DQuat::IDENTITY),
+                    GeoRotation::relative(frame, DQuat::IDENTITY),
                 ))
                 .id();
             // Values from the failing ball.kdl viewport.
@@ -2158,7 +2149,7 @@ mod tests {
                 .spawn((
                     super::WorldPos::default(),
                     GeoPosition(frame, DVec3::ZERO),
-                    GeoRotation::absolute(frame, DQuat::IDENTITY),
+                    GeoRotation::relative(frame, DQuat::IDENTITY),
                 ))
                 .id();
             let viewport_entity = app
@@ -2229,7 +2220,7 @@ mod tests {
             .spawn((
                 super::WorldPos::default(),
                 GeoPosition(frame, DVec3::ZERO),
-                GeoRotation::absolute(frame, DQuat::IDENTITY),
+                GeoRotation::relative(frame, DQuat::IDENTITY),
             ))
             .id();
         let viewport_entity = app
@@ -2404,6 +2395,35 @@ mod tests {
             |glam_mat, nox_mat| (glam_mat, bevy_R_elodin(nox_mat)),
             elodin_R_bevy,
         );
+    }
+
+    /// Relative and Absolute local→frame attitudes share composition
+    /// (`bevy_R * att`) in plane mode. Legacy `bevy_att` is the ENU similarity
+    /// swizzle and is not the GeoRotation path.
+    #[test]
+    fn test_relative_and_absolute_agree_in_plane() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+
+        for (i, (dir, up)) in look_at_test_cases().into_iter().enumerate() {
+            let nox_dir = nox::Vec3::from(dir.as_dvec3());
+            let nox_up = nox::Vec3::from(up.as_dvec3());
+            let (nox_mat, _) = nox::Matrix3::look_at_rh_up(nox_dir, nox_up);
+            let nox_quat = nox::Quaternion::from_rot_mat(nox_mat);
+            let world_pos = super::WorldPos {
+                att: nox_quat,
+                pos: nox::Vec3::new(0.0, 0.0, 0.0),
+            };
+
+            let relative = GeoRotation::relative(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            let absolute = GeoRotation::absolute(GeoFrame::ENU, world_pos.att()).to_bevy(&ctx);
+            assert_eq_quat!(
+                relative.as_quat(),
+                absolute.as_quat(),
+                "case {i} dir {dir} up {up}"
+            );
+        }
     }
 
     #[test]

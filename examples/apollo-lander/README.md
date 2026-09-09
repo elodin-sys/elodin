@@ -308,8 +308,7 @@ Use `--dry-run` to only write the narrowed specs.
     regolith sheet ramps in below ~12 m and dies at engine cutoff.
   Spawn rates come from the effect files and scale with intensity; nozzle
   geometry lives in `apollo-lander.kdl` (schematic Z-up body offsets, tuned to
-  the four-quad layout after the Y-up GLB is lifted with `rotate="(90, 0, 0)"`).
-  The schematic
+  the four-quad layout after the Y-up GLB is lifted onto ENU). The schematic
   `environment` node (harsh sun + shadows, near-zero ambient, black sky) and
   the viewport's `hdr`/`ev100`/`bloom` reproduce the pyrotechnique lighting;
   effect assets are ingested into the DB and served like the GLBs. Reference

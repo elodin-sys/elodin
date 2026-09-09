@@ -1270,10 +1270,13 @@ impl BevyExt for impeller2_wkt::Mesh {
                 bevy::math::primitives::Cylinder::new(radius, height).into()
             }
             impeller2_wkt::Mesh::Plane { width, depth } => {
-                bevy::math::primitives::Plane3d::default()
-                    .mesh()
-                    .size(width, depth)
-                    .into()
+                // Schematic-frame Z-up (not Bevy Y-up): identity att is ground.
+                bevy::math::primitives::Plane3d {
+                    normal: Dir3::Z,
+                    half_size: Vec2::new(width * 0.5, depth * 0.5),
+                }
+                .mesh()
+                .into()
             }
         }
     }
@@ -2556,7 +2559,6 @@ mod tests {
     use bevy::app::App;
     use bevy::math::{DQuat, EulerRot};
     use bevy::mesh::VertexAttributeValues;
-    use bevy_geo_frames::RotationKind;
     use impeller2::types::{ComponentId, Timestamp};
     use impeller2_wkt::ComponentValue;
 
@@ -2589,9 +2591,9 @@ mod tests {
     }
 
     /// Inserting a bare `WorldPos` must pull in the `Geo*` components
-    /// (required components). Default kind is Relative (similarity).
+    /// (required components) and map through composition (`bevy_R * att`).
     #[test]
-    fn world_pos_geo_pipeline_uses_relative_similarity() {
+    fn world_pos_geo_pipeline_uses_frame_composition() {
         let ctx = GeoContext::default();
         let mut app = App::new();
         app.insert_resource(ctx.clone());
@@ -2618,9 +2620,8 @@ mod tests {
             "got {pos:?}, expected {:?}",
             wp.bevy_pos()
         );
-        assert_eq!(geo_rot.2, RotationKind::Relative);
         let q = geo_rot.to_bevy(&ctx);
-        let expected = GeoRotation::relative(GeoFrame::ENU, wp.att()).to_bevy(&ctx);
+        let expected = GeoRotation::absolute(GeoFrame::ENU, wp.att()).to_bevy(&ctx);
         assert!(
             q.dot(expected).abs() > 1.0 - 1e-9,
             "got {q:?}, expected {expected:?}"
@@ -2628,7 +2629,7 @@ mod tests {
     }
 
     #[test]
-    fn plane_mesh_is_horizontal_in_bevy() {
+    fn plane_mesh_is_horizontal_in_schematic_frame() {
         let mesh = impeller2_wkt::Mesh::plane(10.0, 20.0).into_bevy();
         let Some(VertexAttributeValues::Float32x3(normals)) =
             mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
@@ -2638,8 +2639,8 @@ mod tests {
         assert!(!normals.is_empty());
         for n in normals {
             assert!(
-                n[1].abs() > 0.99 && n[0].abs() < 1e-5 && n[2].abs() < 1e-5,
-                "plane normal should be ±Y, got {n:?}"
+                n[2].abs() > 0.99 && n[0].abs() < 1e-5 && n[1].abs() < 1e-5,
+                "plane normal should be ±Z, got {n:?}"
             );
         }
         let Some(VertexAttributeValues::Float32x3(positions)) =
@@ -2649,8 +2650,8 @@ mod tests {
         };
         for p in positions {
             assert!(
-                p[1].abs() < 1e-5,
-                "plane vertices should lie in XZ, got {p:?}"
+                p[2].abs() < 1e-5,
+                "plane vertices should lie in XY, got {p:?}"
             );
         }
     }

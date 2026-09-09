@@ -18,9 +18,6 @@ tabs {
     }
 }
 
-// Same contract as bdx.kdl: absolute ECEF body axes + Rx(+90°) so the
-// Y-up drone GLB sits upright in the LWIR chip (Relative would similarity-
-// rotate it by the site's ECEF level attitude).
-object_3d orientation=absolute target.world_pos {
-    glb path="edu-450-v2-drone.glb" scale=10.0 rotate="(90, 0, 0)"
+object_3d target.world_pos {
+    glb path="edu-450-v2-drone.glb" scale=10.0
 }

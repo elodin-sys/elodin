@@ -4,8 +4,9 @@ The KDL thruster ``direction`` vectors are exhaust directions. The reaction
 force on the vehicle is therefore the opposite vector, and ``position x force``
 defines the body-axis torque sign each visible jet contributes.
 
-Offsets are body/ENU Z-up, the axes ``RcsTorque`` is expressed in, matching
-``apollo-lander.kdl`` where the lander is declared ``orientation=absolute``.
+Offsets are schematic Z-up (ENU), matching ``apollo-lander.kdl`` after the
+Y-up GLB is lifted with ``y_up_to_schematic``: mesh (x, y, z) → schematic
+(x, -z, y).
 """
 
 from __future__ import annotations

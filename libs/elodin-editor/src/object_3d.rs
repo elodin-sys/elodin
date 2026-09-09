@@ -2028,12 +2028,15 @@ pub fn spawn_mesh(
             let scene = assets.load(&url);
 
             let translation = Vec3::new(translate.0, translate.1, translate.2);
-            let rotation = Quat::from_euler(
+            let kdl_rotate = Quat::from_euler(
                 EulerRot::XYZ,
                 rotate.0.to_radians(),
                 rotate.1.to_radians(),
                 rotate.2.to_radians(),
             );
+            // glTF is Y-up; schematic / WorldPos is Z-up. Same lift the
+            // viewport grid applies so `bevy_R * att` does not pitch the mesh.
+            let rotation = GeoRotation::y_up_to_schematic().as_quat() * kdl_rotate;
             let offset_transform = Transform {
                 translation,
                 rotation,
@@ -3014,11 +3017,13 @@ mod translate_body_frame_tests {
         );
     }
 
-    /// Default [`RotationKind::Relative`] in ECEF is a similarity, so the
-    /// rendered aft does **not** match the body-frame EQL offset. ECEF
-    /// objects that must agree with `.translate()` need `orientation=absolute`.
+    /// Camera from `.translate(-2,0,0)` must sit on the rendered mesh's body
+    /// aft axis. With default [`RotationKind::Relative`] in ECEF, Absolute
+    /// body→frame attitudes are re-expressed into Bevy and the visual aft
+    /// diverges from the EQL body offset — the chase camera is not behind
+    /// the mesh.
     #[test]
-    fn ecef_body_translate_diverges_from_default_relative_mesh() {
+    fn ecef_body_translate_matches_rendered_aft_with_default_relative_orientation() {
         use bevy_geo_frames::{
             GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind,
         };
@@ -3035,17 +3040,18 @@ mod translate_body_frame_tests {
         let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
             - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
 
+        // Default object_3d orientation is Relative; sync_pos writes WorldPos.att
+        // into GeoRotation while preserving RotationKind.
         assert_eq!(RotationKind::default(), RotationKind::Relative);
-        let relative_aft = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
-        let absolute_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+        let rendered_aft = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
 
         assert!(
-            (cam_delta_bevy - absolute_aft).length() < 1e-6,
-            "body translate is Absolute composition: Δ={cam_delta_bevy:?}, aft={absolute_aft:?}"
-        );
-        assert!(
-            (cam_delta_bevy - relative_aft).length() > 0.1,
-            "Relative similarity must not match ECEF body translate"
+            (cam_delta_bevy - rendered_aft).length() < 1e-6,
+            "ECEF Relative mesh aft must match body translate offset in Bevy:\n\
+             translate Δ={cam_delta_bevy:?}\n\
+             rendered aft={rendered_aft:?}\n\
+             (Absolute aft would be {:?})",
+            GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft
         );
     }
 
@@ -3071,6 +3077,34 @@ mod translate_body_frame_tests {
         assert!(
             (cam_delta_bevy - rendered_aft).length() < 1e-6,
             "ECEF Absolute mesh aft must match body translate: Δ={cam_delta_bevy:?}, aft={rendered_aft:?}"
+        );
+    }
+
+    #[test]
+    fn glb_y_up_child_cancels_enu_frame_basis() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
+
+        let ctx = GeoContext::default();
+        let parent = GeoRotation::relative(GeoFrame::ENU, DQuat::IDENTITY).to_bevy(&ctx);
+        let child = GeoRotation::y_up_to_schematic();
+        let world = parent * child;
+        assert!(
+            world.dot(DQuat::IDENTITY).abs() > 1.0 - 1e-9,
+            "identity-att GLB should sit level in ENU Bevy, got {world:?}"
+        );
+    }
+
+    #[test]
+    fn glb_y_up_nozzle_offset_is_schematic_down() {
+        use bevy_geo_frames::GeoRotation;
+
+        // Thruster `position`/`direction` are schematic Z-up. A Y-up GLB
+        // nozzle at mesh (0, -1.9, 0) lands at schematic (0, 0, -1.9) after
+        // the same Rx(+π/2) lift applied to the GLB child.
+        let schematic = GeoRotation::y_up_to_schematic() * DVec3::new(0.0, -1.9, 0.0);
+        assert!(
+            (schematic - DVec3::new(0.0, 0.0, -1.9)).length() < 1e-9,
+            "mesh −Y nozzle must become schematic −Z, got {schematic:?}"
         );
     }
 }

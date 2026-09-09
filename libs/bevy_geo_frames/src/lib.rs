@@ -98,13 +98,16 @@ impl GeoOrigin {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
 pub enum RotationKind {
     #[default]
-    /// Re-express the local→frame attitude as a rotation operator in Bevy
-    /// (`bevy_R * att * bevy_R⁻¹`). Identity attitude therefore leaves the
-    /// mesh in its authored Bevy / glTF axes (Y-up).
+    /// Local→frame attitude composed with the frame→Bevy basis change
+    /// (`bevy_R * att`). Same Bevy mapping as [`Absolute`]; identity attitude
+    /// therefore aligns body axes with the frame (not with Bevy axes). Kept as
+    /// the default so WorldPos body attitudes and EQL body-frame
+    /// `.translate()` agree with the rendered mesh without requiring
+    /// `orientation=absolute` on every object.
     Relative,
-    /// Compose the local→frame attitude with the frame→Bevy basis
-    /// (`bevy_R * att`). Identity attitude aligns mesh local axes with the
-    /// schematic frame (ENU: +X east, +Y north, +Z up).
+    /// Local→frame attitude composed with the frame→Bevy basis change.
+    /// An identity rotation in ENU produces the ENU→Bevy basis (e.g. maps
+    /// `[x,y,z]` to `[x,z,-y]`).
     Absolute,
 }
 
