@@ -79,10 +79,10 @@ camera.
 Close-up terrain is the geo-anchored `mojave_rc_field` planar
 `world_mesh` (`frame="ENU"`).
 
-The package GLB is already Elodin body (X forward, Y left, Z up). The editor
-lifts every glTF as Y-up (`Rx(+90°)`); `bdx.kdl` applies `rotate="(-90, 0, 0)"`
-to cancel that so the mesh is not rolled onto its side. The hashed package
-GLB is not rewritten.
+The package GLB is already Elodin body (X forward, Y left, Z up), so
+`bdx.kdl` declares it `orientation=absolute` with no `rotate` — an absolute
+identity maps those axes straight onto ECEF. The Y-up drone GLB next to it
+does carry `rotate="(90, 0, 0)"`. The hashed package GLB is not rewritten.
 
 To fetch and preprocess the terrain atlas (writes
 `assets/terrains/planar/mojave_rc_field/`):

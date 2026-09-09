@@ -1743,7 +1743,12 @@ impl ViewportPane {
         if let Some(frame) = viewport.frame.or_default() {
             parent_cmd.insert((
                 bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
-                bevy_geo_frames::GeoRotation::relative(frame, transform.rotation.as_dquat()),
+                bevy_geo_frames::GeoRotation::from_bevy_kind(
+                    frame,
+                    transform.rotation.as_dquat(),
+                    geo_context,
+                    bevy_geo_frames::RotationKind::Absolute,
+                ),
             ));
         }
 
