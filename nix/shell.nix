@@ -217,8 +217,11 @@ with pkgs; let
           '[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"' \
           'typeset -U path' \
           'path=(''${(s.:.)ELODIN_NIX_PATH} $path)' \
+          "alias zar='gtar --zstd --sparse'" \
           > "$ZDOTDIR/.zshrc"
       fi
+      # Hook-scope too: interactive nix develop may keep this bash (no exec).
+      alias zar='gtar --zstd --sparse'
 
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
