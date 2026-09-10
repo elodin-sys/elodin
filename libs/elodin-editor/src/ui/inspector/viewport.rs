@@ -23,7 +23,7 @@ use nox::ArrayBuf;
 
 use crate::EqlContext;
 use crate::WorldPosExt;
-use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState};
+use crate::object_3d::{ComponentArrayExt, EditableEQL, EqlCompileCtx, Object3DState};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
@@ -734,14 +734,33 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
+        let viewport_frame = viewport.frame;
         ui.label(egui::RichText::new("POSITION").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.pos, &eql_ctx.0, &geo_context);
+        eql_input(
+            ui,
+            &mut viewport.pos,
+            &eql_ctx.0,
+            &geo_context,
+            viewport_frame,
+        );
         ui.separator();
         ui.label(egui::RichText::new("LOOK AT").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.look_at, &eql_ctx.0, &geo_context);
+        eql_input(
+            ui,
+            &mut viewport.look_at,
+            &eql_ctx.0,
+            &geo_context,
+            viewport_frame,
+        );
         ui.separator();
         ui.label(egui::RichText::new("UP").color(get_scheme().text_secondary));
-        eql_input(ui, &mut viewport.up, &eql_ctx.0, &geo_context);
+        eql_input(
+            ui,
+            &mut viewport.up,
+            &eql_ctx.0,
+            &geo_context,
+            viewport_frame,
+        );
         ui.separator();
 
         if ui.add(EButton::highlight("Reset Pos")).clicked() {
@@ -1038,9 +1057,15 @@ pub fn retry_viewport_eql_compile(
     geo_context: Res<GeoContext>,
 ) {
     for mut viewport in &mut viewports {
-        viewport.pos.retry_compile(&eql_context.0, &geo_context);
-        viewport.look_at.retry_compile(&eql_context.0, &geo_context);
-        viewport.up.retry_compile(&eql_context.0, &geo_context);
+        let frame = viewport.frame;
+        let compile_ctx = EqlCompileCtx::new(&geo_context).with_frame(frame);
+        viewport
+            .pos
+            .retry_compile_with(&eql_context.0, &compile_ctx);
+        viewport
+            .look_at
+            .retry_compile_with(&eql_context.0, &compile_ctx);
+        viewport.up.retry_compile_with(&eql_context.0, &compile_ctx);
     }
 }
 
@@ -1049,6 +1074,7 @@ fn eql_input(
     editable_expr: &mut EditableEQL,
     ctx: &eql::Context,
     geo: &GeoContext,
+    frame: Option<GeoFrame>,
 ) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -1062,8 +1088,9 @@ fn eql_input(
             }
             match ctx.parse_str(&editable_expr.eql) {
                 Ok(expr) => {
+                    let compile_ctx = EqlCompileCtx::new(geo).with_frame(frame);
                     editable_expr.compiled_expr =
-                        crate::object_3d::compile_eql_expr_with_geo(expr, geo).ok();
+                        crate::object_3d::compile_eql_expr_with_ctx(expr, &compile_ctx).ok();
                 }
                 Err(err) => {
                     ui.colored_label(get_scheme().error, err.to_string());

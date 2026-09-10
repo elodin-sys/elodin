@@ -527,6 +527,25 @@ impl Context {
         match (method_name, ast_node) {
             // `cast(f64)` reads naturally, but bare identifiers normally parse as component names.
             ("cast", AstNode::Ident(name)) => Ok(Expr::StringLiteral(name.to_string())),
+            ("translate" | "translate_x" | "translate_y" | "translate_z" | "direction", ast) => {
+                self.parse_orientation_flag_arg(ast)
+            }
+            _ => self.parse(ast_node),
+        }
+    }
+
+    /// Map bare `true`/`false` to string literals (they are not components),
+    /// including inside the nested arg tuples the comma rule produces.
+    fn parse_orientation_flag_arg(&self, ast_node: &AstNode) -> Result<Expr, Error> {
+        match ast_node {
+            AstNode::Ident(name) if name == "true" || name == "false" => {
+                Ok(Expr::StringLiteral(name.to_string()))
+            }
+            AstNode::Tuple(nodes) => nodes
+                .iter()
+                .map(|n| self.parse_orientation_flag_arg(n))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Expr::Tuple),
             _ => self.parse(ast_node),
         }
     }
