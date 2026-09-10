@@ -1,6 +1,6 @@
-"""Opt-in physical response audit for Package D.
+"""Simulation-time guidance and physical response audit for Package D.
 
-The manual controller's ``--audit`` sequence injects bounded commands. This
+``AuditGuidance`` injects bounded semantic commands from simulation time. The
 collector observes the command actually exchanged with Betaflight and the
 resulting physical body rates/motor output; it never participates in control.
 """
@@ -12,7 +12,61 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from controls import RC_ANGLE, RC_CENTER, RcCommand
+from controls import RC_ANGLE, RC_CENTER, GuidanceUpdate, RcCommand, SemanticControl
+
+
+@dataclass(slots=True)
+class AuditGuidance:
+    """Deterministic Package D command sequence driven only by simulation time."""
+
+    phase: str = "boot"
+
+    def update(self, update: GuidanceUpdate) -> SemanticControl:
+        t = update.sim_time
+        if t < 5.0:
+            self.phase = "boot"
+            return SemanticControl.safe()
+        if t < 6.0:
+            self.phase = "arm"
+            return SemanticControl(armed=True)
+        if t < 8.0:
+            self.phase = "throttle"
+            return SemanticControl(throttle=0.15, armed=True)
+        if t < 9.0:
+            self.phase = "roll-right"
+            return SemanticControl(roll=0.25, throttle=0.15, armed=True)
+        if t < 10.0:
+            self.phase = "roll-left"
+            return SemanticControl(roll=-0.25, throttle=0.15, armed=True)
+        if t < 11.0:
+            self.phase = "center"
+            return SemanticControl(throttle=0.15, armed=True)
+        if t < 12.0:
+            self.phase = "pitch-forward"
+            return SemanticControl(pitch=0.25, throttle=0.15, armed=True)
+        if t < 13.0:
+            self.phase = "pitch-back"
+            return SemanticControl(pitch=-0.25, throttle=0.15, armed=True)
+        if t < 14.0:
+            self.phase = "center"
+            return SemanticControl(throttle=0.15, armed=True)
+        if t < 15.0:
+            self.phase = "yaw-right"
+            return SemanticControl(yaw=0.25, throttle=0.15, armed=True)
+        if t < 16.0:
+            self.phase = "yaw-left"
+            return SemanticControl(yaw=-0.25, throttle=0.15, armed=True)
+        if t < 17.0:
+            self.phase = "center"
+            return SemanticControl(throttle=0.15, armed=True)
+        if t < 18.0:
+            self.phase = "high-throttle"
+            return SemanticControl(throttle=0.30, armed=True)
+        if t < 20.0:
+            self.phase = "settle"
+            return SemanticControl(armed=True)
+        self.phase = "safe"
+        return SemanticControl.safe()
 
 
 @dataclass(slots=True)

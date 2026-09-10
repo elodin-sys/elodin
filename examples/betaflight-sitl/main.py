@@ -31,7 +31,7 @@ import elodin as el
 import jax.numpy as jnp
 import numpy as np
 
-from audit import AxisAudit
+from audit import AuditGuidance, AxisAudit
 from baseline import C0Result, evaluate_c0
 from config import DEFAULT_CONFIG
 from controls import (
@@ -78,6 +78,9 @@ config.set_as_global()
 if guidance_mode is GuidanceMode.SCRIPTED:
     command_source = ScriptedGuidance()
     initial_control = SemanticControl(angle_mode=False)
+elif audit_requested:
+    command_source = AuditGuidance()
+    initial_control = SemanticControl.safe()
 else:
     command_source = ManualGuidance()
     initial_control = SemanticControl.safe()
@@ -178,15 +181,13 @@ betaflight_recipe = el.s10.PyRecipe.process(
 world.recipe(betaflight_recipe)
 
 # Manual input is deliberately a separate s10-supervised process. The default
-# scripted example neither builds nor starts it.
-if guidance_mode is GuidanceMode.MANUAL:
+# scripted example and simulation-time automated audit neither build nor start it.
+if guidance_mode is GuidanceMode.MANUAL and not audit_requested:
     controller_path = Path(__file__).parent / "controller"
     stick_mode = os.environ.get("RACE_STICK_MODE", "2")
     if stick_mode not in ("1", "2"):
         raise ValueError("RACE_STICK_MODE must be '1' or '2'")
     controller_args = ["--mode1"] if stick_mode == "1" else []
-    if audit_requested:
-        controller_args.append("--audit")
     controller_host = os.environ.get("RACE_CONTROLLER_HOST")
     if controller_host:
         controller_args.extend(["--host", controller_host])
@@ -215,7 +216,7 @@ if guidance_mode is GuidanceMode.MANUAL:
     world.recipe(manual_controller_recipe)
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
-print(f"Guidance: {guidance_mode.value}")
+print(f"Guidance: {'audit (simulation time)' if audit_requested else guidance_mode.value}")
 print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
 print(
     f"Requested sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
@@ -346,8 +347,8 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     manual_values = s.manual_values
     barometer_fresh = tick % _barometer_tick_interval == 0
     magnetometer_fresh = tick % _magnetometer_tick_interval == 0
-    manual_input_poll = (
-        guidance_mode is GuidanceMode.MANUAL and tick % _manual_input_tick_interval == 0
+    manual_input_poll = isinstance(command_source, ManualGuidance) and (
+        tick % _manual_input_tick_interval == 0
     )
     reads = _component_reads.copy()
     if barometer_fresh:
@@ -425,7 +426,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         magnetometer=magnetometer,
         magnetometer_fresh=magnetometer_fresh and sensor_read_succeeded,
     )
-    if isinstance(command_source, ScriptedGuidance):
+    if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
         next_control = command_source.update(update)
         s.phase = command_source.phase
     else:
@@ -544,8 +545,9 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
             print(
                 f"Manual input ended in {command_source.reason!r}; vehicle commanded disarmed on exit."
             )
-            if axis_audit is not None:
-                print(axis_audit.format())
+
+        if axis_audit is not None:
+            print(axis_audit.format())
 
 
 # Return the next non-existent filename with auto-incremented

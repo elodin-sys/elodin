@@ -168,10 +168,14 @@ RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1 \
   elodin run examples/betaflight-sitl/main.py
 ```
 
-The external controller injects bounded roll, pitch, yaw, and throttle commands.
-A successful run emits a `[D-AUDIT] ... status=PASS` line and exits nonzero if
-an axis responds with the wrong sign, throttle has no motor response, or ANGLE
-was not requested.
+The simulation-side `AuditGuidance` source injects bounded roll, pitch, yaw,
+and throttle commands from `GuidanceUpdate.sim_time`; host load therefore cannot
+shift its phase boundaries or shorten its five-simulated-second boot grace. The
+external manual controller is not started for this run. Audit commands still
+follow the ordinary `SemanticControl` → `semantic_to_rc` → one-tick RC latch →
+Betaflight path before `AxisAudit` observes the physical response. A successful
+run emits a `[D-AUDIT] ... status=PASS` line and exits nonzero if an axis responds
+with the wrong sign, throttle has no motor response, or ANGLE was not requested.
 
 
 ### Recorded Database
@@ -223,7 +227,7 @@ nonzero.
 
 ```
 examples/betaflight-sitl/
-├── audit.py           # Opt-in physical control-sign audit
+├── audit.py           # Simulation-time audit guidance and physical assessment
 ├── baseline.py        # Default C0 scenario pass/fail assessment
 ├── controls.py        # Guidance, semantic input, RC conversion, and failsafe
 ├── controller/        # s10-managed Rust gamepad/keyboard input provider
