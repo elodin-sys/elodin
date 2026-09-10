@@ -54,6 +54,7 @@ members = [
     "libs/impeller2/kdl",
     "libs/db/examples/rust_client",
     "examples/rc-jet/controller",
+    "examples/betaflight-sitl/controller",
     "libs/bevy_geo_frames",
     "libs/bevy_mat3_material",
     "libs/bevy_world_mesh",

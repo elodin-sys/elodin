@@ -129,25 +129,18 @@ case "${1:-build}" in
         # On macOS, we need to create stubs for missing SITL symbols and do a two-pass build
         if [[ "$(uname)" == "Darwin" ]]; then
             STUBS_C="$SCRIPT_DIR/macos_sitl_stubs.c"
-            STUBS_O="$BETAFLIGHT_DIR/obj/main/SITL/sitl_stubs.o"
+            STUBS_O="$BETAFLIGHT_DIR/obj/macos_sitl_stubs.o"
             
-            # Create stubs file for macOS (provides missing symbols)
+            # Create stubs file for macOS (only symbols the SITL Makefile leaves unresolved)
             cat > "$STUBS_C" << 'STUBS_EOF'
 /* macOS SITL Stubs - provides missing symbols for Betaflight SITL on macOS */
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
 
-/* GPS stubs */
-typedef struct { int32_t lat, lon, alt; uint16_t groundSpeed, groundCourse; uint8_t numSat, fixType; } gpsSolutionData_t;
-gpsSolutionData_t gpsSol = {0};
+/* Lap-timer PG storage. io/gps.c is compiled for SITL; this config object is not. */
 typedef struct { uint8_t gateEnabled; int32_t gateLat, gateLon; uint16_t gateDirection; uint8_t minimumLapTimeSeconds; } gpsLapTimerConfig_t;
 gpsLapTimerConfig_t gpsLapTimerConfig_System = {0};
-bool gpsHasNewData(void) { return false; }
-float getGpsDataFrequencyHz(void) { return 10.0f; }
-float getGpsDataIntervalSeconds(void) { return 0.1f; }
-void GPS_distance2d(int32_t *lat1, int32_t *lon1, int32_t *lat2, int32_t *lon2, uint32_t *dist) { if (dist) *dist = 0; }
-void GPS_distance_cm_bearing(int32_t *lat1, int32_t *lon1, int32_t *lat2, int32_t *lon2, uint32_t *dist, int32_t *bearing) { if (dist) *dist = 0; if (bearing) *bearing = 0; }
 
 /* Audio stubs */
 void audioSetupIO(void) {}
@@ -158,9 +151,16 @@ void audioGenerateWhiteNoise(void) {}
 /* Clock/timing stubs */
 float clockCyclesToMicrosf(uint32_t cycles) { return (float)cycles / 500.0f; }
 
-/* DMA stubs */
+/* DMA stubs.
+ * 2026.6.1 moved handler-count lookup behind dmaGetHandlerCount(); SITL has no
+ * DMA channels (DMA_LAST_HANDLER is DMA_NONE). */
 typedef struct { void *dummy; } dmaChannelDescriptor_t;
 dmaChannelDescriptor_t dmaDescriptors[16] = {{0}};
+int dmaGetHandlerCount(void) { return 0; }
+
+/* serialPinConfig PG storage. SITL sets SERIAL_TRAIT_PIN_CONFIG=0 so
+ * serial_pinconfig.c is not compiled, but init still calls serialPinConfig(). */
+uint8_t serialPinConfig_System[256] = {0};
 
 /* IO stubs */
 typedef void* IO_t;
@@ -181,7 +181,7 @@ STUBS_EOF
             echo "Building objects (first pass)..."
             run_make TARGET=SITL -j"$JOBS" || true
             
-            # Compile stubs
+            # Compile stubs outside the SITL object tree so they are not mixed into TARGET_OBJS
             echo "Compiling SITL stubs for macOS..."
             mkdir -p "$(dirname "$STUBS_O")"
             gcc -c -O2 -I"$BETAFLIGHT_DIR/src/main" \
@@ -189,14 +189,25 @@ STUBS_EOF
                 -I"$BETAFLIGHT_DIR/src/platform/SIMULATOR/target/SITL" \
                 -o "$STUBS_O" "$STUBS_C"
             
-            # Manual link with stubs included
+            # Link the Makefile's object list (not every .o under obj/) plus stubs.
+            # A raw find also picks up compile-only extras (dma_common, alternate
+            # autopilot PGs) that 2026.6.1 leaves in the tree but does not link.
             echo "Linking with stubs..."
-            OBJS=$(find "$BETAFLIGHT_DIR/obj/main/SITL" -name "*.o" | tr '\n' ' ')
+            PRINT_MK=$(mktemp)
+            printf 'print-sitl-objs:\n\t@echo $(TARGET_OBJS)\n' > "$PRINT_MK"
+            OBJS=$(run_make TARGET=SITL -s --no-print-directory -f Makefile -f "$PRINT_MK" print-sitl-objs)
+            rm -f "$PRINT_MK"
+            if [ -z "$OBJS" ]; then
+                echo "Error: failed to read SITL TARGET_OBJS from the Betaflight Makefile"
+                rm -f "$STUBS_C"
+                exit 1
+            fi
             # Use system clang for linking to avoid Nix toolchain compatibility issues
             # -Wl,-no_compact_unwind suppresses "could not create compact unwind" warnings
             # which occur because Betaflight's firmware code doesn't use standard stack frames
             /usr/bin/clang -o "$BETAFLIGHT_DIR/obj/main/betaflight_SITL.elf" \
                 $OBJS \
+                "$STUBS_O" \
                 -lm -lpthread \
                 -Wl,-no_compact_unwind \
                 -Wl,-map,"$BETAFLIGHT_DIR/obj/main/betaflight_SITL.map"

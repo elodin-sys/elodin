@@ -660,18 +660,26 @@ class SensorDataBuffer:
         gyro: np.ndarray = None,
         baro: np.ndarray = None,
         timestamp: float = None,
+        *,
+        copy: bool = True,
     ):
-        """Update sensor buffer with new values."""
+        """Update sensor values, copying them unless the caller transfers ownership."""
+        if copy:
+            world_pos = None if world_pos is None else np.array(world_pos)
+            world_vel = None if world_vel is None else np.array(world_vel)
+            accel = None if accel is None else np.array(accel)
+            gyro = None if gyro is None else np.array(gyro)
+            baro = None if baro is None else np.array(baro)
         if world_pos is not None:
-            self.world_pos = np.array(world_pos)
+            self.world_pos = world_pos
         if world_vel is not None:
-            self.world_vel = np.array(world_vel)
+            self.world_vel = world_vel
         if accel is not None:
-            self.accel = np.array(accel)
+            self.accel = accel
         if gyro is not None:
-            self.gyro = np.array(gyro)
+            self.gyro = gyro
         if baro is not None:
-            self.baro = np.array(baro)
+            self.baro = baro
         if timestamp is not None:
             self.timestamp = timestamp
 

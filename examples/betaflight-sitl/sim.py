@@ -94,6 +94,35 @@ SimTime = ty.Annotated[
     ),
 ]
 
+# Semantic pilot input written by the optional manual-controller process.
+# Layout: roll, pitch, throttle, yaw, armed, angle_mode, heartbeat.
+ManualControl = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "manual_control",
+        el.ComponentType(el.PrimitiveType.F64, (7,)),
+        metadata={
+            "element_names": "roll,pitch,throttle,yaw,armed,angle_mode,heartbeat",
+            "priority": 202,
+            "external_control": "true",
+        },
+    ),
+]
+
+# Six PWM values selected during post_step for transmission on the next tick.
+RcCommandTelemetry = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "rc_command",
+        el.ComponentType(el.PrimitiveType.U16, (6,)),
+        metadata={
+            "element_names": "roll,pitch,throttle,yaw,arm,mode",
+            "priority": 201,
+            "external_control": "true",
+        },
+    ),
+]
+
 
 @dataclass
 class Drone(el.Archetype):
@@ -108,6 +137,10 @@ class Drone(el.Archetype):
     body_thrust: BodyThrust = field(default_factory=lambda: el.SpatialForce())
     body_drag: BodyDrag = field(default_factory=lambda: jnp.zeros(3))
     sim_time: SimTime = field(default_factory=lambda: jnp.zeros(1))
+    manual_control: ManualControl = field(default_factory=lambda: jnp.zeros(7))
+    rc_command: RcCommandTelemetry = field(
+        default_factory=lambda: jnp.array([1500, 1500, 1000, 1500, 1000, 1800], dtype=jnp.uint16)
+    )
 
 
 # --- Physics Systems ---
