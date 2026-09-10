@@ -138,7 +138,7 @@ def _immutable_copy(value: NDArray[np.generic] | None) -> NDArray[np.generic] | 
     if value is None:
         return None
     copy = np.array(value, copy=True)
-    copy.flags.writeable = False
+    copy.setflags(write=False)
     return copy
 
 
