@@ -166,12 +166,35 @@ impl EditableEQL {
     /// `geo` must be the schematic `coordinate` origin: a retry that fell back
     /// to the default origin would silently misplace ECEF converters.
     pub fn retry_compile(&mut self, ctx: &eql::Context, geo: &GeoContext) {
+        self.retry_compile_with(ctx, &EqlCompileCtx::new(geo));
+    }
+
+    /// Same as [`Self::retry_compile`], keeping the viewport/object `frame=`.
+    pub fn retry_compile_with(&mut self, ctx: &eql::Context, compile_ctx: &EqlCompileCtx<'_>) {
         if self.eql.trim().is_empty() || self.compiled_expr.is_some() {
             return;
         }
         if let Ok(expr) = ctx.parse_str(&self.eql) {
-            self.compiled_expr = compile_eql_expr_with_geo(expr, geo).ok();
+            self.compiled_expr = compile_eql_expr_with_ctx(expr, compile_ctx).ok();
         }
+    }
+}
+
+/// Schematic origin plus the compile-site `frame=` for body-frame translate/direction.
+#[derive(Clone, Copy)]
+pub struct EqlCompileCtx<'a> {
+    pub geo: &'a GeoContext,
+    pub frame: Option<GeoFrame>,
+}
+
+impl<'a> EqlCompileCtx<'a> {
+    pub fn new(geo: &'a GeoContext) -> Self {
+        Self { geo, frame: None }
+    }
+
+    pub fn with_frame(mut self, frame: Option<GeoFrame>) -> Self {
+        self.frame = frame;
+        self
     }
 }
 
@@ -575,14 +598,49 @@ fn cast_component_value(
     }
 }
 
+fn schematic_to_bevy_s() -> DMat3 {
+    DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y)
+}
+
+/// Relative-sense correction `bevy_R_(frame)ᵀ · bevy_R_enu_plane`.
+/// Identity when `frame` is ENU or omitted; skipped when `absolute`.
+fn body_offset_correction(ctx: &EqlCompileCtx<'_>, absolute: bool) -> DMat3 {
+    if absolute {
+        return DMat3::IDENTITY;
+    }
+    let frame = ctx.frame.unwrap_or(GeoFrame::ENU);
+    GeoFrame::bevy_R_(&frame, ctx.geo).transpose() * schematic_to_bevy_s()
+}
+
+fn apply_mat3(m: DMat3, (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
+    let v = m * DVec3::new(x, y, z);
+    (v.x, v.y, v.z)
+}
+
+fn pop_orientation_flag(elements: &[eql::Expr]) -> Result<(&[eql::Expr], bool), CompileError> {
+    match elements.last() {
+        Some(eql::Expr::StringLiteral(s)) if s.eq_ignore_ascii_case("true") => {
+            Ok((&elements[..elements.len() - 1], true))
+        }
+        Some(eql::Expr::StringLiteral(s)) if s.eq_ignore_ascii_case("false") => {
+            Ok((&elements[..elements.len() - 1], false))
+        }
+        Some(eql::Expr::StringLiteral(s)) => Err(ComponentError::Message(
+            format!("orientation flag must be true or false, got {s:?}").into(),
+        )
+        .into()),
+        _ => Ok((elements, false)),
+    }
+}
+
 /// Compiles a formula expression into a runtime closure
 fn compile_formula(
     formula: Arc<dyn eql::Formula>,
     inner_expr: eql::Expr,
-    geo: &GeoContext,
+    ctx: &EqlCompileCtx<'_>,
 ) -> Result<CompiledExpr, CompileError> {
     if let Some(target) = formula.editor_cast_target() {
-        let inner_compiled = compile_eql_expr_with_geo(inner_expr, geo)?;
+        let inner_compiled = compile_eql_expr_with_ctx(inner_expr, ctx)?;
         return Ok(CompiledExpr::closure(
             move |entity_map, component_values| {
                 let v = inner_compiled.execute(entity_map, component_values)?;
@@ -592,7 +650,7 @@ fn compile_formula(
     }
 
     if let Some(conv) = formula.frame_conversion() {
-        return compile_frame_conversion(conv, inner_expr, geo);
+        return compile_frame_conversion(conv, inner_expr, ctx);
     }
 
     let n = formula.name();
@@ -617,8 +675,8 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndAngle(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
-            let angle_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let angle_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -654,10 +712,10 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndThreeAngles(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
-            let x_angle_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
-            let y_angle_compiled = compile_eql_expr_with_geo(elements[2].clone(), geo)?;
-            let z_angle_compiled = compile_eql_expr_with_geo(elements[3].clone(), geo)?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let x_angle_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let y_angle_compiled = compile_eql_expr_with_ctx(elements[2].clone(), ctx)?;
+            let z_angle_compiled = compile_eql_expr_with_ctx(elements[3].clone(), ctx)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -703,12 +761,17 @@ fn compile_formula(
             let eql::Expr::Tuple(elements) = inner_expr else {
                 return Err(ComponentError::RequiresTuple(n).into());
             };
+            let (elements, absolute) = pop_orientation_flag(&elements)?;
             if elements.len() != 2 {
                 return Err(ComponentError::RequiresReceiverAndDistance(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
-            let distance_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let distance_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let correction = match frame {
+                Frame::Body => body_offset_correction(ctx, absolute),
+                Frame::World => DMat3::IDENTITY,
+            };
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -723,6 +786,7 @@ fn compile_formula(
                     2 => (0.0, 0.0, dist),
                     _ => unreachable!(),
                 };
+                let offset_body = apply_mat3(correction, offset_body);
 
                 // Body-frame: rotate offset to world frame; World-frame: use directly
                 let (dx, dy, dz) = match frame {
@@ -748,14 +812,19 @@ fn compile_formula(
             let eql::Expr::Tuple(elements) = inner_expr else {
                 return Err(ComponentError::RequiresTuple(n).into());
             };
+            let (elements, absolute) = pop_orientation_flag(&elements)?;
             if elements.len() != 4 {
                 return Err(ComponentError::RequiresReceiverAndThreeDistances(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
-            let x_dist_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
-            let y_dist_compiled = compile_eql_expr_with_geo(elements[2].clone(), geo)?;
-            let z_dist_compiled = compile_eql_expr_with_geo(elements[3].clone(), geo)?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let x_dist_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let y_dist_compiled = compile_eql_expr_with_ctx(elements[2].clone(), ctx)?;
+            let z_dist_compiled = compile_eql_expr_with_ctx(elements[3].clone(), ctx)?;
+            let correction = match frame {
+                Frame::Body => body_offset_correction(ctx, absolute),
+                Frame::World => DMat3::IDENTITY,
+            };
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -766,11 +835,12 @@ fn compile_formula(
                 let dz = extract_scalar(z_dist_compiled.execute(entity_map, component_values)?)?;
 
                 let q = (data[0], data[1], data[2], data[3]);
+                let offset = apply_mat3(correction, (dx, dy, dz));
 
                 // Body-frame: rotate offset to world frame; World-frame: use directly
                 let (rx, ry, rz) = match frame {
-                    Frame::Body => rotate_vector_by_quat(q, (dx, dy, dz)),
-                    Frame::World => (dx, dy, dz),
+                    Frame::Body => rotate_vector_by_quat(q, offset),
+                    Frame::World => offset,
                 };
 
                 Ok(build_spatial_result(
@@ -785,14 +855,16 @@ fn compile_formula(
             let eql::Expr::Tuple(elements) = inner_expr else {
                 return Err(ComponentError::RequiresTuple(n).into());
             };
+            let (elements, absolute) = pop_orientation_flag(&elements)?;
             if elements.len() != 4 {
                 return Err(ComponentError::RequiresReceiverAndThreeComponents(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr_with_geo(elements[0].clone(), geo)?;
-            let x_compiled = compile_eql_expr_with_geo(elements[1].clone(), geo)?;
-            let y_compiled = compile_eql_expr_with_geo(elements[2].clone(), geo)?;
-            let z_compiled = compile_eql_expr_with_geo(elements[3].clone(), geo)?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let x_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let y_compiled = compile_eql_expr_with_ctx(elements[2].clone(), ctx)?;
+            let z_compiled = compile_eql_expr_with_ctx(elements[3].clone(), ctx)?;
+            let correction = body_offset_correction(ctx, absolute);
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -801,7 +873,8 @@ fn compile_formula(
                 let dy = extract_scalar(y_compiled.execute(entity_map, component_values)?)?;
                 let dz = extract_scalar(z_compiled.execute(entity_map, component_values)?)?;
                 let q = (data[0], data[1], data[2], data[3]);
-                let world = rotate_vector_by_quat(q, (dx, dy, dz));
+                let offset = apply_mat3(correction, (dx, dy, dz));
+                let world = rotate_vector_by_quat(q, offset);
                 Ok(build_vec3_result(world))
             })
         }
@@ -815,15 +888,15 @@ fn compile_formula(
 fn compile_frame_conversion(
     conv: eql::FrameConversion,
     inner_expr: eql::Expr,
-    geo: &GeoContext,
+    ctx: &EqlCompileCtx<'_>,
 ) -> Result<CompiledExpr, CompileError> {
     use eql::FrameConvertKind;
     use nox::ArrayBuf;
 
     let from = conv.from;
     let to = conv.to;
-    let geo = geo.clone();
-    let receiver_compiled = compile_eql_expr_with_geo(inner_expr, &geo)?;
+    let geo = ctx.geo.clone();
+    let receiver_compiled = compile_eql_expr_with_ctx(inner_expr, ctx)?;
 
     Ok(CompiledExpr::closure(
         move |entity_map, component_values| {
@@ -880,6 +953,14 @@ pub fn compile_eql_expr_with_geo(
     expression: eql::Expr,
     geo: &GeoContext,
 ) -> Result<CompiledExpr, CompileError> {
+    compile_eql_expr_with_ctx(expression, &EqlCompileCtx::new(geo))
+}
+
+/// Compiles an EQL expression with an optional schematic `frame=` for body-frame offsets.
+pub fn compile_eql_expr_with_ctx(
+    expression: eql::Expr,
+    ctx: &EqlCompileCtx<'_>,
+) -> Result<CompiledExpr, CompileError> {
     Ok(match expression {
         Expr::ComponentPart(component) => {
             let component_id = component.id;
@@ -894,7 +975,7 @@ pub fn compile_eql_expr_with_geo(
             })
         }
         Expr::ArrayAccess(expr, index) => {
-            let compiled_expr = compile_eql_expr_with_geo(*expr, geo)?;
+            let compiled_expr = compile_eql_expr_with_ctx(*expr, ctx)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let resolved_expr = compiled_expr.execute(entity_map, component_value_maps)?;
                 match resolved_expr {
@@ -933,7 +1014,7 @@ pub fn compile_eql_expr_with_geo(
         Expr::Tuple(exprs) => {
             let compiled_exprs: Result<Vec<CompiledExpr>, CompileError> = exprs
                 .into_iter()
-                .map(|e| compile_eql_expr_with_geo(e, geo))
+                .map(|e| compile_eql_expr_with_ctx(e, ctx))
                 .collect();
             let compiled_exprs = compiled_exprs?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
@@ -957,8 +1038,8 @@ pub fn compile_eql_expr_with_geo(
             })
         }
         Expr::BinaryOp(left, right, op) => {
-            let left_compiled = compile_eql_expr_with_geo(*left, geo)?;
-            let right_compiled = compile_eql_expr_with_geo(*right, geo)?;
+            let left_compiled = compile_eql_expr_with_ctx(*left, ctx)?;
+            let right_compiled = compile_eql_expr_with_ctx(*right, ctx)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let left_val = left_compiled.execute(entity_map, component_value_maps)?;
                 let right_val = right_compiled.execute(entity_map, component_value_maps)?;
@@ -977,7 +1058,7 @@ pub fn compile_eql_expr_with_geo(
             })
         }
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
-        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr, geo)?,
+        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr, ctx)?,
         expr => {
             return Err(CompileError::CannotConvert(expr));
         }
@@ -1892,7 +1973,10 @@ pub fn create_object_3d_entity(
     let entity_id = commands
         .spawn((
             Object3DState {
-                compiled_expr: Some(compile_eql_expr_with_geo(expr, geo_context)?),
+                compiled_expr: Some(compile_eql_expr_with_ctx(
+                    expr,
+                    &EqlCompileCtx::new(geo_context).with_frame(geo_frame),
+                )?),
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
@@ -2877,7 +2961,7 @@ mod translate_body_frame_tests {
     use std::sync::Arc;
 
     use bevy::ecs::system::SystemState;
-    use bevy::math::{DQuat, DVec3};
+    use bevy::math::{DMat3, DQuat, DVec3};
     use bevy::prelude::{Query, World};
     use impeller2::schema::Schema;
     use impeller2::types::{ComponentId, PrimType, Timestamp};
@@ -2885,7 +2969,7 @@ mod translate_body_frame_tests {
     use impeller2_wkt::ComponentValue;
     use nox::Array;
 
-    use super::{ComponentArrayExt, compile_eql_expr};
+    use super::{ComponentArrayExt, EqlCompileCtx, compile_eql_expr, compile_eql_expr_with_ctx};
     use crate::WorldPosExt;
     use crate::ui::widgets::SystemStateExt;
 
@@ -2929,6 +3013,66 @@ mod translate_body_frame_tests {
             .expect("execute")
             .as_world_pos()
             .expect("WorldPos")
+    }
+
+    fn eval_eql_with_ctx(
+        expr: &str,
+        att: DQuat,
+        pos: DVec3,
+        compile_ctx: &EqlCompileCtx<'_>,
+    ) -> impeller2_wkt::WorldPos {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_ctx(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+            compile_ctx,
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        compiled
+            .execute(&entity_map, &values)
+            .expect("execute")
+            .as_world_pos()
+            .expect("WorldPos")
+    }
+
+    fn eval_direction_with_ctx(
+        expr: &str,
+        att: DQuat,
+        pos: DVec3,
+        compile_ctx: &EqlCompileCtx<'_>,
+    ) -> DVec3 {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_ctx(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+            compile_ctx,
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = compiled.execute(&entity_map, &values).expect("execute");
+        let ComponentValue::F64(arr) = out else {
+            panic!("expected f64");
+        };
+        use nox::ArrayBuf;
+        let d = arr.buf.as_buf();
+        DVec3::new(d[0], d[1], d[2])
     }
 
     #[test]
@@ -3014,9 +3158,10 @@ mod translate_body_frame_tests {
         );
     }
 
-    /// Default [`RotationKind::Relative`] in ECEF is a similarity, so the
-    /// rendered aft does **not** match the body-frame EQL offset. ECEF
-    /// objects that must agree with `.translate()` need `orientation=absolute`.
+    /// Compiled **without** a `frame=` (identity correction). `.translate()`
+    /// then equals Absolute composition. Pass `true` or compile with an ECEF
+    /// `frame=` to pick Absolute vs Relative explicitly — see
+    /// `ecef_translate_flag_matches_relative_and_absolute`.
     #[test]
     fn ecef_body_translate_diverges_from_default_relative_mesh() {
         use bevy_geo_frames::{
@@ -3049,8 +3194,8 @@ mod translate_body_frame_tests {
         );
     }
 
-    /// Same contract with `orientation=absolute` (Falcon-style ECEF objects):
-    /// body translate and rendered aft must agree.
+    /// Same contract, still compiled without a `frame=` (identity correction).
+    /// `.translate(..., true)` is the explicit Absolute form when a frame is set.
     #[test]
     fn ecef_body_translate_matches_rendered_aft_with_absolute_orientation() {
         use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present};
@@ -3071,6 +3216,126 @@ mod translate_body_frame_tests {
         assert!(
             (cam_delta_bevy - rendered_aft).length() < 1e-6,
             "ECEF Absolute mesh aft must match body translate: Δ={cam_delta_bevy:?}, aft={rendered_aft:?}"
+        );
+    }
+
+    /// With an ECEF compile-site `frame=`, bare `.translate()` matches Relative
+    /// mesh aft; `.translate(..., true)` matches Absolute.
+    #[test]
+    fn ecef_translate_flag_matches_relative_and_absolute() {
+        use bevy_geo_frames::{
+            GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind,
+        };
+
+        let geo = GeoContext::default().with_present(Present::Plane);
+        let compile_ctx = EqlCompileCtx::new(&geo).with_frame(Some(GeoFrame::ECEF));
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+        let s = DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y);
+
+        let relative = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let absolute = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0, true)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+
+        let rel_delta = GeoPosition(GeoFrame::ECEF, relative.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&geo);
+        let abs_delta = GeoPosition(GeoFrame::ECEF, absolute.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&geo);
+
+        assert_eq!(RotationKind::default(), RotationKind::Relative);
+        let relative_aft =
+            GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&geo) * (s * body_aft);
+        let absolute_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&geo) * body_aft;
+
+        assert!(
+            (rel_delta - relative_aft).length() < 1e-6,
+            "bare translate must match Relative aft: Δ={rel_delta:?}, aft={relative_aft:?}"
+        );
+        assert!(
+            (abs_delta - absolute_aft).length() < 1e-6,
+            "translate(..., true) must match Absolute: Δ={abs_delta:?}, aft={absolute_aft:?}"
+        );
+        assert!(
+            (rel_delta - abs_delta).length() > 0.1,
+            "Relative and Absolute ECEF offsets must diverge"
+        );
+    }
+
+    #[test]
+    fn enu_translate_flag_coincides() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, Present};
+
+        let geo = GeoContext::default().with_present(Present::Plane);
+        let compile_ctx = EqlCompileCtx::new(&geo).with_frame(Some(GeoFrame::ENU));
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+
+        let bare = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let flagged = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0, true)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let bare_delta = GeoPosition(GeoFrame::ENU, bare.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ENU, ROCKET_ECEF).to_bevy(&geo);
+        let flagged_delta = GeoPosition(GeoFrame::ENU, flagged.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ENU, ROCKET_ECEF).to_bevy(&geo);
+        assert!(
+            (bare_delta - flagged_delta).length() < 1e-9,
+            "ENU correction is identity: bare={bare_delta:?}, flagged={flagged_delta:?}"
+        );
+    }
+
+    #[test]
+    fn ecef_direction_flag_matches_relative_and_absolute() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
+
+        let geo = GeoContext::default().with_present(Present::Plane);
+        let compile_ctx = EqlCompileCtx::new(&geo).with_frame(Some(GeoFrame::ECEF));
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let up = DVec3::Z;
+        let s = DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y);
+
+        let relative = eval_direction_with_ctx(
+            "rocket.world_pos.direction(0.0, 0.0, 1.0)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let absolute = eval_direction_with_ctx(
+            "rocket.world_pos.direction(0.0, 0.0, 1.0, true)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+
+        let relative_up = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&geo) * (s * up);
+        let absolute_up = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&geo) * up;
+        // direction() returns a frame-space vector; convert to Bevy for comparison.
+        let rel_bevy = GeoFrame::bevy_R_(&GeoFrame::ECEF, &geo) * relative;
+        let abs_bevy = GeoFrame::bevy_R_(&GeoFrame::ECEF, &geo) * absolute;
+
+        assert!(
+            (rel_bevy - relative_up).length() < 1e-6,
+            "bare direction must match Relative: {rel_bevy:?} vs {relative_up:?}"
+        );
+        assert!(
+            (abs_bevy - absolute_up).length() < 1e-6,
+            "direction(..., true) must match Absolute: {abs_bevy:?} vs {absolute_up:?}"
         );
     }
 }
