@@ -180,9 +180,10 @@ with pkgs; let
         fi
       fi
       export ELODIN_SHELL_ID
-      export ELODIN_SHELL_BIN="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/bin"
+      _elo_shell_dir="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID"
+      export ELODIN_SHELL_BIN="$_elo_shell_dir/bin"
       mkdir -p "$ELODIN_SHELL_BIN"
-      export VIRTUAL_ENV="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/.venv"
+      export VIRTUAL_ENV="$_elo_shell_dir/venv"
       export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
       PATH="$ELODIN_SHELL_BIN:$VIRTUAL_ENV/bin:$PATH"
       if [ -x "$VIRTUAL_ENV/bin/python" ]; then
@@ -204,12 +205,14 @@ with pkgs; let
         unset _elo_dir _elo_id
       fi
 
+      alias zar='gtar --zstd --sparse'
+
       # nix develop applies this hook via print-dev-env (non-interactive) then
       # starts $SHELL. Set SHELL/ZDOTDIR here so -c env and interactive agree.
       if [ "''${ELODIN_SHELL:-}" = zsh ]; then
         export SHELL=${pkgs.zsh}/bin/zsh
         export ELODIN_NIX_PATH="$PATH"
-        export ZDOTDIR="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID/zdot"
+        export ZDOTDIR="$_elo_shell_dir/zdot"
         mkdir -p "$ZDOTDIR"
         printf '%s\n' \
           'ZDOTDIR="$HOME"' \
@@ -220,8 +223,7 @@ with pkgs; let
           "alias zar='gtar --zstd --sparse'" \
           > "$ZDOTDIR/.zshrc"
       fi
-      # Hook-scope too: interactive nix develop may keep this bash (no exec).
-      alias zar='gtar --zstd --sparse'
+      unset _elo_shell_dir
 
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
