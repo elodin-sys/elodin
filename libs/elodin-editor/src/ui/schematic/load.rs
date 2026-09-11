@@ -1047,14 +1047,15 @@ impl LoadSchematicParams<'_, '_> {
         vector_arrow: VectorArrow3d,
         viewport_camera: Option<Entity>,
     ) {
-        use crate::object_3d::compile_eql_expr_with_geo;
+        use crate::object_3d::{EqlCompileCtx, compile_eql_expr_with_ctx};
 
+        let compile_ctx = EqlCompileCtx::new(&self.geo_context).with_frame(vector_arrow.frame);
         let vector_expr = self
             .eql
             .0
             .parse_str(&vector_arrow.vector)
             .map_err(CompileError::Parse)
-            .and_then(|expr| compile_eql_expr_with_geo(expr, &self.geo_context))
+            .and_then(|expr| compile_eql_expr_with_ctx(expr, &compile_ctx))
             .ok();
 
         let origin_expr = vector_arrow.origin.as_ref().and_then(|origin| {
@@ -1062,7 +1063,7 @@ impl LoadSchematicParams<'_, '_> {
                 .0
                 .parse_str(origin)
                 .map_err(CompileError::Parse)
-                .and_then(|expr| compile_eql_expr_with_geo(expr, &self.geo_context))
+                .and_then(|expr| compile_eql_expr_with_ctx(expr, &compile_ctx))
                 .ok()
         });
 
