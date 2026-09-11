@@ -185,10 +185,11 @@ with pkgs; let
       mkdir -p "$ELODIN_SHELL_BIN"
       export VIRTUAL_ENV="$_elo_shell_dir/venv"
       export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
-      PATH="$ELODIN_SHELL_BIN:$VIRTUAL_ENV/bin:$PATH"
-      if [ -x "$VIRTUAL_ENV/bin/python" ]; then
-        export UV_PYTHON="$VIRTUAL_ENV/bin/python"
+      if [ ! -x "$VIRTUAL_ENV/bin/python" ]; then
+        uv venv --quiet --python 3.13 --python-preference only-system --allow-existing "$VIRTUAL_ENV"
       fi
+      PATH="$ELODIN_SHELL_BIN:$VIRTUAL_ENV/bin:$PATH"
+      export UV_PYTHON="$VIRTUAL_ENV/bin/python"
       export PATH
 
       if [ -d "$ELODIN_ROOT/target/shells" ]; then
