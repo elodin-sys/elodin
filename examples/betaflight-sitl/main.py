@@ -19,6 +19,7 @@ Prerequisites:
     2. (Optional) Configure Betaflight via CLI: socat + screen
 """
 
+import math
 import os
 import re
 import subprocess
@@ -85,6 +86,26 @@ else:
     command_source = ManualGuidance()
     initial_control = SemanticControl.safe()
 
+# Package B: opt-in FPV camera (Section 7.4). Default off preserves scripted SITL.
+_race_camera = os.environ.get("RACE_CAMERA", "0")
+if _race_camera not in ("0", "1"):
+    print(f"ERROR: RACE_CAMERA must be '0' or '1', got {_race_camera!r}", file=sys.stderr)
+    sys.exit(2)
+CAMERA_ENABLED = _race_camera == "1"
+
+FPV_MSG = "drone.fpv"
+FPV_WIDTH = 640
+FPV_HEIGHT = 360
+FPV_FPS = 30.0
+FPV_LATENCY_US = 33_000
+FPV_MOUNT = [0.08, 0.0, 0.02]
+FPV_NEAR = 0.1
+FPV_FAR = 100.0
+# Vertical FoV for fx = fy = 320 at 640×360 (≈58.72°, hFOV 90°).
+FPV_FOV_DEG = 2.0 * math.degrees(math.atan((FPV_HEIGHT / 2.0) / 320.0))
+FPV_PERIOD_US = int(round(1_000_000.0 / FPV_FPS))
+FPV_FRAME_BYTES = FPV_WIDTH * FPV_HEIGHT * 4
+
 
 # --- Betaflight Binary Path ---
 BETAFLIGHT_PATH = Path(__file__).parent / "betaflight" / "obj" / "main" / "betaflight_SITL.elf"
@@ -138,9 +159,53 @@ drone = world.spawn(
     name="drone",
 )
 
+# Opt-in FPV camera (Package B). Registering a sensor_camera causes s10 to
+# start the headless render-server; keep this behind RACE_CAMERA=1.
+if CAMERA_ENABLED:
+    world.sensor_camera(
+        entity=drone,
+        name="fpv",
+        width=FPV_WIDTH,
+        height=FPV_HEIGHT,
+        fov=FPV_FOV_DEG,
+        near=FPV_NEAR,
+        far=FPV_FAR,
+        pos_offset=FPV_MOUNT,
+        rot_offset=[0.0, 0.0, 0.0],  # body +X look, body +Z up
+        format="rgba",
+        fps=FPV_FPS,
+        create_frustum=True,
+        frustums_color=[1.0, 0.6, 0.0, 1.0],
+        projection_color=[1.0, 0.6, 0.0, 0.35],
+    )
+
 # Editor schematic for visualization
-world.schematic(
+if CAMERA_ENABLED:
+    _schematic = f"""
+    tabs {{
+        hsplit name = "Viewport" {{
+            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true show_frustums=#true active=#true
+            vsplit share=0.3 {{
+                sensor_view "{FPV_MSG}" name="FPV Camera"
+                graph "drone.motor_command" name="Motor Commands (from Betaflight)"
+                graph "drone.motor_thrust" name="Motor Thrust"
+            }}
+            vsplit share=0.3 {{
+                graph "drone.world_pos.linear()" name="Position (ENU)"
+                graph "drone.world_vel.linear()" name="Velocity"
+                graph "drone.gyro" name="Gyroscope"
+            }}
+        }}
+    }}
+    object_3d drone.world_pos {{
+        glb path="edu-450-v2-drone.glb" scale=10.0
+    }}
+    object_3d "(0,0,0,1, 0,0,0)" {{
+        plane width=40 depth=40 {{ color 70 90 70 }}
+    }}
     """
+else:
+    _schematic = """
     tabs {
         hsplit name = "Viewport" {
             viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true active=#true
@@ -159,9 +224,9 @@ world.schematic(
     object_3d drone.world_pos {
         glb path="edu-450-v2-drone.glb" scale=10.0
     }
-    """,
-    "betaflight-sitl.kdl",
-)
+    """
+
+world.schematic(_schematic, "betaflight-sitl.kdl")
 
 
 # --- System ---
@@ -221,6 +286,13 @@ print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loo
 print(
     f"Requested sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
 )
+if CAMERA_ENABLED:
+    print(
+        f"FPV camera: {FPV_MSG} {FPV_WIDTH}x{FPV_HEIGHT} @ {FPV_FPS:.0f}Hz "
+        f"fov={FPV_FOV_DEG:.2f}° latency={FPV_LATENCY_US}us (RACE_CAMERA=1)"
+    )
+else:
+    print("FPV camera: disabled (RACE_CAMERA=0)")
 
 
 # --- SITL State ---
@@ -263,6 +335,24 @@ last_print = [0.0]
 c0_result: list[C0Result | None] = [None]
 axis_audit = AxisAudit() if audit_requested else None
 
+
+@dataclass
+class FpvCameraStats:
+    last_period_idx: int = -1
+    sample_count: int = 0
+    first_frame_sim_s: float | None = None
+    last_requested_sample_us: int | None = None
+    shape_ok: bool = True
+    last_frame_sig: object = None
+    unique_samples: int = 0
+    # Latest sample offered to guidance this tick (or None).
+    latest_frame: np.ndarray | None = None
+    latest_sample_us: int | None = None
+    latest_fresh: bool = False
+
+
+fpv_stats = FpvCameraStats() if CAMERA_ENABLED else None
+
 # Pre-allocated buffers to avoid allocation in hot loop
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
 _rc_packet = RCPacket(timestamp=0.0, channels=_rc_channels_buffer)
@@ -280,6 +370,107 @@ _component_reads = [
 _manual_input_tick_interval = max(1, round(config.pid_rate / 1_000.0))
 _barometer_tick_interval = config.baro_tick_interval
 _magnetometer_tick_interval = config.mag_tick_interval
+
+
+def _frame_fingerprint(arr: np.ndarray, *, dense: bool = False) -> int:
+    flat = np.ascontiguousarray(arr).reshape(-1)
+    if dense:
+        return hash(flat.tobytes())
+    stride = max(flat.size // 4096, 1)
+    return hash(flat[::stride].tobytes())
+
+
+def _read_fpv_frame(ctx: el.StepContext, stats: FpvCameraStats) -> None:
+    """Non-blocking latency-adjusted FPV read, at most once per camera period."""
+    stats.latest_frame = None
+    stats.latest_sample_us = None
+    stats.latest_fresh = False
+
+    period_idx = int(ctx.timestamp // FPV_PERIOD_US)
+    if period_idx == stats.last_period_idx:
+        return
+    stats.last_period_idx = period_idx
+
+    requested = ctx.timestamp - FPV_LATENCY_US
+    stats.last_requested_sample_us = requested
+    stats.latest_sample_us = requested
+    payload = ctx.read_msg(FPV_MSG, timestamp=requested)
+    if payload is None:
+        return
+
+    arr = np.asarray(payload)
+    if arr.size != FPV_FRAME_BYTES:
+        stats.shape_ok = False
+        return
+
+    rgba = arr.reshape(FPV_HEIGHT, FPV_WIDTH, 4)
+    if rgba.dtype != np.uint8:
+        stats.shape_ok = False
+        return
+
+    stats.sample_count += 1
+    stats.latest_frame = rgba
+    stats.latest_fresh = True
+    if stats.first_frame_sim_s is None:
+        stats.first_frame_sim_s = ctx.tick * config.dt
+        print(
+            f"[fpv] first frame at t={stats.first_frame_sim_s:.3f}s "
+            f"(requested_sample_us={requested}, shape={rgba.shape}, dtype={rgba.dtype})"
+        )
+
+    sig = _frame_fingerprint(arr)
+    if sig != stats.last_frame_sig:
+        stats.last_frame_sig = sig
+        stats.unique_samples += 1
+
+
+def _report_fpv_stats(ctx: el.StepContext, stats: FpvCameraStats, sim_time: float) -> None:
+    """Shutdown report: first-frame time, counts, observed simulated FPS."""
+    print()
+    print("--- FPV camera (Package B) ---")
+    if stats.first_frame_sim_s is None:
+        print("  first_frame: none (render-server produced no frames)")
+        print(f"  sample_count: {stats.sample_count}")
+        print("  observed_fps: 0.0")
+        return
+
+    warmup_us = 2_000_000
+    sweep_end = ctx.timestamp - 100_000
+    sweep_start = max(warmup_us, sweep_end - int(max(sim_time - 2.0, 0.1) * 1_000_000))
+    sweep_window_us = max(sweep_end - sweep_start, 1)
+    sweep_seconds = sweep_window_us / 1_000_000.0
+    step_us = max(int(FPV_PERIOD_US / 2), 100)
+    seen_sig = None
+    unique_frames = 0
+    cursor = sweep_start
+    while cursor <= sweep_end:
+        frame = ctx.read_msg(FPV_MSG, timestamp=cursor)
+        if frame is not None:
+            sig = _frame_fingerprint(np.asarray(frame), dense=True)
+            if sig != seen_sig:
+                unique_frames += 1
+                seen_sig = sig
+        cursor += step_us
+
+    observed_fps = unique_frames / sweep_seconds if sweep_seconds > 0 else 0.0
+    offered_fps = 0.0
+    if sim_time > stats.first_frame_sim_s:
+        offered_fps = stats.sample_count / (sim_time - stats.first_frame_sim_s)
+
+    print(f"  first_frame_sim_s: {stats.first_frame_sim_s:.3f}")
+    print(f"  sample_count: {stats.sample_count}")
+    print(f"  unique_samples_at_period: {stats.unique_samples}")
+    print(f"  offered_sample_fps≈{offered_fps:.2f} (non-None latency reads / sim-s)")
+    print(f"  shape_ok: {stats.shape_ok} (expect ({FPV_HEIGHT}, {FPV_WIDTH}, 4) uint8)")
+    print(f"  last_requested_sample_us: {stats.last_requested_sample_us}")
+    print(
+        f"  observed_sim_fps≈{observed_fps:.2f} "
+        f"(unique_frames={unique_frames} in {sweep_seconds:.2f}s after warmup)"
+    )
+    if observed_fps < 15.0:
+        print("  WARNING: observed FPS below Package B acceptance floor (15 FPS)")
+    else:
+        print("  OK: observed FPS meets Package B acceptance (>= 15 FPS)")
 
 
 def sitl_post_step(tick: int, ctx: el.StepContext):
@@ -416,6 +607,17 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
 
+    # Camera read is after lockstep and never blocks physics (Section 6.2 / Package B).
+    frame = None
+    frame_sample_time = None
+    frame_fresh = False
+    if fpv_stats is not None:
+        _read_fpv_frame(ctx, fpv_stats)
+        frame = fpv_stats.latest_frame
+        if fpv_stats.latest_sample_us is not None:
+            frame_sample_time = float(fpv_stats.latest_sample_us)
+        frame_fresh = fpv_stats.latest_fresh
+
     update = GuidanceUpdate(
         sim_time=t,
         tick=tick,
@@ -425,6 +627,9 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         barometer_fresh=barometer_fresh and sensor_read_succeeded,
         magnetometer=magnetometer,
         magnetometer_fresh=magnetometer_fresh and sensor_read_succeeded,
+        frame=frame,
+        frame_sample_time=frame_sample_time,
+        frame_fresh=frame_fresh,
     )
     if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
         next_control = command_source.update(update)
@@ -516,6 +721,10 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         print(f"  Max motor: {s.max_motor:.3f}")
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
+
+        if fpv_stats is not None:
+            _report_fpv_stats(ctx, fpv_stats, s.sim_time)
+            print()
 
         if guidance_mode is GuidanceMode.SCRIPTED:
             result = evaluate_c0(

@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-08
-**Current resume point:** Package D — manual hardware qualification
+**Last verified against repository:** 2026-09-11  
+**Current resume point:** Package D — manual hardware qualification (Package B complete)
 
 ## 1. Purpose and authority
 
@@ -123,11 +123,10 @@ The default 8 kHz build busy-waits in Betaflight and consumes approximately one
 CPU core to avoid scheduler wakeup latency. The build-time
 `VIRTUAL_GYRO_SAMPLE_RATE_HZ` and Python `simulation_rate` must remain equal.
 
-The example does **not** currently contain a camera, gates, course selection,
-referee, guidance interface, ANGLE-mode guidance, racing controller, perception,
-race tests, or race CI. The README refers to `test_comms.py`, but that file is
-not present; Package A must repair this documentation or supply its supported
-replacement.
+The example does **not** currently contain gates, course selection, referee,
+ANGLE-mode racing guidance, perception, race tests, or race CI. An opt-in FPV
+camera (`RACE_CAMERA=1`) is available after Package B; the default scripted run
+still does not require a GPU render server.
 
 ### 3.1 Current conventions
 
@@ -616,7 +615,7 @@ stable machine-readable C0 result in addition to human diagnostics.
 **Handoff:** Mark A complete, record exact commands and measured runtime, and set
 the resume point to B, C, or D.
 
-### [ ] B — FPV camera vertical slice
+### [x] B — FPV camera vertical slice
 
 **Objective:** Prove independent camera production, consumption, display, and
 recording without introducing racing behavior.
@@ -645,6 +644,26 @@ The default camera-disabled run does not start or require the render server.
 
 **Handoff:** Record the DB path, export command, observed FPS, and any GPU-specific
 limitations.
+
+**Verified 2026-09-11 (ported onto post-A/D `main` at `354fc41a`; WSL2, NVIDIA
+GeForce RTX 3050 6GB Laptop GPU):**
+
+- Default: `RACE_CAMERA=0 elodin run examples/betaflight-sitl/main.py` →
+  `FPV camera: disabled`, C0 `status=PASS`, lockstep_steps `119995`
+  (DB `betaflight_db006`).
+- Camera: `RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py` →
+  `drone.fpv` 640×360 RGBA uint8, first frame at `t≈0.065s`,
+  `sample_count=449`, `offered_sample_fps≈30.06`,
+  `observed_sim_fps≈16.69` after warmup (≥15), `shape_ok=True`,
+  C0 still `PASS` with lockstep_steps `119995` (DB `betaflight_db007`).
+- Export:
+  `elodin-db export-videos betaflight_db007 --output /tmp/bf_fpv_videos_b007 --fps 30`
+  → nonempty `drone.fpv.mp4` (413 frames, 640×360 H.264).
+- Frames are offered into `GuidanceUpdate.frame` / `frame_sample_time` /
+  `frame_fresh` after the motor lockstep exchange; scripted/manual sources do
+  not act on imagery.
+- Limitations: wall-clock RTF ~0.8× without camera and ~0.4× with camera on this
+  host; no `/dev/dri`, NVIDIA path still produced frames.
 
 ### [ ] C — Course and referee vertical slice
 
@@ -1018,12 +1037,12 @@ branch for later resumption.
 | Package | Status | Evidence / notes |
 |---|---|---|
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
-| B | Not started | Platform camera API exists; no Betaflight integration |
+| B | Complete | `RACE_CAMERA=1` FPV slice in `main.py` on post-A/D tree; verified 2026-09-11 (see Package B handoff) |
 | C | Not started | No course or referee code |
 | D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
-| G | Blocked by B | No racing camera geometry contract in code |
+| G | Ready (needs B) | Camera contract available; racing geometry helpers not yet in code |
 | H | Blocked by B, C, G | No detector |
 | I | Blocked by G | No tracker |
 | J | Blocked by E, H, I | No vision guidance |
@@ -1033,13 +1052,15 @@ branch for later resumption.
 ### Resume point
 
 Complete Package D's **manual hardware qualification** using the documented
-gamepad or keyboard controls. The implementation and deterministic physical
-audit are complete, but Package D must remain open until an operator has armed,
-taken off, exercised roll/pitch/yaw/throttle, landed, and disarmed.
+gamepad or keyboard controls. Package B is complete. Package C remains a valid
+independent alternative; Package G can begin on the perception path.
+
+The Package D implementation and deterministic physical audit are complete, but
+Package D must remain open until an operator has armed, taken off, exercised
+roll/pitch/yaw/throttle, landed, and disarmed.
 
 After recording that result in the Package D handoff, Package E is the
-recommended implementation continuation. Packages B and C remain valid
-independent alternatives if camera or course work is prioritized first.
+recommended implementation continuation.
 
 Package A verification from the repository root, with the Elodin Python
 environment active and the current release CLI on `PATH`:
