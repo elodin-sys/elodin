@@ -32,12 +32,12 @@ install-path = "CARGO_HOME"
 install-updater = false
 
 [dist.github-custom-runners]
-aarch64-unknown-linux-gnu = "ubuntu-24.04-arm-large"
-x86_64-unknown-linux-gnu = "ubuntu-24.04-xl"
-aarch64-unknown-linux-musl = "ubuntu-24.04-arm-large"
-x86_64-unknown-linux-musl = "ubuntu-24.04-xl"
-x86_64-pc-windows-msvc = "windows-xl"
-aarch64-apple-darwin = "macos-14-xlarge"
+aarch64-unknown-linux-gnu = "ci-linux-arm64"
+x86_64-unknown-linux-gnu = "ci-linux-x64"
+aarch64-unknown-linux-musl = "ci-linux-arm64"
+x86_64-unknown-linux-musl = "ci-linux-x64"
+x86_64-pc-windows-msvc = "ci-windows-x64"
+aarch64-apple-darwin = "ci-macos-arm64"
 
 [dist.dependencies.apt]
 "g++" = '*'

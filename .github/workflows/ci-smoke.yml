@@ -16,8 +16,8 @@ on:
         description: Test ci-linux-arm64
         type: boolean
         default: false
-      windows_arm64:
-        description: Test ci-windows-arm64
+      windows_x64:
+        description: Test ci-windows-x64
         type: boolean
         default: false
 
@@ -64,14 +64,14 @@ jobs:
       - name: Linux ARM64 runner smoke
         run: bash ci/runners/linux/smoke.sh
 
-  windows-arm64:
-    if: ${{ inputs.windows_arm64 }}
-    runs-on: ci-windows-arm64
+  windows-x64:
+    if: ${{ inputs.windows_x64 }}
+    runs-on: ci-windows-x64
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Windows ARM64 runner smoke
+      - name: Windows x64 runner smoke
         shell: pwsh
         run: ./ci/runners/windows/smoke.ps1
