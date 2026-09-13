@@ -45,7 +45,8 @@ if [[ -f "${toolcache}/Python/${version}/arm64.complete" ]]; then
 else
     echo "Seeding Python ${version} into ${toolcache}..."
     sudo mkdir -p "${toolcache}"
-    sudo chown "$(id -un)" "${toolcache}"
+    # Re-seeds must reclaim the tree a previous run handed to ci.
+    sudo chown -R "$(id -un)" "${toolcache}"
     tmp="$(mktemp -d)"
     trap 'rm -rf "${tmp}"' EXIT
     curl --fail --location --retry 3 -o "${tmp}/python.tar.gz" "${url}"

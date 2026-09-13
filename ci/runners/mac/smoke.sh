@@ -15,6 +15,8 @@ xcode-select -p
 test -d /Applications/Xcode.app/Contents/Developer
 brew --prefix ffmpeg@8
 brew --prefix protobuf
+command -v pkg-config
+PKG_CONFIG_PATH="$(brew --prefix ffmpeg@8)/lib/pkgconfig" pkg-config --modversion libavutil
 command -v cargo
 cargo --version
 command -v rustc

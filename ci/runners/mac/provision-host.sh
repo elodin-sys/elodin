@@ -33,8 +33,8 @@ else
     echo 'User ci already exists.'
 fi
 
-echo 'Installing Homebrew packages (git-lfs, protobuf, ffmpeg@8)...'
-brew install git-lfs protobuf ffmpeg@8
+echo 'Installing Homebrew packages (git-lfs, pkgconf, protobuf, ffmpeg@8)...'
+brew install git-lfs pkgconf protobuf ffmpeg@8
 
 echo 'Accepting the Xcode license...'
 sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer

@@ -32,6 +32,7 @@ if ($link.Source -notmatch 'Hostx64\\x64\\link\.exe$') {
 
 $candle = Get-Command candle.exe -ErrorAction Stop
 Write-Host "candle.exe: $($candle.Source)"
+& (Join-Path $PSScriptRoot 'wix-check.ps1')
 
 $PSVersionTable
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber

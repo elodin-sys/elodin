@@ -75,7 +75,7 @@ Target: ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free. Any distro is fine; jobs ru
    sudo fdesetup add -usertoadd ci
    ```
 
-   `provision-host.sh` creates the `ci` user, installs `git-lfs`, `protobuf`, `ffmpeg@8`, accepts the Xcode license, installs Apple Container 1.4.1, and runs `seed-python.sh`.
+   `provision-host.sh` creates the `ci` user, installs `git-lfs`, `pkgconf`, `protobuf`, `ffmpeg@8`, accepts the Xcode license, installs Apple Container 1.4.1, and runs `seed-python.sh`. `pkgconf` matters: `ffmpeg-sys-next`'s build script needs a `pkg-config` binary, which hosted macOS images ship and a fresh Mac does not.
 
    `seed-python.sh` pre-populates `/Users/runner/hostedtoolcache` with Python `PYTHON_SERIES` (from `versions.env`). `actions/setup-python` hardcodes that path on macOS and its installer needs `sudo`; seeding once as an administrator means jobs on `ci` hit the cache and never install. On an already-provisioned host run it alone: `ci/runners/mac/seed-python.sh`. `pip install` in jobs falls back to the `ci` user site (`~/Library/Python/3.13`), which is expected.
 
@@ -157,7 +157,7 @@ Target: Windows 11 x64, ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free, always on (
    .\ci\runners\windows\provision.ps1
    ```
 
-   Expect a reboot-free run of ~20–40 min (Visual Studio Build Tools dominates). The script is re-runnable. It creates `ci-build` if missing, hides that account from the sign-in screen, and lets `config.cmd --runasservice` grant **Log on as a service**. It ends by running `seed-python.ps1`, which pre-populates the runner tool cache (`C:\actions-runner\_work\_tool`) with Python `PYTHON_SERIES`. `actions/setup-python`'s Windows installer uses `InstallAllUsers=1` and needs admin, which `ci-build` does not have; the seeded cache means jobs skip the install. On an already-provisioned box run it alone from an elevated PowerShell: `.\ci\runners\windows\seed-python.ps1`.
+   Expect a reboot-free run of ~20–40 min (Visual Studio Build Tools dominates). The script is re-runnable. It creates `ci-build` if missing, hides that account from the sign-in screen, adds it to **Administrators**, and lets `config.cmd --runasservice` grant **Log on as a service**. Administrator membership is not optional: `dist build` produces the MSI with WiX 3 `light.exe`, whose ICE validation only works for interactive users or local administrators ([wixtoolset/issues#5473](https://github.com/wixtoolset/issues/issues/5473)) and cargo-dist offers no way to pass `-sval`. A non-admin service account fails with `LGHT0216`/`LGHT0217` ("The Windows Installer Service could not be accessed"). This matches GitHub-hosted Windows runners, which also run as an administrator. `smoke.ps1` runs `wix-check.ps1`, a candle+light round trip with validation on, so a misconfigured account fails smoke rather than a 14-minute release build. It ends by running `seed-python.ps1`, which pre-populates the runner tool cache (`C:\actions-runner\_work\_tool`) with Python `PYTHON_SERIES`, so jobs skip `actions/setup-python`'s per-machine installer and hit the cache. On an already-provisioned box run it alone from an elevated PowerShell: `.\ci\runners\windows\seed-python.ps1`.
 
 3. Confirm the service is running and the runner is online:
 
@@ -191,6 +191,7 @@ Target: Windows 11 x64, ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free, always on (
 - **Linux ARM64 restart:** `container stop --time 60 ci-linux-arm64 && container start ci-linux-arm64`.
 - **Replace a Linux image:** drain work, remove the runner in GitHub, `docker rm` / `container rm` the old container (keep or drop the work volume), rebuild, recreate, register with a new token. Do not copy `.runner` / `.credentials*` between containers.
 - **Windows restart:** `Restart-Service actions.runner.*` when idle. Never clone or image the disk with a live `.runner` / `.credentials` identity.
+- **Windows MSI step fails with WiX exit code 216:** `ci-build` lost Administrators membership. `Add-LocalGroupMember -Group Administrators -Member ci-build; Restart-Service actions.runner.*` from an elevated PowerShell, then dispatch smoke with `windows_x64`.
 - **Bumping `python-version` in `release.yml`:** update `PYTHON_SERIES` in `versions.env` and `$PythonSeries` in `seed-python.ps1`, then re-run `ci/runners/mac/seed-python.sh` (Studio, as administrator) and `seed-python.ps1` (Windows, elevated) before merging. The Linux images use setup-python's relocatable builds and need nothing.
 - **Persistent-workspace rules for `release.yml`:** never enable `Swatinem/rust-cache` (or `setup-rust-toolchain`'s default `cache: true`) on `ci-*` lanes; its post step deletes `~/.cargo/bin` and prunes `target/`. After any `lfs: true` checkout on a self-hosted lane, run `git lfs pull`; `actions/checkout` only smudges files that changed since the previous checkout in that workspace.
 - **Suspected compromise:** remove the runner in GitHub, revoke tokens, rebuild the environment, and treat artifacts from that host as untrusted. Deleting `_work` is not recovery.
