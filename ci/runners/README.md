@@ -19,7 +19,7 @@ The repository is public. A fork PR that edits `runs-on` can execute on these ma
 
 1. Repo **Settings → Actions → General → Fork pull request workflows from outside collaborators** → **Require approval for all outside collaborators**.
 2. Confirm **Settings → Actions → Runners** offers **New self-hosted runner**. If the org blocks repo-level runners, register at org level in a group restricted to `elodin-sys/elodin` (`gh auth refresh -s admin:org`).
-3. Never route `pull_request` jobs to these labels. Do not attach the runners to other public repos.
+3. Never route `pull_request` jobs to these labels. Every job in `release.yml` that can land on a `ci-*` label is hard-gated with `github.event_name != 'pull_request'`; `plan` evaluates the PR's own `dist-workspace.toml`, so `pr_run_mode` alone is not a safe gate. Do not attach the runners to other public repos.
 
 Registration tokens live one hour. Mint from any machine with `gh` logged in as a repo admin:
 
@@ -75,7 +75,9 @@ Target: ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free. Any distro is fine; jobs ru
    sudo fdesetup add -usertoadd ci
    ```
 
-   `provision-host.sh` creates the `ci` user, installs `git-lfs`, `protobuf`, `ffmpeg@8`, accepts the Xcode license, and installs Apple Container 1.4.1.
+   `provision-host.sh` creates the `ci` user, installs `git-lfs`, `protobuf`, `ffmpeg@8`, accepts the Xcode license, installs Apple Container 1.4.1, and runs `seed-python.sh`.
+
+   `seed-python.sh` pre-populates `/Users/runner/hostedtoolcache` with Python `PYTHON_SERIES` (from `versions.env`). `actions/setup-python` hardcodes that path on macOS and its installer needs `sudo`; seeding once as an administrator means jobs on `ci` hit the cache and never install. On an already-provisioned host run it alone: `ci/runners/mac/seed-python.sh`. `pip install` in jobs falls back to the `ci` user site (`~/Library/Python/3.13`), which is expected.
 
 2. Fast User Switch to `ci`. Keep that session logged in (screen lock is fine; logout is not). System Settings → Lock Screen: do not log out the `ci` session on idle.
 
@@ -147,7 +149,15 @@ Target: Windows 11 x64, ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free, always on (
    RUNNER_TOKEN=$(ci/runners/bin/mint-token.sh)
    ```
 
-   Or set `$env:RUNNER_TOKEN` before launching. The script is re-runnable. It creates `ci-build` if missing, hides that account from the sign-in screen, and lets `config.cmd --runasservice` grant **Log on as a service**.
+   Then, in an elevated PowerShell on the Windows box:
+
+   ```powershell
+   $env:RUNNER_TOKEN = '...'
+   $env:CI_BUILD_PASSWORD = '...'
+   .\ci\runners\windows\provision.ps1
+   ```
+
+   Expect a reboot-free run of ~20–40 min (Visual Studio Build Tools dominates). The script is re-runnable. It creates `ci-build` if missing, hides that account from the sign-in screen, and lets `config.cmd --runasservice` grant **Log on as a service**. It ends by running `seed-python.ps1`, which pre-populates the runner tool cache (`C:\actions-runner\_work\_tool`) with Python `PYTHON_SERIES`. `actions/setup-python`'s Windows installer uses `InstallAllUsers=1` and needs admin, which `ci-build` does not have; the seeded cache means jobs skip the install. On an already-provisioned box run it alone from an elevated PowerShell: `.\ci\runners\windows\seed-python.ps1`.
 
 3. Confirm the service is running and the runner is online:
 
@@ -181,6 +191,8 @@ Target: Windows 11 x64, ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free, always on (
 - **Linux ARM64 restart:** `container stop --time 60 ci-linux-arm64 && container start ci-linux-arm64`.
 - **Replace a Linux image:** drain work, remove the runner in GitHub, `docker rm` / `container rm` the old container (keep or drop the work volume), rebuild, recreate, register with a new token. Do not copy `.runner` / `.credentials*` between containers.
 - **Windows restart:** `Restart-Service actions.runner.*` when idle. Never clone or image the disk with a live `.runner` / `.credentials` identity.
+- **Bumping `python-version` in `release.yml`:** update `PYTHON_SERIES` in `versions.env` and `$PythonSeries` in `seed-python.ps1`, then re-run `ci/runners/mac/seed-python.sh` (Studio, as administrator) and `seed-python.ps1` (Windows, elevated) before merging. The Linux images use setup-python's relocatable builds and need nothing.
+- **Persistent-workspace rules for `release.yml`:** never enable `Swatinem/rust-cache` (or `setup-rust-toolchain`'s default `cache: true`) on `ci-*` lanes; its post step deletes `~/.cargo/bin` and prunes `target/`. After any `lfs: true` checkout on a self-hosted lane, run `git lfs pull`; `actions/checkout` only smudges files that changed since the previous checkout in that workspace.
 - **Suspected compromise:** remove the runner in GitHub, revoke tokens, rebuild the environment, and treat artifacts from that host as untrusted. Deleting `_work` is not recovery.
 
 `windows-check.yml`, `deploy-docs.yml`, and `flakehub-publish-tagged.yml` stay on free hosted runners.

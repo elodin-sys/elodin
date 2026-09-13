@@ -112,7 +112,9 @@ jobs:
     # Let the initial task tell us to not run (currently very blunt)
     needs:
       - plan
-    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
+    # Never on pull_request: `plan` evaluates the PR's own dist-workspace.toml,
+    # so a PR could flip pr-run-mode and run code on the self-hosted runners.
+    if: ${{ github.event_name != 'pull_request' && fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
       # Target platforms/runners are computed by dist in create-release.
@@ -141,6 +143,12 @@ jobs:
         with:
           submodules: recursive
           lfs: true
+      # Persistent workspaces keep pointer stubs from earlier non-LFS checkouts;
+      # actions/checkout only smudges files that changed since the last checkout.
+      - name: Materialize Git LFS objects
+        if: runner.environment != 'github-hosted'
+        shell: bash
+        run: git lfs pull
       - name: Install Rust non-interactively if not already installed
         if: ${{ matrix.container }}
         run: |
@@ -376,11 +384,15 @@ jobs:
     timeout-minutes: 90
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    if: ${{ github.event_name != 'pull_request' && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Materialize Git LFS objects
+        if: runner.environment != 'github-hosted'
+        shell: bash
+        run: git lfs pull
       - uses: DeterminateSystems/nix-installer-action@main
         if: runner.environment == 'github-hosted'
       - name: Install Python
@@ -417,11 +429,15 @@ jobs:
     timeout-minutes: 90
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    if: ${{ github.event_name != 'pull_request' && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Materialize Git LFS objects
+        if: runner.environment != 'github-hosted'
+        shell: bash
+        run: git lfs pull
       - name: Install Python
         uses: actions/setup-python@v5
         with:
@@ -437,7 +453,11 @@ jobs:
             protobuf-compiler \
             libavutil-dev libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libswscale-dev libswresample-dev libclang-dev
+      # rust-cache's post step deletes ~/.cargo/bin and prunes target/, which
+      # destroys the toolchain baked into the persistent self-hosted image.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: ${{ runner.environment == 'github-hosted' }}
       - name: Install cargo-deb
         if: runner.environment == 'github-hosted'
         run: cargo install cargo-deb
@@ -500,11 +520,15 @@ jobs:
     timeout-minutes: 90
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    if: ${{ github.event_name != 'pull_request' && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Materialize Git LFS objects
+        if: runner.environment != 'github-hosted'
+        shell: bash
+        run: git lfs pull
       - uses: DeterminateSystems/nix-installer-action@main
         if: runner.environment == 'github-hosted'
       - name: Install Python

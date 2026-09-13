@@ -57,7 +57,6 @@ EOF
 cat >"${runner_dir}/.path" <<EOF
 /opt/homebrew/bin
 ${HOME}/.cargo/bin
-/nix/var/nix/profiles/default/bin
 EOF
 
 if [[ ! -s "${runner_dir}/.runner" ]]; then
