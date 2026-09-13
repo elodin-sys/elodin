@@ -1,0 +1,77 @@
+# Manual smoke tests for self-hosted runners. No publishing or signing.
+name: CI runner smoke tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux_x64:
+        description: Test ci-linux-x64
+        type: boolean
+        default: true
+      macos_arm64:
+        description: Test ci-macos-arm64
+        type: boolean
+        default: false
+      linux_arm64:
+        description: Test ci-linux-arm64
+        type: boolean
+        default: false
+      windows_arm64:
+        description: Test ci-windows-arm64
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-smoke
+  cancel-in-progress: false
+
+jobs:
+  linux-x64:
+    if: ${{ inputs.linux_x64 }}
+    runs-on: ci-linux-x64
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Linux x64 runner smoke
+        run: bash ci/runners/linux/smoke.sh
+
+  macos-arm64:
+    if: ${{ inputs.macos_arm64 }}
+    runs-on: ci-macos-arm64
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: macOS ARM64 runner smoke
+        run: bash ci/runners/mac/smoke.sh
+
+  linux-arm64:
+    if: ${{ inputs.linux_arm64 }}
+    runs-on: ci-linux-arm64
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Linux ARM64 runner smoke
+        run: bash ci/runners/linux/smoke.sh
+
+  windows-arm64:
+    if: ${{ inputs.windows_arm64 }}
+    runs-on: ci-windows-arm64
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Windows ARM64 runner smoke
+        shell: pwsh
+        run: ./ci/runners/windows/smoke.ps1
