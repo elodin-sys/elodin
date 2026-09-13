@@ -23,6 +23,4 @@ command -v dist
 dist --version
 command -v git-lfs
 git lfs version
-command -v nix
-nix --version
 echo "macOS runner environment: PASS ($(uname -m))"

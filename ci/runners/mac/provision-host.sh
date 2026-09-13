@@ -52,6 +52,8 @@ else
     rm -f "${pkg_path}"
 fi
 
+"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/seed-python.sh"
+
 cat <<'EOF'
 
 Host provisioning finished. Next, as the administrator:

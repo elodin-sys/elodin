@@ -197,5 +197,7 @@ if (-not (Test-Path (Join-Path $runnerRoot '.runner'))) {
     Assert-LastExit 'config.cmd'
 }
 
+& (Join-Path $PSScriptRoot 'seed-python.ps1')
+
 Get-Service 'actions.runner.*' | Format-Table Name, Status
 Write-Host 'Windows runner registered. Confirm it is online in GitHub Settings > Actions > Runners.'
