@@ -1,5 +1,5 @@
-# Pre-seeds actions/setup-python's tool cache. The python-versions installer
-# uses InstallAllUsers=1, which needs admin; ci-build is a standard user.
+# Pre-seeds actions/setup-python's tool cache so jobs never run the
+# python-versions installer (InstallAllUsers=1, ~1 min, needs network).
 # Run from an elevated PowerShell. Re-run whenever $PythonSeries changes
 # (python-version in release.yml).
 # Env:

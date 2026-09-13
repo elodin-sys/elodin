@@ -61,6 +61,14 @@ if (-not (Get-LocalUser -Name $buildUser -ErrorAction SilentlyContinue)) {
         -AccountNeverExpires | Out-Null
 }
 
+# WiX light.exe ICE validation (run by `dist build` for the MSI, not
+# suppressible from cargo-dist) only works for interactive users or local
+# administrators; a non-admin service account fails with LGHT0216/0217.
+if (-not (Get-LocalGroupMember -Group Administrators -Member $buildUser -ErrorAction SilentlyContinue)) {
+    Write-Host "Adding $buildUser to Administrators (required for WiX ICE validation)..."
+    Add-LocalGroupMember -Group Administrators -Member $buildUser
+}
+
 $specialAccounts = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
 if (-not (Test-Path $specialAccounts)) {
     New-Item -Path $specialAccounts -Force | Out-Null

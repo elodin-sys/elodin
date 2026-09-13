@@ -176,6 +176,11 @@ jobs:
         if: runner.environment == 'github-hosted'
         run: |
           ${{ matrix.packages_install }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # After Setup Python: setup-python replaces PKG_CONFIG_PATH with its own.
       - name: Point pkg-config at keg-only Homebrew FFmpeg 8
         if: runner.os == 'macOS'
         shell: bash
@@ -183,10 +188,6 @@ jobs:
           prefix="$(brew --prefix ffmpeg@8)"
           echo "PKG_CONFIG_PATH=${prefix}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
           echo "${prefix}/bin" >> "$GITHUB_PATH"
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
       - name: Install Zig for musl C/C++ compilation
         # Required by C/C++ build.rs deps (e.g. openh264-sys2) when targeting
         # *-unknown-linux-musl: cc-rs looks for ${triple}-g++ which Ubuntu does
