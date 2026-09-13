@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>systems.elodin.ci.linux-start</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ci/ci/runners/bin/start-linux-runner.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/ci/ci/logs/linux-start.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/ci/ci/logs/linux-start.err.log</string>
+</dict>
+</plist>
