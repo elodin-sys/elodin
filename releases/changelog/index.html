@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.1" selected>
-                        v0.19.1
+                    <option value="v0.19.2" selected>
+                        v0.19.2
                     </option>
                 </select>
             </span>
@@ -325,6 +325,11 @@
                     <a href="/releases/changelog/#v0-19">v0.19</a>
                     
                     <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-19-2">v0.19.2</a>
+                            
+                        </li>
                         
                         <li>
                             <a href="/releases/changelog/#v0-19-1">v0.19.1</a>
@@ -762,6 +767,15 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-19">v0.19</h2>
+<h3 id="v0-19-2">v0.19.2</h3>
+<ul>
+<li><strong>(feat)</strong> Add <code>StepContext.read_msg_at()</code> to read a message at a given timestamp. (#851)</li>
+<li><strong>(feat)</strong> Add an orientation-sense argument to EQL body-frame offsets: <code>.translate(x, y, z, true)</code>, <code>.translate_x/y/z(d, true)</code>, and <code>.direction(x, y, z, true)</code>. (#850)</li>
+<li><strong>(feat:examples)</strong> Add manual piloting to Betaflight SITL, with a gamepad/RC controller bridge and a real-time flight audit. (#847)</li>
+<li><strong>(fix)</strong> Restore <code>orientation=absolute</code> and glTF Y-up handling in schematics, fixing Apollo lander RCS torque axes, the Falcon 9 barge, and the rc-jet sensor camera. (#845)</li>
+<li><strong>(test:examples)</strong> Cover Betaflight SITL packet, FDM, motor-layout, and baseline contracts, and run those tests in CI. (#840)</li>
+<li><strong>(chore)</strong> Build release artifacts on self-hosted Linux, macOS, and Windows runners. (#854, #855, #856, #857)</li>
+</ul>
 <h3 id="v0-19-1">v0.19.1</h3>
 <ul>
 <li><strong>(feat)</strong> Add H.264 and gray8 sensor-camera outputs, with hardware-accelerated live encoding (NVENC, VideoToolbox) and an OpenH264 fallback. (#827)</li>
