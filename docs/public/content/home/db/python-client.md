@@ -23,7 +23,7 @@ end-to-end demo lives at `examples/db-client` in the repository
 (`uv run python examples/db-client/main.py`).
 
 ```sh
-pip install elodin      # or use the repo's nix devshell + `just install`
+pip install elodin      # or use the repo's nix devshell + `just local-install`
 ```
 
 ## Quick start

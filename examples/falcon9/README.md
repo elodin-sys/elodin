@@ -310,7 +310,7 @@ examples/falcon9/
 
 ## Run
 
-From the repository root inside `nix develop` (`just install` first):
+From the repository root inside `nix develop` (`just local-install` first):
 
 ```sh
 # Watch the calibrated mission in the editor (ECEF scene, truth ghost, graphs)

@@ -29,9 +29,7 @@ From the repository root:
 
 ```bash
 nix develop
-uv venv --python 3.12 && source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
-just install
+just local-install
 
 elodin editor examples/sensor-camera/main.py
 ```

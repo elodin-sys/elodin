@@ -8,7 +8,7 @@
 
 ## Root
 
-- `README.md` — Monorepo overview: component map (flight software, nox-py, editor), Nix/`just install` setup, running examples, macOS/Linux manual build alternatives.
+- `README.md` — Monorepo overview: component map (flight software, nox-py, editor), Nix/`just local-install` setup, running examples, macOS/Linux manual build alternatives.
 - `AGENTS.md` — Contributor/agent rules: `nix develop`, `uv`, CI checks, and an index of `.cursor/skills/` guidance by product area.
 - `CLAUDE.md` — Symlink to `AGENTS.md` (identical content).
 - `CHANGELOG.md` — Versioned release notes (v0.3–v0.17+) covering features, fixes, and breaking changes across editor, DB, SDK, and Aleph.
@@ -27,7 +27,7 @@
 - `.cursor/skills/elodin-aleph/SKILL.md` — Aleph Jetson Orin workflows: `deploy.sh`, SD image, FSW service modules, STM32 flash/reset, on-vehicle elodin-db, SITL/HITL.
 - `.cursor/skills/elodin-cranelift/SKILL.md` — Cranelift-MLIR JIT backend development: `ELODIN_BACKEND`, adding ops, checkpoint tests, regression baselines, debug env vars.
 - `.cursor/skills/elodin-db/SKILL.md` — Elodin-DB usage: run/lua/merge/trim/follow, Impeller2 clients (C/C++/Rust/Python), replication, editor connection.
-- `.cursor/skills/elodin-dev/SKILL.md` — Monorepo architecture and contributor setup: `nix develop`, `just install`, CI checks, workspace crate map.
+- `.cursor/skills/elodin-dev/SKILL.md` — Monorepo architecture and contributor setup: `nix develop`, `just local-install`, CI checks, workspace crate map.
 - `.cursor/skills/elodin-dev/ci-checks.md` — Local CI mirror commands: cargo fmt/test/clippy, ruff, alejandra, plus the Apollo Monte Carlo Buildkite step.
 - `.cursor/skills/elodin-editor-dev/SKILL.md` — Editor development: cargo run/watch, env vars, Bevy/Egui layout, KDL schematics, plots, video, command palette.
 - `.cursor/skills/elodin-monte-carlo/SKILL.md` — Truth-data Monte Carlo workflows: vendoring reference profiles, truth ghosts, spec/campaign TOML, scoring, calibration loop.
@@ -35,7 +35,7 @@
 - `.cursor/skills/elodin-simulation/SKILL.md` — Python SDK simulation authoring: components/systems/6DOF, backends, SITL/HITL, gravity models, regression, Monte Carlo basics.
 - `.cursor/skills/elodin-simulation/api-reference.md` — Quick API reference: `World.run/build/to_jax`, `StepContext`, components, spatial types, queries, panels, sim CLI.
 - `.cursor/skills/elodin-simulation/examples.md` — Annotated example patterns: ball, three-body, rocket, cube-sat, Betaflight SITL, drone, RC jet, video stream.
-- `.cursor/skills/elodin-tracy/SKILL.md` — Tracy profiling on Linux: `just install tracy`, per-process ports, capture/export, DB bench, custom instrumentation.
+- `.cursor/skills/elodin-tracy/SKILL.md` — Tracy profiling on Linux: `just local-install tracy`, per-process ports, capture/export, DB bench, custom instrumentation.
 - `.cursor/skills/gltf-asset-optimization/SKILL.md` — Shrinking LFS-tracked GLBs for Bevy 0.18 (no Draco/meshopt): inspect, decimate, verify.
 - `.cursor/skills/nox-py-dev/SKILL.md` — nox-py internals: PyO3 binding architecture, `WorldExec`, system compilation, adding components/decorators, pytest.
 - `.cursor/skills/qa-test-plan/SKILL.md` — Agentic QA plan authoring/instantiation/execution: case anatomy, ID areas, execution modes, plan locations under `.cursor/skills/qa-test-plan/`.

@@ -12,11 +12,11 @@ description: Profile Elodin with Tracy. Use when profiling the editor, simulatio
 
 ## 1. Quick Start
 
-**Linux only.** Tracy profiling requires Linux. On macOS, `just install tracy` will abort with an explanation. Use a Linux machine or an OrbStack NixOS VM (see the `elodin-nix` skill) for profiling workflows.
+**Linux only.** Tracy profiling requires Linux. On macOS, `just local-install tracy` will abort with an explanation. Use a Linux machine or an OrbStack NixOS VM (see the `elodin-nix` skill) for profiling workflows.
 
 ```bash
 nix develop
-just install tracy
+just local-install tracy
 elodin editor examples/sensor-camera/main.py
 ```
 
@@ -91,10 +91,10 @@ When the `tracy` feature is enabled, the editor binary (`apps/elodin`) sets up a
 
 ### Cranelift-MLIR JIT (sim subprocess)
 
-When `cranelift-mlir` is built with `--features tracy` (propagated via `nox-py/tracy` from `just install tracy`), each JIT-compiled function emits a Tracy zone named after its `FuncId → name` mapping (e.g. `main`, `inner_929`, `svd`). The zones appear in the same sim-subprocess Tracy port (8089) alongside the existing sim instrumentation.
+When `cranelift-mlir` is built with `--features tracy` (propagated via `nox-py/tracy` from `just local-install tracy`), each JIT-compiled function emits a Tracy zone named after its `FuncId → name` mapping (e.g. `main`, `inner_929`, `svd`). The zones appear in the same sim-subprocess Tracy port (8089) alongside the existing sim instrumentation.
 
 Activation requires **both**:
-- Build with `--features tracy` (or `just install tracy`)
+- Build with `--features tracy` (or `just local-install tracy`)
 - Runtime: `ELODIN_CRANELIFT_DEBUG_DIR=<path>`
 
 Without `ELODIN_CRANELIFT_DEBUG_DIR`, the Cranelift JIT IR emits no probe calls, so Tracy produces zero zones for JIT'd functions — the feature is runtime-toggled orthogonally to the Cargo feature. See [`libs/cranelift-mlir/PERFORMANCE.md`](../../libs/cranelift-mlir/PERFORMANCE.md) for the full workflow.
@@ -130,7 +130,7 @@ elodin-db-bench --components 1000 --frequency 100 --duration 20 --mode per-compo
 
 ## 3. Build Details
 
-### What `just install tracy` does
+### What `just local-install tracy` does
 
 1. Builds `nox-py` (Python extension) with `maturin develop -F tracy`
 2. Builds the `elodin` editor and `elodin-db` binaries with `cargo build --release -p elodin -p elodin-db --features tracy`, which activates `bevy/trace_tracy` and adds `tracing-tracy` to both processes

@@ -58,7 +58,7 @@ nix develop --command "cargo build"      # One-off command
 ## Build Commands
 
 ```bash
-just install
+just local-install
 
 # Run an example
 elodin editor examples/three-body/main.py

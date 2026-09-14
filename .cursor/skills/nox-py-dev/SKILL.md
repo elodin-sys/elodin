@@ -10,7 +10,7 @@ nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations
 ## Build & Test
 
 ```bash
-just install py
+just local-install py
 
 # Run tests
 pytest libs/nox-py/tests/

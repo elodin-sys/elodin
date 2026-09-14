@@ -10,7 +10,7 @@ default = []
 # Opt-in Tracy zone emission for cranelift-mlir's live profiling layer.
 # Orthogonal to `ELODIN_CRANELIFT_DEBUG_DIR`: zones only emit when both
 # the feature is built and the env var is set. See PERFORMANCE.md for
-# the `nix develop .#tracy && just install tracy` workflow.
+# the `nix develop .#tracy && just local-install tracy` workflow.
 tracy = ["dep:tracy-client"]
 
 [dependencies]

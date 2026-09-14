@@ -6,7 +6,7 @@ This example is NOT an Elodin simulation. It demonstrates the standalone
 a live read-stream that publishes derived telemetry, message-log events, and
 the full read API (latest / time_series / sql / msgs) — all from one script.
 
-Run from the repository root (after `just install` in the nix devshell):
+Run from the repository root (after `just local-install` in the nix devshell):
 
     uv run python examples/db-client/main.py
 
@@ -278,7 +278,7 @@ def main() -> int:
             else:
                 if shutil.which("elodin") is None:
                     print(
-                        "error: `elodin` binary not found on PATH — run `just install` "
+                        "error: `elodin` binary not found on PATH — run `just local-install` "
                         "in the nix devshell first (or use --no-editor)",
                         file=sys.stderr,
                     )

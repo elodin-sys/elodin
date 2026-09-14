@@ -8,7 +8,7 @@ every written signal.
 
 ## Run
 
-From the repository root, inside the nix devshell (after `just install`):
+From the repository root, inside the nix devshell (after `just local-install`):
 
 ```sh
 uv run python examples/db-client/main.py

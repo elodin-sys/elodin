@@ -11,7 +11,7 @@ Elodin-DB is a high-performance time-series database for telemetry data. It stor
 
 ```bash
 # Install (from source)
-just install
+just local-install
 
 # Run the database
 elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config libs/db/examples/db-config.lua --log-level warn
