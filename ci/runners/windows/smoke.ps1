@@ -8,6 +8,10 @@ Write-Host "OS architecture: $osArch; process architecture: $processArch"
 Write-Host "whoami: $(whoami)"
 if ($osArch -ne 'AMD64') { throw "Expected Windows 11 x64, got $osArch." }
 
+# Steps without `shell:` default to pwsh when present, else PowerShell 5.1
+# (UTF-16 `>` redirection breaks dist-manifest.json).
+$pwsh = Get-Command pwsh.exe -ErrorAction Stop
+Write-Host "pwsh: $($pwsh.Source) ($(& $pwsh.Source -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'))"
 Get-Command git | Format-List Source
 & git --version
 if ($LASTEXITCODE -ne 0) { throw 'Git failed.' }

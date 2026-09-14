@@ -67,6 +67,11 @@ if (-not (Get-LocalUser -Name $buildUser -ErrorAction SilentlyContinue)) {
 if (-not (Get-LocalGroupMember -Group Administrators -Member $buildUser -ErrorAction SilentlyContinue)) {
     Write-Host "Adding $buildUser to Administrators (required for WiX ICE validation)..."
     Add-LocalGroupMember -Group Administrators -Member $buildUser
+    # A running service keeps its old token; only a restart picks up the group.
+    Get-Service 'actions.runner.*' -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "Restarting $($_.Name) to refresh its token..."
+        Restart-Service $_ -Force
+    }
 }
 
 $specialAccounts = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
@@ -91,6 +96,10 @@ choco install protoc --yes
 Assert-LastExit 'choco install protoc'
 choco install wixtoolset --yes
 Assert-LastExit 'choco install wixtoolset'
+# The runner's default shell on Windows is pwsh when present, else PowerShell
+# 5.1, whose `>` writes UTF-16 and corrupts dist-manifest.json. Hosted has 7.
+choco install powershell-core --yes
+Assert-LastExit 'choco install powershell-core'
 
 $vsParams = @(
     '--add Microsoft.VisualStudio.Workload.VCTools'
