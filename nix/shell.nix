@@ -45,8 +45,6 @@ with pkgs; let
         fd # Better find
         ripgrep # Better grep
         zoxide # Smart cd
-        direnv # Directory environments
-        nix-direnv # Nix integration for direnv
         vim # Editor
         less # Pager
 
