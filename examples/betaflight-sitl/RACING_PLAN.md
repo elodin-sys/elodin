@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-03
-**Current resume point:** Package D — Manual piloting, control seam, and ANGLE mode
+**Last verified against repository:** 2026-09-08
+**Current resume point:** Package D — manual hardware qualification
 
 ## 1. Purpose and authority
 
@@ -244,7 +244,7 @@ add independently supervised render-server, manual-controller, and editor
 processes:
 
 ```text
-Manual controller (manual mode only)
+Manual controller (interactive manual mode only; not the automated audit)
     ↕ semantic pilot commands through Elodin DB
 Simulation: Python physics + sensors + post_step + Elodin DB
     ↕ UDP FDM/RC/motors
@@ -271,8 +271,8 @@ After Package D, `post_step` must use this order:
 2. Send FDM plus the **previously computed** RC command to Betaflight.
 3. Block for one motor response and write `drone.motor_command`.
 4. Read the latest latency-adjusted camera frame without blocking.
-5. Run the selected command source—manual, scripted, truth, or vision—and retain
-   its RC command for the next physics tick.
+5. Run the selected command source—manual, scripted, simulation-time audit,
+   truth, or vision—and retain its RC command for the next physics tick.
 6. Run referee scoring from ground truth and emit telemetry/results.
 
 A command selected on tick N therefore reaches Betaflight on tick N+1. At the
@@ -294,12 +294,14 @@ The following environment variables form the core user-facing configuration:
 | `RACE_CAMERA` | `0`, `1` | `0` | Enables the FPV camera independently for bring-up |
 
 `manual` starts or connects to the manual controller and does not require a
-course or camera. `vision` requires the camera and a non-`none` course; the
-program must either enable the camera explicitly with a clear startup message or
-reject the invalid combination. `truth` requires a non-`none` course. Unknown
-values must fail at startup. Running with no environment variables must preserve
-the current scripted behavior and must not require a manual controller or GPU
-render server.
+course or camera. The `RACE_MANUAL_AUDIT=1` qualification override selects an
+in-process, simulation-time command source instead and does not start that
+controller. `vision` requires the camera and a non-`none` course; the program
+must either enable the camera explicitly with a clear startup message or reject
+the invalid combination. `truth` requires a non-`none` course. Unknown values
+must fail at startup. Running with no environment variables must preserve the
+current scripted behavior and must not require a manual controller or GPU render
+server.
 
 New knobs may be added in configuration dataclasses, but avoid an expanding set
 of environment variables for controller gains and detector internals.
@@ -323,9 +325,15 @@ They map to RC channels 0–5 in AETR/AUX order. All outputs must be clamped to
 may retain its current flight mode to preserve behavior; truth and vision modes
 use ANGLE initially.
 
-The empirically observed signs and stick-to-angle behavior must be recorded by
-Package D in this document and encoded in one tested conversion helper. Do not
-infer the signs from comments alone.
+The Package D physical audit measured these semantic signs in the live SITL:
+positive roll is right-wing-down (`+X` FLU rotation), positive pitch is
+nose-down/forward (`+Y` FLU rotation), and positive yaw is nose-right/clockwise
+(`-Z` FLU rotation). Roll and pitch map directly above PWM center; right yaw
+maps below PWM center. A bounded normalized `+0.25` roll or pitch command
+(`1625` PWM) produced approximately 5 degrees of ANGLE-mode attitude before the
+audit reversed it; the peak rates were 0.446 rad/s roll and 0.444 rad/s pitch.
+The tested `semantic_to_rc` helper in `controls.py` encodes these signs and maps
+full normalized axis travel to 1000–2000 PWM.
 
 #### Manual input provider
 
@@ -348,6 +356,18 @@ heartbeat must result in a documented safe command: disarmed, minimum throttle,
 centered axes. A headless host must not panic or accidentally arm. Raw semantic
 input and resulting `drone.rc_command` must be recorded so pilot action can be
 compared with plant response.
+
+#### Automated physical audit
+
+`RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1` replaces the interactive manual
+source with an in-process `AuditGuidance`. It keys every command phase directly
+to `GuidanceUpdate.sim_time`: five simulated seconds safe/disarmed, bounded
+armed throttle and positive/negative roll, pitch, and yaw pulses, then a safe
+disarmed ending. It does not start the external Rust controller. Its semantic
+commands use the common conversion and one-tick RC latch before reaching
+Betaflight, and `AxisAudit` assesses only the command actually exchanged and
+the measured physical response. This keeps the qualification deterministic
+when lockstep runs slower than wall-clock real time.
 
 ### 7.2 Guidance update
 
@@ -655,6 +675,9 @@ example.
 
 ### [ ] D — Manual piloting, control seam, and ANGLE mode
 
+**Implementation status:** Code and automated acceptance are complete; a manual
+qualification session with physical input hardware remains to close the package.
+
 **Objective:** Replace hardcoded RC construction with a minimal, testable command
 boundary; add a safe manual piloting option; preserve default behavior; and prove
 ANGLE-mode conventions before autonomous guidance.
@@ -681,11 +704,12 @@ ANGLE-mode conventions before autonomous guidance.
   filling in one tested path shared by manual and autonomous sources.
 - Add deterministic injected-input tests for throttle, roll, pitch, yaw, arm,
   mode, disconnect, and stale heartbeat behavior.
-- Add an opt-in physical sign audit: from a controlled airborne condition, apply
-  bounded roll and pitch commands separately and assert observed world-direction
-  responses. The audit may use a short, purpose-built initial condition and
-  approximate hover throttle; it must not require implementing Package E's
-  position controller.
+- Add an opt-in physical sign audit: use a simulation-time guidance source to
+  apply bounded roll and pitch commands separately from a controlled airborne
+  condition and assert observed world-direction responses. The audit may use a
+  short, purpose-built initial condition and approximate hover throttle; it must
+  not require implementing Package E's position controller or depend on host
+  speed.
 - Record the measured stick signs and encode them in one tested location.
 
 **Out of scope:** Position hold, gate logic, camera input, autonomous flight, or
@@ -700,6 +724,29 @@ roll/pitch/yaw/throttle, land, and disarm using a supported gamepad or keyboard.
 
 **Handoff:** Update Section 7.1 with measured signs, document controls and
 failsafe timing, and record both automated and manual qualification commands.
+
+Automated qualification (2026-09-10):
+
+```bash
+python3 -m pytest examples/betaflight-sitl/tests -q
+cargo test -p betaflight-sitl-controller
+RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1 elodin run examples/betaflight-sitl/main.py
+```
+
+The audit uses an in-process guidance source keyed to `GuidanceUpdate.sim_time`;
+it does not start the external manual controller. Its commands traverse the
+shared semantic-to-RC conversion, one-tick latch, and Betaflight path before the
+physical response is assessed. The pure suite passed 50 tests, the controller
+passed 5 tests, and the live injected-input audit reported:
+
+```text
+[D-AUDIT] angle=true roll_right_rad_s=0.446 pitch_forward_rad_s=0.444 yaw_right_rad_s=1.480 max_motor=0.391 status=PASS
+```
+
+Manual gamepad/keyboard qualification is still pending. Follow the controls in
+`README.md`, demonstrate arm, takeoff, all four command axes, landing, and
+disarm, then record the hardware/layout and result here before marking D
+complete.
 
 ### [ ] E — Truth-guided single-gate hold
 
@@ -973,7 +1020,7 @@ branch for later resumption.
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
 | C | Not started | No course or referee code |
-| D | Not started | RC remains hardcoded; no manual mode; AUX2 ANGLE not configured |
+| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
 | G | Blocked by B | No racing camera geometry contract in code |
@@ -985,11 +1032,14 @@ branch for later resumption.
 
 ### Resume point
 
-Implement **Package D — Manual piloting, control seam, and ANGLE mode**.
+Complete Package D's **manual hardware qualification** using the documented
+gamepad or keyboard controls. The implementation and deterministic physical
+audit are complete, but Package D must remain open until an operator has armed,
+taken off, exercised roll/pitch/yaw/throttle, landed, and disarmed.
 
-Packages B and C remain valid independent alternatives if camera or course work
-is prioritized first. Package D is the recommended continuation because A now
-provides its required protocol, convention, and C0 safety net.
+After recording that result in the Package D handoff, Package E is the
+recommended implementation continuation. Packages B and C remain valid
+independent alternatives if camera or course work is prioritized first.
 
 Package A verification from the repository root, with the Elodin Python
 environment active and the current release CLI on `PATH`:

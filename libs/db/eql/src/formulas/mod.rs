@@ -45,6 +45,38 @@ use crate::{Context, Error, Expr};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Flatten the parser's nested pair-tuples: `Tuple(Tuple(a, b), c)` → `[a, b, c]`.
+pub(crate) fn flatten_comma_args(args: &[Expr]) -> Vec<Expr> {
+    if args.len() == 1 {
+        flatten_nested_pair_tuples(&args[0])
+    } else {
+        args.to_vec()
+    }
+}
+
+fn flatten_nested_pair_tuples(expr: &Expr) -> Vec<Expr> {
+    match expr {
+        Expr::Tuple(els) if els.len() == 2 => {
+            let mut out = flatten_nested_pair_tuples(&els[0]);
+            out.push(els[1].clone());
+            out
+        }
+        Expr::Tuple(els) => els.clone(),
+        other => vec![other.clone()],
+    }
+}
+
+/// Trailing `true`/`false` on body-frame translate/direction (absolute vs relative).
+pub(crate) fn orientation_flag(expr: &Expr) -> Result<bool, Error> {
+    match expr {
+        Expr::StringLiteral(s) if s.eq_ignore_ascii_case("true") => Ok(true),
+        Expr::StringLiteral(s) if s.eq_ignore_ascii_case("false") => Ok(false),
+        _ => Err(Error::InvalidMethodCall(
+            "orientation flag must be true or false".to_string(),
+        )),
+    }
+}
+
 pub trait Formula: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
 

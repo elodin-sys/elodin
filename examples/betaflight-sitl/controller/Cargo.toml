@@ -1,0 +1,27 @@
+[package]
+name = "betaflight-sitl-controller"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+version.workspace = true
+repository.workspace = true
+description = "Safe manual input provider for the Betaflight SITL example"
+publish = false
+
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "betaflight-sitl-controller"
+path = "src/main.rs"
+
+[dependencies]
+impeller2 = { path = "../../../libs/impeller2", features = ["std"] }
+impeller2-stellar = { path = "../../../libs/impeller2/stellar" }
+impeller2-wkt = { path = "../../../libs/impeller2/wkt" }
+stellarator = { path = "../../../libs/stellarator", features = ["tokio"] }
+gilrs = "0.11"
+device_query = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

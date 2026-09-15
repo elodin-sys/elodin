@@ -1753,8 +1753,10 @@ impl ViewportPane {
         }
 
         let parent = parent_cmd.id();
+        let compile_ctx =
+            crate::object_3d::EqlCompileCtx::new(geo_context).with_frame(viewport.frame);
         let compile = |eql: &str, label: &str| match eql_ctx.parse_str(eql) {
-            Ok(expr) => crate::object_3d::compile_eql_expr_with_geo(expr, geo_context).ok(),
+            Ok(expr) => crate::object_3d::compile_eql_expr_with_ctx(expr, &compile_ctx).ok(),
             Err(e) => {
                 bevy::log::error!("Failed to parse viewport {label} expression '{eql}': {e}");
                 None

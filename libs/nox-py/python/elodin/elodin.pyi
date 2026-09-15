@@ -162,6 +162,13 @@ class StepContext:
             exists at all).
         """
         ...
+    def read_msg_at(
+        self,
+        msg_name: str,
+        timestamp: int,
+    ) -> Optional[Tuple[int, Any]]:
+        """Return the selected message's timestamp and NumPy ``uint8`` payload."""
+        ...
     def read_msg_latest(self, msg_name: str) -> Optional[Tuple[int, Any]]:
         """Return the latest message timestamp and NumPy ``uint8`` payload."""
         ...

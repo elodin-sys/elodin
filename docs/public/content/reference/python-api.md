@@ -1367,6 +1367,8 @@ Body-frame translations move the camera relative to the entity's local axes (the
 - `translate_z(distance)` - Translate along body Z axis (up/down)
 - `translate(x, y, z)` - Apply combined XYZ translation
 
+An optional trailing `true` (`.translate(x, y, z, true)`, also on `translate_x`/`y`/`z` and `direction`) uses the **absolute** orientation sense (`att · offset`), matching `orientation=absolute` meshes. The default (or `false`) matches `orientation=relative`. In ENU the two coincide; cameras chasing absolute objects in ECEF/NED should pass `true`.
+
 **Example - Camera 2m behind and 1m above in body frame:**
 ```kdl
 viewport name=ChaseCamera pos="car.world_pos.translate_x(-2.0).translate_z(1.0)"
