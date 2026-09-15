@@ -9,7 +9,6 @@ result-bin
 .vscode
 node_modules
 profile_output
-.direnv/
 
 # ai
 ai-context

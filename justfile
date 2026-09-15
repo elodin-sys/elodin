@@ -93,7 +93,14 @@ build-windows-gnu:
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc-posix \
     cargo build --release -p elodin --target x86_64-pc-windows-gnu
 
-install target="all":
+[private]
+_install-bin crate dest:
+  cargo build --release -p {{crate}}
+  mkdir -p "{{dest}}"
+  install -m 755 "target/release/{{crate}}" "{{dest}}/"
+
+[private]
+_install-py extra_maturin_args="":
   #!/usr/bin/env sh
   set -e
   # Drop 0-byte libelodin.so left by maturin 1.13+'s broken staging dance
@@ -101,21 +108,39 @@ install target="all":
   # otherwise short-circuit forever. The maturin@1.12.6 pin below stops new
   # ones from appearing while keeping uvx working in non-Nix setups too.
   find target -maxdepth 4 -name 'libelodin.so' -size 0 -delete 2>/dev/null || true
-  mkdir -p "${CARGO_HOME:-$HOME/.cargo}/bin"
+  VIRTUAL_ENV="${VIRTUAL_ENV:-$PWD/.venv}"
+  export VIRTUAL_ENV
+  mkdir -p "$(dirname "$VIRTUAL_ENV")"
+  uv venv --python 3.13 --python-preference only-system --allow-existing "$VIRTUAL_ENV"
+  export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
+  # UV_PYTHON in the nix shell points at the immutable store interpreter so
+  # `uv venv` can create the venv. After that, uv/maturin must target it.
+  export UV_PYTHON="$VIRTUAL_ENV/bin/python"
+  PATH="$VIRTUAL_ENV/bin:$PATH"
+  uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml {{extra_maturin_args}}
+  echo "Venv ready at $VIRTUAL_ENV (active in the nix shell; no source needed)."
+
+install target="all":
+  #!/usr/bin/env sh
+  set -e
+  if [ -z "$ELODIN_SHELL_BIN" ]; then
+    echo "error: ELODIN_SHELL_BIN is unset; run inside nix develop" >&2
+    exit 1
+  fi
+  mkdir -p "$ELODIN_SHELL_BIN"
   case "{{target}}" in
     py)
-      uv venv --python 3.13 --python-preference only-system --clear
-      . .venv/bin/activate
-      uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
-      echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
+      if [ -z "$VIRTUAL_ENV" ]; then
+        echo "error: VIRTUAL_ENV is unset; run inside nix develop" >&2
+        exit 1
+      fi
+      just _install-py
       ;;
     editor)
-      cargo build --release -p elodin
-      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      just _install-bin elodin "$ELODIN_SHELL_BIN"
       ;;
     db)
-      cargo build --release -p elodin-db
-      install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      just _install-bin elodin-db "$ELODIN_SHELL_BIN"
       ;;
     tracy)
       if [ "$(uname -s)" = "Darwin" ]; then
@@ -124,16 +149,21 @@ install target="all":
         echo "Use a Linux machine or an OrbStack NixOS VM for profiling." >&2
         exit 1
       fi
-      uv venv --python 3.13 --python-preference only-system --clear
-      . .venv/bin/activate
-      uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml -F tracy
-      echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
+      if [ -z "$VIRTUAL_ENV" ]; then
+        echo "error: VIRTUAL_ENV is unset; run inside nix develop" >&2
+        exit 1
+      fi
+      just _install-py "-F tracy"
       cargo build --release -p elodin -p elodin-db --features tracy
-      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
-      install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      install -m 755 target/release/elodin "$ELODIN_SHELL_BIN/"
+      install -m 755 target/release/elodin-db "$ELODIN_SHELL_BIN/"
       ;;
-    all) just install py && just install editor && just install db;;
+    all)
+      just install py
+      just install editor
+      just install db
+      ;;
     *)
-      echo "usage: just install [py|editor|db|all]" >&2
+      echo "usage: just install [py|editor|db|tracy|all]" >&2
       exit 1;;
   esac
