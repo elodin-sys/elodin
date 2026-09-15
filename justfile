@@ -167,4 +167,3 @@ install target="all":
       echo "usage: just install [py|editor|db|tracy|all]" >&2
       exit 1;;
   esac
-  command -v elodin || true
