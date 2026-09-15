@@ -10,7 +10,7 @@ Viewport camera frustum overlay rendering.
 - If viewport `near`/`far` are set in KDL, frustum rendering follows those values automatically.
 - Supports per-viewport style via `frustums_color` and `frustums_thickness`.
 - Marks the camera up direction via `frustums_up_marker`, so the image orientation can be read off the frustum.
-  `highlight` thickens the far-plane top edge and balls the corner holding the image origin; `triangle` stands a triangle on that edge.
+  `highlight` thickens the far-plane top edge and balls the corner holding the image origin; `triangle` stands a triangle on that edge, using the edge itself as its base.
   Marker geometry is drawn opaque white so it separates from `frustums_color`, falling back to that color's complement when the frustum is itself near-white.
 - Parents frustum visuals to the source camera, so motion/rotation stay exact.
 - Renders frustums across viewport render layers.
@@ -23,7 +23,7 @@ Viewport camera frustum overlay rendering.
 - `aspect` (optional): fixed camera aspect ratio. If omitted, aspect is derived from viewport size.
 - `frustums_color` (optional): named color or tuple string like `"(255,255,0,200)"`.
 - `frustums_thickness` (optional): edge radius in world units.
-- `frustums_up_marker` (optional): `none` (default), `highlight` (thickens the far-plane top edge and balls the image-origin corner), or `triangle` (stands a triangle on the middle of that edge). The marker is drawn in white, or in the complement of `frustums_color` when that color is near-white.
+- `frustums_up_marker` (optional): `none` (default), `highlight` (thickens the far-plane top edge and balls the image-origin corner), or `triangle` (stands a triangle on the middle of that edge, closed by the edge itself). The marker is drawn in white, or in the complement of `frustums_color` when that color is near-white.
 
 ## KDL usage
 ```kdl
