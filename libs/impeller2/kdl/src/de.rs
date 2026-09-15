@@ -1003,6 +1003,8 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         });
     }
 
+    let frustums_up_marker = parse_frustum_up_marker(node, kdl_src)?;
+
     let show_view_cube = bool_prop(node, "show_view_cube").unwrap_or(true);
     let view_cube_frame = parse_optional_geo_frame(node, "view_cube_frame", "viewport", kdl_src)?;
     let effects = bool_prop(node, "effects").unwrap_or(true);
@@ -1094,6 +1096,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         frustums_color,
         projection_color,
         frustums_thickness,
+        frustums_up_marker,
         show_view_cube,
         view_cube_frame,
         effects,
@@ -1110,6 +1113,24 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         local_arrows,
         node_id: NodeId::default(),
     }))
+}
+
+fn parse_frustum_up_marker(
+    node: &KdlNode,
+    src: &str,
+) -> Result<FrustumUpMarker, KdlSchematicError> {
+    match node.get("frustums_up_marker").and_then(|v| v.as_string()) {
+        None => Ok(FrustumUpMarker::default()),
+        Some(value) => {
+            FrustumUpMarker::from_str(value).map_err(|_| KdlSchematicError::InvalidValue {
+                property: "frustums_up_marker".to_string(),
+                node: "viewport".to_string(),
+                expected: "none, highlight, or triangle".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            })
+        }
+    }
 }
 
 fn parse_viewport_bloom(
@@ -3066,6 +3087,44 @@ viewport name="Chase" cinematic=#true
         assert_eq!(viewport.frustums_color, Color::YALK);
         assert_eq!(viewport.projection_color, Color::MINT);
         assert!((viewport.frustums_thickness - 0.012).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_viewport_frustums_up_marker() {
+        for (value, expected) in [
+            ("none", FrustumUpMarker::None),
+            ("highlight", FrustumUpMarker::Highlight),
+            ("TRIANGLE", FrustumUpMarker::Triangle),
+        ] {
+            let kdl = format!(r#"viewport create_frustum=#true frustums_up_marker="{value}""#);
+            let schematic = parse_schematic(&kdl).unwrap();
+            let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+                panic!("Expected viewport panel");
+            };
+            assert_eq!(viewport.frustums_up_marker, expected);
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_frustums_up_marker_defaults_to_none() {
+        let schematic = parse_schematic(r#"viewport create_frustum=#true"#).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.frustums_up_marker, FrustumUpMarker::None);
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_frustums_up_marker() {
+        let err = parse_schematic(r#"viewport frustums_up_marker="arrow""#).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "frustums_up_marker");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
     }
 
     #[test]

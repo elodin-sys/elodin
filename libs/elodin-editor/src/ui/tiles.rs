@@ -23,7 +23,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
+use impeller2_wkt::{BloomConfig, BloomPreset, FrustumUpMarker, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{
@@ -296,6 +296,8 @@ pub struct ViewportConfig {
     /// Color for this viewport's source frustum 2D projection in target viewports.
     pub projection_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
+    /// Marks the image-up direction on this viewport's frustum.
+    pub frustums_up_marker: FrustumUpMarker,
     pub cinematic: bool,
     /// Authored bloom; `None` keeps house defaults.
     pub bloom: Option<BloomConfig>,
@@ -1872,6 +1874,7 @@ impl ViewportPane {
                 frustums_color: viewport.frustums_color,
                 projection_color: viewport.projection_color,
                 frustums_thickness: viewport.frustums_thickness,
+                frustums_up_marker: viewport.frustums_up_marker,
                 cinematic: viewport.cinematic,
                 bloom: viewport.bloom.clone(),
             },

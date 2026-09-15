@@ -4,6 +4,7 @@ use bevy::ecs::{
 };
 use bevy::prelude::Entity;
 use bevy_egui::egui::{self, Align};
+use impeller2_wkt::FrustumUpMarker;
 
 use crate::{
     sensor_camera::SensorCameraConfigs,
@@ -11,12 +12,14 @@ use crate::{
         button::EButton,
         colors::{EColor, get_scheme},
         label::ELabel,
+        theme,
         utils::MarginSides,
         video_stream::VideoStream,
         widgets::WidgetSystem,
     },
 };
 
+use super::viewport::frustum_up_marker_label;
 use super::{color_popup, empty_inspector};
 use crate::ui::widgets::SystemStateExt;
 
@@ -187,6 +190,28 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             }
                         });
                     });
+
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("UP MARKER").color(scheme.text_secondary));
+                    ui.add_space(4.0);
+                    theme::configure_combo_box(ui.style_mut());
+                    ui.style_mut().spacing.combo_width = ui.available_size().x;
+                    egui::ComboBox::from_id_salt("sensor_camera_frustums_up_marker")
+                        .selected_text(frustum_up_marker_label(config.frustums_up_marker))
+                        .show_ui(ui, |ui| {
+                            theme::configure_combo_item(ui.style_mut());
+                            for marker in [
+                                FrustumUpMarker::None,
+                                FrustumUpMarker::Highlight,
+                                FrustumUpMarker::Triangle,
+                            ] {
+                                ui.selectable_value(
+                                    &mut config.frustums_up_marker,
+                                    marker,
+                                    frustum_up_marker_label(marker),
+                                );
+                            }
+                        });
                 }
             });
     }

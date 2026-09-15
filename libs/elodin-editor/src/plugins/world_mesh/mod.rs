@@ -934,6 +934,7 @@ mod tests {
             frustums_color: default(),
             projection_color: default(),
             frustums_thickness: 0.006,
+            frustums_up_marker: default(),
             cinematic: false,
             bloom: None,
         }
