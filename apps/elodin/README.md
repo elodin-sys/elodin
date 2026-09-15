@@ -9,7 +9,7 @@ To run the editor locally and test the included examples, follow these steps:
 ```bash
 # Prefer the nix shell (venv is auto-active; no source needed)
 nix develop
-just local-install py
+just install py
 
 # Run the three-body example from the editor
 cargo run --bin elodin editor examples/three-body/main.py

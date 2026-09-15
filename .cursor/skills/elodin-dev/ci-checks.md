@@ -61,4 +61,4 @@ cargo fmt && cargo test && cargo clippy -- -Dwarnings && ruff format --check && 
 - Nix formatting applies to `flake.nix`, `aleph/**/*.nix`, and `nix/**/*.nix`
 - Apollo lander Monte Carlo runs on Buildkite (`:rocket: apollo monte-carlo` in
   `.buildkite/pipeline.py`). Locally (inside `nix develop`, after
-  `just local-install`): `scripts/test-apollo-monte-carlo.sh`
+  `just install`): `scripts/test-apollo-monte-carlo.sh`

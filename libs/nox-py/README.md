@@ -49,7 +49,7 @@ cd elodin
 
 # Prefer the nix shell (venv is auto-active; no source needed)
 nix develop
-just local-install py
+just install py
 ```
 
 Without nix:

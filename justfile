@@ -123,47 +123,6 @@ _install-py extra_maturin_args="":
 install target="all":
   #!/usr/bin/env sh
   set -e
-  cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-  mkdir -p "$cargo_bin"
-  case "{{target}}" in
-    py)
-      VIRTUAL_ENV="${ELODIN_ROOT:-$PWD}/.venv"
-      export VIRTUAL_ENV
-      just _install-py
-      ;;
-    editor)
-      just _install-bin elodin "$cargo_bin"
-      ;;
-    db)
-      just _install-bin elodin-db "$cargo_bin"
-      ;;
-    tracy)
-      if [ "$(uname -s)" = "Darwin" ]; then
-        echo "error: Tracy profiling is only supported on Linux." >&2
-        echo "Tracy depends on C++20 features (std::jthread) not available in Apple's libc++." >&2
-        echo "Use a Linux machine or an OrbStack NixOS VM for profiling." >&2
-        exit 1
-      fi
-      VIRTUAL_ENV="${ELODIN_ROOT:-$PWD}/.venv"
-      export VIRTUAL_ENV
-      just _install-py "-F tracy"
-      cargo build --release -p elodin -p elodin-db --features tracy
-      install -m 755 target/release/elodin "$cargo_bin/"
-      install -m 755 target/release/elodin-db "$cargo_bin/"
-      ;;
-    all)
-      just install py
-      just install editor
-      just install db
-      ;;
-    *)
-      echo "usage: just install [py|editor|db|tracy|all]" >&2
-      exit 1;;
-  esac
-
-local-install target="all":
-  #!/usr/bin/env sh
-  set -e
   if [ -z "$ELODIN_SHELL_BIN" ]; then
     echo "error: ELODIN_SHELL_BIN is unset; run inside nix develop" >&2
     exit 1
@@ -183,13 +142,29 @@ local-install target="all":
     db)
       just _install-bin elodin-db "$ELODIN_SHELL_BIN"
       ;;
+    tracy)
+      if [ "$(uname -s)" = "Darwin" ]; then
+        echo "error: Tracy profiling is only supported on Linux." >&2
+        echo "Tracy depends on C++20 features (std::jthread) not available in Apple's libc++." >&2
+        echo "Use a Linux machine or an OrbStack NixOS VM for profiling." >&2
+        exit 1
+      fi
+      if [ -z "$VIRTUAL_ENV" ]; then
+        echo "error: VIRTUAL_ENV is unset; run inside nix develop" >&2
+        exit 1
+      fi
+      just _install-py "-F tracy"
+      cargo build --release -p elodin -p elodin-db --features tracy
+      install -m 755 target/release/elodin "$ELODIN_SHELL_BIN/"
+      install -m 755 target/release/elodin-db "$ELODIN_SHELL_BIN/"
+      ;;
     all)
-      just local-install py
-      just local-install editor
-      just local-install db
+      just install py
+      just install editor
+      just install db
       ;;
     *)
-      echo "usage: just local-install [py|editor|db|all]" >&2
+      echo "usage: just install [py|editor|db|tracy|all]" >&2
       exit 1;;
   esac
   command -v elodin || true
