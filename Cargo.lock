@@ -5542,6 +5542,7 @@ dependencies = [
  "elodin-db",
  "elodin-editor",
  "impeller2-bevy",
+ "impeller2-kdl",
  "machine-uid",
  "miette 7.6.0",
  "monte-carlo",
@@ -8073,6 +8074,7 @@ dependencies = [
  "miette 7.6.0",
  "ron 0.10.1",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -10041,6 +10043,7 @@ version = "0.19.3-alpha.0"
 dependencies = [
  "approx",
  "arrow",
+ "bevy_geo_frames",
  "bytemuck",
  "byteorder",
  "bytes",

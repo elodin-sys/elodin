@@ -1,0 +1,42 @@
+vsplit {
+    hsplit {
+        tabs {
+            component_monitor component_name=DETONATORMESSAGE.TIME_MONOTONIC
+        }
+        tabs {
+            component_monitor component_name=STATEMACHINEOUTPUT.SWITCH_FLAG
+        }
+        tabs {
+            component_monitor component_name=STATEMACHINEOUTPUT.TIME_MONOTONIC
+        }
+    }
+    hsplit {
+        tabs {
+            component_monitor component_name=DETONATORMESSAGE.DETONATOR_STATE
+        }
+        tabs {
+            component_monitor component_name=STATEMACHINEOUTPUT.MISSILE_MODE
+        }
+        tabs {
+            graph "GPSPOSMESSAGE1.LLA[0],GPSPOSMESSAGE1.LLA[1],GPSPOSMESSAGE1.LLA[2]" name=Graph {
+                color 90 130 144
+                color 100 72 168
+                color 176 98 62
+            }
+        }
+    }
+    hsplit {
+        tabs {
+            graph "BARMESSAGE.PRESSURE[0]" name=Graph {
+                color 37 24 100
+            }
+        }
+        tabs {
+            graph "NAVNED.POS_NED[0],NAVNED.POS_NED[1],NAVNED.POS_NED[2]" name=Graph {
+                color 28 42 88
+                color 61 104 61
+                color 44 58 72
+            }
+        }
+    }
+}

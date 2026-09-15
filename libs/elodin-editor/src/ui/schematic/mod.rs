@@ -290,20 +290,39 @@ impl SchematicParam<'_, '_> {
                         let mut colors: Vec<impeller2_wkt::Color> = vec![];
                         let mut parts: Vec<String> = Vec::new();
 
-                        for (component_path, component_values) in &graph_state.components {
-                            for (index, (enabled, color)) in component_values.iter().enumerate() {
-                                if !*enabled {
-                                    continue;
+                        if let Some(derived) = &graph_state.derived {
+                            eql = derived.source.clone();
+                            for index in 0..derived.lines.len().max(derived.colors.len()) {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(derived.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| derived.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller2_wkt::Color::from_color32(color));
                                 }
-                                parts.push(component_expr(component_path, index, &self.metadata));
-                                colors.push(impeller2_wkt::Color::from_color32(*color));
                             }
-                        }
+                        } else {
+                            for (component_path, component_values) in &graph_state.components {
+                                for (index, (enabled, color)) in component_values.iter().enumerate()
+                                {
+                                    if !*enabled {
+                                        continue;
+                                    }
+                                    parts.push(component_expr(
+                                        component_path,
+                                        index,
+                                        &self.metadata,
+                                    ));
+                                    colors.push(impeller2_wkt::Color::from_color32(*color));
+                                }
+                            }
 
-                        if !parts.is_empty() {
-                            eql = parts.join(", ");
-                        } else if !graph_state.label.is_empty() {
-                            eql = graph_state.label.clone();
+                            if !parts.is_empty() {
+                                eql = parts.join(", ");
+                            } else if !graph_state.label.is_empty() {
+                                eql = graph_state.label.clone();
+                            }
                         }
 
                         let node_id = impeller2_wkt::NodeId::next();
@@ -864,12 +883,29 @@ fn const_value(expr: &eql::Expr) -> Option<f64> {
 pub trait EqlExt {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
     fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)>;
+    /// Whether plotting this expression requires evaluating its AST instead of
+    /// displaying its source components directly.
+    fn requires_plot_evaluation(&self) -> bool;
     /// First geo-frame converter in the expression, if any (`ecef_to_ned`, …).
     /// Schematic load attaches SQL-backed `QueryPlotData` when this is `Some`.
     fn frame_conversion_name(&self) -> Option<&'static str>;
 }
 
 impl EqlExt for eql::Expr {
+    fn requires_plot_evaluation(&self) -> bool {
+        match self {
+            eql::Expr::Formula(_, _) | eql::Expr::BinaryOp(_, _, _) => true,
+            eql::Expr::ArrayAccess(expr, _)
+            | eql::Expr::Last(expr, _)
+            | eql::Expr::First(expr, _) => expr.requires_plot_evaluation(),
+            eql::Expr::Tuple(_) => true,
+            eql::Expr::ComponentPart(_)
+            | eql::Expr::Time(_)
+            | eql::Expr::FloatLiteral(_)
+            | eql::Expr::StringLiteral(_) => false,
+        }
+    }
+
     /// Name of the first geo-frame converter in the expression, if any.
     fn frame_conversion_name(&self) -> Option<&'static str> {
         match self {
@@ -1128,6 +1164,25 @@ mod element_affine_tests {
         let affines = affines(&expr);
         assert_eq!(affines.len(), 2);
         assert!(affines.iter().all(|a| a.is_identity()));
+    }
+
+    #[test]
+    fn plot_evaluation_detects_math_without_routing_plain_components() {
+        let plain = element("ball.pos", 0);
+        assert!(!plain.requires_plot_evaluation());
+
+        let arithmetic = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(2.0),
+            eql::BinaryOp::Mul,
+        );
+        assert!(arithmetic.requires_plot_evaluation());
+
+        let sqrt = eql::Expr::Formula(Arc::new(eql::formulas::Sqrt), Box::new(plain.clone()));
+        assert!(sqrt.requires_plot_evaluation());
+
+        let tuple = eql::Expr::Tuple(vec![plain, sqrt]);
+        assert!(tuple.requires_plot_evaluation());
     }
 
     #[test]
