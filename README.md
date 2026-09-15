@@ -71,7 +71,7 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 elodin editor
 ```
 
-`just local-install` writes `elodin` / `elodin-db` and a Python venv into this shell's `target/shells/$ELODIN_SHELL_ID/` so parallel worktrees and agent shells cannot overwrite each other.
+`just local-install` writes `elodin` / `elodin-db` and a Python venv into this shell's `target/shells/$ELODIN_SHELL_ID/` so parallel worktrees and agent shells cannot overwrite each other. `just install` still installs globally (`~/.cargo/bin` and the worktree `.venv`).
 
 ---
 
@@ -115,10 +115,7 @@ git lfs install
 ```sh
 git clone https://github.com/elodin-sys/elodin.git
 cd elodin
-uv venv --python 3.13
-source .venv/bin/activate
-uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
-cargo build --release -p elodin -p elodin-db
+just install
 ```
 
 ### Python Development (Local Setup)
@@ -151,7 +148,7 @@ sudo apt install just git-lfs pkg-config libasound2-dev libudev-dev cmake gfortr
 git lfs install
 ```
 
-After installing these packages, follow the same `uvx maturin` and `cargo build` steps above.
+After installing these packages, follow the same `just install` and `uvx maturin` local build steps above.
 
 
 ## Additional Resources

@@ -23,10 +23,10 @@ No need to switch shells for different tasks — everything is in one environmen
 
 Each `nix develop` is self-contained so parallel worktrees and agent shells do not overwrite each other:
 
-- **`VIRTUAL_ENV`** is set to `<worktree>/target/shells/$ELODIN_SHELL_ID/venv` and prepended to `PATH` on entry. A bare venv is created on first entry if missing; do not `source .venv/bin/activate`. `just local-install py` installs into that venv.
+- **`VIRTUAL_ENV`** is set to `<worktree>/target/shells/$ELODIN_SHELL_ID/venv` and prepended to `PATH` on entry. A bare venv is created on first entry if missing; do not `source .venv/bin/activate`. `just local-install py` installs into that venv; `just install py` still uses the worktree `.venv`.
 - **`ELODIN_SHELL_ID`** defaults to the terminal session id on Linux (`ps -o sid= -p $$`), `$$` elsewhere, and is inherited when already set. Every `nix develop` / `nix develop --command` in the same tab shares one bin dir.
 - **`ELODIN_SHELL_BIN`** is `<worktree>/target/shells/$ELODIN_SHELL_ID/bin`. Dead numeric IDs are pruned on shell entry.
-- **`just local-install`** builds `elodin` / `elodin-db` into `$ELODIN_SHELL_BIN` (this shell only).
+- **`just local-install`** builds `elodin` / `elodin-db` into `$ELODIN_SHELL_BIN` (this shell only). **`just install`** still copies to `~/.cargo/bin` (global, shared). Agents must use `just local-install`.
 - **`ELODIN_SHELL=zsh`** sets `SHELL` to nix zsh and writes a wrapper `ZDOTDIR` `.zshrc` that sources `~/.zshrc` then re-prepends the nix PATH, so `~/.cargo/bin` cannot shadow local bins. `nix develop` then starts that `$SHELL`. Default bash stays in the hook environment (no exec). Both define `zar='gtar --zstd --sparse'`.
 
 ## Nix Installation

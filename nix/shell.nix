@@ -236,7 +236,8 @@ with pkgs; let
         echo "  • Local bins: $ELODIN_SHELL_BIN"
         echo ""
         echo "Development flow:"
-        echo "  • just local-install  — this shell only"
+        echo "  • just local-install  — this shell only (use this in agents / parallel worktrees)"
+        echo "  • just install        — global ~/.cargo/bin (shared across shells)"
         echo "  • ELODIN_SHELL=zsh    — opt-in zsh + p10k (PATH is re-asserted after ~/.zshrc)"
         echo ""
 

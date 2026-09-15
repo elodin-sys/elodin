@@ -23,7 +23,7 @@ if [[ -z "${ELODIN_BIN:-}" ]]; then
   elif [[ -x "$HOME/.cargo/bin/elodin" ]]; then
     ELODIN_BIN="$HOME/.cargo/bin/elodin"
   else
-    echo "error: elodin not found; run \`just local-install editor\` first" >&2
+    echo "error: elodin not found; run \`just install editor\` first" >&2
     exit 127
   fi
 fi

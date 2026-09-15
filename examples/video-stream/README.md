@@ -78,7 +78,7 @@ Both shells put GStreamer, x264, SRT, and `elodinsink` on `GST_PLUGIN_PATH`. Do 
 ### Step 2: Build the Elodin Tools
 
 ```bash
-just local-install
+just install
 ```
 
 This builds the Elodin Editor, Elodin DB, and all supporting tools.

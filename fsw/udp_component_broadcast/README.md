@@ -44,7 +44,7 @@ uv pip install -r requirements.txt
 protoc --python_out=. component_broadcast.proto
 ```
 
-From the repo's nix devshell, `just local-install` builds and installs the local
+From the repo's nix devshell, `just install` builds and installs the local
 elodin wheel instead.
 
 ## Quick Start

@@ -103,14 +103,14 @@ If this file is still the suite template (`examples/test-plan.md`), copy it to `
 **Steps**
 
 ```bash
-nix develop --command just local-install
+nix develop --command just install
 nix develop --command elodin --version
 nix develop --command elodin-db --version
 ```
 
 **Pass criteria**
 
-- [ ] `just local-install` exits 0
+- [ ] `just install` exits 0
 - [ ] `elodin --version` and `elodin-db --version` each exit 0 and print a version string
 
 **Result:**

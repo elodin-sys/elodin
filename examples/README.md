@@ -3,7 +3,7 @@
 These examples show how to use Elodin — physics, vehicles, editor objects, and
 integrations. An example can appear in more than one section.
 
-Run from the repository root, inside `nix develop` (after `just local-install`):
+Run from the repository root, inside `nix develop` (after `just install`):
 
 ```sh
 elodin editor examples/<name>/main.py   # 3D editor

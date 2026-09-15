@@ -122,19 +122,19 @@ If this file is still the suite template (`elodin-editor/test-plan.md`), copy it
 **Steps**
 
 ```bash
-nix develop --command just local-install
+nix develop --command just install
 nix develop --command elodin --version
 nix develop --command elodin-db --version
 ```
 
 **Pass criteria**
 
-- [ ] `just local-install` exits 0
+- [ ] `just install` exits 0
 - [ ] `elodin --version` and `elodin-db --version` each exit 0 and print a version string
 
 **Result:**
 **Evidence:**
-**Notes:** AUTHOR-VALIDATED 2026-07-19 @5fdb9118: warm `elodin`/`elodin-db` already present from prior nix install; version prints `0.17.4-alpha.0+…`. Full `just local-install` not re-run this authoring pass (EDITOR-100 rebuilds the editor binary under test).
+**Notes:** AUTHOR-VALIDATED 2026-07-19 @5fdb9118: warm `elodin`/`elodin-db` already present from prior nix install; version prints `0.17.4-alpha.0+…`. Full `just install` not re-run this authoring pass (EDITOR-100 rebuilds the editor binary under test).
 
 ---
 

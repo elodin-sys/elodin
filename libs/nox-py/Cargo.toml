@@ -12,7 +12,7 @@ publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
 shared = ["nox/shared"]
 # Forward `tracy` enablement down to the cranelift-mlir profiling layer.
 # Pairs with `apps/elodin`'s `tracy` feature so `nix develop .#tracy &&
-# just local-install tracy` gives a cranelift-mlir-instrumented build.
+# just install tracy` gives a cranelift-mlir-instrumented build.
 tracy = ["cranelift-mlir/tracy"]
 
 [package.metadata.maturin]

@@ -69,14 +69,14 @@ If this file is still `template.md`, copy it to `ai-context/qa-test-plan/<yyyy-m
 **Steps**
 
 ```bash
-nix develop --command just local-install
+nix develop --command just install
 nix develop --command elodin --version
 nix develop --command elodin-db --version
 ```
 
 **Pass criteria**
 
-- [ ] `just local-install` exits 0
+- [ ] `just install` exits 0
 - [ ] `elodin --version` exits 0 and prints a version string
 - [ ] `elodin-db --version` exits 0 and prints a version string
 

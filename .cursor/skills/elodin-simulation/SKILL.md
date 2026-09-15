@@ -346,7 +346,7 @@ regressions.  The process:
 ```bash
 git stash && git checkout main
 nix develop
-just local-install
+just install
 
 # Run the sim, writing to a dedicated DB path
 BALL_DB_PATH=dbs/ball-main uv run examples/ball/main.py bench --ticks 2000
@@ -363,7 +363,7 @@ The `BALL_DB_PATH` env var is read by `examples/ball/main.py` and passed to
 ```bash
 git checkout <branch> && git stash pop
 nix develop
-just local-install
+just install
 BALL_DB_PATH=dbs/ball-branch uv run examples/ball/main.py bench --ticks 2000
 elodin-db export --format csv --flatten --output exports/ball-branch dbs/ball-branch
 ```

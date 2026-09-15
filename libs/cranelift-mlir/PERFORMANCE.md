@@ -76,7 +76,7 @@ lands on the correct `func.func` in the MLIR.
 
 ## 2. Quick start
 
-From a `nix develop` shell with `just local-install` already run:
+From a `nix develop` shell with `just install` already run:
 
 ```bash
 ELODIN_BACKEND=cranelift \
@@ -287,7 +287,7 @@ One-time setup (Linux only):
 
 ```bash
 nix develop .#tracy        # Tracy GUI + tracy-capture
-just local-install tracy         # builds nox-py with --features tracy
+just install tracy         # builds nox-py with --features tracy
 ```
 
 Run with Tracy listening:
@@ -511,7 +511,7 @@ function names reflect the sim structure, and
 
 ```bash
 nix develop .#tracy
-just local-install tracy
+just install tracy
 # Terminal 1:
 tracy -a 127.0.0.1 -p 8089 &
 # Terminal 2:

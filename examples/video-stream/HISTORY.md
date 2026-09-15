@@ -523,7 +523,7 @@ if (frame_timestamp.0 - state.current_time.0.0).abs() > 500000 {
 
 2. **Build the Elodin tools**:
    ```bash
-   just local-install
+   just install
    ```
 
 ### Step 1: Start Elodin DB

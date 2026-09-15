@@ -11,10 +11,10 @@
 - **Nix development shell (`nix develop`)** — Reproducible unified dev environment (Rust, Python, C/C++, GStreamer, docs tooling, git-lfs) used for all development; also `nix develop .#run` (run-focused shell) and one-off `nix develop --command ...` invocations.
 - **Determinate Systems Nix install** — Recommended Nix installation path for dev machines and Aleph development.
 - **Elodin S3 binary cache** — `elodin-nix-cache.s3.us-west-2.amazonaws.com` substituter with `trusted-users` configuration to speed up builds; misconfiguration produces the documented "ignoring untrusted substituter" FAQ symptom.
-- **Just task runner** — `just local-install [py|editor|db|tracy|all]` builds and installs the Python SDK wheel (uv + maturin 1.12.6), `elodin` editor binary, and `elodin-db` binary into `$ELODIN_SHELL_BIN`; `just local-install tracy` builds all with Tracy profiling enabled (Linux only).
-- **uv-based Python management** — All Python work uses `uv` inside the Nix shell; `just local-install py` installs into the nix-shell venv (Python 3.13).
+- **Just task runner** — `just install [py|editor|db|tracy|all]` builds and installs the Python SDK wheel (uv + maturin 1.12.6), `elodin` editor binary, and `elodin-db` binary into the cargo bin path; `just install tracy` builds all with Tracy profiling enabled (Linux only).
+- **uv-based Python management** — All Python work uses `uv` inside the Nix shell; `just install py` creates `.venv` (Python 3.13) and examples run via `.venv/bin/python`.
 - **git-lfs assets** — Large binary assets (GLBs, terrain) are LFS-tracked; `git lfs install` required at clone time.
-- **Manual (non-Nix) setups** — Documented but discouraged alternatives: macOS via Homebrew (gstreamer, gfortran, openblas, uv, rust) and Ubuntu via apt (just, git-lfs, libasound2-dev, cmake, gfortran, patchelf), followed by `uvx maturin develop` and `cargo build`.
+- **Manual (non-Nix) setups** — Documented but discouraged alternatives: macOS via Homebrew (gstreamer, gfortran, openblas, uv, rust) and Ubuntu via apt (just, git-lfs, libasound2-dev, cmake, gfortran, patchelf), followed by the same `just install` / `uvx maturin develop` steps.
 - **Cargo aliases** — `cargo elodin ...` / `cargo elodin-db ...` run the binaries from source.
 - **Nix flake packages** — `elodin-py`, `elodin-cli`, `elodin-db`, `elodinsink` buildable from the root flake.
 - **OrbStack NixOS VM remote builds** — macOS builds Linux binaries via an SSH build machine in `/etc/nix/machines`; includes the disk-backed `build-dir` workaround for Qt tmpfs exhaustion.
@@ -268,7 +268,7 @@
 
 ## 21. Profiling & Performance Diagnostics
 
-- **Tracy profiling (Linux only)** — `just local-install tracy` builds editor/db/nox-py with Tracy; fixed ports per process (editor 8087, render server 8088, sim 8089, elodin-db 8090); `tracy-capture` + `tracy-csvexport` headless workflow; Bevy `trace_tracy` automatic system zones; Cranelift per-function JIT zones; DB spans (handle_conn, sink_table, follow_stream); `TRACY_NO_EXIT=1`; sudo for sampling; AutoNoVsync tip.
+- **Tracy profiling (Linux only)** — `just install tracy` builds editor/db/nox-py with Tracy; fixed ports per process (editor 8087, render server 8088, sim 8089, elodin-db 8090); `tracy-capture` + `tracy-csvexport` headless workflow; Bevy `trace_tracy` automatic system zones; Cranelift per-function JIT zones; DB spans (handle_conn, sink_table, follow_stream); `TRACY_NO_EXIT=1`; sudo for sampling; AutoNoVsync tip.
 - **Cranelift profiling** — `ELODIN_CRANELIFT_DEBUG_DIR` stderr report (tick latency distribution, hot functions, SIMD utilization, marshal bytes), `profile.json` with per-tick waveform, `diff_profile.py`, `plot_tick_waveform.py`.
 - **Sim bench/profile** — `bench --ticks N` timing summary (tick time, build time, real_time_factor); `--profile` FLOP/HLO analysis + DOT graphs.
 - **DB benchmark** — `elodin-db-bench` scenario throughput.
