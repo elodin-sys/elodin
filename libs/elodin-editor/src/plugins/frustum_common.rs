@@ -82,8 +82,7 @@ const FAR_TOP_SEGMENT: usize = 4;
 
 /// Up-triangle dimensions, as fractions of [`up_triangle_reference`].
 const UP_TRIANGLE_HALF_BASE: f32 = 0.13;
-const UP_TRIANGLE_GAP: f32 = 0.05;
-const UP_TRIANGLE_HEIGHT: f32 = 0.16;
+const UP_TRIANGLE_HEIGHT: f32 = 0.20;
 
 /// Cap on the triangle's reference size, as a fraction of the far distance.
 /// A wide-FOV frustum has a far plane that dwarfs the pyramid behind it, so
@@ -199,21 +198,21 @@ fn up_triangle_reference(points: &[Vec3; 8]) -> f32 {
     far_half_height.min(far_distance * UP_TRIANGLE_MAX_REFERENCE)
 }
 
-/// Outline of the triangle standing on the middle of the far-plane top edge,
-/// pointing towards the camera's up direction. Both axes scale off the same
-/// reference, so the triangle keeps its shape whatever the frustum aspect.
-pub fn frustum_up_triangle(points: &[Vec3; 8]) -> [(Vec3, Vec3); 3] {
+/// The two sides of the triangle standing on the middle of the far-plane top
+/// edge, pointing towards the camera's up direction. The edge itself closes the
+/// shape, so drawing a base here would only double that line. Both axes scale
+/// off the same reference, so the triangle keeps its shape whatever the frustum
+/// aspect.
+pub fn frustum_up_triangle(points: &[Vec3; 8]) -> [(Vec3, Vec3); 2] {
     let reference = up_triangle_reference(points);
     let z = points[4].z;
+    let base_y = points[4].y;
 
     let half_base = reference * UP_TRIANGLE_HALF_BASE;
-    let base_y = points[4].y + reference * UP_TRIANGLE_GAP;
-    let apex_y = base_y + reference * UP_TRIANGLE_HEIGHT;
-
+    let apex = Vec3::new(0.0, base_y + reference * UP_TRIANGLE_HEIGHT, z);
     let left = Vec3::new(-half_base, base_y, z);
     let right = Vec3::new(half_base, base_y, z);
-    let apex = Vec3::new(0.0, apex_y, z);
-    [(left, right), (right, apex), (apex, left)]
+    [(left, apex), (apex, right)]
 }
 
 pub fn color_component_to_u8(value: f32) -> u8 {
@@ -418,27 +417,40 @@ mod tests {
     }
 
     #[test]
-    fn frustum_up_triangle_sits_above_far_top_edge() {
+    fn frustum_up_triangle_rests_on_the_far_top_edge() {
         let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
         let triangle = frustum_up_triangle(&points);
 
         let far_top_y = points[4].y;
         let far_z = points[4].z;
         for (start, end) in triangle {
-            assert!(start.y > far_top_y && end.y > far_top_y);
+            assert!(start.y >= far_top_y && end.y >= far_top_y);
             assert!((start.z - far_z).abs() < 1e-5 && (end.z - far_z).abs() < 1e-5);
         }
 
-        let apex = triangle[1].1;
+        let (left, apex) = triangle[0];
+        let right = triangle[1].1;
         assert!(apex.x.abs() < 1e-6, "apex should be horizontally centered");
-        assert!(apex.y > triangle[0].0.y, "apex should be above the base");
+        assert!(apex.y > far_top_y, "apex should be above the edge");
+        assert_eq!(left.y, far_top_y, "the edge itself serves as the base");
+        assert_eq!(right.y, far_top_y);
+        assert!(
+            left.x < 0.0 && right.x > 0.0,
+            "base corners straddle the middle of the edge"
+        );
+        assert!(
+            !triangle
+                .iter()
+                .any(|(start, end)| start.y == far_top_y && end.y == far_top_y),
+            "no base segment, which would double the far top edge"
+        );
     }
 
     #[test]
     fn frustum_segments_triangle_appends_outline() {
         let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
         let segments = frustum_segments(points, 0.01, FrustumUpMarker::Triangle);
-        assert_eq!(segments.len(), 15);
+        assert_eq!(segments.len(), 14);
 
         let (base, marker) = segments.split_at(12);
         assert!(base.iter().all(|edge| edge.thickness == 0.01));
@@ -456,9 +468,8 @@ mod tests {
     fn up_triangle_shrinks_relative_to_a_wide_field_of_view() {
         // Height of the triangle as a fraction of the far-plane half height.
         let relative_height = |points: &[Vec3; 8]| {
-            let triangle = frustum_up_triangle(points);
-            let height = triangle[1].1.y - triangle[0].0.y;
-            height / ((points[4].y - points[7].y) * 0.5)
+            let (base, apex) = frustum_up_triangle(points)[0];
+            (apex.y - base.y) / ((points[4].y - points[7].y) * 0.5)
         };
 
         let narrow = frustum_local_points(&perspective(0.6, 1.0, 0.1, 6.0)).unwrap();
