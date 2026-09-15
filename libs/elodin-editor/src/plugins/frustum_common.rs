@@ -80,19 +80,34 @@ pub const FRUSTUM_IMAGE_ORIGIN_SCALE: f32 = 9.0;
 /// Index of the far-plane top edge within [`frustum_segments`].
 const FAR_TOP_SEGMENT: usize = 4;
 
-/// Up-triangle dimensions, as fractions of the far-plane half extents.
-const UP_TRIANGLE_HALF_BASE: f32 = 0.22;
-const UP_TRIANGLE_GAP: f32 = 0.06;
-const UP_TRIANGLE_HEIGHT: f32 = 0.24;
+/// Up-triangle dimensions, as fractions of [`up_triangle_reference`].
+const UP_TRIANGLE_HALF_BASE: f32 = 0.13;
+const UP_TRIANGLE_GAP: f32 = 0.05;
+const UP_TRIANGLE_HEIGHT: f32 = 0.16;
 
-/// Frustum edges in camera-local space as `(start, end, thickness)`, including
-/// the extra edges drawn for `up_marker`.
+/// Cap on the triangle's reference size, as a fraction of the far distance.
+/// A wide-FOV frustum has a far plane that dwarfs the pyramid behind it, so
+/// sizing the triangle off that plane alone makes it swallow the shape it is
+/// supposed to annotate.
+const UP_TRIANGLE_MAX_REFERENCE: f32 = 0.7;
+
+/// A frustum edge in camera-local space.
+pub struct FrustumEdge {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub thickness: f32,
+    /// Part of the up marker, so drawn in [`frustum_up_marker_color`].
+    pub is_up_marker: bool,
+}
+
+/// Frustum edges in camera-local space, including the extra edges drawn for
+/// `up_marker`.
 pub fn frustum_segments(
     points: [Vec3; 8],
     thickness: f32,
     up_marker: FrustumUpMarker,
-) -> Vec<(Vec3, Vec3, f32)> {
-    let mut segments: Vec<(Vec3, Vec3, f32)> = [
+) -> Vec<FrustumEdge> {
+    let mut segments: Vec<FrustumEdge> = [
         (points[0], points[1]),
         (points[1], points[2]),
         (points[2], points[3]),
@@ -107,24 +122,60 @@ pub fn frustum_segments(
         (points[3], points[7]),
     ]
     .into_iter()
-    .map(|(start, end)| (start, end, thickness))
+    .map(|(start, end)| FrustumEdge {
+        start,
+        end,
+        thickness,
+        is_up_marker: false,
+    })
     .collect();
 
     match up_marker {
         FrustumUpMarker::None => {}
         FrustumUpMarker::Highlight => {
-            segments[FAR_TOP_SEGMENT].2 = thickness * FRUSTUM_UP_MARKER_SCALE;
+            segments[FAR_TOP_SEGMENT].thickness = thickness * FRUSTUM_UP_MARKER_SCALE;
+            segments[FAR_TOP_SEGMENT].is_up_marker = true;
         }
         FrustumUpMarker::Triangle => {
             segments.extend(
                 frustum_up_triangle(&points)
                     .into_iter()
-                    .map(|(start, end)| (start, end, thickness * FRUSTUM_UP_MARKER_SCALE)),
+                    .map(|(start, end)| FrustumEdge {
+                        start,
+                        end,
+                        thickness: thickness * FRUSTUM_UP_MARKER_SCALE,
+                        is_up_marker: true,
+                    }),
             );
         }
     }
 
     segments
+}
+
+/// Channel floor above which a frustum color counts as near-white.
+const FRUSTUM_NEAR_WHITE: f32 = 0.7;
+
+/// Color for up-marker geometry. White separates the marker from the frustum
+/// color, which the user picks freely; when that color is itself near-white a
+/// white marker would vanish, so fall back to its complement. Always opaque, so
+/// the marker still reads on a translucent or fully clear frustum.
+pub fn frustum_up_marker_color(frustum_color: impeller2_wkt::Color) -> impeller2_wkt::Color {
+    let darkest_channel = frustum_color
+        .r
+        .min(frustum_color.g)
+        .min(frustum_color.b)
+        .clamp(0.0, 1.0);
+    if darkest_channel > FRUSTUM_NEAR_WHITE {
+        impeller2_wkt::Color::rgba(
+            1.0 - frustum_color.r.clamp(0.0, 1.0),
+            1.0 - frustum_color.g.clamp(0.0, 1.0),
+            1.0 - frustum_color.b.clamp(0.0, 1.0),
+            1.0,
+        )
+    } else {
+        impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 1.0)
+    }
 }
 
 /// Ball marking the image origin — the far-plane corner holding pixel (0, 0),
@@ -140,16 +191,24 @@ pub fn frustum_image_origin_marker(
         .then(|| (points[4], thickness * FRUSTUM_IMAGE_ORIGIN_SCALE))
 }
 
-/// Outline of the triangle standing on the middle of the far-plane top edge,
-/// pointing towards the camera's up direction.
-pub fn frustum_up_triangle(points: &[Vec3; 8]) -> [(Vec3, Vec3); 3] {
-    let far_half_width = (points[5].x - points[4].x) * 0.5;
+/// Size the up triangle is derived from: the far-plane half height, capped
+/// against the far distance so a wide field of view cannot inflate it.
+fn up_triangle_reference(points: &[Vec3; 8]) -> f32 {
     let far_half_height = (points[4].y - points[7].y) * 0.5;
+    let far_distance = -points[4].z;
+    far_half_height.min(far_distance * UP_TRIANGLE_MAX_REFERENCE)
+}
+
+/// Outline of the triangle standing on the middle of the far-plane top edge,
+/// pointing towards the camera's up direction. Both axes scale off the same
+/// reference, so the triangle keeps its shape whatever the frustum aspect.
+pub fn frustum_up_triangle(points: &[Vec3; 8]) -> [(Vec3, Vec3); 3] {
+    let reference = up_triangle_reference(points);
     let z = points[4].z;
 
-    let half_base = far_half_width * UP_TRIANGLE_HALF_BASE;
-    let base_y = points[4].y + far_half_height * UP_TRIANGLE_GAP;
-    let apex_y = base_y + far_half_height * UP_TRIANGLE_HEIGHT;
+    let half_base = reference * UP_TRIANGLE_HALF_BASE;
+    let base_y = points[4].y + reference * UP_TRIANGLE_GAP;
+    let apex_y = base_y + reference * UP_TRIANGLE_HEIGHT;
 
     let left = Vec3::new(-half_base, base_y, z);
     let right = Vec3::new(half_base, base_y, z);
@@ -279,7 +338,8 @@ mod tests {
         let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
         let segments = frustum_segments(points, 0.01, FrustumUpMarker::None);
         assert_eq!(segments.len(), 12);
-        assert!(segments.iter().all(|(_, _, thickness)| *thickness == 0.01));
+        assert!(segments.iter().all(|edge| edge.thickness == 0.01));
+        assert!(segments.iter().all(|edge| !edge.is_up_marker));
     }
 
     #[test]
@@ -288,15 +348,59 @@ mod tests {
         let segments = frustum_segments(points, 0.01, FrustumUpMarker::Highlight);
         assert_eq!(segments.len(), 12);
 
-        let (start, end, thickness) = segments[4];
-        assert_eq!(start, points[4]);
-        assert_eq!(end, points[5]);
-        assert_eq!(thickness, 0.01 * FRUSTUM_UP_MARKER_SCALE);
-        for (idx, (_, _, thickness)) in segments.iter().enumerate() {
+        let top = &segments[4];
+        assert_eq!(top.start, points[4]);
+        assert_eq!(top.end, points[5]);
+        assert_eq!(top.thickness, 0.01 * FRUSTUM_UP_MARKER_SCALE);
+        assert!(top.is_up_marker);
+        for (idx, edge) in segments.iter().enumerate() {
             if idx != 4 {
-                assert_eq!(*thickness, 0.01);
+                assert_eq!(edge.thickness, 0.01);
+                assert!(!edge.is_up_marker);
             }
         }
+    }
+
+    #[test]
+    fn up_marker_color_is_white_against_ordinary_frustums() {
+        use impeller2_wkt::Color as FrustumColor;
+
+        let white = FrustumColor::rgba(1.0, 1.0, 1.0, 1.0);
+        for color in [
+            FrustumColor::YELLOW,
+            FrustumColor::RED,
+            FrustumColor::BLACK,
+            FrustumColor::MINT,
+            FrustumColor::PEACH,
+        ] {
+            assert_eq!(frustum_up_marker_color(color), white);
+        }
+    }
+
+    #[test]
+    fn up_marker_color_complements_near_white_frustums() {
+        use impeller2_wkt::Color as FrustumColor;
+
+        assert_eq!(
+            frustum_up_marker_color(FrustumColor::WHITE),
+            FrustumColor::rgba(0.0, 0.0, 0.0, 1.0)
+        );
+
+        let complement = frustum_up_marker_color(FrustumColor::rgba(0.9, 0.8, 1.0, 0.4));
+        assert!((complement.r - 0.1).abs() < 1e-6);
+        assert!((complement.g - 0.2).abs() < 1e-6);
+        assert!(complement.b.abs() < 1e-6);
+        assert_eq!(complement.a, 1.0, "marker stays opaque on a faint frustum");
+    }
+
+    #[test]
+    fn up_marker_color_is_opaque_on_a_clear_frustum() {
+        use impeller2_wkt::Color as FrustumColor;
+
+        assert_eq!(
+            frustum_up_marker_color(FrustumColor::rgba(0.2, 0.3, 0.4, 0.0)),
+            FrustumColor::rgba(1.0, 1.0, 1.0, 1.0)
+        );
     }
 
     #[test]
@@ -337,12 +441,35 @@ mod tests {
         assert_eq!(segments.len(), 15);
 
         let (base, marker) = segments.split_at(12);
-        assert!(base.iter().all(|(_, _, thickness)| *thickness == 0.01));
+        assert!(base.iter().all(|edge| edge.thickness == 0.01));
+        assert!(base.iter().all(|edge| !edge.is_up_marker));
         assert!(
             marker
                 .iter()
-                .all(|(_, _, thickness)| *thickness == 0.01 * FRUSTUM_UP_MARKER_SCALE),
+                .all(|edge| edge.thickness == 0.01 * FRUSTUM_UP_MARKER_SCALE),
             "triangle reads at the same weight as the highlighted edge"
+        );
+        assert!(marker.iter().all(|edge| edge.is_up_marker));
+    }
+
+    #[test]
+    fn up_triangle_shrinks_relative_to_a_wide_field_of_view() {
+        // Height of the triangle as a fraction of the far-plane half height.
+        let relative_height = |points: &[Vec3; 8]| {
+            let triangle = frustum_up_triangle(points);
+            let height = triangle[1].1.y - triangle[0].0.y;
+            height / ((points[4].y - points[7].y) * 0.5)
+        };
+
+        let narrow = frustum_local_points(&perspective(0.6, 1.0, 0.1, 6.0)).unwrap();
+        let wide = frustum_local_points(&perspective(2.0, 1.0, 0.1, 6.0)).unwrap();
+        assert!(
+            relative_height(&wide) < relative_height(&narrow) * 0.6,
+            "a far plane that dwarfs the pyramid must not carry a proportional triangle"
+        );
+        assert!(
+            relative_height(&narrow) < 0.25,
+            "triangle stays a small annotation on the far plane"
         );
     }
 

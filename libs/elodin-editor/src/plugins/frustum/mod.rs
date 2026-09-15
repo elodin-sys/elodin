@@ -1,6 +1,7 @@
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_image_origin_marker, frustum_local_points, frustum_segments, presentation_perspective,
+    frustum_image_origin_marker, frustum_local_points, frustum_segments, frustum_up_marker_color,
+    presentation_perspective,
 };
 use crate::MainCamera;
 use crate::sensor_camera::SensorCameraConfigs;
@@ -359,6 +360,11 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     for (source_camera, points, color, thickness, up_marker) in sources {
         let material =
             frustum_material_for_color(color, &mut params.materials, &mut params.material_cache);
+        let marker_material = frustum_material_for_color(
+            frustum_up_marker_color(color),
+            &mut params.materials,
+            &mut params.material_cache,
+        );
         let face_material = frustum_face_material_for_color(
             color,
             &mut params.materials,
@@ -383,13 +389,16 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             };
             desired_roots.insert(root_key);
 
-            for (segment_idx, (start_local, end_local, segment_thickness)) in
-                segments.iter().enumerate()
-            {
+            for (segment_idx, edge) in segments.iter().enumerate() {
                 let Some(local_transform) =
-                    frustum_segment_transform_local(*start_local, *end_local, *segment_thickness)
+                    frustum_segment_transform_local(edge.start, edge.end, edge.thickness)
                 else {
                     continue;
+                };
+                let edge_material = if edge.is_up_marker {
+                    marker_material.clone()
+                } else {
+                    material.clone()
                 };
                 desired_segments.insert(
                     CameraFrustumLineVisual {
@@ -401,7 +410,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                         root_key,
                         local_transform,
                         render_layers.clone(),
-                        MeshMaterial3d(material.clone()),
+                        MeshMaterial3d(edge_material),
                     ),
                 );
             }
@@ -420,7 +429,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                             scale: Vec3::splat(radius),
                         },
                         render_layers.clone(),
-                        MeshMaterial3d(material.clone()),
+                        MeshMaterial3d(marker_material.clone()),
                     ),
                 );
             }

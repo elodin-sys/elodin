@@ -11,6 +11,7 @@ Viewport camera frustum overlay rendering.
 - Supports per-viewport style via `frustums_color` and `frustums_thickness`.
 - Marks the camera up direction via `frustums_up_marker`, so the image orientation can be read off the frustum.
   `highlight` thickens the far-plane top edge and balls the corner holding the image origin; `triangle` stands a triangle on that edge.
+  Marker geometry is drawn opaque white so it separates from `frustums_color`, falling back to that color's complement when the frustum is itself near-white.
 - Parents frustum visuals to the source camera, so motion/rotation stay exact.
 - Renders frustums across viewport render layers.
 - A viewport never renders its own frustum; it only renders frustums from other viewports.
@@ -22,7 +23,7 @@ Viewport camera frustum overlay rendering.
 - `aspect` (optional): fixed camera aspect ratio. If omitted, aspect is derived from viewport size.
 - `frustums_color` (optional): named color or tuple string like `"(255,255,0,200)"`.
 - `frustums_thickness` (optional): edge radius in world units.
-- `frustums_up_marker` (optional): `none` (default), `highlight` (thickens the far-plane top edge and balls the image-origin corner), or `triangle` (stands a triangle on the middle of that edge).
+- `frustums_up_marker` (optional): `none` (default), `highlight` (thickens the far-plane top edge and balls the image-origin corner), or `triangle` (stands a triangle on the middle of that edge). The marker is drawn in white, or in the complement of `frustums_color` when that color is near-white.
 
 ## KDL usage
 ```kdl
@@ -39,4 +40,4 @@ tabs {
 - In viewport inspector, frustum controls are contextual:
   - `create_frustum` is exposed as a toggle button (`CREATE` / `DELETE`).
   - `show_frustums` toggle controls whether this viewport renders frustums from other viewports.
-  - `frustums_color`, `frustums_thickness`, and `frustums_up_marker` are editable when `create_frustum` is enabled.
+  - `frustums_color`, `frustums_thickness`, and `frustums_up_marker` are editable when `create_frustum` is enabled. The up-marker color is derived from `frustums_color` and is not separately editable.

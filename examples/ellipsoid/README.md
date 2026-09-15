@@ -23,7 +23,7 @@ It is attached to a `drone` entity whose `world_pos` is updated in `pre_step`, s
 The viewport frustum and sensor camera frustum use different colors so they can be compared in the target viewport.
 
 Both frustums carry a camera-up marker, which tells you how the image is oriented on a frustum seen from outside.
-They use `frustums_up_marker="highlight"`: the far-plane top edge is drawn thicker, with a ball on the corner holding the image origin.
+They use `frustums_up_marker="highlight"`: the far-plane top edge is drawn thicker, with a ball on the corner holding the image origin, both in white so they read against the frustum's own color.
 Since the drone rolls and yaws continuously, watch the sensor camera's marker rotate with it in the **Target View**.
 The other available marker is `frustums_up_marker="triangle"`, which stands a triangle on the middle of that edge instead.
 
