@@ -224,6 +224,7 @@ class WorldBuilder:
         frustums_color: Optional[Sequence[float]] = None,
         projection_color: Optional[Sequence[float]] = None,
         frustums_thickness: float = 0.006,
+        frustums_up_marker: str = "none",
         fps: Optional[float] = None,
         cinematic: bool = False,
         ev100: Optional[float] = None,
@@ -245,6 +246,11 @@ class WorldBuilder:
         ``(0, -15, 0)``, 30 degrees right bank ``(30, 0, 0)``, 90 degrees left
         yaw ``(0, 0, 90)``.
 
+        ``frustums_up_marker`` marks which frustum edge is the top of the camera
+        image when ``create_frustum=True``: ``"highlight"`` thickens the
+        far-plane top edge and puts a ball on the corner holding the image
+        origin, ``"triangle"`` stands a small triangle on that edge.
+
         ``cinematic=True`` enables the cinematic Earth stack in the render
         server (same meaning as KDL ``viewport cinematic=#true``). ``ev100``,
         ``bloom``, and ``environment`` match the schematic and require
@@ -264,7 +270,8 @@ class WorldBuilder:
             frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)
 
         Raises ``ValueError`` if ``rot_offset`` is not a finite 3-element
-        sequence, if ``fps`` is not a positive finite number, if look settings
+        sequence, if ``fps`` is not a positive finite number, if
+        ``frustums_up_marker`` is not a known marker, if look settings
         are passed without ``cinematic=True``, or if more than one cinematic
         environment owner is configured.
         """

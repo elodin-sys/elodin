@@ -234,6 +234,7 @@ This pattern gives you deterministic, reproducible testing of the full sensor st
 | `frustums_color` | [f32; 3/4] | yellow | Frustum color, normalized RGBA |
 | `projection_color` | [f32; 3/4] | white | 2D projection color, normalized RGBA |
 | `frustums_thickness` | float | 0.006 | Frustum edge radius in world units |
+| `frustums_up_marker` | str | "none" | Marks image-up on the frustum: `"none"`, `"highlight"` (thick top edge + image-origin ball), or `"triangle"` |
 
 ### `ctx.read_msg()`
 
