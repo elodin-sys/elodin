@@ -53,7 +53,7 @@ cd elodin
 nix develop
 ```
 > [!TIP]
-> The shell is bash by default (venv on PATH; no `source` needed). For Oh My Zsh + Powerlevel 10k: `ELODIN_SHELL=zsh nix develop`, then `p10k configure`.
+> The shell follows yours (bash or zsh; venv on PATH; no `source` needed). Override with `ELODIN_SHELL=bash` or `ELODIN_SHELL=zsh`. For Oh My Zsh + Powerlevel 10k: `p10k configure` if prompted.
 >
 
 ### 4. Build and Install Elodin Editor and Elodin DB into your path

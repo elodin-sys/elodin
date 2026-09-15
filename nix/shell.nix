@@ -178,10 +178,10 @@ with pkgs; let
         fi
       fi
       export ELODIN_SHELL_ID
-      _elo_shell_dir="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID"
-      export ELODIN_SHELL_BIN="$_elo_shell_dir/bin"
+      shell_dir="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID"
+      export ELODIN_SHELL_BIN="$shell_dir/bin"
       mkdir -p "$ELODIN_SHELL_BIN"
-      export VIRTUAL_ENV="$_elo_shell_dir/venv"
+      export VIRTUAL_ENV="$shell_dir/venv"
       export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
       if [ ! -x "$VIRTUAL_ENV/bin/python" ]; then
         uv venv --quiet --python 3.13 --python-preference only-system --allow-existing "$VIRTUAL_ENV"
@@ -191,27 +191,64 @@ with pkgs; let
       export PATH
 
       if [ -d "$ELODIN_ROOT/target/shells" ]; then
-        for _elo_dir in "$ELODIN_ROOT/target/shells"/[0-9]*; do
-          [ -d "$_elo_dir" ] || continue
-          _elo_id="''${_elo_dir##*/}"
-          case "$_elo_id" in
+        for dir in "$ELODIN_ROOT/target/shells"/[0-9]*; do
+          [ -d "$dir" ] || continue
+          dead_id="''${dir##*/}"
+          case "$dead_id" in
             *[!0-9]*) continue ;;
           esac
-          if ! kill -0 "$_elo_id" 2>/dev/null; then
-            rm -rf "$_elo_dir"
+          if ! kill -0 "$dead_id" 2>/dev/null; then
+            rm -rf "$dir"
           fi
         done
-        unset _elo_dir _elo_id
+        unset dir dead_id
       fi
 
       alias zar='gtar --zstd --sparse'
 
-      # nix develop applies this hook via print-dev-env (non-interactive) then
-      # starts $SHELL. Set SHELL/ZDOTDIR here so -c env and interactive agree.
-      if [ "''${ELODIN_SHELL:-}" = zsh ]; then
+      find_parent_shell() {
+        local pid=$PPID n=0 comm
+        while [ "$n" -lt 16 ]; do
+          [ -n "$pid" ] || return 1
+          case "$pid" in
+            0|1) return 1 ;;
+            *[!0-9]*) return 1 ;;
+          esac
+          comm=$(ps -o comm= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+          comm=''${comm##*/}
+          comm=''${comm#-}
+          case "$comm" in
+            zsh|bash)
+              printf '%s\n' "$comm"
+              return 0
+              ;;
+          esac
+          pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+          n=$((n + 1))
+        done
+        return 1
+      }
+
+      if [ -z "''${ELODIN_SHELL:-}" ]; then
+        ELODIN_SHELL=auto
+      fi
+      if [ "$ELODIN_SHELL" = auto ]; then
+        if found=$(find_parent_shell); then
+          ELODIN_SHELL=$found
+        else
+          echo "warn: The parent shell was not found. Defaulting to bash." >&2;
+          ELODIN_SHELL=bash
+        fi
+        unset found
+      fi
+      unset -f find_parent_shell
+      export ELODIN_SHELL
+
+      # Set SHELL/ZDOTDIR here so -c env and interactive agree.
+      if [ "$ELODIN_SHELL" = zsh ]; then
         export SHELL=${pkgs.zsh}/bin/zsh
         export ELODIN_NIX_PATH="$PATH"
-        export ZDOTDIR="$_elo_shell_dir/zdot"
+        export ZDOTDIR="$shell_dir/zdot"
         mkdir -p "$ZDOTDIR"
         printf '%s\n' \
           'ZDOTDIR="$HOME"' \
@@ -222,7 +259,7 @@ with pkgs; let
           "alias zar='gtar --zstd --sparse'" \
           > "$ZDOTDIR/.zshrc"
       fi
-      unset _elo_shell_dir
+      unset shell_dir
 
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -234,13 +271,14 @@ with pkgs; let
         echo "  • Tools: uv, maturin, ruff, just, alejandra"
         echo "  • Venv: $VIRTUAL_ENV (auto-active; no source needed)"
         echo "  • Local bins: $ELODIN_SHELL_BIN"
+        echo "  • Shell: $ELODIN_SHELL"
         echo ""
         echo "Development flow:"
-        echo "  • just install        — this shell only"
-        echo "  • ELODIN_SHELL=zsh    — opt-in zsh + p10k (PATH is re-asserted after ~/.zshrc)"
+        echo "  • just install             — this shell only"
+        echo "  • ELODIN_SHELL=bash|zsh    — override auto shell detect"
         echo ""
 
-        if [ "''${ELODIN_SHELL:-}" = zsh ]; then
+        if [ "$ELODIN_SHELL" != bash ]; then
           exec "$SHELL" -i
         fi
       fi

@@ -12,8 +12,9 @@ Elodin uses Nix flakes for reproducible builds, CI dependencies, Docker images, 
 The unified dev shell includes all tools for Rust, Python, C/C++, cloud operations, documentation, and git-lfs:
 
 ```bash
-nix develop                              # Enter interactive shell (bash)
-ELODIN_SHELL=zsh nix develop             # Opt-in zsh + p10k
+nix develop                              # Enter interactive shell (bash or zsh)
+ELODIN_SHELL=zsh nix develop             # Force zsh + p10k
+ELODIN_SHELL=bash nix develop            # Force bash
 nix develop --command "cargo build"      # One-off command
 ```
 
@@ -27,7 +28,7 @@ Each `nix develop` is self-contained so parallel worktrees and agent shells do n
 - **`ELODIN_SHELL_ID`** defaults to the terminal session id on Linux (`ps -o sid= -p $$`), `$$` elsewhere, and is inherited when already set. Every `nix develop` / `nix develop --command` in the same tab shares one bin dir.
 - **`ELODIN_SHELL_BIN`** is `<worktree>/target/shells/$ELODIN_SHELL_ID/bin`. Dead numeric IDs are pruned on shell entry.
 - **`just install`** builds `elodin` / `elodin-db` into `$ELODIN_SHELL_BIN` (this shell only).
-- **`ELODIN_SHELL=zsh`** sets `SHELL` to nix zsh and writes a wrapper `ZDOTDIR` `.zshrc` that sources `~/.zshrc` then re-prepends the nix PATH, so `~/.cargo/bin` cannot shadow local bins. `nix develop` then starts that `$SHELL`. Default bash stays in the hook environment (no exec). Both define `zar='gtar --zstd --sparse'`.
+- **`ELODIN_SHELL`** defaults to `auto`, which walks parent processes for `zsh` or `bash` (`nix develop` overwrites `$SHELL` with bash). If none is found, bash is used. `ELODIN_SHELL=zsh` / `ELODIN_SHELL=bash` override. zsh sets `SHELL` to nix zsh and writes a wrapper `ZDOTDIR` `.zshrc` that sources `~/.zshrc` then re-prepends the nix PATH; bash stays in the hook environment (no exec). Both define `zar='gtar --zstd --sparse'`.
 
 ## Nix Installation
 
