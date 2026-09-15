@@ -95,46 +95,6 @@ Open the Elodin editor and connect to the local server
 
 ---
 
-## Alternative Local Setup (macOS Only)
-
-> [!WARNING]
-> This setup is more complex and may lead to inconsistent environments across developers. We strongly recommend using Nix instead.
-
-If you cannot use Nix, you can manually install dependencies on macOS:
-
-### Prerequisites
-```sh
-# Install required tools via Homebrew
-brew install gstreamer python gfortran openblas uv git-lfs rust
-
-# Initialize git-lfs
-git lfs install
-```
-
-### Build and Run
-```sh
-git clone https://github.com/elodin-sys/elodin.git
-cd elodin
-uv venv --python 3.13
-source .venv/bin/activate
-uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
-cargo build --release -p elodin -p elodin-db
-```
-
-### Python Development (Local Setup)
-```sh
-uv venv --python 3.13
-source .venv/bin/activate
-uvx maturin@1.12.6 develop --uv --manifest-path=libs/nox-py/Cargo.toml
-
-cargo run --bin elodin editor examples/three-body/main.py
-# Or equivalently use the 'elodin' cargo alias:
-cargo elodin editor examples/three-body/main.py
-```
-
-> [!NOTE]
-> Local setup instructions were validated on M1 architecture, macOS 15.6.1 on 2025-11-03.
-
 ## Alternative Local Setup (Ubuntu/Linux)
 
 > [!WARNING]
