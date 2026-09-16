@@ -861,7 +861,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", fps=None, cinematic=False, ev100=None, bloom=None, environment=None)</code> -&gt; None</p>
+<p><code>sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)</code> -&gt; None</p>
 <p>Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every <code>1 / fps</code> µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with <code>ctx.read_msg("entity.name", timestamp=...)</code>.</p>
 <ul>
 <li><code>entity</code> : <a href="https://docs.elodin.systems/preview/pr-860/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity the camera is attached to.</li>
