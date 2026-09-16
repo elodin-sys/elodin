@@ -1,6 +1,6 @@
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_image_origin_marker, frustum_local_points, frustum_segments, frustum_up_marker_color,
+    frustum_local_points, frustum_segments, frustum_up_marker_balls, frustum_up_marker_color,
     presentation_perspective,
 };
 use crate::MainCamera;
@@ -34,7 +34,7 @@ impl Plugin for FrustumPlugin {
 #[derive(Resource, Clone)]
 struct FrustumLineAssets {
     edge_mesh: Handle<Mesh>,
-    image_origin_mesh: Handle<Mesh>,
+    marker_ball_mesh: Handle<Mesh>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -69,11 +69,13 @@ struct CameraFrustumFaceVisual {
     target: Entity,
 }
 
-/// Ball sitting on the frustum corner that holds the image origin.
+/// Ball belonging to a frustum's up marker: the image-origin corner in
+/// `Highlight` mode, or a rounded joint of the outline in `Triangle` mode.
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct CameraFrustumImageOriginVisual {
+struct CameraFrustumMarkerBallVisual {
     source: Entity,
     target: Entity,
+    ball: u8,
 }
 
 const FRUSTUM_FACE_ALPHA: u8 = 45;
@@ -171,15 +173,15 @@ struct FrustumDrawParams<'w, 's> {
     existing_roots: Query<'w, 's, (Entity, &'static CameraFrustumRootVisual)>,
     existing_lines: Query<'w, 's, (Entity, &'static CameraFrustumLineVisual)>,
     existing_faces: Query<'w, 's, (Entity, &'static CameraFrustumFaceVisual, &'static Mesh3d)>,
-    existing_image_origins: Query<'w, 's, (Entity, &'static CameraFrustumImageOriginVisual)>,
+    existing_marker_balls: Query<'w, 's, (Entity, &'static CameraFrustumMarkerBallVisual)>,
 }
 
 fn frustum_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let edge_mesh = meshes.add(Mesh::from(Cylinder::new(1.0, 1.0)));
-    let image_origin_mesh = meshes.add(Mesh::from(Sphere::new(1.0)));
+    let marker_ball_mesh = meshes.add(Mesh::from(Sphere::new(1.0)));
     commands.insert_resource(FrustumLineAssets {
         edge_mesh,
-        image_origin_mesh,
+        marker_ball_mesh,
     });
 }
 
@@ -244,7 +246,7 @@ fn cleanup_frustum_entities(params: &FrustumDrawParams<'_, '_>, commands: &mut C
     for (entity, _, _) in params.existing_faces.iter() {
         commands.entity(entity).despawn();
     }
-    for (entity, _) in params.existing_image_origins.iter() {
+    for (entity, _) in params.existing_marker_balls.iter() {
         commands.entity(entity).despawn();
     }
     for (entity, _) in params.existing_roots.iter() {
@@ -347,8 +349,8 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     }
     let mut desired_faces: Vec<DesiredFace> = Vec::new();
 
-    let mut desired_image_origins: HashMap<
-        CameraFrustumImageOriginVisual,
+    let mut desired_marker_balls: HashMap<
+        CameraFrustumMarkerBallVisual,
         (
             CameraFrustumRootVisual,
             Transform,
@@ -371,7 +373,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             &mut params.material_cache,
         );
         let segments = frustum_segments(points, thickness, up_marker);
-        let image_origin = frustum_image_origin_marker(&points, thickness, up_marker);
+        let marker_balls = frustum_up_marker_balls(&points, thickness, up_marker);
         for (target_camera, render_layers) in &targets {
             if source_camera == *target_camera {
                 continue;
@@ -415,11 +417,12 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                 );
             }
 
-            if let Some((center, radius)) = image_origin {
-                desired_image_origins.insert(
-                    CameraFrustumImageOriginVisual {
+            for (ball_idx, (center, radius)) in marker_balls.iter().copied().enumerate() {
+                desired_marker_balls.insert(
+                    CameraFrustumMarkerBallVisual {
                         source: source_camera,
                         target: *target_camera,
+                        ball: ball_idx as u8,
                     },
                     (
                         root_key,
@@ -520,18 +523,18 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         commands.entity(entity).despawn();
     }
 
-    let mut existing_image_origins_by_key: HashMap<CameraFrustumImageOriginVisual, Entity> =
+    let mut existing_marker_balls_by_key: HashMap<CameraFrustumMarkerBallVisual, Entity> =
         HashMap::new();
-    for (entity, key) in params.existing_image_origins.iter() {
-        existing_image_origins_by_key.insert(*key, entity);
+    for (entity, key) in params.existing_marker_balls.iter() {
+        existing_marker_balls_by_key.insert(*key, entity);
     }
 
-    for (key, (root_key, transform, render_layers, material)) in desired_image_origins {
+    for (key, (root_key, transform, render_layers, material)) in desired_marker_balls {
         let Some(&root_entity) = root_entities.get(&root_key) else {
             continue;
         };
 
-        if let Some(entity) = existing_image_origins_by_key.remove(&key) {
+        if let Some(entity) = existing_marker_balls_by_key.remove(&key) {
             commands.entity(entity).insert((
                 transform,
                 render_layers,
@@ -542,7 +545,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         }
 
         commands.spawn((
-            Mesh3d(line_assets.image_origin_mesh.clone()),
+            Mesh3d(line_assets.marker_ball_mesh.clone()),
             material,
             transform,
             GlobalTransform::default(),
@@ -550,11 +553,11 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             NoFrustumCulling,
             key,
             ChildOf(root_entity),
-            Name::new("viewport_frustum_image_origin"),
+            Name::new("viewport_frustum_marker_ball"),
         ));
     }
 
-    for entity in existing_image_origins_by_key.into_values() {
+    for entity in existing_marker_balls_by_key.into_values() {
         commands.entity(entity).despawn();
     }
 

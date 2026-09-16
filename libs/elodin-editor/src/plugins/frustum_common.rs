@@ -177,17 +177,32 @@ pub fn frustum_up_marker_color(frustum_color: impeller2_wkt::Color) -> impeller2
     }
 }
 
-/// Ball marking the image origin — the far-plane corner holding pixel (0, 0),
-/// i.e. top-left as seen through the camera — as `(center, radius)` in
-/// camera-local space. Together with the thickened top edge it tells which way
-/// up the image is, and which end of that edge it starts from.
-pub fn frustum_image_origin_marker(
+/// Balls belonging to the up marker, as `(center, radius)` in camera-local
+/// space.
+///
+/// `Highlight` gets one on the far-plane corner holding pixel (0, 0) — top-left
+/// as seen through the camera — which, with the thickened top edge, says which
+/// way up the image is and which end of that edge it starts from.
+///
+/// `Triangle` gets one on each of its corners. Edges are flat-capped cylinders,
+/// so the two sides meeting at an angle would otherwise leave a notch; a ball
+/// of the same radius rounds the joint into a continuous line.
+pub fn frustum_up_marker_balls(
     points: &[Vec3; 8],
     thickness: f32,
     up_marker: FrustumUpMarker,
-) -> Option<(Vec3, f32)> {
-    matches!(up_marker, FrustumUpMarker::Highlight)
-        .then(|| (points[4], thickness * FRUSTUM_IMAGE_ORIGIN_SCALE))
+) -> Vec<(Vec3, f32)> {
+    match up_marker {
+        FrustumUpMarker::None => Vec::new(),
+        FrustumUpMarker::Highlight => {
+            vec![(points[4], thickness * FRUSTUM_IMAGE_ORIGIN_SCALE)]
+        }
+        FrustumUpMarker::Triangle => {
+            let radius = thickness * FRUSTUM_UP_MARKER_SCALE;
+            let [(left, apex), (_, right)] = frustum_up_triangle(points);
+            vec![(left, radius), (apex, radius), (right, radius)]
+        }
+    }
 }
 
 /// Size the up triangle is derived from: the far-plane half height, capped
@@ -403,17 +418,34 @@ mod tests {
     }
 
     #[test]
-    fn frustum_image_origin_marker_only_for_highlight() {
+    fn frustum_up_marker_balls_per_mode() {
         let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
 
-        let (center, radius) =
-            frustum_image_origin_marker(&points, 0.01, FrustumUpMarker::Highlight).unwrap();
+        assert!(frustum_up_marker_balls(&points, 0.01, FrustumUpMarker::None).is_empty());
+
+        let highlight = frustum_up_marker_balls(&points, 0.01, FrustumUpMarker::Highlight);
+        let [(center, radius)] = highlight[..] else {
+            panic!("highlight should place a single ball, got {highlight:?}");
+        };
         assert_eq!(center, points[4], "ball sits on the far top-left corner");
         assert!(center.x < 0.0 && center.y > 0.0, "left of and above center");
         assert_eq!(radius, 0.01 * FRUSTUM_IMAGE_ORIGIN_SCALE);
 
-        assert!(frustum_image_origin_marker(&points, 0.01, FrustumUpMarker::None).is_none());
-        assert!(frustum_image_origin_marker(&points, 0.01, FrustumUpMarker::Triangle).is_none());
+        // One rounded joint per triangle corner, matching the stroke radius so
+        // the flat-capped sides join into a continuous line.
+        let triangle_balls = frustum_up_marker_balls(&points, 0.01, FrustumUpMarker::Triangle);
+        assert_eq!(triangle_balls.len(), 3);
+        assert!(
+            triangle_balls
+                .iter()
+                .all(|(_, radius)| *radius == 0.01 * FRUSTUM_UP_MARKER_SCALE)
+        );
+
+        let corners: Vec<Vec3> = triangle_balls.iter().map(|(center, _)| *center).collect();
+        let triangle = frustum_up_triangle(&points);
+        for (start, end) in triangle {
+            assert!(corners.contains(&start) && corners.contains(&end));
+        }
     }
 
     #[test]
