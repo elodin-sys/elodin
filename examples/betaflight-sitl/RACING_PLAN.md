@@ -1,7 +1,7 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-08
+**Last verified against repository:** 2026-09-15
 **Current resume point:** Package D — manual hardware qualification
 
 ## 1. Purpose and authority
@@ -123,11 +123,18 @@ The default 8 kHz build busy-waits in Betaflight and consumes approximately one
 CPU core to avoid scheduler wakeup latency. The build-time
 `VIRTUAL_GYRO_SAMPLE_RATE_HZ` and Python `simulation_rate` must remain equal.
 
-The example does **not** currently contain a camera, gates, course selection,
-referee, guidance interface, ANGLE-mode guidance, racing controller, perception,
-race tests, or race CI. The README refers to `test_comms.py`, but that file is
-not present; Package A must repair this documentation or supply its supported
-replacement.
+The example now additionally contains:
+
+- Package A's pure protocol/convention tests and machine-readable C0 result;
+- Package C's opt-in `none`/`single` course geometry, four-bar gate rendering,
+  ordered truth referee, fixed-width race telemetry, and final race result; and
+- Package D's command seam, manual-controller integration, ANGLE configuration,
+  one-tick RC latch, and automated physical sign audit. Package D remains open
+  only for operator hardware qualification.
+
+The example does **not** currently contain a camera, autonomous truth/vision
+guidance, the three-gate course, perception/tracking, race completion tests, or
+race CI.
 
 ### 3.1 Current conventions
 
@@ -467,6 +474,12 @@ Only the next gate in sequence can count. For each physics tick:
 4. Test interpolated local y/z against `±inner_size/2`.
 5. On success, record gate index and simulation time exactly once.
 
+The pass timestamp is linearly interpolated between the previous and current
+simulation sample times using the same plane-crossing fraction; it never uses
+wall-clock time. Lap time runs from simulation time zero through the final
+ordered crossing. An enabled course emits exactly one final result on complete,
+incomplete, or interrupted simulation shutdown after execution starts.
+
 Tests must cover centered, edge-inside, edge-outside, backward, yawed, and fast
 diagonal crossings. The end-of-run output contract is:
 
@@ -646,7 +659,7 @@ The default camera-disabled run does not start or require the render server.
 **Handoff:** Record the DB path, export command, observed FPS, and any GPU-specific
 limitations.
 
-### [ ] C — Course and referee vertical slice
+### [x] C — Course and referee vertical slice
 
 **Objective:** Provide independently tested course geometry, rendering, pass
 scoring, and race results without autonomous guidance.
@@ -1019,7 +1032,7 @@ branch for later resumption.
 |---|---|---|
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
-| C | Not started | No course or referee code |
+| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, and exactly one final enabled-course result are implemented. 81 pure tests pass. Matching release integrations returned zero: default C0 passed with no race result; `single` emitted exactly one expected incomplete race result. Unknown and reserved courses failed clearly. Fresh screenshot: `/tmp/package-c-gate-536eb565.png`. |
 | D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
@@ -1038,27 +1051,42 @@ audit are complete, but Package D must remain open until an operator has armed,
 taken off, exercised roll/pitch/yaw/throttle, landed, and disarmed.
 
 After recording that result in the Package D handoff, Package E is the
-recommended implementation continuation. Packages B and C remain valid
-independent alternatives if camera or course work is prioritized first.
+recommended implementation continuation because its C and D code prerequisites
+are now present. Package B remains the next fully independent implementation
+option.
 
-Package A verification from the repository root, with the Elodin Python
-environment active and the current release CLI on `PATH`:
+Package C verification from the repository root uses the explicit Python
+environment and current release CLI:
 
 ```bash
-python3 -m pytest examples/betaflight-sitl/tests -q
-elodin run examples/betaflight-sitl/main.py
+/home/ubuntu/py-uv-env/bin/python -m pytest examples/betaflight-sitl/tests -q
+ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python ./target/release/elodin run examples/betaflight-sitl/main.py
+RACE_COURSE=single ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python ./target/release/elodin run examples/betaflight-sitl/main.py
 ```
 
-The verified C0 result was:
+The verified results were:
 
 ```text
-[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.837 status=PASS
+81 passed in 0.08s
+[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.835 status=PASS
+[RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
 ```
 
-The pure suite passed 24 tests in 0.15 seconds and C0 completed in 29 wall-clock
-seconds. Raising the takeoff criterion temporarily to 100 m emitted
-`status=FAIL` and returned process status 1; the required 0.1 m criterion was
-then restored.
+Both integrations returned zero. The default emitted one C0 result, no race
+result, and registered no gate entities. The `single` run emitted one C0 result
+and exactly one race result. Its `INCOMPLETE` status is expected because Package
+C preserves scripted vertical flight and adds no steering. `RACE_COURSE=oval`
+and `c1_straight` returned status 1 with clear unknown/reserved startup errors.
+The Package D audit also remained green with `RACE_COURSE=single`, emitting one
+`[D-AUDIT] ... status=PASS` and one race result.
+
+The current wheel was rebuilt and installed before integration so both Python
+and the CLI reported `0.19.3-alpha.0+536eb565.dirty`. The required release build
+and `git diff --check` passed. A fresh editor capture after main's rendering
+changes is retained at `/tmp/package-c-gate-536eb565.png`; runtime registration,
+a nonempty PNG, and the dominant saturated-orange rectangular ring verify the
+four-bar gate. Gamescope segfaulted only during teardown after confirming the
+screenshot write; no process remained.
 
 ## 13. Decision log
 

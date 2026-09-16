@@ -177,6 +177,58 @@ Betaflight path before `AxisAudit` observes the physical response. A successful
 run emits a `[D-AUDIT] ... status=PASS` line and exits nonzero if an axis responds
 with the wrong sign, throttle has no motor response, or ANGLE was not requested.
 
+### Race Course and Referee
+
+Course selection is independent of the command source:
+
+```bash
+# No course (default): preserves the C0 scripted takeoff.
+elodin run examples/betaflight-sitl/main.py
+
+# One static training gate plus truth-based scoring.
+RACE_COURSE=single elodin run examples/betaflight-sitl/main.py
+
+# Render the same course in the editor.
+RACE_COURSE=single elodin editor examples/betaflight-sitl/main.py
+```
+
+`RACE_COURSE` accepts `none` (default) and `single`. `c1_straight` is a
+reserved value and fails clearly until Package F implements it; every other
+value is also rejected at startup. Course parsing does not select or alter
+`RACE_GUIDANCE`, so the no-environment default remains the scripted C0 run.
+
+The single gate is centered at ENU `(10, 0, 1.8)` metres with yaw `0` and an
+exact `2.5 m` square inner opening. Yaw is about world +Z; yaw zero gives a
+plane normal along world +X. A pass approaches from negative gate-local X and
+crosses toward positive local X. Four static `0.2 m` saturated-orange matte
+bars render the frame; they carry only `WorldPos` and do not participate in
+rigid-body integration or collision physics.
+
+The referee scores simulation truth after command selection, independently of
+guidance mode. It interpolates each sampled segment at the next ordered gate
+plane, checks the interpolated local Y/Z point against the inclusive opening
+bounds, and records each gate once. The pass timestamp is interpolated between
+the segment endpoints in simulation time (never wall-clock time); lap time runs
+from simulation time zero through the final gate crossing. Guidance receives
+the resulting ordered progress on the next physics tick and only public course
+rules—never gate poses, the crossing point, or drone truth through this seam.
+
+An enabled course emits exactly one final machine-readable line, including on
+an incomplete or interrupted run. The default vertical script does not steer
+through the gate, so `single` normally reports:
+
+```text
+[RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
+```
+
+A completed synthetic or future guided run uses seconds with six decimal
+places, for example `lap_time=2.125000 pass_times=[2.125000]`. Referee-owned
+telemetry is recorded as:
+
+- `drone.last_gate_passed`: ordered gate index, initially `-1`;
+- `drone.gate_pass_times`: fixed three-entry simulation-seconds array, with
+  unpassed slots set to `-1.0` (reserved for the three-gate core course).
+
 
 ### Recorded Database
 
@@ -230,6 +282,9 @@ examples/betaflight-sitl/
 ├── audit.py           # Simulation-time audit guidance and physical assessment
 ├── baseline.py        # Default C0 scenario pass/fail assessment
 ├── controls.py        # Guidance, semantic input, RC conversion, and failsafe
+├── course.py          # Pure gate/course geometry and KDL bar generation
+├── referee.py         # Pure ordered crossing scorer and race result
+├── race_runtime.py    # Static scene entities and referee telemetry adapters
 ├── controller/        # s10-managed Rust gamepad/keyboard input provider
 ├── build.sh           # Build script for Betaflight SITL
 ├── init_eeprom.py     # Create and configure eeprom.bin
@@ -238,7 +293,7 @@ examples/betaflight-sitl/
 ├── sim.py             # Physics simulation systems
 ├── sensors.py         # IMU sensor simulation
 ├── comms.py           # UDP packets, conversions, and communication bridge
-├── tests/             # Pure pytest protocol and convention tests
+├── tests/             # Pure protocol, control, course, and referee tests
 ├── RACING_PLAN.md     # Incremental vision-guided racing plan
 ├── eeprom.bin         # Betaflight saved config (created on first run)
 ├── betaflight/        # Betaflight submodule

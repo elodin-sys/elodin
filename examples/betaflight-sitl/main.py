@@ -45,6 +45,9 @@ from controls import (
     guidance_mode_from_env,
     semantic_to_rc,
 )
+from course import course_from_env, gate_schematic
+from referee import Referee, world_position_from_transform
+from race_runtime import RaceTelemetry, spawn_course
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -59,6 +62,7 @@ config = DEFAULT_CONFIG
 
 try:
     guidance_mode = guidance_mode_from_env()
+    race_course = course_from_env()
 except ValueError as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(2)
@@ -134,13 +138,18 @@ drone = world.spawn(
         ),
         Drone(),
         IMU(),
+        RaceTelemetry(),
     ],
     name="drone",
 )
 
-# Editor schematic for visualization
-world.schematic(
-    """
+# Gate bars are kinematic scene entities with WorldPos only. They deliberately
+# have no Body/Inertia/Force components and never enter rigid-body integration.
+gate_entities = spawn_course(world, race_course)
+
+# Editor schematic for visualization. Procedural gate boxes use the editor's
+# standard non-emissive material; their entity poses supply the gate yaw.
+schematic = """
     tabs {
         hsplit name = "Viewport" {
             viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true active=#true
@@ -159,7 +168,17 @@ world.schematic(
     object_3d drone.world_pos {
         glb path="edu-450-v2-drone.glb" scale=10.0
     }
-    """,
+    """
+if race_course.gates:
+    # Keep the opt-in course framed during scripted bring-up; the default
+    # schematic retains its existing chase camera unchanged.
+    schematic = schematic.replace(
+        'pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos"',
+        'pos="(0,0,0,1, 4,-2,3)" look_at="(10,0,1.8)"',
+    )
+    schematic += "\n" + gate_schematic(race_course) + "\n"
+world.schematic(
+    schematic,
     "betaflight-sitl.kdl",
 )
 
@@ -217,6 +236,11 @@ if guidance_mode is GuidanceMode.MANUAL and not audit_requested:
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
 print(f"Guidance: {'audit (simulation time)' if audit_requested else guidance_mode.value}")
+if race_course.gates:
+    print(
+        f"Race course: {race_course.name} "
+        f"({len(race_course.gates)} gate, inner opening {race_course.inner_size:.1f}m)"
+    )
 print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
 print(
     f"Requested sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
@@ -262,6 +286,20 @@ start_time = [None]
 last_print = [0.0]
 c0_result: list[C0Result | None] = [None]
 axis_audit = AxisAudit() if audit_requested else None
+referee = Referee(race_course)
+# Establish the pre-integration truth sample so even a first-tick segment has
+# a well-defined previous endpoint.
+referee.observe_truth(config.initial_position, 0.0)
+race_result_emitted = [False]
+
+
+def emit_race_result() -> None:
+    """Emit the enabled course's final result exactly once."""
+
+    if race_course.gates and not race_result_emitted[0]:
+        print(referee.result().format())
+        race_result_emitted[0] = True
+
 
 # Pre-allocated buffers to avoid allocation in hot loop
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
@@ -345,6 +383,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     barometer = s.barometer
     magnetometer = s.magnetometer
     manual_values = s.manual_values
+    current_truth_position = None
     barometer_fresh = tick % _barometer_tick_interval == 0
     magnetometer_fresh = tick % _magnetometer_tick_interval == 0
     manual_input_poll = isinstance(command_source, ManualGuidance) and (
@@ -364,6 +403,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         gyro = sensor_data["drone.gyro"]
         world_pos = sensor_data["drone.world_pos"]
         world_vel = sensor_data["drone.world_vel"]
+        current_truth_position = world_position_from_transform(world_pos)
         if barometer_fresh:
             s.barometer = float(sensor_data["drone.baro"][0])
             barometer = s.barometer
@@ -416,6 +456,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
 
+    progress = referee.progress()
     update = GuidanceUpdate(
         sim_time=t,
         tick=tick,
@@ -425,6 +466,10 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         barometer_fresh=barometer_fresh and sensor_read_succeeded,
         magnetometer=magnetometer,
         magnetometer_fresh=magnetometer_fresh and sensor_read_succeeded,
+        last_gate_passed=progress.last_gate_passed,
+        next_gate_index=progress.next_gate_index,
+        gate_count=progress.gate_count,
+        gate_inner_size=progress.gate_inner_size,
     )
     if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
         next_control = command_source.update(update)
@@ -444,6 +489,21 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     if next_command != s.rc_telemetry:
         ctx.write_component("drone.rc_command", next_command.as_array())
         s.rc_telemetry = next_command
+
+    # Referee scoring is the final post-step stage. It always consumes truth,
+    # independent of guidance mode, while guidance sees only the public progress
+    # snapshot constructed above (therefore a pass becomes visible next tick).
+    if race_course.gates and current_truth_position is not None:
+        gate_event = referee.observe_truth(current_truth_position, t)
+        if gate_event is not None:
+            ctx.component_batch_operation(
+                writes={
+                    "drone.last_gate_passed": np.array([gate_event.gate_index], dtype=np.int64),
+                    "drone.gate_pass_times": np.array(
+                        referee.telemetry_pass_times(), dtype=np.float64
+                    ),
+                }
+            )
 
     # Print status every second
     if t - last_print[0] >= 1.0:
@@ -549,6 +609,8 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         if axis_audit is not None:
             print(axis_audit.format())
 
+        emit_race_result()
+
 
 # Return the next non-existent filename with auto-incremented
 # number if the pattern ends in Xs.
@@ -578,15 +640,23 @@ def next_filename(pattern: str) -> str:
 #   elodin editor examples/betaflight-sitl/main.py
 
 db_filename = next_filename("betaflight_dbXXX")
-world.run(
-    system,
-    simulation_rate=config.pid_rate,
-    generate_real_time=True,
-    max_ticks=config.total_sim_ticks,
-    post_step=sitl_post_step,
-    db_path=db_filename,
-    interactive=False,
-)
+try:
+    world.run(
+        system,
+        simulation_rate=config.pid_rate,
+        generate_real_time=True,
+        max_ticks=config.total_sim_ticks,
+        post_step=sitl_post_step,
+        db_path=db_filename,
+        interactive=False,
+    )
+finally:
+    # The CLI imports this file once to generate a recipe before starting the
+    # simulation child. Emit only from a process that actually initialized the
+    # bridge; this covers interrupted/exceptional simulation shutdown without
+    # duplicating the child's normal callback result in the recipe generator.
+    if bridge[0] is not None:
+        emit_race_result()
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 
