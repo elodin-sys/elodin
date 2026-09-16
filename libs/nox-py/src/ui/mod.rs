@@ -15,7 +15,7 @@ use impeller2_kdl::{
     apply_overlay as apply_overlay_model, extract_overlay as extract_overlay_model,
     overlay_asset_key, parse_overlay, parse_schematic, serialize_overlay, serialize_schematic,
 };
-use impeller2_wkt::{Schematic, SetDbConfig, StoreAsset};
+use impeller2_wkt::{DISPLAY_KERNEL_ASSET_PREFIX, Schematic, SetDbConfig, StoreAsset};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
@@ -28,11 +28,22 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 #[derive(Clone, Debug)]
 pub struct PySchematic {
     pub(crate) inner: Schematic,
+    pub(crate) kernel_assets: HashMap<String, Vec<u8>>,
 }
 
 impl PySchematic {
     pub fn from_inner(inner: Schematic) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            kernel_assets: HashMap::new(),
+        }
+    }
+
+    pub fn from_parts(inner: Schematic, kernel_assets: HashMap<String, Vec<u8>>) -> Self {
+        Self {
+            inner,
+            kernel_assets,
+        }
     }
 
     pub fn emit_kdl_string(&self) -> String {
@@ -46,7 +57,10 @@ impl PySchematic {
     #[staticmethod]
     fn from_kdl(text: &str) -> PyResult<Self> {
         let inner = parse_schematic(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            kernel_assets: HashMap::new(),
+        })
     }
 
     /// Emit deterministic KDL (FR-2 / FR-3).
@@ -134,7 +148,10 @@ fn schematic(
         push_elem(&mut inner, &elem)?;
     }
 
-    Ok(PySchematic { inner })
+    Ok(PySchematic {
+        inner,
+        kernel_assets: builders::take_kernel_assets(),
+    })
 }
 
 fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -194,6 +211,25 @@ fn write(schematic: &PySchematic, path: PathBuf) -> PyResult<()> {
     }
     std::fs::write(&path, kdl)
         .map_err(|e| PyRuntimeError::new_err(format!("write {}: {e}", path.display())))?;
+    if !schematic.kernel_assets.is_empty() {
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+        let kernel_dir = match parent {
+            Some(parent) => parent.join("kernels"),
+            None => PathBuf::from("kernels"),
+        };
+        std::fs::create_dir_all(&kernel_dir).map_err(|e| {
+            PyRuntimeError::new_err(format!("create_dir_all {}: {e}", kernel_dir.display()))
+        })?;
+        for (key, bytes) in &schematic.kernel_assets {
+            let hash = key
+                .strip_prefix(DISPLAY_KERNEL_ASSET_PREFIX)
+                .unwrap_or(key.rsplit('/').next().unwrap_or(key));
+            let sidecar = kernel_dir.join(hash);
+            std::fs::write(&sidecar, bytes).map_err(|e| {
+                PyRuntimeError::new_err(format!("write {}: {e}", sidecar.display()))
+            })?;
+        }
+    }
     Ok(())
 }
 
@@ -218,10 +254,22 @@ fn push(schematic: &PySchematic, db: &str, key: Option<String>) -> PyResult<()> 
         metadata,
     };
 
+    let kernel_assets = schematic.kernel_assets.clone();
     crate::db::block_on(move || async move {
         let mut client = impeller2_stellar::Client::connect(addr)
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
+        for (asset_key, bytes) in kernel_assets {
+            let kernel_store = StoreAsset {
+                key: asset_key,
+                bytes,
+            };
+            client
+                .send((&kernel_store).into_len_packet())
+                .await
+                .0
+                .map_err(|e| PyRuntimeError::new_err(format!("StoreAsset kernel: {e}")))?;
+        }
         client
             .send((&store).into_len_packet())
             .await
@@ -235,6 +283,12 @@ fn push(schematic: &PySchematic, db: &str, key: Option<String>) -> PyResult<()> 
         Ok::<(), PyErr>(())
     })?;
     Ok(())
+}
+
+/// Compile-check StableHLO text with the shared Cranelift backend.
+#[pyfunction]
+fn validate_stablehlo(mlir: &str) -> PyResult<()> {
+    cranelift_mlir::display_kernel::DisplayKernelExec::validate(mlir).map_err(PyValueError::new_err)
 }
 
 const BUILD_ERROR_KEY: &str = "ui.build_error";
@@ -309,6 +363,7 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_function(wrap_pyfunction!(write, &child)?)?;
     child.add_function(wrap_pyfunction!(push, &child)?)?;
     child.add_function(wrap_pyfunction!(set_build_error, &child)?)?;
+    child.add_function(wrap_pyfunction!(validate_stablehlo, &child)?)?;
     child.add_function(wrap_pyfunction!(overlay_key, &child)?)?;
     child.add_function(wrap_pyfunction!(apply_overlay_kdl, &child)?)?;
     child.add_function(wrap_pyfunction!(extract_overlay_kdl, &child)?)?;

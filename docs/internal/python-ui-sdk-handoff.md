@@ -41,8 +41,8 @@ FSW KDLs live at `../fsw/assets/schematics` (sibling of this repo). Corpus copie
 | **3** | `elodin ui watch`, last-good, editor error banner | **Done enough to demo.** No headless-editor integration test (G3 still wants save→re-render &lt; 1s recorded). |
 | **4** | Layout overlay | **Implemented.** Overlay KDL + `ui.apply_overlay` / `extract_overlay`; watch merges `*.overlay.kdl`; editor **Save Layout** writes DB asset plus a temporary local inspection copy. |
 | **5** | Fleet migration + `to-python` codegen | **In progress.** `elodin schematic to-python` emits typed builder calls; all 22 live FSW schematics are generated under `../fsw/dashboards` and model-equality checked. Hand-authored organization of the generated `main.py` remains. |
-| **6** | Tier B: real math in editor/eql (faer, per-sample graph eval) | **G6 implemented.** A shared scalar/vector evaluator projects ordered tuples, arithmetic, `sqrt()`, `norm()`, casts, and core scalar formulas from `TelemetryCache` into normal `LineTree` plots. Direct component plots retain their existing fast path; unsupported formulas still use query-backed plots. `sym_mat3` packing and covariance Cholesky have focused golden coverage; general matrix-valued EQL operators remain future work. |
-| **7** | Tier C: JAX/StableHLO display kernels | **Not started** (do not build speculatively) |
+| **6** | Tier B: real math in editor/eql (faer, per-sample graph eval) | **G6 implemented.** A shared scalar/vector evaluator projects ordered tuples, arithmetic, `sqrt()`, `norm()`, casts, and core scalar formulas from `TelemetryCache` into normal `LineTree` plots. Direct component plots retain their existing fast path; unsupported formulas still use query-backed plots. EQL is the **direct/legacy** path only — do not resume matrix/`sym_mat3` work there. |
+| **7** | Tier C: JAX/StableHLO display kernels | **Implemented.** `@ui.kernel` traces ordinary JAX at schematic build/watch time, lowers scalar + `vmap` StableHLO, validates with Cranelift, and publishes content-addressed sidecars under `schematics/kernels/<sha256>`. The editor compiles once per hash and evaluates graphs in batches and object pose/covariance as scalars. No Python runs in the editor after push. |
 
 The commit message `ai: Phase 2.` also contains Phase 3 (watch CLI, status bar, demo docs). Treat Phases 0–3 as landed on this SHA.
 
@@ -176,7 +176,16 @@ Only after 4–5, or if graphs-of-formulas are blocking. Extend `eql::Expr` + ed
 
 ### Phase 7 — Tier C
 
-JAX → StableHLO display kernels in the editor. **Do not start unless Tier B ops are insufficient.**
+Python-authored JAX display kernels. Trace at `ui.watch` / `ui.push` / `ui.write`; execute native StableHLO/Cranelift in the editor. EQL remains available for direct component bindings. Derived matrix math (Cholesky, packed covariance) lives in `@ui.kernel` functions, not EQL.
+
+Demo: `examples/db-client/schematic.py` publishes `drone.nav.covariance` through a JAX 3×3 Cholesky kernel (explicit StableHLO ops; `jnp.linalg.cholesky` lowers to LAPACK FFI and is rejected) used by both a graph and an ellipsoid. Workflow is unchanged:
+
+```bash
+uv run python examples/db-client/main.py --db-schematic
+elodin ui watch examples/db-client/schematic.py --db 127.0.0.1:2240
+```
+
+After a successful push the editor does not need the Python process.
 
 ---
 

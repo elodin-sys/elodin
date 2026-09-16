@@ -41,6 +41,16 @@ If you used `--no-editor` on the first command, open the editor separately:
 ELODIN_ASSETS_DIR=./assets elodin editor 127.0.0.1:2240
 ```
 
+## Display kernels
+
+`schematic.py` traces a JAX `@ui.kernel` (covariance → Cholesky) at push time.
+Watch writes the StableHLO sidecar to `schematics/kernels/<sha256>` **before**
+activating KDL. After that, the editor evaluates the kernel natively — you can
+stop the Python watch process and the graph / ellipsoid keep updating.
+
+A failed trace or Cranelift validation keeps the last-good schematic and sets
+`ui.build_error`.
+
 ## Try it
 
 1. In `examples/db-client/schematic.py`, rename a graph (e.g. `"Battery (V)"` → `"Battery volts"`).

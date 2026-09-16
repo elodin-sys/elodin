@@ -90,10 +90,12 @@ class Schema:
                 raise ExprError(f"unknown component {name!r}")
             return ComponentHandle(name, strict=False)
         info = self._components[name]
+        prim = info.get("prim_type") or info.get("type")
         return ComponentHandle(
             name,
             element_names=info.get("element_names") or [],
             shape=info.get("shape") or None,
+            prim_type=str(prim) if prim is not None else None,
             strict=self.strict,
         )
 

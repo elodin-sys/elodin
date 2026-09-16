@@ -7,8 +7,32 @@ Watch live::
 
 from __future__ import annotations
 
+import jax.numpy as jnp
+
 import elodin.ui as ui
-from elodin.ui import Expr
+from elodin.ui import Expr, Schema
+
+
+def packed_covariance_cholesky(cov):
+    """3×3 Cholesky of the editor packed SPD 6-vector ``[p00,p10,p20,p11,p21,p22]``.
+
+    ``jnp.linalg.cholesky`` lowers to LAPACK FFI, which Cranelift rejects.
+    """
+    p00, p10, p20 = cov[0], cov[1], cov[2]
+    p11, p21, p22 = cov[3], cov[4], cov[5]
+    l00 = jnp.sqrt(p00)
+    l10 = p10 / l00
+    l20 = p20 / l00
+    l11 = jnp.sqrt(p11 - l10 * l10)
+    l21 = (p21 - l20 * l10) / l11
+    l22 = jnp.sqrt(p22 - l20 * l20 - l21 * l21)
+    z = jnp.float64(0.0)
+    return jnp.array([[l00, z, z], [l10, l11, z], [l20, l21, l22]])
+
+
+@ui.kernel
+def covariance_cholesky(cov):
+    return packed_covariance_cholesky(cov)
 
 
 def build() -> ui.Schematic:
@@ -16,6 +40,17 @@ def build() -> ui.Schematic:
     world_pos = Expr("drone.world_pos")
     ground_speed = Expr("drone.nav.speed")
     chase_pos = world_pos + Expr("(0,0,0,0, 0.4, 0.4, 0.25)")
+    schema = Schema.from_json(
+        {
+            "components": {
+                "drone.nav.covariance": {
+                    "shape": [6],
+                    "prim_type": "f64",
+                }
+            }
+        }
+    )
+    chol = covariance_cholesky(schema["drone.nav.covariance"])
 
     return ui.schematic(
         ui.tabs(
@@ -52,7 +87,7 @@ def build() -> ui.Schematic:
             ui.vsplit(
                 ui.graph(world_pos, name="World pos (quaternion + xyz)"),
                 ui.graph(ground_speed, name="Ground speed (m/s)"),
-                ui.graph(ground_speed.sqrt() + 1, name="Square root of ground speed"),
+                ui.graph(chol, name="Nav covariance Cholesky"),
                 name="Pose",
             ),
         ),
@@ -66,6 +101,14 @@ def build() -> ui.Schematic:
                 )
                 for i in range(4)
             ],
+        ),
+        ui.object_3d(
+            world_pos,
+            mesh=ui.ellipsoid(
+                error_covariance_cholesky=chol,
+                color=ui.color(64, 180, 255, 80),
+                error_confidence_interval=70.0,
+            ),
         ),
         ui.line_3d(world_pos, line_width=2.0, color="yalk"),
         coordinate=ui.coordinate(frame="ENU"),

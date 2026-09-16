@@ -67,7 +67,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
         let (icons, graph_id) = args;
 
-        let InspectorGraph {
+        let InspectorGraph{
             metadata_store,
             schema_store,
             mut graph_states,
@@ -619,7 +619,7 @@ fn add_components_from_eql(
             .collect();
         dependencies.sort();
         dependencies.dedup();
-        graph_state.derived = Some(DerivedGraph {
+        graph_state.derived = Some(DerivedGraph{
             source: query.to_string(),
             expr,
             dependencies,

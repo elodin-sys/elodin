@@ -11,7 +11,7 @@ use bevy_egui::egui::{self, Color32};
 use impeller2::schema::Schema;
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::ComponentPath;
-use impeller2_wkt::{ComponentMetadata, GraphType};
+use impeller2_wkt::{ComponentMetadata, DisplayKernelBinding, GraphType};
 
 use super::Line;
 use super::gpu::LineVisibleRange;
@@ -28,6 +28,17 @@ pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 pub struct DerivedGraph {
     pub source: String,
     pub expr: eql::Expr,
+    pub dependencies: Vec<ComponentId>,
+    pub lines: Vec<Handle<Line>>,
+    pub colors: Vec<Color32>,
+    pub path: ComponentPath,
+    pub last_generation: u64,
+    pub last_range: Option<(i64, i64)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct KernelGraph {
+    pub binding: DisplayKernelBinding,
     pub dependencies: Vec<ComponentId>,
     pub lines: Vec<Handle<Line>>,
     pub colors: Vec<Color32>,
@@ -54,6 +65,7 @@ pub struct GraphBundle {
 pub struct GraphState {
     pub components: BTreeMap<ComponentPath, GraphStateComponent>,
     pub derived: Option<DerivedGraph>,
+    pub kernel: Option<KernelGraph>,
     pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
@@ -107,6 +119,7 @@ impl GraphBundle {
         let graph_state = GraphState {
             components,
             derived: None,
+            kernel: None,
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,

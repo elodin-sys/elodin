@@ -16,6 +16,7 @@ from .expr import (
     sym_mat3,
     tuple_expr,
 )
+from .kernel import KernelError, KernelExpr, kernel
 from .schema import Schema
 
 Schematic = _native.Schematic
@@ -123,6 +124,9 @@ __all__ = [
     "ExprError",
     "ComponentHandle",
     "Schema",
+    "KernelExpr",
+    "KernelError",
+    "kernel",
     "pose",
     "sym_mat3",
     "tuple_expr",

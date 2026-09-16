@@ -712,7 +712,7 @@ mod db_save_tests {
     use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem, WindowSchematic};
 
     fn glb_object(eql: &str, mesh: &str) -> SchematicElem {
-        SchematicElem::Object3d(Object3D {
+        SchematicElem::Object3d(Object3D{
             eql: eql.into(),
             mesh: Object3DMesh::glb(mesh),
             frame: None,
@@ -723,7 +723,8 @@ mod db_save_tests {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: Default::default(),
-        })
+                    kernel: None,
+})
     }
 
     #[test]

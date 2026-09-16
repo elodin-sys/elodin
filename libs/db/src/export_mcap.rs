@@ -3264,6 +3264,7 @@ mod tests {
             thrusters: vec![],
             mesh_visibility_range: None,
             node_id: Default::default(),
+            kernel: None,
         }
     }
 

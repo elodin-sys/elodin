@@ -579,6 +579,7 @@ fn object_mesh_expr(mesh: &Object3DMesh) -> PyExpr {
             error_confidence_interval,
             show_grid,
             grid_color,
+            ..
         } => PyExpr::call("ellipsoid")
             .kw("scale", py_str(scale))
             .kw("color", py_color(*color))

@@ -383,6 +383,7 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             })],
             ..Default::default()
         };
@@ -435,6 +436,7 @@ mod tests {
             thrusters: effects.iter().map(|e| thruster_with_effect(e)).collect(),
             mesh_visibility_range: None,
             node_id: Default::default(),
+            kernel: None,
         }
     }
 
@@ -558,6 +560,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
                 SchematicElem::Object3d(Object3D {
                     eql: "b".into(),
@@ -570,6 +573,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
                 SchematicElem::Object3d(Object3D {
                     eql: "c".into(),
@@ -582,6 +586,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
             ],
             ..Default::default()
@@ -608,6 +613,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
                 SchematicElem::Object3d(Object3D {
                     eql: "b".into(),
@@ -620,6 +626,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
             ],
             ..Default::default()
@@ -659,6 +666,7 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             })],
             ..Default::default()
         };
@@ -698,6 +706,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
                 SchematicElem::Object3d(Object3D {
                     eql: "b".into(),
@@ -710,6 +719,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
             ],
             ..Default::default()
@@ -764,6 +774,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
                 SchematicElem::Object3d(Object3D {
                     eql: "b".into(),
@@ -776,6 +787,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
             ],
             ..Default::default()
@@ -817,6 +829,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
                 SchematicElem::Object3d(Object3D {
                     eql: "b".into(),
@@ -829,6 +842,7 @@ mod tests {
                     thrusters: Vec::new(),
                     mesh_visibility_range: None,
                     node_id: Default::default(),
+                    kernel: None,
                 }),
             ],
             ..Default::default()
@@ -858,6 +872,7 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             })],
             ..Default::default()
         };
@@ -898,6 +913,7 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             })],
             ..Default::default()
         };
@@ -927,6 +943,7 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             })],
             ..Default::default()
         };
