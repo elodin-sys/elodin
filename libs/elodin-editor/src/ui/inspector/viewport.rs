@@ -2526,8 +2526,10 @@ mod tests {
             scale_error: None,
             error_covariance_cholesky_expr: None,
             error_covariance_expr: None,
+            last_pose_kernel_input: None,
+            last_cov_kernel_input: None,
             joint_animations: Vec::new(),
-            data: Object3D {
+            data: Object3D{
                 eql: eql.to_string(),
                 mesh: Object3DMesh::glb("model.glb"),
                 frame: None,
@@ -2538,7 +2540,8 @@ mod tests {
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,
                 node_id: Default::default(),
-            },
+                            kernel: None,
+},
         }
     }
 

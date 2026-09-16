@@ -1155,6 +1155,15 @@ fn floor_ts_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
 }
 
 /// Parse an EQL string and insert every referenced component ID into `out`.
+fn collect_kernel_component_ids(
+    binding: &impeller2_wkt::DisplayKernelBinding,
+    out: &mut HashSet<ComponentId>,
+) {
+    for input in &binding.inputs {
+        out.insert(ComponentId::new(&input.component));
+    }
+}
+
 fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<ComponentId>) {
     if eql.trim().is_empty() {
         return;
@@ -1182,9 +1191,16 @@ fn collect_object_3d_mesh_component_ids(
             scale,
             error_covariance_cholesky,
             error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
             ..
         } => {
-            if let Some(cholesky) = error_covariance_cholesky {
+            if let Some(kernel) = error_covariance_cholesky_kernel
+                .as_ref()
+                .or(error_covariance_kernel.as_ref())
+            {
+                collect_kernel_component_ids(kernel, out);
+            } else if let Some(cholesky) = error_covariance_cholesky {
                 collect_eql_component_ids(cholesky, eql_ctx, out);
             } else if let Some(covariance) = error_covariance {
                 collect_eql_component_ids(covariance, eql_ctx, out);
@@ -1206,7 +1222,9 @@ fn plot_fetch_component_ids(
 ) -> HashSet<ComponentId> {
     let mut ids = HashSet::new();
     for gs in graph_states.iter() {
-        if let Some(derived) = &gs.derived {
+        if let Some(kernel) = &gs.kernel {
+            ids.extend(kernel.dependencies.iter().copied());
+        } else if let Some(derived) = &gs.derived {
             ids.extend(derived.dependencies.iter().copied());
         } else {
             for (path, _) in gs.enabled_lines.keys() {
@@ -1218,7 +1236,11 @@ fn plot_fetch_component_ids(
         collect_eql_component_ids(&line.eql, eql_ctx, &mut ids);
     }
     for obj in object_3ds.iter() {
-        collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        if let Some(kernel) = &obj.data.kernel {
+            collect_kernel_component_ids(kernel, &mut ids);
+        } else {
+            collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        }
         collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
         // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
         for thruster in &obj.data.thrusters {
@@ -3181,6 +3203,8 @@ mod tests {
             color: default_ellipsoid_color(),
             error_covariance_cholesky: Some("shape.cholesky".into()),
             error_covariance: Some("shape.covariance".into()),
+            error_covariance_cholesky_kernel: None,
+            error_covariance_kernel: None,
             error_confidence_interval: default_ellipsoid_confidence_interval(),
             show_grid: false,
             grid_color: default_ellipsoid_grid_color(),

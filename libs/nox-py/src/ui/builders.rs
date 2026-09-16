@@ -1,5 +1,6 @@
 //! Panel / object builders for `elodin.ui` (Phase 1: EQL as strings).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::str::FromStr;
@@ -202,6 +203,66 @@ fn extract_optional_color(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Col
 fn parse_frame(frame: &str) -> PyResult<GeoFrame> {
     GeoFrame::from_str(frame)
         .map_err(|_| PyValueError::new_err(format!("unknown coordinate frame {frame:?}")))
+}
+
+thread_local! {
+    static PENDING_KERNEL_ASSETS: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn take_kernel_assets() -> HashMap<String, Vec<u8>> {
+    PENDING_KERNEL_ASSETS.with(|pending| std::mem::take(&mut *pending.borrow_mut()))
+}
+
+fn register_kernel_asset(key: String, bytes: Vec<u8>) {
+    PENDING_KERNEL_ASSETS.with(|pending| {
+        pending.borrow_mut().insert(key, bytes);
+    });
+}
+
+enum ValueBinding {
+    Eql(String),
+    Kernel(DisplayKernelBinding),
+}
+
+fn extract_kernel_binding(obj: &Bound<'_, PyAny>) -> PyResult<Option<DisplayKernelBinding>> {
+    if !obj.hasattr("_display_kernel")? {
+        return Ok(None);
+    }
+    let info = obj.getattr("_display_kernel")?;
+    let hash: String = info.get_item("hash")?.extract()?;
+    let asset: String = info.get_item("asset")?.extract()?;
+    let sidecar: Vec<u8> = info.get_item("sidecar")?.extract()?;
+    let inputs_obj = info.get_item("inputs")?;
+    let mut inputs = Vec::new();
+    for item in inputs_obj.try_iter()? {
+        let item = item?;
+        inputs.push(DisplayKernelInput {
+            component: item.get_item("component")?.extract()?,
+            shape: item
+                .get_item("shape")
+                .ok()
+                .and_then(|value| value.extract().ok())
+                .unwrap_or_default(),
+            dtype: item
+                .get_item("dtype")
+                .ok()
+                .and_then(|value| value.extract().ok())
+                .unwrap_or_default(),
+        });
+    }
+    register_kernel_asset(asset.clone(), sidecar);
+    Ok(Some(DisplayKernelBinding {
+        hash,
+        asset,
+        inputs,
+    }))
+}
+
+fn extract_value_binding(obj: &Bound<'_, PyAny>) -> PyResult<ValueBinding> {
+    if let Some(kernel) = extract_kernel_binding(obj)? {
+        return Ok(ValueBinding::Kernel(kernel));
+    }
+    Ok(ValueBinding::Eql(extract_eql(obj)?))
 }
 
 /// Accept `str`, an object with `__str__` (e.g. `ui.Expr`), or a list of those.
@@ -556,7 +617,10 @@ fn graph(
     colors: Option<Vec<Bound<'_, PyAny>>>,
     share: Option<f32>,
 ) -> PyResult<PyPanel> {
-    let eql = extract_eql(eql)?;
+    let (eql, kernel) = match extract_value_binding(eql)? {
+        ValueBinding::Eql(eql) => (eql, None),
+        ValueBinding::Kernel(kernel) => (String::new(), Some(kernel)),
+    };
     let graph_type = match graph_type {
         None | Some("line") => GraphType::Line,
         Some("point") => GraphType::Point,
@@ -584,6 +648,7 @@ fn graph(
     Ok(PyPanel {
         inner: Panel::Graph(Graph {
             eql,
+            kernel,
             name,
             graph_type,
             locked,
@@ -1087,12 +1152,29 @@ fn ellipsoid(
             "set only one of error_covariance_cholesky or error_covariance",
         ));
     }
+    let (error_covariance_cholesky, error_covariance_cholesky_kernel) =
+        match error_covariance_cholesky {
+            Some(obj) if !obj.is_none() => match extract_value_binding(obj)? {
+                ValueBinding::Eql(eql) => (Some(eql), None),
+                ValueBinding::Kernel(kernel) => (None, Some(kernel)),
+            },
+            _ => (None, None),
+        };
+    let (error_covariance, error_covariance_kernel) = match error_covariance {
+        Some(obj) if !obj.is_none() => match extract_value_binding(obj)? {
+            ValueBinding::Eql(eql) => (Some(eql), None),
+            ValueBinding::Kernel(kernel) => (None, Some(kernel)),
+        },
+        _ => (None, None),
+    };
     Ok(PyMesh {
         inner: Object3DMesh::Ellipsoid {
             scale: extract_optional_eql(scale)?.unwrap_or_else(default_ellipsoid_scale_expr),
             color: extract_optional_color(color)?.unwrap_or_else(default_ellipsoid_color),
-            error_covariance_cholesky: extract_optional_eql(error_covariance_cholesky)?,
-            error_covariance: extract_optional_eql(error_covariance)?,
+            error_covariance_cholesky,
+            error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
             error_confidence_interval,
             show_grid,
             grid_color: extract_optional_color(grid_color)?
@@ -1258,7 +1340,10 @@ fn object_3d(
     thrusters: Option<Vec<Bound<'_, PyAny>>>,
     visibility: Option<Bound<'_, PyAny>>,
 ) -> PyResult<PyObject3D> {
-    let eql = extract_eql(eql)?;
+    let (eql, kernel) = match extract_value_binding(eql)? {
+        ValueBinding::Eql(eql) => (eql, None),
+        ValueBinding::Kernel(kernel) => (String::new(), Some(kernel)),
+    };
     let mut mesh = mesh.extract::<PyRef<'_, PyMesh>>()?.inner.clone();
     if let Some(anims) = animate {
         let animations = anims
@@ -1309,6 +1394,8 @@ fn object_3d(
             frame: frame.map(parse_frame).transpose()?,
             frame_orientation: frame_orientation.map(parse_frame).transpose()?,
             orientation,
+            sensor_visible: true,
+            kernel,
             icon: icon
                 .map(|obj| -> PyResult<_> { Ok(obj.extract::<PyRef<'_, PyIcon>>()?.inner.clone()) })
                 .transpose()?,
