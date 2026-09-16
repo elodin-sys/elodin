@@ -12,6 +12,7 @@ Viewport camera frustum overlay rendering.
 - Marks the camera up direction via `frustums_up_marker`, so the image orientation can be read off the frustum.
   `highlight` thickens the far-plane top edge and balls the corner holding the image origin; `triangle` stands a triangle on that edge, using the edge itself as its base.
   Marker geometry is drawn opaque white so it separates from `frustums_color`, falling back to that color's complement when the frustum is itself near-white.
+- Repeats the marker along the top of the camera's own pane — 3D viewports and sensor camera panes alike — so the image orientation reads the same there as on the frustum.
 - Parents frustum visuals to the source camera, so motion/rotation stay exact.
 - Renders frustums across viewport render layers.
 - A viewport never renders its own frustum; it only renders frustums from other viewports.
