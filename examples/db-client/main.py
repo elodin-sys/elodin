@@ -176,8 +176,13 @@ def flight_loop(client: edb.Client, stop: threading.Event):
 
 
 def derived_loop(client: edb.Client, stop: threading.Event):
-    """Consume the live world_pos stream and publish ground speed back."""
-    speed_w = client.table_writer({"drone.nav.speed": edb.f64})
+    """Consume the live world_pos stream and publish ground speed + covariance."""
+    speed_w = client.table_writer(
+        {
+            "drone.nav.speed": edb.f64,
+            "drone.nav.covariance": edb.f64[6].labeled("p00", "p10", "p20", "p11", "p21", "p22"),
+        }
+    )
     prev = None
     try:
         with client.stream("drone.world_pos") as rows:
@@ -189,9 +194,15 @@ def derived_loop(client: edb.Client, stop: threading.Event):
                     dt_us = row.timestamp_us - prev[0]
                     if dt_us > 0:
                         speed = float(np.linalg.norm(pos - prev[1]) / (dt_us * 1e-6))
+                        # Diagonal SPD 6-pack that grows with speed (meters²).
+                        var = 0.02 + 0.08 * speed
+                        cov = [var, 0.0, 0.0, var, 0.0, var * 0.4]
                         speed_w.write_nowait(
                             timestamp_us=row.timestamp_us,
-                            values={"drone.nav.speed": speed},
+                            values={
+                                "drone.nav.speed": speed,
+                                "drone.nav.covariance": cov,
+                            },
                         )
                 prev = (row.timestamp_us, pos.copy())
     finally:

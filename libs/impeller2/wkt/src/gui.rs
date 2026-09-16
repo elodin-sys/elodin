@@ -943,10 +943,163 @@ impl Asset for Panel {
     const NAME: &'static str = "panel";
 }
 
+pub const DISPLAY_KERNEL_BATCH_SIZE: u32 = 256;
+pub const DISPLAY_KERNEL_ASSET_PREFIX: &str = "schematics/kernels/";
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct DisplayKernelInput {
+    pub component: String,
+    #[serde(default)]
+    pub shape: Vec<u64>,
+    #[serde(default)]
+    pub dtype: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct DisplayKernelBinding {
+    pub hash: String,
+    pub asset: String,
+    #[serde(default)]
+    pub inputs: Vec<DisplayKernelInput>,
+}
+
+impl DisplayKernelBinding {
+    pub fn asset_key(hash: &str) -> String {
+        format!("{DISPLAY_KERNEL_ASSET_PREFIX}{hash}")
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DisplayKernelTensor {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub component: String,
+    pub shape: Vec<u64>,
+    pub dtype: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DisplayKernelArtifact {
+    pub version: u32,
+    pub hash: String,
+    pub batch_size: u32,
+    pub inputs: Vec<DisplayKernelTensor>,
+    pub outputs: Vec<DisplayKernelTensor>,
+    pub scalar_mlir: String,
+    pub batched_mlir: String,
+}
+
+impl DisplayKernelArtifact {
+    pub fn parse(bytes: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(bytes).map_err(|err| err.to_string())
+    }
+
+    pub fn input_nbytes(&self, batched: bool) -> Result<Vec<usize>, String> {
+        self.inputs
+            .iter()
+            .map(|tensor| tensor_nbytes(tensor, batched.then_some(self.batch_size)))
+            .collect()
+    }
+
+    pub fn output_nbytes(&self, batched: bool) -> Result<Vec<usize>, String> {
+        self.outputs
+            .iter()
+            .map(|tensor| tensor_nbytes(tensor, batched.then_some(self.batch_size)))
+            .collect()
+    }
+
+    /// Canonical JSON used for the content hash (hash field itself excluded).
+    pub fn hash_payload(&self) -> Result<Vec<u8>, String> {
+        let inputs: Vec<serde_json::Value> = self
+            .inputs
+            .iter()
+            .map(|tensor| {
+                serde_json::json!({
+                    "name": tensor.name,
+                    "component": tensor.component,
+                    "shape": tensor.shape,
+                    "dtype": tensor.dtype,
+                })
+            })
+            .collect();
+        let outputs: Vec<serde_json::Value> = self
+            .outputs
+            .iter()
+            .map(|tensor| {
+                serde_json::json!({
+                    "shape": tensor.shape,
+                    "dtype": tensor.dtype,
+                })
+            })
+            .collect();
+        let payload = serde_json::json!({
+            "batch_size": self.batch_size,
+            "inputs": inputs,
+            "outputs": outputs,
+            "scalar_mlir": self.scalar_mlir,
+            "batched_mlir": self.batched_mlir,
+        });
+        canonical_json_bytes(&payload)
+    }
+}
+
+fn canonical_json_bytes(value: &serde_json::Value) -> Result<Vec<u8>, String> {
+    Ok(canonical_json_value(value).to_string().into_bytes())
+}
+
+fn canonical_json_value(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<_> = map.keys().cloned().collect();
+            keys.sort();
+            let mut out = serde_json::Map::new();
+            for key in keys {
+                if let Some(item) = map.get(&key) {
+                    out.insert(key, canonical_json_value(item));
+                }
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(canonical_json_value).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn tensor_nbytes(tensor: &DisplayKernelTensor, batch: Option<u32>) -> Result<usize, String> {
+    let width = dtype_width(&tensor.dtype)?;
+    let mut count = tensor.shape.iter().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim as usize)
+            .ok_or_else(|| "display kernel tensor is too large".to_string())
+    })?;
+    if let Some(batch) = batch {
+        count = count
+            .checked_mul(batch as usize)
+            .ok_or_else(|| "display kernel batch is too large".to_string())?;
+    }
+    count
+        .checked_mul(width)
+        .ok_or_else(|| "display kernel tensor is too large".to_string())
+}
+
+pub fn dtype_width(dtype: &str) -> Result<usize, String> {
+    match dtype {
+        "f64" | "i64" | "u64" => Ok(8),
+        "f32" | "i32" | "u32" => Ok(4),
+        "f16" | "i16" | "u16" => Ok(2),
+        "i8" | "u8" | "bool" => Ok(1),
+        other => Err(format!("unsupported display kernel dtype {other}")),
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Graph {
     pub eql: String,
+    #[serde(default)]
+    pub kernel: Option<DisplayKernelBinding>,
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
@@ -1333,6 +1486,10 @@ pub enum Object3DMesh {
         error_covariance_cholesky: Option<String>,
         #[serde(default)]
         error_covariance: Option<String>,
+        #[serde(default)]
+        error_covariance_cholesky_kernel: Option<DisplayKernelBinding>,
+        #[serde(default)]
+        error_covariance_kernel: Option<DisplayKernelBinding>,
         #[serde(default = "default_ellipsoid_confidence_interval")]
         error_confidence_interval: f32,
         #[serde(default = "default_ellipsoid_show_grid")]
@@ -1602,6 +1759,8 @@ pub struct Object3D {
     pub orientation: bevy_geo_frames::RotationKind,
     #[serde(default = "default_true")]
     pub sensor_visible: bool,
+    #[serde(default)]
+    pub kernel: Option<DisplayKernelBinding>,
     pub icon: Option<Object3DIcon>,
     #[serde(default)]
     pub thrusters: Vec<Thruster>,
@@ -2215,5 +2374,39 @@ mod tests {
         assert_eq!(config.effect_param_f32(&["contrast"], 0.0), 1.5);
         assert!(config.camera_model.is_none());
         assert!(config.lens_hfov_degrees.is_none());
+    }
+
+    #[test]
+    fn display_kernel_hash_payload_is_canonical_and_excludes_hash() {
+        let artifact = DisplayKernelArtifact {
+            version: 1,
+            hash: "should-not-appear".into(),
+            batch_size: 256,
+            inputs: vec![DisplayKernelTensor {
+                name: "cov".into(),
+                component: "drone.nav.covariance".into(),
+                shape: vec![6],
+                dtype: "f64".into(),
+            }],
+            outputs: vec![DisplayKernelTensor {
+                name: String::new(),
+                component: String::new(),
+                shape: vec![3, 3],
+                dtype: "f64".into(),
+            }],
+            scalar_mlir: "module {}".into(),
+            batched_mlir: "module {}".into(),
+        };
+        let payload = String::from_utf8(artifact.hash_payload().unwrap()).unwrap();
+        assert!(!payload.contains("should-not-appear"));
+        assert!(!payload.contains("\"version\""));
+        assert_eq!(
+            payload,
+            r#"{"batch_size":256,"batched_mlir":"module {}","inputs":[{"component":"drone.nav.covariance","dtype":"f64","name":"cov","shape":[6]}],"outputs":[{"dtype":"f64","shape":[3,3]}],"scalar_mlir":"module {}"}"#
+        );
+        assert_eq!(
+            artifact.hash_payload().unwrap(),
+            artifact.hash_payload().unwrap()
+        );
     }
 }

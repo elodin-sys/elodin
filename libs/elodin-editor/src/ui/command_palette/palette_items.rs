@@ -2093,6 +2093,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         orientation: Default::default(),
                         sensor_visible: true,
                         node_id: Default::default(),
+                        kernel: None,
                     },
                     expr.clone(),
                     &eql_ctx.0,
@@ -2179,7 +2180,19 @@ pub fn create_3d_object() -> PaletteItem {
 
                                                 let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, thrusters: Vec::new(), mesh_visibility_range: None, frame: None, frame_orientation: None, orientation: Default::default(), sensor_visible: true, node_id: Default::default() },
+                                                    Object3D {
+                                                        eql: eql.clone(),
+                                                        mesh: obj,
+                                                        icon: None,
+                                                        kernel: None,
+                                                        thrusters: Vec::new(),
+                                                        mesh_visibility_range: None,
+                                                        frame: None,
+                                                        frame_orientation: None,
+                                                        orientation: Default::default(),
+                                                        sensor_visible: true,
+                                                        node_id: Default::default(),
+                                                    },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,

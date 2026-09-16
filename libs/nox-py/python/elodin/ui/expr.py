@@ -103,7 +103,7 @@ class Expr:
 class ComponentHandle(Expr):
     """Schema-backed component reference with element / index access."""
 
-    __slots__ = ("_name", "_element_names", "_shape", "_strict")
+    __slots__ = ("_name", "_element_names", "_shape", "_strict", "_prim_type")
 
     def __init__(
         self,
@@ -111,12 +111,14 @@ class ComponentHandle(Expr):
         *,
         element_names: Sequence[str] | None = None,
         shape: Sequence[int] | None = None,
+        prim_type: str | None = None,
         strict: bool = True,
     ):
         super().__init__(name)
         self._name = name
         self._element_names = list(element_names or [])
         self._shape = list(shape) if shape is not None else None
+        self._prim_type = prim_type
         self._strict = strict
 
     @property
@@ -126,6 +128,10 @@ class ComponentHandle(Expr):
     @property
     def shape(self) -> list[int] | None:
         return list(self._shape) if self._shape is not None else None
+
+    @property
+    def prim_type(self) -> str | None:
+        return self._prim_type
 
     def __getattr__(self, item: str) -> Expr:
         if item.startswith("_"):

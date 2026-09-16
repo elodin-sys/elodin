@@ -44,7 +44,7 @@ use crate::{
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::{DerivedGraph, GraphBundle},
+        plot::{DerivedGraph, GraphBundle, KernelGraph},
         query_plot::QueryPlotData,
         schematic::{CurrentSchematic, EqlExt},
         tiles::{
@@ -969,11 +969,21 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
-        let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
-            if let Some(pending) = self.pending_object_3d.as_mut() {
-                pending.objects.push(object_3d);
-            }
-            return;
+        let expr = if object_3d.kernel.is_some() {
+            self.eql.0.parse_str("0").unwrap_or_else(|_| {
+                self.eql
+                    .0
+                    .parse_str(&object_3d.eql)
+                    .unwrap_or(eql::Expr::FloatLiteral(0.0))
+            })
+        } else {
+            let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
+                if let Some(pending) = self.pending_object_3d.as_mut() {
+                    pending.objects.push(object_3d);
+                }
+                return;
+            };
+            expr
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
@@ -1226,6 +1236,49 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Graph(graph) => {
+                let graph_label = graph_label(graph);
+                if let Some(binding) = graph.kernel.clone() {
+                    let mut dependencies: Vec<_> = binding
+                        .inputs
+                        .iter()
+                        .map(|input| impeller2::types::ComponentId::new(&input.component))
+                        .collect();
+                    dependencies.sort();
+                    dependencies.dedup();
+                    let mut bundle = GraphBundle::new(
+                        &mut self.render_layer_alloc,
+                        BTreeMap::new(),
+                        graph_label.clone(),
+                    );
+                    bundle.graph_state.locked = force_graph_lock || graph.locked;
+                    if matches!(context, PanelContext::Window(_)) {
+                        bundle.camera.is_active = false;
+                    }
+                    bundle.graph_state.auto_y_range = graph.auto_y_range;
+                    bundle.graph_state.y_range = graph.y_range.clone();
+                    bundle.graph_state.graph_type = graph.graph_type;
+                    bundle.graph_state.kernel = Some(KernelGraph {
+                        binding,
+                        dependencies,
+                        lines: Vec::new(),
+                        colors: graph
+                            .colors
+                            .iter()
+                            .copied()
+                            .map(EColor::into_color32)
+                            .collect(),
+                        path: ComponentPath::from_name(&format!("kernel.{graph_label}")),
+                        last_generation: u64::MAX,
+                        last_range: None,
+                    });
+                    let entity_cmds = self.commands.spawn(bundle);
+                    let graph_id = entity_cmds.id();
+                    if matches!(context, PanelContext::Window(_)) {
+                        self.commands.entity(graph_id).remove::<MainCamera>();
+                    }
+                    let pane = GraphPane::new(graph_id, graph_label);
+                    return tile_state.insert_tile(Tile::Pane(Pane::Graph(pane)), parent_id, false);
+                }
                 let eql = self
                     .eql
                     .0
@@ -1264,7 +1317,6 @@ impl LoadSchematicParams<'_, '_> {
                         }
                     })
                     .ok()?;
-                let graph_label = graph_label(graph);
                 let requires_evaluation = eql.requires_plot_evaluation();
                 let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
                 let uses_query_plot = requires_evaluation && !uses_derived_plot;

@@ -296,8 +296,20 @@ impl SchematicParam<'_, '_> {
                         let mut eql = String::new();
                         let mut colors: Vec<impeller2_wkt::Color> = vec![];
                         let mut parts: Vec<String> = Vec::new();
+                        let kernel = graph_state.kernel.as_ref().map(|k| k.binding.clone());
 
-                        if let Some(derived) = &graph_state.derived {
+                        if let Some(kernel_state) = &graph_state.kernel {
+                            for index in 0..kernel_state.lines.len().max(kernel_state.colors.len()) {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(kernel_state.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| kernel_state.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller2_wkt::Color::from_color32(color));
+                                }
+                            }
+                        } else if let Some(derived) = &graph_state.derived {
                             eql = derived.source.clone();
                             for index in 0..derived.lines.len().max(derived.colors.len()) {
                                 let color = graph_state
@@ -334,7 +346,7 @@ impl SchematicParam<'_, '_> {
 
                         let node_id = impeller2_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, graph.id);
-                        Some(Panel::Graph(impeller2_wkt::Graph {
+                        Some(Panel::Graph(impeller2_wkt::Graph{
                             eql,
                             name: pane_name,
                             graph_type: graph_state.graph_type,
@@ -343,6 +355,7 @@ impl SchematicParam<'_, '_> {
                             y_range: graph_state.y_range.clone(),
                             node_id,
                             colors,
+                            kernel,
                         }))
                     }
 

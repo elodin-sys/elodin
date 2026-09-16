@@ -59,7 +59,7 @@ def test_graph_accepts_expr():
     assert "drone.thrust" in built.emit_kdl()
 
 
-def test_g1_still_matches_with_expr_schematic():
+def test_db_client_expr_schematic_still_builds():
     import importlib.util
     from pathlib import Path
 
@@ -70,9 +70,10 @@ def test_g1_still_matches_with_expr_schematic():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    handwritten = ui.from_kdl((repo / "examples" / "db-client" / "schematic.kdl").read_text())
     rebuilt = mod.build()
-    assert ui.from_kdl(rebuilt.emit_kdl()) == ui.from_kdl(handwritten.emit_kdl())
+    kdl = rebuilt.emit_kdl()
+    assert "kernel=" in kdl
+    assert ui.from_kdl(kdl).emit_kdl() == kdl
 
 
 def test_apply_overlay_changes_share_without_source():

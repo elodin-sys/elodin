@@ -30,7 +30,7 @@ uv run python examples/db-client/main.py --no-editor --duration 5
 | `table_writer` + `write_nowait` (drop-oldest) | 100 Hz state writer: `drone.world_pos` (`f64[7]`, labeled quaternion + xyz), `drone.imu.accel`, `drone.imu.gyro`, `drone.propeller_angle` (drives the rotor `animate` joints) |
 | `table_writer` + blocking `write` | 10 Hz status writer: `drone.motor.rpm` (`f32[4]`), `drone.battery.voltage` (`f64`), `drone.status.armed` (`bool`), `drone.status.mode` (`i32`) |
 | `Field` DSL (`f64[7].labeled(...)`, `f32`, `bool_`, `i32`) | writer schemas |
-| `stream` (live) → derived write-back | `derived_loop` consumes `drone.world_pos` rows and publishes `drone.nav.speed` |
+| `stream` (live) → derived write-back | `derived_loop` consumes `drone.world_pos` rows and publishes `drone.nav.speed` plus a 6-pack `drone.nav.covariance` |
 | `send_msg` (message log) | one `drone.events` JSON event per completed lap |
 | `components`, `earliest_timestamp`, `latest`, `time_series`, `sql` + `sql_table_name`, `get_msgs` | shutdown summary |
 | Writer observability (`dropped`, `state()`) | logged when the flight loop stops |
@@ -47,6 +47,10 @@ uv run python examples/db-client/main.py --no-editor --duration 5
   speed
 - **Status** tab: battery voltage, motor RPM, armed flag, flight mode
 - **Pose** tab: the raw 7-element `world_pos` (labeled `q0..q3, x, y, z`)
+- Live Python path (`--db-schematic` + `elodin ui watch`): a JAX display kernel
+  projects `drone.nav.covariance` to Cholesky for a graph and a covariance
+  ellipsoid. After push, the editor runs that kernel natively — no Python
+  process is required at view time. See [`UI_WATCH.md`](UI_WATCH.md).
 
 The axis labels on the graphs come from the `.labeled(...)` element names set
 by the writers.
