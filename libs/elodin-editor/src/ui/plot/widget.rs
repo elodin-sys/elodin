@@ -45,7 +45,7 @@ use crate::{
         colors::{ColorExt, get_scheme, with_opacity},
         input_owner::UiInputOwners,
         plot::{
-            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS,
+            CollectedGraphData, GraphState, GraphStateComponent, Line, OVERVIEW_MAX_POINTS,
             data::evaluate_series,
             element_names_for_graph,
             gpu::{LineBundle, LineConfig, LineUniform},
@@ -209,6 +209,29 @@ pub enum PlotDataSource<'a> {
         query_label: String,
         series: Vec<XYPlotSeries>,
     },
+}
+
+fn retain_enabled_line(
+    kernel: Option<(&impeller2_bevy::ComponentPath, usize)>,
+    derived: Option<(&impeller2_bevy::ComponentPath, usize)>,
+    components: &std::collections::BTreeMap<impeller2_bevy::ComponentPath, GraphStateComponent>,
+    component_path: &impeller2_bevy::ComponentPath,
+    index: usize,
+) -> bool {
+    if let Some((path, len)) = kernel
+        && component_path == path
+    {
+        return index < len;
+    }
+    if let Some((path, len)) = derived
+        && component_path == path
+    {
+        return index < len;
+    }
+    components
+        .get(component_path)
+        .and_then(|component| component.get(index))
+        .is_some()
 }
 
 fn has_timeseries_selection(graph_state: &GraphState) -> bool {
@@ -907,6 +930,10 @@ impl TimeseriesPlot {
                                     .derived
                                     .as_ref()
                                     .is_some_and(|derived| derived.path == *component_path)
+                                    || graph_state
+                                        .kernel
+                                        .as_ref()
+                                        .is_some_and(|kernel| kernel.path == *component_path)
                                 {
                                     ui.add_space(8.0);
                                     ui.label(
@@ -1696,19 +1723,24 @@ pub fn sync_graphs(
             }
         }
 
+        let kernel_keep = graph_state
+            .kernel
+            .as_ref()
+            .map(|kernel| (&kernel.path, kernel.lines.len()));
+        let derived_keep = graph_state
+            .derived
+            .as_ref()
+            .map(|derived| (&derived.path, derived.lines.len()));
         graph_state
             .enabled_lines
             .retain(|(component_path, index), _| {
-                if let Some(derived) = &graph_state.derived
-                    && component_path == &derived.path
-                {
-                    return *index < derived.lines.len();
-                }
-                graph_state
-                    .components
-                    .get(component_path)
-                    .and_then(|component| component.get(*index))
-                    .is_some()
+                retain_enabled_line(
+                    kernel_keep,
+                    derived_keep,
+                    &graph_state.components,
+                    component_path,
+                    *index,
+                )
             });
     }
 }
@@ -2612,12 +2644,14 @@ pub fn graph_touch(
 
 #[cfg(test)]
 mod short_window_y_tests {
-    use super::{has_timeseries_selection, should_update_short_window_y};
+    use super::{has_timeseries_selection, retain_enabled_line, should_update_short_window_y};
     use crate::{
         plugins::render_layer_alloc::RenderLayerAllocator,
-        ui::plot::{DerivedGraph, GraphBundle},
+        ui::plot::{DerivedGraph, GraphBundle, KernelGraph},
     };
+    use bevy::prelude::Entity;
     use impeller2_bevy::ComponentPath;
+    use impeller2_wkt::DisplayKernelBinding;
     use std::collections::BTreeMap;
 
     #[test]
@@ -2640,6 +2674,62 @@ mod short_window_y_tests {
             last_range: None,
         });
         assert!(has_timeseries_selection(&graph_state));
+    }
+
+    #[test]
+    fn kernel_graph_lines_survive_eql_retain() {
+        let mut allocator = RenderLayerAllocator::default();
+        let mut graph_state =
+            GraphBundle::try_new(&mut allocator, BTreeMap::new(), "chol".to_string())
+                .expect("render layer")
+                .graph_state;
+        let path = ComponentPath::from_name("kernel.chol");
+        graph_state.kernel = Some(KernelGraph {
+            binding: DisplayKernelBinding {
+                hash: "abc".into(),
+                asset: "schematics/kernels/abc".into(),
+                inputs: Vec::new(),
+            },
+            dependencies: Vec::new(),
+            lines: vec![bevy::asset::Handle::default(); 2],
+            colors: Vec::new(),
+            path: path.clone(),
+            last_generation: 0,
+            last_range: None,
+        });
+        graph_state.enabled_lines.insert(
+            (path.clone(), 0),
+            (Entity::from_bits(1), bevy_egui::egui::Color32::WHITE),
+        );
+        graph_state.enabled_lines.insert(
+            (path.clone(), 1),
+            (Entity::from_bits(2), bevy_egui::egui::Color32::WHITE),
+        );
+        graph_state.enabled_lines.insert(
+            (path.clone(), 2),
+            (Entity::from_bits(3), bevy_egui::egui::Color32::WHITE),
+        );
+
+        let kernel_keep = graph_state
+            .kernel
+            .as_ref()
+            .map(|kernel| (&kernel.path, kernel.lines.len()));
+        graph_state
+            .enabled_lines
+            .retain(|(component_path, index), _| {
+                retain_enabled_line(
+                    kernel_keep,
+                    None,
+                    &graph_state.components,
+                    component_path,
+                    *index,
+                )
+            });
+
+        assert_eq!(graph_state.enabled_lines.len(), 2);
+        assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 0)));
+        assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 1)));
+        assert!(!graph_state.enabled_lines.contains_key(&(path, 2)));
     }
 
     #[test]
