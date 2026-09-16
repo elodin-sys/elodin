@@ -12,7 +12,7 @@ Viewport camera frustum overlay rendering.
 - Marks the camera up direction via `frustums_up_marker`, so the image orientation can be read off the frustum.
   `highlight` thickens the far-plane top edge and balls the corner holding the image origin.
   The edge keeps `frustums_color`, which is what tells several frustums apart; the ball is opaque white, falling back to that color's complement when the frustum is itself near-white.
-- Repeats the marker along the top of a sensor camera's own pane, so the image orientation reads the same there as on the frustum. 3D viewports can opt in with `frustums_up_marker_overlay`.
+- Repeats the marker along the top of the camera's own pane via `frustums_up_marker_overlay`, so the image orientation reads the same there as on the frustum. On by default for sensor cameras, whose pane exists only to show that image; off by default for 3D viewports, which are interactive scene views where several marked panes read as clutter.
 - Parents frustum visuals to the source camera, so motion/rotation stay exact.
 - Renders frustums across viewport render layers.
 - A viewport never renders its own frustum; it only renders frustums from other viewports.
@@ -25,7 +25,7 @@ Viewport camera frustum overlay rendering.
 - `frustums_color` (optional): named color or tuple string like `"(255,255,0,200)"`.
 - `frustums_thickness` (optional): edge radius in world units.
 - `frustums_up_marker` (optional): `none` (default) or `highlight`, which thickens the far-plane top edge and balls the image-origin corner. The ball is white, or the complement of `frustums_color` when that color is near-white.
-- `frustums_up_marker_overlay` (bool, default false): repeats the marker along the top of this viewport's own pane. Off by default, since a viewport is an interactive scene view and several panes carrying the marker at once read as clutter.
+- `frustums_up_marker_overlay` (bool, default false on viewports, true on sensor cameras): repeats the marker along the top of this camera's own pane.
 
 ## KDL usage
 ```kdl

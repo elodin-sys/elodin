@@ -235,6 +235,7 @@ This pattern gives you deterministic, reproducible testing of the full sensor st
 | `projection_color` | [f32; 3/4] | white | 2D projection color, normalized RGBA |
 | `frustums_thickness` | float | 0.006 | Frustum edge radius in world units |
 | `frustums_up_marker` | str | "none" | Marks image-up on the frustum: `"none"` or `"highlight"` (thick top edge + image-origin ball) |
+| `frustums_up_marker_overlay` | bool | True | Repeats the up marker along the top of this camera's pane |
 
 ### `ctx.read_msg()`
 

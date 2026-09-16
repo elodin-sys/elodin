@@ -1151,7 +1151,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     // Gated on create_frustum like the 3D marker, so deleting the
                     // frustum cannot strand a bar the inspector no longer exposes.
                     .filter(|config| {
-                        config.create_frustum && config.frustums_up_marker != FrustumUpMarker::None
+                        config.create_frustum
+                            && config.frustums_up_marker_overlay
+                            && config.frustums_up_marker != FrustumUpMarker::None
                     })
                 {
                     let image_rect = egui::Rect::from_min_size(

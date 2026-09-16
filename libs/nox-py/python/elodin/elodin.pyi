@@ -225,6 +225,7 @@ class WorldBuilder:
         projection_color: Optional[Sequence[float]] = None,
         frustums_thickness: float = 0.006,
         frustums_up_marker: str = "none",
+        frustums_up_marker_overlay: bool = True,
         fps: Optional[float] = None,
         cinematic: bool = False,
         ev100: Optional[float] = None,
@@ -249,7 +250,9 @@ class WorldBuilder:
         ``frustums_up_marker`` marks which frustum edge is the top of the camera
         image when ``create_frustum=True``: ``"highlight"`` thickens the
         far-plane top edge and puts a ball on the corner holding the image
-        origin. The marker is repeated along the top of the camera's own pane.
+        origin. ``frustums_up_marker_overlay`` repeats it along the top of this
+        camera's own pane, and is on by default since that pane exists only to
+        show this camera's image.
 
         ``cinematic=True`` enables the cinematic Earth stack in the render
         server (same meaning as KDL ``viewport cinematic=#true``). ``ev100``,
