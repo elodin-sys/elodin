@@ -1,6 +1,6 @@
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_local_points, frustum_segments, frustum_up_marker_balls, frustum_up_marker_color,
+    frustum_image_origin_ball, frustum_local_points, frustum_segments, frustum_up_marker_color,
     presentation_perspective,
 };
 use crate::MainCamera;
@@ -69,13 +69,11 @@ struct CameraFrustumFaceVisual {
     target: Entity,
 }
 
-/// Ball belonging to a frustum's up marker: the image-origin corner in
-/// `Highlight` mode, or a rounded joint of the outline in `Triangle` mode.
+/// Ball sitting on the frustum corner that holds the image origin.
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct CameraFrustumMarkerBallVisual {
     source: Entity,
     target: Entity,
-    ball: u8,
 }
 
 const FRUSTUM_FACE_ALPHA: u8 = 45;
@@ -373,7 +371,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             &mut params.material_cache,
         );
         let segments = frustum_segments(points, thickness, up_marker);
-        let marker_balls = frustum_up_marker_balls(&points, thickness, up_marker);
+        let image_origin = frustum_image_origin_ball(&points, thickness, up_marker);
         for (target_camera, render_layers) in &targets {
             if source_camera == *target_camera {
                 continue;
@@ -397,11 +395,6 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                 else {
                     continue;
                 };
-                let edge_material = if edge.is_up_marker {
-                    marker_material.clone()
-                } else {
-                    material.clone()
-                };
                 desired_segments.insert(
                     CameraFrustumLineVisual {
                         source: source_camera,
@@ -412,17 +405,16 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                         root_key,
                         local_transform,
                         render_layers.clone(),
-                        MeshMaterial3d(edge_material),
+                        MeshMaterial3d(material.clone()),
                     ),
                 );
             }
 
-            for (ball_idx, (center, radius)) in marker_balls.iter().copied().enumerate() {
+            if let Some((center, radius)) = image_origin {
                 desired_marker_balls.insert(
                     CameraFrustumMarkerBallVisual {
                         source: source_camera,
                         target: *target_camera,
-                        ball: ball_idx as u8,
                     },
                     (
                         root_key,

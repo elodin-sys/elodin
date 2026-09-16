@@ -50,10 +50,8 @@ pub fn default_viewport_frustums_thickness() -> f32 {
 pub enum FrustumUpMarker {
     #[default]
     None,
-    /// Thickens the far-plane top edge.
+    /// Thickens the far-plane top edge and balls its image-origin corner.
     Highlight,
-    /// Draws a triangle standing on the far-plane top edge.
-    Triangle,
 }
 
 impl FrustumUpMarker {
@@ -61,7 +59,6 @@ impl FrustumUpMarker {
         match self {
             Self::None => "none",
             Self::Highlight => "highlight",
-            Self::Triangle => "triangle",
         }
     }
 }
@@ -73,7 +70,6 @@ impl std::str::FromStr for FrustumUpMarker {
         match s.to_ascii_lowercase().as_str() {
             "none" => Ok(Self::None),
             "highlight" => Ok(Self::Highlight),
-            "triangle" => Ok(Self::Triangle),
             _ => Err(()),
         }
     }
@@ -844,6 +840,11 @@ pub struct Viewport {
     /// Marks the image-up direction on this viewport's frustum.
     #[serde(default)]
     pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats [`Self::frustums_up_marker`] along the top of this viewport's
+    /// own pane. Off by default: a viewport is an interactive scene view, and
+    /// several panes carrying the marker at once read as clutter.
+    #[serde(default)]
+    pub frustums_up_marker_overlay: bool,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     /// Which shared view-cube mesh (ENU/NED/ECEF) this viewport shows.
@@ -898,6 +899,7 @@ impl Default for Viewport {
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             frustums_up_marker: FrustumUpMarker::None,
+            frustums_up_marker_overlay: false,
             show_view_cube: true,
             view_cube_frame: None,
             effects: true,

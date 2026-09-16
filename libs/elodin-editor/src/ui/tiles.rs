@@ -300,6 +300,8 @@ pub struct ViewportConfig {
     pub frustums_thickness: f32,
     /// Marks the image-up direction on this viewport's frustum.
     pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats the up marker along the top of this viewport's own pane.
+    pub frustums_up_marker_overlay: bool,
     pub cinematic: bool,
     /// Authored bloom; `None` keeps house defaults.
     pub bloom: Option<BloomConfig>,
@@ -1364,15 +1366,19 @@ impl Pane {
                         );
 
                         // Same marker the sensor camera panes paint, since this
-                        // pane is likewise the image of a camera carrying a frustum.
-                        if let Some(config) = world
-                            .get::<ViewportConfig>(cam)
-                            .filter(|config| config.frustums_up_marker != FrustumUpMarker::None)
-                        {
+                        // pane is likewise the image of a camera carrying a
+                        // frustum — but opt-in, and gated on create_frustum so
+                        // deleting the frustum cannot strand it.
+                        if let Some(config) = world.get::<ViewportConfig>(cam).filter(|config| {
+                            config.create_frustum
+                                && config.frustums_up_marker_overlay
+                                && config.frustums_up_marker != FrustumUpMarker::None
+                        }) {
                             paint_up_marker(
                                 ui.painter(),
                                 rect,
                                 config.frustums_up_marker,
+                                config.frustums_color.into_color32(),
                                 frustum_up_marker_color(config.frustums_color).into_color32(),
                             );
                         }
@@ -1891,6 +1897,7 @@ impl ViewportPane {
                 projection_color: viewport.projection_color,
                 frustums_thickness: viewport.frustums_thickness,
                 frustums_up_marker: viewport.frustums_up_marker,
+                frustums_up_marker_overlay: viewport.frustums_up_marker_overlay,
                 cinematic: viewport.cinematic,
                 bloom: viewport.bloom.clone(),
             },

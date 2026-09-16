@@ -23,10 +23,9 @@ It is attached to a `drone` entity whose `world_pos` is updated in `pre_step`, s
 The viewport frustum and sensor camera frustum use different colors so they can be compared in the target viewport.
 
 Both frustums carry a camera-up marker, which tells you how the image is oriented on a frustum seen from outside.
-They use `frustums_up_marker="highlight"`: the far-plane top edge is drawn thicker, with a ball on the corner holding the image origin, both in white so they read against the frustum's own color.
-The same marker is painted along the top of each camera's own pane — the two 3D viewports and the **Sensor Camera** pane — so you can match what the frustum says against the image it describes.
+They use `frustums_up_marker="highlight"`: the far-plane top edge is drawn thicker, in the frustum's own color, with a white ball on the corner holding the image origin.
+The same marker is painted along the top of the **Sensor Camera** pane, so you can match what the frustum says against the image it describes; a 3D viewport can show it over its own pane too with `frustums_up_marker_overlay=#true`.
 Since the drone rolls and yaws continuously, watch the sensor camera's marker rotate with it in the **Target View**.
-The other available marker is `frustums_up_marker="triangle"`, which stands a triangle on the middle of that edge instead.
 
 The schematic embeds a smaller ellipsoid `object_3d` with `ellipsoid.world_pos`, plus a `talon-quad-v2.glb` drone that stays inside it. The camera is mounted close to the drone body so part of the drone remains visible in the sensor image. The sensor camera leaves `show_ellipsoids=False`, so it does not render the ellipsoid debug surface. The ellipsoid name (`ellipsoid`) is used for the `FrustumCoverage` component (`ellipsoid.frustum_coverage`).
 
