@@ -1938,6 +1938,11 @@ pub struct SensorCameraConfig {
     /// Marks the image-up direction on this camera's frustum.
     #[serde(default)]
     pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats [`Self::frustums_up_marker`] along the top of this camera's own
+    /// pane. On by default, unlike the viewport one: that pane exists only to
+    /// show this camera's image, so the marker annotates rather than clutters.
+    #[serde(default = "default_true")]
+    pub frustums_up_marker_overlay: bool,
     /// Target rendering rate in frames per second of sim time. The headless
     /// render server emits one frame per camera every `1 / fps` µs of sim time.
     #[serde(default = "default_fps")]
@@ -1980,6 +1985,7 @@ impl Default for SensorCameraConfig {
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             frustums_up_marker: FrustumUpMarker::None,
+            frustums_up_marker_overlay: true,
             fps: default_fps(),
             cinematic: false,
             ev100: None,

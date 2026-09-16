@@ -208,6 +208,11 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                                 );
                             }
                         });
+
+                    if config.frustums_up_marker != FrustumUpMarker::None {
+                        ui.add_space(4.0);
+                        ui.checkbox(&mut config.frustums_up_marker_overlay, "Show on this pane");
+                    }
                 }
             });
     }
