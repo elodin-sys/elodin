@@ -249,7 +249,7 @@ class WorldBuilder:
         ``frustums_up_marker`` marks which frustum edge is the top of the camera
         image when ``create_frustum=True``: ``"highlight"`` thickens the
         far-plane top edge and puts a ball on the corner holding the image
-        origin, ``"triangle"`` stands a small triangle on that edge.
+        origin. The marker is repeated along the top of the camera's own pane.
 
         ``cinematic=True`` enables the cinematic Earth stack in the render
         server (same meaning as KDL ``viewport cinematic=#true``). ``ev100``,

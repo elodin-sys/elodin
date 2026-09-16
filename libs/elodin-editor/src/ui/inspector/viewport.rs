@@ -50,7 +50,6 @@ pub fn frustum_up_marker_label(marker: FrustumUpMarker) -> &'static str {
     match marker {
         FrustumUpMarker::None => "None",
         FrustumUpMarker::Highlight => "Highlight top edge",
-        FrustumUpMarker::Triangle => "Up triangle",
     }
 }
 
@@ -1025,11 +1024,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         .selected_text(frustum_up_marker_label(viewport_config.frustums_up_marker))
                         .show_ui(ui, |ui| {
                             theme::configure_combo_item(ui.style_mut());
-                            for marker in [
-                                FrustumUpMarker::None,
-                                FrustumUpMarker::Highlight,
-                                FrustumUpMarker::Triangle,
-                            ] {
+                            for marker in [FrustumUpMarker::None, FrustumUpMarker::Highlight] {
                                 ui.selectable_value(
                                     &mut viewport_config.frustums_up_marker,
                                     marker,
@@ -1037,6 +1032,14 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                                 );
                             }
                         });
+
+                    if viewport_config.frustums_up_marker != FrustumUpMarker::None {
+                        ui.add_space(4.0);
+                        ui.checkbox(
+                            &mut viewport_config.frustums_up_marker_overlay,
+                            "Show on this pane",
+                        );
+                    }
                 }
 
                 ui.add_space(8.0);

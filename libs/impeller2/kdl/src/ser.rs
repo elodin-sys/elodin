@@ -602,6 +602,11 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
         ));
     }
 
+    if viewport.frustums_up_marker_overlay {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frustums_up_marker_overlay", true));
+    }
+
     if !viewport.show_view_cube {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_view_cube", false));
@@ -1950,6 +1955,7 @@ viewport name="main" cinematic=#true ev100=13.5
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
                 show_view_cube: true,
                 view_cube_frame: None,
                 effects: true,
@@ -1997,10 +2003,7 @@ viewport name="main" cinematic=#true ev100=13.5
         };
 
         assert!(!viewport_line(FrustumUpMarker::None).contains("frustums_up_marker"));
-        for (marker, expected) in [
-            (FrustumUpMarker::Highlight, "highlight"),
-            (FrustumUpMarker::Triangle, "triangle"),
-        ] {
+        for (marker, expected) in [(FrustumUpMarker::Highlight, "highlight")] {
             let serialized = viewport_line(marker);
             assert!(
                 serialized.contains(&format!("frustums_up_marker={expected}"))
@@ -2034,7 +2037,8 @@ viewport name="main" cinematic=#true ev100=13.5
                 frustums_color: Color::YALK,
                 projection_color: Color::MINT,
                 frustums_thickness: 0.012,
-                frustums_up_marker: FrustumUpMarker::Triangle,
+                frustums_up_marker: FrustumUpMarker::Highlight,
+                frustums_up_marker_overlay: true,
                 show_view_cube: false,
                 view_cube_frame: None,
                 effects: true,
@@ -2074,6 +2078,7 @@ viewport name="main" cinematic=#true ev100=13.5
             "projection_color=",
             "frustums_thickness=",
             "frustums_up_marker=",
+            "frustums_up_marker_overlay=",
             "show_view_cube=",
             "active=",
         ];
@@ -2088,7 +2093,7 @@ viewport name="main" cinematic=#true ev100=13.5
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → frustums_up_marker → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → frustums_up_marker → frustums_up_marker_overlay → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -2792,6 +2797,7 @@ object_3d lander.world_pos {
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
                 show_view_cube: true,
                 view_cube_frame: None,
                 effects: true,

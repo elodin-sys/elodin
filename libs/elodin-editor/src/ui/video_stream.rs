@@ -1148,7 +1148,11 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             .iter()
                             .find(|config| config.camera_name == stream.msg_name)
                     })
-                    .filter(|config| config.frustums_up_marker != FrustumUpMarker::None)
+                    // Gated on create_frustum like the 3D marker, so deleting the
+                    // frustum cannot strand a bar the inspector no longer exposes.
+                    .filter(|config| {
+                        config.create_frustum && config.frustums_up_marker != FrustumUpMarker::None
+                    })
                 {
                     let image_rect = egui::Rect::from_min_size(
                         egui::pos2(viewport_pos.x + x_offset, viewport_pos.y + y_offset),
@@ -1158,6 +1162,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         ui.painter(),
                         image_rect,
                         config.frustums_up_marker,
+                        config.frustums_color.into_color32(),
                         frustum_up_marker_color(config.frustums_color).into_color32(),
                     );
                 }

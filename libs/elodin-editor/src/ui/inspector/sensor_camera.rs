@@ -200,11 +200,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                         .selected_text(frustum_up_marker_label(config.frustums_up_marker))
                         .show_ui(ui, |ui| {
                             theme::configure_combo_item(ui.style_mut());
-                            for marker in [
-                                FrustumUpMarker::None,
-                                FrustumUpMarker::Highlight,
-                                FrustumUpMarker::Triangle,
-                            ] {
+                            for marker in [FrustumUpMarker::None, FrustumUpMarker::Highlight] {
                                 ui.selectable_value(
                                     &mut config.frustums_up_marker,
                                     marker,
