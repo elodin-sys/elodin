@@ -76,10 +76,12 @@ use crate::{
     },
     sensor_camera::SensorCameraConfigs,
     ui::colors::ColorExt,
+    ui::up_marker::paint_up_marker,
 };
 
 pub(crate) mod sidebar;
 
+use crate::plugins::frustum_common::frustum_up_marker_color;
 use crate::ui::widgets::SystemStateExt;
 use sidebar::tab_add_visible;
 
@@ -1360,6 +1362,20 @@ impl Pane {
                             rect,
                             PointerOwner::Viewport { camera: cam },
                         );
+
+                        // Same marker the sensor camera panes paint, since this
+                        // pane is likewise the image of a camera carrying a frustum.
+                        if let Some(config) = world
+                            .get::<ViewportConfig>(cam)
+                            .filter(|config| config.frustums_up_marker != FrustumUpMarker::None)
+                        {
+                            paint_up_marker(
+                                ui.painter(),
+                                rect,
+                                config.frustums_up_marker,
+                                frustum_up_marker_color(config.frustums_color).into_color32(),
+                            );
+                        }
                     }
                 } else {
                     register_ui_blocker(

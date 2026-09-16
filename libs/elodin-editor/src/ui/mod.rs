@@ -104,6 +104,7 @@ mod theme;
 pub mod tiles;
 pub mod time_label;
 pub mod timeline;
+pub mod up_marker;
 pub mod utils;
 pub mod video_stream;
 pub mod widgets;
