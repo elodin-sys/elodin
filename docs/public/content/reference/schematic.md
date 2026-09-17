@@ -35,7 +35,9 @@ order = 6
 
 ### timeline
 - Optional top-level node that configures playback globally for the editor session.
-- `played_color`: named color or tuple string, default `yellow`. Used by the LIVE badge, the timeline playhead cursor, and the played segment of 3D trails.
+- Saving a schematic omits properties with default behavior and omits the entire `timeline` node when no properties remain. This also applies to an explicit `range="full"`. Custom colors, `follow_latest=#true`, and non-full ranges are preserved.
+- Existing files containing a bare `timeline` node remain valid: loading them restores the same settings as omitting the node. Saving them removes the empty node.
+- `played_color`: named color or tuple string, default `yalk`. Used by the LIVE badge, the timeline playhead cursor, and the played segment of 3D trails.
 - `future_color`: named color or tuple string, default `white`. Used by the timeline latest/end cursor and the 3D trail segment that lies ahead of the current playback position.
 - `follow_latest`: bool, default `#false`. When omitted, the editor keeps the default start-from-beginning playback behavior. Set it to `#true` to switch to LIVE automatically once the connected stream proves that it is still advancing.
 - `range`: optional string preset for the visible time window on load. Accepted values: `full`, `last_5s`, `last_15s`, `last_30s`, `last_1m`, `last_5m`, `last_15m`, `last_30m`, `last_1h`, `last_6h`, `last_12h`, `last_24h`, or `last_<N>s` / `<N>s` for a custom trailing duration. When omitted, the editor uses full range. Trailing presets (`last_*`) always end at the playhead (`min(LastUpdated, CurrentTimestamp)`), so recordings show the last N seconds of what you are watching. `full` still spans the whole database in normal mode; `--replay` separately progressive-reveals the timeline bar as the playhead advances.
