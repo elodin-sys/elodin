@@ -91,9 +91,24 @@ def flight_loop(client: edb.Client, stop: threading.Event):
         {
             "drone.world_pos": edb.f64[7].labeled("q0", "q1", "q2", "q3", "x", "y", "z"),
             "drone.nav.position": edb.f64[3].labeled("x", "y", "z"),
-            # Row-major 3×3; schematic.py applies this to position with `@ui.kernel`.
-            "drone.nav.transform": edb.f64[9].labeled(
-                "r00", "r01", "r02", "r10", "r11", "r12", "r20", "r21", "r22"
+            # Row-major 4×4 homogeneous; schematic.py applies this with `@ui.kernel`.
+            "drone.nav.transform": edb.f64[16].labeled(
+                "m00",
+                "m01",
+                "m02",
+                "m03",
+                "m10",
+                "m11",
+                "m12",
+                "m13",
+                "m20",
+                "m21",
+                "m22",
+                "m23",
+                "m30",
+                "m31",
+                "m32",
+                "m33",
             ),
             "drone.imu.accel": edb.f64[3].labeled("x", "y", "z"),
             "drone.imu.gyro": edb.f64[3].labeled("p", "q", "r"),
@@ -127,10 +142,28 @@ def flight_loop(client: edb.Client, stop: threading.Event):
             t_us = time.time_ns() // 1_000
             world_pos, accel, gyro, speed = flight_state(t)
             x, y, z = world_pos[4], world_pos[5], world_pos[6]
-            # Slow yaw about +Z so the kernel-transformed ghost orbits the path.
+            # Yaw about +Z plus a circling translation so the ghost is offset.
             yaw = 0.5 * t
             c, s = math.cos(yaw), math.sin(yaw)
-            transform = [c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0]
+            tx, ty, tz = 0.35 * math.cos(0.4 * t), 0.35 * math.sin(0.4 * t), 0.12
+            transform = [
+                c,
+                -s,
+                0.0,
+                tx,
+                s,
+                c,
+                0.0,
+                ty,
+                0.0,
+                0.0,
+                1.0,
+                tz,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ]
 
             base_rpm = 12_000.0 + 3_000.0 * speed
             rpm = [base_rpm + 120.0 * math.sin(t * 7.0 + k) for k in range(4)]
