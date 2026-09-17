@@ -1,0 +1,91 @@
+"""Phase 2 typed expressions + Phase 3 watch helpers."""
+
+from __future__ import annotations
+
+import elodin.ui as ui
+from elodin.ui import Expr, ExprError, Schema, pose
+
+
+def test_expr_ops_emit_eql():
+    a = Expr("drone.world_pos")
+    b = a + Expr("(0,0,0,0, 1, 0, 0)")
+    assert str(b) == "(drone.world_pos + (0,0,0,0, 1, 0, 0))"
+    assert str(a[4]) == "drone.world_pos[4]"
+    assert str(a.sqrt()) == "drone.world_pos.sqrt()"
+
+
+def test_schema_index_bounds():
+    schema = Schema(
+        {
+            "NAV.QUAT": {
+                "element_names": ["q0", "q1", "q2", "q3"],
+                "shape": [4],
+            }
+        }
+    )
+    q = schema["NAV.QUAT"]
+    assert str(q.q0) == "NAV.QUAT.q0"
+    assert str(q[2]) == "NAV.QUAT[2]"
+    try:
+        _ = q[4]
+        raise AssertionError("expected out-of-range")
+    except ExprError as exc:
+        assert "out of range" in str(exc)
+
+
+def test_pose_wxyz_order():
+    schema = Schema(
+        {
+            "NAV.QUAT": {"element_names": ["q0", "q1", "q2", "q3"], "shape": [4]},
+            "NAV.POS": {"element_names": ["x", "y", "z"], "shape": [3]},
+        }
+    )
+    # Treat q0 as w for this packing demo.
+    p = pose(quat=schema["NAV.QUAT"], pos=schema["NAV.POS"], order="wxyz")
+    assert "NAV.QUAT.q1" in str(p)
+    assert "NAV.POS.x" in str(p)
+
+
+def test_sym_mat3_packing_is_stable():
+    covariance = Expr("NAV.COV")
+    assert str(ui.sym_mat3(covariance)) == (
+        "(NAV.COV[0], NAV.COV[1], NAV.COV[2], NAV.COV[3], NAV.COV[4], NAV.COV[5])"
+    )
+    assert str(ui.sym_mat3([0, 1, 2, 3, 4, 5], packing="upper_row")) == ("(0, 1, 3, 2, 4, 5)")
+
+
+def test_graph_accepts_expr():
+    built = ui.schematic(ui.graph(Expr("drone.thrust"), name="Thrust"))
+    assert "drone.thrust" in built.emit_kdl()
+
+
+def test_db_client_expr_schematic_still_builds():
+    import importlib.util
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[4]
+    path = repo / "examples" / "db-client" / "schematic.py"
+    spec = importlib.util.spec_from_file_location("db_client_schematic", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    rebuilt = mod.build()
+    kdl = rebuilt.emit_kdl()
+    assert "kernel=" in kdl
+    assert ui.from_kdl(kdl).emit_kdl() == kdl
+
+
+def test_apply_overlay_changes_share_without_source():
+    built = ui.schematic(
+        ui.hsplit(
+            ui.graph("a", name="A", share=0.5),
+            ui.graph("b", name="B", share=0.5),
+        )
+    )
+    overlay = ui.extract_overlay(built)
+    assert "split" in overlay
+    tweaked = overlay.replace("0.5", "0.25", 1)
+    merged = ui.apply_overlay(built, tweaked)
+    assert "0.25" in merged.emit_kdl() or "0.250" in merged.emit_kdl()
+    assert ui.overlay_key("schematics/main.kdl") == "schematics/main.overlay.kdl"

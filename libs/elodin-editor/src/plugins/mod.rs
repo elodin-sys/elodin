@@ -16,6 +16,8 @@ pub(crate) mod gpu_info;
 pub(crate) mod hw_stats;
 pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod display_kernel;
 mod logical_key;
 pub mod navigation_gizmo;
 pub mod render_layer_alloc;

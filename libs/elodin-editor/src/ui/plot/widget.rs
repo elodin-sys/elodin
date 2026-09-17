@@ -1,3 +1,4 @@
+use bevy::log::warn_once;
 use bevy::prelude::*;
 use egui_material_icons::{icon_button, icons::*};
 use std::collections::HashMap;
@@ -26,7 +27,9 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
+use impeller2_bevy::{
+    ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, TelemetryCache,
+};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
@@ -42,7 +45,9 @@ use crate::{
         colors::{ColorExt, get_scheme, with_opacity},
         input_owner::UiInputOwners,
         plot::{
-            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS, element_names_for_graph,
+            CollectedGraphData, GraphState, GraphStateComponent, Line, OVERVIEW_MAX_POINTS,
+            data::evaluate_series,
+            element_names_for_graph,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
         tiles::WindowState,
@@ -204,6 +209,35 @@ pub enum PlotDataSource<'a> {
         query_label: String,
         series: Vec<XYPlotSeries>,
     },
+}
+
+fn retain_enabled_line(
+    kernel: Option<(&impeller2_bevy::ComponentPath, usize)>,
+    derived: Option<(&impeller2_bevy::ComponentPath, usize)>,
+    components: &std::collections::BTreeMap<impeller2_bevy::ComponentPath, GraphStateComponent>,
+    component_path: &impeller2_bevy::ComponentPath,
+    index: usize,
+) -> bool {
+    if let Some((path, len)) = kernel
+        && component_path == path
+    {
+        return index < len;
+    }
+    if let Some((path, len)) = derived
+        && component_path == path
+    {
+        return index < len;
+    }
+    components
+        .get(component_path)
+        .and_then(|component| component.get(index))
+        .is_some()
+}
+
+fn has_timeseries_selection(graph_state: &GraphState) -> bool {
+    !graph_state.components.is_empty()
+        || graph_state.derived.is_some()
+        || graph_state.kernel.is_some()
 }
 
 #[derive(Debug)]
@@ -865,7 +899,7 @@ impl TimeseriesPlot {
                         );
                         ui.label(PrettyDuration(offset).to_string());
                         let mut current_component_path: Option<&ComponentPath> = None;
-                        for ((component_path, line_index), (entity, color)) in
+                        for ((component_path, _line_index), (entity, color)) in
                             graph_state.enabled_lines.iter()
                         {
                             let Ok(line_handle) = line_handles.get(*entity) else {
@@ -892,22 +926,31 @@ impl TimeseriesPlot {
                                             .color(with_opacity(get_scheme().text_primary, 0.6)),
                                     );
                                     ui.add_space(8.0);
+                                } else if graph_state
+                                    .derived
+                                    .as_ref()
+                                    .is_some_and(|derived| derived.path == *component_path)
+                                    || graph_state
+                                        .kernel
+                                        .as_ref()
+                                        .is_some_and(|kernel| kernel.path == *component_path)
+                                {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(graph_state.label.clone())
+                                            .size(11.0)
+                                            .color(with_opacity(get_scheme().text_primary, 0.6)),
+                                    );
+                                    ui.add_space(8.0);
                                 }
                             }
-
-                            let Some(line_data) = collected_graph_data
-                                .get_line(&component_path.id, *line_index)
-                                .and_then(|h| lines.get(h))
-                            else {
-                                continue;
-                            };
 
                             let value = line
                                 .data
                                 .get_nearest(timestamp)
                                 .map(|(_time, x)| format_num(*x as f64))
                                 .unwrap_or_else(|| "N/A".to_string());
-                            modal_series_row(ui, *color, &line_data.label, &value);
+                            modal_series_row(ui, *color, &line.label, &value);
                         }
                     }
                     PlotDataSource::XY {
@@ -1053,7 +1096,7 @@ impl TimeseriesPlot {
 
         // Check if we have data
         let (has_data, xy_point_count) = match &data_source {
-            PlotDataSource::Timeseries { .. } => (!graph_state.components.is_empty(), 0),
+            PlotDataSource::Timeseries { .. } => (has_timeseries_selection(graph_state), 0),
             PlotDataSource::XY {
                 xy_lines, series, ..
             } => {
@@ -1680,17 +1723,305 @@ pub fn sync_graphs(
             }
         }
 
+        let kernel_keep = graph_state
+            .kernel
+            .as_ref()
+            .map(|kernel| (&kernel.path, kernel.lines.len()));
+        let derived_keep = graph_state
+            .derived
+            .as_ref()
+            .map(|derived| (&derived.path, derived.lines.len()));
         graph_state
             .enabled_lines
             .retain(|(component_path, index), _| {
-                graph_state
-                    .components
-                    .get(component_path)
-                    .and_then(|component| component.get(*index))
-                    .is_some()
+                retain_enabled_line(
+                    kernel_keep,
+                    derived_keep,
+                    &graph_state.components,
+                    component_path,
+                    *index,
+                )
             });
     }
 }
+
+pub fn sync_derived_graphs(
+    mut graph_states: Query<(Entity, &mut GraphState)>,
+    cache: Res<TelemetryCache>,
+    selected_range: Res<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    mut lines: ResMut<Assets<Line>>,
+    mut commands: Commands,
+) {
+    let range = selected_range.0.clone();
+    if range.start >= range.end {
+        return;
+    }
+    let range_key = (range.start.0, range.end.0);
+    let generation = cache.generation();
+    let max_points =
+        (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
+
+    for (graph_entity, mut graph_state) in &mut graph_states {
+        let Some(derived) = graph_state.derived.as_ref() else {
+            continue;
+        };
+        if derived.last_generation == generation && derived.last_range == Some(range_key) {
+            continue;
+        }
+        let expr = derived.expr.clone();
+        let dependencies = derived.dependencies.clone();
+        let path = derived.path.clone();
+        let colors = derived.colors.clone();
+        let evaluated =
+            match evaluate_series(&cache, &expr, &dependencies, range.clone(), max_points) {
+                Ok(evaluated) => evaluated,
+                Err(err) => {
+                    warn_once!(?err, "derived graph evaluation failed");
+                    let derived = graph_state.derived.as_mut().expect("checked above");
+                    derived.last_generation = generation;
+                    derived.last_range = Some(range_key);
+                    continue;
+                }
+            };
+
+        {
+            let label = graph_state.label.clone();
+            let derived = graph_state.derived.as_mut().expect("checked above");
+            while derived.lines.len() < evaluated.values.len() {
+                let index = derived.lines.len();
+                let line_label = if evaluated.values.len() == 1 {
+                    label.clone()
+                } else {
+                    format!("{label}[{index}]")
+                };
+                derived.lines.push(lines.add(Line {
+                    label: line_label,
+                    ..Default::default()
+                }));
+            }
+            for (handle, values) in derived.lines.iter().zip(&evaluated.values) {
+                if let Some(mut line) = lines.get_mut(handle) {
+                    line.data.rebuild_from_time_value_pairs(
+                        earliest.0,
+                        &evaluated.timestamps,
+                        values,
+                    );
+                }
+            }
+            derived.last_generation = generation;
+            derived.last_range = Some(range_key);
+        }
+
+        let handles = graph_state
+            .derived
+            .as_ref()
+            .expect("checked above")
+            .lines
+            .iter()
+            .take(evaluated.values.len())
+            .cloned()
+            .collect::<Vec<_>>();
+        for (index, handle) in handles.into_iter().enumerate() {
+            let color = colors
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| crate::ui::colors::get_color_by_index_all(index));
+            let key = (path.clone(), index);
+            if let Some((entity, existing_color)) = graph_state.enabled_lines.get_mut(&key) {
+                *existing_color = color;
+                commands
+                    .entity(*entity)
+                    .try_insert(LineHandle::Timeseries(handle))
+                    .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
+                    .try_insert(graph_state.graph_type)
+                    .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .try_insert(graph_state.visible_range.clone());
+            } else {
+                let entity = commands
+                    .spawn(LineBundle {
+                        line: LineHandle::Timeseries(handle),
+                        uniform: LineUniform::new(graph_state.line_width, color.into_bevy()),
+                        config: LineConfig {
+                            render_layers: graph_state.render_layers.clone(),
+                        },
+                        line_visible_range: graph_state.visible_range.clone(),
+                        graph_type: graph_state.graph_type,
+                    })
+                    .insert(Name::new("derived line"))
+                    .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .insert(ChildOf(graph_entity))
+                    .id();
+                graph_state.enabled_lines.insert(key, (entity, color));
+            }
+        }
+        let stale = graph_state
+            .enabled_lines
+            .keys()
+            .filter(|(component_path, index)| {
+                component_path == &path && *index >= evaluated.values.len()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in stale {
+            if let Some((entity, _)) = graph_state.enabled_lines.remove(&key) {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn sync_kernel_graphs(
+    mut graph_states: Query<(Entity, &mut GraphState)>,
+    cache: Res<TelemetryCache>,
+    selected_range: Res<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    mut lines: ResMut<Assets<Line>>,
+    mut commands: Commands,
+    mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
+    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
+) {
+    use crate::plugins::display_kernel::{
+        KernelFetchCtx, evaluate_kernel_series, kernel_fetch_ctx,
+    };
+
+    let range = selected_range.0.clone();
+    if range.start >= range.end {
+        return;
+    }
+    let range_key = (range.start.0, range.end.0);
+    let generation = cache.generation();
+    let max_points =
+        (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
+    let (addr, local_root, kdl_dir) = kernel_fetch_ctx(connection_addr, initial_kdl);
+    let fetch = KernelFetchCtx {
+        connection_addr: addr,
+        local_root: local_root.as_deref(),
+        kdl_dir: kdl_dir.as_deref(),
+    };
+
+    for (graph_entity, mut graph_state) in &mut graph_states {
+        let Some(kernel) = graph_state.kernel.as_ref() else {
+            continue;
+        };
+        if kernel.last_generation == generation && kernel.last_range == Some(range_key) {
+            continue;
+        }
+        let binding = kernel.binding.clone();
+        let path = kernel.path.clone();
+        let colors = kernel.colors.clone();
+        let compiled = match kernels.compiled(&binding, fetch) {
+            Ok(compiled) => compiled,
+            Err(err) => {
+                warn_once!(?err, "display kernel graph failed to load");
+                let kernel = graph_state.kernel.as_mut().expect("checked above");
+                kernel.last_generation = generation;
+                kernel.last_range = Some(range_key);
+                continue;
+            }
+        };
+        let evaluated =
+            match evaluate_kernel_series(&cache, compiled, &binding, range.clone(), max_points) {
+                Ok(evaluated) => evaluated,
+                Err(err) => {
+                    warn_once!(?err, "display kernel graph evaluation failed");
+                    let kernel = graph_state.kernel.as_mut().expect("checked above");
+                    kernel.last_generation = generation;
+                    kernel.last_range = Some(range_key);
+                    continue;
+                }
+            };
+
+        {
+            let label = graph_state.label.clone();
+            let kernel = graph_state.kernel.as_mut().expect("checked above");
+            while kernel.lines.len() < evaluated.values.len() {
+                let index = kernel.lines.len();
+                let line_label = if evaluated.values.len() == 1 {
+                    label.clone()
+                } else {
+                    format!("{label}[{index}]")
+                };
+                kernel.lines.push(lines.add(Line {
+                    label: line_label,
+                    ..Default::default()
+                }));
+            }
+            for (handle, values) in kernel.lines.iter().zip(&evaluated.values) {
+                if let Some(mut line) = lines.get_mut(handle) {
+                    line.data.rebuild_from_time_value_pairs(
+                        earliest.0,
+                        &evaluated.timestamps,
+                        values,
+                    );
+                }
+            }
+            kernel.last_generation = generation;
+            kernel.last_range = Some(range_key);
+        }
+
+        let handles = graph_state
+            .kernel
+            .as_ref()
+            .expect("checked above")
+            .lines
+            .iter()
+            .take(evaluated.values.len())
+            .cloned()
+            .collect::<Vec<_>>();
+        for (index, handle) in handles.into_iter().enumerate() {
+            let color = colors
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| crate::ui::colors::get_color_by_index_all(index));
+            let key = (path.clone(), index);
+            if let Some((entity, existing_color)) = graph_state.enabled_lines.get_mut(&key) {
+                *existing_color = color;
+                commands
+                    .entity(*entity)
+                    .try_insert(LineHandle::Timeseries(handle))
+                    .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
+                    .try_insert(graph_state.graph_type)
+                    .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .try_insert(graph_state.visible_range.clone());
+            } else {
+                let entity = commands
+                    .spawn(LineBundle {
+                        line: LineHandle::Timeseries(handle),
+                        uniform: LineUniform::new(graph_state.line_width, color.into_bevy()),
+                        config: LineConfig {
+                            render_layers: graph_state.render_layers.clone(),
+                        },
+                        line_visible_range: graph_state.visible_range.clone(),
+                        graph_type: graph_state.graph_type,
+                    })
+                    .insert(Name::new("kernel line"))
+                    .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .insert(ChildOf(graph_entity))
+                    .id();
+                graph_state.enabled_lines.insert(key, (entity, color));
+            }
+        }
+        let stale = graph_state
+            .enabled_lines
+            .keys()
+            .filter(|(component_path, index)| {
+                component_path == &path && *index >= evaluated.values.len()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in stale {
+            if let Some((entity, _)) = graph_state.enabled_lines.remove(&key) {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub fn sync_kernel_graphs() {}
 
 /// New locks adopt X from current leader but don't become leader yet.
 #[allow(clippy::type_complexity)]
@@ -2313,7 +2644,93 @@ pub fn graph_touch(
 
 #[cfg(test)]
 mod short_window_y_tests {
-    use super::should_update_short_window_y;
+    use super::{has_timeseries_selection, retain_enabled_line, should_update_short_window_y};
+    use crate::{
+        plugins::render_layer_alloc::RenderLayerAllocator,
+        ui::plot::{DerivedGraph, GraphBundle, KernelGraph},
+    };
+    use bevy::prelude::Entity;
+    use impeller2_bevy::ComponentPath;
+    use impeller2_wkt::DisplayKernelBinding;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn derived_graph_counts_as_a_timeseries_selection() {
+        let mut allocator = RenderLayerAllocator::default();
+        let mut graph_state =
+            GraphBundle::try_new(&mut allocator, BTreeMap::new(), "sqrt".to_string())
+                .expect("render layer")
+                .graph_state;
+        assert!(!has_timeseries_selection(&graph_state));
+
+        graph_state.derived = Some(DerivedGraph {
+            source: "sample.value.sqrt()".to_string(),
+            expr: eql::Expr::FloatLiteral(0.0),
+            dependencies: Vec::new(),
+            lines: Vec::new(),
+            colors: Vec::new(),
+            path: ComponentPath::from_name("derived.sqrt"),
+            last_generation: 0,
+            last_range: None,
+        });
+        assert!(has_timeseries_selection(&graph_state));
+    }
+
+    #[test]
+    fn kernel_graph_lines_survive_eql_retain() {
+        let mut allocator = RenderLayerAllocator::default();
+        let mut graph_state =
+            GraphBundle::try_new(&mut allocator, BTreeMap::new(), "chol".to_string())
+                .expect("render layer")
+                .graph_state;
+        let path = ComponentPath::from_name("kernel.chol");
+        graph_state.kernel = Some(KernelGraph {
+            binding: DisplayKernelBinding {
+                hash: "abc".into(),
+                asset: "schematics/kernels/abc".into(),
+                inputs: Vec::new(),
+            },
+            dependencies: Vec::new(),
+            lines: vec![bevy::asset::Handle::default(); 2],
+            colors: Vec::new(),
+            path: path.clone(),
+            last_generation: 0,
+            last_range: None,
+        });
+        graph_state.enabled_lines.insert(
+            (path.clone(), 0),
+            (Entity::from_bits(1), bevy_egui::egui::Color32::WHITE),
+        );
+        graph_state.enabled_lines.insert(
+            (path.clone(), 1),
+            (Entity::from_bits(2), bevy_egui::egui::Color32::WHITE),
+        );
+        graph_state.enabled_lines.insert(
+            (path.clone(), 2),
+            (Entity::from_bits(3), bevy_egui::egui::Color32::WHITE),
+        );
+
+        let kernel_keep = graph_state
+            .kernel
+            .as_ref()
+            .map(|kernel| (&kernel.path, kernel.lines.len()));
+        graph_state
+            .enabled_lines
+            .retain(|(component_path, index), _| {
+                retain_enabled_line(
+                    kernel_keep,
+                    None,
+                    &graph_state.components,
+                    component_path,
+                    *index,
+                )
+            });
+
+        assert_eq!(graph_state.enabled_lines.len(), 2);
+        assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 0)));
+        assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 1)));
+        assert!(!graph_state.enabled_lines.contains_key(&(path, 2)));
+    }
 
     #[test]
     fn short_y_hysteresis_ignores_small_drift() {

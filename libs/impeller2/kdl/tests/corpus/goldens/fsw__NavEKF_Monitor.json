@@ -1,0 +1,243 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVEKFSTATE.POS_ECEF",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVEKFSTATE.STD_POS_ECEF",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.4000000059604645,
+                              "g": 0.23529411852359772,
+                              "r": 0.1411764770746231
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.2823529541492462,
+                              "g": 0.4274509847164154,
+                              "r": 0.2823529541492462
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.3529411852359772,
+                              "g": 0.2823529541492462,
+                              "r": 0.21568627655506134
+                            }
+                          ],
+                          "eql": "NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVEKFSTATE.VEL_ECEF",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVEKFSTATE.STD_VEL_ECEF",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.7019608020782471,
+                              "g": 0.34117648005485535,
+                              "r": 0.4470588266849518
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.25882354378700256,
+                              "g": 0.41960784792900085,
+                              "r": 0.7764706015586853
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.21176470816135406,
+                              "g": 0.6431372761726379,
+                              "r": 0.8392156958580017
+                            }
+                          ],
+                          "eql": "NAVEKFSTATE.VEL_ECEF[0],NAVEKFSTATE.VEL_ECEF[1],NAVEKFSTATE.VEL_ECEF[2]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVEKFSTATE.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINEOUTPUT.MISSILE_MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "NAVEKFSTATE.QUAT_NED2IMU",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.11764705926179886,
+                              "g": 0.2078431397676468,
+                              "r": 0.34117648005485535
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.03921568766236305,
+                              "g": 0.06666667014360428,
+                              "r": 0.1725490242242813
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.18039216101169586,
+                              "g": 0.08627451211214066,
+                              "r": 0.062745101749897
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.13333334028720856,
+                              "g": 0.23529411852359772,
+                              "r": 0.13333334028720856
+                            }
+                          ],
+                          "eql": "NAVEKFSTATE.QUAT_NED2IMU[0],NAVEKFSTATE.QUAT_NED2IMU[1],NAVEKFSTATE.QUAT_NED2IMU[2],NAVEKFSTATE.QUAT_NED2IMU[3]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5
+                }
+              }
+            }
+          ],
+          "shares": {}
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

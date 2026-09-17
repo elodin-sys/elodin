@@ -5,7 +5,7 @@ theme mode=dark scheme=default
 
 tabs {
     hsplit name="Flight" {
-        viewport name="Chase" pos="drone.world_pos + (0,0,0,0, 0.4, 0.4, 0.25)" look_at="drone.world_pos" show_grid=#true active=#true share=0.55
+        viewport name="Chase" pos="(drone.world_pos + (0,0,0,0, 0.4, 0.4, 0.25))" look_at="drone.world_pos" show_grid=#true active=#true share=0.55
         vsplit share=0.45 {
             graph "drone.imu.accel" name="Accelerometer (m/s^2)"
             graph "drone.imu.gyro" name="Gyroscope (rad/s)"
@@ -21,6 +21,7 @@ tabs {
     vsplit name="Pose" {
         graph "drone.world_pos" name="World pos (quaternion + xyz)"
         graph "drone.nav.speed" name="Ground speed (m/s)"
+        graph "drone.nav.speed.sqrt()" name="Square root of ground speed"
     }
 }
 
