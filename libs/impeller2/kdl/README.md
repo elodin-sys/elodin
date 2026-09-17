@@ -108,5 +108,7 @@ All scene nodes support an optional `frame` attribute (`ENU`, `NED`, or `ECEF`) 
 
 ## Serialization Notes
 
+- `serialize_schematic` omits the top-level `timeline` node when all its properties serialize to defaults, including an explicit full range (`full`, `full_range`, or `fullrange`). The parser still accepts a bare `timeline`; an absent node loads with the same defaults. Custom `played_color`, `future_color`, `follow_latest=#true`, and non-full `range` values are retained independently.
+
 - Many default scalar properties are omitted (for example `viewport fov=45.0`, `show_arrows=#true`).
 - Several nodes always serialize explicit color children, including `line_3d`, `vector_arrow`, `query_plot`, and mesh materials.

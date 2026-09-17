@@ -1,7 +1,6 @@
 # Changelog
 
 ## unreleased
-- **(fix)** Skip the bare `timeline` node when saving a schematic with default timeline settings. (#844)
 
 ## v0.19
 

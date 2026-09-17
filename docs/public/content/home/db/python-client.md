@@ -182,7 +182,6 @@ the camera on it:
 
 ```kdl
 coordinate frame=ENU
-timeline
 
 viewport name="chase" pos="drone.world_pos + (0,0,0,0, -6, 0, 2)" look_at="drone.world_pos" show_grid=#true
 

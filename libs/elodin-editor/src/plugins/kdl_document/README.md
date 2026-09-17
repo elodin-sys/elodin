@@ -83,8 +83,10 @@ A schematic document is a `.kdl` file. The following top-level nodes are recogni
 |---|---|
 | `window` | Secondary window descriptor (`path`, `title`, `screen`, `screen_rect`) |
 | `theme` | Color scheme / mode (`scheme`, `mode`) |
-| `timeline` | Timeline appearance (`played_color`, `future_color`, `follow_latest`) |
+| `timeline` | Timeline appearance and playback (`played_color`, `future_color`, `follow_latest`, `range`) |
 | `skybox` | Cached skybox activation (`name`). **Skybox... → Clear Skybox** removes this node from the current schematic; selecting a cached entry sets it. |
+
+Saving serializes the current timeline settings through `impeller2-kdl`. Default properties are omitted; if none remain (including an explicit full range), no `timeline` node is written. Older documents with a bare `timeline` still load with the default settings. See the [schematic reference](../../../../../docs/public/content/reference/schematic.md#timeline) for the settings and defaults.
 
 ### Example
 
@@ -102,7 +104,7 @@ tabs {
 
 object_3d "drone.world_pos" mesh="assets/drone.glb"
 
-timeline follow_latest=true
+timeline follow_latest=#true
 ```
 
 ## Status

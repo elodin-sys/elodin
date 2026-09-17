@@ -22,9 +22,9 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
     }
     if let Some(timeline) = schematic.timeline.as_ref() {
         let node = serialize_timeline(timeline);
-        // A bare `timeline` node carries no information: every setting is at
-        // its default, which is exactly what the loader assumes when the node
-        // is absent. Skip it so saved schematics don't accumulate noise.
+        // Check the serialized properties rather than TimelineConfig equality:
+        // an explicit full range also normalizes to the default behavior.
+        // The loader restores defaults when the timeline node is absent.
         if !node.entries().is_empty() {
             doc.nodes_mut().push(node);
         }
@@ -1467,20 +1467,59 @@ mod tests {
             parsed.timeline.unwrap_or_default(),
             TimelineConfig::default()
         );
+    }
 
-        // Any non-default setting still emits the node.
-        let schematic = Schematic {
-            timeline: Some(TimelineConfig {
+    #[test]
+    fn test_serialize_timeline_preserves_each_non_default_setting() {
+        for timeline in [
+            TimelineConfig {
+                played_color: Color::MINT,
+                ..Default::default()
+            },
+            TimelineConfig {
+                future_color: Color::HYPERBLUE,
+                ..Default::default()
+            },
+            TimelineConfig {
                 follow_latest: true,
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let serialized = serialize_schematic(&schematic);
-        assert!(
-            serialized.contains("timeline follow_latest=#true"),
-            "non-default timeline settings must still serialize: {serialized}"
-        );
+            },
+            TimelineConfig {
+                range: Some("last_5s".to_string()),
+                ..Default::default()
+            },
+        ] {
+            let schematic = Schematic {
+                timeline: Some(timeline.clone()),
+                ..Default::default()
+            };
+            let serialized = serialize_schematic(&schematic);
+            let parsed = parse_schematic(&serialized).unwrap();
+            assert_eq!(parsed.timeline, Some(timeline), "{serialized}");
+        }
+    }
+
+    #[test]
+    fn test_serialize_timeline_normalizes_default_inputs() {
+        for source in [
+            "",
+            "timeline",
+            "timeline follow_latest=#false",
+            "timeline played_color=yalk future_color=white",
+            "timeline range=full",
+            "timeline range=full_range",
+            "timeline range=fullrange",
+        ] {
+            let schematic = parse_schematic(source).unwrap();
+            let serialized = serialize_schematic(&schematic);
+            let parsed = parse_schematic(&serialized).unwrap();
+            assert!(parsed.timeline.is_none(), "{source:?}: {serialized}");
+            assert_eq!(serialize_schematic(&parsed), serialized);
+            assert_eq!(
+                parsed.timeline.unwrap_or_default(),
+                TimelineConfig::default()
+            );
+        }
     }
 
     #[test]
