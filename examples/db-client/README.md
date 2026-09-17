@@ -48,8 +48,9 @@ uv run python examples/db-client/main.py --no-editor --duration 5
 - **Status** tab: battery voltage, motor RPM, armed flag, flight mode
 - **Pose** tab: the raw 7-element `world_pos` (labeled `q0..q3, x, y, z`)
 - Live Python path (`--db-schematic` + `elodin ui watch`): JAX display kernels
-  project `drone.nav.covariance` to Cholesky and apply `drone.nav.transform`
-  (`R @ xyz`) to `drone.nav.position` for a graph plus a marker sphere.
+  project `drone.nav.covariance` to Cholesky and apply a 4×4
+  `drone.nav.transform` (`T @ xyz`) to `drone.nav.position` for a graph plus a
+  marker sphere.
   After push, the editor runs those kernels natively. See [`UI_WATCH.md`](UI_WATCH.md).
 
 The axis labels on the graphs come from the `.labeled(...)` element names set

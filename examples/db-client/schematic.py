@@ -37,15 +37,17 @@ def covariance_cholesky(cov):
 
 @ui.kernel
 def apply_transform(pos, transform):
-    """Rotate a 3D position: ``R @ pos`` with row-major ``transform`` of length 9."""
-    R = jnp.array(
+    """Apply a row-major 4×4 homogeneous transform to a 3D position."""
+    T = jnp.array(
         [
-            [transform[0], transform[1], transform[2]],
-            [transform[3], transform[4], transform[5]],
-            [transform[6], transform[7], transform[8]],
+            [transform[0], transform[1], transform[2], transform[3]],
+            [transform[4], transform[5], transform[6], transform[7]],
+            [transform[8], transform[9], transform[10], transform[11]],
+            [transform[12], transform[13], transform[14], transform[15]],
         ]
     )
-    return R @ pos
+    p = jnp.array([pos[0], pos[1], pos[2], jnp.float64(1.0)])
+    return (T @ p)[:3]
 
 
 def build() -> ui.Schematic:
@@ -64,7 +66,7 @@ def build() -> ui.Schematic:
                     "prim_type": "f64",
                 },
                 "drone.nav.transform": {
-                    "shape": [9],
+                    "shape": [16],
                     "prim_type": "f64",
                 },
             }
@@ -107,7 +109,7 @@ def build() -> ui.Schematic:
             ),
             ui.vsplit(
                 ui.graph(world_pos, name="World pos (quaternion + xyz)"),
-                ui.graph(rotated, name="Rotated position (R @ xyz)"),
+                ui.graph(rotated, name="Transformed position (T @ xyz)"),
                 ui.graph(chol, name="Nav covariance Cholesky"),
                 name="Pose",
             ),
