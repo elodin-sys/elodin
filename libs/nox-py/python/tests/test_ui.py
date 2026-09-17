@@ -163,6 +163,8 @@ def test_db_client_python_schematic_emits_display_kernel():
     assert "kernel=" in kdl
     assert "schematics/kernels/" in kdl
     assert "drone.nav.covariance" in kdl
+    assert "drone.nav.position" in kdl
+    assert "drone.nav.transform" in kdl
 
 
 def test_g1_motor_panel_equals_handwritten():

@@ -35,10 +35,22 @@ def covariance_cholesky(cov):
     return packed_covariance_cholesky(cov)
 
 
+@ui.kernel
+def apply_transform(pos, transform):
+    """Rotate a 3D position: ``R @ pos`` with row-major ``transform`` of length 9."""
+    R = jnp.array(
+        [
+            [transform[0], transform[1], transform[2]],
+            [transform[3], transform[4], transform[5]],
+            [transform[6], transform[7], transform[8]],
+        ]
+    )
+    return R @ pos
+
+
 def build() -> ui.Schematic:
     # Typed expressions (Phase 2): still emit EQL strings into KDL.
     world_pos = Expr("drone.world_pos")
-    ground_speed = Expr("drone.nav.speed")
     chase_pos = world_pos + Expr("(0,0,0,0, 0.4, 0.4, 0.25)")
     schema = Schema.from_json(
         {
@@ -46,11 +58,20 @@ def build() -> ui.Schematic:
                 "drone.nav.covariance": {
                     "shape": [6],
                     "prim_type": "f64",
-                }
+                },
+                "drone.nav.position": {
+                    "shape": [3],
+                    "prim_type": "f64",
+                },
+                "drone.nav.transform": {
+                    "shape": [9],
+                    "prim_type": "f64",
+                },
             }
         }
     )
     chol = covariance_cholesky(schema["drone.nav.covariance"])
+    rotated = apply_transform(schema["drone.nav.position"], schema["drone.nav.transform"])
 
     return ui.schematic(
         ui.tabs(
@@ -86,7 +107,7 @@ def build() -> ui.Schematic:
             ),
             ui.vsplit(
                 ui.graph(world_pos, name="World pos (quaternion + xyz)"),
-                ui.graph(ground_speed, name="Ground speed (m/s)"),
+                ui.graph(rotated, name="Rotated position (R @ xyz)"),
                 ui.graph(chol, name="Nav covariance Cholesky"),
                 name="Pose",
             ),
@@ -109,6 +130,10 @@ def build() -> ui.Schematic:
                 color=ui.color(64, 180, 255, 80),
                 error_confidence_interval=70.0,
             ),
+        ),
+        ui.object_3d(
+            rotated,
+            mesh=ui.sphere(radius=0.06, color=ui.color(255, 180, 64)),
         ),
         ui.line_3d(world_pos, line_width=2.0, color="yalk"),
         coordinate=ui.coordinate(frame="ENU"),

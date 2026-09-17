@@ -90,6 +90,11 @@ def flight_loop(client: edb.Client, stop: threading.Event):
     state_w = client.table_writer(
         {
             "drone.world_pos": edb.f64[7].labeled("q0", "q1", "q2", "q3", "x", "y", "z"),
+            "drone.nav.position": edb.f64[3].labeled("x", "y", "z"),
+            # Row-major 3×3; schematic.py applies this to position with `@ui.kernel`.
+            "drone.nav.transform": edb.f64[9].labeled(
+                "r00", "r01", "r02", "r10", "r11", "r12", "r20", "r21", "r22"
+            ),
             "drone.imu.accel": edb.f64[3].labeled("x", "y", "z"),
             "drone.imu.gyro": edb.f64[3].labeled("p", "q", "r"),
             "drone.propeller_angle": edb.f64[4].labeled("p0", "p1", "p2", "p3"),
@@ -121,6 +126,11 @@ def flight_loop(client: edb.Client, stop: threading.Event):
             t = time.time() - t0
             t_us = time.time_ns() // 1_000
             world_pos, accel, gyro, speed = flight_state(t)
+            x, y, z = world_pos[4], world_pos[5], world_pos[6]
+            # Slow yaw about +Z so the kernel-transformed ghost orbits the path.
+            yaw = 0.5 * t
+            c, s = math.cos(yaw), math.sin(yaw)
+            transform = [c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0]
 
             base_rpm = 12_000.0 + 3_000.0 * speed
             rpm = [base_rpm + 120.0 * math.sin(t * 7.0 + k) for k in range(4)]
@@ -135,6 +145,8 @@ def flight_loop(client: edb.Client, stop: threading.Event):
                 timestamp_us=t_us,
                 values={
                     "drone.world_pos": world_pos,
+                    "drone.nav.position": [x, y, z],
+                    "drone.nav.transform": transform,
                     "drone.imu.accel": accel,
                     "drone.imu.gyro": gyro,
                     "drone.propeller_angle": prop_angle,

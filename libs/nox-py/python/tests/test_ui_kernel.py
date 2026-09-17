@@ -24,6 +24,15 @@ def _schema() -> Schema:
                     "element_names": ["p00", "p10", "p20", "p11", "p21", "p22"],
                 },
                 "drone.nav.speed": {"shape": [], "prim_type": "f64"},
+                "drone.nav.position": {
+                    "shape": [3],
+                    "prim_type": "f64",
+                    "element_names": ["x", "y", "z"],
+                },
+                "drone.nav.transform": {
+                    "shape": [9],
+                    "prim_type": "f64",
+                },
             }
         }
     )
@@ -141,6 +150,30 @@ def test_cholesky_matches_jax_golden():
     expected = np.linalg.cholesky(p)
     got = covariance_cholesky._func(cov)
     np.testing.assert_allclose(np.asarray(got), expected, rtol=1e-10, atol=1e-12)
+
+
+def test_apply_transform_matches_numpy():
+    schema = _schema()
+
+    @ui.kernel
+    def apply_transform(pos, transform):
+        R = jnp.array(
+            [
+                [transform[0], transform[1], transform[2]],
+                [transform[3], transform[4], transform[5]],
+                [transform[6], transform[7], transform[8]],
+            ]
+        )
+        return R @ pos
+
+    expr = apply_transform(schema["drone.nav.position"], schema["drone.nav.transform"])
+    artifact = expr.artifact()
+    assert artifact.outputs[0]["shape"] == [3]
+    pos = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    # 90° about +Z
+    transform = np.array([0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+    got = apply_transform._func(pos, transform)
+    np.testing.assert_allclose(np.asarray(got), [0.0, 1.0, 0.0], atol=1e-12)
 
 
 def test_lapack_cholesky_is_rejected_by_cranelift():
