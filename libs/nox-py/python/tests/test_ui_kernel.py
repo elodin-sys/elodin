@@ -30,7 +30,7 @@ def _schema() -> Schema:
                     "element_names": ["x", "y", "z"],
                 },
                 "drone.nav.transform": {
-                    "shape": [9],
+                    "shape": [16],
                     "prim_type": "f64",
                 },
             }
@@ -157,23 +157,45 @@ def test_apply_transform_matches_numpy():
 
     @ui.kernel
     def apply_transform(pos, transform):
-        R = jnp.array(
+        T = jnp.array(
             [
-                [transform[0], transform[1], transform[2]],
-                [transform[3], transform[4], transform[5]],
-                [transform[6], transform[7], transform[8]],
+                [transform[0], transform[1], transform[2], transform[3]],
+                [transform[4], transform[5], transform[6], transform[7]],
+                [transform[8], transform[9], transform[10], transform[11]],
+                [transform[12], transform[13], transform[14], transform[15]],
             ]
         )
-        return R @ pos
+        p = jnp.array([pos[0], pos[1], pos[2], jnp.float64(1.0)])
+        return (T @ p)[:3]
 
     expr = apply_transform(schema["drone.nav.position"], schema["drone.nav.transform"])
     artifact = expr.artifact()
     assert artifact.outputs[0]["shape"] == [3]
     pos = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-    # 90° about +Z
-    transform = np.array([0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+    # 90° about +Z, then translate + (0.5, 0, 0.25)
+    transform = np.array(
+        [
+            0.0,
+            -1.0,
+            0.0,
+            0.5,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.25,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ],
+        dtype=np.float64,
+    )
     got = apply_transform._func(pos, transform)
-    np.testing.assert_allclose(np.asarray(got), [0.0, 1.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(np.asarray(got), [0.5, 1.0, 0.25], atol=1e-12)
 
 
 def test_lapack_cholesky_is_rejected_by_cranelift():
