@@ -415,7 +415,15 @@ impl Plugin for EditorPlugin {
                 Update,
                 impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
             )
-            .add_systems(Update, ui::data_overview::trigger_time_range_queries)
+            .add_systems(
+                Update,
+                (
+                    ui::data_overview::trigger_time_range_queries,
+                    ui::data_overview::dispatch_time_range_queries,
+                    ui::data_overview::estimate_sim_time_step_from_ranges,
+                )
+                    .chain(),
+            )
             .add_systems(Update, update_eql_context)
             .add_systems(Update, sync_eql_geo_origin.after(update_eql_context))
             .add_systems(Update, set_eql_context_range.after(update_eql_context))

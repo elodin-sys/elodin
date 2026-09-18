@@ -615,16 +615,6 @@ const SIM_TIME_STEP_MAX_ATTEMPTS: u8 = 8;
 /// in-flight flag, which would latch forever the first time one is dropped.
 const SIM_TIME_STEP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Leading samples pulled per candidate component when measuring an interval:
-/// enough for the median to shrug off a startup burst, small enough to stay a
-/// cheap request.
-const SIM_TIME_STEP_ESTIMATE_SAMPLES: usize = 64;
-/// Below this, consecutive deltas describe jitter rather than a rate.
-const SIM_TIME_STEP_ESTIMATE_MIN_SAMPLES: usize = 4;
-/// Measuring every component of a wide DB is pointless; the finest few decide
-/// the result.
-const SIM_TIME_STEP_ESTIMATE_MAX_COMPONENTS: usize = 32;
-
 /// Where the current [`impeller2_wkt::SimulationTimeStep`] came from.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SimTimeStepSource {
@@ -634,7 +624,7 @@ pub enum SimTimeStepSource {
     Unknown,
     /// The rate the simulation publishes as `Globals.simulation_time_step`.
     Declared,
-    /// Measured from the interval between recorded samples, for DBs that never
+    /// Measured from the spacing of recorded samples, for DBs that never
     /// declare a rate. Only as regular as the data itself.
     Estimated,
 }
@@ -665,13 +655,12 @@ impl Attempts {
 }
 
 /// Resolution state for [`impeller2_wkt::SimulationTimeStep`]: the rate the sim
-/// declares, else a rate measured from sample intervals.
+/// declares, else a rate measured from how densely the recording was sampled.
 #[derive(Resource, Default)]
 pub struct SimTimeStepFetch {
     source: SimTimeStepSource,
     declared: Attempts,
-    estimate: Attempts,
-    /// Finest median interval measured so far, in micros.
+    /// Finest sample spacing measured so far, in micros.
     best_estimate_micros: Option<i64>,
 }
 
@@ -686,34 +675,30 @@ impl SimTimeStepFetch {
         self.source
     }
 
-    /// Keep the finest interval seen: a slow component describes its own rate,
-    /// not the resolution the recording can be stepped at.
-    fn improve_estimate(&mut self, micros: i64) -> bool {
+    /// True while a measured rate must not be applied, because the sim either
+    /// already declared one or still might.
+    pub fn defers_to_declared(
+        &self,
+        path_reg: &ComponentPathRegistry,
+        schema_reg: &ComponentSchemaRegistry,
+    ) -> bool {
+        self.source == SimTimeStepSource::Declared
+            || (!self.declared.exhausted()
+                && sim_time_step_component_id(path_reg, schema_reg).is_some())
+    }
+
+    /// Record a measured sample spacing. Returns the step in seconds when it is
+    /// finer than anything measured so far, and so should be published: a slow
+    /// component describes its own rate, not the resolution the recording as a
+    /// whole can be stepped at.
+    pub fn record_estimate(&mut self, micros: i64) -> Option<f64> {
         if micros <= 0 || self.best_estimate_micros.is_some_and(|best| best <= micros) {
-            return false;
+            return None;
         }
         self.best_estimate_micros = Some(micros);
-        true
+        self.source = SimTimeStepSource::Estimated;
+        Some(micros as f64 / 1_000_000.0)
     }
-}
-
-/// Median interval between consecutive samples, in micros. `None` when the
-/// window is too short to mean anything.
-fn median_interval_micros(timestamps: &[Timestamp]) -> Option<i64> {
-    if timestamps.len() < SIM_TIME_STEP_ESTIMATE_MIN_SAMPLES {
-        return None;
-    }
-    // Duplicate and out-of-order timestamps carry no interval.
-    let mut deltas: Vec<i64> = timestamps
-        .windows(2)
-        .map(|pair| pair[1].0.saturating_sub(pair[0].0))
-        .filter(|delta| *delta > 0)
-        .collect();
-    if deltas.is_empty() {
-        return None;
-    }
-    deltas.sort_unstable();
-    Some(deltas[deltas.len() / 2])
 }
 
 /// DB series are keyed by pair id (`Globals.simulation_time_step`), so resolve
@@ -736,8 +721,8 @@ fn sim_time_step_component_id(
 /// `simulation_time_step` is a constant sim global, not telemetry. It would only
 /// reach [`apply_cached_data`] if a UI consumer put it in the
 /// [`SeriesFetchPriority`] allowlist, which never happens, leaving the resource
-/// on [`Impeller2Plugin`]'s 1 ms fallback and making timeline tick stepping a
-/// no-op. Fetch it directly instead, once per connection.
+/// unresolved and making timeline tick stepping a no-op (#834). Fetch it
+/// directly instead, once per connection.
 pub fn fetch_sim_time_step(
     path_reg: bevy::prelude::Res<ComponentPathRegistry>,
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
@@ -780,85 +765,6 @@ pub fn fetch_sim_time_step(
             true
         },
     );
-}
-
-/// Fallback for DBs that never declare a rate — raw telemetry recordings rather
-/// than Elodin sims. Measures the median interval of each candidate component
-/// and keeps the finest, which is the resolution the timeline can be stepped
-/// at. There may be no single rate at all, hence a measurement rather than an
-/// assumption.
-pub fn estimate_sim_time_step(
-    path_reg: bevy::prelude::Res<ComponentPathRegistry>,
-    schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
-    last_updated: bevy::prelude::Res<LastUpdated>,
-    mut fetch: ResMut<SimTimeStepFetch>,
-    mut commands: Commands,
-) {
-    if fetch.source == SimTimeStepSource::Declared || !fetch.estimate.is_due() {
-        return;
-    }
-    if last_updated.0 == Timestamp(i64::MIN) {
-        return;
-    }
-    // Only measure once the declared rate is out of the running, so an Elodin
-    // sim never pays for these requests.
-    let declared_id = sim_time_step_component_id(&path_reg, &schema_reg);
-    if declared_id.is_some() && !fetch.declared.exhausted() {
-        return;
-    }
-    let candidates = estimate_candidates(&schema_reg, declared_id);
-    if candidates.is_empty() {
-        return;
-    }
-    fetch.estimate.record();
-
-    for component_id in candidates {
-        commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
-            GetTimeSeries {
-                id: PacketId::default(),
-                range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
-                component_id,
-                limit: Some(SIM_TIME_STEP_ESTIMATE_SAMPLES),
-            },
-            move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
-                  mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
-                  mut fetch: ResMut<SimTimeStepFetch>| {
-                if fetch.source == SimTimeStepSource::Declared {
-                    return true;
-                }
-                let OwnedPacket::TimeSeries(ts) = &*pkt else {
-                    return true;
-                };
-                let Ok(timestamps) = ts.timestamps() else {
-                    return true;
-                };
-                if let Some(micros) = median_interval_micros(timestamps)
-                    && fetch.improve_estimate(micros)
-                {
-                    time_step.0 = micros as f64 / 1_000_000.0;
-                    fetch.source = SimTimeStepSource::Estimated;
-                }
-                true
-            },
-        );
-    }
-}
-
-/// Components worth measuring, capped and ordered so the cap keeps the same set
-/// across runs — [`ComponentSchemaRegistry`] is a hash map.
-fn estimate_candidates(
-    schema_reg: &ComponentSchemaRegistry,
-    declared_id: Option<ComponentId>,
-) -> Vec<ComponentId> {
-    let mut ids: Vec<ComponentId> = schema_reg
-        .0
-        .iter()
-        .filter(|(id, schema)| Some(**id) != declared_id && schema.size() > 0)
-        .map(|(&id, _)| id)
-        .collect();
-    ids.sort_unstable();
-    ids.truncate(SIM_TIME_STEP_ESTIMATE_MAX_COMPONENTS);
-    ids
 }
 
 fn parse_sim_time_step(
@@ -1573,11 +1479,7 @@ impl Plugin for Impeller2Plugin {
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(
                 bevy::prelude::Update,
-                (
-                    flush_msg_request_queue,
-                    fetch_sim_time_step,
-                    estimate_sim_time_step,
-                ),
+                (flush_msg_request_queue, fetch_sim_time_step),
             )
             // 0 means "rate not known yet". A non-zero seed would be
             // indistinguishable from a real rate: the previous 1 ms seed made
@@ -2182,56 +2084,52 @@ mod sim_time_step_tests {
     }
 
     #[test]
-    fn estimate_keeps_the_finest_interval() {
+    fn estimate_keeps_the_finest_spacing() {
         let mut fetch = SimTimeStepFetch::default();
-        assert!(fetch.improve_estimate(8_333));
-        assert!(
-            !fetch.improve_estimate(5_000_000),
+        assert_eq!(fetch.record_estimate(8_333), Some(0.008333));
+        assert_eq!(
+            fetch.record_estimate(5_000_000),
+            None,
             "a slow component must not coarsen the step"
         );
-        assert!(fetch.improve_estimate(125));
-        assert!(!fetch.improve_estimate(125), "equal is not an improvement");
-        assert!(!fetch.improve_estimate(0));
-        assert_eq!(fetch.best_estimate_micros, Some(125));
+        assert_eq!(fetch.record_estimate(125), Some(0.000125));
+        assert_eq!(fetch.record_estimate(125), None, "equal is no improvement");
+        assert_eq!(fetch.record_estimate(0), None);
+        assert_eq!(fetch.source(), SimTimeStepSource::Estimated);
     }
 
     #[test]
-    fn median_interval_ignores_a_startup_burst() {
-        // Three samples written back to back, then a steady 8.333 ms.
-        let mut micros = vec![0i64, 1, 2];
-        micros.extend((1..=8).map(|i| 1_000 + i * 8_333));
-        let timestamps: Vec<Timestamp> = micros.into_iter().map(Timestamp).collect();
-
-        assert_eq!(median_interval_micros(&timestamps), Some(8_333));
-    }
-
-    #[test]
-    fn median_interval_needs_a_usable_window() {
-        let too_short: Vec<Timestamp> = [0i64, 125, 250].into_iter().map(Timestamp).collect();
-        assert_eq!(median_interval_micros(&too_short), None);
-
-        // Long enough, but every sample shares a timestamp.
-        let flat: Vec<Timestamp> = std::iter::repeat_n(Timestamp(7), 8).collect();
-        assert_eq!(median_interval_micros(&flat), None);
-    }
-
-    #[test]
-    fn candidates_are_capped_deterministically_and_skip_the_declared_id() {
-        let declared = ComponentId(5);
+    fn a_measured_rate_waits_for_the_declared_one() {
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
         let mut schema_reg = ComponentSchemaRegistry::default();
-        for id in 0..(SIM_TIME_STEP_ESTIMATE_MAX_COMPONENTS as u64 + 10) {
-            schema_reg.0.insert(ComponentId(id), scalar_schema());
-        }
+        schema_reg.0.insert(pair_id, scalar_schema());
 
-        let candidates = estimate_candidates(&schema_reg, Some(declared));
-        assert_eq!(candidates.len(), SIM_TIME_STEP_ESTIMATE_MAX_COMPONENTS);
-        assert!(!candidates.contains(&declared));
-        assert!(candidates.is_sorted());
-        assert_eq!(
-            candidates,
-            estimate_candidates(&schema_reg, Some(declared)),
-            "hash map order must not leak into the capped set"
+        let mut fetch = SimTimeStepFetch::default();
+        assert!(
+            fetch.defers_to_declared(&path_reg, &schema_reg),
+            "the DB declares a rate, so measuring must not pre-empt it"
         );
+
+        fetch.declared.count = SIM_TIME_STEP_MAX_ATTEMPTS;
+        assert!(
+            !fetch.defers_to_declared(&path_reg, &schema_reg),
+            "out of retries, a measured rate is better than none"
+        );
+
+        fetch.source = SimTimeStepSource::Declared;
+        assert!(fetch.defers_to_declared(&path_reg, &schema_reg));
+    }
+
+    #[test]
+    fn a_db_without_a_declared_rate_is_measured_immediately() {
+        let fetch = SimTimeStepFetch::default();
+        assert!(!fetch.defers_to_declared(
+            &ComponentPathRegistry::default(),
+            &ComponentSchemaRegistry::default()
+        ));
     }
 
     #[test]
