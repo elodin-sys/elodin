@@ -1357,7 +1357,12 @@ impl Plugin for Impeller2Plugin {
                 bevy::prelude::Update,
                 (flush_msg_request_queue, fetch_sim_time_step),
             )
-            .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
+            // 0 means "rate not known yet". A non-zero seed would be
+            // indistinguishable from a real rate: the previous 1 ms seed made
+            // every unresolved connection report TPS 1000 and step the
+            // playhead by 1 ms (#834). Consumers already treat a non-positive
+            // step as unknown and degrade to `N/A` / inert step buttons.
+            .insert_resource(impeller2_wkt::SimulationTimeStep(0.0))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
             .insert_resource(impeller2_wkt::LastUpdated(Timestamp(i64::MIN)))
             .insert_resource(impeller2_wkt::EarliestTimestamp(Timestamp(i64::MAX)))
