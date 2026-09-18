@@ -2212,7 +2212,7 @@ pub fn spawn_mesh(
                     base: StandardMaterial {
                         base_color: bevy_color,
                         alpha_mode,
-                        unlit: false,
+                        unlit: color.a < 1.0,
                         double_sided: true,
                         cull_mode: None,
                         perceptual_roughness: 0.6,
@@ -2742,7 +2742,11 @@ pub fn update_object_3d_kernels(
         else {
             continue;
         };
-        let Some(packed) = floats_to_6(&values) else {
+        let Some(packed) = (match shape_mode {
+            EllipsoidShapeMode::Cholesky => floats_to_cholesky_6(&values),
+            EllipsoidShapeMode::Covariance => floats_to_6(&values),
+            EllipsoidShapeMode::Scale => None,
+        }) else {
             warn_once!("ellipsoid kernel output must be 6 packed values or a 3x3 matrix");
             continue;
         };
@@ -2833,6 +2837,19 @@ fn floats_to_6(values: &[f64]) -> Option<[f32; 6]> {
                 *p22 as f32,
             ])
         }
+        _ => None,
+    }
+}
+
+/// Packed Cholesky `[l00, l10, l11, l20, l21, l22]`, or a row-major 3×3 L (JAX).
+fn floats_to_cholesky_6(values: &[f64]) -> Option<[f32; 6]> {
+    match values {
+        [a, b, c, d, e, f] => Some([
+            *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
+        ]),
+        [l00, _u01, _u02, l10, l11, _u12, l20, l21, l22] => Some([
+            *l00 as f32, *l10 as f32, *l11 as f32, *l20 as f32, *l21 as f32, *l22 as f32,
+        ]),
         _ => None,
     }
 }
@@ -3218,6 +3235,20 @@ mod ellipsoid_covariance_tests {
         assert_eq!(matrix[3], 2.0);
         assert_eq!(matrix[5], 3.0);
         assert!(super::floats_to_6(&[1.0, 2.0]).is_none());
+    }
+
+    #[test]
+    fn kernel_cholesky_accepts_row_major_matrix() {
+        // JAX row-major L = [[2, 0, 0], [0, 1, 0], [0, 0, 3]]
+        let packed = super::floats_to_cholesky_6(&[2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 3.0])
+            .unwrap();
+        assert_eq!(packed, [2.0, 0.0, 1.0, 0.0, 0.0, 3.0]);
+        let linear = super::lower_cholesky_pack_to_mat3(&packed);
+        let cols = linear.to_cols_array();
+        assert!((cols[0] - 2.0).abs() < 1e-6);
+        assert!((cols[4] - 1.0).abs() < 1e-6);
+        assert!((cols[8] - 3.0).abs() < 1e-6);
+        assert!(cols[3].abs() < 1e-6);
     }
 }
 

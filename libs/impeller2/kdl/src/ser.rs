@@ -1318,14 +1318,14 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
                 node.entries_mut()
                     .push(KdlEntry::new_prop("show_grid", true));
             }
+            if !children.nodes().is_empty() {
+                node.set_children(children);
+            }
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
             }
             if *show_grid && *grid_color != impeller2_wkt::default_ellipsoid_grid_color() {
                 serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
-            }
-            if !children.nodes().is_empty() {
-                node.set_children(children);
             }
 
             (node, Vec::new())

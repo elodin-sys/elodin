@@ -129,7 +129,7 @@ def build() -> ui.Schematic:
             world_pos,
             mesh=ui.ellipsoid(
                 error_covariance_cholesky=chol,
-                color=ui.color(64, 180, 255, 80),
+                color=ui.color(64, 180, 255, 40),
                 error_confidence_interval=70.0,
             ),
         ),

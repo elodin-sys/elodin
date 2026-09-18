@@ -3321,6 +3321,47 @@ object_3d "drone.world_pos" {
     }
 
     #[test]
+    fn test_ellipsoid_kernel_preserves_translucent_color() {
+        let kdl = r#"
+object_3d "drone.world_pos" {
+    ellipsoid error_covariance_cholesky_kernel="schematics/kernels/cholabc" {
+        input "drone.nav.covariance"
+        color 64 180 255 40
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(ellip) = &schematic.elems[0] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            color,
+            error_covariance_cholesky_kernel: Some(_),
+            ..
+        } = &ellip.mesh
+        else {
+            panic!("expected cholesky kernel ellipsoid");
+        };
+        assert!((color.a - 40.0 / 255.0).abs() < f32::EPSILON);
+        let roundtrip = crate::serialize_schematic(&schematic);
+        assert!(
+            roundtrip.contains("color 64 180 255 40"),
+            "kernel inputs must not drop ellipsoid color: {roundtrip}"
+        );
+        let parsed = parse_schematic(&roundtrip).unwrap();
+        let SchematicElem::Object3d(ellip) = &parsed.elems[0] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } = &ellip.mesh else {
+            panic!("expected ellipsoid");
+        };
+        assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.g - 180.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.b - 255.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.a - 40.0 / 255.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_display_kernel_hash_payload_is_canonical() {
         let artifact = DisplayKernelArtifact {
             version: 1,
