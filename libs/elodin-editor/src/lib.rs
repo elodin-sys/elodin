@@ -1631,6 +1631,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     mut series: SeriesStoreReconnect,
     mut editor_ui: EditorUiHardClear,
     mut current: ResMut<CurrentTimestamp>,
+    mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
 ) {
     if !config.is_changed() {
         return;
@@ -1645,6 +1646,8 @@ pub(crate) fn sync_series_store_session_from_db_config(
     if series.session.matches(addr, start_ts) {
         return;
     }
+    // A different recording may run at a different rate.
+    sim_time_step_fetch.rearm();
     cancel_in_flight_series_requests(
         &mut editor_ui.commands,
         &mut series.msg_handlers,
@@ -2877,6 +2880,7 @@ mod tests {
             .init_resource::<impeller2_bevy::TelemetryCache>()
             .init_resource::<impeller2_bevy::BackfillState>()
             .init_resource::<impeller2_bevy::SeriesStoreLoadState>()
+            .init_resource::<impeller2_bevy::SimTimeStepFetch>()
             .init_resource::<crate::ui::plot::data::PlotSyncState>()
             .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
             .init_resource::<SyncedObject3d>()

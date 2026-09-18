@@ -34,6 +34,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     marker::PhantomData,
+    time::{Duration, Instant},
 };
 use stellarator_buf::Slice;
 
@@ -541,19 +542,39 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
 
 /// Bounded retries so a component that never gets a sample cannot spin.
 const SIM_TIME_STEP_MAX_ATTEMPTS: u8 = 8;
+/// Reply handlers are dropped both on reconnect and on a failed send (no msg
+/// connection yet), so pacing comes from this interval rather than an
+/// in-flight flag, which would latch forever the first time one is dropped.
+const SIM_TIME_STEP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Bookkeeping for the one-shot [`impeller2_wkt::SimulationTimeStep`] fetch.
 #[derive(Resource, Default)]
 pub struct SimTimeStepFetch {
-    in_flight: bool,
     resolved: bool,
     attempts: u8,
+    last_attempt: Option<Instant>,
 }
 
 impl SimTimeStepFetch {
-    /// Re-arm after a reconnect: a restarted sim may run at a different rate.
+    /// Re-arm after a reconnect or a recording identity change: the new
+    /// recording may run at a different rate.
     pub fn rearm(&mut self) {
         *self = Self::default();
+    }
+
+    /// Ready for another attempt: still unresolved, budget left, and the retry
+    /// interval elapsed.
+    fn is_due(&self) -> bool {
+        !self.resolved
+            && self.attempts < SIM_TIME_STEP_MAX_ATTEMPTS
+            && !self
+                .last_attempt
+                .is_some_and(|at| at.elapsed() < SIM_TIME_STEP_RETRY_INTERVAL)
+    }
+
+    fn record_attempt(&mut self) {
+        self.attempts += 1;
+        self.last_attempt = Some(Instant::now());
     }
 }
 
@@ -586,7 +607,8 @@ pub fn fetch_sim_time_step(
     mut fetch: ResMut<SimTimeStepFetch>,
     mut commands: Commands,
 ) {
-    if fetch.resolved || fetch.in_flight || fetch.attempts >= SIM_TIME_STEP_MAX_ATTEMPTS {
+    // A retry may overlap a reply still in flight; both write the same value.
+    if !fetch.is_due() {
         return;
     }
     // An empty series has nothing to read; wait until the DB reports data.
@@ -596,8 +618,7 @@ pub fn fetch_sim_time_step(
     let Some(component_id) = sim_time_step_component_id(&path_reg, &schema_reg) else {
         return;
     };
-    fetch.in_flight = true;
-    fetch.attempts += 1;
+    fetch.record_attempt();
 
     commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
         GetTimeSeries {
@@ -610,7 +631,6 @@ pub fn fetch_sim_time_step(
               schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
               mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
               mut fetch: ResMut<SimTimeStepFetch>| {
-            fetch.in_flight = false;
             match parse_sim_time_step(&pkt, &schema_reg, component_id) {
                 Some(dt) if dt > 0.0 => {
                     time_step.0 = dt;
@@ -1899,6 +1919,37 @@ mod sim_time_step_tests {
             sim_time_step_component_id(&path_reg, &schema_reg),
             Some(pair_id)
         );
+    }
+
+    #[test]
+    fn retry_is_paced_then_exhausted() {
+        let mut fetch = SimTimeStepFetch::default();
+        assert!(fetch.is_due());
+
+        fetch.record_attempt();
+        assert!(!fetch.is_due(), "retry must wait out the interval");
+
+        fetch.last_attempt = Some(Instant::now() - SIM_TIME_STEP_RETRY_INTERVAL * 2);
+        assert!(
+            fetch.is_due(),
+            "a dropped reply handler must not latch the fetch"
+        );
+
+        fetch.attempts = SIM_TIME_STEP_MAX_ATTEMPTS;
+        assert!(!fetch.is_due());
+    }
+
+    #[test]
+    fn rearm_reopens_a_resolved_fetch() {
+        let mut fetch = SimTimeStepFetch {
+            resolved: true,
+            attempts: SIM_TIME_STEP_MAX_ATTEMPTS,
+            last_attempt: Some(Instant::now()),
+        };
+        assert!(!fetch.is_due());
+
+        fetch.rearm();
+        assert!(fetch.is_due());
     }
 
     #[test]
