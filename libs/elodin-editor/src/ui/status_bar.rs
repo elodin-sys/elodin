@@ -11,7 +11,9 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
-use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
+use impeller2_bevy::{
+    ConnectionStatus, SimTimeStepFetch, SimTimeStepSource, ThreadConnectionStatus,
+};
 use impeller2_wkt::SimulationTimeStep;
 use std::time::{Duration, Instant};
 
@@ -33,6 +35,7 @@ use crate::ui::widgets::SystemStateExt;
 #[derive(SystemParam)]
 pub struct StatusBar<'w, 's> {
     tick_time: Res<'w, SimulationTimeStep>,
+    sim_time_step: Res<'w, SimTimeStepFetch>,
     diagnostics: Res<'w, DiagnosticsStore>,
     connection_status: Res<'w, ThreadConnectionStatus>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
@@ -58,6 +61,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         };
 
         let tick_time = state_mut.tick_time;
+        let sim_time_step = state_mut.sim_time_step;
         let diagnostics = state_mut.diagnostics;
         let skybox_ui = &state_mut.skybox_ui;
         let skybox_cache = &state_mut.skybox_cache;
@@ -100,12 +104,27 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     } else {
                         String::from("N/A")
                     };
+                    // A measured rate is only as regular as the data, so say so
+                    // rather than passing it off as the sim's own rate.
+                    let (marker, provenance) = match sim_time_step.source() {
+                        SimTimeStepSource::Declared => ("", "Rate published by the simulation"),
+                        SimTimeStepSource::Estimated => (
+                            "~",
+                            "Estimated from the interval between recorded samples: this \
+                             recording does not publish a rate",
+                        ),
+                        SimTimeStepSource::Unknown => ("", "No rate resolved yet"),
+                    };
 
-                    ui.add(egui::Label::new(
-                        egui::RichText::new(format!("TPS {sim_fps}"))
-                            .text_style(egui::TextStyle::Small)
-                            .color(get_scheme().text_secondary),
-                    ));
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("TPS {marker}{sim_fps}"))
+                                .text_style(egui::TextStyle::Small)
+                                .color(get_scheme().text_secondary),
+                        )
+                        .sense(egui::Sense::hover()),
+                    )
+                    .on_hover_text(provenance);
 
                     let ram_str = process_resident_memory_gb()
                         .map(|gb| format!("{gb:.1}"))

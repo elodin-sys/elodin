@@ -34,6 +34,8 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     marker::PhantomData,
+    ops::Bound,
+    time::{Duration, Instant},
 };
 use stellarator_buf::Slice;
 
@@ -262,6 +264,40 @@ impl TelemetryCache {
             .is_some_and(|s| s.range(range.start..range.end).next().is_some())
     }
 
+    /// First cached sample strictly after `after`. `None` unless coverage
+    /// vouches for the whole gap: outside a covered span the next cached sample
+    /// is not necessarily the next recorded one.
+    pub fn next_sample_after(
+        &self,
+        component_id: &ComponentId,
+        after: Timestamp,
+    ) -> Option<Timestamp> {
+        let series = self.components.get(component_id)?;
+        let next = *series
+            .range((Bound::Excluded(after), Bound::Unbounded))
+            .next()?
+            .0;
+        // `[after, next)` covered ⇒ nothing recorded hides in between.
+        self.is_covered(component_id, &(after..next))
+            .then_some(next)
+    }
+
+    /// Last cached sample strictly before `before`, under the same coverage
+    /// condition as [`Self::next_sample_after`].
+    pub fn prev_sample_before(
+        &self,
+        component_id: &ComponentId,
+        before: Timestamp,
+    ) -> Option<Timestamp> {
+        let series = self.components.get(component_id)?;
+        let prev = *series
+            .range((Bound::Unbounded, Bound::Excluded(before)))
+            .next_back()?
+            .0;
+        self.is_covered(component_id, &(prev..before))
+            .then_some(prev)
+    }
+
     /// First/last sample timestamps in range, if any.
     pub fn sample_span_in_range(
         &self,
@@ -300,6 +336,39 @@ fn merge_intervals(intervals: &mut Vec<(i64, i64)>) {
 #[derive(Resource, Default)]
 pub struct SeriesFetchPriority {
     pub high: std::collections::HashSet<ComponentId>,
+}
+
+/// Nearest recorded sample boundary after `after` across the subscribed
+/// components — the next moment something the user is actually looking at
+/// changes, which is what a frame step should land on.
+///
+/// A component whose coverage cannot vouch for the gap is skipped rather than
+/// vetoing the step: the answer is still a real boundary of a displayed series,
+/// which beats a nominal step. `None` when nothing can answer, leaving the
+/// caller to fall back.
+pub fn next_subscribed_sample(
+    cache: &TelemetryCache,
+    priority: &SeriesFetchPriority,
+    after: Timestamp,
+) -> Option<Timestamp> {
+    priority
+        .high
+        .iter()
+        .filter_map(|id| cache.next_sample_after(id, after))
+        .min()
+}
+
+/// Mirror of [`next_subscribed_sample`] walking backwards.
+pub fn prev_subscribed_sample(
+    cache: &TelemetryCache,
+    priority: &SeriesFetchPriority,
+    before: Timestamp,
+) -> Option<Timestamp> {
+    priority
+        .high
+        .iter()
+        .filter_map(|id| cache.prev_sample_before(id, before))
+        .max()
 }
 
 /// Single vtable pass for incoming tables: append allowlisted samples to the
@@ -537,6 +606,211 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
             true
         },
     );
+}
+
+/// Bounded retries so a component that never gets a sample cannot spin.
+const SIM_TIME_STEP_MAX_ATTEMPTS: u8 = 8;
+/// Reply handlers are dropped both on reconnect and on a failed send (no msg
+/// connection yet), so pacing comes from this interval rather than an
+/// in-flight flag, which would latch forever the first time one is dropped.
+const SIM_TIME_STEP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Where the current [`impeller2_wkt::SimulationTimeStep`] came from.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SimTimeStepSource {
+    /// Nothing resolved yet, so the step is 0 and consumers treat stepping as
+    /// unavailable rather than inventing a rate.
+    #[default]
+    Unknown,
+    /// The rate the simulation publishes as `Globals.simulation_time_step`.
+    Declared,
+    /// Measured from the spacing of recorded samples, for DBs that never
+    /// declare a rate. Only as regular as the data itself.
+    Estimated,
+}
+
+/// Paced, bounded retry budget for one resolution strategy.
+#[derive(Default)]
+struct Attempts {
+    count: u8,
+    last: Option<Instant>,
+}
+
+impl Attempts {
+    fn is_due(&self) -> bool {
+        !self.exhausted()
+            && !self
+                .last
+                .is_some_and(|at| at.elapsed() < SIM_TIME_STEP_RETRY_INTERVAL)
+    }
+
+    fn exhausted(&self) -> bool {
+        self.count >= SIM_TIME_STEP_MAX_ATTEMPTS
+    }
+
+    fn record(&mut self) {
+        self.count += 1;
+        self.last = Some(Instant::now());
+    }
+}
+
+/// Resolution state for [`impeller2_wkt::SimulationTimeStep`]: the rate the sim
+/// declares, else a rate measured from how densely the recording was sampled.
+#[derive(Resource, Default)]
+pub struct SimTimeStepFetch {
+    source: SimTimeStepSource,
+    declared: Attempts,
+    /// Finest sample spacing measured so far, in micros.
+    best_estimate_micros: Option<i64>,
+}
+
+impl SimTimeStepFetch {
+    /// Private so it cannot be called without also clearing the published
+    /// step; see [`rearm_sim_time_step`].
+    fn rearm(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn source(&self) -> SimTimeStepSource {
+        self.source
+    }
+
+    /// True while a measured rate must not be applied, because the sim either
+    /// already declared one or still might.
+    pub fn defers_to_declared(
+        &self,
+        path_reg: &ComponentPathRegistry,
+        schema_reg: &ComponentSchemaRegistry,
+    ) -> bool {
+        self.source == SimTimeStepSource::Declared
+            || (!self.declared.exhausted()
+                && sim_time_step_component_id(path_reg, schema_reg).is_some())
+    }
+
+    /// Record a measured sample spacing. Returns the step in seconds when it is
+    /// finer than anything measured so far, and so should be published: a slow
+    /// component describes its own rate, not the resolution the recording as a
+    /// whole can be stepped at.
+    pub fn record_estimate(&mut self, micros: i64) -> Option<f64> {
+        if micros <= 0 || self.best_estimate_micros.is_some_and(|best| best <= micros) {
+            return None;
+        }
+        self.best_estimate_micros = Some(micros);
+        self.source = SimTimeStepSource::Estimated;
+        Some(micros as f64 / 1_000_000.0)
+    }
+}
+
+/// Re-arm rate resolution after a reconnect or a recording identity change,
+/// which may run at a different rate.
+///
+/// Drops the published step as well as the resolution state. Keeping the
+/// previous recording's dt would leave the status bar quoting a rate while its
+/// tooltip says none is resolved, and every nominal step, tick label and
+/// jump-to-tick using it — until the new recording publishes one, or forever if
+/// it never does.
+pub fn rearm_sim_time_step(
+    fetch: &mut SimTimeStepFetch,
+    time_step: &mut impeller2_wkt::SimulationTimeStep,
+) {
+    fetch.rearm();
+    time_step.0 = 0.0;
+}
+
+/// DB series are keyed by pair id (`Globals.simulation_time_step`), so resolve
+/// through the path registry rather than the bare type-leaf id.
+fn sim_time_step_component_id(
+    path_reg: &ComponentPathRegistry,
+    schema_reg: &ComponentSchemaRegistry,
+) -> Option<ComponentId> {
+    let leaf = <impeller2_wkt::SimulationTimeStep as impeller2::component::Component>::COMPONENT_ID;
+    if schema_reg.0.contains_key(&leaf) {
+        return Some(leaf);
+    }
+    path_reg
+        .0
+        .iter()
+        .find(|(id, path)| path.tail().id == leaf && schema_reg.0.contains_key(id))
+        .map(|(&id, _)| id)
+}
+
+/// `simulation_time_step` is a constant sim global, not telemetry. It would only
+/// reach [`apply_cached_data`] if a UI consumer put it in the
+/// [`SeriesFetchPriority`] allowlist, which never happens, leaving the resource
+/// unresolved and making timeline tick stepping a no-op (#834). Fetch it
+/// directly instead, once per connection.
+pub fn fetch_sim_time_step(
+    path_reg: bevy::prelude::Res<ComponentPathRegistry>,
+    schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+    last_updated: bevy::prelude::Res<LastUpdated>,
+    mut fetch: ResMut<SimTimeStepFetch>,
+    mut commands: Commands,
+) {
+    // A retry may overlap a reply still in flight; both write the same value.
+    if fetch.source == SimTimeStepSource::Declared || !fetch.declared.is_due() {
+        return;
+    }
+    // An empty series has nothing to read; wait until the DB reports data.
+    if last_updated.0 == Timestamp(i64::MIN) {
+        return;
+    }
+    let Some(component_id) = sim_time_step_component_id(&path_reg, &schema_reg) else {
+        return;
+    };
+    fetch.declared.record();
+
+    commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
+        GetTimeSeries {
+            id: PacketId::default(),
+            range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
+            component_id,
+            limit: Some(1),
+        },
+        move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
+              schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+              mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
+              mut fetch: ResMut<SimTimeStepFetch>| {
+            match parse_sim_time_step(&pkt, &schema_reg, component_id) {
+                Some(dt) if dt > 0.0 => {
+                    time_step.0 = dt;
+                    // Authoritative: overrides any interval-based estimate.
+                    fetch.source = SimTimeStepSource::Declared;
+                }
+                _ => debug!("simulation_time_step reply carried no usable value"),
+            }
+            true
+        },
+    );
+}
+
+fn parse_sim_time_step(
+    pkt: &OwnedPacket<PacketGrantR>,
+    schema_reg: &ComponentSchemaRegistry,
+    component_id: ComponentId,
+) -> Option<f64> {
+    let OwnedPacket::TimeSeries(ts) = pkt else {
+        return None;
+    };
+    if ts.timestamps().ok()?.is_empty() {
+        return None;
+    }
+    let schema = schema_reg.0.get(&component_id)?;
+    let elem_size = schema.size();
+    if elem_size == 0 {
+        return None;
+    }
+    let bytes = ts.data().ok()?.get(..elem_size)?;
+    let view =
+        ComponentView::try_from_bytes_shape(bytes, schema.shape(), schema.prim_type()).ok()?;
+    let mut value = impeller2_wkt::SimulationTimeStep::default();
+    value
+        .apply_value(
+            <impeller2_wkt::SimulationTimeStep as impeller2::component::Component>::COMPONENT_ID,
+            view,
+            None,
+        )
+        .ok()?;
+    Some(value.0)
 }
 
 fn sink_inner(
@@ -1219,8 +1493,16 @@ impl Plugin for Impeller2Plugin {
         app.add_message::<DbMessage>()
             .add_plugins(DefaultAdaptersPlugin)
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
-            .add_systems(bevy::prelude::Update, flush_msg_request_queue)
-            .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
+            .add_systems(
+                bevy::prelude::Update,
+                (flush_msg_request_queue, fetch_sim_time_step),
+            )
+            // 0 means "rate not known yet". A non-zero seed would be
+            // indistinguishable from a real rate: the previous 1 ms seed made
+            // every unresolved connection report TPS 1000 and step the
+            // playhead by 1 ms (#834). Consumers already treat a non-positive
+            // step as unknown and degrade to `N/A` / inert step buttons.
+            .insert_resource(impeller2_wkt::SimulationTimeStep(0.0))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
             .insert_resource(impeller2_wkt::LastUpdated(Timestamp(i64::MIN)))
             .insert_resource(impeller2_wkt::EarliestTimestamp(Timestamp(i64::MAX)))
@@ -1241,7 +1523,8 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<TelemetryCache>()
             .init_resource::<BackfillState>()
             .init_resource::<SeriesStoreLoadState>()
-            .init_resource::<SeriesFetchPriority>();
+            .init_resource::<SeriesFetchPriority>()
+            .init_resource::<SimTimeStepFetch>();
     }
 }
 
@@ -1760,6 +2043,132 @@ mod earliest_timestamp_tests {
 }
 
 #[cfg(test)]
+mod sim_time_step_tests {
+    use super::*;
+    use impeller2::types::PrimType;
+
+    fn scalar_schema() -> Schema<Vec<u64>> {
+        Schema::new(PrimType::F64, [0usize; 0]).expect("schema")
+    }
+
+    #[test]
+    fn resolves_pair_id_from_path_registry() {
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
+        let mut schema_reg = ComponentSchemaRegistry::default();
+        schema_reg.0.insert(pair_id, scalar_schema());
+
+        assert_eq!(
+            sim_time_step_component_id(&path_reg, &schema_reg),
+            Some(pair_id)
+        );
+    }
+
+    #[test]
+    fn retry_is_paced_then_exhausted() {
+        let mut attempts = Attempts::default();
+        assert!(attempts.is_due());
+
+        attempts.record();
+        assert!(!attempts.is_due(), "retry must wait out the interval");
+
+        attempts.last = Some(Instant::now() - SIM_TIME_STEP_RETRY_INTERVAL * 2);
+        assert!(
+            attempts.is_due(),
+            "a dropped reply handler must not latch the fetch"
+        );
+
+        attempts.count = SIM_TIME_STEP_MAX_ATTEMPTS;
+        assert!(!attempts.is_due());
+        assert!(attempts.exhausted());
+    }
+
+    #[test]
+    fn rearm_reopens_a_resolved_fetch() {
+        let mut fetch = SimTimeStepFetch {
+            source: SimTimeStepSource::Declared,
+            best_estimate_micros: Some(8_333),
+            ..Default::default()
+        };
+        assert_eq!(fetch.source(), SimTimeStepSource::Declared);
+
+        let mut time_step = impeller2_wkt::SimulationTimeStep(0.008333);
+        rearm_sim_time_step(&mut fetch, &mut time_step);
+
+        assert_eq!(fetch.source(), SimTimeStepSource::Unknown);
+        assert_eq!(fetch.best_estimate_micros, None);
+        assert_eq!(
+            time_step.0, 0.0,
+            "the previous recording's rate must not outlive its resolution state"
+        );
+    }
+
+    #[test]
+    fn estimate_keeps_the_finest_spacing() {
+        let mut fetch = SimTimeStepFetch::default();
+        assert_eq!(fetch.record_estimate(8_333), Some(0.008333));
+        assert_eq!(
+            fetch.record_estimate(5_000_000),
+            None,
+            "a slow component must not coarsen the step"
+        );
+        assert_eq!(fetch.record_estimate(125), Some(0.000125));
+        assert_eq!(fetch.record_estimate(125), None, "equal is no improvement");
+        assert_eq!(fetch.record_estimate(0), None);
+        assert_eq!(fetch.source(), SimTimeStepSource::Estimated);
+    }
+
+    #[test]
+    fn a_measured_rate_waits_for_the_declared_one() {
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
+        let mut schema_reg = ComponentSchemaRegistry::default();
+        schema_reg.0.insert(pair_id, scalar_schema());
+
+        let mut fetch = SimTimeStepFetch::default();
+        assert!(
+            fetch.defers_to_declared(&path_reg, &schema_reg),
+            "the DB declares a rate, so measuring must not override it"
+        );
+
+        fetch.declared.count = SIM_TIME_STEP_MAX_ATTEMPTS;
+        assert!(
+            !fetch.defers_to_declared(&path_reg, &schema_reg),
+            "out of retries, a measured rate is better than none"
+        );
+
+        fetch.source = SimTimeStepSource::Declared;
+        assert!(fetch.defers_to_declared(&path_reg, &schema_reg));
+    }
+
+    #[test]
+    fn a_db_without_a_declared_rate_is_measured_immediately() {
+        let fetch = SimTimeStepFetch::default();
+        assert!(!fetch.defers_to_declared(
+            &ComponentPathRegistry::default(),
+            &ComponentSchemaRegistry::default()
+        ));
+    }
+
+    #[test]
+    fn no_id_until_a_schema_is_known() {
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
+
+        assert_eq!(
+            sim_time_step_component_id(&path_reg, &ComponentSchemaRegistry::default()),
+            None
+        );
+    }
+}
+
+#[cfg(test)]
 mod series_store_allowlist_tests {
     use super::*;
     use impeller2::types::PrimType;
@@ -1793,6 +2202,80 @@ mod series_store_allowlist_tests {
             Schema::new(PrimType::F64, [1usize]).expect("schema"),
         );
         assert!(series_store_backfill_candidates(&allow, &schema_reg).is_empty());
+    }
+
+    fn sample(cache: &mut TelemetryCache, id: ComponentId, micros: i64) {
+        cache.insert(
+            id,
+            Timestamp(micros),
+            ComponentValue::F64(nox::array![1.0f64].to_dyn()),
+        );
+    }
+
+    #[test]
+    fn sample_neighbours_need_coverage_to_vouch_for_the_gap() {
+        let id = ComponentId(7);
+        let mut cache = TelemetryCache::default();
+        for micros in [100i64, 200, 300] {
+            sample(&mut cache, id, micros);
+        }
+
+        // Samples present but nothing declared covered: the DB may hold more.
+        assert_eq!(cache.next_sample_after(&id, Timestamp(100)), None);
+        assert_eq!(cache.prev_sample_before(&id, Timestamp(300)), None);
+
+        cache.mark_covered(id, Timestamp(100), Timestamp(301));
+        assert_eq!(
+            cache.next_sample_after(&id, Timestamp(100)),
+            Some(Timestamp(200))
+        );
+        assert_eq!(
+            cache.prev_sample_before(&id, Timestamp(300)),
+            Some(Timestamp(200))
+        );
+        // Strictly after / strictly before, and the ends have no neighbour.
+        assert_eq!(cache.next_sample_after(&id, Timestamp(300)), None);
+        assert_eq!(cache.prev_sample_before(&id, Timestamp(100)), None);
+    }
+
+    #[test]
+    fn subscribed_sample_takes_the_nearest_boundary() {
+        let fast = ComponentId(1);
+        let slow = ComponentId(2);
+        let unsubscribed = ComponentId(3);
+        let mut cache = TelemetryCache::default();
+        for micros in [0i64, 10, 20, 30] {
+            sample(&mut cache, fast, micros);
+        }
+        for micros in [0i64, 30] {
+            sample(&mut cache, slow, micros);
+        }
+        for micros in [0i64, 5] {
+            sample(&mut cache, unsubscribed, micros);
+        }
+        for id in [fast, slow, unsubscribed] {
+            cache.mark_covered(id, Timestamp(0), Timestamp(31));
+        }
+
+        let priority = SeriesFetchPriority {
+            high: [fast, slow].into_iter().collect(),
+        };
+
+        // The fast series decides, and the unsubscribed one is ignored even
+        // though its sample at 5 is nearer.
+        assert_eq!(
+            next_subscribed_sample(&cache, &priority, Timestamp(0)),
+            Some(Timestamp(10))
+        );
+        assert_eq!(
+            prev_subscribed_sample(&cache, &priority, Timestamp(30)),
+            Some(Timestamp(20))
+        );
+        assert_eq!(
+            next_subscribed_sample(&cache, &SeriesFetchPriority::default(), Timestamp(0)),
+            None,
+            "nothing subscribed leaves the caller to fall back"
+        );
     }
 
     #[test]
