@@ -47,6 +47,12 @@ pub(crate) fn plugin(app: &mut App) {
         );
 }
 
+/// One simulation tick as `Timestamp` micros. Shared by the timeline frame-step
+/// buttons and the arrow-key shortcuts so both move the playhead identically.
+pub fn tick_step_micros(seconds: f64) -> i128 {
+    hifitime::Duration::from_seconds(seconds).total_nanoseconds() / 1000
+}
+
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
 pub struct PlaybackSpeed(pub f64);
 

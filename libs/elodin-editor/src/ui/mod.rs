@@ -60,9 +60,12 @@ use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
-use impeller2::types::ComponentId;
+use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, ComponentValue, WindowRect};
+use impeller2_wkt::{
+    ComponentMetadata, ComponentValue, CurrentTimestamp, EarliestTimestamp, LastUpdated,
+    SimulationTimeStep, WindowRect,
+};
 
 use crate::ui::window::window_entity_from_target;
 use crate::{
@@ -240,6 +243,39 @@ pub fn create_egui_context() -> EguiContext {
     bevy_egui_ctx
 }
 
+/// Move the playhead one simulation tick. Mirrors the timeline frame-step
+/// buttons: a boundary or an unknown tick step leaves the playhead alone, and
+/// the caller only drops follow-latest when the playhead actually moved.
+fn step_playhead(
+    forward: bool,
+    tick: &mut CurrentTimestamp,
+    tick_step_micros: i64,
+    earliest: Timestamp,
+    latest: Timestamp,
+    tick_origin: &mut timeline::StreamTickOrigin,
+) -> bool {
+    if tick_step_micros <= 0 {
+        return false;
+    }
+
+    if forward {
+        if tick.0 >= latest {
+            return false;
+        }
+        tick.0.0 += tick_step_micros;
+    } else {
+        if tick.0 <= earliest {
+            return false;
+        }
+        tick.0.0 -= tick_step_micros;
+        if tick.0 <= earliest {
+            tick_origin.request_rebase();
+        }
+    }
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
 fn shortcuts(
     mut paused: ResMut<Paused>,
     mut latest_follow: ResMut<timeline::LatestFollow>,
@@ -247,18 +283,51 @@ fn shortcuts(
     command_palette_state: Res<CommandPaletteState>,
     key_state: Res<LogicalKeyState>,
     mut context: Query<&mut EguiContext>,
+    mut tick: ResMut<CurrentTimestamp>,
+    mut tick_origin: ResMut<timeline::StreamTickOrigin>,
+    tick_time: Res<SimulationTimeStep>,
+    earliest_timestamp: Res<EarliestTimestamp>,
+    max_tick: Res<LastUpdated>,
 ) {
     let input_has_focus = command_palette_state.show
         || context
             .iter_mut()
             .any(|mut c| c.get_mut().memory(|m| m.focused().is_some()));
 
-    if !input_has_focus && key_state.just_pressed(&Key::Space) {
+    if input_has_focus {
+        return;
+    }
+
+    if key_state.just_pressed(&Key::Space) {
         auto_follow_latest_state.cancel();
         paused.0 = !paused.0;
         if paused.0 {
             latest_follow.0 = false;
         }
+    }
+
+    let forward = if key_state.just_pressed(&Key::ArrowRight) {
+        true
+    } else if key_state.just_pressed(&Key::ArrowLeft) {
+        false
+    } else {
+        return;
+    };
+
+    let tick_step_micros = i64::try_from(timeline::tick_step_micros(tick_time.0)).unwrap_or(0);
+    if step_playhead(
+        forward,
+        &mut tick,
+        tick_step_micros,
+        earliest_timestamp.0,
+        max_tick.0,
+        &mut tick_origin,
+    ) {
+        auto_follow_latest_state.cancel();
+        latest_follow.0 = false;
+        // advance_playback would re-advance a whole frame (~16 ms) and clamp,
+        // erasing the step before it is ever drawn.
+        paused.0 = true;
     }
 }
 
@@ -929,5 +998,46 @@ fn sync_hdr(
         } else if !hdr_enabled.0 && has_hdr {
             commands.entity(entity).remove::<Hdr>();
         }
+    }
+}
+
+#[cfg(test)]
+mod step_playhead_tests {
+    use super::*;
+
+    const EARLIEST: Timestamp = Timestamp(1_000);
+    const LATEST: Timestamp = Timestamp(5_000);
+    const STEP: i64 = 1_000;
+
+    fn step(forward: bool, from: i64, tick_step_micros: i64) -> (bool, i64) {
+        let mut tick = CurrentTimestamp(Timestamp(from));
+        let mut origin = timeline::StreamTickOrigin::default();
+        let moved = step_playhead(
+            forward,
+            &mut tick,
+            tick_step_micros,
+            EARLIEST,
+            LATEST,
+            &mut origin,
+        );
+        (moved, tick.0.0)
+    }
+
+    #[test]
+    fn steps_one_tick_in_each_direction() {
+        assert_eq!(step(true, 3_000, STEP), (true, 4_000));
+        assert_eq!(step(false, 3_000, STEP), (true, 2_000));
+    }
+
+    #[test]
+    fn unknown_tick_step_leaves_playhead_alone() {
+        assert_eq!(step(true, 3_000, 0), (false, 3_000));
+        assert_eq!(step(false, 3_000, -1), (false, 3_000));
+    }
+
+    #[test]
+    fn boundaries_are_no_ops() {
+        assert_eq!(step(true, LATEST.0, STEP), (false, LATEST.0));
+        assert_eq!(step(false, EARLIEST.0, STEP), (false, EARLIEST.0));
     }
 }
