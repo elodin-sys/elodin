@@ -34,6 +34,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     marker::PhantomData,
+    ops::Bound,
     time::{Duration, Instant},
 };
 use stellarator_buf::Slice;
@@ -263,6 +264,40 @@ impl TelemetryCache {
             .is_some_and(|s| s.range(range.start..range.end).next().is_some())
     }
 
+    /// First cached sample strictly after `after`. `None` unless coverage
+    /// vouches for the whole gap: outside a covered span the next cached sample
+    /// is not necessarily the next recorded one.
+    pub fn next_sample_after(
+        &self,
+        component_id: &ComponentId,
+        after: Timestamp,
+    ) -> Option<Timestamp> {
+        let series = self.components.get(component_id)?;
+        let next = *series
+            .range((Bound::Excluded(after), Bound::Unbounded))
+            .next()?
+            .0;
+        // `[after, next)` covered ⇒ nothing recorded hides in between.
+        self.is_covered(component_id, &(after..next))
+            .then_some(next)
+    }
+
+    /// Last cached sample strictly before `before`, under the same coverage
+    /// condition as [`Self::next_sample_after`].
+    pub fn prev_sample_before(
+        &self,
+        component_id: &ComponentId,
+        before: Timestamp,
+    ) -> Option<Timestamp> {
+        let series = self.components.get(component_id)?;
+        let prev = *series
+            .range((Bound::Unbounded, Bound::Excluded(before)))
+            .next_back()?
+            .0;
+        self.is_covered(component_id, &(prev..before))
+            .then_some(prev)
+    }
+
     /// First/last sample timestamps in range, if any.
     pub fn sample_span_in_range(
         &self,
@@ -301,6 +336,39 @@ fn merge_intervals(intervals: &mut Vec<(i64, i64)>) {
 #[derive(Resource, Default)]
 pub struct SeriesFetchPriority {
     pub high: std::collections::HashSet<ComponentId>,
+}
+
+/// Nearest recorded sample boundary after `after` across the subscribed
+/// components — the next moment something the user is actually looking at
+/// changes, which is what a frame step should land on.
+///
+/// A component whose coverage cannot vouch for the gap is skipped rather than
+/// vetoing the step: the answer is still a real boundary of a displayed series,
+/// which beats a nominal step. `None` when nothing can answer, leaving the
+/// caller to fall back.
+pub fn next_subscribed_sample(
+    cache: &TelemetryCache,
+    priority: &SeriesFetchPriority,
+    after: Timestamp,
+) -> Option<Timestamp> {
+    priority
+        .high
+        .iter()
+        .filter_map(|id| cache.next_sample_after(id, after))
+        .min()
+}
+
+/// Mirror of [`next_subscribed_sample`] walking backwards.
+pub fn prev_subscribed_sample(
+    cache: &TelemetryCache,
+    priority: &SeriesFetchPriority,
+    before: Timestamp,
+) -> Option<Timestamp> {
+    priority
+        .high
+        .iter()
+        .filter_map(|id| cache.prev_sample_before(id, before))
+        .max()
 }
 
 /// Single vtable pass for incoming tables: append allowlisted samples to the
@@ -2214,6 +2282,80 @@ mod series_store_allowlist_tests {
             Schema::new(PrimType::F64, [1usize]).expect("schema"),
         );
         assert!(series_store_backfill_candidates(&allow, &schema_reg).is_empty());
+    }
+
+    fn sample(cache: &mut TelemetryCache, id: ComponentId, micros: i64) {
+        cache.insert(
+            id,
+            Timestamp(micros),
+            ComponentValue::F64(nox::array![1.0f64].to_dyn()),
+        );
+    }
+
+    #[test]
+    fn sample_neighbours_need_coverage_to_vouch_for_the_gap() {
+        let id = ComponentId(7);
+        let mut cache = TelemetryCache::default();
+        for micros in [100i64, 200, 300] {
+            sample(&mut cache, id, micros);
+        }
+
+        // Samples present but nothing declared covered: the DB may hold more.
+        assert_eq!(cache.next_sample_after(&id, Timestamp(100)), None);
+        assert_eq!(cache.prev_sample_before(&id, Timestamp(300)), None);
+
+        cache.mark_covered(id, Timestamp(100), Timestamp(301));
+        assert_eq!(
+            cache.next_sample_after(&id, Timestamp(100)),
+            Some(Timestamp(200))
+        );
+        assert_eq!(
+            cache.prev_sample_before(&id, Timestamp(300)),
+            Some(Timestamp(200))
+        );
+        // Strictly after / strictly before, and the ends have no neighbour.
+        assert_eq!(cache.next_sample_after(&id, Timestamp(300)), None);
+        assert_eq!(cache.prev_sample_before(&id, Timestamp(100)), None);
+    }
+
+    #[test]
+    fn subscribed_sample_takes_the_nearest_boundary() {
+        let fast = ComponentId(1);
+        let slow = ComponentId(2);
+        let unsubscribed = ComponentId(3);
+        let mut cache = TelemetryCache::default();
+        for micros in [0i64, 10, 20, 30] {
+            sample(&mut cache, fast, micros);
+        }
+        for micros in [0i64, 30] {
+            sample(&mut cache, slow, micros);
+        }
+        for micros in [0i64, 5] {
+            sample(&mut cache, unsubscribed, micros);
+        }
+        for id in [fast, slow, unsubscribed] {
+            cache.mark_covered(id, Timestamp(0), Timestamp(31));
+        }
+
+        let priority = SeriesFetchPriority {
+            high: [fast, slow].into_iter().collect(),
+        };
+
+        // The fast series decides, and the unsubscribed one is ignored even
+        // though its sample at 5 is nearer.
+        assert_eq!(
+            next_subscribed_sample(&cache, &priority, Timestamp(0)),
+            Some(Timestamp(10))
+        );
+        assert_eq!(
+            prev_subscribed_sample(&cache, &priority, Timestamp(30)),
+            Some(Timestamp(20))
+        );
+        assert_eq!(
+            next_subscribed_sample(&cache, &SeriesFetchPriority::default(), Timestamp(0)),
+            None,
+            "nothing subscribed leaves the caller to fall back"
+        );
     }
 
     #[test]
