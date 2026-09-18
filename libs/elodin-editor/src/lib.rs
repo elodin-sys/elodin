@@ -1640,6 +1640,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     mut editor_ui: EditorUiHardClear,
     mut current: ResMut<CurrentTimestamp>,
     mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
+    mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
 ) {
     if !config.is_changed() {
         return;
@@ -1654,8 +1655,10 @@ pub(crate) fn sync_series_store_session_from_db_config(
     if series.session.matches(addr, start_ts) {
         return;
     }
-    // A different recording may run at a different rate.
+    // A different recording may run at a different rate, measured from ranges
+    // that must be re-queried rather than carried over.
     sim_time_step_fetch.rearm();
+    component_time_ranges.reset();
     cancel_in_flight_series_requests(
         &mut editor_ui.commands,
         &mut series.msg_handlers,
@@ -1718,17 +1721,7 @@ fn clear_state_new_connection(
     );
 
     eql_context.0.component_parts.clear();
-    // Clear cached component time ranges so they will be re-queried
-    component_time_ranges.ranges.clear();
-    component_time_ranges.row_counts.clear();
-    component_time_ranges.sparklines.clear();
-    component_time_ranges.tables_to_query.clear();
-    component_time_ranges.row_settings.clear();
-    component_time_ranges.pending_queries = 0;
-    component_time_ranges.total_queries = 0;
-    component_time_ranges.completed_queries = 0;
-    component_time_ranges.current_batch = 0;
-    component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
+    component_time_ranges.reset();
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = editor_ui.commands.get_entity(*entity) {
             entity_commands.despawn();
@@ -2889,6 +2882,7 @@ mod tests {
             .init_resource::<impeller2_bevy::BackfillState>()
             .init_resource::<impeller2_bevy::SeriesStoreLoadState>()
             .init_resource::<impeller2_bevy::SimTimeStepFetch>()
+            .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .init_resource::<crate::ui::plot::data::PlotSyncState>()
             .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
             .init_resource::<SyncedObject3d>()
@@ -2969,6 +2963,14 @@ mod tests {
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedAssetsRevision>()
                 .revision = Some(3);
+            let mut time_ranges = app
+                .world_mut()
+                .resource_mut::<ui::data_overview::ComponentTimeRanges>();
+            time_ranges
+                .ranges
+                .insert("old_recording".into(), (Timestamp(0), Timestamp(1_000)));
+            time_ranges.row_counts.insert("old_recording".into(), 1_001);
+            time_ranges.state = ui::data_overview::TimeRangeQueryState::Ready;
         }
 
         {
@@ -3006,6 +3008,18 @@ mod tests {
             app.world().resource::<CurrentTimestamp>().0,
             Timestamp::EPOCH
         );
+        // Ranges from the previous recording would otherwise keep feeding the
+        // timeline step its old rate, since queries only restart from
+        // `NotStarted`.
+        let time_ranges = app
+            .world()
+            .resource::<ui::data_overview::ComponentTimeRanges>();
+        assert!(time_ranges.ranges.is_empty());
+        assert!(time_ranges.row_counts.is_empty());
+        assert!(matches!(
+            time_ranges.state,
+            ui::data_overview::TimeRangeQueryState::NotStarted
+        ));
         assert!(app.world_mut().unregister_system(msg_sys).is_err());
         assert!(app.world_mut().unregister_system(req_sys).is_err());
         assert!(app.world_mut().unregister_system(pkt_sys).is_err());

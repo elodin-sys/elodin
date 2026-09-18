@@ -16,6 +16,7 @@ use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{
     CommandsExt, ComponentPathRegistry, ComponentSchemaRegistry, SimTimeStepFetch,
+    SimTimeStepSource,
 };
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SimulationTimeStep, SparklineQuery};
 
@@ -83,6 +84,16 @@ pub struct ComponentTimeRanges {
     /// Current batch index for processing
     pub current_batch: usize,
     pub row_settings: HashMap<ComponentId, DataOverviewRowSettings>,
+}
+
+impl ComponentTimeRanges {
+    /// Drop everything measured for the previous recording. Returning `state`
+    /// to `NotStarted` is what re-arms [`trigger_time_range_queries`]; leaving
+    /// stale ranges behind would let the timeline step keep the old
+    /// recording's rate.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1216,7 +1227,14 @@ pub fn estimate_sim_time_step_from_ranges(
     mut fetch: ResMut<SimTimeStepFetch>,
     mut time_step: ResMut<SimulationTimeStep>,
 ) {
-    if !time_ranges.is_changed() || fetch.defers_to_declared(&path_reg, &schema_reg) {
+    if fetch.defers_to_declared(&path_reg, &schema_reg) {
+        return;
+    }
+    // Deliberately not gated on the ranges changing. A DB that declares a rate
+    // only releases the measured fallback once its fetch runs out of retries,
+    // seconds after the ranges have gone quiet. Once a rate is published,
+    // though, only fresh ranges can refine it.
+    if fetch.source() == SimTimeStepSource::Estimated && !time_ranges.is_changed() {
         return;
     }
     let Some(micros) = finest_sample_spacing_micros(&time_ranges) else {
@@ -1298,5 +1316,80 @@ mod sample_spacing_tests {
         time_ranges.row_counts.insert("orphan".to_string(), 10_000);
 
         assert_eq!(finest_sample_spacing_micros(&time_ranges), Some(1_000));
+    }
+
+    fn estimate_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<ComponentTimeRanges>()
+            .init_resource::<ComponentPathRegistry>()
+            .init_resource::<ComponentSchemaRegistry>()
+            .init_resource::<SimTimeStepFetch>()
+            .insert_resource(SimulationTimeStep(0.0))
+            .add_systems(Update, estimate_sim_time_step_from_ranges);
+        app
+    }
+
+    fn declare_a_rate(app: &mut App) {
+        use impeller2::component::Component;
+        let id = <SimulationTimeStep as Component>::COMPONENT_ID;
+        let schema = impeller2::schema::Schema::new(impeller2::types::PrimType::F64, [0usize; 0])
+            .expect("schema");
+        app.world_mut()
+            .resource_mut::<ComponentSchemaRegistry>()
+            .0
+            .insert(id, schema);
+    }
+
+    #[test]
+    fn the_measured_rate_lands_after_the_declared_one_gives_up() {
+        let mut app = estimate_app();
+        declare_a_rate(&mut app);
+        {
+            let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
+            *time_ranges = ranges(&[("gyro", 0, 1_000_000, 1_001)]);
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<SimulationTimeStep>().0,
+            0.0,
+            "a declared rate must not be pre-empted while it may still arrive"
+        );
+
+        // The declared rate drops out of the running, on a frame where the
+        // ranges are untouched — exactly what the retry budget running out
+        // looks like, seconds after the queries went quiet.
+        app.world_mut()
+            .resource_mut::<ComponentSchemaRegistry>()
+            .0
+            .clear();
+        app.update();
+
+        assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.001);
+        assert_eq!(
+            app.world().resource::<SimTimeStepFetch>().source(),
+            SimTimeStepSource::Estimated
+        );
+    }
+
+    #[test]
+    fn later_query_batches_refine_the_rate() {
+        let mut app = estimate_app();
+        {
+            let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
+            *time_ranges = ranges(&[("slow", 0, 1_000_000, 1_001)]);
+        }
+        app.update();
+        assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.001);
+
+        {
+            let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
+            time_ranges
+                .ranges
+                .insert("fast".into(), (Timestamp(0), Timestamp(1_000_000)));
+            time_ranges.row_counts.insert("fast".into(), 8_001);
+        }
+        app.update();
+
+        assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.000125);
     }
 }
