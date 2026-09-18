@@ -96,7 +96,8 @@ impl WidgetSystem for TimelineControls<'_, '_> {
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);
 
-        let tick_step_micros_i128 = super::tick_step_micros(tick_time.0);
+        let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
+        let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
         let played_color = timeline_settings.played_color.into_color32();
         ui.set_height(50.0);
