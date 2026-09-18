@@ -43,6 +43,38 @@ pub fn default_viewport_frustums_thickness() -> f32 {
     0.006
 }
 
+/// Marks which frustum edge corresponds to the top of the camera image, so the
+/// image orientation can be read off a frustum drawn in another viewport.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrustumUpMarker {
+    #[default]
+    None,
+    /// Thickens the far-plane top edge and balls its image-origin corner.
+    Highlight,
+}
+
+impl FrustumUpMarker {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Highlight => "highlight",
+        }
+    }
+}
+
+impl std::str::FromStr for FrustumUpMarker {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "none" => Ok(Self::None),
+            "highlight" => Ok(Self::Highlight),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
 #[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
@@ -805,6 +837,14 @@ pub struct Viewport {
     pub projection_color: Color,
     #[serde(default = "default_viewport_frustums_thickness")]
     pub frustums_thickness: f32,
+    /// Marks the image-up direction on this viewport's frustum.
+    #[serde(default)]
+    pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats [`Self::frustums_up_marker`] along the top of this viewport's
+    /// own pane. Off by default: a viewport is an interactive scene view, and
+    /// several panes carrying the marker at once read as clutter.
+    #[serde(default)]
+    pub frustums_up_marker_overlay: bool,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     /// Which shared view-cube mesh (ENU/NED/ECEF) this viewport shows.
@@ -858,6 +898,8 @@ impl Default for Viewport {
             frustums_color: default_viewport_frustums_color(),
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
+            frustums_up_marker: FrustumUpMarker::None,
+            frustums_up_marker_overlay: false,
             show_view_cube: true,
             view_cube_frame: None,
             effects: true,
@@ -1893,6 +1935,14 @@ pub struct SensorCameraConfig {
     pub projection_color: Color,
     #[serde(default = "default_viewport_frustums_thickness")]
     pub frustums_thickness: f32,
+    /// Marks the image-up direction on this camera's frustum.
+    #[serde(default)]
+    pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats [`Self::frustums_up_marker`] along the top of this camera's own
+    /// pane. On by default, unlike the viewport one: that pane exists only to
+    /// show this camera's image, so the marker annotates rather than clutters.
+    #[serde(default = "default_true")]
+    pub frustums_up_marker_overlay: bool,
     /// Target rendering rate in frames per second of sim time. The headless
     /// render server emits one frame per camera every `1 / fps` µs of sim time.
     #[serde(default = "default_fps")]
@@ -1934,6 +1984,8 @@ impl Default for SensorCameraConfig {
             frustums_color: default_viewport_frustums_color(),
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
+            frustums_up_marker: FrustumUpMarker::None,
+            frustums_up_marker_overlay: true,
             fps: default_fps(),
             cinematic: false,
             ev100: None,
