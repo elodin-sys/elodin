@@ -539,6 +539,120 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
     );
 }
 
+/// Bounded retries so a component that never gets a sample cannot spin.
+const SIM_TIME_STEP_MAX_ATTEMPTS: u8 = 8;
+
+/// Bookkeeping for the one-shot [`impeller2_wkt::SimulationTimeStep`] fetch.
+#[derive(Resource, Default)]
+pub struct SimTimeStepFetch {
+    in_flight: bool,
+    resolved: bool,
+    attempts: u8,
+}
+
+impl SimTimeStepFetch {
+    /// Re-arm after a reconnect: a restarted sim may run at a different rate.
+    pub fn rearm(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// DB series are keyed by pair id (`Globals.simulation_time_step`), so resolve
+/// through the path registry rather than the bare type-leaf id.
+fn sim_time_step_component_id(
+    path_reg: &ComponentPathRegistry,
+    schema_reg: &ComponentSchemaRegistry,
+) -> Option<ComponentId> {
+    let leaf = <impeller2_wkt::SimulationTimeStep as impeller2::component::Component>::COMPONENT_ID;
+    if schema_reg.0.contains_key(&leaf) {
+        return Some(leaf);
+    }
+    path_reg
+        .0
+        .iter()
+        .find(|(id, path)| path.tail().id == leaf && schema_reg.0.contains_key(id))
+        .map(|(&id, _)| id)
+}
+
+/// `simulation_time_step` is a constant sim global, not telemetry. It would only
+/// reach [`apply_cached_data`] if a UI consumer put it in the
+/// [`SeriesFetchPriority`] allowlist, which never happens, leaving the resource
+/// on [`Impeller2Plugin`]'s 1 ms fallback and making timeline tick stepping a
+/// no-op. Fetch it directly instead, once per connection.
+pub fn fetch_sim_time_step(
+    path_reg: bevy::prelude::Res<ComponentPathRegistry>,
+    schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+    last_updated: bevy::prelude::Res<LastUpdated>,
+    mut fetch: ResMut<SimTimeStepFetch>,
+    mut commands: Commands,
+) {
+    if fetch.resolved || fetch.in_flight || fetch.attempts >= SIM_TIME_STEP_MAX_ATTEMPTS {
+        return;
+    }
+    // An empty series has nothing to read; wait until the DB reports data.
+    if last_updated.0 == Timestamp(i64::MIN) {
+        return;
+    }
+    let Some(component_id) = sim_time_step_component_id(&path_reg, &schema_reg) else {
+        return;
+    };
+    fetch.in_flight = true;
+    fetch.attempts += 1;
+
+    commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
+        GetTimeSeries {
+            id: PacketId::default(),
+            range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
+            component_id,
+            limit: Some(1),
+        },
+        move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
+              schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+              mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
+              mut fetch: ResMut<SimTimeStepFetch>| {
+            fetch.in_flight = false;
+            match parse_sim_time_step(&pkt, &schema_reg, component_id) {
+                Some(dt) if dt > 0.0 => {
+                    time_step.0 = dt;
+                    fetch.resolved = true;
+                }
+                _ => debug!("simulation_time_step reply carried no usable value"),
+            }
+            true
+        },
+    );
+}
+
+fn parse_sim_time_step(
+    pkt: &OwnedPacket<PacketGrantR>,
+    schema_reg: &ComponentSchemaRegistry,
+    component_id: ComponentId,
+) -> Option<f64> {
+    let OwnedPacket::TimeSeries(ts) = pkt else {
+        return None;
+    };
+    if ts.timestamps().ok()?.is_empty() {
+        return None;
+    }
+    let schema = schema_reg.0.get(&component_id)?;
+    let elem_size = schema.size();
+    if elem_size == 0 {
+        return None;
+    }
+    let bytes = ts.data().ok()?.get(..elem_size)?;
+    let view =
+        ComponentView::try_from_bytes_shape(bytes, schema.shape(), schema.prim_type()).ok()?;
+    let mut value = impeller2_wkt::SimulationTimeStep::default();
+    value
+        .apply_value(
+            <impeller2_wkt::SimulationTimeStep as impeller2::component::Component>::COMPONENT_ID,
+            view,
+            None,
+        )
+        .ok()?;
+    Some(value.0)
+}
+
 fn sink_inner(
     world: &mut World,
     packet_rx: &mut PacketRx,
@@ -1219,7 +1333,10 @@ impl Plugin for Impeller2Plugin {
         app.add_message::<DbMessage>()
             .add_plugins(DefaultAdaptersPlugin)
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
-            .add_systems(bevy::prelude::Update, flush_msg_request_queue)
+            .add_systems(
+                bevy::prelude::Update,
+                (flush_msg_request_queue, fetch_sim_time_step),
+            )
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
             .insert_resource(impeller2_wkt::LastUpdated(Timestamp(i64::MIN)))
@@ -1241,7 +1358,8 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<TelemetryCache>()
             .init_resource::<BackfillState>()
             .init_resource::<SeriesStoreLoadState>()
-            .init_resource::<SeriesFetchPriority>();
+            .init_resource::<SeriesFetchPriority>()
+            .init_resource::<SimTimeStepFetch>();
     }
 }
 
@@ -1756,6 +1874,44 @@ mod earliest_timestamp_tests {
         );
         assert_eq!(earliest.0, Timestamp(1_500));
         assert_eq!(current.0, Timestamp(5_000));
+    }
+}
+
+#[cfg(test)]
+mod sim_time_step_tests {
+    use super::*;
+    use impeller2::types::PrimType;
+
+    fn scalar_schema() -> Schema<Vec<u64>> {
+        Schema::new(PrimType::F64, [0usize; 0]).expect("schema")
+    }
+
+    #[test]
+    fn resolves_pair_id_from_path_registry() {
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
+        let mut schema_reg = ComponentSchemaRegistry::default();
+        schema_reg.0.insert(pair_id, scalar_schema());
+
+        assert_eq!(
+            sim_time_step_component_id(&path_reg, &schema_reg),
+            Some(pair_id)
+        );
+    }
+
+    #[test]
+    fn no_id_until_a_schema_is_known() {
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
+
+        assert_eq!(
+            sim_time_step_component_id(&path_reg, &ComponentSchemaRegistry::default()),
+            None
+        );
     }
 }
 

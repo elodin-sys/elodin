@@ -1674,11 +1674,14 @@ fn clear_state_new_connection(
     mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
     mut series: SeriesStoreReconnect,
     mut editor_ui: EditorUiHardClear,
+    mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
+
+    sim_time_step_fetch.rearm();
 
     // SeriesStore ops run before any UI early-return so a missing primary
     // window cannot leave handlers/cache in a half-torn-down state.
