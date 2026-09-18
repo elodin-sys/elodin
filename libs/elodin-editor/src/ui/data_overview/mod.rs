@@ -1352,7 +1352,7 @@ mod sample_spacing_tests {
         assert_eq!(
             app.world().resource::<SimulationTimeStep>().0,
             0.0,
-            "a declared rate must not be pre-empted while it may still arrive"
+            "a declared rate must not be overridden while it may still arrive"
         );
 
         // The declared rate drops out of the running, on a frame where the

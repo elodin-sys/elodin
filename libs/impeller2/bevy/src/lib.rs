@@ -2132,7 +2132,7 @@ mod sim_time_step_tests {
         let mut fetch = SimTimeStepFetch::default();
         assert!(
             fetch.defers_to_declared(&path_reg, &schema_reg),
-            "the DB declares a rate, so measuring must not pre-empt it"
+            "the DB declares a rate, so measuring must not override it"
         );
 
         fetch.declared.count = SIM_TIME_STEP_MAX_ATTEMPTS;
