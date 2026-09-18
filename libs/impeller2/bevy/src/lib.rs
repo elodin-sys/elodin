@@ -665,9 +665,9 @@ pub struct SimTimeStepFetch {
 }
 
 impl SimTimeStepFetch {
-    /// Re-arm after a reconnect or a recording identity change: the new
-    /// recording may run at a different rate.
-    pub fn rearm(&mut self) {
+    /// Private so it cannot be called without also clearing the published
+    /// step; see [`rearm_sim_time_step`].
+    fn rearm(&mut self) {
         *self = Self::default();
     }
 
@@ -699,6 +699,22 @@ impl SimTimeStepFetch {
         self.source = SimTimeStepSource::Estimated;
         Some(micros as f64 / 1_000_000.0)
     }
+}
+
+/// Re-arm rate resolution after a reconnect or a recording identity change,
+/// which may run at a different rate.
+///
+/// Drops the published step as well as the resolution state. Keeping the
+/// previous recording's dt would leave the status bar quoting a rate while its
+/// tooltip says none is resolved, and every nominal step, tick label and
+/// jump-to-tick using it — until the new recording publishes one, or forever if
+/// it never does.
+pub fn rearm_sim_time_step(
+    fetch: &mut SimTimeStepFetch,
+    time_step: &mut impeller2_wkt::SimulationTimeStep,
+) {
+    fetch.rearm();
+    time_step.0 = 0.0;
 }
 
 /// DB series are keyed by pair id (`Globals.simulation_time_step`), so resolve
@@ -2078,9 +2094,15 @@ mod sim_time_step_tests {
         };
         assert_eq!(fetch.source(), SimTimeStepSource::Declared);
 
-        fetch.rearm();
+        let mut time_step = impeller2_wkt::SimulationTimeStep(0.008333);
+        rearm_sim_time_step(&mut fetch, &mut time_step);
+
         assert_eq!(fetch.source(), SimTimeStepSource::Unknown);
         assert_eq!(fetch.best_estimate_micros, None);
+        assert_eq!(
+            time_step.0, 0.0,
+            "the previous recording's rate must not outlive its resolution state"
+        );
     }
 
     #[test]

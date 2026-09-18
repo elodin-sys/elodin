@@ -1640,6 +1640,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     mut editor_ui: EditorUiHardClear,
     mut current: ResMut<CurrentTimestamp>,
     mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
+    mut sim_time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
     mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
 ) {
     if !config.is_changed() {
@@ -1657,7 +1658,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     }
     // A different recording may run at a different rate, measured from ranges
     // that must be re-queried rather than carried over.
-    sim_time_step_fetch.rearm();
+    impeller2_bevy::rearm_sim_time_step(&mut sim_time_step_fetch, &mut sim_time_step);
     component_time_ranges.reset();
     cancel_in_flight_series_requests(
         &mut editor_ui.commands,
@@ -1689,13 +1690,14 @@ fn clear_state_new_connection(
     mut series: SeriesStoreReconnect,
     mut editor_ui: EditorUiHardClear,
     mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
+    mut sim_time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
 
-    sim_time_step_fetch.rearm();
+    impeller2_bevy::rearm_sim_time_step(&mut sim_time_step_fetch, &mut sim_time_step);
 
     // SeriesStore ops run before any UI early-return so a missing primary
     // window cannot leave handlers/cache in a half-torn-down state.
@@ -2882,6 +2884,7 @@ mod tests {
             .init_resource::<impeller2_bevy::BackfillState>()
             .init_resource::<impeller2_bevy::SeriesStoreLoadState>()
             .init_resource::<impeller2_bevy::SimTimeStepFetch>()
+            .insert_resource(impeller2_wkt::SimulationTimeStep(0.008333))
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .init_resource::<crate::ui::plot::data::PlotSyncState>()
             .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
@@ -3020,6 +3023,14 @@ mod tests {
             time_ranges.state,
             ui::data_overview::TimeRangeQueryState::NotStarted
         ));
+        // The published rate must go with it, or TPS, tick labels and
+        // jump-to-tick keep quoting the previous recording.
+        assert_eq!(
+            app.world()
+                .resource::<impeller2_wkt::SimulationTimeStep>()
+                .0,
+            0.0
+        );
         assert!(app.world_mut().unregister_system(msg_sys).is_err());
         assert!(app.world_mut().unregister_system(req_sys).is_err());
         assert!(app.world_mut().unregister_system(pkt_sys).is_err());
