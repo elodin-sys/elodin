@@ -1480,7 +1480,7 @@ mod tests {
             last_pose_kernel_input: None,
             last_cov_kernel_input: None,
             joint_animations: Vec::new(),
-            data: impeller2_wkt::Object3D{
+            data: impeller2_wkt::Object3D {
                 eql: "lander.world_pos".to_string(),
                 mesh: impeller2_wkt::Object3DMesh::glb("lander.glb"),
                 frame: None,
@@ -1491,8 +1491,8 @@ mod tests {
                 thrusters,
                 mesh_visibility_range: None,
                 node_id: Default::default(),
-                            kernel: None,
-},
+                kernel: None,
+            },
         }
     }
 

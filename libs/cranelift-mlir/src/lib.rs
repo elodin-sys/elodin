@@ -1,7 +1,7 @@
 pub mod const_cache;
 pub mod const_fold;
-pub mod display_kernel;
 pub mod debug;
+pub mod display_kernel;
 pub mod inliner;
 pub mod ir;
 pub mod lower;

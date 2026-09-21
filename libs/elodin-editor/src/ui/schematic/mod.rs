@@ -299,7 +299,8 @@ impl SchematicParam<'_, '_> {
                         let kernel = graph_state.kernel.as_ref().map(|k| k.binding.clone());
 
                         if let Some(kernel_state) = &graph_state.kernel {
-                            for index in 0..kernel_state.lines.len().max(kernel_state.colors.len()) {
+                            for index in 0..kernel_state.lines.len().max(kernel_state.colors.len())
+                            {
                                 let color = graph_state
                                     .enabled_lines
                                     .get(&(kernel_state.path.clone(), index))
@@ -346,7 +347,7 @@ impl SchematicParam<'_, '_> {
 
                         let node_id = impeller2_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, graph.id);
-                        Some(Panel::Graph(impeller2_wkt::Graph{
+                        Some(Panel::Graph(impeller2_wkt::Graph {
                             eql,
                             name: pane_name,
                             graph_type: graph_state.graph_type,

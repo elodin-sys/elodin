@@ -2848,7 +2848,12 @@ fn floats_to_cholesky_6(values: &[f64]) -> Option<[f32; 6]> {
             *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
         ]),
         [l00, _u01, _u02, l10, l11, _u12, l20, l21, l22] => Some([
-            *l00 as f32, *l10 as f32, *l11 as f32, *l20 as f32, *l21 as f32, *l22 as f32,
+            *l00 as f32,
+            *l10 as f32,
+            *l11 as f32,
+            *l20 as f32,
+            *l21 as f32,
+            *l22 as f32,
         ]),
         _ => None,
     }
@@ -3240,8 +3245,8 @@ mod ellipsoid_covariance_tests {
     #[test]
     fn kernel_cholesky_accepts_row_major_matrix() {
         // JAX row-major L = [[2, 0, 0], [0, 1, 0], [0, 0, 3]]
-        let packed = super::floats_to_cholesky_6(&[2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 3.0])
-            .unwrap();
+        let packed =
+            super::floats_to_cholesky_6(&[2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 3.0]).unwrap();
         assert_eq!(packed, [2.0, 0.0, 1.0, 0.0, 0.0, 3.0]);
         let linear = super::lower_cholesky_pack_to_mat3(&packed);
         let cols = linear.to_cols_array();

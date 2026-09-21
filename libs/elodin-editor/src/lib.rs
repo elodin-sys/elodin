@@ -1391,7 +1391,7 @@ pub fn sync_object_3d(
 
         if let Ok(object_entity) = create_object_3d_entity(
             &mut commands,
-            Object3D{
+            Object3D {
                 eql,
                 mesh: mesh_source,
                 icon: None,
@@ -1402,8 +1402,8 @@ pub fn sync_object_3d(
                 orientation: Default::default(),
                 sensor_visible: true,
                 node_id: Default::default(),
-                            kernel: None,
-},
+                kernel: None,
+            },
             expr,
             &ctx.0,
             &mut material_assets,

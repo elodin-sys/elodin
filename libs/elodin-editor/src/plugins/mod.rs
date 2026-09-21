@@ -2,6 +2,8 @@ mod asset_cache;
 pub(crate) mod camera_anchor;
 #[cfg(not(target_family = "wasm"))]
 pub mod cinematic_earth;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod display_kernel;
 pub mod editor_cam_input;
 pub mod editor_cam_touch;
 pub(crate) mod env_asset_source;
@@ -16,8 +18,6 @@ pub(crate) mod gpu_info;
 pub(crate) mod hw_stats;
 pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) mod display_kernel;
 mod logical_key;
 pub mod navigation_gizmo;
 pub mod render_layer_alloc;
