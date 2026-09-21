@@ -179,6 +179,14 @@ def test_g1_rate_control_panel_equals_handwritten():
     assert _canonical(mod.build()) == _canonical(handwritten)
 
 
+def test_g1_ball_schematic_equals_handwritten():
+    mod = _load_example(EXAMPLES / "ball" / "schematic.py", "ball_schematic")
+    handwritten = ui.from_kdl((EXAMPLES / "ball" / "schematic.kdl").read_text())
+    assert _canonical(mod.build()) == _canonical(handwritten)
+    ned = ui.from_kdl((EXAMPLES / "ball" / "schematic_ned.kdl").read_text())
+    assert _canonical(mod.build(frame="NED")) == _canonical(ned)
+
+
 def test_world_schematic_accepts_ui_schematic():
     world = el.World()
     s = ui.schematic(ui.graph("drone.thrust"))
