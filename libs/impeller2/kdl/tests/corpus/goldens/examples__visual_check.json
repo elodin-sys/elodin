@@ -14,6 +14,7 @@
                 "threshold": null,
                 "threshold_softness": null
               },
+              "cinematic": false,
               "create_frustum": false,
               "effects": true,
               "ev100": 13.5,
@@ -44,7 +45,9 @@
               "show_frustums": false,
               "show_grid": false,
               "show_view_cube": true,
-              "up": "(0.1433, -0.8661, 0.4788)"
+              "smoothing": 0.0,
+              "up": "(0.1433, -0.8661, 0.4788)",
+              "view_cube_frame": null
             }
           },
           {
@@ -57,6 +60,7 @@
                 "threshold": null,
                 "threshold_softness": null
               },
+              "cinematic": false,
               "create_frustum": false,
               "effects": true,
               "ev100": 12.5,
@@ -87,7 +91,9 @@
               "show_frustums": false,
               "show_grid": false,
               "show_view_cube": true,
-              "up": "(0.1444, -0.8670, 0.4769)"
+              "smoothing": 0.0,
+              "up": "(0.1444, -0.8670, 0.4769)",
+              "view_cube_frame": null
             }
           }
         ]
@@ -122,6 +128,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -154,6 +161,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": [
           {
             "body_frame": true,
@@ -404,6 +412,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": [
           {
             "body_frame": true,
@@ -458,6 +467,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": [
           {
             "body_frame": true,
@@ -511,6 +521,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": []
       }
     }
@@ -532,9 +543,11 @@
       "outer_radius": 6473250.0,
       "raymarched": false
     },
+    "earth": null,
     "sky_color": null,
     "sun": {
       "azimuth_deg": 146.5800018310547,
+      "direction": null,
       "elevation_deg": 55.40999984741211,
       "illuminance": 100000.0,
       "shadows": true

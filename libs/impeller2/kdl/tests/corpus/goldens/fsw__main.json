@@ -29,6 +29,7 @@
                                       "active": false,
                                       "aspect": null,
                                       "bloom": null,
+                                      "cinematic": false,
                                       "create_frustum": false,
                                       "effects": true,
                                       "ev100": null,
@@ -59,7 +60,9 @@
                                       "show_frustums": true,
                                       "show_grid": false,
                                       "show_view_cube": false,
-                                      "up": "(-0.380511,-0.721428,0.578579)"
+                                      "smoothing": 0.0,
+                                      "up": "(-0.380511,-0.721428,0.578579)",
+                                      "view_cube_frame": null
                                     }
                                   },
                                   {
@@ -67,6 +70,7 @@
                                       "active": false,
                                       "aspect": null,
                                       "bloom": null,
+                                      "cinematic": false,
                                       "create_frustum": false,
                                       "effects": true,
                                       "ev100": null,
@@ -97,7 +101,9 @@
                                       "show_frustums": false,
                                       "show_grid": false,
                                       "show_view_cube": false,
-                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)"
+                                      "smoothing": 0.0,
+                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)",
+                                      "view_cube_frame": null
                                     }
                                   }
                                 ],
@@ -116,6 +122,7 @@
                                           "active": false,
                                           "aspect": null,
                                           "bloom": null,
+                                          "cinematic": false,
                                           "create_frustum": false,
                                           "effects": true,
                                           "ev100": null,
@@ -146,7 +153,9 @@
                                           "show_frustums": false,
                                           "show_grid": false,
                                           "show_view_cube": false,
-                                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                                          "smoothing": 0.0,
+                                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)",
+                                          "view_cube_frame": null
                                         }
                                       },
                                       {
@@ -154,6 +163,7 @@
                                           "active": false,
                                           "aspect": null,
                                           "bloom": null,
+                                          "cinematic": false,
                                           "create_frustum": false,
                                           "effects": true,
                                           "ev100": null,
@@ -184,7 +194,9 @@
                                           "show_frustums": false,
                                           "show_grid": false,
                                           "show_view_cube": false,
-                                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                                          "smoothing": 0.0,
+                                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)",
+                                          "view_cube_frame": null
                                         }
                                       }
                                     ]
@@ -194,6 +206,7 @@
                                       "active": false,
                                       "aspect": 1.0,
                                       "bloom": null,
+                                      "cinematic": false,
                                       "create_frustum": false,
                                       "effects": true,
                                       "ev100": null,
@@ -224,7 +237,9 @@
                                       "show_frustums": false,
                                       "show_grid": false,
                                       "show_view_cube": false,
-                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)"
+                                      "smoothing": 0.0,
+                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)",
+                                      "view_cube_frame": null
                                     }
                                   }
                                 ],
@@ -1095,6 +1110,7 @@
                     "active": false,
                     "aspect": null,
                     "bloom": null,
+                    "cinematic": false,
                     "create_frustum": false,
                     "effects": true,
                     "ev100": null,
@@ -1125,7 +1141,9 @@
                     "show_frustums": true,
                     "show_grid": false,
                     "show_view_cube": false,
-                    "up": "(-0.380511,-0.721428,0.578579)"
+                    "smoothing": 0.0,
+                    "up": "(-0.380511,-0.721428,0.578579)",
+                    "view_cube_frame": null
                   }
                 }
               ],
@@ -1151,6 +1169,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1181,7 +1200,9 @@
                           "show_frustums": false,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": "(-0.380511,-0.721428,0.578579)"
+                          "smoothing": 0.0,
+                          "up": "(-0.380511,-0.721428,0.578579)",
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -1189,6 +1210,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1219,7 +1241,9 @@
                           "show_frustums": false,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": "(-0.380511,-0.721428,0.578579)"
+                          "smoothing": 0.0,
+                          "up": "(-0.380511,-0.721428,0.578579)",
+                          "view_cube_frame": null
                         }
                       }
                     ],
@@ -1236,6 +1260,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1266,7 +1291,9 @@
                           "show_frustums": false,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": null
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -1274,6 +1301,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1304,7 +1332,9 @@
                           "show_frustums": false,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": null
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
                         }
                       }
                     ],
@@ -1330,6 +1360,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1360,7 +1391,9 @@
                           "show_frustums": true,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": "(-0.380511,-0.721428,0.578579)"
+                          "smoothing": 0.0,
+                          "up": "(-0.380511,-0.721428,0.578579)",
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -1370,6 +1403,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -1400,7 +1434,9 @@
                               "show_frustums": false,
                               "show_grid": false,
                               "show_view_cube": false,
-                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)"
+                              "smoothing": 0.0,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)",
+                              "view_cube_frame": null
                             }
                           },
                           {
@@ -1408,6 +1444,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -1438,7 +1475,9 @@
                               "show_frustums": false,
                               "show_grid": false,
                               "show_view_cube": false,
-                              "up": "(-0.380511,-0.721428,0.578579)"
+                              "smoothing": 0.0,
+                              "up": "(-0.380511,-0.721428,0.578579)",
+                              "view_cube_frame": null
                             }
                           }
                         ]
@@ -1459,6 +1498,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -1489,7 +1529,9 @@
                               "show_frustums": false,
                               "show_grid": false,
                               "show_view_cube": false,
-                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                              "smoothing": 0.0,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)",
+                              "view_cube_frame": null
                             }
                           },
                           {
@@ -1497,6 +1539,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -1527,7 +1570,9 @@
                               "show_frustums": false,
                               "show_grid": false,
                               "show_view_cube": false,
-                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)"
+                              "smoothing": 0.0,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,-1,-1)",
+                              "view_cube_frame": null
                             }
                           }
                         ]
@@ -1537,6 +1582,7 @@
                           "active": false,
                           "aspect": 1.0,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": true,
                           "effects": true,
                           "ev100": null,
@@ -1567,7 +1613,9 @@
                           "show_frustums": false,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)"
+                          "smoothing": 0.0,
+                          "up": "(NAVEKFSTATE.QUAT_ECEF2BODY[1],NAVEKFSTATE.QUAT_ECEF2BODY[2],NAVEKFSTATE.QUAT_ECEF2BODY[3],NAVEKFSTATE.QUAT_ECEF2BODY[0],NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,1,0)",
+                          "view_cube_frame": null
                         }
                       }
                     ],
@@ -1579,6 +1627,7 @@
                     "active": false,
                     "aspect": null,
                     "bloom": null,
+                    "cinematic": false,
                     "create_frustum": false,
                     "effects": true,
                     "ev100": null,
@@ -1609,7 +1658,9 @@
                     "show_frustums": true,
                     "show_grid": false,
                     "show_view_cube": false,
-                    "up": "(-0.380511,-0.721428,0.578579)"
+                    "smoothing": 0.0,
+                    "up": "(-0.380511,-0.721428,0.578579)",
+                    "view_cube_frame": null
                   }
                 }
               ],
@@ -1635,6 +1686,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1665,7 +1717,9 @@
                           "show_frustums": true,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": "(-0.380511,-0.721428,0.578579)"
+                          "smoothing": 0.0,
+                          "up": "(-0.380511,-0.721428,0.578579)",
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -1673,6 +1727,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -1703,7 +1758,9 @@
                           "show_frustums": true,
                           "show_grid": false,
                           "show_view_cube": false,
-                          "up": "(-0.380511,-0.721428,0.578579)"
+                          "smoothing": 0.0,
+                          "up": "(-0.380511,-0.721428,0.578579)",
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -2542,6 +2599,7 @@
               "active": false,
               "aspect": null,
               "bloom": null,
+              "cinematic": false,
               "create_frustum": false,
               "effects": true,
               "ev100": null,
@@ -2572,7 +2630,9 @@
               "show_frustums": true,
               "show_grid": false,
               "show_view_cube": true,
-              "up": "(-0.380511,-0.721428,0.578579)"
+              "smoothing": 0.0,
+              "up": "(-0.380511,-0.721428,0.578579)",
+              "view_cube_frame": null
             }
           }
         ]
@@ -2623,6 +2683,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -2671,6 +2732,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -2704,6 +2766,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -2737,6 +2800,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -2818,6 +2882,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": [
           {
             "body_frame": true,
@@ -2872,6 +2937,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -2952,6 +3018,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },

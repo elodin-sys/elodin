@@ -28,7 +28,7 @@ impl DisplayKernelExec {
         input_bytes: &[usize],
         output_bytes: &[usize],
     ) -> Result<Self, String> {
-        if input_bytes.iter().any(|&size| size == 0) || output_bytes.iter().any(|&size| size == 0) {
+        if input_bytes.contains(&0) || output_bytes.contains(&0) {
             return Err("display kernel tensor sizes must be non-zero".into());
         }
         let mut ir_module =

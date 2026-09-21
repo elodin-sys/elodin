@@ -227,21 +227,23 @@ pub fn evaluate_kernel_series(
 pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, String> {
     match dtype {
         "f64" => {
-            if bytes.len() % 8 != 0 {
+            let (chunks, rest) = bytes.as_chunks::<8>();
+            if !rest.is_empty() {
                 return Err("f64 output is not 8-byte aligned".into());
             }
-            Ok(bytes
-                .chunks_exact(8)
-                .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("8 bytes")))
+            Ok(chunks
+                .iter()
+                .map(|&chunk| f64::from_le_bytes(chunk))
                 .collect())
         }
         "f32" => {
-            if bytes.len() % 4 != 0 {
+            let (chunks, rest) = bytes.as_chunks::<4>();
+            if !rest.is_empty() {
                 return Err("f32 output is not 4-byte aligned".into());
             }
-            Ok(bytes
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("4 bytes")) as f64)
+            Ok(chunks
+                .iter()
+                .map(|&chunk| f32::from_le_bytes(chunk) as f64)
                 .collect())
         }
         other => Err(format!("unsupported display kernel output dtype {other}")),
@@ -276,10 +278,12 @@ fn load_compiled(
     })
 }
 
+type KernelBufferSizes = (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>);
+
 fn verify_artifact(
     artifact: &DisplayKernelArtifact,
     binding: &DisplayKernelBinding,
-) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>), String> {
+) -> Result<KernelBufferSizes, String> {
     if artifact.hash != binding.hash {
         return Err(format!(
             "display kernel hash mismatch: binding {} vs artifact {}",
@@ -356,7 +360,7 @@ fn pack_component_value(value: &ComponentValue, dtype: &str) -> Result<Vec<u8>, 
 fn component_floats(value: &ComponentValue) -> Vec<f64> {
     use nox::ArrayBuf;
     match value {
-        ComponentValue::F64(array) => array.buf.as_buf().iter().copied().collect(),
+        ComponentValue::F64(array) => array.buf.as_buf().to_vec(),
         ComponentValue::F32(array) => array.buf.as_buf().iter().map(|&v| v as f64).collect(),
         ComponentValue::I64(array) => array.buf.as_buf().iter().map(|&v| v as f64).collect(),
         ComponentValue::I32(array) => array.buf.as_buf().iter().map(|&v| v as f64).collect(),

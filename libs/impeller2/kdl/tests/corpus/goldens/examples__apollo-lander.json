@@ -17,6 +17,7 @@
                   "threshold": 0.7799999713897705,
                   "threshold_softness": 0.11999999731779099
                 },
+                "cinematic": false,
                 "create_frustum": false,
                 "effects": true,
                 "ev100": 13.199999809265137,
@@ -47,7 +48,9 @@
                 "show_frustums": false,
                 "show_grid": false,
                 "show_view_cube": true,
-                "up": null
+                "smoothing": 0.0,
+                "up": null,
+                "view_cube_frame": null
               }
             },
             {
@@ -361,6 +364,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": [
           {
             "body_frame": true,
@@ -762,6 +766,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": [
           {
             "body_frame": true,
@@ -816,6 +821,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -848,6 +854,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -901,6 +908,7 @@
       "outer_radius": 6478140.0,
       "raymarched": true
     },
+    "earth": null,
     "sky_color": {
       "a": 1.0,
       "b": 0.0,
@@ -909,6 +917,7 @@
     },
     "sun": {
       "azimuth_deg": 268.80999755859375,
+      "direction": null,
       "elevation_deg": 10.649999618530273,
       "illuminance": 130000.0,
       "shadows": true
