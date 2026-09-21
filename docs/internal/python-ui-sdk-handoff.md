@@ -74,7 +74,7 @@ CI: `cargo fmt`, `cargo test`, `cargo clippy -- -Dwarnings`, `ruff format --chec
 
 ## Demo the human can run (Phase 3)
 
-Written up in `examples/db-client/UI_WATCH.md`.
+Written up in `examples/display-kernels/README.md`.
 
 ```bash
 nix develop
@@ -85,16 +85,16 @@ export ELODIN_PYTHON="$(pwd)/.venv/bin/python"
 Terminal 1:
 
 ```bash
-uv run python examples/db-client/main.py --db-schematic
+elodin editor examples/display-kernels/main.py
 ```
 
 Terminal 2:
 
 ```bash
-elodin ui watch examples/db-client/schematic.py --db 127.0.0.1:2240
+elodin ui watch examples/display-kernels/schematic.py --db 127.0.0.1:2240
 ```
 
-`--db-schematic` seeds `schematic.active` from Python and **does not** pass sticky `--kdl`, so watch/reload can work. Edit `examples/db-client/schematic.py`, save, editor should hot-reload. Syntax error → last-good kept; status bar shows `Schematic build error: …` from `DbConfig.metadata["ui.build_error"]`.
+`world.schematic()` seeds `schematic.active` from the Python builder (including kernel sidecars). Edit `examples/display-kernels/schematic.py`, save, editor should hot-reload. Syntax error → last-good kept; status bar shows `Schematic build error: …` from `DbConfig.metadata["ui.build_error"]`.
 
 ---
 
@@ -110,7 +110,7 @@ elodin ui watch examples/db-client/schematic.py --db 127.0.0.1:2240
 | Editor banner | `libs/elodin-editor/src/ui/status_bar.rs` |
 | Golden corpus | `libs/impeller2/kdl/tests/corpus/` + `golden_corpus.rs` |
 | `PartialEq` on GUI types | `libs/impeller2/wkt/src/gui.rs` |
-| Demo | `examples/db-client/{schematic.py,main.py,UI_WATCH.md,schematic.kdl}` |
+| Demo | `examples/display-kernels/{schematic.py,main.py,README.md}` |
 | Other Python rebuilds | `examples/drone/{motor_panel.py,rate_control_panel.py}` |
 | Tests | `libs/nox-py/python/tests/test_ui.py`, `test_ui_expr.py` |
 | `watchfiles` dep | `libs/nox-py/pyproject.toml` |
@@ -178,11 +178,11 @@ Only after 4–5, or if graphs-of-formulas are blocking. Extend `eql::Expr` + ed
 
 Python-authored JAX display kernels. Trace at `ui.watch` / `ui.push` / `ui.write`; execute native StableHLO/Cranelift in the editor. EQL remains available for direct component bindings. Derived matrix math (Cholesky, packed covariance) lives in `@ui.kernel` functions, not EQL.
 
-Demo: `examples/db-client/schematic.py` publishes `drone.nav.covariance` through a JAX 3×3 Cholesky kernel (explicit StableHLO ops; `jnp.linalg.cholesky` lowers to LAPACK FFI and is rejected) used by both a graph and an ellipsoid. Workflow is unchanged:
+Demo: `examples/display-kernels/schematic.py` publishes `craft.error_covariance` through a JAX 3×3 Cholesky kernel (explicit StableHLO ops; `jnp.linalg.cholesky` lowers to LAPACK FFI and is rejected) used by both a graph and an ellipsoid. Workflow:
 
 ```bash
-uv run python examples/db-client/main.py --db-schematic
-elodin ui watch examples/db-client/schematic.py --db 127.0.0.1:2240
+elodin editor examples/display-kernels/main.py
+elodin ui watch examples/display-kernels/schematic.py --db 127.0.0.1:2240
 ```
 
 After a successful push the editor does not need the Python process.
@@ -195,9 +195,8 @@ After a successful push the editor does not need the Python process.
 - G2 “every EQL in `main.kdl` via typed layer” not done.
 - Generated FSW dashboards are mechanical translations. `main.py` still needs hand-authored factoring and naming to become the intended showcase rather than a 1:1 generated tree.
 - Overlay is per-schematic (`schematics/<stem>.overlay.kdl`), not per-workstation. Active-tab index is not in the model yet, so overlay covers split shares + window rects only.
-- `Expr.__add__` parenthesizes (`(a + b)`). Handwritten `examples/db-client/schematic.kdl` chase `pos` was updated to match; model equality is after parse, not byte-identical KDL.
+- `Expr.__add__` parenthesizes (`(a + b)`). Model equality is after parse, not byte-identical KDL.
 - `test_ui.py` `test_push_to_embedded_server` needs a free DB port; don’t run two demos on 2240.
-- Headless `main.py --db-schematic` + concurrent client can hit `Already borrowed` on `latest()` — demo issue, not the SDK path.
 - **Fixed 2026-08-31:** `edb.Server.start` did not spawn the DB Asset Server on TCP+1. The editor then failed with `http://127.0.0.1:2241/schematics/main.kdl: error sending request for url`. `libs/nox-py/src/db/server.rs` now calls `spawn_assets_http` like `elodin-db run` / `world.run`. Rebuild the Python wheel after pulling.
 
 ---

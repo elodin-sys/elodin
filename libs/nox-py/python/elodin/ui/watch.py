@@ -4,7 +4,7 @@ Script contract: define ``build() -> elodin.ui.Schematic``.
 
 Example::
 
-    python -m elodin.ui.watch examples/db-client/schematic.py --db 127.0.0.1:2240
+    python -m elodin.ui.watch examples/display-kernels/schematic.py --db 127.0.0.1:2240
 """
 
 from __future__ import annotations
