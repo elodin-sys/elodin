@@ -139,6 +139,16 @@ pub fn prime_schematic_assets(
         }
     }
 
+    // Display-kernel sidecars are content-addressed (`schematics/kernels/<sha256>`),
+    // so storing them on every prime is idempotent and still refreshes hashes
+    // produced by an edited `@ui.kernel` even when the copy-once schematic KDL
+    // is left untouched on a DB reopen.
+    for (key, bytes) in &world.metadata.schematic_kernels {
+        if let Err(err) = db.store_asset(key, bytes) {
+            tracing::warn!(asset = %key, ?err, "failed to store display kernel sidecar");
+        }
+    }
+
     // Reopen: the on-disk active schematic is authoritative (copy-once, same as
     // the asset tree). Never overwrite editor-written bytes from stale in-memory
     // sim metadata. The pointer is equally authoritative: a `DB::open` reopen
@@ -973,6 +983,54 @@ mod asset_tests {
             db.read_active_schematic().as_deref(),
             Some(active_kdl.as_str())
         );
+    }
+
+    #[test]
+    fn prime_stores_display_kernel_sidecars() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let _no_assets =
+            EnvVarGuard::set("ELODIN_ASSETS", dir.path().join("nope").to_str().unwrap());
+
+        let db_path = dir.path().join("db");
+        let db = elodin_db::DB::create(db_path.clone()).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some("viewport {\n}\n".to_string());
+        let key = format!(
+            "{}{}",
+            impeller2_wkt::DISPLAY_KERNEL_ASSET_PREFIX,
+            "deadbeef"
+        );
+        let sidecar = b"{\"version\":1,\"hash\":\"deadbeef\"}".to_vec();
+        world
+            .metadata
+            .schematic_kernels
+            .insert(key.clone(), sidecar.clone());
+
+        prime_schematic_assets(&db, &world, None).unwrap();
+
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored.join(&key)).unwrap(),
+            sidecar,
+            "kernel sidecar must be stored verbatim"
+        );
+
+        // Reopen: copy-once schematic is preserved, but a new kernel hash still
+        // lands because sidecars are content-addressed.
+        let reopened = elodin_db::DB::open(db_path).unwrap();
+        let new_key = format!(
+            "{}{}",
+            impeller2_wkt::DISPLAY_KERNEL_ASSET_PREFIX,
+            "cafebabe"
+        );
+        let new_sidecar = b"{\"version\":1,\"hash\":\"cafebabe\"}".to_vec();
+        world
+            .metadata
+            .schematic_kernels
+            .insert(new_key.clone(), new_sidecar.clone());
+        prime_schematic_assets(&reopened, &world, None).unwrap();
+        assert_eq!(std::fs::read(stored.join(&new_key)).unwrap(), new_sidecar);
     }
 
     #[test]

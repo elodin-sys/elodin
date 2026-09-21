@@ -1819,9 +1819,12 @@ impl WorldBuilder {
         default_content: Option<&Bound<'_, PyAny>>,
         path: Option<String>,
     ) -> Result<(), Error> {
-        let default_content = match default_content {
-            None => None,
-            Some(obj) => Some(crate::ui::extract_schematic_content(obj)?),
+        let (default_content, kernel_assets) = match default_content {
+            None => (None, HashMap::new()),
+            Some(obj) => {
+                let (kdl, kernels) = crate::ui::extract_schematic_content(obj)?;
+                (Some(kdl), kernels)
+            }
         };
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
@@ -1854,9 +1857,12 @@ impl WorldBuilder {
                 }
             });
         let previous = self.world.metadata.schematic.clone();
+        let previous_kernels = self.world.metadata.schematic_kernels.clone();
         self.world.metadata.schematic = file_contents.or(default_content);
+        self.world.metadata.schematic_kernels = kernel_assets;
         if let Err(err) = self.validate_cinematic_owners() {
             self.world.metadata.schematic = previous;
+            self.world.metadata.schematic_kernels = previous_kernels;
             return Err(err);
         }
         Ok(())

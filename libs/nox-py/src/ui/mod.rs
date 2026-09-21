@@ -321,12 +321,17 @@ fn set_build_error(db: &str, message: Option<String>) -> PyResult<()> {
 }
 
 /// Parse `default_content` for [`crate::WorldBuilder::schematic`]: `str` or [`PySchematic`].
-pub fn extract_schematic_content(obj: &Bound<'_, PyAny>) -> PyResult<String> {
+///
+/// Returns the KDL text plus any display-kernel sidecar bytes that must be
+/// stored into the DB so the editor can fetch them.
+pub fn extract_schematic_content(
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<(String, HashMap<String, Vec<u8>>)> {
     if let Ok(s) = obj.extract::<String>() {
-        return Ok(s);
+        return Ok((s, HashMap::new()));
     }
     if let Ok(schematic) = obj.extract::<PyRef<'_, PySchematic>>() {
-        return Ok(schematic.emit_kdl_string());
+        return Ok((schematic.emit_kdl_string(), schematic.kernel_assets.clone()));
     }
     Err(PyTypeError::new_err(
         "schematic content must be str or elodin.ui.Schematic",
