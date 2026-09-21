@@ -8,7 +8,7 @@ type TickFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
 
 /// Compiled StableHLO module with a checked pointer ABI.
 pub struct DisplayKernelExec {
-    compiled: CompiledModule,
+    _compiled: CompiledModule,
     tick_fn: TickFn,
     input_bytes: Vec<usize>,
     output_bytes: Vec<usize>,
@@ -40,9 +40,9 @@ impl DisplayKernelExec {
         if fn_ptr.is_null() {
             return Err("compiled module is missing a callable main entrypoint".into());
         }
-        let tick_fn: TickFn = unsafe { std::mem::transmute(fn_ptr) };
+        let tick_fn = unsafe { std::mem::transmute::<*const u8, TickFn>(fn_ptr) };
         Ok(Self {
-            compiled,
+            _compiled: compiled,
             tick_fn,
             input_bytes: input_bytes.to_vec(),
             output_bytes: output_bytes.to_vec(),
@@ -99,7 +99,6 @@ impl DisplayKernelExec {
         unsafe {
             (self.tick_fn)(self.input_ptrs.as_ptr(), self.output_ptrs.as_mut_ptr());
         }
-        let _ = &self.compiled;
         Ok(())
     }
 
