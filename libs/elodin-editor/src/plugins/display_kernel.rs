@@ -3,8 +3,10 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use cranelift_mlir::display_kernel::DisplayKernelExec;
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{ConnectionAddr, EntityMap, TelemetryCache};
@@ -17,6 +19,9 @@ use crate::object_3d::{local_assets_root, resolve_db_asset_url};
 use crate::plugins::kdl_document::InitialKdlPath;
 use crate::ui::plot::data::EvaluatedSeries;
 
+const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+const RETRY_BACKOFF_CAP: Duration = Duration::from_secs(30);
+
 pub struct DisplayKernelPlugin;
 
 impl Plugin for DisplayKernelPlugin {
@@ -27,7 +32,49 @@ impl Plugin for DisplayKernelPlugin {
 
 #[derive(Resource, Default)]
 pub struct DisplayKernelCache {
-    modules: HashMap<String, Result<CompiledDisplayKernel, String>>,
+    modules: HashMap<String, KernelEntry>,
+}
+
+enum KernelEntry {
+    Loading {
+        task: Task<Result<CompiledDisplayKernel, LoadError>>,
+        attempts: u32,
+    },
+    Ready(Box<CompiledDisplayKernel>),
+    Failed {
+        err: String,
+        retryable: bool,
+        since: Instant,
+        attempts: u32,
+    },
+}
+
+pub enum KernelStatus<'a> {
+    Ready(&'a mut CompiledDisplayKernel),
+    Loading,
+    Failed(&'a str),
+}
+
+#[derive(Debug)]
+struct LoadError {
+    message: String,
+    retryable: bool,
+}
+
+impl LoadError {
+    fn fetch(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retryable: true,
+        }
+    }
+
+    fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retryable: false,
+        }
+    }
 }
 
 pub struct CompiledDisplayKernel {
@@ -36,29 +83,70 @@ pub struct CompiledDisplayKernel {
     pub batched: DisplayKernelExec,
 }
 
-#[derive(Clone, Copy)]
-pub struct KernelFetchCtx<'a> {
+#[derive(Clone, Default)]
+pub struct KernelFetchCtx {
     pub connection_addr: Option<SocketAddr>,
-    pub local_root: Option<&'a Path>,
-    pub kdl_dir: Option<&'a Path>,
+    pub local_root: Option<PathBuf>,
+    pub kdl_dir: Option<PathBuf>,
 }
 
 impl DisplayKernelCache {
-    pub fn compiled(
+    pub fn poll(
         &mut self,
         binding: &DisplayKernelBinding,
-        fetch: KernelFetchCtx<'_>,
-    ) -> Result<&mut CompiledDisplayKernel, String> {
-        if !self.modules.contains_key(&binding.hash) {
-            let loaded = load_compiled(binding, fetch);
-            self.modules.insert(binding.hash.clone(), loaded);
+        fetch: &KernelFetchCtx,
+    ) -> KernelStatus<'_> {
+        let hash = binding.hash.clone();
+        let spawn_attempts = match self.modules.get(&hash) {
+            None => Some(0),
+            Some(KernelEntry::Failed {
+                retryable: true,
+                since,
+                attempts,
+                ..
+            }) if since.elapsed() >= retry_backoff(*attempts) => Some(*attempts),
+            _ => None,
+        };
+        if let Some(attempts) = spawn_attempts {
+            let task = spawn_load(binding.clone(), fetch.clone());
+            self.modules
+                .insert(hash.clone(), KernelEntry::Loading { task, attempts });
         }
-        match self.modules.get_mut(&binding.hash) {
-            Some(Ok(compiled)) => Ok(compiled),
-            Some(Err(err)) => Err(err.clone()),
-            None => Err("display kernel cache insert failed".into()),
+
+        if let Some(KernelEntry::Loading { task, attempts }) = self.modules.get_mut(&hash)
+            && let Some(result) = future::block_on(future::poll_once(task))
+        {
+            let attempts = *attempts;
+            let entry = match result {
+                Ok(compiled) => KernelEntry::Ready(Box::new(compiled)),
+                Err(err) => KernelEntry::Failed {
+                    err: err.message,
+                    retryable: err.retryable,
+                    since: Instant::now(),
+                    attempts: attempts.saturating_add(1),
+                },
+            };
+            self.modules.insert(hash.clone(), entry);
+        }
+
+        match self.modules.get_mut(&hash) {
+            Some(KernelEntry::Ready(compiled)) => KernelStatus::Ready(compiled.as_mut()),
+            Some(KernelEntry::Failed { err, .. }) => KernelStatus::Failed(err),
+            Some(KernelEntry::Loading { .. }) | None => KernelStatus::Loading,
         }
     }
+}
+
+fn spawn_load(
+    binding: DisplayKernelBinding,
+    fetch: KernelFetchCtx,
+) -> Task<Result<CompiledDisplayKernel, LoadError>> {
+    IoTaskPool::get().spawn(async move { load_compiled(&binding, &fetch) })
+}
+
+fn retry_backoff(attempts: u32) -> Duration {
+    let shift = attempts.saturating_sub(1).min(5);
+    Duration::from_secs(1u64 << shift).min(RETRY_BACKOFF_CAP)
 }
 
 #[allow(dead_code)]
@@ -250,27 +338,31 @@ pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, String> {
     }
 }
 
-pub fn kernel_fetch_ctx<'a>(
-    connection_addr: Option<Res<'a, ConnectionAddr>>,
-    initial_kdl: Option<Res<'a, InitialKdlPath>>,
-) -> (Option<SocketAddr>, Option<PathBuf>, Option<PathBuf>) {
-    let addr = connection_addr.map(|a| a.0);
-    let local_root = local_assets_root(initial_kdl.as_deref());
-    let kdl_dir = initial_kdl
-        .and_then(|path| path.0.clone())
-        .and_then(|path| path.parent().map(Path::to_path_buf));
-    (addr, local_root, kdl_dir)
+pub fn kernel_fetch_ctx(
+    connection_addr: Option<Res<ConnectionAddr>>,
+    initial_kdl: Option<Res<InitialKdlPath>>,
+) -> KernelFetchCtx {
+    KernelFetchCtx {
+        connection_addr: connection_addr.map(|a| a.0),
+        local_root: local_assets_root(initial_kdl.as_deref()),
+        kdl_dir: initial_kdl
+            .and_then(|path| path.0.clone())
+            .and_then(|path| path.parent().map(Path::to_path_buf)),
+    }
 }
 
 fn load_compiled(
     binding: &DisplayKernelBinding,
-    fetch: KernelFetchCtx<'_>,
-) -> Result<CompiledDisplayKernel, String> {
+    fetch: &KernelFetchCtx,
+) -> Result<CompiledDisplayKernel, LoadError> {
     let bytes = fetch_kernel_bytes(binding, fetch)?;
-    let artifact = DisplayKernelArtifact::parse(&bytes)?;
-    let (scalar_in, scalar_out, batched_in, batched_out) = verify_artifact(&artifact, binding)?;
-    let scalar = DisplayKernelExec::compile(&artifact.scalar_mlir, &scalar_in, &scalar_out)?;
-    let batched = DisplayKernelExec::compile(&artifact.batched_mlir, &batched_in, &batched_out)?;
+    let artifact = DisplayKernelArtifact::parse(&bytes).map_err(LoadError::permanent)?;
+    let (scalar_in, scalar_out, batched_in, batched_out) =
+        verify_artifact(&artifact, binding).map_err(LoadError::permanent)?;
+    let scalar = DisplayKernelExec::compile(&artifact.scalar_mlir, &scalar_in, &scalar_out)
+        .map_err(LoadError::permanent)?;
+    let batched = DisplayKernelExec::compile(&artifact.batched_mlir, &batched_in, &batched_out)
+        .map_err(LoadError::permanent)?;
     Ok(CompiledDisplayKernel {
         artifact,
         scalar,
@@ -312,18 +404,19 @@ fn verify_artifact(
 
 fn fetch_kernel_bytes(
     binding: &DisplayKernelBinding,
-    fetch: KernelFetchCtx<'_>,
-) -> Result<Vec<u8>, String> {
+    fetch: &KernelFetchCtx,
+) -> Result<Vec<u8>, LoadError> {
     let hash = binding
         .hash
         .rsplit('/')
         .next()
         .unwrap_or(&binding.hash)
         .to_string();
-    if let Some(dir) = fetch.kdl_dir {
+    if let Some(dir) = &fetch.kdl_dir {
         let local = dir.join("kernels").join(&hash);
         if local.is_file() {
-            return std::fs::read(&local).map_err(|err| format!("read {}: {err}", local.display()));
+            return std::fs::read(&local)
+                .map_err(|err| LoadError::fetch(format!("read {}: {err}", local.display())));
         }
     }
     let key = if binding.asset.starts_with(DISPLAY_KERNEL_ASSET_PREFIX)
@@ -333,11 +426,12 @@ fn fetch_kernel_bytes(
     } else {
         DisplayKernelBinding::asset_key(&hash)
     };
-    if let Some(root) = fetch.local_root {
+    if let Some(root) = &fetch.local_root {
         let rel = key.strip_prefix("db:").unwrap_or(&key);
         let path = root.join(rel);
         if path.is_file() {
-            return std::fs::read(&path).map_err(|err| format!("read {}: {err}", path.display()));
+            return std::fs::read(&path)
+                .map_err(|err| LoadError::fetch(format!("read {}: {err}", path.display())));
         }
     }
     let url = if key.starts_with("http://") || key.starts_with("https://") {
@@ -347,9 +441,15 @@ fn fetch_kernel_bytes(
     } else {
         resolve_db_asset_url(&format!("db:{key}"), fetch.connection_addr)
     };
-    reqwest::blocking::get(&url)
+    let client = reqwest::blocking::Client::builder()
+        .timeout(FETCH_TIMEOUT)
+        .build()
+        .map_err(|err| LoadError::fetch(err.to_string()))?;
+    client
+        .get(&url)
+        .send()
         .and_then(|resp| resp.error_for_status()?.bytes().map(|b| b.to_vec()))
-        .map_err(|err| format!("fetch {url}: {err}"))
+        .map_err(|err| LoadError::fetch(format!("fetch {url}: {err}")))
 }
 
 fn pack_component_value(value: &ComponentValue, dtype: &str) -> Result<Vec<u8>, String> {
@@ -458,6 +558,7 @@ fn unpack_batched_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::app::TaskPoolPlugin;
     use impeller2_wkt::{DisplayKernelInput, DisplayKernelTensor};
     use sha2::{Digest, Sha256};
 
@@ -596,5 +697,131 @@ mod tests {
         let mut values = vec![Vec::new()];
         unpack_batched_outputs(&artifact, &[buf], 3, &mut values).unwrap();
         assert_eq!(values[0], vec![1.0, 2.0, 3.0]);
+    }
+
+    fn task_pool_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(TaskPoolPlugin::default());
+        app
+    }
+
+    fn cache_binding(hash: &str) -> DisplayKernelBinding {
+        DisplayKernelBinding {
+            hash: hash.into(),
+            asset: DisplayKernelBinding::asset_key(hash),
+            inputs: vec![],
+        }
+    }
+
+    fn poll_until_settled(cache: &mut DisplayKernelCache, binding: &DisplayKernelBinding) -> bool {
+        let fetch = KernelFetchCtx::default();
+        for _ in 0..200 {
+            match cache.poll(binding, &fetch) {
+                KernelStatus::Loading => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                KernelStatus::Failed(_) | KernelStatus::Ready(_) => return true,
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn pending_load_reports_loading() {
+        let _app = task_pool_app();
+        let mut cache = DisplayKernelCache::default();
+        cache.modules.insert(
+            "pending".into(),
+            KernelEntry::Loading {
+                task: IoTaskPool::get().spawn(async {
+                    std::future::pending::<Result<CompiledDisplayKernel, LoadError>>().await
+                }),
+                attempts: 0,
+            },
+        );
+        assert!(matches!(
+            cache.poll(&cache_binding("pending"), &KernelFetchCtx::default()),
+            KernelStatus::Loading
+        ));
+    }
+
+    #[test]
+    fn permanent_failure_stays_failed() {
+        let _app = task_pool_app();
+        let mut cache = DisplayKernelCache::default();
+        cache.modules.insert(
+            "dead".into(),
+            KernelEntry::Loading {
+                task: IoTaskPool::get()
+                    .spawn(async { Err(LoadError::permanent("compile failed")) }),
+                attempts: 0,
+            },
+        );
+        let binding = cache_binding("dead");
+        assert!(poll_until_settled(&mut cache, &binding));
+        assert!(matches!(
+            cache.poll(&binding, &KernelFetchCtx::default()),
+            KernelStatus::Failed("compile failed")
+        ));
+        assert!(matches!(
+            cache.modules.get("dead"),
+            Some(KernelEntry::Failed {
+                retryable: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn retryable_failure_respawns_after_backoff() {
+        let _app = task_pool_app();
+        let mut cache = DisplayKernelCache::default();
+        cache.modules.insert(
+            "retry".into(),
+            KernelEntry::Failed {
+                err: "fetch failed".into(),
+                retryable: true,
+                since: Instant::now() - Duration::from_secs(2),
+                attempts: 1,
+            },
+        );
+        assert!(matches!(
+            cache.poll(&cache_binding("retry"), &KernelFetchCtx::default()),
+            KernelStatus::Loading
+        ));
+        assert!(matches!(
+            cache.modules.get("retry"),
+            Some(KernelEntry::Loading { attempts: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn retryable_failure_waits_for_backoff() {
+        let _app = task_pool_app();
+        let mut cache = DisplayKernelCache::default();
+        cache.modules.insert(
+            "wait".into(),
+            KernelEntry::Failed {
+                err: "fetch failed".into(),
+                retryable: true,
+                since: Instant::now(),
+                attempts: 1,
+            },
+        );
+        assert!(matches!(
+            cache.poll(&cache_binding("wait"), &KernelFetchCtx::default()),
+            KernelStatus::Failed("fetch failed")
+        ));
+        assert!(matches!(
+            cache.modules.get("wait"),
+            Some(KernelEntry::Failed { attempts: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn retry_backoff_starts_at_one_second() {
+        assert_eq!(retry_backoff(1), Duration::from_secs(1));
+        assert_eq!(retry_backoff(2), Duration::from_secs(2));
+        assert_eq!(retry_backoff(6), RETRY_BACKOFF_CAP);
     }
 }
