@@ -14,10 +14,7 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::{
-    CommandsExt, ComponentPathRegistry, ComponentSchemaRegistry, SimTimeStepFetch,
-    SimTimeStepSource,
-};
+use impeller2_bevy::{CommandsExt, SimTimeStepFetch, SimTimeStepSource};
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SimulationTimeStep, SparklineQuery};
 
 use crate::{
@@ -1253,20 +1250,23 @@ pub fn dispatch_time_range_queries(
 /// data the first 64 IMU samples imply 9 µs where the series really runs at
 /// 1 ms — and since the finest component wins, the worst-biased one would
 /// otherwise decide the result every time.
+///
+/// Measuring does not wait to see whether the sim will declare a rate: a
+/// declared one wins by overriding this, not by holding it back. Waiting meant
+/// reading the leftover `simulation_time_step` entry in the schema registry as
+/// proof the current recording publishes a rate, but that registry accumulates
+/// across connections and is never cleared, so a recording opened after a
+/// declaring one would sit at `N/A` with an inert step until the declared
+/// fetch ran out of retries.
 pub fn estimate_sim_time_step_from_ranges(
     time_ranges: Res<ComponentTimeRanges>,
-    path_reg: Res<ComponentPathRegistry>,
-    schema_reg: Res<ComponentSchemaRegistry>,
     mut fetch: ResMut<SimTimeStepFetch>,
     mut time_step: ResMut<SimulationTimeStep>,
 ) {
-    if fetch.defers_to_declared(&path_reg, &schema_reg) {
+    if fetch.source() == SimTimeStepSource::Declared {
         return;
     }
-    // Deliberately not gated on the ranges changing. A DB that declares a rate
-    // only releases the measured fallback once its fetch runs out of retries,
-    // seconds after the ranges have gone quiet. Once a rate is published,
-    // though, only fresh ranges can refine it.
+    // Once a rate is published, only fresh ranges can refine it.
     if fetch.source() == SimTimeStepSource::Estimated && !time_ranges.is_changed() {
         return;
     }
@@ -1297,6 +1297,7 @@ fn finest_sample_spacing_micros(time_ranges: &ComponentTimeRanges) -> Option<i64
 #[cfg(test)]
 mod sample_spacing_tests {
     use super::*;
+    use impeller2_bevy::{ComponentPathRegistry, ComponentSchemaRegistry};
 
     fn ranges(entries: &[(&str, i64, i64, usize)]) -> ComponentTimeRanges {
         let mut time_ranges = ComponentTimeRanges::default();
@@ -1430,27 +1431,17 @@ mod sample_spacing_tests {
     }
 
     #[test]
-    fn the_measured_rate_lands_after_the_declared_one_gives_up() {
+    fn a_leftover_schema_entry_does_not_hold_back_the_measurement() {
+        // The schema registry accumulates across connections and is never
+        // cleared, so an entry left by a previously connected sim says nothing
+        // about whether this recording publishes a rate. Measuring goes ahead
+        // on its own schedule; a declared rate asserts itself by overriding.
         let mut app = estimate_app();
         declare_a_rate(&mut app);
         {
             let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
             *time_ranges = ranges(&[("gyro", 0, 1_000_000, 1_001)]);
         }
-        app.update();
-        assert_eq!(
-            app.world().resource::<SimulationTimeStep>().0,
-            0.0,
-            "a declared rate must not be overridden while it may still arrive"
-        );
-
-        // The declared rate drops out of the running, on a frame where the
-        // ranges are untouched — exactly what the retry budget running out
-        // looks like, seconds after the queries went quiet.
-        app.world_mut()
-            .resource_mut::<ComponentSchemaRegistry>()
-            .0
-            .clear();
         app.update();
 
         assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.001);

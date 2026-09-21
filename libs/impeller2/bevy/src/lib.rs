@@ -678,10 +678,9 @@ impl SimTimeStepFetch {
     /// Whether a reply still belongs to the recording that asked for it.
     ///
     /// `Declared` is terminal: it short-circuits [`fetch_sim_time_step`] so
-    /// nothing asks again, and holds [`SimTimeStepFetch::defers_to_declared`]
-    /// true so no measured rate can take over. A single reply landing after a
-    /// re-arm would therefore pin the new recording to the previous one's dt
-    /// for good.
+    /// nothing asks again, and no measured rate may override it. A single
+    /// reply landing after a re-arm would therefore pin the new recording to
+    /// the previous one's dt for good.
     fn accepts(&self, generation: u64) -> bool {
         self.generation == generation
     }
@@ -690,22 +689,13 @@ impl SimTimeStepFetch {
         self.source
     }
 
-    /// True while a measured rate must not be applied, because the sim either
-    /// already declared one or still might.
-    pub fn defers_to_declared(
-        &self,
-        path_reg: &ComponentPathRegistry,
-        schema_reg: &ComponentSchemaRegistry,
-    ) -> bool {
-        self.source == SimTimeStepSource::Declared
-            || (!self.declared.exhausted()
-                && sim_time_step_component_id(path_reg, schema_reg).is_some())
-    }
-
     /// Record a measured sample spacing. Returns the step in seconds when it is
     /// finer than anything measured so far, and so should be published: a slow
     /// component describes its own rate, not the resolution the recording as a
     /// whole can be stepped at.
+    ///
+    /// A declared rate is authoritative over anything recorded here, but it
+    /// asserts itself by overriding: see [`fetch_sim_time_step`].
     pub fn record_estimate(&mut self, micros: i64) -> Option<f64> {
         if micros <= 0 || self.best_estimate_micros.is_some_and(|best| best <= micros) {
             return None;
@@ -2155,40 +2145,6 @@ mod sim_time_step_tests {
         assert_eq!(fetch.record_estimate(125), None, "equal is no improvement");
         assert_eq!(fetch.record_estimate(0), None);
         assert_eq!(fetch.source(), SimTimeStepSource::Estimated);
-    }
-
-    #[test]
-    fn a_measured_rate_waits_for_the_declared_one() {
-        let pair = ComponentPath::from_name("Globals.simulation_time_step");
-        let pair_id = pair.id;
-        let mut path_reg = ComponentPathRegistry::default();
-        path_reg.0.insert(pair_id, pair);
-        let mut schema_reg = ComponentSchemaRegistry::default();
-        schema_reg.0.insert(pair_id, scalar_schema());
-
-        let mut fetch = SimTimeStepFetch::default();
-        assert!(
-            fetch.defers_to_declared(&path_reg, &schema_reg),
-            "the DB declares a rate, so measuring must not override it"
-        );
-
-        fetch.declared.count = SIM_TIME_STEP_MAX_ATTEMPTS;
-        assert!(
-            !fetch.defers_to_declared(&path_reg, &schema_reg),
-            "out of retries, a measured rate is better than none"
-        );
-
-        fetch.source = SimTimeStepSource::Declared;
-        assert!(fetch.defers_to_declared(&path_reg, &schema_reg));
-    }
-
-    #[test]
-    fn a_db_without_a_declared_rate_is_measured_immediately() {
-        let fetch = SimTimeStepFetch::default();
-        assert!(!fetch.defers_to_declared(
-            &ComponentPathRegistry::default(),
-            &ComponentSchemaRegistry::default()
-        ));
     }
 
     #[test]
