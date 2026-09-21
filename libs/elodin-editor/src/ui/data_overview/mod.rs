@@ -84,6 +84,8 @@ pub struct ComponentTimeRanges {
     /// Current batch index for processing
     pub current_batch: usize,
     pub row_settings: HashMap<ComponentId, DataOverviewRowSettings>,
+    /// Bumped by [`ComponentTimeRanges::reset`] to disown replies in flight.
+    generation: u64,
 }
 
 impl ComponentTimeRanges {
@@ -92,7 +94,40 @@ impl ComponentTimeRanges {
     /// stale ranges behind would let the timeline step keep the old
     /// recording's rate.
     pub fn reset(&mut self) {
+        let disowned = self.generation.wrapping_add(1);
         *self = Self::default();
+        self.generation = disowned;
+    }
+
+    /// Stamp to hand a query, so its reply can be matched back to the
+    /// recording that asked for it.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Whether a reply still belongs to the current recording.
+    pub fn accepts(&self, generation: u64) -> bool {
+        self.generation == generation
+    }
+}
+
+/// Account for one finished time-range query.
+///
+/// Reaching zero pending moves the batch on to sparklines. Note that a reply
+/// arriving after a reset would satisfy `completed >= total` immediately,
+/// since a reset leaves `total_queries` at zero — which is why callers must
+/// check [`ComponentTimeRanges::accepts`] first. Moving off `NotStarted` is
+/// unrecoverable: [`trigger_time_range_queries`] only ever starts from there.
+fn finish_time_range_query(time_ranges: &mut ComponentTimeRanges) {
+    time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
+    time_ranges.completed_queries += 1;
+
+    if time_ranges.pending_queries == 0
+        && time_ranges.completed_queries >= time_ranges.total_queries
+    {
+        time_ranges.state = TimeRangeQueryState::QueryingSparklines(Instant::now());
+        time_ranges.current_batch = 0;
+        time_ranges.completed_queries = 0;
     }
 }
 
@@ -310,6 +345,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 params.time_ranges.pending_queries = batch_size;
                 params.time_ranges.current_batch += 1;
 
+                let generation = params.time_ranges.generation();
                 for table_name in params.time_ranges.tables_to_query[batch_start..batch_end].iter()
                 {
                     let table_name_clone = table_name.clone();
@@ -327,6 +363,9 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                         query,
                         move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                               mut time_ranges: ResMut<ComponentTimeRanges>| {
+                            if !time_ranges.accepts(generation) {
+                                return true;
+                            }
                             // Only process data batches; completion markers (batch: None) are ignored
                             // since the handler is removed immediately after processing data.
                             // This prevents request ID collisions when IDs wrap around.
@@ -1167,6 +1206,10 @@ pub fn dispatch_time_range_queries(
     time_ranges.pending_queries = batch_end - batch_start;
     time_ranges.current_batch += 1;
 
+    // These requests are queued as commands and so outlive the frame. A
+    // session reset in between cancels the registered handlers, but not ones
+    // whose registration is still sitting in the command queue.
+    let generation = time_ranges.generation();
     let batch: Vec<String> = time_ranges.tables_to_query[batch_start..batch_end].to_vec();
     for table_name in batch {
         let query = format!(
@@ -1177,6 +1220,9 @@ pub fn dispatch_time_range_queries(
             SQLQuery(query),
             move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                   mut time_ranges: ResMut<ComponentTimeRanges>| {
+                if !time_ranges.accepts(generation) {
+                    return true;
+                }
                 // Completion markers (batch: None) are ignored; the handler is
                 // removed either way, freeing the request id.
                 match res {
@@ -1187,23 +1233,10 @@ pub fn dispatch_time_range_queries(
                             if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
                                 process_time_range_and_count(&table_name, &batch, &mut time_ranges);
                             }
-                            time_ranges.pending_queries =
-                                time_ranges.pending_queries.saturating_sub(1);
-                            time_ranges.completed_queries += 1;
+                            finish_time_range_query(&mut time_ranges);
                         }
                     }
-                    Err(_) => {
-                        time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
-                        time_ranges.completed_queries += 1;
-                    }
-                }
-
-                if time_ranges.pending_queries == 0
-                    && time_ranges.completed_queries >= time_ranges.total_queries
-                {
-                    time_ranges.state = TimeRangeQueryState::QueryingSparklines(Instant::now());
-                    time_ranges.current_batch = 0;
-                    time_ranges.completed_queries = 0;
+                    Err(_) => finish_time_range_query(&mut time_ranges),
                 }
                 true
             },
@@ -1316,6 +1349,62 @@ mod sample_spacing_tests {
         time_ranges.row_counts.insert("orphan".to_string(), 10_000);
 
         assert_eq!(finest_sample_spacing_micros(&time_ranges), Some(1_000));
+    }
+
+    #[test]
+    fn a_reset_disowns_queries_already_in_flight() {
+        let mut time_ranges = ranges(&[("gyro", 0, 1_000_000, 1_001)]);
+        let in_flight = time_ranges.generation();
+        assert!(time_ranges.accepts(in_flight));
+
+        time_ranges.reset();
+
+        assert!(
+            !time_ranges.accepts(in_flight),
+            "cancelling handlers cannot reach requests still sitting in the command queue"
+        );
+        assert!(time_ranges.accepts(time_ranges.generation()));
+    }
+
+    #[test]
+    fn one_unguarded_reply_would_strand_the_new_recording() {
+        // What the generation guard exists to prevent: a reset leaves
+        // `total_queries` at zero, so the very first reply to land satisfies
+        // `completed >= total` and moves the state on. Since
+        // `trigger_time_range_queries` only ever starts from `NotStarted`,
+        // nothing would re-measure the new recording.
+        let mut time_ranges = ComponentTimeRanges::default();
+        time_ranges.reset();
+        assert!(matches!(time_ranges.state, TimeRangeQueryState::NotStarted));
+
+        finish_time_range_query(&mut time_ranges);
+
+        assert!(!matches!(
+            time_ranges.state,
+            TimeRangeQueryState::NotStarted
+        ));
+    }
+
+    #[test]
+    fn a_full_batch_moves_on_to_sparklines() {
+        let mut time_ranges = ComponentTimeRanges {
+            state: TimeRangeQueryState::QueryingTimeRanges(Instant::now()),
+            pending_queries: 2,
+            total_queries: 2,
+            ..Default::default()
+        };
+
+        finish_time_range_query(&mut time_ranges);
+        assert!(matches!(
+            time_ranges.state,
+            TimeRangeQueryState::QueryingTimeRanges(_)
+        ));
+
+        finish_time_range_query(&mut time_ranges);
+        assert!(matches!(
+            time_ranges.state,
+            TimeRangeQueryState::QueryingSparklines(_)
+        ));
     }
 
     fn estimate_app() -> App {
