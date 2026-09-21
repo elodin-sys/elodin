@@ -1098,7 +1098,7 @@ pub fn dtype_width(dtype: &str) -> Result<usize, String> {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Graph {
     pub eql: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel: Option<DisplayKernelBinding>,
     pub name: Option<String>,
     #[serde(default)]
@@ -1486,9 +1486,9 @@ pub enum Object3DMesh {
         error_covariance_cholesky: Option<String>,
         #[serde(default)]
         error_covariance: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         error_covariance_cholesky_kernel: Option<DisplayKernelBinding>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         error_covariance_kernel: Option<DisplayKernelBinding>,
         #[serde(default = "default_ellipsoid_confidence_interval")]
         error_confidence_interval: f32,
@@ -1759,7 +1759,7 @@ pub struct Object3D {
     pub orientation: bevy_geo_frames::RotationKind,
     #[serde(default = "default_true")]
     pub sensor_visible: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel: Option<DisplayKernelBinding>,
     pub icon: Option<Object3DIcon>,
     #[serde(default)]

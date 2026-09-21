@@ -2629,6 +2629,11 @@ pub fn apply_glb_material_overrides(
 }
 
 #[cfg(not(target_family = "wasm"))]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::too_many_lines
+)]
 pub fn update_object_3d_kernels(
     mut commands: Commands,
     mut objects_query: Query<(

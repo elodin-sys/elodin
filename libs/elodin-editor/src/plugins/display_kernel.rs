@@ -112,6 +112,7 @@ pub fn invoke_scalar(
     Ok(outputs)
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn evaluate_kernel_series(
     cache: &TelemetryCache,
     compiled: &mut CompiledDisplayKernel,
@@ -143,7 +144,6 @@ pub fn evaluate_kernel_series(
         .max(1);
     let batch_size = compiled.artifact.batch_size as usize;
     let input_sizes = compiled.artifact.input_nbytes(false)?;
-    let output_sizes = compiled.artifact.output_nbytes(false)?;
     let batched_in = compiled.artifact.input_nbytes(true)?;
     let batched_out = compiled.artifact.output_nbytes(true)?;
 
@@ -194,12 +194,7 @@ pub fn evaluate_kernel_series(
     }
 
     let n = timestamps.len();
-    let series_width: usize = output_sizes
-        .iter()
-        .map(|size| size / dtype_width_or_8(&compiled.artifact.outputs, 0))
-        .sum();
     let mut values = vec![Vec::with_capacity(n); flatten_value_count(&compiled.artifact.outputs)];
-    let _ = series_width;
 
     let mut in_bufs: Vec<Vec<u8>> = batched_in.iter().map(|len| vec![0u8; *len]).collect();
     let mut out_bufs: Vec<Vec<u8>> = batched_out.iter().map(|len| vec![0u8; *len]).collect();
@@ -419,14 +414,6 @@ fn flatten_value_count(outputs: &[impeller2_wkt::DisplayKernelTensor]) -> usize 
                 .max(1)
         })
         .sum()
-}
-
-fn dtype_width_or_8(outputs: &[impeller2_wkt::DisplayKernelTensor], index: usize) -> usize {
-    outputs
-        .get(index)
-        .and_then(|tensor| impeller2_wkt::dtype_width(&tensor.dtype).ok())
-        .unwrap_or(8)
-        .max(1)
 }
 
 fn unpack_batched_outputs(

@@ -196,6 +196,7 @@ fn schematic_elem_expr(elem: &SchematicElem) -> PyExpr {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn panel_expr(panel: &Panel, share: Option<f32>) -> PyExpr {
     match panel {
         Panel::Tabs(panels) => {
