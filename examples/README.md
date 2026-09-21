@@ -139,6 +139,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | [sensor-camera](./sensor-camera) | Bouncing balls carrying onboard RGB / thermal cameras |
 | [ellipsoid](./ellipsoid) | Frustum ∩ ellipsoid coverage and far-plane projection |
 | [covariance-ellipsoids](./covariance-ellipsoids) | Cholesky factor vs direct `P` covariance |
+| [display-kernels](./display-kernels) | Python schematic + `@ui.kernel` ellipsoid / graph |
 
 ### Telemetry & external clients
 
@@ -295,6 +296,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | [rc-jet](./rc-jet) | α, β, CL/CD, surfaces, spool |
 | [rocket](./rocket) | EQL `query_plot` for angle of attack and speed |
 | [voyager](./voyager) | Position / velocity error vs SPICE |
+| [display-kernels](./display-kernels) | Kernel `det(P)` / `trace(P)` vs plain EQL covariance |
 
 ### KDL: line_3d
 
@@ -334,6 +336,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | Example | Description |
 | --- | --- |
 | [covariance-ellipsoids](./covariance-ellipsoids) | `error_covariance` vs `error_covariance_cholesky` |
+| [display-kernels](./display-kernels) | Kernel-driven `error_covariance_cholesky` ellipsoid |
 | [ellipsoid](./ellipsoid) | Frustum ∩ ellipsoid coverage + far-plane projection |
 
 ### sensor_camera / sensor_view
