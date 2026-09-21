@@ -157,14 +157,12 @@ def test_g1_db_client_handwritten_kdl_roundtrip():
     assert _canonical(handwritten) == handwritten
 
 
-def test_db_client_python_schematic_emits_display_kernel():
-    mod = _load_example(EXAMPLES / "db-client" / "schematic.py", "db_client_schematic")
+def test_display_kernels_python_schematic_emits_display_kernel():
+    mod = _load_example(EXAMPLES / "display-kernels" / "schematic.py", "display_kernels_schematic")
     kdl = mod.build().emit_kdl()
     assert "kernel=" in kdl
     assert "schematics/kernels/" in kdl
-    assert "drone.nav.covariance" in kdl
-    assert "drone.nav.position" in kdl
-    assert "drone.nav.transform" in kdl
+    assert "craft.error_covariance" in kdl
 
 
 def test_g1_motor_panel_equals_handwritten():

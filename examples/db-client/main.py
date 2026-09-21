@@ -90,26 +90,6 @@ def flight_loop(client: edb.Client, stop: threading.Event):
     state_w = client.table_writer(
         {
             "drone.world_pos": edb.f64[7].labeled("q0", "q1", "q2", "q3", "x", "y", "z"),
-            "drone.nav.position": edb.f64[3].labeled("x", "y", "z"),
-            # Row-major 4×4 homogeneous; schematic.py applies this with `@ui.kernel`.
-            "drone.nav.transform": edb.f64[16].labeled(
-                "m00",
-                "m01",
-                "m02",
-                "m03",
-                "m10",
-                "m11",
-                "m12",
-                "m13",
-                "m20",
-                "m21",
-                "m22",
-                "m23",
-                "m30",
-                "m31",
-                "m32",
-                "m33",
-            ),
             "drone.imu.accel": edb.f64[3].labeled("x", "y", "z"),
             "drone.imu.gyro": edb.f64[3].labeled("p", "q", "r"),
             "drone.propeller_angle": edb.f64[4].labeled("p0", "p1", "p2", "p3"),
@@ -141,29 +121,6 @@ def flight_loop(client: edb.Client, stop: threading.Event):
             t = time.time() - t0
             t_us = time.time_ns() // 1_000
             world_pos, accel, gyro, speed = flight_state(t)
-            x, y, z = world_pos[4], world_pos[5], world_pos[6]
-            # Yaw about +Z plus a circling translation so the ghost is offset.
-            yaw = 0.5 * t
-            c, s = math.cos(yaw), math.sin(yaw)
-            tx, ty, tz = 0.35 * math.cos(0.4 * t), 0.35 * math.sin(0.4 * t), 0.12
-            transform = [
-                c,
-                -s,
-                0.0,
-                tx,
-                s,
-                c,
-                0.0,
-                ty,
-                0.0,
-                0.0,
-                1.0,
-                tz,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-            ]
 
             base_rpm = 12_000.0 + 3_000.0 * speed
             rpm = [base_rpm + 120.0 * math.sin(t * 7.0 + k) for k in range(4)]
@@ -178,8 +135,6 @@ def flight_loop(client: edb.Client, stop: threading.Event):
                 timestamp_us=t_us,
                 values={
                     "drone.world_pos": world_pos,
-                    "drone.nav.position": [x, y, z],
-                    "drone.nav.transform": transform,
                     "drone.imu.accel": accel,
                     "drone.imu.gyro": gyro,
                     "drone.propeller_angle": prop_angle,
@@ -221,13 +176,8 @@ def flight_loop(client: edb.Client, stop: threading.Event):
 
 
 def derived_loop(client: edb.Client, stop: threading.Event):
-    """Consume the live world_pos stream and publish ground speed + covariance."""
-    speed_w = client.table_writer(
-        {
-            "drone.nav.speed": edb.f64,
-            "drone.nav.covariance": edb.f64[6].labeled("p00", "p10", "p20", "p11", "p21", "p22"),
-        }
-    )
+    """Consume the live world_pos stream and publish ground speed back."""
+    speed_w = client.table_writer({"drone.nav.speed": edb.f64})
     prev = None
     try:
         with client.stream("drone.world_pos") as rows:
@@ -239,17 +189,9 @@ def derived_loop(client: edb.Client, stop: threading.Event):
                     dt_us = row.timestamp_us - prev[0]
                     if dt_us > 0:
                         speed = float(np.linalg.norm(pos - prev[1]) / (dt_us * 1e-6))
-                        # Oblate SPD 6-pack [p00,p10,p20,p11,p21,p22]: wide
-                        # East/North, thin Up (~3:1 radii; variance 9:1).
-                        var_h = 0.09 + 0.12 * speed
-                        var_v = var_h / 9.0
-                        cov = [var_h, 0.0, 0.0, var_h, 0.0, var_v]
                         speed_w.write_nowait(
                             timestamp_us=row.timestamp_us,
-                            values={
-                                "drone.nav.speed": speed,
-                                "drone.nav.covariance": cov,
-                            },
+                            values={"drone.nav.speed": speed},
                         )
                 prev = (row.timestamp_us, pos.copy())
     finally:
@@ -302,12 +244,6 @@ def main() -> int:
     parser.add_argument(
         "--duration", type=float, default=30.0, help="headless run length in seconds"
     )
-    parser.add_argument(
-        "--db-schematic",
-        action="store_true",
-        help="load schematic from the DB (schematic.active) instead of --kdl sticky file; "
-        "use with `elodin ui watch examples/db-client/schematic.py`",
-    )
     args = parser.parse_args()
 
     # The server creates the database at a fresh path (an existing directory
@@ -317,22 +253,6 @@ def main() -> int:
     t_start_us = time.time_ns() // 1_000
 
     with edb.Server.start(db_path, args.addr), edb.Client.connect(args.addr) as client:
-        if args.db_schematic:
-            # Seed the active schematic from the Python builder so the editor
-            # has something before `elodin ui watch` attaches.
-            import importlib.util
-
-            import elodin.ui as ui
-
-            spec = importlib.util.spec_from_file_location(
-                "db_client_schematic", EXAMPLE_DIR / "schematic.py"
-            )
-            assert spec and spec.loader
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            ui.push(mod.build(), args.addr)
-            print(f"[ui] seeded schematic.active from schematic.py → {args.addr}")
-
         stop = threading.Event()
         threads = [
             threading.Thread(target=flight_loop, args=(client, stop), daemon=True),
@@ -364,11 +284,8 @@ def main() -> int:
                     )
                     return 1
                 print("[editor] launching; close the window to stop the demo")
-                editor_cmd = ["elodin", "editor", args.addr]
-                if not args.db_schematic:
-                    editor_cmd.extend(["--kdl", str(SCHEMATIC)])
                 subprocess.run(
-                    editor_cmd,
+                    ["elodin", "editor", args.addr, "--kdl", str(SCHEMATIC)],
                     env={**os.environ, "ELODIN_ASSETS_DIR": str(REPO_ROOT / "assets")},
                     check=False,
                 )

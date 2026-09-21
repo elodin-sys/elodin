@@ -59,13 +59,13 @@ def test_graph_accepts_expr():
     assert "drone.thrust" in built.emit_kdl()
 
 
-def test_db_client_expr_schematic_still_builds():
+def test_display_kernels_expr_schematic_still_builds():
     import importlib.util
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[4]
-    path = repo / "examples" / "db-client" / "schematic.py"
-    spec = importlib.util.spec_from_file_location("db_client_schematic", path)
+    path = repo / "examples" / "display-kernels" / "schematic.py"
+    spec = importlib.util.spec_from_file_location("display_kernels_schematic", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
