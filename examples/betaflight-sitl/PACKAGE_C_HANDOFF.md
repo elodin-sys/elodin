@@ -1,10 +1,10 @@
 # Package C Completion Handoff
 
 **Package:** C — Course and referee vertical slice
-**Branch:** `package-c-course-referee`
-**Updated base:** `536eb565574ed41b8cceb6420d721af41e9098d1` (`main` = `origin/main` when verified)
+**Package C implementation:** `a0bbc683` on `package-c-course-referee`
+**Qualification work:** uncommitted working-tree changes based on `a0bbc683`
 **Package D integration on main:** `4fc77694` (`#847`)
-**Commit policy:** No commits were created; Package C remains an uncommitted working-tree change for the developer to commit.
+**Commit policy:** No commit was created for the referee qualification; all new work remains visible in the working tree.
 
 ## Completed behavior
 
@@ -22,14 +22,51 @@
 - Package D ordering is preserved: state read → previous RC/Betaflight exchange → motor write → command-source update/next-tick latch → referee truth scoring. Guidance gets only the prior scoring stage's immutable/public ordered progress and opening/count rules, so a new pass is visible on the next tick. No gate pose or crossing truth enters `GuidanceUpdate`.
 - The default schematic/chase expression is unchanged. Only an enabled course opts into fixed course framing.
 
+## Positive referee qualification
+
+`RACE_REFEREE_AUDIT=1` is a narrowly scoped live qualification on the existing
+example. It requires `RACE_COURSE=single`, the default `scripted` guidance, and
+rejects Package D's manual audit. The controlled fixture changes only the audit
+process's initial state and duration:
+
+- position `(5.0, 0.0, 4.9)` m ENU;
+- velocity `(10.0, 0.0, 0.0)` m/s in world coordinates;
+- duration `2.5` simulated seconds.
+
+The run ends before scripted guidance leaves its five-second safe/disarmed boot
+phase. Gravity and quadratic drag carry the drone from the negative local-X side
+through the unchanged vertical gate. The production `post_step` truth read,
+`world_position_from_transform`, `Referee.observe_truth`, component write, a
+later-callback telemetry read, and final `RaceResult` are all exercised. No
+teleport, direct event injection, guidance steering, or special course is used.
+
+The pure evaluator requires one gate-0 event, an interpolated pass time in
+`0.9–1.3 s`, telemetry gate `0` with matching slot 0 and two `-1.0` slots, a
+complete `1/1` result, the expected approach/crossing/departure trajectory, and
+exactly one race and audit result line. Its failing fixtures return exit status
+1. The live result crossed near `(10.0, 0.0, 1.7958)` m at `1.085149 s`, finished
+at X=`11.7776 m`, and the simulation callback interval took about 3.0 wall
+seconds:
+
+```text
+[RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
+[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=1.085149 status=PASS
+```
+
+The editor uses only audit-specific camera framing and substitutes two existing
+graph tiles with `last_gate_passed` and `gate_pass_times`; normal no-course and
+ordinary course schematics are unchanged.
+
 ## Intended files
 
 - `examples/betaflight-sitl/main.py`
 - `examples/betaflight-sitl/course.py`
 - `examples/betaflight-sitl/referee.py`
+- `examples/betaflight-sitl/referee_audit.py`
 - `examples/betaflight-sitl/race_runtime.py`
 - `examples/betaflight-sitl/tests/test_course.py`
 - `examples/betaflight-sitl/tests/test_referee.py`
+- `examples/betaflight-sitl/tests/test_referee_audit.py`
 - `examples/betaflight-sitl/README.md`
 - `examples/betaflight-sitl/RACING_PLAN.md`
 - `examples/betaflight-sitl/PACKAGE_C_HANDOFF.md`
@@ -38,15 +75,9 @@ The root status also shows `examples/betaflight-sitl/betaflight` as modified. Th
 
 ## Verification environment
 
-The pre-existing Python environment held an incompatible old `0.17.4` wheel after main advanced to `0.19.3-alpha.0`. To avoid stale-artifact results, the current wheel was rebuilt and installed:
-
-```bash
-/home/ubuntu/py-uv-env/bin/maturin build --release --manifest-path=libs/nox-py/Cargo.toml
-uv pip install --python /home/ubuntu/py-uv-env/bin/python --reinstall \
-  target/wheels/elodin-0.19.3a0-cp310-abi3-manylinux_2_39_x86_64.whl
-```
-
-Both the wheel and release CLI then reported `0.19.3-alpha.0+536eb565.dirty`.
+The existing Python environment and release CLI match and both report
+`0.19.3-alpha.0+536eb565.dirty`. The qualification changes only example Python
+and documentation, so rebuilding/reinstalling the wheel was unnecessary.
 
 ## Verification performed
 
@@ -59,9 +90,8 @@ cargo build --release -p elodin
 git diff --check
 ```
 
-Final results are recorded in `RACING_PLAN.md`: the Python suite passed all 81
-tests in 0.08 seconds. The Package D controller suite also passed all 5 tests.
-The required release build completed successfully, as did `git diff --check`.
+Final results: the Python suite passed all 96 tests; the Package D controller
+passed all 5 tests; the release editor build and `git diff --check` passed.
 
 Current matching-CLI integration form:
 
@@ -72,6 +102,9 @@ env -u RACE_COURSE -u RACE_GUIDANCE -u RACE_CAMERA -u RACE_MANUAL_AUDIT \
 
 RACE_COURSE=single ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python \
   ./target/release/elodin run examples/betaflight-sitl/main.py
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python \
+  ./target/release/elodin run examples/betaflight-sitl/main.py
 ```
 
 Observed results:
@@ -81,14 +114,13 @@ Observed results:
 [RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
 ```
 
-Both commands returned zero. The default emitted one C0 result and zero race results. The single-course run emitted one C0 result and exactly one well-formed race result. `INCOMPLETE` is expected because Package C deliberately does not add gate steering.
-
-Startup failures were checked with the same CLI/Python pair:
-
-```text
-RACE_COURSE=oval        -> status 1; ERROR: unknown RACE_COURSE='oval' ...
-RACE_COURSE=c1_straight -> status 1; ERROR: ... reserved for Package F and is not implemented
-```
+Both ordinary commands returned zero. The default emitted one C0 result, zero
+race results, and zero audit results. The ordinary single-course run emitted one
+C0 result, one expected incomplete race result, and no audit result. The live
+audit returned zero with exactly one complete race result and one audit PASS.
+`RACE_REFEREE_AUDIT=1` without `RACE_COURSE=single` returned status 1 with a
+clear startup error. Unknown and reserved courses retained their status-1 clear
+errors.
 
 Package D coexistence was checked with:
 
@@ -109,17 +141,48 @@ drone.gate_pass_times  = [-1.0, -1.0, -1.0]
 
 Each of the four gate `world_pos` series had 120,001 rows but exactly one unique pose, confirming static scene state throughout integration.
 
-## Rendering evidence
+## Rendering and capture evidence
 
-Updated main changed editor object/orientation code, so a fresh headless screenshot was generated with the rebuilt editor:
+Final artifacts are outside the worktree:
 
 ```text
-/tmp/package-c-gate-536eb565.png
+/home/ubuntu/package-c-referee-audit.mp4
+/home/ubuntu/package-c-referee-audit.png
 ```
 
-The PNG is nonempty (1280×720, approximately 202 KiB). Runtime logs show valid KDL loading and all four gate entities/components. Saturated-orange pixel segmentation found one dominant 23,828-pixel rectangular ring with a clear inner opening, consistent with all four rendered bars. The installed Gamescope required `/usr/local/lib/x86_64-linux-gnu` for its current pixman and segfaulted during compositor teardown **after** Elodin logged that the screenshot was fully written; no simulation/editor/Betaflight process remained.
+The MP4 is nonempty (1,470,338 bytes), H.264 Main/yuv420p, 1280×720,
+approximately 29.10 FPS, and 5.497944 seconds. The PNG is a nonempty 1280×720
+crossing frame (164,254 bytes). Representative frames at 4.0 s (approach),
+4.95 s (gate occlusion/crossing), and 5.4 s (departure) were decoded and checked
+for nonblank image statistics. Saturated-orange segmentation and the audit's
+oblique camera show the full vertical opening; frame occupancy was adequate, so
+the suspected size issue was framing rather than a need to alter the 2.5 m
+contract gate.
 
-## Review fixes made after merging Package D
+The repository's automated capture script could not run on this host because
+Nix is unavailable and its preflight correctly requires Nix's Xwayland/Mesa
+environment. Manual Gamescope followed the documented PipeWire/GStreamer flow.
+The host's GStreamer 1.24 plugin rejected the documented `target-object` serial
+but accepted the same live source through its deprecated numeric `path`. NVENC
+initialized and GPU encoder activity reached 3%, but losing the short-lived
+Gamescope source before MP4 EOS left a zero-byte file. The reliable x264 fallback
+was therefore recorded to recoverable MPEG-TS and stream-copied to the final
+fast-start MP4. Gamescope segfaulted during PipeWire teardown only after the
+simulation had emitted PASS and the TS was complete. These are capture teardown
+issues, not simulation failures; no process remained.
+
+The exact reproduction commands and fallback are in `README.md`.
+
+## Qualification iteration and issues
+
+- Added the qualification without changing Package C's course, score, telemetry, or guidance contracts.
+- Analytically screened several initial X distances/speeds against gravity and drag, then live-tested `(5, 0, 4.9)` m at `(10, 0, 0)` m/s. The first live attempt passed at `1.085149 s` and departed past X=10.5 before the 2.5 s cap, so no control tuning was needed.
+- Changed only the audit camera from the ordinary course frame to a closer oblique `(3, -4, 3.5)` view looking at `(9, 0, 2)`. The full 2.5 m opening and motion were clear; gate geometry stayed unchanged.
+- Verified telemetry only on a callback after the event write rather than assuming same-callback DB visibility.
+- Added direct PASS and representative FAIL evaluator tests, including a deliberately broken telemetry criterion producing exit status 1.
+- Capture iteration exposed Nix preflight, PipeWire target-selection, NVENC/MP4 finalization, and Gamescope teardown issues. The final recoverable MPEG-TS → MP4 fallback preserved a valid recording and is documented.
+
+## Earlier Package C review fixes
 
 - Resolved all three stash conflicts from the old Package C base (`main.py`, README, and plan) against the landed Package D pipeline rather than selecting either side wholesale.
 - Moved referee scoring to Package D's required final post-step stage and wired only public progress into `GuidanceUpdate`.

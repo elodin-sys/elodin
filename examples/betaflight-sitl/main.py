@@ -46,7 +46,14 @@ from controls import (
     semantic_to_rc,
 )
 from course import course_from_env, gate_schematic
-from referee import Referee, world_position_from_transform
+from referee import GatePassEvent, Referee, world_position_from_transform
+from referee_audit import (
+    RefereeAuditEvidence,
+    RefereeAuditResult,
+    audit_initial_condition,
+    evaluate_referee_audit,
+    referee_audit_from_env,
+)
 from race_runtime import RaceTelemetry, spawn_course
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
@@ -75,8 +82,29 @@ audit_requested = audit_value == "1"
 if audit_requested and guidance_mode is not GuidanceMode.MANUAL:
     print("ERROR: RACE_MANUAL_AUDIT=1 requires RACE_GUIDANCE=manual", file=sys.stderr)
     sys.exit(2)
+try:
+    referee_audit_config = referee_audit_from_env(
+        os.environ,
+        course_name=race_course.name,
+        guidance_mode=guidance_mode.value,
+        manual_audit_requested=audit_requested,
+    )
+except ValueError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    sys.exit(2)
+referee_audit_requested = referee_audit_config.enabled
 if audit_requested:
     config.simulation_time = 24.0
+if referee_audit_requested:
+    initial_position, initial_velocity, simulation_time = audit_initial_condition(
+        True,
+        config.initial_position,
+        config.initial_velocity,
+        config.simulation_time,
+    )
+    config.initial_position = np.array(initial_position)
+    config.initial_velocity = np.array(initial_velocity)
+    config.simulation_time = simulation_time
 config.set_as_global()
 
 if guidance_mode is GuidanceMode.SCRIPTED:
@@ -172,11 +200,24 @@ schematic = """
 if race_course.gates:
     # Keep the opt-in course framed during scripted bring-up; the default
     # schematic retains its existing chase camera unchanged.
+    course_camera = 'pos="(0,0,0,1, 4,-2,3)" look_at="(10,0,1.8)"'
+    if referee_audit_requested:
+        # An oblique audit view keeps the full vertical opening visible while
+        # making the drone's world-X approach and departure visually obvious.
+        course_camera = 'pos="(0,0,0,1, 3,-4,3.5)" look_at="(9,0,2)"'
     schematic = schematic.replace(
         'pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos"',
-        'pos="(0,0,0,1, 4,-2,3)" look_at="(10,0,1.8)"',
+        course_camera,
     )
     schematic += "\n" + gate_schematic(race_course) + "\n"
+if referee_audit_requested:
+    schematic = schematic.replace(
+        'graph "drone.accel" name="Accelerometer"',
+        'graph "drone.last_gate_passed" name="Referee: Last Gate Passed"',
+    ).replace(
+        'graph "drone.gyro" name="Gyroscope"',
+        'graph "drone.gate_pass_times" name="Referee: Gate Pass Times"',
+    )
 world.schematic(
     schematic,
     "betaflight-sitl.kdl",
@@ -236,6 +277,11 @@ if guidance_mode is GuidanceMode.MANUAL and not audit_requested:
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
 print(f"Guidance: {'audit (simulation time)' if audit_requested else guidance_mode.value}")
+if referee_audit_requested:
+    print(
+        "Referee audit: controlled ballistic fixture "
+        f"position={tuple(config.initial_position)} velocity={tuple(config.initial_velocity)}"
+    )
 if race_course.gates:
     print(
         f"Race course: {race_course.name} "
@@ -291,6 +337,21 @@ referee = Referee(race_course)
 # a well-defined previous endpoint.
 referee.observe_truth(config.initial_position, 0.0)
 race_result_emitted = [False]
+race_result_line_count = [0]
+referee_audit_result: list[RefereeAuditResult | None] = [None]
+referee_audit_result_emitted = [False]
+referee_audit_events: list[GatePassEvent] = []
+referee_audit_event_tick: list[int | None] = [None]
+referee_audit_first_position: list[tuple[float, float, float] | None] = [None]
+referee_audit_previous_position: list[tuple[float, float, float] | None] = [
+    tuple(float(value) for value in config.initial_position)
+]
+referee_audit_crossing_previous: list[tuple[float, float, float] | None] = [None]
+referee_audit_crossing_current: list[tuple[float, float, float] | None] = [None]
+referee_audit_final_position: list[tuple[float, float, float] | None] = [None]
+referee_audit_telemetry_last_gate: list[int | None] = [None]
+referee_audit_telemetry_times: list[tuple[float, ...] | None] = [None]
+referee_audit_telemetry_later_tick = [False]
 
 
 def emit_race_result() -> None:
@@ -299,6 +360,34 @@ def emit_race_result() -> None:
     if race_course.gates and not race_result_emitted[0]:
         print(referee.result().format())
         race_result_emitted[0] = True
+        race_result_line_count[0] += 1
+
+
+def emit_final_results() -> None:
+    """Emit the race and qualification contracts once, in that order."""
+
+    emit_race_result()
+    if referee_audit_requested and not referee_audit_result_emitted[0]:
+        evidence = RefereeAuditEvidence(
+            events=tuple(referee_audit_events),
+            telemetry_last_gate_passed=referee_audit_telemetry_last_gate[0],
+            telemetry_pass_times=referee_audit_telemetry_times[0],
+            telemetry_verified_on_later_tick=referee_audit_telemetry_later_tick[0],
+            race_result=referee.result(),
+            first_position=referee_audit_first_position[0],
+            crossing_previous_position=referee_audit_crossing_previous[0],
+            crossing_current_position=referee_audit_crossing_current[0],
+            final_position=referee_audit_final_position[0],
+            race_line_count=race_result_line_count[0],
+            # This is the single line emitted immediately below.
+            audit_line_count=1,
+        )
+        result = evaluate_referee_audit(evidence)
+        referee_audit_result[0] = result
+        print(result.format())
+        if not result.passed:
+            print(f"Referee audit failed checks: {','.join(result.failed_checks)}")
+        referee_audit_result_emitted[0] = True
 
 
 # Pre-allocated buffers to avoid allocation in hot loop
@@ -396,6 +485,14 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         reads.append("drone.mag")
     if manual_input_poll:
         reads.append("drone.manual_control")
+    audit_telemetry_poll = (
+        referee_audit_requested
+        and referee_audit_event_tick[0] is not None
+        and tick > referee_audit_event_tick[0]
+        and not referee_audit_telemetry_later_tick[0]
+    )
+    if audit_telemetry_poll:
+        reads.extend(["drone.last_gate_passed", "drone.gate_pass_times"])
     sensor_read_succeeded = False
     try:
         sensor_data = ctx.component_batch_operation(reads=reads)
@@ -404,6 +501,18 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         world_pos = sensor_data["drone.world_pos"]
         world_vel = sensor_data["drone.world_vel"]
         current_truth_position = world_position_from_transform(world_pos)
+        if referee_audit_requested:
+            if referee_audit_first_position[0] is None:
+                referee_audit_first_position[0] = current_truth_position
+            referee_audit_final_position[0] = current_truth_position
+        if audit_telemetry_poll:
+            referee_audit_telemetry_last_gate[0] = int(
+                sensor_data["drone.last_gate_passed"][0]
+            )
+            referee_audit_telemetry_times[0] = tuple(
+                float(value) for value in sensor_data["drone.gate_pass_times"]
+            )
+            referee_audit_telemetry_later_tick[0] = True
         if barometer_fresh:
             s.barometer = float(sensor_data["drone.baro"][0])
             barometer = s.barometer
@@ -496,6 +605,11 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     if race_course.gates and current_truth_position is not None:
         gate_event = referee.observe_truth(current_truth_position, t)
         if gate_event is not None:
+            if referee_audit_requested:
+                referee_audit_events.append(gate_event)
+                referee_audit_event_tick[0] = tick
+                referee_audit_crossing_previous[0] = referee_audit_previous_position[0]
+                referee_audit_crossing_current[0] = current_truth_position
             ctx.component_batch_operation(
                 writes={
                     "drone.last_gate_passed": np.array([gate_event.gate_index], dtype=np.int64),
@@ -504,6 +618,8 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                     ),
                 }
             )
+        if referee_audit_requested:
+            referee_audit_previous_position[0] = current_truth_position
 
     # Print status every second
     if t - last_print[0] >= 1.0:
@@ -577,7 +693,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
 
-        if guidance_mode is GuidanceMode.SCRIPTED:
+        if guidance_mode is GuidanceMode.SCRIPTED and not referee_audit_requested:
             result = evaluate_c0(
                 lockstep_steps=s.lockstep_steps,
                 max_motor=s.max_motor,
@@ -609,7 +725,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         if axis_audit is not None:
             print(axis_audit.format())
 
-        emit_race_result()
+        emit_final_results()
 
 
 # Return the next non-existent filename with auto-incremented
@@ -656,7 +772,7 @@ finally:
     # bridge; this covers interrupted/exceptional simulation shutdown without
     # duplicating the child's normal callback result in the recipe generator.
     if bridge[0] is not None:
-        emit_race_result()
+        emit_final_results()
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 
@@ -665,5 +781,7 @@ if not bridge[0]:
     print("Usage: python3 examples/betaflight-sitl/main.py run")
 elif c0_result[0] is not None and not c0_result[0].passed:
     sys.exit(1)
+elif referee_audit_result[0] is not None and not referee_audit_result[0].passed:
+    sys.exit(referee_audit_result[0].exit_code)
 elif axis_audit is not None and not axis_audit.passed:
     sys.exit(1)

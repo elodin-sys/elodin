@@ -1,7 +1,7 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-15
+**Last verified against repository:** 2026-09-16
 **Current resume point:** Package D — manual hardware qualification
 
 ## 1. Purpose and authority
@@ -127,7 +127,8 @@ The example now additionally contains:
 
 - Package A's pure protocol/convention tests and machine-readable C0 result;
 - Package C's opt-in `none`/`single` course geometry, four-bar gate rendering,
-  ordered truth referee, fixed-width race telemetry, and final race result; and
+  ordered truth referee, fixed-width race telemetry, final race result, and
+  deterministic live positive-crossing qualification; and
 - Package D's command seam, manual-controller integration, ANGLE configuration,
   one-tick RC latch, and automated physical sign audit. Package D remains open
   only for operator hardware qualification.
@@ -686,6 +687,24 @@ prove valid, missed, backward, yawed, and diagonal behavior.
 **Handoff:** Record final gate coordinate/yaw conventions and the race result
 example.
 
+Additional positive-path qualification (2026-09-16):
+
+```bash
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+This separate integration fixture leaves the contract course unchanged, starts
+the disarmed drone at `(5, 0, 4.9)` m with `+10 m/s` world-X velocity, and ends
+at 2.5 simulated seconds before scripted guidance leaves its safe boot phase.
+Six-DOF gravity and drag produced one gate-0 pass at interpolated simulation
+time `1.085149 s` near `(10.0, 0.0, 1.7958)` m and finished at X=`11.7776 m`;
+telemetry read back on the following callback tick matched the event and
+retained both unused `-1.0` slots. The process emitted exactly one complete
+`[RACE]` line and one passing `[C-REFEREE-AUDIT]` line and returned zero. This
+qualifies the live truth/referee/telemetry/result path, not steering or powered
+autonomous flight.
+
 ### [ ] D — Manual piloting, control seam, and ANGLE mode
 
 **Implementation status:** Code and automated acceptance are complete; a manual
@@ -1032,7 +1051,7 @@ branch for later resumption.
 |---|---|---|
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
-| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, and exactly one final enabled-course result are implemented. 81 pure tests pass. Matching release integrations returned zero: default C0 passed with no race result; `single` emitted exactly one expected incomplete race result. Unknown and reserved courses failed clearly. Fresh screenshot: `/tmp/package-c-gate-536eb565.png`. |
+| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The pure suite passes 96 tests. The audit uses the unchanged vertical 2.5 m gate and reports one complete pass at 1.085149 s with later-tick telemetry readback. Matching release integrations preserve default C0 and ordinary incomplete `single` behavior. Final capture: `/home/ubuntu/package-c-referee-audit.mp4` and `.png`. |
 | D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
@@ -1062,31 +1081,40 @@ environment and current release CLI:
 /home/ubuntu/py-uv-env/bin/python -m pytest examples/betaflight-sitl/tests -q
 ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python ./target/release/elodin run examples/betaflight-sitl/main.py
 RACE_COURSE=single ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python ./target/release/elodin run examples/betaflight-sitl/main.py
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  ELODIN_PYTHON=/home/ubuntu/py-uv-env/bin/python \
+  ./target/release/elodin run examples/betaflight-sitl/main.py
 ```
 
 The verified results were:
 
 ```text
-81 passed in 0.08s
+96 passed in 0.09s
 [C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.835 status=PASS
 [RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
+[RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
+[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=1.085149 status=PASS
 ```
 
-Both integrations returned zero. The default emitted one C0 result, no race
-result, and registered no gate entities. The `single` run emitted one C0 result
-and exactly one race result. Its `INCOMPLETE` status is expected because Package
-C preserves scripted vertical flight and adds no steering. `RACE_COURSE=oval`
-and `c1_straight` returned status 1 with clear unknown/reserved startup errors.
-The Package D audit also remained green with `RACE_COURSE=single`, emitting one
+Both ordinary integrations returned zero. The referee audit also returned zero
+with exactly one complete race line and one audit PASS line. The default emitted
+one C0 result, no race or audit result, and registered no gate entities. The
+ordinary `single` run emitted one C0 result and exactly one incomplete race
+result with no audit line. Its `INCOMPLETE` status is expected because Package C
+preserves scripted vertical flight and adds no steering. `RACE_COURSE=oval` and
+`c1_straight` returned status 1 with clear unknown/reserved startup errors. The
+Package D audit also remained green with `RACE_COURSE=single`, emitting one
 `[D-AUDIT] ... status=PASS` and one race result.
 
-The current wheel was rebuilt and installed before integration so both Python
-and the CLI reported `0.19.3-alpha.0+536eb565.dirty`. The required release build
-and `git diff --check` passed. A fresh editor capture after main's rendering
-changes is retained at `/tmp/package-c-gate-536eb565.png`; runtime registration,
-a nonempty PNG, and the dominant saturated-orange rectangular ring verify the
-four-bar gate. Gamescope segfaulted only during teardown after confirming the
-screenshot write; no process remained.
+The current wheel and release CLI both reported
+`0.19.3-alpha.0+536eb565.dirty`; no wheel rebuild was needed because the audit
+changes only example Python and documentation. The required release build and
+`git diff --check` passed. The final 1280×720 H.264 capture and crossing frame
+are retained at `/home/ubuntu/package-c-referee-audit.mp4` and
+`/home/ubuntu/package-c-referee-audit.png`. Camera-only framing made the existing
+2.5 m gate clear and usable, so its contract geometry was not changed. The host
+Gamescope/PipeWire teardown issue and MPEG-TS recovery workflow are documented
+in `README.md` and `PACKAGE_C_HANDOFF.md`.
 
 ## 13. Decision log
 
