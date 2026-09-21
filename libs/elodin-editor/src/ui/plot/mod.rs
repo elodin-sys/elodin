@@ -25,8 +25,7 @@ pub use widget::{
     STEPS_X_WIDTH_DIVISOR, STEPS_Y_HEIGHT_DIVISOR, TimeseriesPlot, XSyncClock, XYPlotSeries,
     auto_y_bounds, draw_borders, draw_y_axis, get_inner_rect, graph_touch, pan_graph, pretty_round,
     reset_graph, sync_derived_graphs, sync_graphs, sync_kernel_graphs, sync_locked_graphs,
-    track_lock_toggles,
-    zoom_graph,
+    track_lock_toggles, zoom_graph,
 };
 
 mod state;

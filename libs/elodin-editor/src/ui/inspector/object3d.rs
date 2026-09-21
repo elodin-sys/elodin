@@ -66,7 +66,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
         let local_root = crate::object_3d::local_assets_root(
             world.get_resource::<crate::plugins::kdl_document::InitialKdlPath>(),
         );
-        let InspectorObject3D{
+        let InspectorObject3D {
             mut object_3d,
             metadata_query,
             eql_context,
