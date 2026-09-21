@@ -662,13 +662,28 @@ pub struct SimTimeStepFetch {
     declared: Attempts,
     /// Finest sample spacing measured so far, in micros.
     best_estimate_micros: Option<i64>,
+    /// Bumped by [`SimTimeStepFetch::rearm`] to disown replies in flight.
+    generation: u64,
 }
 
 impl SimTimeStepFetch {
     /// Private so it cannot be called without also clearing the published
     /// step; see [`rearm_sim_time_step`].
     fn rearm(&mut self) {
+        let disowned = self.generation.wrapping_add(1);
         *self = Self::default();
+        self.generation = disowned;
+    }
+
+    /// Whether a reply still belongs to the recording that asked for it.
+    ///
+    /// `Declared` is terminal: it short-circuits [`fetch_sim_time_step`] so
+    /// nothing asks again, and holds [`SimTimeStepFetch::defers_to_declared`]
+    /// true so no measured rate can take over. A single reply landing after a
+    /// re-arm would therefore pin the new recording to the previous one's dt
+    /// for good.
+    fn accepts(&self, generation: u64) -> bool {
+        self.generation == generation
     }
 
     pub fn source(&self) -> SimTimeStepSource {
@@ -758,6 +773,9 @@ pub fn fetch_sim_time_step(
         return;
     };
     fetch.declared.record();
+    // Queued as a command, so this reply outlives the frame and survives the
+    // handler cancellation a reconnect does.
+    let generation = fetch.generation;
 
     commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
         GetTimeSeries {
@@ -770,6 +788,9 @@ pub fn fetch_sim_time_step(
               schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
               mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
               mut fetch: ResMut<SimTimeStepFetch>| {
+            if !fetch.accepts(generation) {
+                return true;
+            }
             match parse_sim_time_step(&pkt, &schema_reg, component_id) {
                 Some(dt) if dt > 0.0 => {
                     time_step.0 = dt;
@@ -2103,6 +2124,22 @@ mod sim_time_step_tests {
             time_step.0, 0.0,
             "the previous recording's rate must not outlive its resolution state"
         );
+    }
+
+    #[test]
+    fn a_rearm_disowns_a_fetch_in_flight() {
+        let mut fetch = SimTimeStepFetch::default();
+        let in_flight = fetch.generation;
+        assert!(fetch.accepts(in_flight));
+
+        let mut time_step = impeller2_wkt::SimulationTimeStep(0.008333);
+        rearm_sim_time_step(&mut fetch, &mut time_step);
+
+        assert!(
+            !fetch.accepts(in_flight),
+            "cancelling handlers cannot reach a request still in the command queue"
+        );
+        assert!(fetch.accepts(fetch.generation));
     }
 
     #[test]
