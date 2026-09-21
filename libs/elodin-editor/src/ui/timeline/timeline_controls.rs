@@ -31,6 +31,7 @@ use crate::{
 use super::{
     AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
     TimelineSettings,
+    playback::{self, PLAYBACK_SPEED_PRESETS, PlaybackLoop, PlaybackRegion, set_playback_speed},
 };
 use crate::ui::widgets::SystemStateExt;
 
@@ -46,7 +47,9 @@ pub struct TimelineControls<'w, 's> {
     tick_time: Res<'w, SimulationTimeStep>,
     series: Res<'w, TelemetryCache>,
     series_priority: Res<'w, SeriesFetchPriority>,
-    playback_speed: Res<'w, PlaybackSpeed>,
+    playback_speed: ResMut<'w, PlaybackSpeed>,
+    playback_loop: ResMut<'w, PlaybackLoop>,
+    playback_region: Res<'w, PlaybackRegion>,
     stream_id: Res<'w, CurrentStreamId>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     behavior: ResMut<'w, TimeRangeBehavior>,
@@ -85,7 +88,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             tick_time,
             series,
             series_priority,
-            playback_speed,
+            mut playback_speed,
+            mut playback_loop,
+            playback_region,
             stream_id,
             earliest_timestamp,
             mut behavior,
@@ -225,6 +230,32 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 tick.0 = max_tick.0;
                                 paused.0 = false;
                                 latest_follow.0 = replay_mode.is_none();
+                                if latest_follow.0 {
+                                    playback_loop.0 = false;
+                                }
+                            }
+
+                            let loop_btn = ui
+                                .add(
+                                    EImageButton::new(icons.range_loop)
+                                        .scale(btn_scale, btn_scale)
+                                        .image_tint(if playback_loop.0 {
+                                            played_color
+                                        } else {
+                                            get_scheme().icon_primary
+                                        }),
+                                )
+                                .on_hover_text(if playback_region.0.is_some() {
+                                    "Loop selected range"
+                                } else {
+                                    "Loop recording"
+                                });
+                            if loop_btn.clicked() {
+                                playback_loop.0 = !playback_loop.0;
+                                if playback_loop.0 {
+                                    auto_follow_latest_state.cancel();
+                                    latest_follow.0 = false;
+                                }
                             }
                         },
                     );
@@ -317,21 +348,12 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                                     ui.add_space(24.0);
 
-                                    let speed_text = egui::RichText::new(format_playback_speed(
-                                        playback_speed.0,
-                                    ))
-                                    .color(get_scheme().text_primary);
-                                    ui.add(
-                                        egui::Label::new(speed_text)
-                                            .selectable(false)
-                                            .halign(egui::Align::BOTTOM),
+                                    speed_control(
+                                        ui,
+                                        &mut playback_speed,
+                                        &mut latest_follow,
+                                        &mut auto_follow_latest_state,
                                     );
-
-                                    let speed_label = egui::RichText::new("SPEED")
-                                        .color(get_scheme().text_secondary);
-                                    ui.add_space(8.0);
-
-                                    ui.add(egui::Label::new(speed_label).selectable(false));
 
                                     ui.add_space(16.0);
 
@@ -347,11 +369,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     if latest_enabled && latest_response.clicked() {
                                         auto_follow_latest_state.cancel();
                                         latest_follow.0 = !latest_follow.0;
-                                    }
-
-                                    if latest_follow.0 {
-                                        paused.0 = false;
-                                        tick.0 = max_tick.0;
+                                        if latest_follow.0 {
+                                            playback_loop.0 = false;
+                                        }
                                     }
                                 });
                         },
@@ -359,6 +379,52 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                 });
             });
     }
+}
+
+fn speed_control(
+    ui: &mut egui::Ui,
+    playback_speed: &mut PlaybackSpeed,
+    latest_follow: &mut LatestFollow,
+    auto_follow: &mut AutoFollowLatestState,
+) {
+    let speed_text = egui::RichText::new(format_playback_speed(playback_speed.0))
+        .color(get_scheme().text_primary);
+    let response = ui
+        .add(
+            egui::Label::new(speed_text)
+                .sense(egui::Sense::click())
+                .selectable(false),
+        )
+        .on_hover_text("Playback speed. Scroll to step, click for presets");
+
+    if response.hovered() {
+        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+        if scroll.abs() > 0.0 {
+            let next = playback::adjacent_playback_speed(playback_speed.0, scroll.signum() as i32);
+            set_playback_speed(next, playback_speed, latest_follow, auto_follow);
+        }
+    }
+
+    let popup_id = ui.make_persistent_id("playback_speed");
+    egui::Popup::from_toggle_button_response(&response)
+        .id(popup_id)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(72.0);
+            for speed in PLAYBACK_SPEED_PRESETS {
+                let selected = playback::same_playback_speed(speed, playback_speed.0);
+                if ui
+                    .selectable_label(selected, format_playback_speed(speed))
+                    .clicked()
+                {
+                    set_playback_speed(speed, playback_speed, latest_follow, auto_follow);
+                }
+            }
+        });
+
+    let speed_label = egui::RichText::new("SPEED").color(get_scheme().text_secondary);
+    ui.add_space(8.0);
+    ui.add(egui::Label::new(speed_label).selectable(false));
 }
 
 fn format_playback_speed(speed: f64) -> String {

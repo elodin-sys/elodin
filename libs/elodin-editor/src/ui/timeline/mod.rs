@@ -24,20 +24,37 @@ use crate::{
 
 use super::widgets::{SystemStateExt, WidgetSystem, WidgetSystemExt};
 
+pub mod playback;
 pub mod timeline_controls;
 pub mod timeline_slider;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
+        .init_resource::<playback::PlaybackLoop>()
+        .init_resource::<playback::PlaybackRegion>()
+        .init_resource::<playback::PlaybackDiscontinuities>()
         .init_resource::<TimelineSettings>()
         .init_resource::<TelemetryMode>()
         .init_resource::<LatestFollow>()
         .init_resource::<AutoFollowLatestState>()
         .add_systems(
+            PreUpdate,
+            playback::skip_discontinuities
+                .after(crate::advance_playback)
+                .before(crate::follow_latest),
+        )
+        .add_systems(
             Update,
             (
                 reset_playback_speed_on_stream_change,
+                playback::apply_recorded_playback_speed,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 reset_latest_follow_on_stream_change,
                 reset_auto_follow_latest_state,
                 auto_start_follow_latest,
@@ -45,6 +62,12 @@ pub(crate) fn plugin(app: &mut App) {
         );
 }
 
+/// Multiplier on wall-clock time while the playhead advances.
+///
+/// Session state, like [`playback::PlaybackLoop`] and [`playback::PlaybackRegion`].
+/// None of them are written into the KDL schematic: a schematic is shared
+/// layout, and opening it must not resume the previous session's speed, loop,
+/// or selection.
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
 pub struct PlaybackSpeed(pub f64);
 
