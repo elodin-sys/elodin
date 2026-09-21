@@ -29,6 +29,7 @@
                                       "active": false,
                                       "aspect": null,
                                       "bloom": null,
+                                      "cinematic": false,
                                       "create_frustum": false,
                                       "effects": true,
                                       "ev100": null,
@@ -59,7 +60,9 @@
                                       "show_frustums": true,
                                       "show_grid": true,
                                       "show_view_cube": false,
-                                      "up": null
+                                      "smoothing": 0.0,
+                                      "up": null,
+                                      "view_cube_frame": null
                                     }
                                   },
                                   {
@@ -67,6 +70,7 @@
                                       "active": false,
                                       "aspect": null,
                                       "bloom": null,
+                                      "cinematic": false,
                                       "create_frustum": false,
                                       "effects": true,
                                       "ev100": null,
@@ -97,7 +101,9 @@
                                       "show_frustums": false,
                                       "show_grid": true,
                                       "show_view_cube": true,
-                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).WORLD_POS.direction(1,1,1)"
+                                      "smoothing": 0.0,
+                                      "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).WORLD_POS.direction(1,1,1)",
+                                      "view_cube_frame": null
                                     }
                                   }
                                 ],
@@ -116,6 +122,7 @@
                                           "active": false,
                                           "aspect": null,
                                           "bloom": null,
+                                          "cinematic": false,
                                           "create_frustum": false,
                                           "effects": true,
                                           "ev100": null,
@@ -146,7 +153,9 @@
                                           "show_frustums": false,
                                           "show_grid": true,
                                           "show_view_cube": false,
-                                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                                          "smoothing": 0.0,
+                                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)",
+                                          "view_cube_frame": null
                                         }
                                       },
                                       {
@@ -154,6 +163,7 @@
                                           "active": false,
                                           "aspect": null,
                                           "bloom": null,
+                                          "cinematic": false,
                                           "create_frustum": false,
                                           "effects": true,
                                           "ev100": null,
@@ -184,7 +194,9 @@
                                           "show_frustums": false,
                                           "show_grid": true,
                                           "show_view_cube": false,
-                                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                                          "smoothing": 0.0,
+                                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)",
+                                          "view_cube_frame": null
                                         }
                                       }
                                     ]
@@ -194,6 +206,7 @@
                                       "active": false,
                                       "aspect": 1.0,
                                       "bloom": null,
+                                      "cinematic": false,
                                       "create_frustum": false,
                                       "effects": true,
                                       "ev100": null,
@@ -224,7 +237,9 @@
                                       "show_frustums": false,
                                       "show_grid": true,
                                       "show_view_cube": false,
-                                      "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)"
+                                      "smoothing": 0.0,
+                                      "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)",
+                                      "view_cube_frame": null
                                     }
                                   }
                                 ],
@@ -540,6 +555,7 @@
                     "active": false,
                     "aspect": null,
                     "bloom": null,
+                    "cinematic": false,
                     "create_frustum": false,
                     "effects": true,
                     "ev100": null,
@@ -570,7 +586,9 @@
                     "show_frustums": false,
                     "show_grid": true,
                     "show_view_cube": true,
-                    "up": null
+                    "smoothing": 0.0,
+                    "up": null,
+                    "view_cube_frame": null
                   }
                 }
               ],
@@ -596,6 +614,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -626,7 +645,9 @@
                           "show_frustums": true,
                           "show_grid": true,
                           "show_view_cube": false,
-                          "up": null
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -636,6 +657,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -666,7 +688,9 @@
                               "show_frustums": false,
                               "show_grid": true,
                               "show_view_cube": false,
-                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)"
+                              "smoothing": 0.0,
+                              "up": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)",
+                              "view_cube_frame": null
                             }
                           },
                           {
@@ -674,6 +698,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -704,7 +729,9 @@
                               "show_frustums": false,
                               "show_grid": true,
                               "show_view_cube": false,
-                              "up": null
+                              "smoothing": 0.0,
+                              "up": null,
+                              "view_cube_frame": null
                             }
                           }
                         ]
@@ -725,6 +752,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -755,7 +783,9 @@
                               "show_frustums": false,
                               "show_grid": true,
                               "show_view_cube": false,
-                              "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                              "smoothing": 0.0,
+                              "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)",
+                              "view_cube_frame": null
                             }
                           },
                           {
@@ -763,6 +793,7 @@
                               "active": false,
                               "aspect": null,
                               "bloom": null,
+                              "cinematic": false,
                               "create_frustum": false,
                               "effects": true,
                               "ev100": null,
@@ -793,7 +824,9 @@
                               "show_frustums": false,
                               "show_grid": true,
                               "show_view_cube": false,
-                              "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)"
+                              "smoothing": 0.0,
+                              "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)",
+                              "view_cube_frame": null
                             }
                           }
                         ]
@@ -803,6 +836,7 @@
                           "active": false,
                           "aspect": 1.0,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": true,
                           "effects": true,
                           "ev100": null,
@@ -833,7 +867,9 @@
                           "show_frustums": false,
                           "show_grid": true,
                           "show_view_cube": false,
-                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)"
+                          "smoothing": 0.0,
+                          "up": "MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)",
+                          "view_cube_frame": null
                         }
                       }
                     ],
@@ -845,6 +881,7 @@
                     "active": false,
                     "aspect": null,
                     "bloom": null,
+                    "cinematic": false,
                     "create_frustum": false,
                     "effects": true,
                     "ev100": null,
@@ -875,7 +912,9 @@
                     "show_frustums": true,
                     "show_grid": true,
                     "show_view_cube": false,
-                    "up": null
+                    "smoothing": 0.0,
+                    "up": null,
+                    "view_cube_frame": null
                   }
                 }
               ],
@@ -901,6 +940,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -931,7 +971,9 @@
                           "show_frustums": true,
                           "show_grid": true,
                           "show_view_cube": false,
-                          "up": null
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -939,6 +981,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -969,7 +1012,9 @@
                           "show_frustums": true,
                           "show_grid": true,
                           "show_view_cube": false,
-                          "up": null
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -1261,6 +1306,7 @@
               "active": false,
               "aspect": null,
               "bloom": null,
+              "cinematic": false,
               "create_frustum": false,
               "effects": true,
               "ev100": null,
@@ -1291,7 +1337,9 @@
               "show_frustums": true,
               "show_grid": true,
               "show_view_cube": true,
-              "up": null
+              "smoothing": 0.0,
+              "up": null,
+              "view_cube_frame": null
             }
           }
         ]
@@ -1342,6 +1390,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -1390,6 +1439,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -1423,6 +1473,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "absolute",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -1504,6 +1555,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -1536,6 +1588,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -1616,6 +1669,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },

@@ -19,6 +19,7 @@
                           "active": false,
                           "aspect": null,
                           "bloom": null,
+                          "cinematic": false,
                           "create_frustum": false,
                           "effects": true,
                           "ev100": null,
@@ -49,7 +50,9 @@
                           "show_frustums": false,
                           "show_grid": true,
                           "show_view_cube": true,
-                          "up": null
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
                         }
                       },
                       {
@@ -522,6 +525,7 @@
               "active": false,
               "aspect": null,
               "bloom": null,
+              "cinematic": false,
               "create_frustum": false,
               "effects": true,
               "ev100": null,
@@ -552,7 +556,9 @@
               "show_frustums": false,
               "show_grid": true,
               "show_view_cube": true,
-              "up": null
+              "smoothing": 0.0,
+              "up": null,
+              "view_cube_frame": null
             }
           }
         ]
@@ -587,6 +593,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -619,6 +626,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -651,6 +659,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -683,6 +692,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },
@@ -715,6 +725,7 @@
         "mesh_visibility_range": null,
         "node_id": 0,
         "orientation": "relative",
+        "sensor_visible": true,
         "thrusters": []
       }
     },

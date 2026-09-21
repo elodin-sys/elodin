@@ -545,6 +545,7 @@ impl bevy::asset::VisitAssetDependencies for Schematic {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum SchematicElem {
     Panel(Panel),
     Object3d(Object3D),

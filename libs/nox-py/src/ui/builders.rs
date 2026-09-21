@@ -207,7 +207,7 @@ fn parse_frame(frame: &str) -> PyResult<GeoFrame> {
 
 thread_local! {
     static PENDING_KERNEL_ASSETS: RefCell<HashMap<String, Vec<u8>>> =
-        const { RefCell::new(HashMap::new()) };
+        RefCell::new(HashMap::new());
 }
 
 pub(crate) fn take_kernel_assets() -> HashMap<String, Vec<u8>> {

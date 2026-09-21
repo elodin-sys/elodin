@@ -2807,23 +2807,25 @@ fn kernel_outputs_to_world_pos(outputs: &[Vec<u8>]) -> Option<impeller2_wkt::Wor
 }
 
 fn output_f64s(bytes: &[u8]) -> Option<Vec<f64>> {
-    if bytes.len() % 8 == 0 {
-        Some(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
+    let (chunks8, rest8) = bytes.as_chunks::<8>();
+    if rest8.is_empty() {
+        return Some(
+            chunks8
+                .iter()
+                .map(|&chunk| f64::from_le_bytes(chunk))
                 .collect(),
-        )
-    } else if bytes.len() % 4 == 0 {
-        Some(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()) as f64)
-                .collect(),
-        )
-    } else {
-        None
+        );
     }
+    let (chunks4, rest4) = bytes.as_chunks::<4>();
+    if rest4.is_empty() {
+        return Some(
+            chunks4
+                .iter()
+                .map(|&chunk| f32::from_le_bytes(chunk) as f64)
+                .collect(),
+        );
+    }
+    None
 }
 
 fn floats_to_6(values: &[f64]) -> Option<[f32; 6]> {
