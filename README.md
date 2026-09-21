@@ -53,7 +53,7 @@ cd elodin
 nix develop
 ```
 > [!TIP]
-> The Nix shell supports Oh My Zsh + Powerlevel 10k; for first time configuration run: `p10k configure`
+> The shell follows yours (bash or zsh; venv on PATH; no `source` needed). Override with `ELODIN_SHELL=bash` or `ELODIN_SHELL=zsh`. For Oh My Zsh + Powerlevel 10k: `p10k configure` if prompted.
 >
 
 ### 4. Build and Install Elodin Editor and Elodin DB into your path
@@ -62,7 +62,7 @@ just install
 
 elodin --version
 
-.venv/bin/python examples/rocket/main.py run
+python examples/rocket/main.py run
 ```
 
 Open the Elodin editor in a new nix develop shell and connect to the local server
@@ -70,6 +70,8 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 ```sh
 elodin editor
 ```
+
+`just install` writes `elodin` / `elodin-db` and a Python venv into this shell's `target/shells/$ELODIN_SHELL_ID/` so parallel worktrees and agent shells cannot overwrite each other.
 
 ---
 
@@ -83,8 +85,7 @@ elodin editor
 nix develop
 # build the SDK python wheel
 just install py
-# use the newly built wheel (venv is not active in this shell)
-.venv/bin/python examples/rocket/main.py run
+python examples/rocket/main.py run
 ```
 
 Open the Elodin editor and connect to the local server
@@ -93,43 +94,6 @@ Open the Elodin editor and connect to the local server
 > Local setup instructions were validated on Arm M2 MacOS & Intel x86 Ubuntu 24.04 on 2025-10-12.
 
 ---
-
-## Alternative Local Setup (macOS Only)
-
-> [!WARNING]
-> This setup is more complex and may lead to inconsistent environments across developers. We strongly recommend using Nix instead.
-
-If you cannot use Nix, you can manually install dependencies on macOS:
-
-### Prerequisites
-```sh
-# Install required tools via Homebrew
-brew install gstreamer python gfortran openblas uv git-lfs rust
-
-# Initialize git-lfs
-git lfs install
-```
-
-### Build and Run
-```sh
-git clone https://github.com/elodin-sys/elodin.git
-cd elodin
-just install
-```
-
-### Python Development (Local Setup)
-```sh
-uv venv --python 3.13
-source .venv/bin/activate
-uvx maturin@1.12.6 develop --uv --manifest-path=libs/nox-py/Cargo.toml
-
-cargo run --bin elodin editor examples/three-body/main.py
-# Or equivalently use the 'elodin' cargo alias:
-cargo elodin editor examples/three-body/main.py
-```
-
-> [!NOTE]
-> Local setup instructions were validated on M1 architecture, macOS 15.6.1 on 2025-11-03.
 
 ## Alternative Local Setup (Ubuntu/Linux)
 
@@ -147,7 +111,7 @@ sudo apt install just git-lfs pkg-config libasound2-dev libudev-dev cmake gfortr
 git lfs install
 ```
 
-After installing these packages, follow the same `just install` and `uvx maturin` local build steps above.
+After installing these packages, follow the same `uvx maturin` and `cargo build` steps above.
 
 
 ## Additional Resources

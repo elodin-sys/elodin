@@ -57,7 +57,6 @@ tracy-capture -a 127.0.0.1 -p 8087 -o /tmp/trace-editor.tracy -s 30 &
 tracy-capture -a 127.0.0.1 -p 8088 -o /tmp/trace-render.tracy -s 30 &
 
 sleep 1
-source .venv/bin/activate
 elodin editor examples/sensor-camera/main.py
 
 # After capture completes, export to CSV for analysis:
