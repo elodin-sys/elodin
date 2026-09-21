@@ -722,21 +722,32 @@ pub fn rearm_sim_time_step(
     time_step.0 = 0.0;
 }
 
-/// DB series are keyed by pair id (`Globals.simulation_time_step`), so resolve
-/// through the path registry rather than the bare type-leaf id.
-fn sim_time_step_component_id(
+/// Every id the connected DB might key `simulation_time_step` under: the pair
+/// id its path resolves to (`Globals.simulation_time_step`), and the bare
+/// type-leaf id.
+///
+/// All of them are asked rather than one being picked. The registries
+/// accumulate across connections and are never cleared, so a schema entry
+/// proves only that some DB once used that id — picking by it lets a leftover
+/// entry shadow the id the current recording actually uses, and the empty
+/// replies that follow burn the retry budget without ever resolving. The
+/// recording itself settles it: the ids it does not have return empty series,
+/// which [`parse_sim_time_step`] rejects.
+fn sim_time_step_component_ids(
     path_reg: &ComponentPathRegistry,
     schema_reg: &ComponentSchemaRegistry,
-) -> Option<ComponentId> {
+) -> Vec<ComponentId> {
     let leaf = <impeller2_wkt::SimulationTimeStep as impeller2::component::Component>::COMPONENT_ID;
-    if schema_reg.0.contains_key(&leaf) {
-        return Some(leaf);
-    }
-    path_reg
+    let mut ids: Vec<ComponentId> = path_reg
         .0
         .iter()
-        .find(|(id, path)| path.tail().id == leaf && schema_reg.0.contains_key(id))
+        .filter(|(id, path)| path.tail().id == leaf && schema_reg.0.contains_key(id))
         .map(|(&id, _)| id)
+        .collect();
+    if schema_reg.0.contains_key(&leaf) && !ids.contains(&leaf) {
+        ids.push(leaf);
+    }
+    ids
 }
 
 /// `simulation_time_step` is a constant sim global, not telemetry. It would only
@@ -759,39 +770,44 @@ pub fn fetch_sim_time_step(
     if last_updated.0 == Timestamp(i64::MIN) {
         return;
     }
-    let Some(component_id) = sim_time_step_component_id(&path_reg, &schema_reg) else {
+    let candidates = sim_time_step_component_ids(&path_reg, &schema_reg);
+    if candidates.is_empty() {
         return;
-    };
+    }
+    // One attempt covers the whole candidate set: they are alternative
+    // spellings of the same question, not separate chances.
     fetch.declared.record();
-    // Queued as a command, so this reply outlives the frame and survives the
+    // Queued as a command, so these replies outlive the frame and survive the
     // handler cancellation a reconnect does.
     let generation = fetch.generation;
 
-    commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
-        GetTimeSeries {
-            id: PacketId::default(),
-            range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
-            component_id,
-            limit: Some(1),
-        },
-        move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
-              schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
-              mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
-              mut fetch: ResMut<SimTimeStepFetch>| {
-            if !fetch.accepts(generation) {
-                return true;
-            }
-            match parse_sim_time_step(&pkt, &schema_reg, component_id) {
-                Some(dt) if dt > 0.0 => {
-                    time_step.0 = dt;
-                    // Authoritative: overrides any interval-based estimate.
-                    fetch.source = SimTimeStepSource::Declared;
+    for component_id in candidates {
+        commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
+            GetTimeSeries {
+                id: PacketId::default(),
+                range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
+                component_id,
+                limit: Some(1),
+            },
+            move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
+                  schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+                  mut time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
+                  mut fetch: ResMut<SimTimeStepFetch>| {
+                if !fetch.accepts(generation) {
+                    return true;
                 }
-                _ => debug!("simulation_time_step reply carried no usable value"),
-            }
-            true
-        },
-    );
+                match parse_sim_time_step(&pkt, &schema_reg, component_id) {
+                    Some(dt) if dt > 0.0 => {
+                        time_step.0 = dt;
+                        // Authoritative: overrides any interval-based estimate.
+                        fetch.source = SimTimeStepSource::Declared;
+                    }
+                    _ => debug!("simulation_time_step reply carried no usable value"),
+                }
+                true
+            },
+        );
+    }
 }
 
 fn parse_sim_time_step(
@@ -2072,9 +2088,32 @@ mod sim_time_step_tests {
         schema_reg.0.insert(pair_id, scalar_schema());
 
         assert_eq!(
-            sim_time_step_component_id(&path_reg, &schema_reg),
-            Some(pair_id)
+            sim_time_step_component_ids(&path_reg, &schema_reg),
+            vec![pair_id]
         );
+    }
+
+    #[test]
+    fn a_leftover_leaf_entry_does_not_shadow_the_pair_id() {
+        // The leaf is what a previous connection left behind; the pair id is
+        // what this recording uses. Asking only the leaf would draw empty
+        // replies until the retry budget ran out, and the declared rate would
+        // never land.
+        let pair = ComponentPath::from_name("Globals.simulation_time_step");
+        let pair_id = pair.id;
+        let leaf =
+            <impeller2_wkt::SimulationTimeStep as impeller2::component::Component>::COMPONENT_ID;
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg.0.insert(pair_id, pair);
+        let mut schema_reg = ComponentSchemaRegistry::default();
+        schema_reg.0.insert(pair_id, scalar_schema());
+        schema_reg.0.insert(leaf, scalar_schema());
+
+        let ids = sim_time_step_component_ids(&path_reg, &schema_reg);
+
+        assert!(ids.contains(&pair_id));
+        assert!(ids.contains(&leaf));
+        assert_eq!(ids.len(), 2, "each id must be asked exactly once");
     }
 
     #[test]
@@ -2154,9 +2193,8 @@ mod sim_time_step_tests {
         let mut path_reg = ComponentPathRegistry::default();
         path_reg.0.insert(pair_id, pair);
 
-        assert_eq!(
-            sim_time_step_component_id(&path_reg, &ComponentSchemaRegistry::default()),
-            None
+        assert!(
+            sim_time_step_component_ids(&path_reg, &ComponentSchemaRegistry::default()).is_empty()
         );
     }
 }
