@@ -131,6 +131,8 @@ def build() -> ui.Schematic:
                 error_covariance_cholesky=chol,
                 color=ui.color(64, 180, 255, 40),
                 error_confidence_interval=70.0,
+                show_grid=True,
+                grid_color=ui.color(180, 230, 255, 160),
             ),
         ),
         ui.object_3d(
