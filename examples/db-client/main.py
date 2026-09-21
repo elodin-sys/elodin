@@ -239,9 +239,11 @@ def derived_loop(client: edb.Client, stop: threading.Event):
                     dt_us = row.timestamp_us - prev[0]
                     if dt_us > 0:
                         speed = float(np.linalg.norm(pos - prev[1]) / (dt_us * 1e-6))
-                        # Isotropic SPD 6-pack that grows with speed (meters²).
-                        var = 0.04 + 0.06 * speed
-                        cov = [var, 0.0, 0.0, var, 0.0, var]
+                        # Oblate SPD 6-pack [p00,p10,p20,p11,p21,p22]: wide
+                        # East/North, thin Up (~3:1 radii; variance 9:1).
+                        var_h = 0.09 + 0.12 * speed
+                        var_v = var_h / 9.0
+                        cov = [var_h, 0.0, 0.0, var_h, 0.0, var_v]
                         speed_w.write_nowait(
                             timestamp_us=row.timestamp_us,
                             values={
