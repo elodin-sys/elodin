@@ -2,9 +2,10 @@
 
 **Package:** C — Course and referee vertical slice
 **Package C implementation:** `a0bbc683` on `package-c-course-referee`
-**Qualification work:** uncommitted working-tree changes based on `a0bbc683`
+**Referee qualification:** `2a36b035`
+**Latest merged main:** `630324df` (merged without conflicts)
 **Package D integration on main:** `4fc77694` (`#847`)
-**Commit policy:** No commit was created for the referee qualification; all new work remains visible in the working tree.
+**History policy:** The published Package C commit is unchanged; qualification and main synchronization are later commits.
 
 ## Completed behavior
 
@@ -75,9 +76,12 @@ The root status also shows `examples/betaflight-sitl/betaflight` as modified. Th
 
 ## Verification environment
 
-The existing Python environment and release CLI match and both report
-`0.19.3-alpha.0+536eb565.dirty`. The qualification changes only example Python
-and documentation, so rebuilding/reinstalling the wheel was unnecessary.
+The release CLI was rebuilt after merging `origin/main` at `630324df` and
+reports `0.19.3-alpha.0+af1e589a.dirty` (the merge commit plus the expected
+dirty Betaflight submodule). Python 3.13.14 and the installed wheel report
+`0.19.3-alpha.0+536eb565.dirty`. No wheel rebuild was needed: the merged range
+changes only `libs/nox-py/README.md` under `libs/nox-py`, with no Python runtime,
+API, or package-version change.
 
 ## Verification performed
 
@@ -90,10 +94,11 @@ cargo build --release -p elodin
 git diff --check
 ```
 
-Final results: the Python suite passed all 96 tests; the Package D controller
-passed all 5 tests; the release editor build and `git diff --check` passed.
+Final merged-base results: the Python suite passed all 96 tests in 0.15 seconds;
+the Package D controller passed all 5 tests; the release editor build and
+`git diff --check` passed.
 
-Current matching-CLI integration form:
+Current integration form:
 
 ```bash
 env -u RACE_COURSE -u RACE_GUIDANCE -u RACE_CAMERA -u RACE_MANUAL_AUDIT \
@@ -107,11 +112,13 @@ RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
   ./target/release/elodin run examples/betaflight-sitl/main.py
 ```
 
-Observed results:
+Observed merged-base results:
 
 ```text
 [C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.835 status=PASS
 [RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
+[RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
+[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=1.085149 status=PASS
 ```
 
 Both ordinary commands returned zero. The default emitted one C0 result, zero
@@ -130,16 +137,21 @@ RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1 RACE_COURSE=single \
   ./target/release/elodin run examples/betaflight-sitl/main.py
 ```
 
-It returned zero with one passing `[D-AUDIT]` and one incomplete `[RACE]` line.
+It returned zero with one passing `[D-AUDIT]`, one incomplete `[RACE]` line,
+and no Package C audit line.
 
-The `betaflight_db012` recording was exported with current `elodin-db`. It showed correctly named, typed fields and initial values:
+The merged-base audit recording `betaflight_db005` was exported with current
+`elodin-db`. It persisted both the initial values and the later pass update:
 
 ```text
-drone.last_gate_passed = -1
-drone.gate_pass_times  = [-1.0, -1.0, -1.0]
+drone.last_gate_passed: -1 -> 0
+drone.gate_pass_times:  [-1.0, -1.0, -1.0]
+                     -> [1.085148620922599, -1.0, -1.0]
 ```
 
-Each of the four gate `world_pos` series had 120,001 rows but exactly one unique pose, confirming static scene state throughout integration.
+The four static gate poses were also recorded throughout the integrations; the
+ordinary `single` run retained 120,001 samples per bar without adding any gate
+to the rigid-body query.
 
 ## Rendering and capture evidence
 
@@ -158,6 +170,11 @@ for nonblank image statistics. Saturated-orange segmentation and the audit's
 oblique camera show the full vertical opening; frame occupancy was adequate, so
 the suspected size issue was framing rather than a need to alter the 2.5 m
 contract gate.
+
+The media predates only main's install-session and bare-timeline serialization
+changes. Neither change affects KDL parsing, rendering, camera framing, physics,
+or the audit trajectory, so the retained capture remains representative of the
+merged code and no GPU recapture was required.
 
 The repository's automated capture script could not run on this host because
 Nix is unavailable and its preflight correctly requires Nix's Xwayland/Mesa

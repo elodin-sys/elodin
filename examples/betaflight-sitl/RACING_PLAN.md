@@ -1,7 +1,7 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-16
+**Last verified against repository:** 2026-09-21
 **Current resume point:** Package D — manual hardware qualification
 
 ## 1. Purpose and authority
@@ -1051,8 +1051,8 @@ branch for later resumption.
 |---|---|---|
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
-| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The pure suite passes 96 tests. The audit uses the unchanged vertical 2.5 m gate and reports one complete pass at 1.085149 s with later-tick telemetry readback. Matching release integrations preserve default C0 and ordinary incomplete `single` behavior. Final capture: `/home/ubuntu/package-c-referee-audit.mp4` and `.png`. |
-| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
+| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The merged-base pure suite passes 96 tests. The audit uses the unchanged vertical 2.5 m gate and reports one complete pass at 1.085149 s with later-tick telemetry readback. Release integrations against main `630324df` preserve default C0 and ordinary incomplete `single` behavior. Final capture: `/home/ubuntu/package-c-referee-audit.mp4` and `.png`. |
+| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. The combined merged-base qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
 | G | Blocked by B | No racing camera geometry contract in code |
@@ -1089,7 +1089,7 @@ RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
 The verified results were:
 
 ```text
-96 passed in 0.09s
+96 passed in 0.15s
 [C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.835 status=PASS
 [RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
 [RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
@@ -1106,15 +1106,20 @@ preserves scripted vertical flight and adds no steering. `RACE_COURSE=oval` and
 Package D audit also remained green with `RACE_COURSE=single`, emitting one
 `[D-AUDIT] ... status=PASS` and one race result.
 
-The current wheel and release CLI both reported
-`0.19.3-alpha.0+536eb565.dirty`; no wheel rebuild was needed because the audit
-changes only example Python and documentation. The required release build and
-`git diff --check` passed. The final 1280×720 H.264 capture and crossing frame
-are retained at `/home/ubuntu/package-c-referee-audit.mp4` and
-`/home/ubuntu/package-c-referee-audit.png`. Camera-only framing made the existing
-2.5 m gate clear and usable, so its contract geometry was not changed. The host
-Gamescope/PipeWire teardown issue and MPEG-TS recovery workflow are documented
-in `README.md` and `PACKAGE_C_HANDOFF.md`.
+The release CLI was rebuilt from the feature merge of main `630324df` and
+reported `0.19.3-alpha.0+af1e589a.dirty`; Python 3.13.14 and the installed wheel
+reported `0.19.3-alpha.0+536eb565.dirty`. A wheel rebuild was not needed because
+the merged range changes no `libs/nox-py` runtime source, Python API, or package
+version (only its README). The required release build and `git diff --check`
+passed. The final 1280×720 H.264 capture and crossing frame are retained at
+`/home/ubuntu/package-c-referee-audit.mp4` and
+`/home/ubuntu/package-c-referee-audit.png`. Main's intervening changes affect
+install-session Python selection and bare-timeline serialization, not KDL
+parsing/rendering, framing, physics, or trajectory visibility, so the media
+remains representative and no GPU recapture was required. Camera-only framing
+made the existing 2.5 m gate clear and usable, so its contract geometry was not
+changed. The host Gamescope/PipeWire teardown issue and MPEG-TS recovery workflow
+are documented in `README.md` and `PACKAGE_C_HANDOFF.md`.
 
 ## 13. Decision log
 
