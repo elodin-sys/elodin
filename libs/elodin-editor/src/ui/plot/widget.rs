@@ -1884,9 +1884,7 @@ pub fn sync_kernel_graphs(
     connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
 ) {
-    use crate::plugins::display_kernel::{
-        KernelFetchCtx, evaluate_kernel_series, kernel_fetch_ctx,
-    };
+    use crate::plugins::display_kernel::{KernelStatus, evaluate_kernel_series, kernel_fetch_ctx};
 
     let range = selected_range.0.clone();
     if range.start >= range.end {
@@ -1896,12 +1894,7 @@ pub fn sync_kernel_graphs(
     let generation = cache.generation();
     let max_points =
         (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
-    let (addr, local_root, kdl_dir) = kernel_fetch_ctx(connection_addr, initial_kdl);
-    let fetch = KernelFetchCtx {
-        connection_addr: addr,
-        local_root: local_root.as_deref(),
-        kdl_dir: kdl_dir.as_deref(),
-    };
+    let fetch = kernel_fetch_ctx(connection_addr, initial_kdl);
 
     for (graph_entity, mut graph_state) in &mut graph_states {
         let Some(kernel) = graph_state.kernel.as_ref() else {
@@ -1913,9 +1906,10 @@ pub fn sync_kernel_graphs(
         let binding = kernel.binding.clone();
         let path = kernel.path.clone();
         let colors = kernel.colors.clone();
-        let compiled = match kernels.compiled(&binding, fetch) {
-            Ok(compiled) => compiled,
-            Err(err) => {
+        let compiled = match kernels.poll(&binding, &fetch) {
+            KernelStatus::Ready(compiled) => compiled,
+            KernelStatus::Loading => continue,
+            KernelStatus::Failed(err) => {
                 warn_once!(?err, "display kernel graph failed to load");
                 let kernel = graph_state.kernel.as_mut().expect("checked above");
                 kernel.last_generation = generation;

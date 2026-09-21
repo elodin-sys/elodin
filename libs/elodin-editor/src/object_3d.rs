@@ -2655,15 +2655,10 @@ pub fn update_object_3d_kernels(
     initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
 ) {
     use crate::plugins::display_kernel::{
-        KernelFetchCtx, current_kernel_inputs, invoke_scalar, kernel_fetch_ctx, output_floats,
+        KernelStatus, current_kernel_inputs, invoke_scalar, kernel_fetch_ctx, output_floats,
     };
 
-    let (addr, local_root, kdl_dir) = kernel_fetch_ctx(connection_addr, initial_kdl);
-    let fetch = KernelFetchCtx {
-        connection_addr: addr,
-        local_root: local_root.as_deref(),
-        kdl_dir: kdl_dir.as_deref(),
-    };
+    let fetch = kernel_fetch_ctx(connection_addr, initial_kdl);
 
     for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
@@ -2674,20 +2669,23 @@ pub fn update_object_3d_kernels(
         {
             let fingerprint: Vec<u8> = inputs.iter().flatten().copied().collect();
             if object_3d.last_pose_kernel_input.as_deref() != Some(fingerprint.as_slice()) {
-                match kernels
-                    .compiled(&binding, fetch)
-                    .and_then(|compiled| invoke_scalar(compiled, &inputs))
-                {
-                    Ok(outputs) => {
-                        if let Some(world_pos) = kernel_outputs_to_world_pos(&outputs) {
-                            *pos = world_pos;
-                            if !has_received {
-                                commands.entity(entity).insert(WorldPosReceived);
+                match kernels.poll(&binding, &fetch) {
+                    KernelStatus::Ready(compiled) => match invoke_scalar(compiled, &inputs) {
+                        Ok(outputs) => {
+                            if let Some(world_pos) = kernel_outputs_to_world_pos(&outputs) {
+                                *pos = world_pos;
+                                if !has_received {
+                                    commands.entity(entity).insert(WorldPosReceived);
+                                }
+                                object_3d.last_pose_kernel_input = Some(fingerprint);
                             }
-                            object_3d.last_pose_kernel_input = Some(fingerprint);
                         }
-                    }
-                    Err(err) => {
+                        Err(err) => {
+                            warn_once!(?err, "object_3d display kernel failed");
+                        }
+                    },
+                    KernelStatus::Loading => {}
+                    KernelStatus::Failed(err) => {
                         warn_once!(?err, "object_3d display kernel failed");
                     }
                 }
@@ -2725,9 +2723,10 @@ pub fn update_object_3d_kernels(
         if object_3d.last_cov_kernel_input.as_deref() == Some(fingerprint.as_slice()) {
             continue;
         }
-        let compiled = match kernels.compiled(&binding, fetch) {
-            Ok(compiled) => compiled,
-            Err(err) => {
+        let compiled = match kernels.poll(&binding, &fetch) {
+            KernelStatus::Ready(compiled) => compiled,
+            KernelStatus::Loading => continue,
+            KernelStatus::Failed(err) => {
                 warn_once!(?err, "ellipsoid display kernel failed to load");
                 continue;
             }
