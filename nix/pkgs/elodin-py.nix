@@ -118,6 +118,7 @@
           pytest
           matplotlib
           pyarrow
+          watchfiles
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libcxx
